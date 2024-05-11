@@ -1,0 +1,238 @@
+use std::{collections::HashMap, fmt::{self, Display, Formatter}, str::FromStr};
+
+use bincode::{Decode, Encode};
+use once_cell::sync::Lazy;
+use fancy_regex::Regex;
+use serde::{Deserialize, Serialize};
+
+use crate::{error::Error, primitives::Range, semver, yarn_serialization_protocol};
+
+static GH_URL: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:github:|https:\/\/github\.com\/|git:\/\/github\.com\/)?(?!\.{1,2}\/)([a-zA-Z0-9._-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z0-9._-]+?)(?:\.git)?(#.*)?$").unwrap());
+static GH_TARBALL_URL: Lazy<Regex> = Lazy::new(|| Regex::new(r"^https?:\/\/github\.com\/(?!\.{1,2}\/)([a-zA-Z0-9._-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z0-9._-]+?)\/tarball\/(.+)?$").unwrap());
+
+static GH_URL_SET: Lazy<Vec<Regex>> = Lazy::new(|| vec![
+    Regex::new(r"^ssh:").unwrap(),
+    Regex::new(r"^git(?:\+[^:]+)?:").unwrap(),
+  
+    // `git+` is optional, `.git` is required
+    Regex::new(r"^(?:git\+)?https?:[^#]+\/[^#]+(?:\.git)(?:#.*)?$").unwrap(),
+  
+    Regex::new(r"^git@[^#]+\/[^#]+\.git(?:#.*)?$").unwrap(),
+  
+    Regex::new(r"^(?:github:|https:\/\/github\.com\/)?(?!\.{1,2}\/)([a-zA-Z._0-9-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z._0-9-]+?)(?:\.git)?(?:#.*)?$").unwrap(),
+    // GitHub `/tarball/` URLs
+    Regex::new(r"^https?:\/\/github\.com\/(?!\.{1,2}\/)([a-zA-Z0-9._-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z0-9._-]+?)\/tarball\/(.+)?$").unwrap(),
+]);
+
+pub fn is_git_url<P: AsRef<str>>(url: P) -> bool {
+    GH_URL_SET.iter().find(|r| r.is_match(url.as_ref()).unwrap()).is_some()
+}
+
+pub fn normalize_git_url<P: AsRef<str>>(url: P) -> String {
+    let mut normalized = url.as_ref().to_string();
+
+    if normalized.starts_with("git+https:") {
+        normalized = normalized[4..].to_string();
+    }
+
+    normalized = GH_URL.replace(&normalized, "https://github.com/$1/$2.git$3").to_string();
+    normalized = GH_TARBALL_URL.replace(&normalized, "https://github.com/$1/$2.git#$3").to_string();
+
+    return normalized;
+}
+
+#[derive(Clone, Debug, Decode, Deserialize, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+pub enum GitTreeish {
+    AnythingGoes(String),
+    Branch(String),
+    Commit(String),
+    Semver(semver::Range),
+    Tag(String),
+}
+
+impl Display for GitTreeish {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            GitTreeish::AnythingGoes(treeish) => write!(f, "{}", treeish),
+            GitTreeish::Branch(branch) => write!(f, "branch={}", branch),
+            GitTreeish::Commit(commit) => write!(f, "commit={}", commit),
+            GitTreeish::Semver(range) => write!(f, "semver={}", range),
+            GitTreeish::Tag(tag) => write!(f, "tag={}", tag),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct GitRange {
+    pub repo: String,
+    pub treeish: GitTreeish,
+}
+
+yarn_serialization_protocol!(GitRange, "", {
+    deserialize(src) {
+        let normalized = normalize_git_url(src);
+
+        extract_git_range(normalized)
+    }
+
+    serialize(&self) {
+        format!("{}#{}", self.repo, self.treeish)
+    }
+});
+
+pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
+    let url = url.as_ref();
+
+    let hash_index = url.find('#');
+    if hash_index.is_none() {
+        return Ok(GitRange {
+            repo: url.to_string(),
+            treeish: GitTreeish::Branch("HEAD".to_string()),
+        });
+    }
+
+    let (repo, subsequent) = url.split_at(hash_index.unwrap());
+    let subsequent = &subsequent[1..];
+
+    // New-style: "#commit=abcdef&workspace=foobar"
+    if let Some(_) = subsequent.find('=') {
+        let mut treeish = GitTreeish::Commit("HEAD".to_string());
+
+        for pair in subsequent.split('&') {
+            if let Some(eq_index) = pair.find('=') {
+                let (key, value) = pair.split_at(eq_index);
+                let value = &value[1..];
+
+                treeish = match key {
+                    "branch" => GitTreeish::Branch(value.to_string()),
+                    "commit" => GitTreeish::Commit(value.to_string()),
+                    "semver" => GitTreeish::Semver(semver::Range::from_str(value)?),
+                    "tag" => GitTreeish::Tag(value.to_string()),
+                    _ => treeish,
+                };
+            }
+        }
+
+        return Ok(GitRange {
+            repo: repo.to_string(),
+            treeish: treeish,
+        });
+    }
+
+    let treeish = if let Some(colon_index) = subsequent.find(':') {
+        let (kind, subsequent) = subsequent.split_at(colon_index);
+        let subsequent = &subsequent[1..];
+
+        match kind {
+            "commit" => GitTreeish::Commit(subsequent.to_string()),
+            "branch" => GitTreeish::Branch(subsequent.to_string()),
+            "tag" => GitTreeish::Tag(subsequent.to_string()),
+            _ => GitTreeish::Commit(subsequent.to_string()),
+        }
+    } else {
+        GitTreeish::Branch(subsequent.to_string())
+    };
+
+    Ok(GitRange {
+        repo: repo.to_string(),
+        treeish: treeish,
+    })
+}
+
+async fn ls_remote(repo: &str) -> Result<HashMap<String, String>, Error> {
+    let output = tokio::process::Command::new("git")
+        .arg("ls-remote")
+        .arg(repo)
+        .output()
+        .await
+        .map_err(|_| Error::GitError)?;
+
+    let output = String::from_utf8(output.stdout).unwrap();
+    let mut refs = HashMap::new();
+
+    for line in output.lines() {
+        let mut parts = line.split_whitespace();
+        let hash = parts.next().unwrap();
+        let name = parts.next().unwrap();
+
+        refs.insert(name.to_string(), hash.to_string());
+    }
+
+    Ok(refs)
+}
+
+pub async fn resolve_git_treeish(git_range: &GitRange) -> Result<String, Error> {
+    match &git_range.treeish {
+        GitTreeish::AnythingGoes(treeish) => {
+            if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Commit(treeish.clone())).await {
+                Ok(result)
+            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Tag(treeish.clone())).await {
+                Ok(result)
+            } else if let Ok(result ) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Branch(treeish.clone())).await {
+                Ok(result)
+            } else {
+                Err(Error::InvalidGitSpecifier)
+            }
+        }
+
+        _ => resolve_git_treeish_stricter(&git_range.repo, git_range.treeish.clone()).await
+    }
+}
+
+async fn resolve_git_treeish_stricter(repo: &str, treeish: GitTreeish) -> Result<String, Error> {
+    let refs = ls_remote(repo).await?;
+
+    match treeish {
+        GitTreeish::AnythingGoes(_) => {
+            unreachable!();
+        },
+
+        GitTreeish::Branch(branch) => {
+            let ref_name = if branch == "HEAD" {
+                "HEAD".to_string()
+            } else {
+                format!("refs/heads/{}", branch)
+            };
+
+            let head = refs.get(&ref_name)
+                .ok_or(Error::InvalidGitBranch(branch))?;
+
+            Ok(head.to_string())
+        }
+
+        GitTreeish::Commit(commit) => {
+            if commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit()) {
+                Ok(commit)
+            } else {
+                Err(Error::InvalidGitCommit(commit))
+            }
+        }
+
+        GitTreeish::Semver(tag) => {
+            let mut candidates: Vec<(String, semver::Version)> = refs.into_iter()
+                .filter(|(k, _)| k.starts_with("refs/tags/"))
+                .filter_map(|(k, _)| semver::Version::from_str(&k).ok().map(|v| (k, v)))
+                .filter(|(_, v)| tag.check(v))
+                .collect();
+
+            candidates.sort_by(|(_, v1), (_, v2)| {
+                v2.cmp(v1)
+            });
+
+            if let Some((k, _)) = candidates.first() {
+                Ok(k.to_string())
+            } else {
+                Err(Error::NoCandidatesFound(Range::Semver(tag)))
+            }
+        }
+
+        GitTreeish::Tag(tag) => {
+            let ref_name = format!("refs/tags/{}", tag);
+
+            let head = refs.get(&ref_name)
+                .ok_or(Error::InvalidGitBranch(tag))?;
+
+            Ok(head.to_string())
+        }
+    }
+}
