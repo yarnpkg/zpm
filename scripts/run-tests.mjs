@@ -29,11 +29,11 @@ const resultPath = require.resolve(`../test-results.md`);
 const statusKind = {
   passed: {
     tag: `<!-- test:passed -->`,
-    label: `✅`,
+    img: `https://img.shields.io/badge/passed-green`,
   },
   failed: {
     tag: `<!-- test:failed -->`,
-    label: `❌`,
+    img: `https://img.shields.io/badge/failed-red`,
   },
 };
 
@@ -89,7 +89,7 @@ for (const [testSuite, tests] of sortedTestSuites) {
 output += `\n\n`;
 
 for (const [testSuite, tests] of sortedTestSuites) {
-  output += `\n<table><tr><th colspan=2>\n\n<!-- test:suite -->${testSuite}\n\n</th></tr><tr><td colspan=2>\n\n`;
+  output += `<h3>\n\n<!-- test:suite -->${testSuite}\n\n</h3><table><tr><td colspan=2>\n\n`;
 
   for (const [name, status] of tests) {
     output += `![](./scripts/${status}.png) `;
@@ -98,7 +98,7 @@ for (const [testSuite, tests] of sortedTestSuites) {
   output += `\n\n</td></tr>`;
 
   for (const [name, status] of tests) {
-    output += `<tr><td>${statusKind[status].label}</td><td>\n\n${statusKind[status].tag}${name}\n\n</td></tr>`;
+    output += `<tr><td width=36><img width=8 height=8 src="./scripts/${status}.png"/></td><td>\n\n${statusKind[status].tag}${name}\n</td></tr>`;
   }
 
   output += `</table>\n`;
