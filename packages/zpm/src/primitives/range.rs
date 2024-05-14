@@ -5,7 +5,7 @@ use zpm_macros::Parsed;
 
 use crate::{error::Error, git, semver, yarn_serialization_protocol};
 
-use super::Ident;
+use super::{Ident, Locator};
 
 #[derive(Clone, Debug, Decode, Encode, Parsed, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[parse_error(Error::InvalidRange)]
@@ -19,6 +19,15 @@ pub enum Range {
 
     #[try_pattern(prefix = "npm:", pattern = r"(.*)@(.*)")]
     SemverAlias(Ident, semver::Range),
+
+    #[try_pattern(prefix = "link:")]
+    Link(String),
+
+    #[try_pattern(prefix = "portal:")]
+    Portal(String),
+
+    #[try_pattern(prefix = "file:")]
+    File(String),
 
     #[try_pattern(prefix = "patch:")]
     Patch(String),
@@ -39,6 +48,15 @@ pub enum Range {
     Virtual(Box<Range>, u64),
 }
 
+impl Range {
+    pub fn must_bind(&self) -> bool {
+        match &self {
+            Range::Link(_) | Range::Portal(_) | Range::File(_) | Range::Patch(_) => true,
+            _ => false,
+        }
+    }
+}
+
 yarn_serialization_protocol!(Range, "", {
     serialize(&self) {
         match self {
@@ -46,6 +64,9 @@ yarn_serialization_protocol!(Range, "", {
             Range::SemverTag(tag) => format!("npm:{}", tag),
             Range::SemverAlias(ident, range) => format!("npm:{}@{}", ident, range),
             Range::Patch(patch) => format!("patch:{}", patch),
+            Range::Link(link) => format!("link:{}", link),
+            Range::Portal(portal) => format!("portal:{}", portal),
+            Range::File(file) => format!("file:{}", file),
             Range::WorkspaceSemver(semver) => format!("workspace:{}", semver),
             Range::WorkspaceMagic(magic) => format!("workspace:{}", magic),
             Range::WorkspacePath(path) => format!("workspace:{}", path),

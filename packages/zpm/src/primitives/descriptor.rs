@@ -13,6 +13,7 @@ use super::{Ident, Locator, Range};
 pub struct Descriptor {
     pub ident: Ident,
     pub range: Range,
+    pub parent: Option<Locator>,
 }
 
 impl Descriptor {
@@ -20,6 +21,15 @@ impl Descriptor {
         Descriptor {
             ident,
             range,
+            parent: None,
+        }
+    }
+
+    pub fn new_bound(ident: Ident, range: Range, parent: Option<Locator>) -> Descriptor {
+        Descriptor {
+            ident,
+            range,
+            parent,
         }
     }
 
@@ -30,6 +40,7 @@ impl Descriptor {
         Descriptor {
             ident: self.ident.clone(),
             range: Range::Virtual(Box::new(self.range.clone()), s.finish()),
+            parent: self.parent.clone(),
         }
     }
 
@@ -69,22 +80,32 @@ pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<HashMap<Id
 
 yarn_serialization_protocol!(Descriptor, "", {
     deserialize(src) {
-        let split_point = if src.starts_with('@') {
+        let at_split = if src.starts_with('@') {
             src[1..src.len()].find('@').map(|x| x + 1)
         } else {
             src.find('@')
         };
 
-        let split_point = split_point
+        let at_split = at_split
             .ok_or(Error::InvalidDescriptor(src.to_string()))?;
 
-        let ident = Ident::from_str(&src[..split_point])?;
-        let range = Range::from_str(&src[split_point + 1..])?;
+        let parent_split = src.find("::parent=");
 
-        Ok(Descriptor::new(ident, range))
+        let ident = Ident::from_str(&src[..at_split])?;
+        let range = Range::from_str(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
+
+        let parent = match parent_split {
+            Some(idx) => Some(Locator::from_str(&src[idx + 10..])?),
+            None => None,
+        };
+
+        Ok(Descriptor::new_bound(ident, range, parent))
     }
 
     serialize(&self) {
-        format!("{}@{}", self.ident, self.range)
+        match &self.parent {
+            Some(parent) => format!("{}@{}::parent={}", self.ident, self.range, parent),
+            None => format!("{}@{}", self.ident, self.range),
+        }
     }
 });

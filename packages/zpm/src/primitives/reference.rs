@@ -16,6 +16,9 @@ pub enum Reference {
     #[try_pattern(prefix = "npm:", pattern = r"^(.*)@(.*)$")]
     SemverAlias(Ident, semver::Version),
 
+    #[try_pattern(prefix = "link:")]
+    Link(String),
+
     #[try_pattern(prefix = "virtual:", pattern = r"(.*)#(.*)$")]
     Virtual(Box<Reference>, Sha256),
 
@@ -42,6 +45,7 @@ yarn_serialization_protocol!(Reference, "", {
             Reference::Git(range) => range.to_string(),
             Reference::Semver(version) => format!("npm:{}", version),
             Reference::SemverAlias(ident, version) => format!("npm:{}@{}", ident, version),
+            Reference::Link(path) => format!("link:{}", path),
             Reference::Virtual(inner, hash) => format!("{} [{}]", inner, hash.short()),
             Reference::Workspace(ident) => format!("workspace:{}", ident),
         }

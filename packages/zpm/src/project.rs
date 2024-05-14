@@ -115,26 +115,6 @@ pub fn workspaces() -> Result<HashMap<Ident, Workspace>, Error> {
 
 #[track_time]
 #[once]
-pub fn top_level_dependencies() -> Result<HashSet<Descriptor>, Error> {
-    let mut all_dependencies = HashSet::new();
-
-    for workspace in workspaces()?.into_values() {
-        all_dependencies.insert(workspace.descriptor());
-
-        if let Some(dependencies) = workspace.manifest.dependencies {
-            all_dependencies.extend(dependencies.into_values());
-        }
-
-        if let Some(dev_dependencies) = workspace.manifest.dev_dependencies {
-            all_dependencies.extend(dev_dependencies.into_values());
-        }
-    }
-
-    Ok(all_dependencies)
-}
-
-#[track_time]
-#[once]
 pub fn lockfile() -> Result<Lockfile, Error> {
     let lockfile_path = root()?.with_join_str(LOCKFILE_NAME);
 
@@ -182,7 +162,13 @@ impl ResolutionManager {
         }
     }
 
-    pub fn insert(&mut self, descriptor: Descriptor, resolution: Resolution) {
+    pub fn insert(&mut self, descriptor: Descriptor, mut resolution: Resolution) {
+        for descriptor in resolution.dependencies.values_mut() {
+            if descriptor.range.must_bind() {
+                descriptor.parent = Some(resolution.locator.clone());
+            }
+        }
+
         let transitive_dependencies = resolution.dependencies
             .values()
             .cloned();
@@ -246,8 +232,8 @@ impl ResolutionManager {
 pub async fn resolutions() -> Result<HashMap<Descriptor, Resolution>, Error> {
     let mut manager = ResolutionManager::new();
 
-    for descriptor in top_level_dependencies()? {
-        manager.schedule(descriptor);
+    for workspace in workspaces()?.values() {
+        manager.schedule(workspace.descriptor());
     }
 
     manager.run().await;
@@ -350,7 +336,7 @@ pub async fn cache() -> Result<HashMap<Locator, PackageData>, Error> {
                     }
                 }
 
-                println!("{} - fetch failed: {}", locator, err.to_string())
+                println!("{} - fetch failed: {} ({:#?})", locator, err.to_string(), err);
             }
         }
 

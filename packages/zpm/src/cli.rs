@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use tokio::process::Command;
 
-use crate::{error::Error, linker};
+use crate::{error::Error, linker, project};
 
 #[derive(Parser)]
 struct Cli {
@@ -23,6 +23,7 @@ pub async fn run_cli() -> Result<(), Error> {
 
     match &cli.command {
         None | Some(Commands::Install {}) => {
+            project::persist_lockfile().await?;
             linker::link_project().await?;
         }
 

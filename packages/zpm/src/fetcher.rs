@@ -128,6 +128,9 @@ fn convert_tar_gz_to_zip(ident: &Ident, tar_gz_data: Bytes) -> Result<Vec<u8>, B
 
 pub async fn fetch(locator: &Locator) -> Result<PackageData, Error> {
     match &locator.reference {
+        Reference::Link(path)
+            => fetch_link(&locator.parent, path),
+
         Reference::Semver(version)
             => fetch_semver(&locator, &locator.ident, &version).await,
 
@@ -139,6 +142,10 @@ pub async fn fetch(locator: &Locator) -> Result<PackageData, Error> {
 
         _ => Err(Error::Unsupported),
     }
+}
+
+pub fn fetch_link(parent: &Option<Arc<Locator>>, path: &String) -> Result<PackageData, Error> {
+    Ok(PackageData::Local("/tmp/foo/bar".into()))
 }
 
 pub async fn fetch_semver(locator: &Locator, ident: &Ident, version: &semver::Version) -> Result<PackageData, Error> {

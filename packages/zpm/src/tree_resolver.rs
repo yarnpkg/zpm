@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 
-use crate::{primitives::{Descriptor, Ident, Locator, Range, Reference}, resolver::Resolution};
+use crate::{primitives::{Descriptor, Ident, Locator, Range, Reference}, resolver::Resolution, serialize::Serialized};
 
 #[derive(Clone, Debug)]
 pub struct TreeResolver {
@@ -409,7 +409,7 @@ impl TreeResolver {
             return;
         }
 
-        println!("{}Resolving peer dependencies for {:?} ({:?})", "  ".repeat(self.resolution_stack.len()), parent_locator, parent_descriptor);
+        println!("Resolving peer dependencies for {}", parent_locator.to_string());
 
         self.resolution_stack.push(parent_locator.clone());
         self.resolve_peer_dependencies_impl(parent_descriptor, parent_locator, peer_slots, top_locator, is_optional);

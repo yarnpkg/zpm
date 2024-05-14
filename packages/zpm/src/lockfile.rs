@@ -4,7 +4,7 @@ use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
 use zpm_macros::track_time;
 
-use crate::{error::Error, hash::Sha256, linker::LinkerData, primitives::{Descriptor, Locator}, resolver::Resolution, serialize::Serialized};
+use crate::{error::Error, hash::Sha256, primitives::{Descriptor, Locator}, resolver::Resolution, serialize::Serialized};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 struct MultiKey<T>(Vec<T>);

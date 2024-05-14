@@ -1,4 +1,4 @@
-use std::{hash::Hash, str::FromStr};
+use std::{hash::Hash, str::FromStr, sync::Arc};
 
 use bincode::{Decode, Encode};
 
@@ -10,6 +10,7 @@ use super::{Ident, Reference};
 pub struct Locator {
     pub ident: Ident,
     pub reference: Reference,
+    pub parent: Option<Arc<Locator>>,
 }
 
 impl Locator {
@@ -17,6 +18,15 @@ impl Locator {
         Locator {
             ident,
             reference,
+            parent: None,
+        }
+    }
+
+    pub fn new_bound(ident: Ident, reference: Reference, parent: Option<Arc<Locator>>) -> Locator {
+        Locator {
+            ident,
+            reference,
+            parent,
         }
     }
 
@@ -34,6 +44,7 @@ impl Locator {
         Locator {
             ident: self.ident.clone(),
             reference: Reference::Virtual(Box::new(self.reference.clone()), Sha256::from_string(&serialized)),
+            parent: self.parent.clone(),
         }
     }
 
@@ -44,19 +55,32 @@ impl Locator {
 
 yarn_serialization_protocol!(Locator, "", {
     deserialize(src) {
-        let split_point = if src.starts_with('@') {
+        let at_split = if src.starts_with('@') {
             src[1..src.len()].find('@').map(|x| x + 1)
         } else {
             src.find('@')
         };
 
-        let ident = Ident::from_str(&src[..split_point.unwrap()])?;
-        let range = Reference::from_str(&src[split_point.unwrap() + 1..])?;
+        let at_split = at_split
+            .ok_or(Error::InvalidDescriptor(src.to_string()))?;
 
-        Ok(Locator::new(ident, range))
+        let parent_split = src.find("::parent=");
+
+        let ident = Ident::from_str(&src[..at_split])?;
+        let reference = Reference::from_str(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
+
+        let parent = match parent_split {
+            Some(idx) => Some(Arc::new(Locator::from_str(&src[idx + 10..])?)),
+            None => None,
+        };
+
+        Ok(Locator::new_bound(ident, reference, parent))
     }
 
     serialize(&self) {
-        format!("{}@{}", self.ident, self.reference)
+        match &self.parent {
+            Some(parent) => format!("{}@{}::parent={}", self.ident, self.reference, parent),
+            None => format!("{}@{}", self.ident, self.reference),
+        }
     }
 });

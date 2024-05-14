@@ -41,6 +41,9 @@ pub async fn resolve(descriptor: Descriptor) -> Result<Resolution, Error> {
 
         Range::SemverAlias(ident, range)
             => resolve_semver(ident, range).await,
+
+        Range::Link(path)
+            => resolve_link(descriptor.ident, descriptor.parent, path),
     
         Range::SemverTag(tag)
             => resolve_semver_tag(descriptor.ident, tag).await,
@@ -55,16 +58,23 @@ pub async fn resolve(descriptor: Descriptor) -> Result<Resolution, Error> {
     }
 }
 
+pub fn resolve_link(ident: Ident, parent: Option<Locator>, path: String) -> Result<Resolution, Error> {
+    Ok(Resolution {
+        version: semver::Version::new(),
+        locator: Locator::new_bound(ident.clone(), Reference::Link(path), parent.map(Arc::new)),
+        dependencies: HashMap::new(),
+        peer_dependencies: HashMap::new(),
+        optional_dependencies: HashSet::new(),
+    })
+}
+
 pub async fn resolve_git(ident: Ident, git_range: GitRange) -> Result<Resolution, Error> {
     let commit = resolve_git_treeish(&git_range).await?;
 
-    let locator = Locator {
-        ident,
-        reference: Reference::Git(GitRange {
-            repo: git_range.repo,
-            treeish: crate::git::GitTreeish::Commit(commit),
-        }),
-    };
+    let locator = Locator::new(ident, Reference::Git(GitRange {
+        repo: git_range.repo,
+        treeish: crate::git::GitTreeish::Commit(commit),
+    }));
 
     Ok(Resolution {
         version: semver::Version::new(),
@@ -100,14 +110,9 @@ pub async fn resolve_semver_tag(ident: Ident, tag: String) -> Result<Resolution,
 
     let manifest = registry_data.versions.remove(&version).unwrap();
 
-    let locator = Locator {
-        ident: ident.clone(),
-        reference: Reference::SemverAlias(ident, version.clone()),
-    };
-
     Ok(Resolution {
         version: manifest.version,
-        locator,
+        locator: Locator::new(ident.clone(), Reference::SemverAlias(ident.clone(), version.clone())),
         dependencies: manifest.dependencies.unwrap_or_default(),
         peer_dependencies: manifest.peer_dependencies.unwrap_or_default(),
         optional_dependencies: HashSet::new(),
@@ -211,14 +216,9 @@ pub async fn resolve_semver(ident: Ident, range: semver::Range) -> Result<Resolu
     let transitive_dependencies = manifest.dependencies.clone()
         .unwrap_or_default();
 
-    let locator = Locator {
-        ident: ident,
-        reference: Reference::Semver(version.clone()),
-    };
-
     Ok(Resolution {
         version: manifest.version,
-        locator,
+        locator: Locator::new(ident, Reference::Semver(version)),
         dependencies: transitive_dependencies,
         peer_dependencies: manifest.peer_dependencies.unwrap_or_default(),
         optional_dependencies: HashSet::new(),
@@ -230,11 +230,6 @@ pub fn resolve_workspace_by_name(ident: Ident) -> Result<Resolution, Error> {
 
     match workspaces.get(&ident) {
         Some(workspace) => {
-            let locator = Locator {
-                ident: ident.clone(),
-                reference: Reference::Workspace(ident),
-            };
-
             let mut dependencies = workspace.manifest.dependencies.clone()
                 .unwrap_or_default();
 
@@ -248,7 +243,7 @@ pub fn resolve_workspace_by_name(ident: Ident) -> Result<Resolution, Error> {
 
             Ok(Resolution {
                 version: workspace.manifest.version.clone(),
-                locator,
+                locator: Locator::new(ident.clone(), Reference::Workspace(ident.clone())),
                 dependencies,
                 peer_dependencies,
                 optional_dependencies: HashSet::new(),
