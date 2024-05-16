@@ -6,6 +6,7 @@ pub mod fetcher;
 pub mod git;
 pub mod hash;
 pub mod http;
+pub mod install;
 pub mod linker;
 pub mod lockfile;
 pub mod manifest;

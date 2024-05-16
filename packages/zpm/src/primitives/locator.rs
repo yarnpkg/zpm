@@ -2,7 +2,7 @@ use std::{hash::Hash, str::FromStr, sync::Arc};
 
 use bincode::{Decode, Encode};
 
-use crate::{error::Error, fetcher::{fetch, PackageData}, hash::Sha256, serialize::Serialized, yarn_serialization_protocol};
+use crate::{error::Error, hash::Sha256, serialize::Serialized, yarn_serialization_protocol};
 
 use super::{Ident, Reference};
 
@@ -46,10 +46,6 @@ impl Locator {
             reference: Reference::Virtual(Box::new(self.reference.clone()), Sha256::from_string(&serialized)),
             parent: self.parent.clone(),
         }
-    }
-
-    pub async fn fetch(&self) -> Result<PackageData, Error> {
-        fetch(self).await
     }
 }
 

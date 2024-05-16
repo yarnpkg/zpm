@@ -19,10 +19,10 @@
 🟥 Auth tests ► it should normalize registries url keys
 🟥 Auth tests ► it should support non-base64 encoded authentication ident
 
-[45 / 78] packages/acceptance-tests/pkg-tests-specs/sources/basic.test.js
+[48 / 78] packages/acceptance-tests/pkg-tests-specs/sources/basic.test.js
 
 🟩 Basic tests ► w/ the node-modules linker ► it should allow accessing a package via too many slashes
-🟥 Basic tests ► w/ the node-modules linker ► it should correctly create resolution mounting points when using the link protocol
+🟩 Basic tests ► w/ the node-modules linker ► it should correctly create resolution mounting points when using the link protocol
 🟩 Basic tests ► w/ the node-modules linker ► it should correctly handle browser fields in package.json
 🟩 Basic tests ► w/ the node-modules linker ► it should correctly install a dependency that itself contains a fixed dependency
 🟩 Basic tests ► w/ the node-modules linker ► it should correctly install a dependency that itself contains a range dependency
@@ -48,7 +48,7 @@
 🟩 Basic tests ► w/ the node-modules linker ► it should support self-requires in direct dependencies
 🟩 Basic tests ► w/ the node-modules linker ► it should support self-requires in transitive dependencies
 🟩 Basic tests ► w/ the pnp linker ► it should allow accessing a package via too many slashes
-🟥 Basic tests ► w/ the pnp linker ► it should correctly create resolution mounting points when using the link protocol
+🟩 Basic tests ► w/ the pnp linker ► it should correctly create resolution mounting points when using the link protocol
 🟩 Basic tests ► w/ the pnp linker ► it should correctly handle browser fields in package.json
 🟩 Basic tests ► w/ the pnp linker ► it should correctly install a dependency that itself contains a fixed dependency
 🟩 Basic tests ► w/ the pnp linker ► it should correctly install a dependency that itself contains a range dependency
@@ -74,7 +74,7 @@
 🟩 Basic tests ► w/ the pnp linker ► it should support self-requires in direct dependencies
 🟩 Basic tests ► w/ the pnp linker ► it should support self-requires in transitive dependencies
 🟩 Basic tests ► w/ the pnpm linker ► it should allow accessing a package via too many slashes
-🟥 Basic tests ► w/ the pnpm linker ► it should correctly create resolution mounting points when using the link protocol
+🟩 Basic tests ► w/ the pnpm linker ► it should correctly create resolution mounting points when using the link protocol
 🟩 Basic tests ► w/ the pnpm linker ► it should correctly handle browser fields in package.json
 🟩 Basic tests ► w/ the pnpm linker ► it should correctly install a dependency that itself contains a fixed dependency
 🟩 Basic tests ► w/ the pnpm linker ► it should correctly install a dependency that itself contains a range dependency

@@ -5,17 +5,12 @@ use std::sync::Arc;
 use arca::Path;
 use bincode::{self, Decode, Encode};
 use futures::Future;
-use once_cell::sync::Lazy;
 use sha2::Digest;
 
 use crate::error::Error;
 use crate::hash::Sha256;
-use crate::project;
 
-pub static PACKAGE_CACHE: Lazy<DiskCache> = Lazy::new(|| {
-    DiskCache::new(project::root().unwrap().with_join_str("node_modules/.zpm"))
-});
-
+#[derive(Clone)]
 pub struct DiskCache {
     cache_path: Path,
     data_config: bincode::config::Configuration,
@@ -52,7 +47,7 @@ impl DiskCache {
             .to_path_buf();
 
         let read
-            = tokio::fs::read(key_path_buf.clone()).await;
+            = std::fs::read(key_path_buf.clone());
 
         let data = match read {
             Ok(data) => data,
@@ -60,7 +55,7 @@ impl DiskCache {
                 if err.kind() != std::io::ErrorKind::NotFound {
                     return Err(Error::IoError(Arc::new(err)));
                 }
-        
+
                 self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?
             },
         };
@@ -144,13 +139,10 @@ impl DiskCache {
     {
         let data = func().await?;
 
-        let mut file = File::create(key_path.clone())
-            .map_err(Arc::new)?;
-
         let encoded = bincode::encode_to_vec(&data, self.data_config)
             .map_err(Arc::new)?;
 
-        file.write_all(&encoded)
+        std::fs::write(key_path, encoded)
             .map_err(Arc::new)?;
 
         Ok(data)

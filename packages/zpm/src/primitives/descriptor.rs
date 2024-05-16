@@ -5,7 +5,7 @@ use std::str::FromStr;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{error::Error, resolver::{resolve, Resolution}, yarn_serialization_protocol};
+use crate::{error::Error, yarn_serialization_protocol};
 
 use super::{Ident, Locator, Range};
 
@@ -42,17 +42,6 @@ impl Descriptor {
             range: Range::Virtual(Box::new(self.range.clone()), s.finish()),
             parent: self.parent.clone(),
         }
-    }
-
-    pub async fn resolve(self) -> Result<Resolution, Error> {
-        resolve(self).await
-    }
-
-    pub async fn resolve_with_descriptor(self) -> (Descriptor, Result<Resolution, Error>) {
-        let descriptor = self.clone();
-        let resolution = resolve(self).await;
-
-        (descriptor, resolution)
     }
 }
 

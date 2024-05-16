@@ -26,12 +26,6 @@ pub fn http_client() -> Result<Client, Error> {
 pub fn is_too_many_open_files(err: &dyn std::error::Error) -> bool {
     let mut source = err.source();
 
-    // print all open file descriptors
-    let mut fds = std::fs::read_dir("/proc/self/fd").unwrap();
-    while let Some(fd) = fds.next() {
-        println!("{:?}", fd.unwrap().path());
-    }
-
     while let Some(err) = source {
         if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
             if io_err.raw_os_error() == Some(24) {

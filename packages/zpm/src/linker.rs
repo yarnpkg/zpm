@@ -1,14 +1,14 @@
 use std::{collections::{BTreeMap, HashMap}, io::Read, sync::Arc};
 
-use arca::Path;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use zip::ZipArchive;
+use zpm_macros::track_time;
 
-use crate::{error::Error, fetcher::{PackageData, PackageLinking}, primitives::{Ident, Locator, Reference}, project};
+use crate::{error::Error, fetcher::{PackageData, PackageLinking}, install::Install, primitives::{Ident, Locator, Reference}, project::Project};
 
 fn is_default<T: Default + PartialEq>(t: &T) -> bool {
     t == &T::default()
@@ -82,15 +82,7 @@ fn check_extract<T: std::io::Read + std::io::Seek>(locator: &Locator, package_in
 
 fn get_linker_data(locator: &Locator, data: &PackageData) -> LinkerData {
     match data {
-        _ => {
-            LinkerData::Pnp(PnpLinkerData {
-                enable_build: false,
-                enable_esm: false,
-                enable_extract: false,
-            })
-        }
-
-        PackageData::Zip(_, data, _) => {
+        PackageData::Zip {data, ..} => {
             let reader = std::io::Cursor::new(data);
             let mut zip = zip::read::ZipArchive::new(reader)
                 .unwrap();
@@ -115,6 +107,14 @@ fn get_linker_data(locator: &Locator, data: &PackageData) -> LinkerData {
                 enable_extract,
             })
         }
+
+        _ => {
+            LinkerData::Pnp(PnpLinkerData {
+                enable_build: false,
+                enable_esm: false,
+                enable_extract: false,
+            })
+        }
     }
 }
 
@@ -122,8 +122,8 @@ fn get_linker_data(locator: &Locator, data: &PackageData) -> LinkerData {
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 enum PnpDependencyTarget {
-    Simple(Reference),
-    Alias((Ident, Reference)),
+    Simple(Locator),
+    Alias((Ident, Locator)),
     Missing,
 }
 
@@ -156,32 +156,19 @@ struct PnpState {
     ignore_pattern_data: Option<String>,
 
     #[serde_as(as = "Vec<(_, Vec<(_, _)>)>")]
-    package_registry_data: BTreeMap<Ident, BTreeMap<Reference, PnpPackageInformation>>,
+    package_registry_data: BTreeMap<Ident, BTreeMap<Locator, PnpPackageInformation>>,
     dependency_tree_roots: Vec<PnpDependencyTreeRoot>,
 }
 
-pub fn pnp_path() -> Option<Path> {
-    Some(project::root().unwrap().with_join_str(".pnp.cjs"))
-}
+#[track_time]
+pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Result<(), Error> {
+    let tree = &install.resolution_tree;
 
-pub async fn link_project() -> Result<(), Error> {
-    let project_root = project::root()?;
-    let pnp_path = pnp_path().unwrap();
-
-    let cache
-        = project::cache().await?;
-
-    let linker_data = cache.iter().map(|(locator, data)| {
-        (locator.clone(), get_linker_data(&locator, data))
-    }).collect::<HashMap<_, _>>();
-
-    let tree = project::tree().await?;
-
-    let mut package_registry_data: BTreeMap<Ident, BTreeMap<Reference, PnpPackageInformation>> = BTreeMap::new();
+    let mut package_registry_data: BTreeMap<Ident, BTreeMap<Locator, PnpPackageInformation>> = BTreeMap::new();
     let mut dependency_tree_roots = Vec::new();
 
-    for (locator, resolution) in tree.locator_resolutions {
-        let physical_package_data = cache.get(&locator.physical_locator())
+    for (locator, resolution) in &tree.locator_resolutions {
+        let physical_package_data = install.package_data.get(&locator.physical_locator())
             .expect("Failed to find physical package data");
 
         let mut package_dependencies: BTreeMap<Ident, PnpDependencyTarget> = resolution.dependencies.iter().map(|(ident, descriptor)| {
@@ -189,42 +176,55 @@ pub async fn link_project() -> Result<(), Error> {
                 .expect("Failed to find dependency resolution");
 
             let dependency_target = if &dependency_resolution.ident == ident {
-                PnpDependencyTarget::Simple(dependency_resolution.reference.clone())
+                PnpDependencyTarget::Simple(dependency_resolution.clone())
             } else {
-                PnpDependencyTarget::Alias((dependency_resolution.ident.clone(), dependency_resolution.reference.clone()))
+                PnpDependencyTarget::Alias((dependency_resolution.ident.clone(), dependency_resolution.clone()))
             };
 
             (ident.clone(), dependency_target)
         }).collect();
 
         package_dependencies.entry(locator.ident.clone())
-            .or_insert(PnpDependencyTarget::Simple(locator.reference.clone()));
+            .or_insert(PnpDependencyTarget::Simple(locator.clone()));
 
         let package_peers = resolution.peer_dependencies.keys()
             .cloned()
             .sorted()
             .collect::<Vec<_>>();
 
-        let rel_source_path = project_root.relative_to(&physical_package_data.source_path(&locator));
+        let mut package_location = project.root
+            .relative_to(&physical_package_data.source_path(&locator))
+            .to_string();
 
-        let package_location = if rel_source_path != Path::from(".") {
-            format!("./{}/", rel_source_path.to_string())
-        } else {
-            "./".to_string()
+        if package_location.len() == 0 {
+            package_location = "./".to_string();
+        }
+
+        if !package_location.ends_with('/') {
+            package_location.push('/');
+        }
+
+        if !package_location.starts_with("./") && !package_location.starts_with("../") {
+            package_location.insert_str(0, "./");
+        }
+
+        let discard_from_lookup = match physical_package_data {
+            PackageData::Local {discard_from_lookup, ..} => *discard_from_lookup,
+            _ => false,
         };
 
-        package_registry_data.entry(locator.ident)
+        package_registry_data.entry(locator.ident.clone())
             .or_default()
-            .insert(locator.reference, PnpPackageInformation {
+            .insert(locator.clone(), PnpPackageInformation {
                 package_location,
                 package_dependencies,
                 package_peers,
                 link_type: physical_package_data.link_type(),
-                discard_from_lookup: false,
+                discard_from_lookup,
             });
     }
 
-    for workspace in project::workspaces()?.values() {
+    for workspace in project.workspaces.values() {
         let locator = workspace.locator();
 
         dependency_tree_roots.push(PnpDependencyTreeRoot {
@@ -244,13 +244,6 @@ pub async fn link_project() -> Result<(), Error> {
         dependency_tree_roots,
     };
 
-
-    // `const RAW_RUNTIME_STATE =\n`,
-    // `${generateStringLiteral(generatePrettyJson(data))};\n\n`,
-    // `function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n`,
-    // `  return hydrateRuntimeState(JSON.parse(RAW_RUNTIME_STATE), {basePath: basePath || __dirname});\n`,
-    // `}\n`,
-
     let script = vec![
         "/* eslint-disable */\n",
         "// @ts-nocheck\n",
@@ -265,7 +258,7 @@ pub async fn link_project() -> Result<(), Error> {
         std::include_str!("pnp.tpl.cjs"),
     ].join("");
 
-    std::fs::write(pnp_path.to_path_buf(), script)
+    std::fs::write(project.pnp_path().to_path_buf(), script)
         .map_err(Arc::new)?;
 
     Ok(())

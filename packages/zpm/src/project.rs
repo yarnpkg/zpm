@@ -1,83 +1,135 @@
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use arca::{Path, ToArcaPath};
-use cached::proc_macro::once;
-use futures::{stream::FuturesUnordered, StreamExt};
-use zpm_macros::track_time;
 
-use crate::{error::Error, fetcher::PackageData, hash::Sha256, http::is_too_many_open_files, lockfile::{self, Lockfile}, manifest::{read_manifest, Manifest}, primitives::{Descriptor, Ident, Locator, Range, Reference}, resolver::Resolution, tree_resolver::TreeResolver};
+use crate::{cache::DiskCache, error::Error, lockfile::Lockfile, manifest::{read_manifest, Manifest}, primitives::{Descriptor, Ident, Locator, Range, Reference}};
 
 static LOCKFILE_NAME: &str = "yarn.lock";
 static MANIFEST_NAME: &str = "package.json";
 
-#[once]
-pub fn current_dir() -> Result<Path, Error> {
-    Ok(std::env::current_dir().unwrap().to_arca())
+pub struct Project {
+    pub cwd: Path,
+    pub root: Path,
+
+    pub workspaces: HashMap<Ident, Workspace>,
 }
 
-pub fn root() -> Result<Path, Error> {
-    let mut p = current_dir()?;
-    let mut closest_pkg = None;
+impl Project {
+    pub fn find_closest_project(mut p: Path) -> Result<Path, Error> {
+        let mut closest_pkg = None;
 
-    loop {
-        let lock_p = p.with_join_str(LOCKFILE_NAME);
-        if lock_p.fs_exists() {
-            return Ok(p);
+        loop {
+            let lock_p = p.with_join_str(LOCKFILE_NAME);
+            if lock_p.fs_exists() {
+                return Ok(p);
+            }
+        
+            let pkg_p = p.with_join_str(MANIFEST_NAME);
+            if pkg_p.fs_exists() {
+                closest_pkg = Some(p.clone());
+            }
+    
+            if let Some(dirname) = p.dirname() {
+                p = dirname;
+            } else {
+                break
+            }
         }
     
-        let pkg_p = p.with_join_str(MANIFEST_NAME);
-        if pkg_p.fs_exists() {
-            closest_pkg = Some(p.clone());
-        }
-
-        if let Some(dirname) = p.dirname() {
-            p = dirname;
-        } else {
-            break
-        }
+        closest_pkg
+            .ok_or(Error::ProjectNotFound(p))
     }
 
-    closest_pkg
-        .ok_or(Error::ProjectNotFound(p))
-}
+    pub fn new(cwd: Option<Path>) -> Result<Project, Error> {
+        let cwd = cwd
+            .or_else(|| std::env::var("YARN_CWD").ok().map(|s| Path::from(s)))
+            .or_else(|| std::env::current_dir().ok().map(|p| p.to_arca()));
 
-#[once]
-pub fn workspace_paths() -> Result<Vec<Path>, Error> {
-    let project_root = root()?;
+        let cwd = cwd
+            .expect("Failed to determine current working directory");
 
-    let mut workspaces = vec![project_root.clone()];
+        let root = Project::find_closest_project(cwd.clone())
+            .expect("Failed to find project root");
 
-    let root_manifest = read_manifest(&project_root.with_join_str(MANIFEST_NAME))?;
-    if let Some(patterns) = root_manifest.workspaces {
-        for pattern in patterns {
-            if !pattern.ends_with("/*") {
-                return Err(Error::InvalidWorkspacePattern(pattern.to_string()));
-            }
+        let root_workspace = Workspace::from_path(root.clone())
+            .expect("Failed to read root workspace");
 
-            let slice = &pattern[0..pattern.len() - 2];
+        let mut workspaces: HashMap<_, _> = root_workspace
+            .workspaces()?
+            .into_iter()
+            .map(|w| (w.locator().ident, w))
+            .collect();
 
-            let entries = project_root.with_join_str(slice).to_path_buf().read_dir()
-                .map_err(Arc::new)?;
+        workspaces.insert(
+            root_workspace.locator().ident,
+            root_workspace.clone(),
+        );
 
-            for entry in entries {
-                let entry = entry
-                    .map_err(Arc::new)?;
+        Ok(Project {
+            cwd,
+            root,
+            workspaces,
+        })
+    }
 
-                let entry_path = entry.file_name().into_string().unwrap();
+    pub fn manifest_path(&self) -> Path {
+        self.root.with_join_str(MANIFEST_NAME)
+    }
 
-                let mut workspace_p = project_root.with_join_str(slice);
-                workspace_p.join_str(entry_path);
+    pub fn lockfile_path(&self) -> Path {
+        self.root.with_join_str(LOCKFILE_NAME)
+    }
 
-                if workspace_p.with_join_str(MANIFEST_NAME).fs_is_file() {
-                    workspaces.push(workspace_p);
-                }
+    pub fn pnp_path(&self) -> Path {
+        self.root.with_join_str(".pnp.cjs")
+    }
+
+    pub fn lockfile(&self) -> Result<Lockfile, Error> {
+        let lockfile_path
+            = self.root.with_join_str(LOCKFILE_NAME);
+
+        if !lockfile_path.fs_exists() {
+            return Ok(Lockfile::new());
+        }
+
+        let lockfile_path_buf =
+            lockfile_path.to_path_buf();
+
+        let src = std::fs::read_to_string(&lockfile_path_buf)
+            .map_err(Arc::new)?;
+
+        serde_json::from_str(&src)
+            .map_err(|err| Error::LockfileParseError(Arc::new(err)))
+    }
+
+    pub fn write_lockfile(&self, lockfile: &Lockfile) -> Result<(), Error> {
+        let lockfile_path
+            = self.root.with_join_str(LOCKFILE_NAME);
+
+        let lockfile_path_buf
+            = lockfile_path.to_path_buf();
+
+        let contents
+            = serde_json::to_string_pretty(lockfile)
+                .map_err(|err| Error::LockfileGenerationError(Arc::new(err)))?;
+
+        let current_content = std::fs::read_to_string(&lockfile_path_buf);
+        if let Ok(current_content) = current_content {
+            if current_content == contents {
+                return Ok(());
             }
         }
 
-        workspaces.sort();
+        std::fs::write(&lockfile_path_buf, contents)
+            .map_err(|err| Error::LockfileWriteError(Arc::new(err)))
     }
 
-    Ok(workspaces)
+    pub fn package_cache(&self) -> DiskCache {
+        let cache_path
+            = self.root.with_join_str("node_modules/.zpm");
+
+        DiskCache::new(cache_path)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +139,15 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    pub fn from_path(path: Path) -> Result<Workspace, Error> {
+        let manifest = read_manifest(&path.with_join_str(MANIFEST_NAME))?;
+
+        Ok(Workspace {
+            path,
+            manifest,
+        })
+    }
+
     pub fn descriptor(&self) -> Descriptor {
         Descriptor::new(self.manifest.name.clone(), Range::WorkspaceMagic("^".to_string()))
     }
@@ -94,270 +155,37 @@ impl Workspace {
     pub fn locator(&self) -> Locator {
         Locator::new(self.manifest.name.clone(), Reference::Workspace(self.manifest.name.clone()))
     }
-}
 
-#[track_time]
-#[once]
-pub fn workspaces() -> Result<HashMap<Ident, Workspace>, Error> {
-    let mut manifests = HashMap::new();
+    pub fn workspaces(&self) -> Result<Vec<Workspace>, Error> {
+        let mut workspaces = vec![];
 
-    for workspace_p in workspace_paths()? {
-        let manifest = read_manifest(&workspace_p.with_join_str(MANIFEST_NAME))?;
-
-        manifests.insert(manifest.name.clone(), Workspace {
-            path: workspace_p,
-            manifest,
-        });
-    }
-
-    Ok(manifests)
-}
-
-#[track_time]
-#[once]
-pub fn lockfile() -> Result<Lockfile, Error> {
-    let lockfile_path = root()?.with_join_str(LOCKFILE_NAME);
-
-    if !lockfile_path.fs_exists() {
-        return Ok(Lockfile::new());
-    }
-
-    let src = std::fs::read_to_string(lockfile_path.to_path_buf())
-        .map_err(Arc::new)?;
-
-    Ok(lockfile::deserialize(&src).unwrap_or_default())
-}
-
-struct ResolutionManager {
-    pub resolutions: HashMap<Descriptor, Resolution>,
-
-    lockfile: Lockfile,
-    seen: HashSet<Descriptor>,
-    queue: Vec<Descriptor>,
-}
-
-impl ResolutionManager {
-    pub fn new() -> Self {
-        ResolutionManager {
-            resolutions: HashMap::new(),
-
-            lockfile: lockfile().unwrap(),
-            seen: HashSet::new(),
-            queue: Vec::new(),
-        }
-    }
-
-    pub fn schedule(&mut self, descriptor: Descriptor) {
-        if !self.seen.insert(descriptor.clone()) {
-            return;
-        }
-
-        if let Some(locator) = self.lockfile.resolutions.remove(&descriptor) {
-            let entry = self.lockfile.entries.get(&locator)
-                .expect("Expected a matching resolution to be found in the lockfile for any resolved locator.");
-
-            self.insert(descriptor, entry.resolution.clone());
-        } else {
-            self.queue.push(descriptor);
-        }
-    }
-
-    pub fn insert(&mut self, descriptor: Descriptor, mut resolution: Resolution) {
-        for descriptor in resolution.dependencies.values_mut() {
-            if descriptor.range.must_bind() {
-                descriptor.parent = Some(resolution.locator.clone());
-            }
-        }
-
-        let transitive_dependencies = resolution.dependencies
-            .values()
-            .cloned();
-
-        for descriptor in transitive_dependencies {
-            self.schedule(descriptor);
-        }
-
-        self.resolutions.insert(descriptor, resolution);
-    }
-
-    pub async fn run(&mut self) {
-        let mut wait = FuturesUnordered::new();
-
-        let mut resolution_limit = 5000;
-        let mut total_resolutions = 0;
-    
-        while wait.len() < resolution_limit {
-            if let Some(descriptor) = self.queue.pop() {
-                wait.push(descriptor.resolve_with_descriptor());
-            } else {
-                break;
-            }
-        }
-    
-        while let Some((descriptor, result)) = wait.next().await {
-            total_resolutions = total_resolutions + 1;
-    
-            match result {
-                Ok(resolution) => {
-                    self.insert(descriptor, resolution)
+        if let Some(patterns) = &self.manifest.workspaces {
+            for pattern in patterns {
+                if !pattern.ends_with("/*") {
+                    return Err(Error::InvalidWorkspacePattern(pattern.to_string()));
                 }
-                
-                Err(err) => {
-                    if let Error::RemoteRegistryError(err) = &err {
-                        if is_too_many_open_files(err) && resolution_limit > 1 {
-                            self.queue.push(descriptor);
-                            resolution_limit -= 1;
-    
-                            continue;
-                        }
-                    }
 
-                    println!("{} - resolution failed: {}", descriptor, err.to_string())
-                }
-            }
-    
-            while wait.len() < resolution_limit {
-                if let Some(descriptor) = self.queue.pop() {
-                    wait.push(descriptor.resolve_with_descriptor());
-                } else {
-                    break;
-                }
-            }
-        }
-    }
-}
+                let slice = &pattern[0..pattern.len() - 2];
 
-#[track_time]
-#[once]
-pub async fn resolutions() -> Result<HashMap<Descriptor, Resolution>, Error> {
-    let mut manager = ResolutionManager::new();
+                let entries = self.path.with_join_str(slice).to_path_buf().read_dir()
+                    .map_err(Arc::new)?;
 
-    for workspace in workspaces()?.values() {
-        manager.schedule(workspace.descriptor());
-    }
+                for entry in entries {
+                    let entry = entry
+                        .map_err(Arc::new)?;
 
-    manager.run().await;
+                    let entry_path = entry.file_name().into_string().unwrap();
 
-    Ok(manager.resolutions)
-}
+                    let mut path = self.path.with_join_str(slice);
+                    path.join_str(entry_path);
 
-#[track_time]
-#[once]
-pub async fn resolution_checksums() -> Result<HashMap<Locator, Option<Sha256>>, Error> {
-    let cache = cache().await?;
-
-    let mut checksum_map = HashMap::new();
-
-    for (locator, data) in cache {
-        checksum_map.insert(locator, data.checksum());
-    }
-
-    Ok(checksum_map)
-}
-
-pub async fn persist_lockfile() -> Result<(), Error> {
-    let lockfile_path = root()?.with_join_str(LOCKFILE_NAME);
-
-    let resolutions
-        = resolutions().await?;
-    let checksums
-        = resolution_checksums().await?;
-
-    let mut entries = HashMap::new();
-
-    for (descriptor, resolution) in resolutions {
-        let locator = resolution.locator.clone();
-
-        let entry = lockfile::LockfileEntry {
-            resolution,
-            checksum: checksums.get(&locator).unwrap().clone(),
-        };
-
-        entries.insert(descriptor, entry);
-    }
-
-    let serialized
-        = lockfile::serialize(entries)?;
-
-    std::fs::write(lockfile_path.to_path_buf(), serialized)
-        .map_err(Arc::new)?;
-
-    Ok(())
-}
-
-#[track_time]
-#[once]
-pub async fn cache() -> Result<HashMap<Locator, PackageData>, Error> {
-    let mut queue: Vec<_> = resolutions().await?
-        .into_values()
-        .map(|resolution| resolution.locator)
-        .collect();
-    
-    let mut wait = FuturesUnordered::new();
-
-    let mut fetch_limit = 5000;
-
-    let mut cache = HashMap::new();
-
-    let fetch_with_locator = |locator: Locator| async move {
-        (locator.clone(), locator.fetch().await)
-    };
-
-    while wait.len() < fetch_limit {
-        if let Some(locator) = queue.pop() {
-            wait.push(fetch_with_locator(locator));
-        } else {
-            break;
-        }
-    }
-
-    while let Some((locator, result)) = wait.next().await {
-        match result {
-            Ok(data) => {
-                cache.insert(locator, data);
-            }
-
-            Err(err) => {
-                if let Error::RemoteRegistryError(err) = &err {
-                    if is_too_many_open_files(err) && fetch_limit > 1 {
-                        queue.push(locator);
-                        fetch_limit -= 1;
-
-                        continue;
+                    if path.with_join_str(MANIFEST_NAME).fs_is_file() {
+                        workspaces.push(Workspace::from_path(path)?);
                     }
                 }
-
-                if let Error::IoError(err) = &err {
-                    if is_too_many_open_files(err) && fetch_limit > 1 {
-                        queue.push(locator);
-                        fetch_limit -= 1;
-
-                        continue;
-                    }
-                }
-
-                println!("{} - fetch failed: {} ({:#?})", locator, err.to_string(), err);
             }
         }
 
-        if let Some(locator) = queue.pop() {
-            wait.push(fetch_with_locator(locator));
-        }
+        Ok(workspaces)
     }
-
-    Ok(cache)
 }
-
-#[track_time]
-#[once]
-pub async fn tree() -> Result<TreeResolver, Error> {
-    let root_descriptors: Vec<_> = workspaces()?.values()
-        .map(|w| w.descriptor())
-        .collect();
-
-    Ok(TreeResolver::new(
-        resolutions().await?,
-        root_descriptors,
-    ))
-}
-

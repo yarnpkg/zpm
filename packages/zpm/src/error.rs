@@ -63,6 +63,18 @@ pub enum Error {
     #[error("Internal serialization error")]
     InternalDeserializationError(#[from] Arc<bincode::error::DecodeError>),
 
+    #[error("An error occured while reading the lockfile from disk")]
+    LockfileReadError(Arc<std::io::Error>),
+
+    #[error("An error occured while parsing the lockfile")]
+    LockfileParseError(Arc<serde_json::Error>),
+
+    #[error("Lockfile generation error")]
+    LockfileGenerationError(Arc<serde_json::Error>),
+
+    #[error("An error occured while persisting the lockfile on disk")]
+    LockfileWriteError(Arc<std::io::Error>),
+
     #[error("Git error")]
     GitError,
 

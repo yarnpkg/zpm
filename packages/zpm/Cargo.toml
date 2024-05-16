@@ -12,7 +12,7 @@ regex = "1.10.4"
 once_cell = "1.19.0"
 rstest = "0.18.2"
 glob-match = "0.2.1"
-arca = { version = "0.3.7", features = ["serde"] }
+arca = { version = "0.4.0", features = ["serde"] }
 memoize = "0.4.2"
 thiserror = "1.0.58"
 serde_json = "1.0.115"
@@ -21,7 +21,7 @@ futures = "0.3.30"
 async-recursion = "1.1.0"
 fancy-regex = "0.13.0"
 sonic-rs = "0.3.4"
-criterion = "0.5.1"
+criterion = { version = "0.5.1", features = ["async_tokio"] }
 hyper-util = "0.1.3"
 rustls = "0.23.4"
 pest = "2.7.9"
@@ -43,4 +43,8 @@ clap = { version = "4.5.4", features = ["derive"] }
 
 [[bench]]
 name = "json"
+harness = false
+
+[[bench]]
+name = "install"
 harness = false

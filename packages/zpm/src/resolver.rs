@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, fmt, marker::PhantomData, str::FromSt
 use bincode::{Decode, Encode};
 use serde::{de::{self, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer, Serialize};
 
-use crate::{config, error::Error, git::{resolve_git_treeish, GitRange}, http::http_client, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, project, semver};
+use crate::{config, error::Error, git::{resolve_git_treeish, GitRange}, http::http_client, install::InstallContext, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver};
 
 /**
  * Contains the information we keep in the lockfile for a given package.
@@ -31,7 +31,7 @@ pub struct Resolution {
     pub optional_dependencies: HashSet<Ident>,
 }
 
-pub async fn resolve(descriptor: Descriptor) -> Result<Resolution, Error> {
+pub async fn resolve<'a>(context: InstallContext<'a>, descriptor: Descriptor) -> Result<Resolution, Error> {
     match descriptor.range.clone() {
         Range::Git(range)
             => resolve_git(descriptor.ident, range).await,
@@ -44,21 +44,34 @@ pub async fn resolve(descriptor: Descriptor) -> Result<Resolution, Error> {
 
         Range::Link(path)
             => resolve_link(descriptor.ident, descriptor.parent, path),
-    
+
+        Range::Portal(path)
+            => resolve_portal(descriptor.ident, descriptor.parent, path),
+
         Range::SemverTag(tag)
             => resolve_semver_tag(descriptor.ident, tag).await,
 
         Range::WorkspaceMagic(_)
-            => resolve_workspace_by_name(descriptor.ident),
+            => resolve_workspace_by_name(context, descriptor.ident),
 
         Range::WorkspaceSemver(_)
-            => resolve_workspace_by_name(descriptor.ident),
+            => resolve_workspace_by_name(context, descriptor.ident),
 
         _ => Err(Error::Unsupported),
     }
 }
 
 pub fn resolve_link(ident: Ident, parent: Option<Locator>, path: String) -> Result<Resolution, Error> {
+    Ok(Resolution {
+        version: semver::Version::new(),
+        locator: Locator::new_bound(ident.clone(), Reference::Link(path), parent.map(Arc::new)),
+        dependencies: HashMap::new(),
+        peer_dependencies: HashMap::new(),
+        optional_dependencies: HashSet::new(),
+    })
+}
+
+pub fn resolve_portal(ident: Ident, parent: Option<Locator>, path: String) -> Result<Resolution, Error> {
     Ok(Resolution {
         version: semver::Version::new(),
         locator: Locator::new_bound(ident.clone(), Reference::Link(path), parent.map(Arc::new)),
@@ -225,10 +238,11 @@ pub async fn resolve_semver(ident: Ident, range: semver::Range) -> Result<Resolu
     })
 }
 
-pub fn resolve_workspace_by_name(ident: Ident) -> Result<Resolution, Error> {
-    let workspaces = project::workspaces()?;
+pub fn resolve_workspace_by_name(context: InstallContext, ident: Ident) -> Result<Resolution, Error> {
+    let project = context.project
+        .expect("The project is required for resolving a workspace package");
 
-    match workspaces.get(&ident) {
+    match project.workspaces.get(&ident) {
         Some(workspace) => {
             let mut dependencies = workspace.manifest.dependencies.clone()
                 .unwrap_or_default();

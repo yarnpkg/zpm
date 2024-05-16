@@ -138,9 +138,9 @@ dependencies = [
 
 [[package]]
 name = "arca"
-version = "0.3.7"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51d39fa10f67ff2ef2a943fa2f7eba7932433ac86ddf3a1ff7af0dd24b72389f"
+checksum = "ef8bc331d8f21e4d0957939a2163e3bc62b24a7e81507ce17e1d4055a3075a8a"
 dependencies = [
  "clean-path",
  "path-slash",
@@ -619,6 +619,7 @@ dependencies = [
  "ciborium",
  "clap",
  "criterion-plot",
+ "futures",
  "is-terminal",
  "itertools 0.10.5",
  "num-traits",
@@ -631,6 +632,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tinytemplate",
+ "tokio",
  "walkdir",
 ]
 

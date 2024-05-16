@@ -6,12 +6,20 @@ use serde::{Deserialize, Serialize};
 use tar::Archive;
 use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
-use crate::{cache::PACKAGE_CACHE, config::registry_url_for, error::Error, hash::Sha256, http::http_client, primitives::{Ident, Locator, Reference}, project, semver};
+use crate::{config::registry_url_for, error::Error, hash::Sha256, http::http_client, install::InstallContext, primitives::{Ident, Locator, Reference}, semver};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum PackageData {
-    Local(Path),
-    Zip(Path, Vec<u8>, Sha256),
+    Local {
+        path: Path,
+        discard_from_lookup: bool,
+    },
+
+    Zip {
+        path: Path,
+        data: Vec<u8>,
+        checksum: Sha256,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -32,29 +40,29 @@ impl Display for PackageLinking {
 impl PackageData {
     pub fn path(&self) -> &Path {
         match self {
-            PackageData::Local(path) => path,
-            PackageData::Zip(path, _, _) => path,
+            PackageData::Local {path, ..} => path,
+            PackageData::Zip {path, ..} => path,
         }
     }
 
     pub fn source_path(&self, locator: &Locator) -> Path {
         match self {
-            PackageData::Local(path) => path.clone(),
-            PackageData::Zip(path, _, _) => path.with_join_str(format!("node_modules/{}", locator.ident.as_str())),
+            PackageData::Local {path, ..} => path.clone(),
+            PackageData::Zip {path, ..} => path.with_join_str(format!("node_modules/{}", locator.ident.as_str())),
         }
     }
 
     pub fn checksum(&self) -> Option<Sha256> {
         match self {
-            PackageData::Local(_) => None,
-            PackageData::Zip(_, _, checksum) => Some(checksum.clone()),
+            PackageData::Local {..} => None,
+            PackageData::Zip {checksum, ..} => Some(checksum.clone()),
         }
     }
 
     pub fn link_type(&self) -> PackageLinking {
         match self {
-            PackageData::Local(_) => PackageLinking::Soft,
-            PackageData::Zip(_, _, _) => PackageLinking::Hard,
+            PackageData::Local {..} => PackageLinking::Soft,
+            PackageData::Zip {..} => PackageLinking::Hard,
         }
     }
 }
@@ -126,30 +134,59 @@ fn convert_tar_gz_to_zip(ident: &Ident, tar_gz_data: Bytes) -> Result<Vec<u8>, B
     Ok(zip_data)
 }
 
-pub async fn fetch(locator: &Locator) -> Result<PackageData, Error> {
+pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, parent_data: Option<PackageData>) -> Result<PackageData, Error> {
     match &locator.reference {
         Reference::Link(path)
-            => fetch_link(&locator.parent, path),
+            => fetch_link(path, &locator.parent, parent_data),
+
+        Reference::Portal(path)
+            => fetch_portal(path, &locator.parent, parent_data),
 
         Reference::Semver(version)
-            => fetch_semver(&locator, &locator.ident, &version).await,
+            => fetch_semver(context, &locator, &locator.ident, &version).await,
 
         Reference::SemverAlias(ident, version)
-            => fetch_semver(&locator, &ident, &version).await,
+            => fetch_semver(context, &locator, &ident, &version).await,
 
         Reference::Workspace(ident)
-            => fetch_workspace(&ident),
+            => fetch_workspace(context, &ident),
 
         _ => Err(Error::Unsupported),
     }
 }
 
-pub fn fetch_link(parent: &Option<Arc<Locator>>, path: &String) -> Result<PackageData, Error> {
-    Ok(PackageData::Local("/tmp/foo/bar".into()))
+pub fn fetch_link(path: &String, parent: &Option<Arc<Locator>>, parent_data: Option<PackageData>) -> Result<PackageData, Error> {
+    let parent = parent.as_ref()
+        .expect("The parent locator is required for resolving a linked package");
+    let parent_data = parent_data
+        .expect("The parent data is required for retrieving the path of a linked package");
+
+    let link_path = parent_data.source_path(parent)
+        .with_join_str(&path);
+
+    Ok(PackageData::Local {
+        path: link_path,
+        discard_from_lookup: true,
+    })
 }
 
-pub async fn fetch_semver(locator: &Locator, ident: &Ident, version: &semver::Version) -> Result<PackageData, Error> {
-    let (path, data, checksum) = PACKAGE_CACHE.upsert_blob(locator.clone(), &".zip", || async {
+pub fn fetch_portal(path: &String, parent: &Option<Arc<Locator>>, parent_data: Option<PackageData>) -> Result<PackageData, Error> {
+    let parent = parent.as_ref()
+        .expect("The parent locator is required for resolving a portal package");
+    let parent_data = parent_data
+        .expect("The parent data is required for retrieving the path of a portal package");
+
+    let link_path = parent_data.source_path(parent)
+        .with_join_str(&path);
+
+    Ok(PackageData::Local {
+        path: link_path,
+        discard_from_lookup: false,
+    })
+}
+
+pub async fn fetch_semver<'a>(context: InstallContext<'a>, locator: &Locator, ident: &Ident, version: &semver::Version) -> Result<PackageData, Error> {
+    let (path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), &".zip", || async {
         let client = http_client()?;
         let url = format!("{}/{}/-/{}-{}.tgz", registry_url_for(ident), ident, ident.name(), version.to_string());
 
@@ -163,15 +200,23 @@ pub async fn fetch_semver(locator: &Locator, ident: &Ident, version: &semver::Ve
             .map_err(|err| Error::PackageConversionError(Arc::new(err)))
     }).await?;
 
-    Ok(PackageData::Zip(path, data, checksum))
+    Ok(PackageData::Zip {
+        path,
+        data,
+        checksum,
+    })
 }
 
-pub fn fetch_workspace(ident: &Ident) -> Result<PackageData, Error> {
-    let workspaces = project::workspaces()?;
+pub fn fetch_workspace(context: InstallContext, ident: &Ident) -> Result<PackageData, Error> {
+    let project = context.project
+        .expect("The project is required for fetching a workspace package");
 
-    let workspace = workspaces
+    let workspace = project.workspaces
         .get(ident)
         .ok_or(Error::WorkspaceNotFound(ident.clone()))?;
 
-    Ok(PackageData::Local(workspace.path.clone()))
+    Ok(PackageData::Local {
+        path: workspace.path.clone(),
+        discard_from_lookup: false,
+    })
 }
