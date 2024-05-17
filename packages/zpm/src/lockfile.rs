@@ -3,7 +3,7 @@ use std::{collections::{BTreeMap, HashMap}, fmt, marker::PhantomData};
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{hash::Sha256, primitives::{Descriptor, Locator}, resolver::Resolution, serialize::Serialized};
+use crate::{error::Error, hash::Sha256, primitives::{Descriptor, Locator}, resolver::Resolution, serialize::Serialized};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct LockfileEntry {
@@ -107,13 +107,13 @@ impl<T> Serialize for MultiKey<T> where T: Serialized {
     }
 }
 
-impl<'de, T> Deserialize<'de> for MultiKey<T> where T: std::str::FromStr {
+impl<'de, T> Deserialize<'de> for MultiKey<T> where T: std::str::FromStr<Err = Error> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
         struct VecVisitor<T> {
             marker: PhantomData<fn() -> T>,
         }
 
-        impl<'de, T> Visitor<'de> for VecVisitor<T> where T: std::str::FromStr {
+        impl<'de, T> Visitor<'de> for VecVisitor<T> where T: std::str::FromStr<Err = Error> {
             type Value = Vec<T>;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -124,7 +124,7 @@ impl<'de, T> Deserialize<'de> for MultiKey<T> where T: std::str::FromStr {
                 value
                     .split(',')
                     .map(str::trim)
-                    .map(|s| T::from_str(s).map_err(|_| de::Error::custom("TODO: forward errors")))
+                    .map(|s| T::from_str(s).map_err(|err| de::Error::custom(err)))
                     .collect()
             }
         }

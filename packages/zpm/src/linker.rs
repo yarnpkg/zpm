@@ -169,7 +169,7 @@ pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Res
 
     for (locator, resolution) in &tree.locator_resolutions {
         let physical_package_data = install.package_data.get(&locator.physical_locator())
-            .expect("Failed to find physical package data");
+            .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator()));
 
         let mut package_dependencies: BTreeMap<Ident, PnpDependencyTarget> = resolution.dependencies.iter().map(|(ident, descriptor)| {
             let dependency_resolution = tree.descriptor_to_locator.get(descriptor)
@@ -192,8 +192,11 @@ pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Res
             .sorted()
             .collect::<Vec<_>>();
 
+        let package_location_abs = &physical_package_data.path()
+            .with_join(&physical_package_data.source_dir(&locator));
+
         let mut package_location = project.root
-            .relative_to(&physical_package_data.source_path(&locator))
+            .relative_to(&package_location_abs)
             .to_string();
 
         if package_location.len() == 0 {

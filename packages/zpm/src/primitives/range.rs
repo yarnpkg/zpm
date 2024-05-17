@@ -26,8 +26,11 @@ pub enum Range {
     #[try_pattern(prefix = "portal:")]
     Portal(String),
 
+    #[try_pattern(prefix = "file:", pattern = r"(.*\.tgz)")]
+    Tarball(String),
+
     #[try_pattern(prefix = "file:")]
-    File(String),
+    Directory(String),
 
     #[try_pattern(prefix = "patch:")]
     Patch(String),
@@ -51,7 +54,7 @@ pub enum Range {
 impl Range {
     pub fn must_bind(&self) -> bool {
         match &self {
-            Range::Link(_) | Range::Portal(_) | Range::File(_) | Range::Patch(_) => true,
+            Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Directory(_) | Range::Patch(_) => true,
             _ => false,
         }
     }
@@ -66,7 +69,8 @@ yarn_serialization_protocol!(Range, "", {
             Range::Patch(patch) => format!("patch:{}", patch),
             Range::Link(link) => format!("link:{}", link),
             Range::Portal(portal) => format!("portal:{}", portal),
-            Range::File(file) => format!("file:{}", file),
+            Range::Tarball(file) => format!("file:{}", file),
+            Range::Directory(file) => format!("file:{}", file),
             Range::WorkspaceSemver(semver) => format!("workspace:{}", semver),
             Range::WorkspaceMagic(magic) => format!("workspace:{}", magic),
             Range::WorkspacePath(path) => format!("workspace:{}", path),

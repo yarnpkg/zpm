@@ -44,7 +44,7 @@ pub struct RemoteManifest {
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     #[serde(default)]
-    pub name: Ident,
+    pub name: Option<Ident>,
 
     #[serde(default)]
     pub version: semver::Version,
@@ -61,6 +61,13 @@ pub struct Manifest {
 
     #[serde(default)]
     pub peer_dependencies: Option<HashMap<Ident, PeerRange>>,
+}
+
+pub fn parse_manifest(manifest_text: String) -> Result<Manifest, Error> {
+    let manifest_data = serde_json::from_str(manifest_text.as_str())
+        .map_err(Arc::new)?;
+
+    Ok(manifest_data)
 }
 
 pub fn read_manifest(p: &Path) -> Result<Manifest, Error> {

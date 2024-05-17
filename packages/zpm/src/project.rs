@@ -51,7 +51,7 @@ impl Project {
         let root = Project::find_closest_project(cwd.clone())
             .expect("Failed to find project root");
 
-        let root_workspace = Workspace::from_path(root.clone())
+        let root_workspace = Workspace::from_path(&root, root.clone())
             .expect("Failed to read root workspace");
 
         let mut workspaces: HashMap<_, _> = root_workspace
@@ -134,26 +134,36 @@ impl Project {
 
 #[derive(Debug, Clone)]
 pub struct Workspace {
+    pub name: Ident,
     pub path: Path,
     pub manifest: Manifest,
 }
 
 impl Workspace {
-    pub fn from_path(path: Path) -> Result<Workspace, Error> {
+    pub fn from_path(root: &Path, path: Path) -> Result<Workspace, Error> {
         let manifest = read_manifest(&path.with_join_str(MANIFEST_NAME))?;
 
+        let name = manifest.name.clone().unwrap_or_else(|| {
+            Ident::new(if root == &path {
+                "root-workspace".to_string()
+            } else {
+                path.basename().map_or_else(|| "unnamed-workspace".to_string(), |b| b.to_string())
+            })
+        });
+
         Ok(Workspace {
+            name,
             path,
             manifest,
         })
     }
 
     pub fn descriptor(&self) -> Descriptor {
-        Descriptor::new(self.manifest.name.clone(), Range::WorkspaceMagic("^".to_string()))
+        Descriptor::new(self.name.clone(), Range::WorkspaceMagic("^".to_string()))
     }
 
     pub fn locator(&self) -> Locator {
-        Locator::new(self.manifest.name.clone(), Reference::Workspace(self.manifest.name.clone()))
+        Locator::new(self.name.clone(), Reference::Workspace(self.name.clone()))
     }
 
     pub fn workspaces(&self) -> Result<Vec<Workspace>, Error> {
@@ -180,7 +190,7 @@ impl Workspace {
                     path.join_str(entry_path);
 
                     if path.with_join_str(MANIFEST_NAME).fs_is_file() {
-                        workspaces.push(Workspace::from_path(path)?);
+                        workspaces.push(Workspace::from_path(&self.path, path)?);
                     }
                 }
             }

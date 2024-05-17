@@ -32,7 +32,7 @@ impl Locator {
 
     pub fn physical_locator(&self) -> Locator {
         match &self.reference {
-            Reference::Virtual(inner, _) => Locator::new(self.ident.clone(), inner.physical_reference()),
+            Reference::Virtual(inner, _) => Locator::new_bound(self.ident.clone(), inner.physical_reference(), self.parent.clone()),
             _ => self.clone(),
         }
     }

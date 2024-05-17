@@ -45,10 +45,10 @@ impl PackageData {
         }
     }
 
-    pub fn source_path(&self, locator: &Locator) -> Path {
+    pub fn source_dir(&self, locator: &Locator) -> Path {
         match self {
-            PackageData::Local {path, ..} => path.clone(),
-            PackageData::Zip {path, ..} => path.with_join_str(format!("node_modules/{}", locator.ident.as_str())),
+            PackageData::Local {..} => Path::from("."),
+            PackageData::Zip {..} => Path::from(format!("node_modules/{}", locator.ident.as_str())),
         }
     }
 
@@ -63,6 +63,33 @@ impl PackageData {
         match self {
             PackageData::Local {..} => PackageLinking::Soft,
             PackageData::Zip {..} => PackageLinking::Hard,
+        }
+    }
+
+    pub fn read_text(&self, p: &Path) -> Result<String, Error> {
+        match self {
+            PackageData::Local {path, ..} => {
+                let path = path
+                    .with_join(p);
+
+                std::fs::read_to_string(path.to_path_buf())
+                    .map_err(Arc::new)
+                    .map_err(Error::IoError)
+            },
+
+            PackageData::Zip {data, ..} => {
+                let reader = Cursor::new(data);
+                let mut zip = zip::read::ZipArchive::new(reader)
+                    .unwrap();
+
+                let mut file_entry = zip.by_name(&p.to_string())
+                    .expect("Failed to find the requested file");
+
+                let mut text = String::new();
+                file_entry.read_to_string(&mut text).unwrap();
+
+                Ok(text)
+            },
         }
     }
 }
@@ -161,7 +188,8 @@ pub fn fetch_link(path: &String, parent: &Option<Arc<Locator>>, parent_data: Opt
     let parent_data = parent_data
         .expect("The parent data is required for retrieving the path of a linked package");
 
-    let link_path = parent_data.source_path(parent)
+    let link_path = parent_data.path()
+        .with_join(&parent_data.source_dir(parent))
         .with_join_str(&path);
 
     Ok(PackageData::Local {
@@ -176,12 +204,63 @@ pub fn fetch_portal(path: &String, parent: &Option<Arc<Locator>>, parent_data: O
     let parent_data = parent_data
         .expect("The parent data is required for retrieving the path of a portal package");
 
-    let link_path = parent_data.source_path(parent)
+    let portal_path = parent_data.path()
+        .with_join(&parent_data.source_dir(parent))
         .with_join_str(&path);
 
     Ok(PackageData::Local {
-        path: link_path,
+        path: portal_path,
         discard_from_lookup: false,
+    })
+}
+
+pub async fn fetch_tarball<'a>(context: InstallContext<'a>, locator: &Locator, path: &String, parent: &Option<Arc<Locator>>, parent_data: Option<PackageData>) -> Result<PackageData, Error> {
+    let parent = parent.as_ref()
+        .expect("The parent locator is required for resolving a tarball package");
+    let parent_data = parent_data
+        .expect("The parent data is required for retrieving the path of a tarball package");
+
+    let tarball_path = parent_data.path()
+        .with_join(&parent_data.source_dir(parent))
+        .with_join_str(&path);
+
+    let (path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), &".zip", || async {
+        let archive = std::fs::read(tarball_path.to_path_buf())
+            .map_err(Arc::new)?;
+
+        convert_tar_gz_to_zip(&locator.ident, Bytes::from(archive))
+            .map_err(|err| Error::PackageConversionError(Arc::new(err)))
+    }).await?;
+
+    Ok(PackageData::Zip {
+        path,
+        data,
+        checksum,
+    })
+}
+
+pub async fn fetch_directory<'a>(context: InstallContext<'a>, locator: &Locator, path: &String, parent: &Option<Arc<Locator>>, parent_data: Option<PackageData>) -> Result<PackageData, Error> {
+    let parent = parent.as_ref()
+        .expect("The parent locator is required for resolving a tarball package");
+    let parent_data = parent_data
+        .expect("The parent data is required for retrieving the path of a tarball package");
+
+    let tarball_path = parent_data.path()
+        .with_join(&parent_data.source_dir(parent))
+        .with_join_str(&path);
+
+    let (path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), &".zip", || async {
+        let archive = std::fs::read(tarball_path.to_path_buf())
+            .map_err(Arc::new)?;
+
+        convert_tar_gz_to_zip(&locator.ident, Bytes::from(archive))
+            .map_err(|err| Error::PackageConversionError(Arc::new(err)))
+    }).await?;
+
+    Ok(PackageData::Zip {
+        path,
+        data,
+        checksum,
     })
 }
 

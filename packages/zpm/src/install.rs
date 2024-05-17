@@ -2,7 +2,7 @@ use std::{collections::{HashMap, HashSet}, convert::Infallible, marker::PhantomD
 
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 
-use crate::{cache::DiskCache, error::Error, fetcher::{fetch, PackageData}, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator}, project::Project, resolver::{resolve, Resolution}, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{cache::DiskCache, error::Error, fetcher::{fetch, PackageData}, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator}, project::Project, resolver::{resolve, Resolution, ResolveResult}, tree_resolver::{ResolutionTree, TreeResolver}};
 
 #[derive(Clone, Default)]
 pub struct InstallContext<'a> {
@@ -27,6 +27,7 @@ enum InstallOpResult {
     Resolved {
         descriptor: Descriptor,
         resolution: Resolution,
+        package_data: Option<PackageData>,
     },
 
     ResolutionFailed {
@@ -66,16 +67,17 @@ impl<'a> InstallOp<'a> {
             InstallOp::Phantom(_, _) =>
                 unreachable!("PhantomData should never be instantiated"),
 
-            InstallOp::Resolve {descriptor, ..} => {
-                match resolve(context, descriptor.clone()).await {
+            InstallOp::Resolve {descriptor, parent_data} => {
+                match resolve(context, descriptor.clone(), parent_data).await {
                     Err(error) => InstallOpResult::ResolutionFailed {
                         descriptor,
                         error,
                     },
 
-                    Ok(resolution) => InstallOpResult::Resolved {
+                    Ok(ResolveResult {resolution, package_data}) => InstallOpResult::Resolved {
                         descriptor,
                         resolution,
+                        package_data,
                     },
                 }
             },
@@ -102,12 +104,6 @@ pub struct Install {
     pub lockfile: Lockfile,
     pub package_data: HashMap<Locator, PackageData>,
     pub resolution_tree: ResolutionTree,
-}
-
-impl Install {
-    pub fn lockfile_string() {
-
-    }
 }
 
 #[derive(Default)]
@@ -152,7 +148,7 @@ impl<'a> InstallManager<'a> {
                 let entry = self.lockfile.entries.get(&locator)
                     .expect("Expected a matching resolution to be found in the lockfile for any resolved locator.");
 
-                self.record(descriptor, entry.resolution.clone());
+                self.record_resolution(descriptor, entry.resolution.clone(), None);
                 return;
             }
         }
@@ -168,7 +164,7 @@ impl<'a> InstallManager<'a> {
         }
     }
 
-    fn record(&mut self, descriptor: Descriptor, mut resolution: Resolution) {
+    fn record_resolution(&mut self, descriptor: Descriptor, mut resolution: Resolution, package_data: Option<PackageData>) {
         for descriptor in resolution.dependencies.values_mut() {
             if descriptor.range.must_bind() {
                 descriptor.parent = Some(resolution.locator.clone());
@@ -194,10 +190,25 @@ impl<'a> InstallManager<'a> {
             resolution: resolution.clone(),
         });
 
-        self.ops.push(InstallOp::Fetch {
-            locator: resolution.locator.clone(),
-            parent_data,
-        });
+        if let Some(package_data) = package_data {
+            self.record_fetch(resolution.locator.clone(), package_data.clone());
+        } else {
+            self.ops.push(InstallOp::Fetch {
+                locator: resolution.locator.clone(),
+                parent_data,
+            });
+        }
+    }
+
+    fn record_fetch(&mut self, locator: Locator, package_data: PackageData) {
+        self.result.package_data.insert(locator.clone(), package_data.clone());
+
+        if let Some(deferred) = self.deferred.remove(&locator) {
+            for descriptor in deferred {
+                self.seen.remove(&descriptor);
+                self.schedule(descriptor);
+            }
+        }
     }
 
     fn trigger(&mut self) {
@@ -219,22 +230,21 @@ impl<'a> InstallManager<'a> {
 
         while let Some(res) = self.running.next().await {
             match res {
-                InstallOpResult::Resolved {descriptor, resolution} => {
-                    self.record(descriptor, resolution);
+                InstallOpResult::Resolved {descriptor, resolution, package_data} => {
+                    self.record_resolution(descriptor, resolution, package_data);
                 }
 
                 InstallOpResult::Fetched {locator, package_data} => {
-                    self.result.package_data.insert(locator.clone(), package_data);
-
-                    if let Some(deferred_descriptors) = self.deferred.remove(&locator) {
-                        for descriptor in deferred_descriptors {
-                            self.seen.remove(&descriptor);
-                            self.schedule(descriptor);
-                        }
-                    }
+                    self.record_fetch(locator, package_data);
                 }
 
-                _ => {}
+                InstallOpResult::FetchFailed {locator, error} => {
+                    println!("{}: {:?}", locator, error);
+                }
+
+                InstallOpResult::ResolutionFailed {descriptor, error} => {
+                    println!("{}: {:?}", descriptor, error);
+                }
             }
 
             self.trigger();
