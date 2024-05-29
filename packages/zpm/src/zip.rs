@@ -172,6 +172,40 @@ pub fn entries_from_folder<'a>(path: PathBuf) -> Result<Vec<Entry<'a>>, Error> {
     Ok(entries)
 }
 
+pub fn entries_from_zip(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
+    let end = buffer.len() - std::mem::size_of::<EndOfCentralDirectoryRecord>();
+    let end_of_central_directory_record = unsafe {
+        &*(buffer[end..].as_ptr() as *const EndOfCentralDirectoryRecord)
+    };
+
+    let mut offset = 0;
+    let mut entries = vec![];
+
+    while offset < end_of_central_directory_record.offset_of_central_directory as usize {
+        let general_record = unsafe {
+            &*(buffer[offset..].as_ptr() as *const GeneralRecord)
+        };
+
+        let name = std::str::from_utf8(&buffer[offset + 30..offset + 30 + general_record.header.file_name_length as usize])
+            .map_err(Arc::new)
+            .map_err(Error::Utf8Error)?;
+
+        let size = general_record.header.compressed_size as usize;
+        let data = &buffer[offset + 30 + general_record.header.file_name_length as usize..offset + 30 + general_record.header.file_name_length as usize + size];
+
+        entries.push(Entry {
+            name: name.to_string(),
+            mode: 0o644,
+            crc: general_record.header.crc_32,
+            data: Cow::Borrowed(data),
+        });
+
+        offset += 30 + general_record.header.file_name_length as usize + size;
+    }
+
+    Ok(entries)
+}
+
 pub fn first_entry_from_zip(buffer: &[u8]) -> Result<Entry, Error> {
     unsafe {
         let general_record = &*(buffer.as_ptr() as *const GeneralRecord);

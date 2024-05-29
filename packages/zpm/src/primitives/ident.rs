@@ -23,6 +23,10 @@ impl Ident {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub fn slug(&self) -> String {
+        self.0.replace("/", "-")
+    }
 }
 
 impl AsRef<str> for Ident {

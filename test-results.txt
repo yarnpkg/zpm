@@ -1380,7 +1380,7 @@
 🟥 Plugins ► typescript ► Removing types ► it should not automatically remove @types from peerDependencies without tsconfig or tsEnableAutoTypes
 🟥 Plugins ► typescript ► Removing types ► it should not automatically remove @types peerDependencies from the current workspace without tsconfig.json present or tsEnableAutoTypes
 
-[34 / 41] packages/acceptance-tests/pkg-tests-specs/sources/pnp-esm.test.ts
+[35 / 41] packages/acceptance-tests/pkg-tests-specs/sources/pnp-esm.test.ts
 
 🟩 Plug'n'Play - ESM ► it should allow absolute imports with search params
 🟩 Plug'n'Play - ESM ► it should allow extensionless commonjs imports
@@ -1421,24 +1421,24 @@
 🟩 Plug'n'Play - ESM ► private import mappings ► it should support wildcards
 🟩 Plug'n'Play - ESM ► private import mappings ► it should use legacy resolve when mapping to a dependency without an exports field
 🟩 Plug'n'Play - ESM ► private import mappings ► it should use the closest manifest
-🟥 Plug'n'Play - ESM ► should support loaders importing named exports from commonjs files
+🟩 Plug'n'Play - ESM ► should support loaders importing named exports from commonjs files
 🟩 Plug'n'Play - ESM ► should use the commonjs resolver in commonjs files imported from ESM
 
-[56 / 94] packages/acceptance-tests/pkg-tests-specs/sources/pnp.test.js
+[62 / 94] packages/acceptance-tests/pkg-tests-specs/sources/pnp.test.js
 
 🟩 Plug'n'Play ► it should allow external modules to require internal ones
 🟩 Plug'n'Play ► it should allow ignored paths to require files within the dependency tree
 🟩 Plug'n'Play ► it should allow other PnP projects to require files from this one
 🟩 Plug'n'Play ► it should allow other PnP projects to spawn inline scripts in this one
 🟩 Plug'n'Play ► it should allow packages to define whether they should be unplugged (false)
-🟥 Plug'n'Play ► it should allow packages to define whether they should be unplugged (true)
+🟩 Plug'n'Play ► it should allow packages to define whether they should be unplugged (true)
 🟩 Plug'n'Play ► it should allow packages to require themselves
-🟥 Plug'n'Play ► it should allow picking the unplugged packages by locator
+🟩 Plug'n'Play ► it should allow picking the unplugged packages by locator
 🟩 Plug'n'Play ► it should allow scripts outside of the dependency tree to require files within the dependency tree
-🟥 Plug'n'Play ► it should allow unplugging a deep package from a pnp installation
-🟥 Plug'n'Play ► it should allow unplugging a simple package from a pnp installation
-🟥 Plug'n'Play ► it should allow unplugging multiple identically named packages from a pnp installation
-🟥 Plug'n'Play ► it should automatically unplug packages with postinstall scripts
+🟩 Plug'n'Play ► it should allow unplugging a deep package from a pnp installation
+🟩 Plug'n'Play ► it should allow unplugging a simple package from a pnp installation
+🟩 Plug'n'Play ► it should allow unplugging multiple identically named packages from a pnp installation
+🟩 Plug'n'Play ► it should automatically unplug packages with postinstall scripts
 🟩 Plug'n'Play ► it should be able to require files from a different dependency tree
 🟩 Plug'n'Play ► it should be able to resolve a dependency using a module instance without an id
 🟩 Plug'n'Play ► it should be able to resolve an absolute file from a module in an ignored folder
@@ -1474,7 +1474,7 @@
 🟥 Plug'n'Play ► it should not cache the postinstall artifacts
 🟩 Plug'n'Play ► it should not fallback workspaces by default to the top-level dependencies when they require an undeclared package
 🟥 Plug'n'Play ► it should not loose the pnpapi on portals with virtual paths
-🟥 Plug'n'Play ► it should not override an already unplugged package
+🟩 Plug'n'Play ► it should not override an already unplugged package
 🟥 Plug'n'Play ► it should NOT remove lingering node_modules inside folders matched by pnpIgnorePatterns
 🟥 Plug'n'Play ► it should not touch the .pnp.cjs file when it already exists and is up-to-date
 🟥 Plug'n'Play ► it should not use the wrong pnpapi for a path owned by another pnpapi
@@ -1513,7 +1513,7 @@
 🟥 Plug'n'Play ► it should warn when the peer dependency resolution is incompatible
 🟥 Plug'n'Play ► it should work when working inside a sandbox environment full of symlinks, and pnpEnableInlining is set to false
 🟥 Plug'n'Play ► it should work with pnpEnableInlining set to false
-🟩 Plug'n'Play ► it shouldn't automatically unplug packages with skipped postinstall scripts
+🟥 Plug'n'Play ► it shouldn't automatically unplug packages with skipped postinstall scripts
 🟩 Plug'n'Play ► it shouldn't break the vscode builtin resolution
 🟩 Plug'n'Play ► it shouldn't deduplicate two packages with similar peer dependencies but different names
 🟥 Plug'n'Play ► it shouldn't match on dot files with pnpIgnorePatterns

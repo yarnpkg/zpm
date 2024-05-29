@@ -21,6 +21,9 @@ pub enum Error {
     #[error("Project not found ({0:?})")]
     ProjectNotFound(Path),
 
+    #[error("Invalid value; expected an ident or a locator ({0})")]
+    InvalidIdentOrLocator(String),
+
     #[error("Invalid semver version ({0})")]
     InvalidSemverVersion(String),
 

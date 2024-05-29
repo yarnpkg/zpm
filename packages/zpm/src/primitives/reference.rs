@@ -10,6 +10,7 @@ use super::Ident;
 #[derive(Clone, Debug, Decode, Encode, Parsed, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[parse_error(Error::InvalidReference)]
 pub enum Reference {
+    #[try_pattern()]
     #[try_pattern(prefix = "npm:")]
     Semver(semver::Version),
 
@@ -49,6 +50,20 @@ impl Reference {
         }
     }
 
+    pub fn slug(&self) -> String {
+        match self {
+            Reference::Git(_) => "git".to_string(),
+            Reference::Semver(version) => format!("npm-{}", version.to_string()),
+            Reference::SemverAlias(_, version) => format!("npm-{}", version.to_string()),
+            Reference::Tarball(_) => "file".to_string(),
+            Reference::Folder(_) => "file".to_string(),
+            Reference::Link(_) => "link".to_string(),
+            Reference::Portal(_) => "portal".to_string(),
+            Reference::Url(_) => "url".to_string(),
+            Reference::Virtual(_, _) => "virtual".to_string(),
+            Reference::Workspace(_) => "workspace".to_string(),
+        }
+    }
 }
 
 yarn_serialization_protocol!(Reference, "", {

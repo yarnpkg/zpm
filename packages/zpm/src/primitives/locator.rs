@@ -1,10 +1,22 @@
 use std::{hash::Hash, str::FromStr, sync::Arc};
 
 use bincode::{Decode, Encode};
+use sha2::Digest;
+use zpm_macros::Parsed;
 
 use crate::{error::Error, hash::Sha256, serialize::Serialized, yarn_serialization_protocol};
 
 use super::{Ident, Reference};
+
+#[derive(Clone, Debug, Parsed, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[parse_error(Error::InvalidIdentOrLocator)]
+pub enum IdentOrLocator {
+    #[try_pattern(pattern = "(@?[^@]+)")]
+    Ident(Ident),
+
+    #[try_pattern()]
+    Locator(Locator),
+}
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Locator {
@@ -46,6 +58,14 @@ impl Locator {
             reference: Reference::Virtual(Box::new(self.reference.clone()), Sha256::from_string(&serialized)),
             parent: self.parent.clone(),
         }
+    }
+
+    pub fn slug(&self) -> String {
+        let mut key = sha2::Sha256::new();
+        key.update(self.to_string());
+        let key = key.finalize();
+
+        format!("{}-{}-{:064x}", self.ident.slug(), self.reference.slug(), key)
     }
 }
 
