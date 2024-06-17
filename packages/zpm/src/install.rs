@@ -1,8 +1,8 @@
-use std::{collections::{HashMap, HashSet}, convert::Infallible, marker::PhantomData};
+use std::{collections::{HashMap, HashSet}, convert::Infallible, marker::PhantomData, str::FromStr};
 
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 
-use crate::{cache::DiskCache, error::Error, fetcher::{fetch, PackageData}, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator}, project::Project, resolver::{resolve, Resolution, ResolveResult}, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{cache::DiskCache, error::Error, fetcher::{fetch, PackageData}, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator, PeerRange, Range}, project::Project, resolver::{resolve, Resolution, ResolveResult}, semver, tree_resolver::{ResolutionTree, TreeResolver}};
 
 #[derive(Clone, Default)]
 pub struct InstallContext<'a> {
@@ -183,6 +183,11 @@ impl<'a> InstallManager<'a> {
             Some(parent) => Some(self.result.package_data.get(parent).expect("Parent data not found").clone()),
             None => None,
         };
+
+        for name in resolution.peer_dependencies.keys().cloned().collect::<Vec<_>>() {
+            resolution.peer_dependencies.entry(name.type_ident())
+                .or_insert(PeerRange::Semver(semver::Range::from_str("*").unwrap()));
+        }
 
         self.result.lockfile.resolutions.insert(descriptor, resolution.locator.clone());
         self.result.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {

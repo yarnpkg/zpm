@@ -1,6 +1,6 @@
 use std::{collections::{BTreeMap, HashMap}, sync::Arc};
 
-use arca::Path;
+use arca::{Path, ToArcaPath};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -143,8 +143,37 @@ fn get_package_info(package_data: &PackageData) -> Result<PackageInfo, Error> {
     }
 }
 
-fn extract_archive(root: &Path, locator: &Locator, data: &[u8]) -> Result<Path, Error> {
-    let extract_path = root
+fn remove_nm(nm_path: Path) {
+    if let Ok(entries) = nm_path.fs_read_dir() {
+        let mut has_dot_entries = false;
+
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path()
+                    .to_arca();
+
+                let basename = path.basename()
+                    .unwrap();
+
+                if basename.starts_with(".") && basename != ".bin" && path.fs_is_dir() {
+                    has_dot_entries = true;
+                    continue;
+                }
+
+                path.fs_rm()
+                    .unwrap();
+            }
+        }
+
+        if !has_dot_entries {
+            nm_path.fs_rm()
+                .unwrap();
+        }
+    }
+}
+
+fn extract_archive(project_root: &Path, locator: &Locator, package_data: &PackageData, data: &[u8]) -> Result<Path, Error> {
+    let extract_path = project_root
         .with_join_str(".yarn/unplugged")
         .with_join_str(locator.slug());
 
@@ -169,7 +198,11 @@ fn extract_archive(root: &Path, locator: &Locator, data: &[u8]) -> Result<Path, 
     ready_path.fs_write(&vec![])
         .map_err(Arc::new)?;
 
-    Ok(extract_path)
+    let package_subpath = package_data.package_subpath();
+    let package_directory = extract_path
+        .with_join(&package_subpath);
+
+    Ok(package_directory)
 }
 
 #[serde_as]
@@ -230,6 +263,9 @@ struct PnpState {
 #[track_time]
 pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Result<(), Error> {
     let tree = &install.resolution_tree;
+    let nm_path = project.root.with_join_str("node_modules");
+
+    remove_nm(nm_path);
 
     let dependencies_meta = project.manifest_path()
         .if_exists()
@@ -237,8 +273,6 @@ pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Res
         .and_then(|data| serde_json::from_str::<TopLevelConfiguration>(&data).ok())
         .and_then(|config| config.dependencies_meta)
         .unwrap_or_default();
-
-    println!("dependencies_meta: {:?}", dependencies_meta);
 
     let mut package_registry_data: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
     let mut dependency_tree_roots = Vec::new();
@@ -268,28 +302,23 @@ pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Res
         package_dependencies.entry(locator.ident.clone())
             .or_insert(PnpDependencyTarget::Simple(PnpReference(locator.clone())));
 
-        let general_peers = resolution.peer_dependencies.keys()
+        let mut package_peers = resolution.peer_dependencies.keys()
             .cloned()
             .collect::<Vec<_>>();
-
-        let type_peers = general_peers.iter()
-            .cloned()
-            .map(|ident| ident.type_ident())
-            .collect::<Vec<_>>();
-
-        let mut package_peers = [
-            general_peers,
-            type_peers,
-        ].concat();
 
         package_peers.sort();
 
-        let virtual_dir = match &locator.reference {
+        let virtual_dir = Path::from(match &locator.reference {
             Reference::Virtual(_, hash) => format!("__virtual__/{}/0/", hash),
             _ => "".to_string(),
-        };
+        });
 
-        let mut package_base = physical_package_data.path()
+        let rel_path = physical_package_data.package_directory()
+            .relative_to(physical_package_data.data_root());
+
+        let mut package_location_abs = physical_package_data.data_root()
+            .with_join(&virtual_dir)
+            .with_join(&rel_path)
             .clone();
 
         let package_info = get_package_info(&physical_package_data)?;
@@ -301,16 +330,12 @@ pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Res
             let entries = entries_from_zip(data)?;
 
             if check_extract(&locator, package_meta, &package_info, &entries) {
-                package_base = extract_archive(&project.root, locator, data)?;
+                package_location_abs = extract_archive(&project.root, locator, physical_package_data, data)?;
             }
         }
 
-        let package_location_abs = package_base
-            .with_join_str(&virtual_dir)
-            .with_join(&physical_package_data.source_dir(&locator));
-
-        let mut package_location = project.root
-            .relative_to(&package_location_abs)
+        let mut package_location = package_location_abs
+            .relative_to(&project.root)
             .to_string();
 
         if package_location.len() == 0 {

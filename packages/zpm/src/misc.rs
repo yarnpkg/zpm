@@ -16,7 +16,9 @@ pub fn convert_to_hashmap<U, T, F>(items: Vec<T>, mut key_fn: F) -> HashMap<U, V
 
 pub fn change_file<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C, mode: u32) -> Result<(), std::io::Error> {
     let update_content = std::fs::read(&path)
-        .map(|current| current.eq(contents.as_ref()))
+        .map(|current| {
+            current.ne(contents.as_ref())
+        })
         .or_else(|err| match err.kind() {
             std::io::ErrorKind::NotFound => Ok(true),
             _ => Err(err),
@@ -27,7 +29,7 @@ pub fn change_file<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C, mode: u
     }
 
     let update_permissions = update_content ||
-        std::fs::metadata(&path)?.permissions().mode() != mode;
+        (std::fs::metadata(&path)?.permissions().mode() & 0o777) != mode;
 
     if update_permissions {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))?;

@@ -8,6 +8,11 @@ const require = createRequire(import.meta.url);
 
 const berryPath = process.env.BERRY_PATH || path.join(os.homedir(), `berry`);
 const txtPath = require.resolve(`../test-results.txt`);
+const overridesPath = require.resolve(`../test-overrides.txt`);
+
+const overrides = new Set(fs.readFileSync(overridesPath, `utf8`).split(/\n/).filter(line => {
+  return line.length > 0 && line[0] !== ` `;
+}));
 
 const child = p.spawnSync(`yarn`, [`test:integration`, `--json`, ...process.argv.slice(2)], {
   cwd: berryPath,
@@ -29,11 +34,13 @@ const result = JSON.parse(child.stdout);
 const kindToChar = {
   passed: `🟩`,
   failed: `🟥`,
+  skipped: `🟦`,
 };
 
 const charToKind = {
   [`🟩`]: `passed`,
   [`🟥`]: `failed`,
+  [`🟦`]: `skipped`,
 };
 
 const testSuites = {};
@@ -62,8 +69,12 @@ for (const testSuite of result.testResults) {
 
     const fullName = test.ancestorTitles.concat(test.title).join(` ► `);
 
+    const status = overrides.has(fullName)
+      ? test.status === `failed` ? `skipped` : `failed`
+      : test.status;
+
     testSuites[fileName] ??= {};
-    testSuites[fileName][fullName] = test.status;
+    testSuites[fileName][fullName] = status;
   }
 }
 

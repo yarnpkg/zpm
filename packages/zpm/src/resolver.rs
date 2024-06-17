@@ -121,7 +121,7 @@ pub async fn resolve_tarball<'a>(context: InstallContext<'a>, ident: Ident, path
     let locator = Locator::new_bound(ident, Reference::Tarball(path.to_string()), parent.clone().map(Arc::new));
 
     let (resolution, package_data)
-        = fetch_local_tarball_with_manifest(context, &locator, path, &parent.clone().map(Arc::new), parent_data).await?;
+        = fetch_local_tarball_with_manifest(context, &locator, path, parent_data).await?;
 
     Ok(ResolveResult::new_with_data(resolution, package_data))
 }
@@ -130,7 +130,7 @@ pub async fn resolve_folder<'a>(context: InstallContext<'a>, ident: Ident, path:
     let locator = Locator::new_bound(ident, Reference::Folder(path.to_string()), parent.clone().map(Arc::new));
 
     let (resolution, package_data)
-        = fetch_folder_with_manifest(context, &locator, path, &parent.clone().map(Arc::new), parent_data).await?;
+        = fetch_folder_with_manifest(context, &locator, path, parent_data).await?;
 
     Ok(ResolveResult::new_with_data(resolution, package_data))
 }
@@ -141,8 +141,10 @@ pub fn resolve_portal(ident: &Ident, path: &str, parent: &Option<Locator>, paren
     let parent_data = parent_data
         .expect("The parent data is required for retrieving the path of a portal package");
 
-    let manifest_path = parent_data.source_dir(parent)
-        .with_join_str(&path)
+    let package_directory = parent_data.context_directory()
+        .with_join_str(&path);
+
+    let manifest_path = package_directory
         .with_join_str("package.json");
     let manifest_text
         = parent_data.read_text(&manifest_path)?;

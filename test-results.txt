@@ -961,7 +961,7 @@
 🟥 Commands ► workspace list -v,--verbose --json ► workspace-a requires mismatched version of workspace-b
 🟥 Commands ► workspace list -v,--verbose --json ► workspace-a requires workspace-b, workspace-b requires workspace-a
 
-[7 / 14] packages/acceptance-tests/pkg-tests-specs/sources/dragon.test.js
+[6 / 14] packages/acceptance-tests/pkg-tests-specs/sources/dragon.test.js
 
 🟩 Dragon tests ► it should pass the dragon test 1
 🟥 Dragon tests ► it should pass the dragon test 10
@@ -976,7 +976,7 @@
 🟩 Dragon tests ► it should pass the dragon test 6
 🟥 Dragon tests ► it should pass the dragon test 7
 🟩 Dragon tests ► it should pass the dragon test 8
-🟩 Dragon tests ► it should pass the dragon test 9
+🟥 Dragon tests ► it should pass the dragon test 9
 
 [24 / 29] packages/acceptance-tests/pkg-tests-specs/sources/exports.test.ts
 
@@ -1224,9 +1224,9 @@
 🟥 Features ► Pruned native deps ► shouldn't break when using --check-cache with native packages
 🟥 Features ► Pruned native deps ► shouldn't fetch packages that it won't need
 
-[0 / 3] packages/acceptance-tests/pkg-tests-specs/sources/features/rcFiles.test.js
+[1 / 3] packages/acceptance-tests/pkg-tests-specs/sources/features/rcFiles.test.js
 
-🟥 Features ► Rc files ► it should always load home config in loose mode
+🟩 Features ► Rc files ► it should always load home config in loose mode
 🟥 Features ► Rc files ► it should change the configuration when found in the current directory
 🟥 Features ► Rc files ► it should support changing the rc filename via the environment
 
@@ -1276,7 +1276,7 @@
 🟩 Lock tests ► it should correctly lock dependencies
 🟥 Lock tests ► it shouldn't loose track of the resolutions when upgrading the lockfile version
 
-[13 / 58] packages/acceptance-tests/pkg-tests-specs/sources/node-modules.test.ts
+[14 / 58] packages/acceptance-tests/pkg-tests-specs/sources/node-modules.test.ts
 
 🟥 Node_Modules ► 'winLinkType: junctions' not-on Windows should use symlinks in node_modules directories
 🟥 Node_Modules ► 'winLinkType: symlinks' not-on Windows should use symlinks in node_modules directories
@@ -1306,7 +1306,7 @@
 🟥 Node_Modules ► should not hoist a single package past workspace hoist border
 🟥 Node_Modules ► should not hoist dependencies in nested workspaces when using nmHoistingLimits
 🟥 Node_Modules ► should not hoist multiple packages past workspace hoist border
-🟥 Node_Modules ► should not hoist package peer dependent on parent if conflict exists
+🟩 Node_Modules ► should not hoist package peer dependent on parent if conflict exists
 🟥 Node_Modules ► should not produce orphaned symlinks on dependency removal having bin entries
 🟥 Node_Modules ► should not recreate folders when package is updated
 🟩 Node_Modules ► should not treat link: dependencies as an inner workspaces
@@ -1424,7 +1424,7 @@
 🟩 Plug'n'Play - ESM ► should support loaders importing named exports from commonjs files
 🟩 Plug'n'Play - ESM ► should use the commonjs resolver in commonjs files imported from ESM
 
-[62 / 94] packages/acceptance-tests/pkg-tests-specs/sources/pnp.test.js
+[67 / 94] packages/acceptance-tests/pkg-tests-specs/sources/pnp.test.js
 
 🟩 Plug'n'Play ► it should allow external modules to require internal ones
 🟩 Plug'n'Play ► it should allow ignored paths to require files within the dependency tree
@@ -1455,7 +1455,7 @@
 🟩 Plug'n'Play ► it should generate a file that can be used as an executable to resolve a request (valid request)
 🟥 Plug'n'Play ► it should generate a file with a custom shebang if configured as such
 🟩 Plug'n'Play ► it should generate the same hooks for two projects with the same configuration
-🟥 Plug'n'Play ► it should implicitly allow @types accesses if there are matching peer dependencies
+🟩 Plug'n'Play ► it should implicitly allow @types accesses if there are matching peer dependencies
 🟥 Plug'n'Play ► it should initialize a symlinked pnpapi module only once when working inside a sandbox environment full of symlinks
 🟩 Plug'n'Play ► it should install in such a way that two identical packages with different peer dependencies are different instances
 🟩 Plug'n'Play ► it should install in such a way that two identical packages with the same peer dependencies are the same instances (complex)
@@ -1470,21 +1470,21 @@
 🟩 Plug'n'Play ► it should not break relative requires for files matching pnpIgnorePatterns
 🟩 Plug'n'Play ► it should not break spawning new Node processes ('node' command)
 🟥 Plug'n'Play ► it should not break spawning new Node processes ('run' command)
-🟥 Plug'n'Play ► it should not break the tree path when loading through the result of require.resolve(...)
+🟩 Plug'n'Play ► it should not break the tree path when loading through the result of require.resolve(...)
 🟥 Plug'n'Play ► it should not cache the postinstall artifacts
 🟩 Plug'n'Play ► it should not fallback workspaces by default to the top-level dependencies when they require an undeclared package
 🟥 Plug'n'Play ► it should not loose the pnpapi on portals with virtual paths
-🟩 Plug'n'Play ► it should not override an already unplugged package
-🟥 Plug'n'Play ► it should NOT remove lingering node_modules inside folders matched by pnpIgnorePatterns
-🟥 Plug'n'Play ► it should not touch the .pnp.cjs file when it already exists and is up-to-date
+🟥 Plug'n'Play ► it should not override an already unplugged package
+🟩 Plug'n'Play ► it should NOT remove lingering node_modules inside folders matched by pnpIgnorePatterns
+🟩 Plug'n'Play ► it should not touch the .pnp.cjs file when it already exists and is up-to-date
 🟥 Plug'n'Play ► it should not use the wrong pnpapi for a path owned by another pnpapi
 🟩 Plug'n'Play ► it should not warn when the peer dependency resolution is compatible
 🟩 Plug'n'Play ► it should output the "reloading the API instance" warning using process.emitWarning
-🟥 Plug'n'Play ► it should pick the most specific locator
-🟥 Plug'n'Play ► it should properly forward the NODE_OPTIONS environment variable
+🟩 Plug'n'Play ► it should pick the most specific locator
+🟦 Plug'n'Play ► it should properly forward the NODE_OPTIONS environment variable
 🟩 Plug'n'Play ► it should properly unplug a package with peer dependencies
-🟥 Plug'n'Play ► it should remove lingering folders from the node_modules even when they contain dot-folders
-🟥 Plug'n'Play ► it should remove the lingering node_modules folders
+🟩 Plug'n'Play ► it should remove lingering folders from the node_modules even when they contain dot-folders
+🟩 Plug'n'Play ► it should remove the lingering node_modules folders
 🟩 Plug'n'Play ► it should resolve two identical packages with the same object (complex)
 🟩 Plug'n'Play ► it should resolve two identical packages with the same object (easy)
 🟩 Plug'n'Play ► it should resolve virtual paths passed to process.dlopen
@@ -1508,7 +1508,7 @@
 🟥 Plug'n'Play ► it should throw when a path is controlled by multiple pnpapi instances
 🟩 Plug'n'Play ► it should throw when using require.resolve with unsupported options
 🟥 Plug'n'Play ► it should transparently support the "resolve" package
-🟩 Plug'n'Play ► it should update the .pnp.cjs file when it already exists but isn't up-to-date
+🟥 Plug'n'Play ► it should update the .pnp.cjs file when it already exists but isn't up-to-date
 🟩 Plug'n'Play ► it should use the regular Node resolution when requiring files outside of the pnp install tree
 🟥 Plug'n'Play ► it should warn when the peer dependency resolution is incompatible
 🟥 Plug'n'Play ► it should work when working inside a sandbox environment full of symlinks, and pnpEnableInlining is set to false
@@ -1634,7 +1634,7 @@
 🟥 Protocols ► workspace: ► it should support relative paths (with ./)
 🟥 Protocols ► workspace: ► it should support relative paths (without ./)
 
-[10 / 12] packages/acceptance-tests/pkg-tests-specs/sources/require.test.js
+[12 / 12] packages/acceptance-tests/pkg-tests-specs/sources/require.test.js
 
 🟩 Require tests ► it should allow resetting a loaded module by deleting its entry from require.cache
 🟩 Require tests ► it should cache the loaded modules
@@ -1646,8 +1646,8 @@
 🟩 Require tests ► it should ignore the "main" entry if it doesn't resolve
 🟩 Require tests ► it should load the index.js file when loading from a folder
 🟩 Require tests ► it should resolve the .js extension
-🟥 Require tests ► it should support require.resolve(..., {paths})
-🟥 Require tests ► it should support require(require.resolve(...))
+🟩 Require tests ► it should support require.resolve(..., {paths})
+🟩 Require tests ► it should support require(require.resolve(...))
 
 [7 / 74] packages/acceptance-tests/pkg-tests-specs/sources/script.test.ts
 

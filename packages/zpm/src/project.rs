@@ -88,6 +88,10 @@ impl Project {
         self.root.with_join_str(".pnp.loader.mjs")
     }
 
+    pub fn nm_path(&self) -> Path {
+        self.root.with_join_str("node_modules")
+    }
+
     pub fn lockfile(&self) -> Result<Lockfile, Error> {
         let lockfile_path
             = self.root.with_join_str(LOCKFILE_NAME);
@@ -101,6 +105,10 @@ impl Project {
 
         let src = std::fs::read_to_string(&lockfile_path_buf)
             .map_err(Arc::new)?;
+
+        if src.is_empty() {
+            return Ok(Lockfile::new());
+        }
 
         serde_json::from_str(&src)
             .map_err(|err| Error::LockfileParseError(Arc::new(err)))
@@ -156,7 +164,8 @@ impl Workspace {
             })
         });
 
-        let rel_path = root.relative_to(&path);
+        let rel_path = path
+            .relative_to(&root);
 
         Ok(Workspace {
             name,

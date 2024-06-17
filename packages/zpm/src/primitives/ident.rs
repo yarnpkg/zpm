@@ -28,6 +28,10 @@ impl Ident {
         self.0.replace("/", "-")
     }
 
+    pub fn nm_subdir(&self) -> String {
+        format!("node_modules/{}", self.0)
+    }
+
     pub fn type_ident(&self) -> Ident {
         match self.scope() {
             Some(scope) => Ident::new(format!("@types/{}__{}", scope, self.name())),

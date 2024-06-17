@@ -1,0 +1,4 @@
+Plug'n'Play ► it should properly forward the NODE_OPTIONS environment variable
+    Since ESM loaders are in a separate thread, they run `-r` on their own and asynchronously. As a result
+    an additional `42` is printed after the main process exits when the ESM loader is enabled, which is always
+    the case on zpm.
