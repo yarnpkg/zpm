@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, sync::Arc};
+use std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::Arc};
 
 use arca::{Path, ToArcaPath};
 use itertools::Itertools;
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use zpm_macros::track_time;
 
-use crate::{error::Error, fetcher::{PackageData, PackageLinking}, install::Install, misc::change_file, primitives::{locator::IdentOrLocator, Ident, Locator, Reference}, project::Project, yarn_serialization_protocol, zip::{entries_from_zip, first_entry_from_zip, Entry}};
+use crate::{error::Error, fetcher::{PackageData, PackageLinking}, install::Install, misc::change_file, primitives::{locator::IdentOrLocator, Ident, Locator, Reference}, project::Project, settings, yarn_serialization_protocol, zip::{entries_from_zip, first_entry_from_zip, Entry}};
 
 fn is_default<T: Default + PartialEq>(t: &T) -> bool {
     t == &T::default()
@@ -250,8 +250,10 @@ struct PnpDependencyTreeRoot {
 #[serde(rename_all = "camelCase")]
 struct PnpState {
     enable_top_level_fallback: bool,
-    fallback_exclusion_list: Vec<()>,
     fallback_pool: Vec<()>,
+
+    #[serde_as(as = "Vec<(_, _)>")]
+    fallback_exclusion_list: BTreeMap<Ident, BTreeSet<PnpReference>>,
 
     ignore_pattern_data: Option<Vec<String>>,
 
@@ -437,15 +439,30 @@ pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Res
         });
     }
 
+    let enable_top_level_fallback = project.config.project.pnp_fallback_mode.value != settings::PnpFallbackMode::None;
+
+    let mut fallback_exclusion_list: BTreeMap<Ident, BTreeSet<PnpReference>> = BTreeMap::new();
+    let mut fallback_pool = vec![];
+
+    if project.config.project.pnp_fallback_mode.value == settings::PnpFallbackMode::DependenciesOnly {
+        for locator in tree.locator_resolutions.keys() {
+            if let Reference::Workspace(_) = locator.physical_locator().reference {
+                fallback_exclusion_list.entry(locator.ident.clone())
+                    .or_default()
+                    .insert(PnpReference(locator.clone()));
+            }
+        }
+    }
+
     let ignore_pattern_data = project.config.project.pnp_ignore_patterns.value
         .iter()
         .map(|pattern| pattern.value.to_regex_string())
         .collect::<Vec<String>>();
 
     let state = PnpState {
-        enable_top_level_fallback: false,
-        fallback_exclusion_list: Vec::new(),
-        fallback_pool: Vec::new(),
+        enable_top_level_fallback,
+        fallback_exclusion_list,
+        fallback_pool,
 
         ignore_pattern_data: match ignore_pattern_data.is_empty() {
             true => None,

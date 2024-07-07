@@ -200,13 +200,18 @@ impl Workspace {
                 let glob = wax::Glob::new(&pattern)
                     .map_err(|_| Error::InvalidWorkspacePattern(pattern.to_string()))?;
 
+                println!("Glob: {:?}", pattern);
+
                 for entry in glob.walk(self.path.to_path_buf()) {
                     let path = entry
                         .unwrap()
                         .path()
                         .to_arca();
 
+                    println!("Entry: {:?}", path);
+
                     if path.with_join_str(MANIFEST_NAME).fs_is_file() {
+                        println!("Found workspace: {:?}", path);
                         workspaces.push(Workspace::from_path(&self.path, path)?);
                     }
                 }

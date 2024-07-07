@@ -2,9 +2,9 @@ use serde::Deserialize;
 use zpm_macros::yarn_config;
 use crate::config::{BoolField, EnumField, GlobField, StringField, VecField};
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-enum PnpFallbackMode {
+pub enum PnpFallbackMode {
     None,
     DependenciesOnly,
     All,

@@ -1424,7 +1424,7 @@
 🟩 Plug'n'Play - ESM ► should support loaders importing named exports from commonjs files
 🟩 Plug'n'Play - ESM ► should use the commonjs resolver in commonjs files imported from ESM
 
-[72 / 94] packages/acceptance-tests/pkg-tests-specs/sources/pnp.test.js
+[77 / 94] packages/acceptance-tests/pkg-tests-specs/sources/pnp.test.js
 
 🟩 Plug'n'Play ► it should allow external modules to require internal ones
 🟩 Plug'n'Play ► it should allow ignored paths to require files within the dependency tree
@@ -1448,7 +1448,7 @@
 🟩 Plug'n'Play ► it should export the PnP API through the 'pnpapi' name
 🟩 Plug'n'Play ► it should expose 'findPnpApi' in the 'module' builtin
 🟩 Plug'n'Play ► it should expose the PnP version through 'process.versions.pnp'
-🟥 Plug'n'Play ► it should fallback to the top-level dependencies when it cannot require a transitive dependency require
+🟩 Plug'n'Play ► it should fallback to the top-level dependencies when it cannot require a transitive dependency require
 🟥 Plug'n'Play ► it should fallback workspaces to the top-level dependencies when they require an undeclared package and the fallback mode is 'all'
 🟩 Plug'n'Play ► it should generate a file that can be used as an executable to resolve a request (builtin request)
 🟩 Plug'n'Play ► it should generate a file that can be used as an executable to resolve a request (invalid request)
@@ -1466,7 +1466,7 @@
 🟩 Plug'n'Play ► it should make it possible to copy the pnp file and cache from one place to another
 🟩 Plug'n'Play ► it should mention which ancestor broke the peer dependency chain
 🟩 Plug'n'Play ► it should not automatically unplug all packages
-🟥 Plug'n'Play ► it should not be enabled for paths matching the specified regex
+🟩 Plug'n'Play ► it should not be enabled for paths matching the specified regex
 🟩 Plug'n'Play ► it should not break relative requires for files matching pnpIgnorePatterns
 🟩 Plug'n'Play ► it should not break spawning new Node processes ('node' command)
 🟥 Plug'n'Play ► it should not break spawning new Node processes ('run' command)
@@ -1488,7 +1488,7 @@
 🟩 Plug'n'Play ► it should resolve two identical packages with the same object (complex)
 🟩 Plug'n'Play ► it should resolve two identical packages with the same object (easy)
 🟩 Plug'n'Play ► it should resolve virtual paths passed to process.dlopen
-🟥 Plug'n'Play ► it should respect pnpIgnorePatterns when using findPnpApi
+🟩 Plug'n'Play ► it should respect pnpIgnorePatterns when using findPnpApi
 🟩 Plug'n'Play ► it should respect user provided conditions
 🟩 Plug'n'Play ► it should return the path to the PnP file when calling require.resolve('pnpapi')
 🟥 Plug'n'Play ► it should run scripts using a Node version that auto-injects the hook
@@ -1516,8 +1516,8 @@
 🟥 Plug'n'Play ► it shouldn't automatically unplug packages with skipped postinstall scripts
 🟩 Plug'n'Play ► it shouldn't break the vscode builtin resolution
 🟩 Plug'n'Play ► it shouldn't deduplicate two packages with similar peer dependencies but different names
-🟥 Plug'n'Play ► it shouldn't match on dot files with pnpIgnorePatterns
-🟥 Plug'n'Play ► it shouldn't print warning in the default install mode, even when the fallback is used
+🟩 Plug'n'Play ► it shouldn't match on dot files with pnpIgnorePatterns
+🟩 Plug'n'Play ► it shouldn't print warning in the default install mode, even when the fallback is used
 🟩 Plug'n'Play ► it shouldn't remove the lingering node_modules folders when they contain dot-folders
 🟥 Plug'n'Play ► should skip building incompatible package
 
