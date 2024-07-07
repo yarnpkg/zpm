@@ -439,7 +439,7 @@ pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Res
 
     let ignore_pattern_data = project.config.project.pnp_ignore_patterns.value
         .iter()
-        .map(|pattern| pattern.to_regex_string())
+        .map(|pattern| pattern.value.to_regex_string())
         .collect::<Vec<String>>();
 
     let state = PnpState {

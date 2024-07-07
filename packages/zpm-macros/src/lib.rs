@@ -1,7 +1,31 @@
 extern crate proc_macro;
 
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, TokenStreamExt};
 use syn::{meta::ParseNestedMeta, parse_macro_input, Data, DeriveInput, Expr, ItemFn, Meta};
+
+// Turn X<Y> into X::<Y>
+fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
+    let input = quote!{#input};
+    let mut iter = input.into_iter().peekable();
+
+    let mut result = proc_macro2::TokenStream::new();
+
+    if let Some(first) = iter.next() {
+        result.append(first);
+
+        if let Some(proc_macro2::TokenTree::Punct(punct)) = iter.peek() {
+            if punct.as_char() == '<' {
+                result.append_all(quote! {::});
+            }
+        }
+    }
+
+    while let Some(token) = iter.next() {
+        result.append(token);
+    }
+
+    result
+}
 
 #[proc_macro_attribute]
 pub fn track_time(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -256,83 +280,42 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
     for field in fields.iter() {
         let field_name = field.ident.as_ref().unwrap();
         let field_type = &field.ty;
+        let field_type_path = get_expr_path_from_type(&field_type);
 
         let mut default_value = None;
-        let mut array = false;
-        let mut nullable = false;
 
         for attr in &field.attrs {
-            if attr.path().is_ident("array") {
-                array = true;
-            }
-
             if attr.path().is_ident("default") {
                 if let Ok(value) = attr.parse_args::<Expr>() {
                     default_value = Some(value);
                 }
             }
-
-            if attr.path().is_ident("nullable") {
-                nullable = true;
-            }
         }
 
-        let computed_field_type = if array {
-            quote! { crate::config::Setting<Vec<#field_type>> }
-        } else if nullable {
-            quote! { crate::config::Setting<Option<#field_type>> }
-        } else {
-            quote! { crate::config::Setting<#field_type> }
-        };
-
         if let Some(default) = default_value {
-            let value_from_env = if array {
-                quote! {
-                    value.split(',')
-                        .map(|v| #field_type::hydrate_setting_from_env(v.trim().as_str()).unwrap())
-                        .collect()
-                }
-            } else if nullable {
-                quote! {
-                    if value.is_empty() {
-                        None
-                    } else {
-                        Some(#field_type::hydrate_setting_from_env(value.as_str()).unwrap())
-                    }
-                }
-            } else {
-                quote! {
-                    #field_type::hydrate_setting_from_env(value.as_str()).unwrap()
-                }
-            };
-
             let func_name = syn::Ident::new(&format!("{}_default_from_env", field_name), field_name.span());
             let func_name_str = format!("{}", func_name.to_string());
 
             default_functions.push(quote! {
-                fn #func_name() -> #computed_field_type {
+                fn #func_name() -> #field_type {
+                    use std::str::FromStr;
+
                     match std::env::var(concat!("YARN_", stringify!(#field_name)).to_uppercase()) {
-                        Ok(value) => crate::config::Setting {value: #value_from_env, source: crate::config::SettingSource::Env},
-                        Err(_) => crate::config::Setting {value: #default, source: crate::config::SettingSource::Default},
+                        Ok(value) => #field_type_path::from_str(&value).unwrap(),
+                        Err(_) => #field_type_path::new(#default),
                     }
                 }
             });
 
             new_fields.push(quote! {
                 #[serde(default = #func_name_str)]
-                pub #field_name: #computed_field_type,
+                pub #field_name: #field_type,
             });
         } else {
-            if array {
-                new_fields.push(quote! {
-                    #[serde(default)]
-                    pub #field_name: #computed_field_type,
-                });
-            } else {
-                new_fields.push(quote! {
-                    pub #field_name: #computed_field_type,
-                });
-            }
+            new_fields.push(quote! {
+                #[serde(default)]
+                pub #field_name: #field_type,
+            });
         }
     }
 

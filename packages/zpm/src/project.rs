@@ -198,8 +198,7 @@ impl Workspace {
         if let Some(patterns) = &self.manifest.workspaces {
             for pattern in patterns {
                 let glob = wax::Glob::new(&pattern)
-                    .unwrap();
-                    //.map_err(|_| Error::InvalidWorkspacePattern(pattern.to_string()))?;
+                    .map_err(|_| Error::InvalidWorkspacePattern(pattern.to_string()))?;
 
                 for entry in glob.walk(self.path.to_path_buf()) {
                     let path = entry
