@@ -541,9 +541,9 @@
 🟥 Commands ► dlx ► it shouldn't warn on unused package extensions in projects created by dlx (peerDependencies)
 🟥 Commands ► dlx ► it shouldn't warn on unused package extensions in projects created by dlx (peerDependenciesMeta)
 
-[0 / 3] packages/acceptance-tests/pkg-tests-specs/sources/commands/exec.test.ts
+[1 / 3] packages/acceptance-tests/pkg-tests-specs/sources/commands/exec.test.ts
 
-🟥 Commands ► exec ► it should allow running shell scripts
+🟩 Commands ► exec ► it should allow running shell scripts
 🟥 Commands ► exec ► it should inject binaries the workspace has access to
 🟥 Commands ► exec ► it should preserve the exit code
 
@@ -567,13 +567,14 @@
 🟥 Commands ► init ► it should create a new package.json in the specified directory even if said directory doesn't exist
 🟥 Commands ► init ► it should create a new package.json in the specified directory if it doesn't exist
 
-[3 / 35] packages/acceptance-tests/pkg-tests-specs/sources/commands/install.test.ts
+[3 / 36] packages/acceptance-tests/pkg-tests-specs/sources/commands/install.test.ts
 
 🟥 Commands ► install ► displays validation issues of nested workspaces
 🟥 Commands ► install ► it should accept to add files to the cache when using --immutable without --immutable-cache
 🟥 Commands ► install ► it should block invalid lockfiles when using --refresh-lockfile with --immutable
 🟥 Commands ► install ► it should disable immutable installs when using `--mode=update-lockfile`
 🟥 Commands ► install ► it should enable --refresh-lockfile --immutable by default in public PR CIs
+🟥 Commands ► install ► it should exit with an error code after an unexpected empty event loop
 🟥 Commands ► install ► it should fetch only required packages when using `--mode=update-lockfile`
 🟩 Commands ► install ► it should not enable --refresh-lockfile --immutable if the GH environment file is missing
 🟩 Commands ► install ► it should not enable --refresh-lockfile --immutable if the GH environment file is weird
@@ -776,22 +777,22 @@
 🟥 Commands ► remove ► it should remove the last development dependency from the current project
 🟥 Commands ► remove ► it should remove the last regular dependency from the current project
 
-[0 / 14] packages/acceptance-tests/pkg-tests-specs/sources/commands/run.test.js
+[5 / 14] packages/acceptance-tests/pkg-tests-specs/sources/commands/run.test.js
 
 🟥 Commands ► run misc ► it should ignore scripts when --binaries-only is set
 🟥 Commands ► run misc ► it should normalize scoped bin entries
-🟥 Commands ► run misc ► it should prefer scripts over binaries
+🟩 Commands ► run misc ► it should prefer scripts over binaries
 🟥 Commands ► run misc ► it should print the list of available scripts as JSON if no parameters passed to command
 🟥 Commands ► run misc ► it should print the list of available scripts if no parameters passed to command
 🟥 Commands ► run misc ► it should run the binaries from our dependencies if available
 🟥 Commands ► run misc ► it shouldn't require the "--" flag to stop interpreting options after "run" commands (binaries)
 🟥 Commands ► run misc ► it shouldn't require the "--" flag to stop interpreting options after "run" commands (scripts)
-🟥 Commands ► run with prefix ► it should properly forward the script exit codes
+🟩 Commands ► run with prefix ► it should properly forward the script exit codes
 🟥 Commands ► run with prefix ► it should properly forward the script exit codes when calling into another yarnPath binary
-🟥 Commands ► run with prefix ► it should run the selected script if available
-🟥 Commands ► run without prefix ► it should properly forward the script exit codes
+🟩 Commands ► run with prefix ► it should run the selected script if available
+🟩 Commands ► run without prefix ► it should properly forward the script exit codes
 🟥 Commands ► run without prefix ► it should properly forward the script exit codes when calling into another yarnPath binary
-🟥 Commands ► run without prefix ► it should run the selected script if available
+🟩 Commands ► run without prefix ► it should run the selected script if available
 
 [1 / 10] packages/acceptance-tests/pkg-tests-specs/sources/commands/set/version.test.ts
 
@@ -917,7 +918,7 @@
 🟥 Commands ► workspaces focus ► should not follow local workspace devDependencies for production installs
 🟥 Commands ► workspaces focus ► should only install production dependencies if requested
 
-[0 / 28] packages/acceptance-tests/pkg-tests-specs/sources/commands/workspaces/foreach.test.js
+[1 / 28] packages/acceptance-tests/pkg-tests-specs/sources/commands/workspaces/foreach.test.js
 
 🟥 Commands ► workspace foreach ► --since --recursive runs on workspaces changed and their dependents
 🟥 Commands ► workspace foreach ► --since runs on no workspaces if there are no staged or unstaged changes on the default branch
@@ -938,7 +939,7 @@
 🟥 Commands ► workspace foreach ► should only run the scripts on workspaces that match the --include path list with globs
 🟥 Commands ► workspace foreach ► should prefix the output and include timing information when run with -vv (two verbose levels)
 🟥 Commands ► workspace foreach ► should prefix the output when run with one --verbose
-🟥 Commands ► workspace foreach ► should return correct exit code when encountered errors in running scripts
+🟩 Commands ► workspace foreach ► should return correct exit code when encountered errors in running scripts
 🟥 Commands ► workspace foreach ► should run execute global scripts even on workspaces that don't declare them
 🟥 Commands ► workspace foreach ► should run on current and descendant workspaces when --worktree is set
 🟥 Commands ► workspace foreach ► should run scripts in parallel and interlace the output when run with --parallel --interlaced
@@ -1072,7 +1073,7 @@
 🟥 Features ► Content-Addressed Index ► it should use the exact same device/inode for the same file from different packages
 🟥 Features ► Content-Addressed Index ► it should use the exact same device/inode for the same file from the same package
 
-[1 / 9] packages/acceptance-tests/pkg-tests-specs/sources/features/dotEnvFiles.test.ts
+[2 / 9] packages/acceptance-tests/pkg-tests-specs/sources/features/dotEnvFiles.test.ts
 
 🟥 DotEnv files ► should allow .env variables to be interpolated
 🟥 DotEnv files ► should allow .env variables to be used in the next ones
@@ -1081,7 +1082,7 @@
 🟥 DotEnv files ► should automatically inject a .env.yarn file in the environment
 🟥 DotEnv files ► should let the last environment file override the first
 🟥 DotEnv files ► should throw an error if the settings reference a non-existing file
-🟥 DotEnv files ► shouldn't read the .env.yarn file if the injectEnvironmentFiles setting is defined
+🟩 DotEnv files ► shouldn't read the .env.yarn file if the injectEnvironmentFiles setting is defined
 🟩 DotEnv files ► shouldn't throw an error if the settings reference a non-existing file with a ?-suffixed path
 
 [1 / 3] packages/acceptance-tests/pkg-tests-specs/sources/features/editorSdks.test.js
@@ -1101,13 +1102,14 @@
 🟥 Features ► enableNetwork ► it should fix the 'latest' tag to reference the highest version found in the cache
 🟥 Features ► enableNetwork ► it should let Yarn reuse the package metadata from its cache
 
-[1 / 6] packages/acceptance-tests/pkg-tests-specs/sources/features/immutablePatterns.test.ts
+[1 / 7] packages/acceptance-tests/pkg-tests-specs/sources/features/immutablePatterns.test.ts
 
 🟥 Features ► immutablePatterns ► should detect changes within folders
 🟥 Features ► immutablePatterns ► should prevent reformatting of manifests when so configured
 🟥 Features ► immutablePatterns ► shouldn't allow specific paths to be created when the immutable flag is used
 🟥 Features ► immutablePatterns ► shouldn't allow specific paths to be updated when the immutable flag is used
 🟥 Features ► immutablePatterns ► shouldn't fail when a folder didn't change
+🟥 Features ► immutablePatterns ► shouldn't fail when running an install from a subdirectory
 🟩 Features ► immutablePatterns ► shouldn't have an effect unless --immutable is set
 
 [0 / 4] packages/acceptance-tests/pkg-tests-specs/sources/features/initFields.test.ts
@@ -1135,10 +1137,10 @@
 🟥 Features ► Legacy Plugin Removal ► it should remove the legacy plugins when running an install
 🟥 Features ► Legacy Plugin Removal ► it shouldn't remove other plugins
 
-[0 / 2] packages/acceptance-tests/pkg-tests-specs/sources/features/localMirror.test.js
+[2 / 2] packages/acceptance-tests/pkg-tests-specs/sources/features/localMirror.test.js
 
-🟥 Features ► Local Mirror ► it should store downloaded entries in the mirror
-🟥 Features ► Local Mirror ► it shouldn't store cache entries in the mirror
+🟩 Features ► Local Mirror ► it should store downloaded entries in the mirror
+🟩 Features ► Local Mirror ► it shouldn't store cache entries in the mirror
 
 [0 / 7] packages/acceptance-tests/pkg-tests-specs/sources/features/logFilter.test.ts
 
@@ -1172,13 +1174,15 @@
 🟥 Features ► Package Extensions ► it should warn on unneeded package extensions (peerDependenciesMeta)
 🟥 Features ► Package Extensions ► it should warn on unused package extensions
 
-[1 / 5] packages/acceptance-tests/pkg-tests-specs/sources/features/peerDependenciesMeta.test.ts
+[1 / 7] packages/acceptance-tests/pkg-tests-specs/sources/features/peerDependenciesMeta.test.ts
 
 🟥 Features ► peerDependenciesMeta ► it should automatically add corresponding '@types' optional peer dependencies
 🟥 Features ► peerDependenciesMeta ► it should be able to access an implicit peer dependency
 🟩 Features ► peerDependenciesMeta ► it should not report a warning when omitting an optional peer dependency
 🟥 Features ► peerDependenciesMeta ► it should report a warning when omitting a peer dependencies
+🟥 Features ► peerDependenciesMeta ► it should report collapsed a peer dependency warning when a direct peerDependency request is mismatched
 🟥 Features ► peerDependenciesMeta ► it should report collapsed a peer dependency warning when a set of mismatched peerDependency requirements is detected
+🟥 Features ► peerDependenciesMeta ► it should report collapsed a peer dependency warning with corresponding root when a transitive peerDependency request is mismatched
 
 [2 / 7] packages/acceptance-tests/pkg-tests-specs/sources/features/plugins.test.ts
 
@@ -1276,7 +1280,7 @@
 🟩 Lock tests ► it should correctly lock dependencies
 🟥 Lock tests ► it shouldn't loose track of the resolutions when upgrading the lockfile version
 
-[13 / 58] packages/acceptance-tests/pkg-tests-specs/sources/node-modules.test.ts
+[14 / 58] packages/acceptance-tests/pkg-tests-specs/sources/node-modules.test.ts
 
 🟥 Node_Modules ► 'winLinkType: junctions' not-on Windows should use symlinks in node_modules directories
 🟥 Node_Modules ► 'winLinkType: symlinks' not-on Windows should use symlinks in node_modules directories
@@ -1320,7 +1324,7 @@
 🟥 Node_Modules ► should respect peerDependencies with defaults in workspaces
 🟥 Node_Modules ► should respect self references settings
 🟥 Node_Modules ► should respect transitive peer dependencies
-🟥 Node_Modules ► should return real cwd for scripts inside workspaces
+🟩 Node_Modules ► should return real cwd for scripts inside workspaces
 🟥 Node_Modules ► should setup the right symlinks
 🟩 Node_Modules ► should skip linking incompatible package
 🟥 Node_Modules ► should still hoist direct dependencies from portal target to parent with nmHoistingLimits: dependencies
@@ -1424,7 +1428,7 @@
 🟩 Plug'n'Play - ESM ► should support loaders importing named exports from commonjs files
 🟩 Plug'n'Play - ESM ► should use the commonjs resolver in commonjs files imported from ESM
 
-[86 / 94] packages/acceptance-tests/pkg-tests-specs/sources/pnp.test.js
+[87 / 94] packages/acceptance-tests/pkg-tests-specs/sources/pnp.test.js
 
 🟩 Plug'n'Play ► it should allow external modules to require internal ones
 🟩 Plug'n'Play ► it should allow ignored paths to require files within the dependency tree
@@ -1469,7 +1473,7 @@
 🟩 Plug'n'Play ► it should not be enabled for paths matching the specified regex
 🟩 Plug'n'Play ► it should not break relative requires for files matching pnpIgnorePatterns
 🟩 Plug'n'Play ► it should not break spawning new Node processes ('node' command)
-🟥 Plug'n'Play ► it should not break spawning new Node processes ('run' command)
+🟩 Plug'n'Play ► it should not break spawning new Node processes ('run' command)
 🟩 Plug'n'Play ► it should not break the tree path when loading through the result of require.resolve(...)
 🟥 Plug'n'Play ► it should not cache the postinstall artifacts
 🟩 Plug'n'Play ► it should not fallback workspaces by default to the top-level dependencies when they require an undeclared package
@@ -1491,7 +1495,7 @@
 🟩 Plug'n'Play ► it should respect pnpIgnorePatterns when using findPnpApi
 🟩 Plug'n'Play ► it should respect user provided conditions
 🟩 Plug'n'Play ► it should return the path to the PnP file when calling require.resolve('pnpapi')
-🟥 Plug'n'Play ► it should run scripts using a Node version that auto-injects the hook
+🟩 Plug'n'Play ► it should run scripts using a Node version that auto-injects the hook
 🟥 Plug'n'Play ► it should run the install scripts anew if the unplugged folder is removed
 🟩 Plug'n'Play ► it should set bytesRead on Windows when input is a pipe and EOF is thrown
 🟩 Plug'n'Play ► it should support circular requires
@@ -1505,7 +1509,7 @@
 🟩 Plug'n'Play ► it should throw an exception if a dependency tries to require something it doesn't own
 🟩 Plug'n'Play ► it should throw different semantic errors based on whether the project or a sub-dependency requires something it doesn't own
 🟩 Plug'n'Play ► it should throw the same error than the root when a workspace requires something it doesn't own
-🟩 Plug'n'Play ► it should throw when a path is controlled by multiple pnpapi instances
+🟥 Plug'n'Play ► it should throw when a path is controlled by multiple pnpapi instances
 🟩 Plug'n'Play ► it should throw when using require.resolve with unsupported options
 🟥 Plug'n'Play ► it should transparently support the "resolve" package
 🟩 Plug'n'Play ► it should update the .pnp.cjs file when it already exists but isn't up-to-date
@@ -1581,6 +1585,28 @@
 🟥 Protocols ► git: ► it should use Yarn Classic to setup classic repositories
 🟥 Protocols ► git: ► it shouldn't install dependencies for packages without prepack
 
+[0 / 19] packages/acceptance-tests/pkg-tests-specs/sources/protocols/git.test.ts
+
+🟥 Protocols ► git: ► it should guarantee that all dependencies will be installed when using npm to setup npm repositories
+🟥 Protocols ► git: ► it should install dependencies and run prepack if needed
+🟥 Protocols ► git: ► it should not add a 'packageManager' field to a Yarn classic project
+🟥 Protocols ► git: ► it should not use Corepack to fetch Yarn Classic
+🟥 Protocols ► git: ► it should not use Corepack to install repositories that are installed via Yarn 2+
+🟥 Protocols ► git: ► it should resolve a git dependency (git://github.com/yarnpkg/util-deprecate.git#v1.0.1)
+🟥 Protocols ► git: ► it should resolve a git dependency (git+ssh://git@github.com/yarnpkg/util-deprecate.git#v1.0.1)
+🟥 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#b3562c2798507869edb767da869cd7b85487726d)
+🟥 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#master)
+🟥 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#semver:^1.0.0)
+🟥 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#semver:>=1.0.0 <1.0.2)
+🟥 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#v1.0.0)
+🟥 Protocols ► git: ► it should support installing packages from projects in subfolders
+🟥 Protocols ► git: ► it should support installing specific workspaces
+🟥 Protocols ► git: ► it should support installing specific workspaces from npm repositories
+🟥 Protocols ► git: ► it should support installing workspace packages from projects in subfolders
+🟥 Protocols ► git: ► it should use npm to setup npm repositories
+🟥 Protocols ► git: ► it should use Yarn Classic to setup classic repositories
+🟥 Protocols ► git: ► it shouldn't install dependencies for packages without prepack
+
 [6 / 6] packages/acceptance-tests/pkg-tests-specs/sources/protocols/links.test.js
 
 🟩 Protocols ► link: ► it should allow link to access their containers' dependencies
@@ -1649,19 +1675,19 @@
 🟩 Require tests ► it should support require.resolve(..., {paths})
 🟩 Require tests ► it should support require(require.resolve(...))
 
-[7 / 74] packages/acceptance-tests/pkg-tests-specs/sources/script.test.ts
+[11 / 74] packages/acceptance-tests/pkg-tests-specs/sources/script.test.ts
 
 🟥 Scripts tests ► it should allow to execute the dependencies binaries even from a different cwd than the project root
-🟥 Scripts tests ► it should be able to spawn binaries with a utf-8 path
+🟩 Scripts tests ► it should be able to spawn binaries with a utf-8 path
 🟩 Scripts tests ► it should correctly run empty install scripts
 🟥 Scripts tests ► it should correctly run scripts when project path has space inside
 🟥 Scripts tests ► it should make expose some basic information via the environment
-🟥 Scripts tests ► it should run declared scripts
-🟥 Scripts tests ► it should run scripts using the same Node than the one used by Yarn
+🟩 Scripts tests ► it should run declared scripts
+🟩 Scripts tests ► it should run scripts using the same Node than the one used by Yarn
 🟥 Scripts tests ► it should run scripts using the same package manager than the one running the scripts
 🟥 Scripts tests ► it should set INIT_CWD
 🟥 Scripts tests ► it should set PROJECT_CWD
-🟥 Scripts tests ► it should setup the correct path for locally installed binaries
+🟩 Scripts tests ► it should setup the correct path for locally installed binaries
 🟥 Scripts tests ► w/ the node-modules linker ► it should abort with an error if a package can't be built
 🟥 Scripts tests ► w/ the node-modules linker ► it should add native binaries to the PATH
 🟥 Scripts tests ► w/ the node-modules linker ► it should add node-gyp rebuild script if there isn't an install script and there is a binding.gyp file

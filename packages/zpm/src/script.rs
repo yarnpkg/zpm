@@ -133,9 +133,11 @@ impl ScriptEnvironment {
             .as_ref()
             .ok_or(Error::InstallStateNotFound)?;
 
-        self.cwd = install_state.locations_by_package.get(locator)
-            .expect("Expected the package to be installed")
-            .clone();
+        let package_cwd_rel = install_state.locations_by_package.get(locator)
+            .expect("Expected the package to be installed");
+
+        self.cwd = project.project_cwd
+            .with_join(package_cwd_rel);
 
         let binaries = project.package_visible_binaries(locator)?;
         self.attach_binaries(locator, &binaries, &project.project_cwd)?;

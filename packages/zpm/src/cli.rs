@@ -93,6 +93,22 @@ pub async fn run_cli() -> Result<(), Error> {
                     process::exit(exit_code);
                 },
 
+                "run" => {
+                    project
+                        .import_install_state()?;
+
+                    let (locator, script)
+                        = project.find_script(args[1].as_str())?;
+
+                    let exit_code = ScriptEnvironment::new()
+                        .with_project(&project)
+                        .with_package(&project, &locator)?
+                        .run_script(&script)
+                        .await;
+
+                    process::exit(exit_code);
+                },
+
                 _ => {
                     project
                         .import_install_state()?;

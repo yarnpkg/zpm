@@ -7,7 +7,7 @@ use wax::walk::Entry;
 
 use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, install::InstallState, lockfile::Lockfile, manifest::{read_manifest, Manifest}, primitives::{Descriptor, Ident, Locator, Range, Reference}, zip::ZipSupport};
 
-static LOCKFILE_NAME: &str = "yarn2.lock";
+static LOCKFILE_NAME: &str = "yarn.lock";
 static MANIFEST_NAME: &str = "package.json";
 static INSTALL_STATE_PATH: &str = ".yarn/install-state.json";
 
@@ -293,7 +293,7 @@ impl Project {
 
         #[derive(Debug, Clone, Deserialize)]
         struct ScriptManifest {
-            pub script: Option<HashMap<String, String>>,
+            pub scripts: Option<HashMap<String, String>>,
         }
 
         let manifest_text = self.package_cwd
@@ -303,7 +303,7 @@ impl Project {
         let manifest = serde_json::from_str::<ScriptManifest>(&manifest_text)
             .map_err(|err| Error::InvalidJsonData(Arc::new(err)))?;
 
-        if let Some(script) = manifest.script.as_ref().and_then(|s| s.get(name)) {
+        if let Some(script) = manifest.scripts.as_ref().and_then(|s| s.get(name)) {
             return Ok((active_package.clone(), script.clone()));
         }
 
