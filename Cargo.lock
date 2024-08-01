@@ -140,8 +140,6 @@ dependencies = [
 [[package]]
 name = "arca"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f915ddd863ef73f11c10c75170e86db1d4f539689bc6bfb9ce25d6528d6fe83"
 dependencies = [
  "clean-path",
  "path-slash",

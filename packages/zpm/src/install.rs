@@ -1,8 +1,10 @@
 use std::{collections::{HashMap, HashSet}, convert::Infallible, marker::PhantomData, str::FromStr};
 
+use arca::Path;
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
+use serde::{Deserialize, Serialize};
 
-use crate::{cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator, PeerRange, Range}, project::Project, resolver::{resolve, Resolution, ResolveResult}, semver, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator, PeerRange, Range}, project::Project, resolver::{resolve, Resolution, ResolveResult}, semver, tree_resolver::{ResolutionTree, TreeResolver}};
 
 #[derive(Clone, Default)]
 pub struct InstallContext<'a> {
@@ -99,16 +101,35 @@ impl<'a> InstallOp<'a> {
     }
 }
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct InstallState {
+    pub lockfile: Lockfile,
+    pub resolution_tree: ResolutionTree,
+    pub packages_by_location: HashMap<Path, Locator>,
+    pub locations_by_package: HashMap<Locator, Path>,
+}
+
 #[derive(Clone, Default)]
 pub struct Install {
-    pub lockfile: Lockfile,
     pub package_data: HashMap<Locator, PackageData>,
-    pub resolution_tree: ResolutionTree,
+    pub install_state: InstallState,
+}
+
+impl Install {
+    pub async fn finalize(mut self, project: &mut Project) -> Result<(), Error> {
+        linker::link_project(project, &mut self)
+            .await?;
+
+        project
+            .attach_install_state(self.install_state)?;
+
+        Ok(())
+    }
 }
 
 #[derive(Default)]
 pub struct InstallManager<'a> {
-    lockfile: Lockfile,
+    initial_lockfile: Lockfile,
     roots: Vec<Descriptor>,
     context: InstallContext<'a>,
     result: Install,
@@ -125,7 +146,7 @@ impl<'a> InstallManager<'a> {
     }
 
     pub fn with_lockfile(mut self, lockfile: Lockfile) -> Self {
-        self.lockfile = lockfile;
+        self.initial_lockfile = lockfile;
         self
     }
 
@@ -144,8 +165,8 @@ impl<'a> InstallManager<'a> {
         }
 
         if descriptor.parent.is_none() {
-            if let Some(locator) = self.lockfile.resolutions.remove(&descriptor) {
-                let entry = self.lockfile.entries.get(&locator)
+            if let Some(locator) = self.initial_lockfile.resolutions.remove(&descriptor) {
+                let entry = self.initial_lockfile.entries.get(&locator)
                     .expect("Expected a matching resolution to be found in the lockfile for any resolved locator.");
 
                 self.record_resolution(descriptor, entry.resolution.clone(), None);
@@ -189,8 +210,8 @@ impl<'a> InstallManager<'a> {
                 .or_insert(PeerRange::Semver(semver::Range::from_str("*").unwrap()));
         }
 
-        self.result.lockfile.resolutions.insert(descriptor, resolution.locator.clone());
-        self.result.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
+        self.result.install_state.lockfile.resolutions.insert(descriptor, resolution.locator.clone());
+        self.result.install_state.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
             checksum: None,
             resolution: resolution.clone(),
         });
@@ -226,7 +247,7 @@ impl<'a> InstallManager<'a> {
         }
     }
 
-    pub async fn run(mut self) -> Result<Install, Error> {
+    pub async fn resolve_and_fetch(mut self) -> Result<Install, Error> {
         for descriptor in self.roots.clone() {
             self.schedule(descriptor);
         }
@@ -259,8 +280,8 @@ impl<'a> InstallManager<'a> {
             panic!("Some deferred descriptors were not resolved");
         }
 
-        self.result.resolution_tree = TreeResolver::default()
-            .with_lockfile(self.result.lockfile.clone())
+        self.result.install_state.resolution_tree = TreeResolver::default()
+            .with_lockfile(self.result.install_state.lockfile.clone())
             .with_roots(self.roots.clone())
             .run();
 

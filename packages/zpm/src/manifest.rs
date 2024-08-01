@@ -61,6 +61,9 @@ pub struct Manifest {
 
     #[serde(default)]
     pub peer_dependencies: Option<HashMap<Ident, PeerRange>>,
+
+    #[serde(default)]
+    pub scripts: Option<HashMap<String, String>>,
 }
 
 pub fn parse_manifest(manifest_text: String) -> Result<Manifest, Error> {

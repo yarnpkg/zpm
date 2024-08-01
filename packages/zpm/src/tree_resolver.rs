@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 
 use crate::{lockfile::Lockfile, primitives::{Descriptor, Ident, Locator, Range, Reference}, resolver::Resolution};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ResolutionTree {
     pub roots: Vec<Descriptor>,
     pub descriptor_to_locator: HashMap<Descriptor, Locator>,

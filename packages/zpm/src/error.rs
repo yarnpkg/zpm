@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use arca::Path;
+use clap::error;
 
 use crate::primitives::{Ident, Range};
 
@@ -113,4 +114,28 @@ pub enum Error {
 
     #[error("Workspace not found ({0})")]
     WorkspaceNotFoundByPath(String),
+
+    #[error("Install state file not found; please run an install operation first")]
+    InstallStateNotFound,
+
+    #[error("Couldn't find a package matching the current working directory")]
+    ActivePackageNotFound,
+
+    #[error("Script not found ({0})")]
+    ScriptNotFound(String),
+
+    #[error("Global script not found ({0})")]
+    GlobalScriptNotFound(String),
+
+    #[error("Multiple definitions of the same global script ({0})")]
+    AmbiguousScriptName(String),
+
+    #[error("Binary not found ({0})")]
+    BinaryNotFound(String),
+}
+
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
+        Arc::new(error).into()
+    }
 }

@@ -1,5 +1,6 @@
 use std::{borrow::Cow, os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc};
 
+use arca::Path;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -88,6 +89,27 @@ static ZIP_PATH_INVALID_PATTERNS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\\|/\.{0,2}/|^\.{0,2}/|/\.{0,2}$|^\.{0,2}$").unwrap()
 });
 
+fn clean_name(name: &str) -> Option<String> {
+    if name.starts_with('/') {
+        return None
+    }
+
+    let has_parent_specifier = name.split('/')
+        .any(|part| part == "..");
+
+    if has_parent_specifier {
+        return None
+    }
+
+    let mut name = arca::Path::from(name).to_string();
+
+    if name.ends_with('/') {
+        name.pop();
+    }
+
+    Some(name)
+}
+
 pub fn entries_from_tar(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
     let mut offset = 0;
     let mut entries = vec![];
@@ -102,6 +124,9 @@ pub fn entries_from_tar(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
                 Ok(v) => v,
                 Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
             }.to_string();
+
+            let name = clean_name(&name)
+                .ok_or(Error::InvalidTarFilePath(name))?;
 
             if ZIP_PATH_INVALID_PATTERNS.is_match(&name) {
                 return Err(Error::InvalidTarFilePath(name));
@@ -362,4 +387,40 @@ fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, offset: 
 
     // File name
     target.extend_from_slice(entry.name.as_bytes());
+}
+
+const VIRTUAL_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"/__virtual__/[^/]+/0/").unwrap());
+const ZIP_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"(.*\.zip)/(?:__virtual__/[^/]+/0/)?(.*)").unwrap());
+
+pub trait ZipSupport {
+    fn fs_read_text_with_zip(&self) -> Result<String, Error>;
+}
+
+impl ZipSupport for Path {
+    fn fs_read_text_with_zip(&self) -> Result<String, Error> {
+        let path_str = self.to_string();
+
+        if let Some(captures) = ZIP_REGEX.captures(&path_str) {
+            let zip_path = captures.get(1).unwrap().as_str();
+            let subpath = captures.get(2).unwrap().as_str();
+
+            let zip_data = std::fs::read(zip_path)
+                .map_err(Arc::new)
+                .map_err(Error::IoError)?;
+
+            let entries = entries_from_zip(&zip_data)?;
+
+            let entry = entries.iter()
+                .find(|entry| entry.name == subpath)
+                .ok_or(std::io::Error::from(std::io::ErrorKind::NotFound))
+                .map_err(Arc::new)?;
+
+            Ok(String::from_utf8_lossy(&entry.data).to_string())
+        } else {
+            Ok(match VIRTUAL_REGEX.replace(&path_str, "/") {
+                Cow::Borrowed(_) => self.fs_read_text().map_err(Arc::new)?,
+                Cow::Owned(path_str) => Path::from(path_str).fs_read_text().map_err(Arc::new)?,
+            })
+        }
+    }
 }

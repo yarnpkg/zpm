@@ -1,11 +1,8 @@
 use std::{ffi::OsString, process};
 
 use clap::{Parser, Subcommand};
-use once_cell::sync::Lazy;
-use regex::Regex;
-use tokio::process::Command;
 
-use crate::{error::Error, install::{InstallContext, InstallManager}, linker, lockfile::Lockfile, project};
+use crate::{error::Error, install::{InstallContext, InstallManager}, linker, project, script::ScriptEnvironment};
 
 #[derive(Parser)]
 struct Cli {
@@ -17,33 +14,12 @@ struct Cli {
 enum Commands {
     Install {},
 
+    Exec {
+        script: String,
+    },
+
     #[command(external_subcommand)]
     External(Vec<String>),
-}
-
-const CJS_LOADER_MATCHER: Lazy<Regex> = Lazy::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
-const ESM_LOADER_MATCHER: Lazy<Regex> = Lazy::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
-
-fn setup_script_environment(cmd: &mut Command, project: &project::Project) {
-    let node_options = std::env::var("NODE_OPTIONS")
-        .unwrap_or_else(|_| "".to_string());
-
-    let node_options = CJS_LOADER_MATCHER.replace_all(&node_options, " ");
-    let node_options = ESM_LOADER_MATCHER.replace_all(&node_options, " ");
-
-    let mut node_options = node_options.trim().to_string();
-
-    if let Some(pnp_path) = project.pnp_path().if_exists() {
-        node_options = format!("{} --require {}", node_options, pnp_path.to_string());
-    }
-
-    if let Some(pnp_loader_path) = project.pnp_loader_path().if_exists() {
-        node_options = format!("{} --experimental-loader {}", node_options, pnp_loader_path.to_string());
-    }
-
-    if node_options.len() > 0 {
-        cmd.env("NODE_OPTIONS", node_options);
-    }
 }
 
 pub async fn run_cli() -> Result<(), Error> {
@@ -67,7 +43,7 @@ pub async fn run_cli() -> Result<(), Error> {
 
     match &cli.command {
         None | Some(Commands::Install {}) => {
-            let project
+            let mut project
                 = project::Project::new(None)?;
 
             let package_cache
@@ -80,42 +56,72 @@ pub async fn run_cli() -> Result<(), Error> {
             let mut lockfile = project.lockfile()?;
             lockfile.forget_transient_resolutions();
 
-            let install = InstallManager::default()
+            InstallManager::default()
                 .with_context(install_context)
                 .with_lockfile(lockfile)
                 .with_roots_iter(project.workspaces.values().map(|w| w.descriptor()))
-                .run().await?;
+                .resolve_and_fetch().await?
+                .finalize(&mut project).await?;
+        }
+
+        Some(Commands::Exec {script}) => {
+            let mut project
+                = project::Project::new(None)?;
 
             project
-                .write_lockfile(&install.lockfile)?;
+                .import_install_state()?;
 
-            linker::link_project(&project, &install)
-                .await?;
+            let exit_code = ScriptEnvironment::new()
+                .with_project(&project)
+                .run_script(&script)
+                .await;
+
+            process::exit(exit_code);
         }
 
         Some(Commands::External(args)) => {
-            let project
+            let mut project
                 = project::Project::new(None)?;
 
             match args[0].as_str() {
                 "node" => {
-                    let mut command = Command::new("node");
-
-                    command.args(&args[1..]);
-
-                    setup_script_environment(&mut command, &project);
-
-                    let exit_status
-                        = command.status().await.unwrap();
-
-                    let exit_code
-                        = exit_status.code().unwrap_or(1);
+                    let exit_code = ScriptEnvironment::new()
+                        .with_project(&project)
+                        .run_exec("node", &args[1..])
+                        .await;
 
                     process::exit(exit_code);
                 },
 
                 _ => {
-                    panic!("Unknown external subcommand: {}", args[0]);
+                    project
+                        .import_install_state()?;
+
+                    let maybe_binary
+                        = project.find_binary(args[0].as_str());
+
+                    if let Ok(binary_path) = maybe_binary {
+                        let exit_code = ScriptEnvironment::new()
+                            .with_project(&project)
+                            .with_package(&project, &project.active_package()?)?
+                            .run_exec(&binary_path.to_string(), &args[1..])
+                            .await;
+
+                        process::exit(exit_code);
+                    } else if let Err(Error::BinaryNotFound(_)) = maybe_binary {
+                        let (locator, script)
+                            = project.find_script(args[0].as_str())?;
+
+                        let exit_code = ScriptEnvironment::new()
+                            .with_project(&project)
+                            .with_package(&project, &locator)?
+                            .run_script(&script)
+                            .await;
+
+                        process::exit(exit_code);
+                    } else {
+                        maybe_binary?;
+                    }
                 }
             };
         }

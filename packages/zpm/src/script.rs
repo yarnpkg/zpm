@@ -1,0 +1,165 @@
+use std::{collections::{BTreeMap, HashMap}, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, os::unix::fs::PermissionsExt, sync::Arc};
+
+use arca::{Path, ToArcaPath};
+use itertools::Itertools;
+use once_cell::sync::Lazy;
+use regex::Regex;
+use tokio::process::Command;
+
+use crate::{error::Error, primitives::Locator, project::Project};
+
+const CJS_LOADER_MATCHER: Lazy<Regex> = Lazy::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
+const ESM_LOADER_MATCHER: Lazy<Regex> = Lazy::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
+const JS_EXTENSION: Lazy<Regex> = Lazy::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
+
+fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: Vec<&str>) -> Result<(), Error> {
+    if cfg!(windows) {
+        let cmd_script = format!(
+            r#"@goto #_undefined_# 2>NUL || @title %COMSPEC% & @setlocal & @"{}" {} %*"#,
+            argv0.to_string(),
+            args.iter().map(|arg| format!(r#""{}""#, arg.replace(r#"""#, r#""""#))).collect::<Vec<String>>().join(" "),
+        );
+
+        bin_dir
+            .with_join_str(format!("{}.cmd", name))
+            .fs_write_text(&cmd_script)?;
+    } else {
+        let sh_script = format!(
+            "#!/bin/sh\nexec \"{}\" {} \"$@\"\n",
+            argv0.to_string(),
+            args.iter().map(|arg| format!("'{}'", arg.replace("'", "'\"'\"'"))).collect_vec().join(" "),
+        );
+
+        bin_dir
+            .with_join_str(name)
+            .fs_write_text(&sh_script)?
+            .fs_set_permissions(Permissions::from_mode(0o755))?;
+    }
+
+    Ok(())
+}
+
+pub struct ScriptEnvironment {
+    cwd: Path,
+    env: HashMap<String, String>,
+}
+
+impl ScriptEnvironment {
+    pub fn new() -> Self {
+        Self {
+            cwd: std::env::current_dir().unwrap().to_arca(),
+            env: HashMap::new(),
+        }
+    }
+
+    fn prepend_env(&mut self, key: &str, separator: char, value: &str) {
+        let current = self.env.entry(key.to_string())
+            .or_insert(std::env::var(key).unwrap_or_default());
+
+        if !current.is_empty() {
+            current.insert(0, separator);
+        }
+
+        current.insert_str(0, value);
+    }
+
+    fn append_env(&mut self, key: &str, separator: char, value: &str) {
+        let current = self.env.entry(key.to_string())
+            .or_insert(std::env::var(key).unwrap_or_default());
+
+        if !current.is_empty() {
+            current.push(separator)
+        }
+
+        current.push_str(value);
+    }
+
+    pub fn with_project(mut self, project: &Project) -> Self {
+        if let Some(pnp_path) = project.pnp_path().if_exists() {
+            self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_string()));
+        }
+
+        if let Some(pnp_loader_path) = project.pnp_loader_path().if_exists() {
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_string()));
+        }
+
+        self
+    }
+
+    fn attach_binaries(&mut self, locator: &Locator, binaries: &BTreeMap<String, Path>, relative_to: &Path) -> Result<(), Error> {
+        let mut hash = DefaultHasher::new();
+        binaries.hash(&mut hash);
+        let hash = hash.finish();
+
+        let dir = std::env::temp_dir()
+            .to_arca()
+            .with_join_str(format!("zpm-{}-{}", locator.slug(), hash));
+
+        if !dir.fs_exists() {
+            dir.fs_create_dir()?;
+
+            for (name, binary_path_rel) in binaries {
+                let binary_path_abs = relative_to
+                    .with_join(binary_path_rel)
+                    .to_string();
+
+                if JS_EXTENSION.is_match(&binary_path_abs) {
+                    make_path_wrapper(&dir, &name, &"node".to_string(), vec![&binary_path_abs])?;
+                } else {
+                    make_path_wrapper(&dir, &name, &binary_path_abs, vec![])?;
+                }
+            }
+
+            let self_path_str = std::env::current_exe()?
+                .to_arca()
+                .to_string();
+
+            make_path_wrapper(&dir, "run", &self_path_str, vec!["run"])?;
+            make_path_wrapper(&dir, "yarn", &self_path_str, vec![])?;
+            make_path_wrapper(&dir, "yarnpkg", &self_path_str, vec![])?;
+            make_path_wrapper(&dir, "node-gyp", &self_path_str, vec!["run", "--top-level", "node-gyp"])?;
+        }
+
+        let bin_dir_str = dir.to_string();
+
+        self.prepend_env("PATH", ':', &bin_dir_str);
+        self.env.insert("BERRY_BIN_FOLDER".to_string(), bin_dir_str);
+
+        Ok(())
+    }
+
+    pub fn with_package(mut self, project: &Project, locator: &Locator) -> Result<Self, Error> {
+        let install_state = project.install_state
+            .as_ref()
+            .ok_or(Error::InstallStateNotFound)?;
+
+        self.cwd = install_state.locations_by_package.get(locator)
+            .expect("Expected the package to be installed")
+            .clone();
+
+        let binaries = project.package_visible_binaries(locator)?;
+        self.attach_binaries(locator, &binaries, &project.project_cwd)?;
+
+        Ok(self)
+    }
+
+    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> i32 where I: IntoIterator<Item = S>, S: AsRef<OsStr> {
+        let mut cmd = Command::new(program);
+
+        cmd.current_dir(self.cwd.to_path_buf());
+        cmd.envs(self.env.iter());
+        cmd.args(args);
+
+        let exit_status
+            = cmd.status().await.unwrap();
+
+        let exit_code
+            = exit_status.code().unwrap_or(1);
+
+        exit_code
+    }
+
+    pub async fn run_script(&mut self, script: &str) -> i32 {
+        self.run_exec("bash", vec!["-c", script]).await
+    }
+}

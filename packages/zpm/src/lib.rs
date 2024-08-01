@@ -15,6 +15,7 @@ pub mod path;
 pub mod primitives;
 pub mod project;
 pub mod resolver;
+pub mod script;
 pub mod semver;
 pub mod serialize;
 pub mod settings;

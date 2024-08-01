@@ -316,10 +316,9 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
     Ok(())
 }
 
-#[track_time]
-pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Result<(), Error> {
-    let tree = &install.resolution_tree;
-    let nm_path = project.root.with_join_str("node_modules");
+pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install) -> Result<(), Error> {
+    let tree = &install.install_state.resolution_tree;
+    let nm_path = project.project_cwd.with_join_str("node_modules");
 
     remove_nm(nm_path);
 
@@ -385,12 +384,17 @@ pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Res
             let entries = entries_from_zip(data)?;
 
             if check_extract(&locator, package_meta, &package_info, &entries) {
-                package_location_abs = extract_archive(&project.root, locator, physical_package_data, data)?;
+                package_location_abs = extract_archive(&project.project_cwd, locator, physical_package_data, data)?;
             }
         }
 
-        let mut package_location = package_location_abs
-            .relative_to(&project.root)
+        let package_location_rel = package_location_abs
+            .relative_to(&project.project_cwd);
+
+        install.install_state.packages_by_location.insert(package_location_rel.clone(), locator.clone());
+        install.install_state.locations_by_package.insert(locator.clone(), package_location_rel.clone());
+
+        let mut package_location = package_location_rel
             .to_string();
 
         if package_location.len() == 0 {
@@ -424,7 +428,7 @@ pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Res
     for workspace in project.workspaces.values().sorted_by_cached_key(|w| w.descriptor()) {
         let locator = workspace.locator();
 
-        if workspace.path == project.root {
+        if workspace.path == project.project_cwd {
             let entry = package_registry_data
                 .get(&Some(locator.ident.clone()))
                 .expect("Failed to find workspace entry")
