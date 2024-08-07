@@ -40,11 +40,11 @@ hex = "0.4.3"
 serde_yaml = "0.9.34"
 blake2 = { version = "0.10.6" }
 serde_with = "3.8.1"
-clap = { version = "4.5.4", features = ["derive"] }
 once_map = "0.4.18"
 crc32fast = "1.4.2"
 trust-dns = "0.23.2"
 wax = { git = "https://github.com/arcanis/wax.git" }
+clipanion = "0.3.0"
 
 [[bench]]
 name = "json"

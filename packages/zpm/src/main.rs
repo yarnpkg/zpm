@@ -1,9 +1,7 @@
-use tokio;
-use zpm::cli::run_cli;
+use std::process::ExitCode;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    run_cli().await?;
+use zpm::commands::run_cli;
 
-    Ok(())
+fn main() -> ExitCode {
+    run_cli()
 }

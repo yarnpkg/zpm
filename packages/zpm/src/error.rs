@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use arca::Path;
-use clap::error;
 
 use crate::primitives::{Ident, Range};
 
