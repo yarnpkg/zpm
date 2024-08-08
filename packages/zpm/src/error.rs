@@ -4,6 +4,8 @@ use arca::Path;
 
 use crate::primitives::{Ident, Range};
 
+pub type Result<T> = anyhow::Result<T, Error>;
+
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum Error {
     #[error("Failed to change the current working directory")]
@@ -42,7 +44,7 @@ pub enum Error {
     #[error("No candidates found for {0:?}")]
     NoCandidatesFound(Range),
 
-    #[error("I/O error")]
+    #[error("I/O error ({0})")]
     IoError(#[from] Arc<std::io::Error>),
 
     #[error("UTF-8 error")]
@@ -131,10 +133,19 @@ pub enum Error {
 
     #[error("Binary not found ({0})")]
     BinaryNotFound(String),
+
+    #[error("Some build scripts failed to run")]
+    BuildScriptsFailedToRun,
 }
 
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
+        Arc::new(error).into()
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(error: serde_json::Error) -> Self {
         Arc::new(error).into()
     }
 }

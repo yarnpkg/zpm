@@ -1,15 +1,13 @@
-use std::process::ExitCode;
-
 mod exec;
 mod install;
 mod node;
+mod default;
 mod run;
 
-pub fn run_cli() -> ExitCode {
-    clipanion::new![
-        exec::Exec,
-        install::Install,
-        node::Node,
-        run::Run,
-    ].run_default()
-}
+clipanion::program!(YarnCli, [
+    exec::Exec,
+    install::Install,
+    default::Default,
+    node::Node,
+    run::Run,
+]);

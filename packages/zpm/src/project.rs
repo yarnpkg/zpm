@@ -234,7 +234,8 @@ impl Project {
             pub bin: Option<BinField>,
         }
 
-        let manifest_text = location
+        let manifest_text = self.project_cwd
+            .with_join(location)
             .with_join_str(MANIFEST_NAME)
             .fs_read_text_with_zip()?;
 
@@ -296,7 +297,8 @@ impl Project {
             pub scripts: Option<HashMap<String, String>>,
         }
 
-        let manifest_text = self.package_cwd
+        let manifest_text = self.project_cwd
+            .with_join(&self.package_cwd)
             .with_join_str(MANIFEST_NAME)
             .fs_read_text_with_zip()?;
 

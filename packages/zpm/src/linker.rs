@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::Arc};
+use std::{collections::{BTreeMap, BTreeSet, HashMap, HashSet}, sync::Arc};
 
 use arca::{Path, ToArcaPath};
 use itertools::Itertools;
@@ -6,9 +6,8 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use zpm_macros::track_time;
 
-use crate::{error::Error, fetcher::{PackageData, PackageLinking}, install::Install, misc::change_file, primitives::{locator::IdentOrLocator, Ident, Locator, Reference}, project::Project, settings, yarn_serialization_protocol, zip::{entries_from_zip, first_entry_from_zip, Entry}};
+use crate::{build::{self, Build}, error::Error, fetcher::{PackageData, PackageLinking}, install::Install, misc::change_file, primitives::{locator::IdentOrLocator, Descriptor, Ident, Locator, Reference}, project::Project, resolver::Resolution, settings, yarn_serialization_protocol, zip::{entries_from_zip, first_entry_from_zip, Entry}};
 
 fn is_default<T: Default + PartialEq>(t: &T) -> bool {
     t == &T::default()
@@ -69,11 +68,35 @@ static UNPLUG_EXT_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\.(exe|bin|h|hh|hpp|c|cc|cpp|java|jar|node)$").unwrap()
 });
 
-fn check_build(package_info: &PackageInfo) -> bool {
-    UNPLUG_SCRIPTS.iter().any(|k| package_info.scripts.contains_key(*k))
+fn check_build(locator: &Locator, package_meta: Option<&PackageMeta>, package_info: &PackageInfo, entries: &Vec<Entry>) -> Vec<build::Command> {
+    let built = package_meta
+        .and_then(|meta| meta.built)
+        .unwrap_or(true);
+
+    if !built {
+        return vec![];
+    }
+
+    let binding_gyp_name
+        = format!("node_modules/{}/binding.gyp", locator.ident.as_str());
+
+    let build_scripts = UNPLUG_SCRIPTS.iter()
+        .filter_map(|k| package_info.scripts.get(*k))
+        .map(|v| build::Command::Script(v.clone()))
+        .collect::<Vec<_>>();
+
+    if !build_scripts.is_empty() {
+        return build_scripts;
+    }
+
+    if entries.iter().any(|entry| entry.name == binding_gyp_name) {
+        return vec![build::Command::Program("node-gyp".to_string(), vec!["rebuild".to_string()])];
+    }
+
+    vec![]
 }
 
-fn check_extract(locator: &Locator, package_meta: Option<&PackageMeta>, package_info: &PackageInfo, entries: &Vec<Entry>) -> bool {
+fn check_extract(package_meta: Option<&PackageMeta>, package_info: &PackageInfo, build_commands: &Vec<build::Command>, entries: &Vec<Entry>) -> bool {
     if let Some(meta) = package_meta {
         if let Some(unplugged) = meta.unplugged {
             return unplugged;
@@ -84,20 +107,11 @@ fn check_extract(locator: &Locator, package_meta: Option<&PackageMeta>, package_
         return prefer_unplugged;
     }
 
-    if check_build(package_info) {
-        let built = package_meta
-            .and_then(|meta| meta.built)
-            .unwrap_or(true);
-
-        if built {
-            return true;
-        }
+    if !build_commands.is_empty() {
+        return true;
     }
 
-    let binding_gyp_name = format!("node_modules/{}/binding.gyp", locator.ident.as_str());
-    let has_unpluggable_files = entries.iter().any(|entry| entry.name == binding_gyp_name || UNPLUG_EXT_REGEX.is_match(&entry.name));
-
-    if has_unpluggable_files {
+    if entries.iter().any(|entry| UNPLUG_EXT_REGEX.is_match(&entry.name)) {
         return true;
     }
 
@@ -141,13 +155,15 @@ fn get_package_info(package_data: &PackageData) -> Result<PackageInfo, Error> {
         PackageData::Zip {data, ..} => {
             let first_entry = first_entry_from_zip(&data)?;
 
-            serde_json::from_slice::<PackageInfo>(&first_entry.data)
-                .map_err(Arc::new)
-                .map_err(Error::InvalidJsonData)
-       }
+            Ok(serde_json::from_slice::<PackageInfo>(&first_entry.data)?)
+        },
 
-        _ => {
-            Ok(PackageInfo::default())
+        PackageData::Local {package_directory, ..} => {
+            let manifest_text = package_directory
+                .with_join_str("package.json")
+                .fs_read_text()?;
+
+            Ok(serde_json::from_str::<PackageInfo>(&manifest_text)?)
         },
     }
 }
@@ -316,7 +332,45 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
     Ok(())
 }
 
-pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install) -> Result<(), Error> {
+fn populate_build_entry_dependencies(package_build_entries: &HashMap<Locator, usize>, locator_resolutions: &HashMap<Locator, Resolution>, descriptor_to_locator: &HashMap<Descriptor, Locator>) -> HashMap<usize, HashSet<usize>> {
+    let mut package_build_dependencies = HashMap::new();
+
+    for locator in package_build_entries.keys() {
+        let mut build_dependencies = HashSet::new();
+
+        let mut queue = vec![locator.clone()];
+        let mut seen = HashSet::new();
+
+        while let Some(locator) = queue.pop() {
+            let resolution = locator_resolutions.get(&locator)
+                .expect("Failed to find locator resolution");
+
+            for dependency in resolution.dependencies.values() {
+                let dependency_locator = descriptor_to_locator.get(dependency)
+                    .expect("Failed to find dependency locator");
+
+                if !seen.insert(locator.clone()) {
+                    continue;
+                }
+
+                if let Some(dependency_entry_idx) = package_build_entries.get(dependency_locator) {
+                    build_dependencies.insert(*dependency_entry_idx);
+                }
+
+                queue.push(dependency_locator.clone());
+            }
+        }
+
+        let entry_idx = package_build_entries.get(locator)
+            .expect("Failed to find build entry index");
+
+        package_build_dependencies.insert(*entry_idx, build_dependencies);
+    }
+
+    package_build_dependencies
+}
+
+pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install) -> Result<Build, Error> {
     let tree = &install.install_state.resolution_tree;
     let nm_path = project.project_cwd.with_join_str("node_modules");
 
@@ -331,6 +385,9 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
 
     let mut package_registry_data: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
     let mut dependency_tree_roots = Vec::new();
+
+    let mut all_build_entries = Vec::new();
+    let mut package_build_entries = HashMap::new();
 
     for (locator, resolution) in &tree.locator_resolutions {
         let physical_package_data = install.package_data.get(&locator.physical_locator())
@@ -380,10 +437,16 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
             .get(&IdentOrLocator::Locator(locator.clone()))
             .or_else(|| dependencies_meta.get(&IdentOrLocator::Ident(locator.ident.clone())));
 
-        if let PackageData::Zip {data, ..} = physical_package_data {
-            let entries = entries_from_zip(data)?;
+        let relevant_build_entries = match physical_package_data {
+            PackageData::Zip {data, ..} => entries_from_zip(data)?,
+            PackageData::Local {..} => vec![],
+        };
 
-            if check_extract(&locator, package_meta, &package_info, &entries) {
+        let build_commands
+            = check_build(&locator, package_meta, &package_info, &relevant_build_entries);
+
+        if let PackageData::Zip {data, ..} = physical_package_data {
+            if check_extract(package_meta, &package_info, &build_commands, &relevant_build_entries) {
                 package_location_abs = extract_archive(&project.project_cwd, locator, physical_package_data, data)?;
             }
         }
@@ -423,6 +486,15 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
                 link_type: physical_package_data.link_type(),
                 discard_from_lookup,
             });
+
+        if !build_commands.is_empty() {
+            package_build_entries.insert(locator.clone(), all_build_entries.len());
+            all_build_entries.push(build::Entry {
+                cwd: package_location_abs,
+                locator: locator.clone(),
+                commands: build_commands,
+            });
+        }
     }
 
     for workspace in project.workspaces.values().sorted_by_cached_key(|w| w.descriptor()) {
@@ -492,6 +564,15 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
     change_file(project.pnp_loader_path().to_path_buf(), std::include_str!("pnp.loader.mjs"), 0o644)
         .map_err(Arc::new)?;
 
-    Ok(())
+    let package_build_dependencies = populate_build_entry_dependencies(
+        &package_build_entries,
+        &tree.locator_resolutions,
+        &tree.descriptor_to_locator,
+    );
+
+    Ok(build::Build {
+        entries: all_build_entries,
+        dependencies: package_build_dependencies,
+    })
 }
 

@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use clipanion::cli;
 
-use crate::{error::Error, project, script::ScriptEnvironment};
+use crate::{error::{self, Error}, project, script::ScriptEnvironment};
 
 #[cli::command(proxy)]
 #[cli::path("run")]
@@ -13,7 +13,7 @@ pub struct Run {
 
 impl Run {
     #[tokio::main()]
-    pub async fn execute(&self) -> Result<ExitCode, Error> {
+    pub async fn execute(&self) -> error::Result<ExitCode> {
         let mut project
             = project::Project::new(None)?;
 

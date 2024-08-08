@@ -1,3 +1,4 @@
+pub mod build;
 pub mod cache;
 pub mod commands;
 pub mod config;

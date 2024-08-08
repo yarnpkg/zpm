@@ -6,7 +6,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use tokio::process::Command;
 
-use crate::{error::Error, primitives::Locator, project::Project};
+use crate::{error::{self, Error}, primitives::Locator, project::Project};
 
 const CJS_LOADER_MATCHER: Lazy<Regex> = Lazy::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
 const ESM_LOADER_MATCHER: Lazy<Regex> = Lazy::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
@@ -83,10 +83,13 @@ impl ScriptEnvironment {
             self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_string()));
         }
 
+        self.env.insert("PROJECT_CWD".to_string(), project.project_cwd.to_string());
+        self.env.insert("INIT_CWD".to_string(), project.project_cwd.with_join(&project.shell_cwd).to_string());
+
         self
     }
 
-    fn attach_binaries(&mut self, locator: &Locator, binaries: &BTreeMap<String, Path>, relative_to: &Path) -> Result<(), Error> {
+    fn attach_binaries(&mut self, locator: &Locator, binaries: &BTreeMap<String, Path>, relative_to: &Path) -> error::Result<()> {
         let mut hash = DefaultHasher::new();
         binaries.hash(&mut hash);
         let hash = hash.finish();
@@ -96,7 +99,13 @@ impl ScriptEnvironment {
             .with_join_str(format!("zpm-{}-{}", locator.slug(), hash));
 
         if !dir.fs_exists() {
-            dir.fs_create_dir()?;
+            let nonce = format!("{:08x}", rand::random::<u64>());
+
+            let temp_dir = std::env::temp_dir()
+                .to_arca()
+                .with_join_str(format!("zpm-temp-{}", nonce));
+
+            temp_dir.fs_create_dir()?;
 
             for (name, binary_path_rel) in binaries {
                 let binary_path_abs = relative_to
@@ -104,9 +113,9 @@ impl ScriptEnvironment {
                     .to_string();
 
                 if JS_EXTENSION.is_match(&binary_path_abs) {
-                    make_path_wrapper(&dir, &name, &"node".to_string(), vec![&binary_path_abs])?;
+                    make_path_wrapper(&temp_dir, &name, &"node".to_string(), vec![&binary_path_abs])?;
                 } else {
-                    make_path_wrapper(&dir, &name, &binary_path_abs, vec![])?;
+                    make_path_wrapper(&temp_dir, &name, &binary_path_abs, vec![])?;
                 }
             }
 
@@ -114,10 +123,12 @@ impl ScriptEnvironment {
                 .to_arca()
                 .to_string();
 
-            make_path_wrapper(&dir, "run", &self_path_str, vec!["run"])?;
-            make_path_wrapper(&dir, "yarn", &self_path_str, vec![])?;
-            make_path_wrapper(&dir, "yarnpkg", &self_path_str, vec![])?;
-            make_path_wrapper(&dir, "node-gyp", &self_path_str, vec!["run", "--top-level", "node-gyp"])?;
+            make_path_wrapper(&temp_dir, "run", &self_path_str, vec!["run"])?;
+            make_path_wrapper(&temp_dir, "yarn", &self_path_str, vec![])?;
+            make_path_wrapper(&temp_dir, "yarnpkg", &self_path_str, vec![])?;
+            make_path_wrapper(&temp_dir, "node-gyp", &self_path_str, vec!["run", "--top-level", "node-gyp"])?;
+
+            std::fs::rename(temp_dir.to_path_buf(), dir.to_path_buf())?;
         }
 
         let bin_dir_str = dir.to_string();
@@ -128,7 +139,7 @@ impl ScriptEnvironment {
         Ok(())
     }
 
-    pub fn with_package(mut self, project: &Project, locator: &Locator) -> Result<Self, Error> {
+    pub fn with_package(mut self, project: &Project, locator: &Locator) -> error::Result<Self> {
         let install_state = project.install_state
             .as_ref()
             .ok_or(Error::InstallStateNotFound)?;
@@ -145,8 +156,22 @@ impl ScriptEnvironment {
         Ok(self)
     }
 
+    pub fn with_cwd(mut self, cwd: Path) -> Self {
+        self.cwd = cwd;
+        self
+    }
+
     pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> i32 where I: IntoIterator<Item = S>, S: AsRef<OsStr> {
-        let mut cmd = Command::new(program);
+        let is_node = JS_EXTENSION.is_match(&program);
+
+        let mut cmd = Command::new(match is_node {
+            true => "node",
+            false => program,
+        });
+
+        if is_node {
+            cmd.arg(program);
+        }
 
         cmd.current_dir(self.cwd.to_path_buf());
         cmd.envs(self.env.iter());

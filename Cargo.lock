@@ -95,6 +95,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "038dfcf04a5feb68e9c60b21c9625a54c2c0616e79b72b0fd87075a056ae1d1b"
 
 [[package]]
+name = "anyhow"
+version = "1.0.86"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3d1d046238990b9cf5bcde22a3fb3584ee5cf65fb2765f454ed428c7a0063da"
+
+[[package]]
 name = "arca"
 version = "0.7.0"
 dependencies = [
@@ -518,9 +524,9 @@ checksum = "aaa6b4b263a5d737e9bf6b7c09b72c41a5480aec4d7219af827f6564e950b6a5"
 
 [[package]]
 name = "clipanion"
-version = "0.3.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e3059503767b3ef07fd00918f36714f1990f6f6b4f43c908e746f045e002eb5"
+checksum = "4b6622cda6aa85182f77b1b859c73620c0c546eca94faacc6c68b7592c6c6e47"
 dependencies = [
  "clipanion-core",
  "clipanion-derive",
@@ -529,15 +535,15 @@ dependencies = [
 
 [[package]]
 name = "clipanion-core"
-version = "0.2.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5ad0ceb6e82ae84c04bd5b334a8e7f6644362385b6b0c129d02a0b1a6984763"
+checksum = "ec918cd3535ec1f99d6a2284e7cace4832b310fc8573a4eab6bbcfbde5e0c192"
 
 [[package]]
 name = "clipanion-derive"
-version = "0.2.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f64227ee72fa95860be23c39d38f2d42126a6170b740e0d49d3aee79d2f13727"
+checksum = "621624de2cf1aee5060b0711ef469daeb7eaebcdc3629579b444e85abe086076"
 dependencies = [
  "indoc",
  "proc-macro2",
@@ -3842,6 +3848,7 @@ dependencies = [
 name = "zpm"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arca",
  "async-recursion",
  "bincode",
@@ -3863,6 +3870,7 @@ dependencies = [
  "once_map",
  "pest",
  "pest_derive",
+ "rand",
  "regex",
  "reqwest",
  "rstest 0.18.2",

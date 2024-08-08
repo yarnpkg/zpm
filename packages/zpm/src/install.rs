@@ -4,7 +4,7 @@ use arca::Path;
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use crate::{cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator, PeerRange, Range}, project::Project, resolver::{resolve, Resolution, ResolveResult}, semver, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator, PeerRange}, project::Project, resolver::{resolve, Resolution, ResolveResult}, semver, tree_resolver::{ResolutionTree, TreeResolver}};
 
 #[derive(Clone, Default)]
 pub struct InstallContext<'a> {
@@ -117,11 +117,14 @@ pub struct Install {
 
 impl Install {
     pub async fn finalize(mut self, project: &mut Project) -> Result<(), Error> {
-        linker::link_project(project, &mut self)
+        let build = linker::link_project(project, &mut self)
             .await?;
 
         project
             .attach_install_state(self.install_state)?;
+
+        build::BuildManager::new(build)
+            .run(project).await?;
 
         Ok(())
     }

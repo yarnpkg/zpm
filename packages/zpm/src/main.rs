@@ -1,7 +1,8 @@
 use std::process::ExitCode;
 
-use zpm::commands::run_cli;
+use clipanion::advanced::Cli;
+use zpm::commands::YarnCli;
 
 fn main() -> ExitCode {
-    run_cli()
+    YarnCli::run_default()
 }
