@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use arca::Path;
 
-use crate::primitives::{Ident, Range};
+use crate::primitives::{Ident, Locator, Range};
 
 pub type Result<T> = anyhow::Result<T, Error>;
 
@@ -13,6 +13,9 @@ pub enum Error {
 
     #[error("Unsupported code path")]
     Unsupported,
+
+    #[error("Invalid ident ({0})")]
+    InvalidIdent(String),
 
     #[error("Invalid descriptor ({0})")]
     InvalidDescriptor(String),
@@ -50,7 +53,7 @@ pub enum Error {
     #[error("UTF-8 error")]
     Utf8Error(#[from] Arc<std::str::Utf8Error>),
 
-    #[error("Invalid JSON data")]
+    #[error("Invalid JSON data ({0})")]
     InvalidJsonData(#[from] Arc<serde_json::Error>),
 
     #[error("Invalid SHA256 data")]
@@ -111,10 +114,7 @@ pub enum Error {
     PackageConversionError(Arc<Box<dyn std::error::Error + Send + Sync>>),
 
     #[error("Workspace not found ({0})")]
-    WorkspaceNotFoundByName(Ident),
-
-    #[error("Workspace not found ({0})")]
-    WorkspaceNotFoundByPath(String),
+    WorkspaceNotFound(Ident),
 
     #[error("Install state file not found; please run an install operation first")]
     InstallStateNotFound,
@@ -133,6 +133,9 @@ pub enum Error {
 
     #[error("Binary not found ({0})")]
     BinaryNotFound(String),
+
+    #[error("Circular build dependency detected")]
+    CircularBuildDependency(Locator),
 
     #[error("Some build scripts failed to run")]
     BuildScriptsFailedToRun,

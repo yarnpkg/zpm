@@ -11,6 +11,18 @@ pub enum PnpFallbackMode {
     All,
 }
 
+/**
+ * Configuration settings obtained from the environment variables only. Those
+ * variables are extracted whenever the program starts and are never updated.
+ * 
+ * In general you only want to use this for one-off debugging settings.
+ */
+#[yarn_config]
+pub struct EnvConfig {
+    #[default(false)]
+    pub enable_timings: BoolField,
+}
+
 #[yarn_config]
 pub struct UserConfig {
 }

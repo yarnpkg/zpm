@@ -1,69 +1,55 @@
-use std::{collections::HashMap, fs, str::FromStr, sync::Arc};
+use std::{collections::HashMap, fs, sync::Arc};
 
 use arca::Path;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, primitives::{Descriptor, Ident, PeerRange, Range}, semver};
+use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, PeerRange}, semver};
 
-fn from_dependency_map<'de, D>(deserializer: D) -> Result<Option<HashMap<Ident, Descriptor>>, D::Error> where D: Deserializer<'de> {
-    let source: Option<HashMap<String, String>> = Deserialize::deserialize(deserializer)?;
-
-    if let Some(source) = source {
-        let mut entries = HashMap::new();
-
-        for (k, v) in source.iter() {
-            let range = Range::from_str(v)
-                .map_err(serde::de::Error::custom)?;
-
-            let ident = Ident::new(k);
-            let descriptor = Descriptor::new(Ident::new(k), range);
-
-            entries.insert(ident, descriptor);
-        }
-
-        Ok(Some(entries))
-    } else {
-        Ok(None)
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteManifest {
+    #[serde(default)]
     pub version: semver::Version,
 
     #[serde(default)]
-    #[serde(deserialize_with = "from_dependency_map")]
-    pub dependencies: Option<HashMap<Ident, Descriptor>>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(serialize_with = "descriptor_map_serializer")]
+    #[serde(deserialize_with = "descriptor_map_deserializer")]
+    pub dependencies: HashMap<Ident, Descriptor>,
 
     #[serde(default)]
-    pub peer_dependencies: Option<HashMap<Ident, PeerRange>>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub peer_dependencies: HashMap<Ident, PeerRange>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(serialize_with = "descriptor_map_serializer")]
+    #[serde(deserialize_with = "descriptor_map_deserializer")]
+    pub optional_dependencies: HashMap<Ident, Descriptor>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<Ident>,
 
-    #[serde(default)]
-    pub version: semver::Version,
+    #[serde(flatten)]
+    pub remote: RemoteManifest,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub workspaces: Option<Vec<String>>,
 
     #[serde(default)]
-    #[serde(deserialize_with = "from_dependency_map")]
-    pub dependencies: Option<HashMap<Ident, Descriptor>>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(serialize_with = "descriptor_map_serializer")]
+    #[serde(deserialize_with = "descriptor_map_deserializer")]
+    pub dev_dependencies: HashMap<Ident, Descriptor>,
 
     #[serde(default)]
-    #[serde(deserialize_with = "from_dependency_map")]
-    pub dev_dependencies: Option<HashMap<Ident, Descriptor>>,
-
-    #[serde(default)]
-    pub peer_dependencies: Option<HashMap<Ident, PeerRange>>,
-
-    #[serde(default)]
-    pub scripts: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub scripts: HashMap<String, String>,
 }
 
 pub fn parse_manifest(manifest_text: String) -> Result<Manifest, Error> {

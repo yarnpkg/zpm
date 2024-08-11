@@ -1675,81 +1675,81 @@
 🟩 Require tests ► it should support require.resolve(..., {paths})
 🟩 Require tests ► it should support require(require.resolve(...))
 
-[37 / 74] packages/acceptance-tests/pkg-tests-specs/sources/script.test.ts
+[74 / 74] packages/acceptance-tests/pkg-tests-specs/sources/script.test.ts
 
 🟩 Scripts tests ► it should allow to execute the dependencies binaries even from a different cwd than the project root
 🟩 Scripts tests ► it should be able to spawn binaries with a utf-8 path
 🟩 Scripts tests ► it should correctly run empty install scripts
 🟩 Scripts tests ► it should correctly run scripts when project path has space inside
-🟥 Scripts tests ► it should make expose some basic information via the environment
+🟩 Scripts tests ► it should make expose some basic information via the environment
 🟩 Scripts tests ► it should run declared scripts
 🟩 Scripts tests ► it should run scripts using the same Node than the one used by Yarn
 🟩 Scripts tests ► it should run scripts using the same package manager than the one running the scripts
 🟩 Scripts tests ► it should set INIT_CWD
 🟩 Scripts tests ► it should set PROJECT_CWD
 🟩 Scripts tests ► it should setup the correct path for locally installed binaries
-🟥 Scripts tests ► w/ the node-modules linker ► it should abort with an error if a package can't be built
+🟩 Scripts tests ► w/ the node-modules linker ► it should abort with an error if a package can't be built
 🟩 Scripts tests ► w/ the node-modules linker ► it should add native binaries to the PATH
-🟥 Scripts tests ► w/ the node-modules linker ► it should add node-gyp rebuild script if there isn't an install script and there is a binding.gyp file
+🟩 Scripts tests ► w/ the node-modules linker ► it should add node-gyp rebuild script if there isn't an install script and there is a binding.gyp file
 🟩 Scripts tests ► w/ the node-modules linker ► it should allow dependencies with install scripts to run the binaries exposed by their own dependencies
 🟩 Scripts tests ► w/ the node-modules linker ► it should allow dependencies with install scripts to run their own subscripts
 🟩 Scripts tests ► w/ the node-modules linker ► it should allow dependency binaries to require relative paths
 🟩 Scripts tests ► w/ the node-modules linker ► it should allow dependency binaries to require their own dependencies
-🟥 Scripts tests ► w/ the node-modules linker ► it should allow to retrieve the path to a dependency binary by its name
-🟥 Scripts tests ► w/ the node-modules linker ► it should allow to retrieve the path to a dependency binary, even when running from outside the project
-🟥 Scripts tests ► w/ the node-modules linker ► it should return an absolute path when retrieving the path to a dependency binary
+🟩 Scripts tests ► w/ the node-modules linker ► it should allow to retrieve the path to a dependency binary by its name
+🟩 Scripts tests ► w/ the node-modules linker ► it should allow to retrieve the path to a dependency binary, even when running from outside the project
+🟩 Scripts tests ► w/ the node-modules linker ► it should return an absolute path when retrieving the path to a dependency binary
 🟩 Scripts tests ► w/ the node-modules linker ► it should run install scripts during the install
 🟩 Scripts tests ► w/ the node-modules linker ► it should run native binaries
-🟥 Scripts tests ► w/ the node-modules linker ► it should run the bin of a soft-link
-🟥 Scripts tests ► w/ the node-modules linker ► it should run the bin of self-require-trap
-🟥 Scripts tests ► w/ the node-modules linker ► it should run the bin of self-require-trap (aliased)
+🟩 Scripts tests ► w/ the node-modules linker ► it should run the bin of a soft-link
+🟩 Scripts tests ► w/ the node-modules linker ► it should run the bin of self-require-trap
+🟩 Scripts tests ► w/ the node-modules linker ► it should run the bin of self-require-trap (aliased)
 🟩 Scripts tests ► w/ the node-modules linker ► it should trigger the postinstall scripts in the right order, children before parents
-🟥 Scripts tests ► w/ the node-modules linker ► it should trigger the postinstall when a dependency gets its dependency tree modified
-🟥 Scripts tests ► w/ the node-modules linker ► it shouldn't abort with an error if the package that can't be built is a transitive dependency of an optional package
-🟥 Scripts tests ► w/ the node-modules linker ► it shouldn't abort with an error if the package that can't be built is optional
-🟥 Scripts tests ► w/ the node-modules linker ► it shouldn't call the postinstall on every install
+🟩 Scripts tests ► w/ the node-modules linker ► it should trigger the postinstall when a dependency gets its dependency tree modified
+🟩 Scripts tests ► w/ the node-modules linker ► it shouldn't abort with an error if the package that can't be built is a transitive dependency of an optional package
+🟩 Scripts tests ► w/ the node-modules linker ► it shouldn't abort with an error if the package that can't be built is optional
+🟩 Scripts tests ► w/ the node-modules linker ► it shouldn't call the postinstall on every install
 🟩 Scripts tests ► w/ the node-modules linker ► it shouldn't trigger the postinstall if an unrelated branch of the tree is modified
-🟥 Scripts tests ► w/ the pnp linker ► it should abort with an error if a package can't be built
+🟩 Scripts tests ► w/ the pnp linker ► it should abort with an error if a package can't be built
 🟩 Scripts tests ► w/ the pnp linker ► it should add native binaries to the PATH
-🟥 Scripts tests ► w/ the pnp linker ► it should add node-gyp rebuild script if there isn't an install script and there is a binding.gyp file
+🟩 Scripts tests ► w/ the pnp linker ► it should add node-gyp rebuild script if there isn't an install script and there is a binding.gyp file
 🟩 Scripts tests ► w/ the pnp linker ► it should allow dependencies with install scripts to run the binaries exposed by their own dependencies
 🟩 Scripts tests ► w/ the pnp linker ► it should allow dependencies with install scripts to run their own subscripts
 🟩 Scripts tests ► w/ the pnp linker ► it should allow dependency binaries to require relative paths
 🟩 Scripts tests ► w/ the pnp linker ► it should allow dependency binaries to require their own dependencies
-🟥 Scripts tests ► w/ the pnp linker ► it should allow to retrieve the path to a dependency binary by its name
-🟥 Scripts tests ► w/ the pnp linker ► it should allow to retrieve the path to a dependency binary, even when running from outside the project
-🟥 Scripts tests ► w/ the pnp linker ► it should return an absolute path when retrieving the path to a dependency binary
+🟩 Scripts tests ► w/ the pnp linker ► it should allow to retrieve the path to a dependency binary by its name
+🟩 Scripts tests ► w/ the pnp linker ► it should allow to retrieve the path to a dependency binary, even when running from outside the project
+🟩 Scripts tests ► w/ the pnp linker ► it should return an absolute path when retrieving the path to a dependency binary
 🟩 Scripts tests ► w/ the pnp linker ► it should run install scripts during the install
 🟩 Scripts tests ► w/ the pnp linker ► it should run native binaries
-🟥 Scripts tests ► w/ the pnp linker ► it should run the bin of a soft-link
-🟥 Scripts tests ► w/ the pnp linker ► it should run the bin of self-require-trap
-🟥 Scripts tests ► w/ the pnp linker ► it should run the bin of self-require-trap (aliased)
+🟩 Scripts tests ► w/ the pnp linker ► it should run the bin of a soft-link
+🟩 Scripts tests ► w/ the pnp linker ► it should run the bin of self-require-trap
+🟩 Scripts tests ► w/ the pnp linker ► it should run the bin of self-require-trap (aliased)
 🟩 Scripts tests ► w/ the pnp linker ► it should trigger the postinstall scripts in the right order, children before parents
-🟥 Scripts tests ► w/ the pnp linker ► it should trigger the postinstall when a dependency gets its dependency tree modified
-🟥 Scripts tests ► w/ the pnp linker ► it shouldn't abort with an error if the package that can't be built is a transitive dependency of an optional package
-🟥 Scripts tests ► w/ the pnp linker ► it shouldn't abort with an error if the package that can't be built is optional
-🟥 Scripts tests ► w/ the pnp linker ► it shouldn't call the postinstall on every install
+🟩 Scripts tests ► w/ the pnp linker ► it should trigger the postinstall when a dependency gets its dependency tree modified
+🟩 Scripts tests ► w/ the pnp linker ► it shouldn't abort with an error if the package that can't be built is a transitive dependency of an optional package
+🟩 Scripts tests ► w/ the pnp linker ► it shouldn't abort with an error if the package that can't be built is optional
+🟩 Scripts tests ► w/ the pnp linker ► it shouldn't call the postinstall on every install
 🟩 Scripts tests ► w/ the pnp linker ► it shouldn't trigger the postinstall if an unrelated branch of the tree is modified
-🟥 Scripts tests ► w/ the pnpm linker ► it should abort with an error if a package can't be built
+🟩 Scripts tests ► w/ the pnpm linker ► it should abort with an error if a package can't be built
 🟩 Scripts tests ► w/ the pnpm linker ► it should add native binaries to the PATH
-🟥 Scripts tests ► w/ the pnpm linker ► it should add node-gyp rebuild script if there isn't an install script and there is a binding.gyp file
+🟩 Scripts tests ► w/ the pnpm linker ► it should add node-gyp rebuild script if there isn't an install script and there is a binding.gyp file
 🟩 Scripts tests ► w/ the pnpm linker ► it should allow dependencies with install scripts to run the binaries exposed by their own dependencies
 🟩 Scripts tests ► w/ the pnpm linker ► it should allow dependencies with install scripts to run their own subscripts
 🟩 Scripts tests ► w/ the pnpm linker ► it should allow dependency binaries to require relative paths
 🟩 Scripts tests ► w/ the pnpm linker ► it should allow dependency binaries to require their own dependencies
-🟥 Scripts tests ► w/ the pnpm linker ► it should allow to retrieve the path to a dependency binary by its name
-🟥 Scripts tests ► w/ the pnpm linker ► it should allow to retrieve the path to a dependency binary, even when running from outside the project
-🟥 Scripts tests ► w/ the pnpm linker ► it should return an absolute path when retrieving the path to a dependency binary
+🟩 Scripts tests ► w/ the pnpm linker ► it should allow to retrieve the path to a dependency binary by its name
+🟩 Scripts tests ► w/ the pnpm linker ► it should allow to retrieve the path to a dependency binary, even when running from outside the project
+🟩 Scripts tests ► w/ the pnpm linker ► it should return an absolute path when retrieving the path to a dependency binary
 🟩 Scripts tests ► w/ the pnpm linker ► it should run install scripts during the install
 🟩 Scripts tests ► w/ the pnpm linker ► it should run native binaries
-🟥 Scripts tests ► w/ the pnpm linker ► it should run the bin of a soft-link
-🟥 Scripts tests ► w/ the pnpm linker ► it should run the bin of self-require-trap
-🟥 Scripts tests ► w/ the pnpm linker ► it should run the bin of self-require-trap (aliased)
+🟩 Scripts tests ► w/ the pnpm linker ► it should run the bin of a soft-link
+🟩 Scripts tests ► w/ the pnpm linker ► it should run the bin of self-require-trap
+🟩 Scripts tests ► w/ the pnpm linker ► it should run the bin of self-require-trap (aliased)
 🟩 Scripts tests ► w/ the pnpm linker ► it should trigger the postinstall scripts in the right order, children before parents
-🟥 Scripts tests ► w/ the pnpm linker ► it should trigger the postinstall when a dependency gets its dependency tree modified
-🟥 Scripts tests ► w/ the pnpm linker ► it shouldn't abort with an error if the package that can't be built is a transitive dependency of an optional package
-🟥 Scripts tests ► w/ the pnpm linker ► it shouldn't abort with an error if the package that can't be built is optional
-🟥 Scripts tests ► w/ the pnpm linker ► it shouldn't call the postinstall on every install
+🟩 Scripts tests ► w/ the pnpm linker ► it should trigger the postinstall when a dependency gets its dependency tree modified
+🟩 Scripts tests ► w/ the pnpm linker ► it shouldn't abort with an error if the package that can't be built is a transitive dependency of an optional package
+🟩 Scripts tests ► w/ the pnpm linker ► it shouldn't abort with an error if the package that can't be built is optional
+🟩 Scripts tests ► w/ the pnpm linker ► it shouldn't call the postinstall on every install
 🟩 Scripts tests ► w/ the pnpm linker ► it shouldn't trigger the postinstall if an unrelated branch of the tree is modified
 
 [3 / 9] packages/acceptance-tests/pkg-tests-specs/sources/workspace.test.ts

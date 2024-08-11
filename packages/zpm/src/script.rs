@@ -1,10 +1,11 @@
-use std::{collections::{BTreeMap, HashMap}, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, os::unix::fs::PermissionsExt, sync::Arc};
+use std::{collections::{BTreeMap, HashMap}, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::fs::PermissionsExt};
 
 use arca::{Path, ToArcaPath};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use tokio::process::Command;
+use zpm_macros::track_time;
 
 use crate::{error::{self, Error}, primitives::Locator, project::Project};
 
@@ -37,6 +38,67 @@ fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: Vec<&str>) -
     }
 
     Ok(())
+}
+
+fn is_node_script(p: Path) -> bool {
+    let ext = p.extname().unwrap_or_default();
+
+    if JS_EXTENSION.is_match(&ext) {
+        return true;
+    }
+
+    if ext == ".exe" || ext == ".bin" {
+        return false;
+    }
+
+    let mut buf = [0u8; 4];
+
+    let magic = std::fs::File::open(p.to_path_buf())
+        .and_then(|mut fd| fd.read_exact(&mut buf))
+        .map(|_| u32::from_be_bytes(buf));
+
+    match magic {
+        Err(_) => true,
+
+        // OSX Universal Binary
+        // Mach-O
+        // ELF
+        Ok(0xcafebabe | 0xcffaedfe | 0x7f454c46) => false,
+
+        // DOS MZ Executable
+        Ok(n) if (n & 0xffff0000) == 0x4d5a0000 => false,
+
+        _ => true,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum BinaryKind {
+    Default,
+    Node,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Binary {
+    pub path: Path,
+    pub kind: BinaryKind,
+}
+
+impl Binary {
+    pub fn new(project: &Project, path_rel: Path) -> Self {
+        let path_abs = project.project_cwd
+            .with_join(&path_rel);
+
+        let kind = match is_node_script(path_abs.clone()) {
+            true => BinaryKind::Node,
+            false => BinaryKind::Default,
+        };
+
+        Self {
+            path: path_abs,
+            kind,
+        }
+    }
 }
 
 pub struct ScriptEnvironment {
@@ -89,7 +151,33 @@ impl ScriptEnvironment {
         self
     }
 
-    fn attach_binaries(&mut self, locator: &Locator, binaries: &BTreeMap<String, Path>, relative_to: &Path) -> error::Result<()> {
+    fn attach_package_variables(&mut self, project: &Project, locator: &Locator) -> error::Result<()> {
+        let install_state = project.install_state.as_ref()
+            .ok_or(Error::InstallStateNotFound)?;
+
+        let resolution = install_state.resolution_tree.locator_resolutions.get(locator)
+            .expect("Expected active package to have a resolution tree");
+
+        // TODO (but do we really need to do this?): We may return the wrong
+        // location when a same package is hoisted in multiple places, since
+        // we only return the first one we find.
+        //
+        let package_location_rel = install_state.locations_by_package.get(locator)
+            .expect("Expected the package to be installed");
+
+        let manifest_location_abs = project.project_cwd
+            .with_join(package_location_rel)
+            .with_join_str("package.json");
+        
+        self.env.insert("npm_package_name".to_string(), locator.ident.to_string());
+        self.env.insert("npm_package_version".to_string(), resolution.version.to_string());
+        self.env.insert("npm_package_json".to_string(), manifest_location_abs.to_string());
+
+        Ok(())
+    }
+
+    #[track_time]
+    fn attach_binaries(&mut self, locator: &Locator, binaries: &BTreeMap<String, Binary>, relative_to: &Path) -> error::Result<()> {
         let mut hash = DefaultHasher::new();
         binaries.hash(&mut hash);
         let hash = hash.finish();
@@ -107,18 +195,6 @@ impl ScriptEnvironment {
 
             temp_dir.fs_create_dir()?;
 
-            for (name, binary_path_rel) in binaries {
-                let binary_path_abs = relative_to
-                    .with_join(binary_path_rel)
-                    .to_string();
-
-                if JS_EXTENSION.is_match(&binary_path_abs) {
-                    make_path_wrapper(&temp_dir, &name, &"node".to_string(), vec![&binary_path_abs])?;
-                } else {
-                    make_path_wrapper(&temp_dir, &name, &binary_path_abs, vec![])?;
-                }
-            }
-
             let self_path_str = std::env::current_exe()?
                 .to_arca()
                 .to_string();
@@ -128,11 +204,23 @@ impl ScriptEnvironment {
             make_path_wrapper(&temp_dir, "yarnpkg", &self_path_str, vec![])?;
             make_path_wrapper(&temp_dir, "node-gyp", &self_path_str, vec!["run", "--top-level", "node-gyp"])?;
 
+            for (name, binary) in binaries {
+                let binary_path_abs = relative_to
+                    .with_join(&binary.path)
+                    .to_string();
+
+                if binary.kind == BinaryKind::Node {
+                    make_path_wrapper(&temp_dir, &name, &"node".to_string(), vec![&binary_path_abs])?;
+                } else {
+                    make_path_wrapper(&temp_dir, &name, &binary_path_abs, vec![])?;
+                }
+            }
+
             std::fs::rename(temp_dir.to_path_buf(), dir.to_path_buf())?;
         }
 
         let bin_dir_str = dir.to_string();
-
+    
         self.prepend_env("PATH", ':', &bin_dir_str);
         self.env.insert("BERRY_BIN_FOLDER".to_string(), bin_dir_str);
 
@@ -149,6 +237,8 @@ impl ScriptEnvironment {
 
         self.cwd = project.project_cwd
             .with_join(package_cwd_rel);
+    
+        self.attach_package_variables(project, locator)?;
 
         let binaries = project.package_visible_binaries(locator)?;
         self.attach_binaries(locator, &binaries, &project.project_cwd)?;
@@ -161,17 +251,9 @@ impl ScriptEnvironment {
         self
     }
 
+    #[track_time]
     pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> i32 where I: IntoIterator<Item = S>, S: AsRef<OsStr> {
-        let is_node = JS_EXTENSION.is_match(&program);
-
-        let mut cmd = Command::new(match is_node {
-            true => "node",
-            false => program,
-        });
-
-        if is_node {
-            cmd.arg(program);
-        }
+        let mut cmd = Command::new(program);
 
         cmd.current_dir(self.cwd.to_path_buf());
         cmd.envs(self.env.iter());
@@ -186,7 +268,31 @@ impl ScriptEnvironment {
         exit_code
     }
 
-    pub async fn run_script(&mut self, script: &str) -> i32 {
-        self.run_exec("bash", vec!["-c", script]).await
+    pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> i32 where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+        match binary.kind {
+            BinaryKind::Node => {
+                let mut node_args = vec![];
+
+                node_args.push(binary.path.to_string());
+                node_args.extend(args.into_iter().map(|arg| arg.to_string()));
+
+                self.run_exec("node", node_args).await
+            },
+
+            BinaryKind::Default => {
+                self.run_exec(&binary.path.to_string(), args).await
+            },
+        }
+    }
+
+    pub async fn run_script<I, S>(&mut self, script: &str, args: I) -> i32 where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+        let mut bash_args = vec![];
+
+        bash_args.push("-c".to_string());
+        bash_args.push(format!("{} \"$@\"", script));
+        bash_args.push("yarn-script".to_string());
+        bash_args.extend(args.into_iter().map(|arg| arg.to_string()));
+
+        self.run_exec("bash", bash_args).await
     }
 }

@@ -525,8 +525,6 @@ checksum = "aaa6b4b263a5d737e9bf6b7c09b72c41a5480aec4d7219af827f6564e950b6a5"
 [[package]]
 name = "clipanion"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b6622cda6aa85182f77b1b859c73620c0c546eca94faacc6c68b7592c6c6e47"
 dependencies = [
  "clipanion-core",
  "clipanion-derive",
@@ -536,14 +534,10 @@ dependencies = [
 [[package]]
 name = "clipanion-core"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec918cd3535ec1f99d6a2284e7cace4832b310fc8573a4eab6bbcfbde5e0c192"
 
 [[package]]
 name = "clipanion-derive"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "621624de2cf1aee5060b0711ef469daeb7eaebcdc3629579b444e85abe086076"
 dependencies = [
  "indoc",
  "proc-macro2",

@@ -4,10 +4,11 @@ use clipanion::cli;
 
 use crate::{error::Error, project, script::ScriptEnvironment};
 
-#[cli::command]
+#[cli::command(proxy)]
 #[cli::path("exec")]
 pub struct Exec {
     script: String,
+    args: Vec<String>,
 }
 
 impl Exec {
@@ -21,7 +22,7 @@ impl Exec {
 
         let exit_code = ScriptEnvironment::new()
             .with_project(&project)
-            .run_script(&self.script)
+            .run_script(&self.script, &self.args)
             .await;
 
         Ok(ExitCode::from(exit_code as u8))

@@ -5,7 +5,7 @@ use blake2::{Blake2b, Digest, digest::consts::U64};
 
 use crate::{error::Error, yarn_serialization_protocol};
 
-type Blake2b80 = Blake2b<U64>;
+pub type Blake2b80 = Blake2b<U64>;
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Sha256 {

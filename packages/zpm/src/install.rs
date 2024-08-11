@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, convert::Infallible, marker::PhantomData, str::FromStr};
+use std::{collections::{HashMap, HashSet}, marker::PhantomData, str::FromStr};
 
 use arca::Path;
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
@@ -50,7 +50,8 @@ enum InstallOpResult {
 
 #[derive(Debug)]
 enum InstallOp<'a> {
-    Phantom(Infallible, PhantomData<&'a ()>),
+    #[allow(dead_code)]
+    Phantom(PhantomData<&'a ()>),
 
     Resolve {
         descriptor: Descriptor,
@@ -66,7 +67,7 @@ enum InstallOp<'a> {
 impl<'a> InstallOp<'a> {
     pub async fn run(self, context: InstallContext<'a>) -> InstallOpResult {
         match self {
-            InstallOp::Phantom(_, _) =>
+            InstallOp::Phantom(_) =>
                 unreachable!("PhantomData should never be instantiated"),
 
             InstallOp::Resolve {descriptor, parent_data} => {
@@ -101,12 +102,13 @@ impl<'a> InstallOp<'a> {
     }
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstallState {
     pub lockfile: Lockfile,
     pub resolution_tree: ResolutionTree,
     pub packages_by_location: HashMap<Path, Locator>,
     pub locations_by_package: HashMap<Locator, Path>,
+    pub optional_packages: HashSet<Locator>,
 }
 
 #[derive(Clone, Default)]
@@ -123,8 +125,12 @@ impl Install {
         project
             .attach_install_state(self.install_state)?;
 
-        build::BuildManager::new(build)
+        let result = build::BuildManager::new(build)
             .run(project).await?;
+
+        if !result.build_errors.is_empty() {
+            return Err(Error::Unsupported);
+        }
 
         Ok(())
     }

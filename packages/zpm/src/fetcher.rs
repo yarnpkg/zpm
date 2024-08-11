@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::{self, Display, Formatter}, io::{Cursor, Read}, sync::Arc};
+use std::{fmt::{self, Display, Formatter}, io::{Cursor, Read}, sync::Arc};
 
 use arca::Path;
 use bytes::Bytes;
@@ -164,8 +164,8 @@ pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, parent_da
         Reference::SemverAlias(ident, version)
             => fetch_semver(context, &locator, &ident, &version).await,
 
-        Reference::Workspace(path)
-            => fetch_workspace(context, &path),
+        Reference::Workspace(ident)
+            => fetch_workspace(context, &ident),
 
         _ => Err(Error::Unsupported),
     }
@@ -217,14 +217,8 @@ pub async fn fetch_remote_tarball_with_manifest<'a>(context: InstallContext<'a>,
                 .map_err(Error::InvalidJsonData)
         )?;
 
-    let resolution = Resolution {
-        version: manifest.version,
-        locator: locator.clone(),
-        dependencies: manifest.dependencies.unwrap_or_default(),
-        peer_dependencies: manifest.peer_dependencies.unwrap_or_default(),
-        optional_dependencies: HashSet::new(),
-        missing_peer_dependencies: HashSet::new(),
-    };
+    let resolution
+        = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
     let package_directory = archive_path
         .with_join_str(locator.ident.nm_subdir());
@@ -260,14 +254,8 @@ pub async fn fetch_local_tarball_with_manifest<'a>(context: InstallContext<'a>, 
                 .map_err(Error::InvalidJsonData)
         )?;
 
-    let resolution = Resolution {
-        version: manifest.version,
-        locator: locator.clone(),
-        dependencies: manifest.dependencies.unwrap_or_default(),
-        peer_dependencies: manifest.peer_dependencies.unwrap_or_default(),
-        optional_dependencies: HashSet::new(),
-        missing_peer_dependencies: HashSet::new(),
-    };
+    let resolution
+        = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
     let package_directory = archive_path
         .with_join_str(locator.ident.nm_subdir());
@@ -300,14 +288,8 @@ pub async fn fetch_folder_with_manifest<'a>(context: InstallContext<'a>, locator
                 .map_err(Error::InvalidJsonData)
         )?;
 
-    let resolution = Resolution {
-        version: manifest.version,
-        locator: locator.clone(),
-        dependencies: manifest.dependencies.unwrap_or_default(),
-        peer_dependencies: manifest.peer_dependencies.unwrap_or_default(),
-        optional_dependencies: HashSet::new(),
-        missing_peer_dependencies: HashSet::new(),
-    };
+    let resolution
+        = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
     let package_directory = archive_path
         .with_join_str(locator.ident.nm_subdir());
@@ -352,14 +334,13 @@ pub async fn fetch_semver<'a>(context: InstallContext<'a>, locator: &Locator, id
     })
 }
 
-pub fn fetch_workspace(context: InstallContext, path: &str) -> Result<PackageData, Error> {
+pub fn fetch_workspace(context: InstallContext, ident: &Ident) -> Result<PackageData, Error> {
     let project = context.project
         .expect("The project is required for fetching a workspace package");
 
     let workspace = project.workspaces
-        .values()
-        .find(|w| w.rel_path.as_str() == path)
-        .ok_or_else(|| Error::WorkspaceNotFoundByPath(path.to_string()))?;
+        .get(ident)
+        .ok_or_else(|| Error::WorkspaceNotFound(ident.clone()))?;
 
     Ok(PackageData::Local {
         package_directory: workspace.path.clone(),

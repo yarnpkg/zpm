@@ -29,7 +29,7 @@ impl ResolveResult {
 /**
  * Contains the information we keep in the lockfile for a given package.
  */
-#[derive(Clone, Debug, Deserialize, Decode, Encode, Serialize)]
+#[derive(Clone, Debug, Deserialize, Decode, Encode, Serialize, PartialEq, Eq)]
 pub struct Resolution {
     #[serde(rename = "resolution")]
     pub locator: Locator,
@@ -54,6 +54,28 @@ pub struct Resolution {
     #[serde(default)]
     #[serde(skip_serializing_if = "HashSet::is_empty")]
     pub missing_peer_dependencies: HashSet<Ident>,
+}
+
+impl Resolution {
+    pub fn from_remote_manifest(locator: Locator, manifest: RemoteManifest) -> Resolution {
+        let optional_dependencies
+            = HashSet::from_iter(manifest.optional_dependencies.keys().cloned());
+
+        let mut dependencies
+            = manifest.dependencies;
+
+        dependencies
+            .extend(manifest.optional_dependencies);
+
+        Resolution {
+            locator,
+            version: manifest.version,
+            dependencies,
+            peer_dependencies: manifest.peer_dependencies,
+            optional_dependencies,
+            missing_peer_dependencies: HashSet::new(),
+        }
+    }
 }
 
 pub async fn resolve<'a>(context: InstallContext<'a>, descriptor: Descriptor, parent_data: Option<PackageData>) -> Result<ResolveResult, Error> {
@@ -154,14 +176,8 @@ pub fn resolve_portal(ident: &Ident, path: &str, parent: &Option<Locator>, paren
     let manifest
         = parse_manifest(manifest_text)?;
 
-    let resolution = Resolution {
-        version: semver::Version::new(),
-        locator: Locator::new_bound(ident.clone(), Reference::Portal(path.to_string()), Some(Arc::new(parent.clone()))),
-        dependencies: manifest.dependencies.unwrap_or_default(),
-        peer_dependencies: manifest.peer_dependencies.unwrap_or_default(),
-        optional_dependencies: HashSet::new(),
-        missing_peer_dependencies: HashSet::new(),
-    };
+    let locator = Locator::new_bound(ident.clone(), Reference::Portal(path.to_string()), Some(Arc::new(parent.clone())));
+    let resolution = Resolution::from_remote_manifest(locator, manifest.remote);
 
     Ok(ResolveResult::new(resolution))
 }
@@ -216,14 +232,8 @@ pub async fn resolve_semver_tag<'a>(context: InstallContext<'a>, ident: Ident, t
 
     let manifest = registry_data.versions.remove(&version).unwrap();
 
-    let resolution = Resolution {
-        version: manifest.version,
-        locator: Locator::new(ident.clone(), Reference::SemverAlias(ident.clone(), version.clone())),
-        dependencies: manifest.dependencies.unwrap_or_default(),
-        peer_dependencies: manifest.peer_dependencies.unwrap_or_default(),
-        optional_dependencies: HashSet::new(),
-        missing_peer_dependencies: HashSet::new(),
-    };
+    let locator = Locator::new(ident.clone(), Reference::SemverAlias(ident.clone(), version.clone()));
+    let resolution = Resolution::from_remote_manifest(locator, manifest);
 
     Ok(ResolveResult::new(resolution))
 }
@@ -327,17 +337,8 @@ pub async fn resolve_semver<'a>(context: InstallContext<'a>, ident: &Ident, rang
     let (version, manifest) = manifest_result
         .map_err(|_| Error::NoCandidatesFound(Range::Semver(range.clone())))?;
 
-    let transitive_dependencies = manifest.dependencies.clone()
-        .unwrap_or_default();
-
-    let resolution = Resolution {
-        version: manifest.version,
-        locator: Locator::new(ident.clone(), Reference::Semver(version)),
-        dependencies: transitive_dependencies,
-        peer_dependencies: manifest.peer_dependencies.unwrap_or_default(),
-        optional_dependencies: HashSet::new(),
-        missing_peer_dependencies: HashSet::new(),
-    };
+    let locator = Locator::new(ident.clone(), Reference::Semver(version));
+    let resolution = Resolution::from_remote_manifest(locator, manifest);
 
     Ok(ResolveResult::new(resolution))
 }
@@ -356,29 +357,16 @@ pub fn resolve_workspace_by_name(context: InstallContext, ident: Ident) -> Resul
 
     match project.workspaces.get(&ident) {
         Some(workspace) => {
-            let mut dependencies = workspace.manifest.dependencies.clone()
-                .unwrap_or_default();
+            let manifest = workspace.manifest.clone();
 
-            let dev_dependencies = workspace.manifest.dev_dependencies.clone()
-                .unwrap_or_default();
+            let locator = Locator::new(ident.clone(), Reference::Workspace(workspace.name.clone()));
+            let mut resolution = Resolution::from_remote_manifest(locator, manifest.remote);
 
-            dependencies.extend(dev_dependencies);
-
-            let peer_dependencies = workspace.manifest.peer_dependencies.clone()
-                .unwrap_or_default();
-
-            let resolution = Resolution {
-                version: workspace.manifest.version.clone(),
-                locator: Locator::new(ident.clone(), Reference::Workspace(workspace.rel_path.to_string())),
-                dependencies,
-                peer_dependencies,
-                optional_dependencies: HashSet::new(),
-                missing_peer_dependencies: HashSet::new(),
-            };
+            resolution.dependencies.extend(manifest.dev_dependencies);
 
             Ok(ResolveResult::new(resolution))
         }
 
-        None => Err(Error::WorkspaceNotFoundByName(ident)),
+        None => Err(Error::WorkspaceNotFound(ident)),
     }
 }

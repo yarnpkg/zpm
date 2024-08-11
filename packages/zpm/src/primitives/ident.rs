@@ -1,8 +1,8 @@
-use std::hash::Hash;
+use std::{cell::LazyCell, hash::Hash};
 
 use bincode::{Decode, Encode};
 
-use crate::yarn_serialization_protocol;
+use crate::{error::Error, yarn_serialization_protocol};
 
 #[derive(Clone, Debug, Default, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Ident(String);
@@ -46,8 +46,16 @@ impl AsRef<str> for Ident {
     }
 }
 
+const IDENT_REGEX: LazyCell<regex::Regex> = LazyCell::new(|| {
+    regex::Regex::new(r"^(?:@([^/]+?)/)?([^@/]+)$").unwrap()
+});
+
 yarn_serialization_protocol!(Ident, "", {
     deserialize(src) {
+        if !IDENT_REGEX.is_match(src) {
+            return Err(Error::InvalidIdent(src.to_string()));
+        }
+
         Ok(Ident::new(src))
     }
 

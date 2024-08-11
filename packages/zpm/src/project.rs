@@ -4,12 +4,12 @@ use arca::{Path, ToArcaPath};
 use serde::Deserialize;
 use serde_with::serde_as;
 use wax::walk::Entry;
+use zpm_macros::track_time;
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, install::InstallState, lockfile::Lockfile, manifest::{read_manifest, Manifest}, primitives::{Descriptor, Ident, Locator, Range, Reference}, zip::ZipSupport};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::{self, Error}, install::{InstallContext, InstallManager, InstallState}, lockfile::Lockfile, manifest::{read_manifest, Manifest}, primitives::{Descriptor, Ident, Locator, Range, Reference}, script::Binary, zip::ZipSupport};
 
 static LOCKFILE_NAME: &str = "yarn.lock";
 static MANIFEST_NAME: &str = "package.json";
-static INSTALL_STATE_PATH: &str = ".yarn/install-state.json";
 
 pub struct Project {
     pub project_cwd: Path,
@@ -52,17 +52,16 @@ impl Project {
 
     pub fn new(cwd: Option<Path>) -> Result<Project, Error> {
         let shell_cwd = cwd
-            .or_else(|| std::env::var("YARN_CWD").ok().map(|s| Path::from(s)))
-            .or_else(|| std::env::current_dir().ok().map(|p| p.to_arca()))
-            .expect("Failed to determine current working directory");
+            .map(Ok)
+            .unwrap_or_else(|| std::env::current_dir().map(|p| p.to_arca()))?;
 
-        let (project_cwd, package_cwd) = Project::find_closest_project(shell_cwd.clone())
-            .expect("Failed to find project root");
+        let (project_cwd, package_cwd)
+            = Project::find_closest_project(shell_cwd.clone())?;
 
         let config = Config::new(Some(project_cwd.clone()));
 
-        let root_workspace = Workspace::from_path(&project_cwd, project_cwd.clone())
-            .expect("Failed to read root workspace");
+        let root_workspace
+            = Workspace::from_path(&project_cwd, project_cwd.clone())?;
 
         let mut workspaces: HashMap<_, _> = root_workspace
             .workspaces()?
@@ -111,6 +110,14 @@ impl Project {
         self.project_cwd.with_join_str("node_modules")
     }
 
+    pub fn install_state_path(&self) -> Path {
+        self.project_cwd.with_join_str(".yarn/install-state.json")
+    }
+
+    pub fn build_state_path(&self) -> Path {
+        self.project_cwd.with_join_str(".yarn/build-state.json")
+    }
+
     pub fn lockfile(&self) -> Result<Lockfile, Error> {
         let lockfile_path
             = self.project_cwd.with_join_str(LOCKFILE_NAME);
@@ -131,9 +138,10 @@ impl Project {
             .map_err(|err| Error::LockfileParseError(Arc::new(err)))
     }
 
+    #[track_time]
     pub fn import_install_state(&mut self) -> Result<&mut Self, Error> {
         let install_state_path
-            = self.project_cwd.with_join_str(INSTALL_STATE_PATH);
+            = self.install_state_path();
 
         if !install_state_path.fs_exists() {
             return Err(Error::InstallStateNotFound);
@@ -160,14 +168,19 @@ impl Project {
 
     fn write_install_state(&mut self, install_state: &InstallState) -> Result<(), Error> {
             let link_info_path
-            = self.project_cwd.with_join_str(INSTALL_STATE_PATH);
+            = self.install_state_path();
 
         let contents
             = serde_json::to_string(&install_state)
                 .map_err(|err| Error::LockfileGenerationError(Arc::new(err)))?;
 
+        let re_parsed: InstallState
+            = serde_json::from_str(&contents)?;
+
         crate::misc::change_file(link_info_path.to_path_buf(), contents, 0o644)
             .map_err(|err| Error::LockfileWriteError(Arc::new(err)))?;
+
+        assert_eq!(&re_parsed, install_state);
 
         Ok(())
     }
@@ -213,7 +226,7 @@ impl Project {
         Ok(active_package.clone())
     }
 
-    pub fn package_self_binaries(&self, locator: &Locator) -> Result<Vec<(String, Path)>, Error> {
+    pub fn package_self_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
 
@@ -225,7 +238,7 @@ impl Project {
         #[serde(untagged)]
         enum BinField {
             String(Path),
-            Map(#[serde_as(as = "HashMap<_, _>")] Vec<(String, Path)>),
+            Map(HashMap<String, Path>),
         }
 
         #[derive(Debug, Clone, Deserialize)]
@@ -245,22 +258,23 @@ impl Project {
         Ok(match manifest.bin {
             Some(BinField::String(bin)) => {
                 if let Some(name) = manifest.name {
-                    vec![(name.name().to_string(), location.with_join(&bin))]
+                    BTreeMap::from_iter([(name.name().to_string(), Binary::new(self, location.with_join(&bin)))])
                 } else {
-                    vec![]
+                    BTreeMap::new()
                 }
             }
 
             Some(BinField::Map(bins)) => bins
-                .iter()
-                .map(|(name, path)| (name.clone(), location.with_join(path)))
+                .into_iter()
+                .map(|(name, path)| (name, Binary::new(self, location.with_join(&path))))
                 .collect(),
 
-            None => vec![]
+            None => BTreeMap::new(),
         })
     }
 
-    pub fn package_visible_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Path>, Error> {
+    #[track_time]
+    pub fn package_visible_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
 
@@ -281,7 +295,7 @@ impl Project {
         Ok(BTreeMap::from_iter(all_bins.into_iter()))
     }
 
-    pub fn find_binary(&self, name: &str) -> Result<Path, Error> {
+    pub fn find_binary(&self, name: &str) -> Result<Binary, Error> {
         let active_package = self.active_package()?;
 
         self.package_visible_binaries(&active_package)?
@@ -316,17 +330,38 @@ impl Project {
         let mut iterator = self.workspaces.values();
 
         let script_match = iterator
-            .find_map(|w| w.manifest.scripts.as_ref().and_then(|s| s.get(name).map(|s| (w.locator(), s.clone()))));
+            .find_map(|w| w.manifest.scripts.get(name).map(|s| (w.locator(), s.clone())));
 
         if script_match.is_none() {
             return Err(Error::GlobalScriptNotFound(name.to_string()));
         }
 
-        if iterator.any(|w| w.manifest.scripts.as_ref().map(|s| s.contains_key(name)).unwrap_or(false)) {
+        if iterator.any(|w| w.manifest.scripts.contains_key(name)) {
             return Err(Error::AmbiguousScriptName(name.to_string()));
         }
 
         Ok(script_match.unwrap())
+    }
+
+    pub async fn run_install(&mut self) -> error::Result<()> {
+        let package_cache
+            = self.package_cache();
+
+        let install_context = InstallContext::default()
+            .with_package_cache(Some(&package_cache))
+            .with_project(Some(self));
+
+        let mut lockfile = self.lockfile()?;
+        lockfile.forget_transient_resolutions();
+
+        InstallManager::default()
+            .with_context(install_context)
+            .with_lockfile(lockfile)
+            .with_roots_iter(self.workspaces.values().map(|w| w.descriptor()))
+            .resolve_and_fetch().await?
+            .finalize(self).await?;
+
+        Ok(())
     }
 }
 
@@ -366,7 +401,7 @@ impl Workspace {
     }
 
     pub fn locator(&self) -> Locator {
-        Locator::new(self.name.clone(), Reference::Workspace(self.rel_path.to_string()))
+        Locator::new(self.name.clone(), Reference::Workspace(self.name.clone()))
     }
 
     pub fn workspaces(&self) -> Result<Vec<Workspace>, Error> {
@@ -391,5 +426,15 @@ impl Workspace {
         }
 
         Ok(workspaces)
+    }
+
+    pub fn write_manifest(&self) -> error::Result<()> {
+        let serialized = serde_json::to_string_pretty(&self.manifest)
+            .map_err(Arc::new)?;
+
+        crate::misc::change_file(self.path.with_join_str(MANIFEST_NAME).to_path_buf(), serialized, 0o644)
+            .map_err(Arc::new)?;
+
+        Ok(())
     }
 }

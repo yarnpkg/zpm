@@ -5,11 +5,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{lockfile::Lockfile, primitives::{Descriptor, Ident, Locator, Range, Reference}, resolver::Resolution};
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolutionTree {
     pub roots: Vec<Descriptor>,
     pub descriptor_to_locator: HashMap<Descriptor, Locator>,
     pub locator_resolutions: HashMap<Locator, Resolution>,
+    pub optional_builds: HashSet<Locator>,
 }
 
 #[derive(Default)]
@@ -18,7 +19,6 @@ pub struct TreeResolver {
     accessible_locators: HashSet<Locator>,
     virtual_stack: HashMap<Locator, u8>,
     resolution_stack: Vec<Locator>,
-    optional_builds: HashSet<Locator>,
     virtual_dependents: HashMap<Descriptor, HashSet<Locator>>,
     original_workspace_definitions: HashMap<Locator, Resolution>,
     peer_dependency_links: HashMap<Locator, HashMap<Ident, HashSet<Locator>>>,
@@ -41,6 +41,7 @@ impl TreeResolver {
 
             self.resolution_tree.descriptor_to_locator.insert(descriptor.clone(), locator.clone());
             self.resolution_tree.locator_resolutions.insert(locator.clone(), resolution.clone());
+            self.resolution_tree.optional_builds.insert(locator.clone());
 
             if let Reference::Workspace(_) = locator.reference {
                 self.original_workspace_definitions.insert(locator.clone(), resolution.clone());
@@ -87,7 +88,7 @@ impl TreeResolver {
 
     fn resolve_peer_dependencies_impl(&mut self, parent_descriptor: &Descriptor, parent_locator: &Locator, peer_slots: &HashMap<Ident, Locator>, top_locator: &Locator, is_optional: bool) {
         if !is_optional {
-            self.optional_builds.remove(&parent_locator);
+            self.resolution_tree.optional_builds.remove(&parent_locator);
         }
 
         if !self.accessible_locators.insert(parent_locator.clone()) {

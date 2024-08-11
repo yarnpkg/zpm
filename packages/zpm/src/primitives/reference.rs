@@ -36,7 +36,7 @@ pub enum Reference {
     Virtual(Box<Reference>, Sha256),
 
     #[try_pattern(prefix = "workspace:")]
-    Workspace(String),
+    Workspace(Ident),
 
     #[try_pattern()]
     Git(git::GitRange),
@@ -78,7 +78,7 @@ yarn_serialization_protocol!(Reference, "", {
             Reference::Portal(path) => format!("portal:{}", path),
             Reference::Url(url) => url.to_string(),
             Reference::Virtual(inner, hash) => format!("{} [{}]", inner, hash.short()),
-            Reference::Workspace(path) => format!("workspace:{}", path),
+            Reference::Workspace(ident) => format!("workspace:{}", ident),
         }
     }
 });

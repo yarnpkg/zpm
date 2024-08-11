@@ -44,7 +44,7 @@ once_map = "0.4.18"
 crc32fast = "1.4.2"
 trust-dns = "0.23.2"
 wax = { git = "https://github.com/arcanis/wax.git" }
-clipanion = "0.4.1"
+clipanion = { path = "../../../clipanion-rs/packages/clipanion", version = "0.4.1" }
 rand = "0.8.5"
 anyhow = "1.0.86"
 

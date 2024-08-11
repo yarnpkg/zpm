@@ -41,6 +41,7 @@ pub struct Entry<'a> {
     pub data: Cow<'a, [u8]>,
 }
 
+#[allow(dead_code)]
 #[repr(packed)]
 struct FileHeader {
     version_needed_to_extract: u16,
@@ -55,12 +56,14 @@ struct FileHeader {
     extra_field_length: u16,
 }
 
+#[allow(dead_code)]
 #[repr(packed)]
 struct GeneralRecord {
     signature: [u8; 4],
     header: FileHeader,
 }
 
+#[allow(dead_code)]
 #[repr(packed)]
 struct CentralDirectoryRecord {
     signature: [u8; 4],
@@ -73,6 +76,7 @@ struct CentralDirectoryRecord {
     relative_offset_of_local_header: u32,
 }
 
+#[allow(dead_code)]
 #[repr(packed)]
 struct EndOfCentralDirectoryRecord {
     signature: [u8; 4],

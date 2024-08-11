@@ -37,3 +37,17 @@ pub fn change_file<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C, mode: u
 
     Ok(())
 }
+
+#[macro_export]
+macro_rules! yarn_track_time {
+    ($label:expr, $code:block) => { {
+        let start = std::time::Instant::now();
+
+        let res = $code;
+
+        let duration = start.elapsed();
+        println!("{} {:?}", $label, duration);
+
+        res
+    } }
+}

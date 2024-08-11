@@ -7,7 +7,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::{build::{self, Build}, error::Error, fetcher::{PackageData, PackageLinking}, install::Install, misc::change_file, primitives::{locator::IdentOrLocator, Descriptor, Ident, Locator, Reference}, project::Project, resolver::Resolution, settings, yarn_serialization_protocol, zip::{entries_from_zip, first_entry_from_zip, Entry}};
+use crate::{build::{self, BuildRequests}, error::{self, Error}, fetcher::{PackageData, PackageLinking}, install::Install, misc::change_file, primitives::{locator::IdentOrLocator, Descriptor, Ident, Locator, Reference}, project::Project, resolver::Resolution, settings, yarn_serialization_protocol, zip::{entries_from_zip, first_entry_from_zip, Entry}};
 
 fn is_default<T: Default + PartialEq>(t: &T) -> bool {
     t == &T::default()
@@ -332,7 +332,7 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
     Ok(())
 }
 
-fn populate_build_entry_dependencies(package_build_entries: &HashMap<Locator, usize>, locator_resolutions: &HashMap<Locator, Resolution>, descriptor_to_locator: &HashMap<Descriptor, Locator>) -> HashMap<usize, HashSet<usize>> {
+fn populate_build_entry_dependencies(package_build_entries: &HashMap<Locator, usize>, locator_resolutions: &HashMap<Locator, Resolution>, descriptor_to_locator: &HashMap<Descriptor, Locator>) -> error::Result<HashMap<usize, HashSet<usize>>> {
     let mut package_build_dependencies = HashMap::new();
 
     for locator in package_build_entries.keys() {
@@ -353,6 +353,10 @@ fn populate_build_entry_dependencies(package_build_entries: &HashMap<Locator, us
                     continue;
                 }
 
+                if dependency_locator == &locator {
+                    return Err(Error::CircularBuildDependency(locator));
+                }
+
                 if let Some(dependency_entry_idx) = package_build_entries.get(dependency_locator) {
                     build_dependencies.insert(*dependency_entry_idx);
                 }
@@ -367,10 +371,10 @@ fn populate_build_entry_dependencies(package_build_entries: &HashMap<Locator, us
         package_build_dependencies.insert(*entry_idx, build_dependencies);
     }
 
-    package_build_dependencies
+    Ok(package_build_dependencies)
 }
 
-pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install) -> Result<Build, Error> {
+pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install) -> Result<BuildRequests, Error> {
     let tree = &install.install_state.resolution_tree;
     let nm_path = project.project_cwd.with_join_str("node_modules");
 
@@ -489,10 +493,11 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
 
         if !build_commands.is_empty() {
             package_build_entries.insert(locator.clone(), all_build_entries.len());
-            all_build_entries.push(build::Entry {
-                cwd: package_location_abs,
+            all_build_entries.push(build::BuildRequest {
+                cwd: package_location_rel,
                 locator: locator.clone(),
                 commands: build_commands,
+                allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
             });
         }
     }
@@ -570,9 +575,9 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         &tree.descriptor_to_locator,
     );
 
-    Ok(build::Build {
+    Ok(build::BuildRequests {
         entries: all_build_entries,
-        dependencies: package_build_dependencies,
+        dependencies: package_build_dependencies?,
     })
 }
 

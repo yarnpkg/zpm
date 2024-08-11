@@ -1,10 +1,10 @@
-use std::{str::FromStr, sync::Mutex};
+use std::{str::FromStr, sync::{LazyLock, Mutex}};
 
 use arca::{Path, ToArcaPath};
 use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Deserializer};
 
-use crate::{error::Error, primitives::Ident, settings::{ProjectConfig, UserConfig}};
+use crate::{error::Error, primitives::Ident, settings::{EnvConfig, ProjectConfig, UserConfig}};
 
 pub static CONFIG_PATH: Lazy<Mutex<Option<Path>>> = Lazy::new(|| Mutex::new(None));
 
@@ -211,10 +211,14 @@ impl FromEnv for PathField {
     type Err = Error;
 
     fn from_env(raw: &str) -> Result<Self, Self::Err> {
-        let value = CONFIG_PATH.lock().unwrap()
-            .as_ref().unwrap()
-            .dirname().unwrap()
-            .with_join_str(&raw);
+        let mut value = Path::from(raw);
+
+        if !value.is_absolute() {
+            value = CONFIG_PATH.lock().unwrap()
+                .as_ref().unwrap()
+                .dirname().unwrap()
+                .with_join(&value);
+        }
 
         Ok(Self {value, source: SettingSource::Env})
     }
@@ -269,6 +273,11 @@ pub struct Config {
     pub project: ProjectConfig,
 }
 
+pub static ENV_CONFIG: LazyLock<EnvConfig> = LazyLock::new(|| {
+    *CONFIG_PATH.lock().unwrap() = None;
+    serde_json::from_str("{}").unwrap()
+});
+
 impl Config {
     fn import_config<'a, T>(path: Option<Path>) -> T where T: for<'de> Deserialize<'de> {
         let content = path
@@ -280,6 +289,7 @@ impl Config {
     }
 
     pub fn new(cwd: Option<Path>) -> Self {
+        #[allow(deprecated)]
         let user_yarnrc_path = std::env::home_dir()
             .map(|dir| dir.to_arca().with_join_str(".yarnrc.yml"));
 

@@ -3,11 +3,34 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::str::FromStr;
 
 use bincode::{Decode, Encode};
+use rstest::rstest;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{error::Error, yarn_serialization_protocol};
 
 use super::{Ident, Locator, Range};
+
+#[derive(Debug)]
+pub struct LooseDescriptor {
+    pub descriptor: Descriptor,
+}
+
+impl<'a> std::convert::TryFrom<&'a str> for LooseDescriptor {
+    type Error = crate::error::Error;
+
+    fn try_from(src: &str) -> std::result::Result<Self, Self::Error> {
+        if let Ok(descriptor) = Descriptor::from_str(src) {
+            return Ok(LooseDescriptor {descriptor});
+        }
+
+        let ident = Ident::from_str(src)?;
+        let range = Range::from_str("latest").unwrap();
+
+        let descriptor = Descriptor::new(ident, range);
+
+        Ok(LooseDescriptor {descriptor})
+    }
+}
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Descriptor {
@@ -48,20 +71,32 @@ impl Descriptor {
 pub fn descriptor_map_serializer<S>(value: &HashMap<Ident, Descriptor>, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
     let mut map = BTreeMap::new();
 
-    for (k, v) in value.iter() {
-        map.insert(k.clone(), v.range.clone());
+    for v in value.values() {
+        let serialized_range = v.to_string();
+
+        let at_split = match serialized_range.starts_with('@') {
+            true => serialized_range[1..serialized_range.len()].find('@').map(|x| x + 1),
+            false => serialized_range.find('@'),
+        }.unwrap();
+
+        let ident_str = &serialized_range[0..at_split];
+        let range_str = &serialized_range[at_split + 1..];
+
+        map.insert(ident_str.to_string(), range_str.to_string());
     }
 
     map.serialize(serializer)
 }
 
 pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<HashMap<Ident, Descriptor>, D::Error> where D: Deserializer<'de> {
-    let values = HashMap::<Ident, Range>::deserialize(deserializer)?;
+    let values = HashMap::<String, String>::deserialize(deserializer)?;
     let mut entries = HashMap::new();
 
     for (k, v) in values.iter() {
-        let descriptor = Descriptor::new(k.clone(), v.clone());
-        entries.insert(k.clone(), descriptor);
+        let serialized_range = format!("{}@{}", k, v);
+        let descriptor = Descriptor::from_str(&serialized_range).unwrap();
+
+        entries.insert(descriptor.ident.clone(), descriptor);
     }
 
     Ok(entries)
@@ -78,13 +113,14 @@ yarn_serialization_protocol!(Descriptor, "", {
         let at_split = at_split
             .ok_or(Error::InvalidDescriptor(src.to_string()))?;
 
-        let parent_split = src.find("::parent=");
-
+        let parent_marker = "::parent=";
+        let parent_split = src.find(parent_marker);
+    
         let ident = Ident::from_str(&src[..at_split])?;
         let range = Range::from_str(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
 
         let parent = match parent_split {
-            Some(idx) => Some(Locator::from_str(&src[idx + 10..])?),
+            Some(idx) => Some(Locator::from_str(&src[idx + parent_marker.len()..])?),
             None => None,
         };
 
@@ -98,3 +134,10 @@ yarn_serialization_protocol!(Descriptor, "", {
         }
     }
 });
+
+#[rstest]
+#[case("foo@npm:1.0.0")]
+#[case("foo@npm:1.0.0::parent=root@workspace:")]
+fn test_descriptor_serialization(#[case] str: &str) {
+    assert_eq!(str, Descriptor::from_str(str).unwrap().to_string());
+}

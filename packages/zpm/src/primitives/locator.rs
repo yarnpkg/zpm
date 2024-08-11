@@ -1,6 +1,7 @@
 use std::{hash::Hash, str::FromStr, sync::Arc};
 
 use bincode::{Decode, Encode};
+use rstest::rstest;
 use sha2::Digest;
 use zpm_macros::Parsed;
 
@@ -80,13 +81,14 @@ yarn_serialization_protocol!(Locator, "", {
         let at_split = at_split
             .ok_or(Error::InvalidDescriptor(src.to_string()))?;
 
-        let parent_split = src.find("::parent=");
+        let parent_marker = "::parent=";
+        let parent_split = src.find(parent_marker);
 
         let ident = Ident::from_str(&src[..at_split])?;
         let reference = Reference::from_str(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
 
         let parent = match parent_split {
-            Some(idx) => Some(Arc::new(Locator::from_str(&src[idx + 10..])?)),
+            Some(idx) => Some(Arc::new(Locator::from_str(&src[idx + parent_marker.len()..])?)),
             None => None,
         };
 
@@ -100,3 +102,10 @@ yarn_serialization_protocol!(Locator, "", {
         }
     }
 });
+
+#[rstest]
+#[case("foo@npm:1.0.0")]
+#[case("foo@npm:1.0.0::parent=root@workspace:")]
+fn test_locator_serialization(#[case] str: &str) {
+    assert_eq!(str, Locator::from_str(str).unwrap().to_string());
+}

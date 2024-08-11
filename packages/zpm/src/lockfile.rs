@@ -5,7 +5,7 @@ use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serialize
 
 use crate::{error::Error, hash::Sha256, primitives::{Descriptor, Locator}, resolver::Resolution, serialize::Serialized};
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockfileEntry {
     pub checksum: Option<Sha256>,
 
@@ -13,7 +13,7 @@ pub struct LockfileEntry {
     pub resolution: Resolution,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Lockfile {
     pub resolutions: HashMap<Descriptor, Locator>,
     pub entries: HashMap<Locator, LockfileEntry>,

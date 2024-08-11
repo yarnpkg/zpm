@@ -1,7 +1,7 @@
 extern crate proc_macro;
 
-use quote::{format_ident, quote, TokenStreamExt};
-use syn::{meta::ParseNestedMeta, parse_macro_input, Data, DeriveInput, Expr, ItemFn, Meta};
+use quote::{quote, ToTokens, TokenStreamExt};
+use syn::{meta::ParseNestedMeta, parse_macro_input, Data, DeriveInput, Expr, ImplItem, ImplItemFn, Meta};
 
 // Turn X<Y> into X::<Y>
 fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
@@ -29,47 +29,31 @@ fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
 
 #[proc_macro_attribute]
 pub fn track_time(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let input_fn = parse_macro_input!(item as ItemFn);
+    let mut item = parse_macro_input!(item);
 
-    // Decompose the input function to inspect its components
-    let ItemFn {
-        attrs,
-        vis,
-        sig,
-        block,
-    } = input_fn;
+    let input_fn = match &mut item {
+        ImplItem::Fn(item_fn) => item_fn,
+        _ => panic!("Invalid item type"),
+    };
 
-    let fn_name = &sig.ident; // Get the function name
-    let is_async = sig.asyncness.is_some();
-    let result_var = format_ident!("result");
+    let ImplItemFn {sig, block, ..} = &input_fn;
+    let fn_name = &sig.ident;
 
-    let exec_time_log = quote! {
+    input_fn.block = syn::parse_quote! { {
+        if !crate::config::ENV_CONFIG.enable_timings.value {
+            return #block;
+        }
+
+        let start = std::time::Instant::now();
+        let result = #block;
+
         let duration = start.elapsed();
         println!("{} took {:?}", stringify!(#fn_name), duration);
-    };
 
-    // Apply different logic based on the async attribute
-    let output = if is_async {
-        quote! {
-            #(#attrs)* #vis #sig {
-                let start = std::time::Instant::now();
-                let #result_var = (|| async #block)().await;
-                #exec_time_log
-                #result_var
-            }
-        }
-    } else {
-        quote! {
-            #(#attrs)* #vis #sig {
-                let start = std::time::Instant::now();
-                let #result_var = (|| #block)();
-                #exec_time_log
-                #result_var
-            }
-        }
-    };
+        result
+    } };
 
-    output.into()
+    input_fn.to_token_stream().into()
 }
 
 fn extract_literal(meta: &ParseNestedMeta) -> syn::Result<String> {
