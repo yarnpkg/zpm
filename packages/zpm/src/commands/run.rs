@@ -16,7 +16,7 @@ pub struct Run {
 
 impl Run {
     #[tokio::main()]
-    pub async fn execute(&self) -> error::Result<ExitCode> {
+    pub async fn execute(&self) -> Result<ExitCode, Error> {
         let mut project
             = project::Project::new(None)?;
 

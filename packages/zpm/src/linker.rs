@@ -167,32 +167,42 @@ fn get_package_info(package_data: &PackageData) -> Result<PackageInfo, Error> {
     }
 }
 
-fn remove_nm(nm_path: Path) -> error::Result<()> {
-    let entries = nm_path.fs_read_dir()?;
+fn remove_nm(nm_path: Path) -> Result<(), Error> {
+    let entries = nm_path.fs_read_dir();
 
-    let mut has_dot_entries = false;
+    match entries {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+            => return Ok(()),
 
-    for entry in entries.flatten() {
-        let path = entry.path()
-            .to_arca();
+        Err(error)
+            => return Err(error.into()),
 
-        let basename = path.basename()
-            .unwrap();
+        Ok(entries) => {
+            let mut has_dot_entries = false;
 
-        if basename.starts_with(".") && basename != ".bin" && path.fs_is_dir() {
-            has_dot_entries = true;
-            continue;
-        }
-
-        path.fs_rm()
-            .unwrap();
+            for entry in entries.flatten() {
+                let path = entry.path()
+                    .to_arca();
+        
+                let basename = path.basename()
+                    .unwrap();
+        
+                if basename.starts_with(".") && basename != ".bin" && path.fs_is_dir() {
+                    has_dot_entries = true;
+                    continue;
+                }
+        
+                path.fs_rm()
+                    .unwrap();
+            }
+        
+            if !has_dot_entries {
+                nm_path.fs_rm()?;
+            }
+        
+            Ok(())
+        },
     }
-
-    if !has_dot_entries {
-        nm_path.fs_rm()?;
-    }
-
-    Ok(())
 }
 
 fn extract_archive(project_root: &Path, locator: &Locator, package_data: &PackageData, data: &[u8]) -> Result<Path, Error> {
@@ -212,15 +222,13 @@ fn extract_archive(project_root: &Path, locator: &Locator, package_data: &Packag
             let target_path = extract_path
                 .with_join(&Path::from(&entry.name));
 
-            std::fs::create_dir_all(target_path.dirname().unwrap().to_path_buf())
-                .map_err(Arc::new)?;
-
-            std::fs::write(target_path.to_path_buf(), entry.data)
-                .map_err(Arc::new)?;
+            target_path
+                .fs_create_parent()?
+                .fs_write(&entry.data)?;
         }
 
-        ready_path.fs_write(&vec![])
-            .map_err(Arc::new)?;
+        ready_path
+            .fs_write(&vec![])?;
     }
 
     Ok(package_directory)
@@ -299,8 +307,7 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
         std::include_str!("pnp.tpl.cjs"),
     ].join("");
 
-    change_file(project.pnp_path().to_path_buf(), script, 0o755)
-        .map_err(Arc::new)?;
+    change_file(project.pnp_path().to_path_buf(), script, 0o755)?;
 
     Ok(())
 }
@@ -321,16 +328,13 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
         std::include_str!("pnp.tpl.cjs"),
     ].join("");
 
-    change_file(project.pnp_path().to_path_buf(), script, 0o755)
-        .map_err(Arc::new)?;
-
-    change_file(project.pnp_data_path().to_path_buf(), serde_json::to_string(&state).unwrap(), 0o644)
-        .map_err(Arc::new)?;
+    change_file(project.pnp_path().to_path_buf(), script, 0o755)?;
+    change_file(project.pnp_data_path().to_path_buf(), serde_json::to_string(&state).unwrap(), 0o644)?;
 
     Ok(())
 }
 
-fn populate_build_entry_dependencies(package_build_entries: &HashMap<Locator, usize>, locator_resolutions: &HashMap<Locator, Resolution>, descriptor_to_locator: &HashMap<Descriptor, Locator>) -> error::Result<HashMap<usize, HashSet<usize>>> {
+fn populate_build_entry_dependencies(package_build_entries: &HashMap<Locator, usize>, locator_resolutions: &HashMap<Locator, Resolution>, descriptor_to_locator: &HashMap<Descriptor, Locator>) -> Result<HashMap<usize, HashSet<usize>>, Error> {
     let mut package_build_dependencies = HashMap::new();
 
     for locator in package_build_entries.keys() {
@@ -380,7 +384,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
 
     let dependencies_meta = project.manifest_path()
         .if_exists()
-        .and_then(|path| std::fs::read_to_string(path.to_path_buf()).ok())
+        .and_then(|path| path.fs_read_text().ok())
         .and_then(|data| serde_json::from_str::<TopLevelConfiguration>(&data).ok())
         .and_then(|config| config.dependencies_meta)
         .unwrap_or_default();
@@ -564,8 +568,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         generate_split_setup(project, &state)?;
     }
 
-    change_file(project.pnp_loader_path().to_path_buf(), std::include_str!("pnp.loader.mjs"), 0o644)
-        .map_err(Arc::new)?;
+    change_file(project.pnp_loader_path().to_path_buf(), std::include_str!("pnp.loader.mjs"), 0o644)?;
 
     let package_build_dependencies = populate_build_entry_dependencies(
         &package_build_entries,

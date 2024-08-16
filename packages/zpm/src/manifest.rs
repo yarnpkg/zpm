@@ -60,11 +60,8 @@ pub fn parse_manifest(manifest_text: String) -> Result<Manifest, Error> {
 }
 
 pub fn read_manifest(p: &Path) -> Result<Manifest, Error> {
-    let manifest_text = fs::read_to_string(p.to_path_buf())
-        .map_err(Arc::new)?;
-
-    let manifest_data = serde_json::from_str(manifest_text.as_str())
-        .map_err(Arc::new)?;
+    let manifest_text = fs::read_to_string(p.to_path_buf())?;
+    let manifest_data = serde_json::from_str(manifest_text.as_str())?;
 
     Ok(manifest_data)
 }

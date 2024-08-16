@@ -1,6 +1,6 @@
 use clipanion::cli;
 
-use crate::{error, project};
+use crate::{error::{self, Error}, project};
 
 #[cli::command]
 #[cli::path("bin")]
@@ -8,7 +8,7 @@ use crate::{error, project};
 pub struct BinList {}
 
 impl BinList {
-    pub fn execute(&self) -> error::Result<()> {
+    pub fn execute(&self) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -20,7 +20,7 @@ pub struct Bin {
 }
 
 impl Bin {
-    pub fn execute(&self) -> error::Result<()> {
+    pub fn execute(&self) -> Result<(), Error> {
         let mut project
             = project::Project::new(None)?;
 

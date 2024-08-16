@@ -156,7 +156,7 @@ impl ScriptEnvironment {
         self
     }
 
-    fn attach_package_variables(&mut self, project: &Project, locator: &Locator) -> error::Result<()> {
+    fn attach_package_variables(&mut self, project: &Project, locator: &Locator) -> Result<(), Error> {
         let install_state = project.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
 
@@ -182,7 +182,7 @@ impl ScriptEnvironment {
     }
 
     #[track_time]
-    fn attach_binaries(&mut self, locator: &Locator, binaries: &BTreeMap<String, Binary>, relative_to: &Path) -> error::Result<()> {
+    fn attach_binaries(&mut self, locator: &Locator, binaries: &BTreeMap<String, Binary>, relative_to: &Path) -> Result<(), Error> {
         let mut hash = DefaultHasher::new();
         binaries.hash(&mut hash);
         let hash = hash.finish();
@@ -190,6 +190,19 @@ impl ScriptEnvironment {
         let dir = std::env::temp_dir()
             .to_arca()
             .with_join_str(format!("zpm-{}-{}", locator.slug(), hash));
+
+        // We try to reuse directories rather than generate the binaries at
+        // every command; I noticed that on OSX the content of these directories
+        // is sometimes purged (perhaps because we write in /tmp?), so to avoid
+        // that we check whether a known file is still there before blindly
+        // using the directory.
+        //
+        let ready_path = dir
+            .with_join_str(".ready");
+
+        if !ready_path.fs_exists() && dir.fs_exists() {
+            dir.fs_rm()?;
+        }
 
         if !dir.fs_exists() {
             let nonce = format!("{:08x}", rand::random::<u64>());
@@ -199,6 +212,10 @@ impl ScriptEnvironment {
                 .with_join_str(format!("zpm-temp-{}", nonce));
 
             temp_dir.fs_create_dir()?;
+
+            temp_dir
+                .with_join_str(".ready")
+                .fs_write_text("")?;
 
             let self_path_str = std::env::current_exe()?
                 .to_arca()
@@ -221,7 +238,8 @@ impl ScriptEnvironment {
                 }
             }
 
-            std::fs::rename(temp_dir.to_path_buf(), dir.to_path_buf())?;
+            temp_dir
+                .fs_rename(&dir)?;
         }
 
         let bin_dir_str = dir.to_string();
@@ -232,7 +250,7 @@ impl ScriptEnvironment {
         Ok(())
     }
 
-    pub fn with_package(mut self, project: &Project, locator: &Locator) -> error::Result<Self> {
+    pub fn with_package(mut self, project: &Project, locator: &Locator) -> Result<Self, Error> {
         let install_state = project.install_state
             .as_ref()
             .ok_or(Error::InstallStateNotFound)?;

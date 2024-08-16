@@ -109,9 +109,7 @@ fn convert_tar_gz_to_zip(ident: &Ident, tar_gz_data: Bytes) -> Result<Vec<u8>, E
     let mut decompressed = vec![];
 
     flate2::read::GzDecoder::new(Cursor::new(tar_gz_data))
-        .read_to_end(&mut decompressed)
-        .map_err(Arc::new)
-        .map_err(Error::IoError)?;
+        .read_to_end(&mut decompressed)?;
 
     let entries = crate::zip::entries_from_tar(&decompressed)?;
     let entries = crate::zip::strip_first_segment(entries);
@@ -228,10 +226,7 @@ pub async fn fetch_local_tarball_with_manifest<'a>(context: InstallContext<'a>, 
         .with_join_str(path);
 
     let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
-        let archive = std::fs::read(tarball_path.to_path_buf())
-            .map_err(Arc::new)?;
-
-        convert_tar_gz_to_zip(&locator.ident, Bytes::from(archive))
+        convert_tar_gz_to_zip(&locator.ident, Bytes::from(tarball_path.fs_read()?))
     }).await?;
 
     let first_entry = first_entry_from_zip(&data);

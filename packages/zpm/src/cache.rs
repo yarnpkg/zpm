@@ -108,7 +108,7 @@ impl DiskCache {
             Ok(data) => data,
             Err(err) => {
                 if err.kind() != std::io::ErrorKind::NotFound {
-                    return Err(Error::IoError(Arc::new(err)));
+                    return Err(err)?;
                 }
 
                 self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?
@@ -145,8 +145,7 @@ impl DiskCache {
             Ok(mut file) => {
                 let mut buffer = Vec::new();
 
-                file.read_to_end(&mut buffer)
-                    .map_err(Arc::new)?;
+                file.read_to_end(&mut buffer)?;
 
                 let decode: Result<(T, _), _>
                     = bincode::decode_from_slice(&buffer, self.data_config);
@@ -177,11 +176,8 @@ impl DiskCache {
     {
         let data = func().await?;
 
-        let mut file = File::create(key_path.clone())
-            .map_err(Arc::new)?;
-
-        file.write_all(&data)
-            .map_err(Arc::new)?;
+        let mut file = File::create(key_path.clone())?;
+        file.write_all(&data)?;
 
         Ok(data)
     }
@@ -194,11 +190,8 @@ impl DiskCache {
     {
         let data = func().await?;
 
-        let encoded = bincode::encode_to_vec(&data, self.data_config)
-            .map_err(Arc::new)?;
-
-        std::fs::write(key_path, encoded)
-            .map_err(Arc::new)?;
+        let encoded = bincode::encode_to_vec(&data, self.data_config)?;
+        std::fs::write(key_path, encoded)?;
 
         Ok(data)
     }

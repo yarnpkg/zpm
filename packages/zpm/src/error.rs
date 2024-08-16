@@ -4,7 +4,13 @@ use arca::Path;
 
 use crate::primitives::{Ident, Locator, Range};
 
-pub type Result<T> = anyhow::Result<T, Error>;
+fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
+    if backtrace.status() == std::backtrace::BacktraceStatus::Captured {
+        backtrace.to_string().trim_end().to_string()
+    } else {
+        "Run with RUST_BACKTRACE=1 to get a backtrace".to_string()
+    }
+}
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum Error {
@@ -47,8 +53,11 @@ pub enum Error {
     #[error("No candidates found for {0:?}")]
     NoCandidatesFound(Range),
 
-    #[error("I/O error ({0})")]
-    IoError(#[from] Arc<std::io::Error>),
+    #[error("I/O error ({inner})\n\n{}", render_backtrace(&.backtrace))]
+    IoError {
+        inner: Arc<std::io::Error>,
+        backtrace: Arc<std::backtrace::Backtrace>,
+    },
 
     #[error("UTF-8 error")]
     Utf8Error(#[from] Arc<std::str::Utf8Error>),
@@ -143,6 +152,15 @@ pub enum Error {
 
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
+        Error::IoError {
+            inner: Arc::new(error),
+            backtrace: Arc::new(std::backtrace::Backtrace::capture()),
+        }
+    }
+}
+
+impl From<bincode::error::EncodeError> for Error {
+    fn from(error: bincode::error::EncodeError) -> Self {
         Arc::new(error).into()
     }
 }

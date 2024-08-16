@@ -3,13 +3,16 @@ use std::hash::Hash;
 use bincode::{Decode, Encode};
 use zpm_macros::Parsed;
 
-use crate::{error::Error, git, semver, yarn_serialization_protocol};
+use crate::{error::Error, git, hash::Sha256, semver, yarn_serialization_protocol};
 
 use super::Ident;
 
 #[derive(Clone, Debug, Decode, Encode, Parsed, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[parse_error(Error::InvalidRange)]
 pub enum Range {
+    #[try_pattern(pattern = r"missing!")]
+    MissingPeerDependency(),
+
     #[try_pattern()]
     SemverOrWorkspace(semver::Range),
 
@@ -42,6 +45,9 @@ pub enum Range {
     #[try_pattern(prefix = "patch:")]
     Patch(String),
 
+    #[try_pattern(prefix = "virtual:", pattern = r"(.*)#([a-f0-9]*)$")]
+    Virtual(Box<Range>, Sha256),
+
     #[try_pattern(prefix = "workspace:")]
     WorkspaceSemver(semver::Range),
 
@@ -53,9 +59,6 @@ pub enum Range {
 
     #[try_pattern()]
     Git(git::GitRange),
-
-    MissingPeerDependency,
-    Virtual(Box<Range>, u64),
 }
 
 impl Range {
@@ -85,8 +88,8 @@ yarn_serialization_protocol!(Range, "", {
             Range::WorkspaceMagic(magic) => format!("workspace:{}", magic),
             Range::WorkspacePath(path) => format!("workspace:{}", path),
             Range::Git(git) => git.to_string(),
-            Range::MissingPeerDependency => "missing!".to_string(),
-            Range::Virtual(inner, hash) => format!("{} [{:016x}]", inner, hash),
+            Range::MissingPeerDependency() => "missing!".to_string(),
+            Range::Virtual(inner, hash) => format!("virtual:{}#{}", inner, hash),
         }
     }
 });

@@ -4,7 +4,7 @@ use arca::Path;
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use sha2::Digest;
 
-use crate::{error, hash::Blake2b80, misc::change_file, primitives::Locator, project::Project, script::ScriptEnvironment};
+use crate::{error::{self, Error}, hash::Blake2b80, misc::change_file, primitives::Locator, project::Project, script::ScriptEnvironment};
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -21,7 +21,7 @@ pub struct BuildRequest {
 }
 
 impl BuildRequest {
-    pub async fn run(self, project: &Project) -> error::Result<i32> {
+    pub async fn run(self, project: &Project) -> Result<i32, Error> {
         let cwd_abs = project.project_cwd
             .with_join(&self.cwd);
 
@@ -69,7 +69,7 @@ pub struct BuildManager<'a> {
     pub dependents: HashMap<usize, HashSet<usize>>,
     pub tree_hashes: HashMap<Locator, String>,
     pub queued: Vec<usize>,
-    pub running: FuturesUnordered<BoxFuture<'a, (usize, String, error::Result<i32>)>>,
+    pub running: FuturesUnordered<BoxFuture<'a, (usize, String, Result<i32, Error>)>>,
     pub build_errors: HashSet<(Locator, Path)>,
     pub build_state_out: HashMap<Path, String>,
 }
@@ -202,7 +202,7 @@ impl<'a> BuildManager<'a> {
             .unwrap()
     }
 
-    pub async fn run(mut self, project: &'a mut Project) -> error::Result<Build> {
+    pub async fn run(mut self, project: &'a mut Project) -> Result<Build, Error> {
         let build_state_path = project
             .build_state_path();
 

@@ -160,15 +160,10 @@ pub fn entries_from_folder<'a>(path: PathBuf) -> Result<Vec<Entry<'a>>, Error> {
     let mut process_queue = vec![path];
 
     while let Some(path) = process_queue.pop() {
-        let listing = std::fs::read_dir(&path)
-            .map_err(Arc::new)
-            .map_err(Error::IoError)?;
+        let listing = std::fs::read_dir(&path)?;
 
         for entry in listing {
-            let entry = entry
-                .map_err(Arc::new)
-                .map_err(Error::IoError)?;
-
+            let entry = entry?;
             let path = entry.path();
 
             if path.is_dir() {
@@ -177,13 +172,8 @@ pub fn entries_from_folder<'a>(path: PathBuf) -> Result<Vec<Entry<'a>>, Error> {
             }
 
             let name = entry.file_name().into_string().unwrap();
-            let data = std::fs::read(&path)
-                .map_err(Arc::new)
-                .map_err(Error::IoError)?;
-
-            let metadata = path.metadata()
-                .map_err(Arc::new)
-                .map_err(Error::IoError)?;
+            let data = std::fs::read(&path)?;
+            let metadata = path.metadata()?;
 
             let is_exec = metadata.permissions().mode() & 0o111 != 0;
             let mode = if is_exec { 0o755 } else { 0o644 };
@@ -407,8 +397,7 @@ impl ZipSupport for Path {
 
         let entry = entries.iter()
             .find(|entry| entry.name == path_as_string)
-            .ok_or(std::io::Error::from(std::io::ErrorKind::NotFound))
-            .map_err(Arc::new)?;
+            .ok_or(std::io::Error::from(std::io::ErrorKind::NotFound))?;
 
         Ok(String::from_utf8_lossy(&entry.data).to_string())
     }
@@ -425,8 +414,8 @@ impl ZipSupport for Path {
             Path::from(subpath).fs_read_text_from_zip_buffer(&zip_data)
         } else {
             Ok(match VIRTUAL_REGEX.replace(&path_str, "/") {
-                Cow::Borrowed(_) => self.fs_read_text().map_err(Arc::new)?,
-                Cow::Owned(path_str) => Path::from(path_str).fs_read_text().map_err(Arc::new)?,
+                Cow::Borrowed(_) => self.fs_read_text()?,
+                Cow::Owned(path_str) => Path::from(path_str).fs_read_text()?,
             })
         }
     }

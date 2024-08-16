@@ -1,6 +1,6 @@
 use clipanion::cli;
 
-use crate::{error, primitives::{descriptor::LooseDescriptor, Reference}, project};
+use crate::{error::{self, Error}, primitives::{descriptor::LooseDescriptor, Reference}, project};
 
 #[cli::command]
 #[cli::path("add")]
@@ -10,7 +10,7 @@ pub struct Add {
 
 impl Add {
     #[tokio::main()]
-    pub async fn execute(&self) -> error::Result<()> {
+    pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = project::Project::new(None)?;
 

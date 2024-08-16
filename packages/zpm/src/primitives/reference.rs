@@ -32,7 +32,7 @@ pub enum Reference {
     #[try_pattern(pattern = r"(https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
     Url(String),
 
-    #[try_pattern(prefix = "virtual:", pattern = r"(.*)#(.*)$")]
+    #[try_pattern(prefix = "virtual:", pattern = r"(.*)#([a-f0-9]*)$")]
     Virtual(Box<Reference>, Sha256),
 
     #[try_pattern(prefix = "workspace:")]
@@ -77,7 +77,7 @@ yarn_serialization_protocol!(Reference, "", {
             Reference::Link(path) => format!("link:{}", path),
             Reference::Portal(path) => format!("portal:{}", path),
             Reference::Url(url) => url.to_string(),
-            Reference::Virtual(inner, hash) => format!("{} [{}]", inner, hash.short()),
+            Reference::Virtual(inner, hash) => format!("virtual:{}#{}", inner, hash),
             Reference::Workspace(ident) => format!("workspace:{}", ident),
         }
     }

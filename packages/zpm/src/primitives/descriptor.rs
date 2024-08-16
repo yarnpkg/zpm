@@ -6,6 +6,8 @@ use bincode::{Decode, Encode};
 use rstest::rstest;
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::hash::Sha256;
+use crate::serialize::Serialized;
 use crate::{error::Error, yarn_serialization_protocol};
 
 use super::{Ident, Locator, Range};
@@ -57,12 +59,12 @@ impl Descriptor {
     }
 
     pub fn virtualized_for(&self, parent: &Locator) -> Descriptor {
-        let mut s = DefaultHasher::new();
-        parent.hash(&mut s);
+        let serialized = parent.serialized()
+            .unwrap_or_else(|_| panic!("Failed to serialize locator: {:?}", self));
 
         Descriptor {
             ident: self.ident.clone(),
-            range: Range::Virtual(Box::new(self.range.clone()), s.finish()),
+            range: Range::Virtual(Box::new(self.range.clone()), Sha256::from_string(&serialized)),
             parent: self.parent.clone(),
         }
     }
