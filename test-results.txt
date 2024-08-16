@@ -173,37 +173,37 @@
 🟥 Commands ► config ► test (folder without rcfile in ancestry / as json)
 🟥 Commands ► config ► test (folder without rcfile in ancestry / without flags)
 
-[1 / 5] packages/acceptance-tests/pkg-tests-specs/sources/commands/config/get.test.js
+[0 / 5] packages/acceptance-tests/pkg-tests-specs/sources/commands/config/get.test.js
 
-🟩 Commands ► config get ► it should print native paths
+🟥 Commands ► config get ► it should print native paths
 🟥 Commands ► config get ► it should print secrets when using the --no-redacted flag
 🟥 Commands ► config get ► it should print the requested configuration value for the current directory
 🟥 Commands ► config get ► it should support printing sub-keys
 🟥 Commands ► config get ► it shouldn't print secrets by default
 
-[2 / 5] packages/acceptance-tests/pkg-tests-specs/sources/commands/config/set.test.ts
+[0 / 5] packages/acceptance-tests/pkg-tests-specs/sources/commands/config/set.test.ts
 
-🟩 Commands ► config set ► it should allow running the command from arbitrary folders if the -H,--home option is set
+🟥 Commands ► config set ► it should allow running the command from arbitrary folders if the -H,--home option is set
 🟥 Commands ► config set ► it should print the configured value for the current directory
 🟥 Commands ► config set ► it should support setting JSON values
 🟥 Commands ► config set ► it shouldn't print secrets
-🟩 Commands ► config set ► it shouldn't remove empty arrays from the files
+🟥 Commands ► config set ► it shouldn't remove empty arrays from the files
 
-[1 / 6] packages/acceptance-tests/pkg-tests-specs/sources/commands/config/unset.test.ts
+[0 / 6] packages/acceptance-tests/pkg-tests-specs/sources/commands/config/unset.test.ts
 
-🟩 Commands ► config unset ► it should allow running the command from arbitrary folders if the -H,--home option is set
+🟥 Commands ► config unset ► it should allow running the command from arbitrary folders if the -H,--home option is set
 🟥 Commands ► config unset ► it should show a warning when unsetting a nested config setting that's not set
 🟥 Commands ► config unset ► it should show a warning when unsetting a simple config setting that's not set
 🟥 Commands ► config unset ► it should unset a complex config correctly
 🟥 Commands ► config unset ► it should unset a nested config correctly
 🟥 Commands ► config unset ► it should unset a simple config correctly
 
-[2 / 186] packages/acceptance-tests/pkg-tests-specs/sources/commands/constraints.test.ts
+[0 / 186] packages/acceptance-tests/pkg-tests-specs/sources/commands/constraints.test.ts
 
-🟩 Commands ► constraints ► should allow requiring dependencies from the yarn.config.cjs file
+🟥 Commands ► constraints ► should allow requiring dependencies from the yarn.config.cjs file
 🟥 Commands ► constraints ► should report an error when comparing objects with different key ordering
 🟥 Commands ► constraints ► should report custom errors
-🟩 Commands ► constraints ► shouldn't report errors when comparing identical objects
+🟥 Commands ► constraints ► shouldn't report errors when comparing identical objects
 🟥 Commands ► constraints ► test (empty project / empty constraints / js)
 🟥 Commands ► constraints ► test (empty project / empty constraints / prolog)
 🟥 Commands ► constraints ► test (empty project / gen_enforced_dependency (ambiguous) / js)
@@ -508,7 +508,7 @@
 🟥 Commands ► create ► it should treat '@scope@next' as '@scope/create@next'
 🟥 Commands ► create ► it should treat '@scope/app' as '@scope/create-app'
 
-[1 / 13] packages/acceptance-tests/pkg-tests-specs/sources/commands/dedupe.test.ts
+[0 / 13] packages/acceptance-tests/pkg-tests-specs/sources/commands/dedupe.test.ts
 
 🟥 Commands ► dedupe ► flags ► --json
 🟥 Commands ► dedupe ► flags ► -c,--check ► should reject with error code 1 when there are duplicates
@@ -521,10 +521,10 @@
 🟥 Commands ► dedupe ► should include a footer
 🟥 Commands ► dedupe ► strategies ► highest ► should dedupe dependencies
 🟥 Commands ► dedupe ► strategies ► highest ► should dedupe dependencies to the highest possible version
-🟩 Commands ► dedupe ► strategies ► highest ► should handle aliased packages
+🟥 Commands ► dedupe ► strategies ► highest ► should handle aliased packages
 🟥 Commands ► dedupe ► strategies ► highest ► should not throw on resolutions by npm-tag-resolver with __archiveUrl
 
-[3 / 14] packages/acceptance-tests/pkg-tests-specs/sources/commands/dlx.test.js
+[0 / 14] packages/acceptance-tests/pkg-tests-specs/sources/commands/dlx.test.js
 
 🟥 Commands ► dlx ► it should always update the binary between two calls
 🟥 Commands ► dlx ► it should forward the arguments to the binary
@@ -537,9 +537,9 @@
 🟥 Commands ► dlx ► it should support running arbitrary versions
 🟥 Commands ► dlx ► it should support running different binaries than the default one
 🟥 Commands ► dlx ► it should use the exact tag specified
-🟩 Commands ► dlx ► it shouldn't warn on unused package extensions in projects created by dlx (dependencies)
-🟩 Commands ► dlx ► it shouldn't warn on unused package extensions in projects created by dlx (peerDependencies)
-🟩 Commands ► dlx ► it shouldn't warn on unused package extensions in projects created by dlx (peerDependenciesMeta)
+🟥 Commands ► dlx ► it shouldn't warn on unused package extensions in projects created by dlx (dependencies)
+🟥 Commands ► dlx ► it shouldn't warn on unused package extensions in projects created by dlx (peerDependencies)
+🟥 Commands ► dlx ► it shouldn't warn on unused package extensions in projects created by dlx (peerDependenciesMeta)
 
 [1 / 3] packages/acceptance-tests/pkg-tests-specs/sources/commands/exec.test.ts
 
@@ -547,7 +547,7 @@
 🟥 Commands ► exec ► it should inject binaries the workspace has access to
 🟥 Commands ► exec ► it should preserve the exit code
 
-[0 / 10] packages/acceptance-tests/pkg-tests-specs/sources/commands/info.test.ts
+[3 / 10] packages/acceptance-tests/pkg-tests-specs/sources/commands/info.test.ts
 
 🟥 Commands ► info ► it should allow filtering packages by both glob ident and reference
 🟥 Commands ► info ► it should allow filtering packages by glob idents
@@ -556,9 +556,9 @@
 🟥 Commands ► info ► it should print info for other workspaces if -A,--all is set
 🟥 Commands ► info ► it should print info for the specified package
 🟥 Commands ► info ► it should print info for the transitive dependencies if -R,--recursive is set
-🟥 Commands ► info ► it should throw an error if the package is nowhere to be found
-🟥 Commands ► info ► it shouldn't print info for other workspaces by default
-🟥 Commands ► info ► it shouldn't print info for the transitive dependencies by default
+🟩 Commands ► info ► it should throw an error if the package is nowhere to be found
+🟩 Commands ► info ► it shouldn't print info for other workspaces by default
+🟩 Commands ► info ► it shouldn't print info for the transitive dependencies by default
 
 [0 / 4] packages/acceptance-tests/pkg-tests-specs/sources/commands/init.test.ts
 
@@ -618,7 +618,7 @@
 🟥 Commands ► link ► it should not load plugins from the link target
 🟥 Commands ► link ► it should not load the link target config in strict mode
 
-[5 / 18] packages/acceptance-tests/pkg-tests-specs/sources/commands/npm/audit.test.ts
+[0 / 18] packages/acceptance-tests/pkg-tests-specs/sources/commands/npm/audit.test.ts
 
 🟥 Commands ► npm audit ► it should allow excluding packages
 🟥 Commands ► npm audit ► it should allow excluding packages (deprecations)
@@ -626,8 +626,8 @@
 🟥 Commands ► npm audit ► it should allow ignoring advisories
 🟥 Commands ► npm audit ► it should allow ignoring advisories (when using --json)
 🟥 Commands ► npm audit ► it should also audit development packages by default
-🟩 Commands ► npm audit ► it should also audit only development packages if requested
-🟩 Commands ► npm audit ► it should also audit only production packages if requested
+🟥 Commands ► npm audit ► it should also audit only development packages if requested
+🟥 Commands ► npm audit ► it should also audit only production packages if requested
 🟥 Commands ► npm audit ► it should detect transitive vulnerable packages when requested
 🟥 Commands ► npm audit ► it should follow link:-protocol dependencies
 🟥 Commands ► npm audit ► it should perform the deprecation checks against the package registry, not the audit registry
@@ -635,9 +635,9 @@
 🟥 Commands ► npm audit ► it should return all vulnerabilities in a vulnerable package
 🟥 Commands ► npm audit ► it should return vulnerable packages
 🟥 Commands ► npm audit ► it should return vulnerable virtual packages
-🟩 Commands ► npm audit ► it shouldn't detect transitive vulnerable packages by default
-🟩 Commands ► npm audit ► it shouldn't report deprecations when they're set to empty strings
-🟩 Commands ► npm audit ► it shouldn't return vulnerable packages if the current version isn't affected
+🟥 Commands ► npm audit ► it shouldn't detect transitive vulnerable packages by default
+🟥 Commands ► npm audit ► it shouldn't report deprecations when they're set to empty strings
+🟥 Commands ► npm audit ► it shouldn't return vulnerable packages if the current version isn't affected
 
 [0 / 4] packages/acceptance-tests/pkg-tests-specs/sources/commands/npm/info.test.ts
 
@@ -674,7 +674,7 @@
 🟥 Commands ► npm whoami ► it should throw an error when config has an invalid npmAuthToken
 🟥 Commands ► npm whoami ► it should throw an error when no auth config is found
 
-[8 / 42] packages/acceptance-tests/pkg-tests-specs/sources/commands/pack.test.js
+[0 / 42] packages/acceptance-tests/pkg-tests-specs/sources/commands/pack.test.js
 
 🟥 Commands ► pack ► it should allow to explicitly add back a file excluded by a gitignore
 🟥 Commands ► pack ► it should allow to explicitly add back a single file excluded by a gitignore
@@ -685,9 +685,9 @@
 🟥 Commands ► pack ► it should always include the manifest, even with a "files" field
 🟥 Commands ► pack ► it should generate an archive with a custom name when using `--out`
 🟥 Commands ► pack ► it should ignore root .gitignore files when using the 'files' field
-🟩 Commands ► pack ► it should ignore the files covered by the local gitignore file
-🟩 Commands ► pack ► it should ignore the files covered by the local npmignore file
-🟩 Commands ► pack ► it should ignore the folders covered by the local npmignore file
+🟥 Commands ► pack ► it should ignore the files covered by the local gitignore file
+🟥 Commands ► pack ► it should ignore the files covered by the local npmignore file
+🟥 Commands ► pack ► it should ignore the folders covered by the local npmignore file
 🟥 Commands ► pack ► it should ignore the patterns from a gitignore if a npmignore exists
 🟥 Commands ► pack ► it should keep digging inside excluded folders (unlike gitignore!)
 🟥 Commands ► pack ► it should list all the files in a package
@@ -713,11 +713,11 @@
 🟥 Commands ► pack ► it should support gitignore patterns (**)
 🟥 Commands ► pack ► it should support when the "browser" field is an object
 🟥 Commands ► pack ► it should support writing the archive in a absolute destination
-🟩 Commands ► pack ► it shouldn't add .gitignore files to the package files
-🟩 Commands ► pack ► it shouldn't add .npmignore files to the package files
-🟩 Commands ► pack ► it shouldn't add the cache to the package files
-🟩 Commands ► pack ► it shouldn't add the lockfile to the package files
-🟩 Commands ► pack ► it shouldn't pack Yarn files by default
+🟥 Commands ► pack ► it shouldn't add .gitignore files to the package files
+🟥 Commands ► pack ► it shouldn't add .npmignore files to the package files
+🟥 Commands ► pack ► it shouldn't add the cache to the package files
+🟥 Commands ► pack ► it shouldn't add the lockfile to the package files
+🟥 Commands ► pack ► it shouldn't pack Yarn files by default
 
 [0 / 2] packages/acceptance-tests/pkg-tests-specs/sources/commands/patch.test.ts
 
@@ -749,23 +749,23 @@
 🟥 Commands ► plugin remove ► it should completely remove the key when removing the last plugin
 🟥 Commands ► plugin remove ► it should support removing a plugin via its name
 
-[4 / 5] packages/acceptance-tests/pkg-tests-specs/sources/commands/publish.test.ts
+[0 / 5] packages/acceptance-tests/pkg-tests-specs/sources/commands/publish.test.ts
 
-🟩 publish ► it should detect the gitHead for this repo
-🟩 publish ► it should not detect the gitHead for this repo
-🟩 publish ► should accept an otp and skip prompting for it
+🟥 publish ► it should detect the gitHead for this repo
+🟥 publish ► it should not detect the gitHead for this repo
+🟥 publish ► should accept an otp and skip prompting for it
 🟥 publish ► should fail when invalid otp is given
-🟩 publish ► should publish a package with the readme content
+🟥 publish ► should publish a package with the readme content
 
 [0 / 2] packages/acceptance-tests/pkg-tests-specs/sources/commands/rebuild.test.js
 
 🟥 Commands ► rebuild ► it rebuild a single package when called with arguments
 🟥 Commands ► rebuild ► it rebuild everything when called without arguments
 
-[2 / 12] packages/acceptance-tests/pkg-tests-specs/sources/commands/remove.test.js
+[0 / 12] packages/acceptance-tests/pkg-tests-specs/sources/commands/remove.test.js
 
-🟩 Commands ► remove ► it should leave alone other development dependencies
-🟩 Commands ► remove ► it should leave alone other regular dependencies
+🟥 Commands ► remove ► it should leave alone other development dependencies
+🟥 Commands ► remove ► it should leave alone other regular dependencies
 🟥 Commands ► remove ► it should remove a dependency from both regular and development environments
 🟥 Commands ► remove ► it should remove a specific development dependency amongst many
 🟥 Commands ► remove ► it should remove a specific regular dependency amongst many
@@ -777,7 +777,7 @@
 🟥 Commands ► remove ► it should remove the last development dependency from the current project
 🟥 Commands ► remove ► it should remove the last regular dependency from the current project
 
-[5 / 14] packages/acceptance-tests/pkg-tests-specs/sources/commands/run.test.js
+[7 / 14] packages/acceptance-tests/pkg-tests-specs/sources/commands/run.test.js
 
 🟥 Commands ► run misc ► it should ignore scripts when --binaries-only is set
 🟥 Commands ► run misc ► it should normalize scoped bin entries
@@ -787,19 +787,19 @@
 🟩 Commands ► run misc ► it should run the binaries from our dependencies if available
 🟩 Commands ► run misc ► it shouldn't require the "--" flag to stop interpreting options after "run" commands (binaries)
 🟩 Commands ► run misc ► it shouldn't require the "--" flag to stop interpreting options after "run" commands (scripts)
-🟥 Commands ► run with prefix ► it should properly forward the script exit codes
+🟩 Commands ► run with prefix ► it should properly forward the script exit codes
 🟥 Commands ► run with prefix ► it should properly forward the script exit codes when calling into another yarnPath binary
 🟩 Commands ► run with prefix ► it should run the selected script if available
-🟥 Commands ► run without prefix ► it should properly forward the script exit codes
+🟩 Commands ► run without prefix ► it should properly forward the script exit codes
 🟥 Commands ► run without prefix ► it should properly forward the script exit codes when calling into another yarnPath binary
 🟩 Commands ► run without prefix ► it should run the selected script if available
 
-[0 / 10] packages/acceptance-tests/pkg-tests-specs/sources/commands/set/version.test.ts
+[1 / 10] packages/acceptance-tests/pkg-tests-specs/sources/commands/set/version.test.ts
 
 🟥 Commands ► set version ► it should always set yarnPath if --yarn-path is set
 🟥 Commands ► set version ► it should always set yarnPath if one already exists
 🟥 Commands ► set version ► it should never set yarnPath if --no-yarn-path is set
-🟥 Commands ► set version ► it should prevent using --no-yarn-path with arbitrary files
+🟩 Commands ► set version ► it should prevent using --no-yarn-path with arbitrary files
 🟥 Commands ► set version ► it should set yarnPath even if yarnPath is set outside of the project
 🟥 Commands ► set version ► it should set yarnPath if corepack is disabled, even when the version is semver
 🟥 Commands ► set version ► it should set yarnPath if the version is an arbitrary file
@@ -835,19 +835,19 @@
 🟥 Commands ► unplug ► it should unplug all dependencies matching a glob pattern
 🟥 Commands ► unplug ► it should unplug all dependencies satisfying a range
 
-[3 / 9] packages/acceptance-tests/pkg-tests-specs/sources/commands/up.test.ts
+[0 / 9] packages/acceptance-tests/pkg-tests-specs/sources/commands/up.test.ts
 
 🟥 Commands ► up ► it should bump dependency ranges to their latest
-🟩 Commands ► up ► it should skip build scripts when using --mode=skip-build
-🟩 Commands ► up ► it should skip build scripts when using --mode=skip-build (recursive)
+🟥 Commands ► up ► it should skip build scripts when using --mode=skip-build
+🟥 Commands ► up ► it should skip build scripts when using --mode=skip-build (recursive)
 🟥 Commands ► up ► it should upgrade all dependencies matching a glob pattern (scope & star & range)
 🟥 Commands ► up ► it should upgrade all dependencies matching a glob pattern (scope & star)
 🟥 Commands ► up ► it should upgrade all dependencies when the name is *
 🟥 Commands ► up ► it should upgrade regular dependencies to the current project (fixed tag)
 🟥 Commands ► up ► it should upgrade regular dependencies to the current project (resolved tag)
-🟩 Commands ► up ► it shouldn't do anything when the dependency is already the latest
+🟥 Commands ► up ► it shouldn't do anything when the dependency is already the latest
 
-[0 / 18] packages/acceptance-tests/pkg-tests-specs/sources/commands/version.test.ts
+[1 / 18] packages/acceptance-tests/pkg-tests-specs/sources/commands/version.test.ts
 
 🟥 Commands ► version check ► it should correctly report a dependent workspace when unable to upgrade its version.
 🟥 Commands ► version check ► it should immediatly increase the version number for a workspace when using --immediate, even if preferDeferredVersions is set
@@ -866,11 +866,11 @@
 🟥 Commands ► version check ► it shouldn't immediatly increase the version number for a workspace when using preferDeferredVersions
 🟥 Commands ► version check ► it shouldn't work if the immediate bump would be lower than the planned version (incremental strategy)
 🟥 Commands ► version check ► it shouldn't work if the immediate bump would be lower than the planned version (semver strategy)
-🟥 Commands ► version check ► it shouldn't work if the strategy isn't semver and there is no prior version
+🟩 Commands ► version check ► it shouldn't work if the strategy isn't semver and there is no prior version
 
-[1 / 9] packages/acceptance-tests/pkg-tests-specs/sources/commands/version/apply.test.ts
+[0 / 9] packages/acceptance-tests/pkg-tests-specs/sources/commands/version/apply.test.ts
 
-🟩 Commands ► version apply ► it should apply "decline"
+🟥 Commands ► version apply ► it should apply "decline"
 🟥 Commands ► version apply ► it should apply the new version to multiple packages if needed
 🟥 Commands ► version apply ► it should apply the new version to the relevant package
 🟥 Commands ► version apply ► it should auto-update the dependencies (explicit range)
@@ -880,18 +880,18 @@
 🟥 Commands ► version apply ► it should only apply the new version to the relevant packages
 🟥 Commands ► version apply ► it should successfully apply a version bump that can't be described by a strategy (deferred)
 
-[7 / 10] packages/acceptance-tests/pkg-tests-specs/sources/commands/version/check.test.js
+[1 / 10] packages/acceptance-tests/pkg-tests-specs/sources/commands/version/check.test.js
 
 🟥 Commands ► version check ► it should detect that a dependent workspace changed vs master
 🟥 Commands ► version check ► it should detect that a dependent workspace changed vs master, even when the current workspace already has a bump scheduled
-🟥 Commands ► version check ► it should detect that a workspace changed vs master
-🟩 Commands ► version check ► it should pass for basic repositories
-🟩 Commands ► version check ► it shouldn't detect a change when pulling master
-🟩 Commands ► version check ► it shouldn't throw if a dependent workspace has been bumped
-🟩 Commands ► version check ► it shouldn't throw if a dependent workspace has declined to be bumped
-🟩 Commands ► version check ► it shouldn't throw if a modified workspace has been bumped
-🟩 Commands ► version check ► it shouldn't throw if a modified workspace has declined to be bumped
-🟩 Commands ► version check ► it shouldn't throw if changes were reverted
+🟩 Commands ► version check ► it should detect that a workspace changed vs master
+🟥 Commands ► version check ► it should pass for basic repositories
+🟥 Commands ► version check ► it shouldn't detect a change when pulling master
+🟥 Commands ► version check ► it shouldn't throw if a dependent workspace has been bumped
+🟥 Commands ► version check ► it shouldn't throw if a dependent workspace has declined to be bumped
+🟥 Commands ► version check ► it shouldn't throw if a modified workspace has been bumped
+🟥 Commands ► version check ► it shouldn't throw if a modified workspace has declined to be bumped
+🟥 Commands ► version check ► it shouldn't throw if changes were reverted
 
 [0 / 5] packages/acceptance-tests/pkg-tests-specs/sources/commands/why.test.ts
 
@@ -918,7 +918,7 @@
 🟥 Commands ► workspaces focus ► should not follow local workspace devDependencies for production installs
 🟥 Commands ► workspaces focus ► should only install production dependencies if requested
 
-[0 / 28] packages/acceptance-tests/pkg-tests-specs/sources/commands/workspaces/foreach.test.js
+[1 / 28] packages/acceptance-tests/pkg-tests-specs/sources/commands/workspaces/foreach.test.js
 
 🟥 Commands ► workspace foreach ► --since --recursive runs on workspaces changed and their dependents
 🟥 Commands ► workspace foreach ► --since runs on no workspaces if there are no staged or unstaged changes on the default branch
@@ -939,7 +939,7 @@
 🟥 Commands ► workspace foreach ► should only run the scripts on workspaces that match the --include path list with globs
 🟥 Commands ► workspace foreach ► should prefix the output and include timing information when run with -vv (two verbose levels)
 🟥 Commands ► workspace foreach ► should prefix the output when run with one --verbose
-🟥 Commands ► workspace foreach ► should return correct exit code when encountered errors in running scripts
+🟩 Commands ► workspace foreach ► should return correct exit code when encountered errors in running scripts
 🟥 Commands ► workspace foreach ► should run execute global scripts even on workspaces that don't declare them
 🟥 Commands ► workspace foreach ► should run on current and descendant workspaces when --worktree is set
 🟥 Commands ► workspace foreach ► should run scripts in parallel and interlace the output when run with --parallel --interlaced
@@ -1194,14 +1194,14 @@
 🟥 Features ► Plugins ► it should properly load multiple plugins via the local rc file, in the right order
 🟥 Features ► Plugins ► it should throw an error when fetching the plugin but the checksum does not match
 
-[4 / 7] packages/acceptance-tests/pkg-tests-specs/sources/features/pnpLoose.test.ts
+[3 / 7] packages/acceptance-tests/pkg-tests-specs/sources/features/pnpLoose.test.ts
 
 🟥 Features ► PnP Loose ► it should allow resolutions to top-level hoisting candidates
 🟥 Features ► PnP Loose ► it should allow resolutions to top-level hoisting candidates (even if it's an unmet peer dependency)
 🟥 Features ► PnP Loose ► it should allow resolutions to top-level hoisting candidates (even if they have peer dependencies)
 🟩 Features ► PnP Loose ► it should install a root workspace without any dependencies (named)
 🟩 Features ► PnP Loose ► it should install a root workspace without any dependencies (unnamed)
-🟩 Features ► PnP Loose ► it should log an exception if a dependency tries to require something it doesn't own but that can be accessed through hoisting
+🟥 Features ► PnP Loose ► it should log an exception if a dependency tries to require something it doesn't own but that can be accessed through hoisting
 🟩 Features ► PnP Loose ► it should throw an exception if a dependency tries to require something it doesn't own that isn't hoisted
 
 [1 / 3] packages/acceptance-tests/pkg-tests-specs/sources/features/pnpm.test.ts
@@ -1216,13 +1216,13 @@
 🟥 Features ► Project detection ► it should move upward until it finds the project
 🟥 Features ► Project detection ► it shouldn't cross past lockfiles
 
-[2 / 9] packages/acceptance-tests/pkg-tests-specs/sources/features/prunedNativeDeps.test.ts
+[1 / 9] packages/acceptance-tests/pkg-tests-specs/sources/features/prunedNativeDeps.test.ts
 
 🟥 Features ► Pruned native deps ► should also validate other architectures than the current one if necessary when using --check-cache
 🟥 Features ► Pruned native deps ► should detect packages being tampered when using --check-cache
 🟥 Features ► Pruned native deps ► should only fetch other architectures when using --check-cache if they are already in the cache
 🟥 Features ► Pruned native deps ► should overfetch if requested to do so
-🟩 Features ► Pruned native deps ► should produce a stable lockfile, regardless of the architecture
+🟥 Features ► Pruned native deps ► should produce a stable lockfile, regardless of the architecture
 🟩 Features ► Pruned native deps ► should produce a stable PnP hook, regardless of the architecture
 🟥 Features ► Pruned native deps ► should resolve all dependencies, regardless of the system
 🟥 Features ► Pruned native deps ► shouldn't break when using --check-cache with native packages
@@ -1341,7 +1341,7 @@
 🟥 Node_Modules ► should wire via hardlinks files having the same content when in nmMode: hardlinks-global
 🟥 Node_Modules ► workspace packages shouldn't be hoisted if they conflict with root dependencies
 
-[6 / 40] packages/acceptance-tests/pkg-tests-specs/sources/plugins/plugin-typescript.test.ts
+[0 / 40] packages/acceptance-tests/pkg-tests-specs/sources/plugins/plugin-typescript.test.ts
 
 🟥 Plugins ► typescript ► Adding types ► it should add @types with the range '^<original-major>' by default
 🟥 Plugins ► typescript ► Adding types ► it should add @types with the range '^<original-major>' if the ranges of the original descriptor match, but the @types aren't installed
@@ -1377,14 +1377,14 @@
 🟥 Plugins ► typescript ► Removing types ► it should automatically remove @types peerDependencies from the current workspace when a tsconfig is detected in the root project of the current workspace
 🟥 Plugins ► typescript ► Removing types ► it should automatically remove @types peerDependencies from the current workspace with tsconfig.json present
 🟥 Plugins ► typescript ► Removing types ► it should automatically remove @types peerDependencies from the current workspace with tsEnableAutoTypes set to true
-🟩 Plugins ► typescript ► Removing types ► it should not automatically remove @types dependencies from the current workspace without tsconfig.json present or tsEnableAutoTypes
-🟩 Plugins ► typescript ► Removing types ► it should not automatically remove @types devDependencies from the current workspace without tsconfig.json present or tsEnableAutoTypes
-🟩 Plugins ► typescript ► Removing types ► it should not automatically remove @types from dependencies without tsconfig or tsEnableAutoTypes
-🟩 Plugins ► typescript ► Removing types ► it should not automatically remove @types from devDependencies without tsconfig or tsEnableAutoTypes
-🟩 Plugins ► typescript ► Removing types ► it should not automatically remove @types from peerDependencies without tsconfig or tsEnableAutoTypes
-🟩 Plugins ► typescript ► Removing types ► it should not automatically remove @types peerDependencies from the current workspace without tsconfig.json present or tsEnableAutoTypes
+🟥 Plugins ► typescript ► Removing types ► it should not automatically remove @types dependencies from the current workspace without tsconfig.json present or tsEnableAutoTypes
+🟥 Plugins ► typescript ► Removing types ► it should not automatically remove @types devDependencies from the current workspace without tsconfig.json present or tsEnableAutoTypes
+🟥 Plugins ► typescript ► Removing types ► it should not automatically remove @types from dependencies without tsconfig or tsEnableAutoTypes
+🟥 Plugins ► typescript ► Removing types ► it should not automatically remove @types from devDependencies without tsconfig or tsEnableAutoTypes
+🟥 Plugins ► typescript ► Removing types ► it should not automatically remove @types from peerDependencies without tsconfig or tsEnableAutoTypes
+🟥 Plugins ► typescript ► Removing types ► it should not automatically remove @types peerDependencies from the current workspace without tsconfig.json present or tsEnableAutoTypes
 
-[36 / 41] packages/acceptance-tests/pkg-tests-specs/sources/pnp-esm.test.ts
+[40 / 41] packages/acceptance-tests/pkg-tests-specs/sources/pnp-esm.test.ts
 
 🟩 Plug'n'Play - ESM ► it should allow absolute imports with search params
 🟩 Plug'n'Play - ESM ► it should allow extensionless commonjs imports
@@ -1398,9 +1398,9 @@
 🟩 Plug'n'Play - ESM ► it should load commonjs with an unknown extension
 🟩 Plug'n'Play - ESM ► it should load extensionless commonjs files as an entrypoint
 🟩 Plug'n'Play - ESM ► it should load symlinked extensionless commonjs files as an entrypoint
-🟥 Plug'n'Play - ESM ► it should not allow unknown extensions with {type: "module"}
-🟥 Plug'n'Play - ESM ► it should not resolve extensions
-🟥 Plug'n'Play - ESM ► it should not resolve JSON modules without an import assertion/attribute
+🟩 Plug'n'Play - ESM ► it should not allow unknown extensions with {type: "module"}
+🟩 Plug'n'Play - ESM ► it should not resolve extensions
+🟩 Plug'n'Play - ESM ► it should not resolve JSON modules without an import assertion/attribute
 🟩 Plug'n'Play - ESM ► it should preserve search params in the resolve result (cache busting)
 🟩 Plug'n'Play - ESM ► it should resolve JSON modules with an import assertion/attribute
 🟩 Plug'n'Play - ESM ► it should respect exports
@@ -1418,7 +1418,7 @@
 🟩 Plug'n'Play - ESM ► it should throw ERR_REQUIRE_ESM when requiring a file with type=module
 🟩 Plug'n'Play - ESM ► it should use legacy resolve when exports is missing
 🟩 Plug'n'Play - ESM ► private import mappings ► it should allow importing files regardless of parent URL
-🟥 Plug'n'Play - ESM ► private import mappings ► it should not allow mapping to another private mapping
+🟩 Plug'n'Play - ESM ► private import mappings ► it should not allow mapping to another private mapping
 🟩 Plug'n'Play - ESM ► private import mappings ► it should support conditions
 🟩 Plug'n'Play - ESM ► private import mappings ► it should support mapping to a dependency
 🟩 Plug'n'Play - ESM ► private import mappings ► it should support private import mappings

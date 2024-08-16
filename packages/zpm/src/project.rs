@@ -174,27 +174,9 @@ impl Project {
         let re_parsed: InstallState
             = serde_json::from_str(&contents)?;
 
-        crate::misc::change_file(link_info_path.to_path_buf(), contents, 0o644)
-            .map_err(|err| Error::LockfileWriteError(Arc::new(err)))?;
+        crate::misc::change_file(link_info_path.to_path_buf(), contents, 0o644)?;
 
-        if re_parsed != *install_state {
-            println!("is lockfile identical? {:?}", re_parsed.lockfile == install_state.lockfile);
-            println!("is resolution tree identical? {:?}", re_parsed.resolution_tree == install_state.resolution_tree);
-            println!("is packages by location identical? {:?}", re_parsed.packages_by_location == install_state.packages_by_location);
-            println!("is locations by package identical? {:?}", re_parsed.locations_by_package == install_state.locations_by_package);
-            println!("is optional packages identical? {:?}", re_parsed.optional_packages == install_state.optional_packages);
-
-            println!("is resolution tree / roots identical? {:?}", re_parsed.resolution_tree.roots == install_state.resolution_tree.roots);
-            println!("is resolution tree / locator resolutions identical? {:?}", re_parsed.resolution_tree.locator_resolutions == install_state.resolution_tree.locator_resolutions);
-            println!("is resolution tree / descriptor to locator identical? {:?}", re_parsed.resolution_tree.descriptor_to_locator == install_state.resolution_tree.descriptor_to_locator);
-            println!("is resolution tree / optional builds identical? {:?}", re_parsed.resolution_tree.optional_builds == install_state.resolution_tree.optional_builds);
-            
-            println!("{:#?}", re_parsed.resolution_tree.descriptor_to_locator);
-            println!("{:#?}", install_state.resolution_tree.descriptor_to_locator);
-
-            assert_eq!(&re_parsed, install_state);
-
-        }
+        assert_eq!(&re_parsed, install_state);
 
         Ok(())
     }
@@ -207,8 +189,9 @@ impl Project {
             = serde_json::to_string_pretty(lockfile)
                 .map_err(|err| Error::LockfileGenerationError(Arc::new(err)))?;
 
-        crate::misc::change_file(lockfile_path.to_path_buf(), contents, 0o644)
-            .map_err(|err| Error::LockfileWriteError(Arc::new(err)))
+        crate::misc::change_file(lockfile_path.to_path_buf(), contents, 0o644)?;
+
+        Ok(())
     }
 
     pub fn package_cache(&self) -> CompositeCache {

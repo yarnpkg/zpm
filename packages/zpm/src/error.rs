@@ -95,9 +95,6 @@ pub enum Error {
     #[error("Lockfile generation error")]
     LockfileGenerationError(Arc<serde_json::Error>),
 
-    #[error("An error occured while persisting the lockfile on disk")]
-    LockfileWriteError(Arc<std::io::Error>),
-
     #[error("Git error")]
     GitError,
 

@@ -5,21 +5,23 @@ use zpm_macros::track_time;
 
 mod add;
 mod bin;
+mod default;
 mod exec;
 mod install;
 mod node;
-mod default;
 mod run;
+mod version;
 
 clipanion::program!(YarnCli, [
     add::Add,
     bin::BinList,
     bin::Bin,
+    default::Default,
     exec::Exec,
     install::Install,
-    default::Default,
     node::Node,
     run::Run,
+    version::Version,
 ]);
 
 #[track_time]
