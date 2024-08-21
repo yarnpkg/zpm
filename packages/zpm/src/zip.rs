@@ -191,34 +191,49 @@ pub fn entries_from_folder<'a>(path: PathBuf) -> Result<Vec<Entry<'a>>, Error> {
 }
 
 pub fn entries_from_zip(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
-    let end = buffer.len() - std::mem::size_of::<EndOfCentralDirectoryRecord>();
+    let end_of_central_directory_record_offset = buffer.len() - std::mem::size_of::<EndOfCentralDirectoryRecord>();
+
     let end_of_central_directory_record = unsafe {
-        &*(buffer[end..].as_ptr() as *const EndOfCentralDirectoryRecord)
+        &*(buffer[end_of_central_directory_record_offset..].as_ptr() as *const EndOfCentralDirectoryRecord)
     };
 
-    let mut offset = 0;
     let mut entries = vec![];
 
-    while offset < end_of_central_directory_record.offset_of_central_directory as usize {
-        let general_record = unsafe {
-            &*(buffer[offset..].as_ptr() as *const GeneralRecord)
+    let mut central_directory_record_offset
+        = end_of_central_directory_record.offset_of_central_directory as usize;
+
+    while central_directory_record_offset < end_of_central_directory_record_offset {
+        let central_directory_record = unsafe {
+            &*(buffer[central_directory_record_offset..].as_ptr() as *const CentralDirectoryRecord)
         };
 
-        let name = std::str::from_utf8(&buffer[offset + 30..offset + 30 + general_record.header.file_name_length as usize])
+        let local_file_header_offset
+            = central_directory_record.relative_offset_of_local_header as usize;
+
+        let general_record = unsafe {
+            &*(buffer[local_file_header_offset..].as_ptr() as *const GeneralRecord)
+        };
+
+        let name_offset = local_file_header_offset + std::mem::size_of::<GeneralRecord>();
+        let data_offset = name_offset + general_record.header.file_name_length as usize;
+
+        let name = std::str::from_utf8(&buffer[name_offset..name_offset + general_record.header.file_name_length as usize])
             .map_err(Arc::new)
             .map_err(Error::Utf8Error)?;
 
-        let size = general_record.header.compressed_size as usize;
-        let data = &buffer[offset + 30 + general_record.header.file_name_length as usize..offset + 30 + general_record.header.file_name_length as usize + size];
+        let data_size = general_record.header.compressed_size as usize;
+        let data = &buffer[data_offset..data_offset + data_size];
 
         entries.push(Entry {
             name: name.to_string(),
-            mode: 0o644,
+            mode: central_directory_record.external_file_attributes as u64 >> 16,
             crc: general_record.header.crc_32,
             data: Cow::Borrowed(data),
         });
 
-        offset += 30 + general_record.header.file_name_length as usize + size;
+        central_directory_record_offset += std::mem::size_of::<CentralDirectoryRecord>()
+            + general_record.header.file_name_length as usize
+            + general_record.header.extra_field_length as usize;
     }
 
     Ok(entries)
@@ -329,7 +344,7 @@ fn inject_general_record(target: &mut Vec<u8>, entry: &Entry) {
             any_as_u8_slice(&GeneralRecord {
                 signature: [0x50, 0x4b, 0x03, 0x04],
                 header: FileHeader {
-                    version_needed_to_extract: 0x14,
+                    version_needed_to_extract: 0x0A,
                     general_purpose_bit_flag: 0x00,
                     compression_method: 0x00,
                     last_mod_file_time: 0xae40,
@@ -356,7 +371,7 @@ fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, offset: 
         target.extend_from_slice(
             any_as_u8_slice(&CentralDirectoryRecord {
                 signature: [0x50, 0x4b, 0x01, 0x02],
-                version_made_by: 0x08,
+                version_made_by: 0x0314, // UNIX
                 header: FileHeader {
                     version_needed_to_extract: 0x14,
                     general_purpose_bit_flag: 0x00,
@@ -372,7 +387,7 @@ fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, offset: 
                 file_comment_length: 0x00,
                 disk_number_start: 0x00,
                 internal_file_attributes: 0x00,
-                external_file_attributes: 0x00,
+                external_file_attributes: (entry.mode as u32) << 16,
                 relative_offset_of_local_header: offset as u32,
             }),
         );

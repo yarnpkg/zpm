@@ -17,6 +17,34 @@ pub struct CompositeCache {
 }
 
 impl CompositeCache {
+    pub fn key_path<K: Decode + Encode>(&self, key: &K, ext: &str) -> Result<Path, Error> {
+        if let Some(ref cache) = self.local_cache {
+            return cache.key_path(key, ext);
+        }
+
+        if let Some(ref cache) = self.global_cache {
+            return cache.key_path(key, ext);
+        }
+
+        panic!("Expected at least one cache to be set");
+    }
+
+    pub async fn upsert_blob_or_mock<K, R, F>(&self, is_mock_request: bool, key: K, ext: &str, func: F) -> Result<(Path, Vec<u8>, Sha256), Error>
+    where
+        K: Clone + Decode + Encode,
+        R: Future<Output = Result<Vec<u8>, Error>>,
+        F: FnOnce() -> R,
+    {
+        if is_mock_request {
+            let data = func().await?;
+            let checksum = Sha256::from_data(&data);
+
+            Ok((Path::new(), data, checksum))
+        } else {
+            self.upsert_blob(key, ext, func).await
+        }
+    }
+
     pub async fn upsert_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<(Path, Vec<u8>, Sha256), Error>
     where
         K: Clone + Decode + Encode,
@@ -37,7 +65,7 @@ impl CompositeCache {
             return cache.upsert_blob(key, ext, func).await;
         }
 
-        panic!("Cache miss");
+        panic!("Expected at least one cache to be set");
     }
 
     pub async fn upsert_serialized<K, T, R, F>(&self, key: K, func: F) -> Result<(Path, T), Error>
@@ -82,12 +110,7 @@ impl DiskCache {
         }
     }
 
-    pub async fn upsert_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<(Path, Vec<u8>, Sha256), Error>
-    where
-        K: Decode + Encode,
-        R: Future<Output = Result<Vec<u8>, Error>>,
-        F: FnOnce() -> R,
-    {
+    pub fn key_path<K: Decode + Encode>(&self, key: &K, ext: &str) -> Result<Path, Error> {
         let serialized_key = bincode::encode_to_vec(&key, self.data_config)
             .map_err(Arc::new)?;
 
@@ -98,8 +121,19 @@ impl DiskCache {
         let key_path = self.cache_path
             .with_join_str(format!("{:064x}{}", key, ext));
 
-        let key_path_buf = key_path
-            .to_path_buf();
+        Ok(key_path)
+    }
+
+    pub async fn upsert_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<(Path, Vec<u8>, Sha256), Error>
+    where
+        K: Decode + Encode,
+        R: Future<Output = Result<Vec<u8>, Error>>,
+        F: FnOnce() -> R,
+    {
+        let key_path
+            = self.key_path(&key, ext)?;
+        let key_path_buf
+            = key_path.to_path_buf();
 
         let read
             = std::fs::read(key_path_buf.clone());

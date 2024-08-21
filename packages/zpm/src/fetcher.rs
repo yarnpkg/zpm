@@ -22,6 +22,17 @@ pub enum PackageData {
         discard_from_lookup: bool,
     },
 
+    MissingZip {
+        /** Path of the .zip file on disk */
+        archive_path: Path,
+
+        /** Directory from which relative links from link:/file:/portal: dependencies will be resolved */
+        context_directory: Path,
+
+        /** Directory that contains the package.json file */
+        package_directory: Path,
+    },
+
     Zip {
         /** Path of the .zip file on disk */
         archive_path: Path,
@@ -42,6 +53,7 @@ impl PackageData {
     pub fn data_root(&self) -> &Path {
         match self {
             PackageData::Local {package_directory, ..} => package_directory,
+            PackageData::MissingZip {archive_path, ..} => archive_path,
             PackageData::Zip {archive_path, ..} => archive_path,
         }
     }
@@ -50,6 +62,7 @@ impl PackageData {
     pub fn context_directory(&self) -> &Path {
         match self {
             PackageData::Local {package_directory, ..} => package_directory,
+            PackageData::MissingZip {context_directory, ..} => context_directory,
             PackageData::Zip {context_directory, ..} => context_directory,
         }
     }
@@ -58,6 +71,7 @@ impl PackageData {
     pub fn package_directory(&self) -> &Path {
         match self {
             PackageData::Local {package_directory, ..} => package_directory,
+            PackageData::MissingZip {package_directory, ..} => package_directory,
             PackageData::Zip {package_directory, ..} => package_directory,
         }
     }
@@ -70,6 +84,7 @@ impl PackageData {
     pub fn checksum(&self) -> Option<Sha256> {
         match self {
             PackageData::Local {..} => None,
+            PackageData::MissingZip {..} => None,
             PackageData::Zip {checksum, ..} => Some(checksum.clone()),
         }
     }
@@ -77,6 +92,7 @@ impl PackageData {
     pub fn link_type(&self) -> PackageLinking {
         match self {
             PackageData::Local {..} => PackageLinking::Soft,
+            PackageData::MissingZip {..} => PackageLinking::Hard,
             PackageData::Zip {..} => PackageLinking::Hard,
         }
     }
@@ -89,6 +105,10 @@ impl PackageData {
                     .fs_read_text()?;
 
                 Ok(text)
+            },
+
+            PackageData::MissingZip {..} => {
+                panic!("Cannot read files from a package that didn't get truly fetched");
             },
 
             PackageData::Zip {data, ..} => p
@@ -119,7 +139,7 @@ fn convert_folder_to_zip(ident: &Ident, folder_path: &Path) -> Result<Vec<u8>, E
     Ok(crate::zip::craft_zip(&entries))
 }
 
-pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, parent_data: Option<PackageData>) -> Result<PackageData, Error> {
+pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_request: bool, parent_data: Option<PackageData>) -> Result<PackageData, Error> {
     match &locator.reference {
         Reference::Link(path)
             => fetch_link(path, parent_data),
@@ -137,10 +157,10 @@ pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, parent_da
             => Ok(fetch_folder_with_manifest(context, locator, path, parent_data).await?.1),
 
         Reference::Semver(version)
-            => fetch_semver(context, locator, &locator.ident, version).await,
+            => fetch_semver(context, locator, &locator.ident, version, is_mock_request).await,
 
         Reference::SemverAlias(ident, version)
-            => fetch_semver(context, locator, ident, version).await,
+            => fetch_semver(context, locator, ident, version, is_mock_request).await,
 
         Reference::Workspace(ident)
             => fetch_workspace(context, ident),
@@ -278,14 +298,28 @@ pub async fn fetch_folder_with_manifest<'a>(context: InstallContext<'a>, locator
     }))
 }
 
-pub async fn fetch_semver<'a>(context: InstallContext<'a>, locator: &Locator, ident: &Ident, version: &semver::Version) -> Result<PackageData, Error> {
+pub async fn fetch_semver<'a>(context: InstallContext<'a>, locator: &Locator, ident: &Ident, version: &semver::Version, is_mock_request: bool) -> Result<PackageData, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
+
+    if is_mock_request {
+        let archive_path = context.package_cache.unwrap()
+            .key_path(locator, ".zip")?;
+
+        let package_directory = archive_path
+            .with_join_str(ident.nm_subdir());
+
+        return Ok(PackageData::MissingZip {
+            archive_path,
+            context_directory: package_directory.clone(),
+            package_directory,
+        });
+    }
 
     let registry_url = project.config.registry_url_for(ident);
     let url = format!("{}/{}/-/{}-{}.tgz", registry_url, ident, ident.name(), version);
 
-    let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
+    let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob_or_mock(is_mock_request, locator.clone(), ".zip", || async {
         let client = http_client()?;
 
         let response = client.get(url.clone()).send().await

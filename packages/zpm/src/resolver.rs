@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, fmt, marker::PhantomData, str::FromSt
 use bincode::{Decode, Encode};
 use serde::{de::{self, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer, Serialize};
 
-use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_remote_tarball_with_manifest, PackageData}, git::{resolve_git_treeish, GitRange}, http::http_client, install::InstallContext, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver};
+use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_remote_tarball_with_manifest, PackageData}, git::{resolve_git_treeish, GitRange}, http::http_client, install::InstallContext, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, system};
 
 pub struct ResolveResult {
     pub resolution: Resolution,
@@ -54,6 +54,10 @@ pub struct Resolution {
     #[serde(default)]
     #[serde(skip_serializing_if = "HashSet::is_empty")]
     pub missing_peer_dependencies: HashSet<Ident>,
+
+    #[serde(default)]
+    #[serde(flatten)]
+    pub conditions: Option<system::Requirements>,
 }
 
 impl Resolution {
@@ -74,6 +78,7 @@ impl Resolution {
             peer_dependencies: manifest.peer_dependencies,
             optional_dependencies,
             missing_peer_dependencies: HashSet::new(),
+            conditions: manifest.conditions,
         }
     }
 }
@@ -128,6 +133,7 @@ pub fn resolve_link(ident: &Ident, path: &str, parent: &Option<Locator>) -> Resu
         peer_dependencies: HashMap::new(),
         optional_dependencies: HashSet::new(),
         missing_peer_dependencies: HashSet::new(),
+        conditions: None,
     };
 
     Ok(ResolveResult::new(resolution))
@@ -197,6 +203,7 @@ pub async fn resolve_git(ident: Ident, git_range: &GitRange) -> Result<ResolveRe
         peer_dependencies: HashMap::new(),
         optional_dependencies: HashSet::new(),
         missing_peer_dependencies: HashSet::new(),
+        conditions: None,
     };
 
     Ok(ResolveResult::new(resolution))

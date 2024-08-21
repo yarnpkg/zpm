@@ -31,7 +31,7 @@ pub enum LinkerData {
     Pnp(PnpLinkerData),
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PackageMeta {
     #[serde(default, skip_serializing_if = "is_default")]
@@ -67,25 +67,23 @@ static UNPLUG_EXT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\.(exe|bin|h|hh|hpp|c|cc|cpp|java|jar|node)$").unwrap()
 });
 
-fn check_build(locator: &Locator, package_meta: Option<&PackageMeta>, package_info: &PackageInfo, entries: &[Entry]) -> Vec<build::Command> {
-    let built = package_meta
-        .and_then(|meta| meta.built)
-        .unwrap_or(true);
-
-    if !built {
+fn check_build(locator: &Locator, package_info: &Option<PackageInfo>, package_meta: &PackageMeta, entries: &[Entry]) -> Vec<build::Command> {
+    if !package_meta.built.unwrap_or(true) {
         return vec![];
     }
 
     let binding_gyp_name
         = format!("node_modules/{}/binding.gyp", locator.ident.as_str());
 
-    let build_scripts = UNPLUG_SCRIPTS.iter()
-        .filter_map(|k| package_info.scripts.get(*k))
-        .map(|v| build::Command::Script(v.clone()))
-        .collect::<Vec<_>>();
+    if let Some(package_info) = package_info {
+        let build_scripts = UNPLUG_SCRIPTS.iter()
+            .filter_map(|k| package_info.scripts.get(*k))
+            .map(|v| build::Command::Script(v.clone()))
+            .collect::<Vec<_>>();
 
-    if !build_scripts.is_empty() {
-        return build_scripts;
+        if !build_scripts.is_empty() {
+            return build_scripts;
+        }
     }
 
     if entries.iter().any(|entry| entry.name == binding_gyp_name) {
@@ -95,15 +93,15 @@ fn check_build(locator: &Locator, package_meta: Option<&PackageMeta>, package_in
     vec![]
 }
 
-fn check_extract(package_meta: Option<&PackageMeta>, package_info: &PackageInfo, build_commands: &[build::Command], entries: &[Entry]) -> bool {
-    if let Some(meta) = package_meta {
-        if let Some(unplugged) = meta.unplugged {
-            return unplugged;
-        }
+fn check_extract(package_info: &Option<PackageInfo>, package_meta: &PackageMeta, build_commands: &[build::Command], entries: &[Entry]) -> bool {
+    if let Some(unplugged) = package_meta.unplugged {
+        return unplugged;
     }
 
-    if let Some(prefer_unplugged) = package_info.prefer_unplugged {
-        return prefer_unplugged;
+    if let Some(package_info) = package_info {
+        if let Some(prefer_unplugged) = package_info.prefer_unplugged {
+            return prefer_unplugged;
+        }
     }
 
     if !build_commands.is_empty() {
@@ -149,20 +147,24 @@ fn check_extract(package_meta: Option<&PackageMeta>, package_info: &PackageInfo,
 //     }
 // }
 
-fn get_package_info(package_data: &PackageData) -> Result<PackageInfo, Error> {
+fn get_package_info(package_data: &PackageData) -> Result<Option<PackageInfo>, Error> {
     match package_data {
-        PackageData::Zip {data, ..} => {
-            let first_entry = first_entry_from_zip(data)?;
-
-            Ok(serde_json::from_slice::<PackageInfo>(&first_entry.data)?)
-        },
-
         PackageData::Local {package_directory, ..} => {
             let manifest_text = package_directory
                 .with_join_str("package.json")
                 .fs_read_text()?;
 
-            Ok(serde_json::from_str::<PackageInfo>(&manifest_text)?)
+            Ok(Some(serde_json::from_str::<PackageInfo>(&manifest_text)?))
+        },
+
+        PackageData::MissingZip {..} => {
+            Ok(None)
+        },
+
+        PackageData::Zip {data, ..} => {
+            let first_entry = first_entry_from_zip(data)?;
+
+            Ok(Some(serde_json::from_slice::<PackageInfo>(&first_entry.data)?))
         },
     }
 }
@@ -217,14 +219,15 @@ fn extract_archive(project_root: &Path, locator: &Locator, package_data: &Packag
     let ready_path = extract_path
         .with_join_str(".ready");
 
-    if !ready_path.fs_exists() {
+    if !ready_path.fs_exists() && !matches!(package_data, &PackageData::MissingZip {..}) {
         for entry in crate::zip::entries_from_zip(data)? {
             let target_path = extract_path
                 .with_join(&Path::from(&entry.name));
 
             target_path
                 .fs_create_parent()?
-                .fs_write(&entry.data)?;
+                .fs_write(&entry.data)?
+                .fs_set_permissions(Permissions::from_mode(entry.mode as u32))?;
         }
 
         ready_path
@@ -449,28 +452,37 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
             _ => false,
         };
 
-        let package_info = match discard_from_lookup {
-            true => Default::default(),
-            false => get_package_info(physical_package_data)?,
-        };
-
-        let package_meta = dependencies_meta
+        let mut package_meta = dependencies_meta
             .get(&IdentOrLocator::Locator(locator.clone()))
-            .or_else(|| dependencies_meta.get(&IdentOrLocator::Ident(locator.ident.clone())));
+            .or_else(|| dependencies_meta.get(&IdentOrLocator::Ident(locator.ident.clone())))
+            .cloned()
+            .unwrap_or_default();
+
+        // Optional dependencies are always unplugged, as we have no way to
+        // know whether they would be unplugged if we were to download them
+        // (this may change depending on the package's files).
+        //
+        if install.install_state.resolution_tree.optional_builds.contains(locator) {
+            package_meta.unplugged = Some(true);
+        }
+
+        let package_info
+            = get_package_info(&physical_package_data)?;
 
         let relevant_build_entries = match physical_package_data {
-            PackageData::Zip {data, ..} => entries_from_zip(data)?,
             PackageData::Local {..} => vec![],
+            PackageData::MissingZip {..} => vec![],
+            PackageData::Zip {data, ..} => entries_from_zip(data)?,
         };
 
         let build_commands
-            = check_build(locator, package_meta, &package_info, &relevant_build_entries);
+            = check_build(locator, &package_info, &package_meta, &relevant_build_entries);
 
         let mut is_physically_on_disk = true;
         let mut is_freshly_unplugged = false;
 
         if let PackageData::Zip {data, ..} = physical_package_data {
-            if check_extract(package_meta, &package_info, &build_commands, &relevant_build_entries) {
+            if check_extract(&package_info, &package_meta, &build_commands, &relevant_build_entries) {
                 (package_location_abs, is_freshly_unplugged) = extract_archive(&project.project_cwd, locator, physical_package_data, data)?;
             } else {
                 is_physically_on_disk = false;
@@ -480,8 +492,10 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         let package_location_rel = package_location_abs
             .relative_to(&project.project_cwd);
 
-        install.install_state.packages_by_location.insert(package_location_rel.clone(), locator.clone());
-        install.install_state.locations_by_package.insert(locator.clone(), package_location_rel.clone());
+        if !matches!(physical_package_data, PackageData::MissingZip {..}) {
+            install.install_state.packages_by_location.insert(package_location_rel.clone(), locator.clone());
+            install.install_state.locations_by_package.insert(locator.clone(), package_location_rel.clone());
+        }
 
         let mut package_location = package_location_rel
             .to_string();

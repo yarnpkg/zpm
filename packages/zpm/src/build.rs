@@ -235,7 +235,8 @@ impl<'a> BuildManager<'a> {
                     self.record(idx, hash, exit_code);
                 }
 
-                Err(_) => {
+                Err(err) => {
+                    println!("Error building package: {:?}", err);
                     self.build_errors.insert(request.key());
                 }
             }

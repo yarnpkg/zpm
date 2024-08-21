@@ -3,13 +3,17 @@ use std::{collections::HashMap, fs, sync::Arc};
 use arca::Path;
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, PeerRange}, semver};
+use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, PeerRange}, semver, system};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteManifest {
     #[serde(default)]
     pub version: semver::Version,
+
+    #[serde(default)]
+    #[serde(flatten)]
+    pub conditions: Option<system::Requirements>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "HashMap::is_empty")]

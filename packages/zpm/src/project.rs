@@ -286,7 +286,13 @@ impl Project {
             let locator = install_state.resolution_tree.descriptor_to_locator.get(descriptor)
                 .expect("Expected resolution to be found in the resolution tree");
 
-            all_bins.extend(self.package_self_binaries(locator)?);
+            // Packages may be missing from locations_by_package when they
+            // haven't been installed due to being unsupported on the current
+            // platform. In this case, we ignore its binaries.
+            //
+            if install_state.locations_by_package.contains_key(locator) {
+                all_bins.extend(self.package_self_binaries(locator)?);
+            }
         }
 
         all_bins.extend(self.package_self_binaries(locator)?);
@@ -353,7 +359,7 @@ impl Project {
         let mut lockfile = self.lockfile()?;
         lockfile.forget_transient_resolutions();
 
-        InstallManager::default()
+        InstallManager::new()
             .with_context(install_context)
             .with_lockfile(lockfile)
             .with_roots_iter(self.workspaces.values().map(|w| w.descriptor()))

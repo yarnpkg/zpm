@@ -4,7 +4,7 @@ use arca::Path;
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use crate::{build, cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator, PeerRange}, project::Project, resolver::{resolve, Resolution, ResolveResult}, semver, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator, PeerRange}, project::Project, resolver::{resolve, Resolution, ResolveResult}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 #[derive(Clone, Default)]
 pub struct InstallContext<'a> {
@@ -60,6 +60,7 @@ enum InstallOp<'a> {
 
     Fetch {
         locator: Locator,
+        is_mock_request: bool,
         parent_data: Option<PackageData>,
     },
 }
@@ -85,8 +86,8 @@ impl<'a> InstallOp<'a> {
                 }
             },
 
-            InstallOp::Fetch {locator, parent_data} => {
-                match fetch(context, &locator.clone(), parent_data).await {
+            InstallOp::Fetch {locator, is_mock_request, parent_data} => {
+                match fetch(context, &locator.clone(), is_mock_request, parent_data).await {
                     Err(error) => InstallOpResult::FetchFailed {
                         locator,
                         error,
@@ -109,6 +110,8 @@ pub struct InstallState {
     pub packages_by_location: HashMap<Path, Locator>,
     pub locations_by_package: HashMap<Locator, Path>,
     pub optional_packages: HashSet<Locator>,
+    pub disabled_locators: HashSet<Locator>,
+    pub conditional_locators: HashSet<Locator>,
 }
 
 #[derive(Clone, Default)]
@@ -129,6 +132,7 @@ impl Install {
             .run(project).await?;
 
         if !result.build_errors.is_empty() {
+            println!("Build errors: {:?}", result.build_errors);
             return Err(Error::Unsupported);
         }
 
@@ -136,8 +140,8 @@ impl Install {
     }
 }
 
-#[derive(Default)]
 pub struct InstallManager<'a> {
+    description: system::Description,
     initial_lockfile: Lockfile,
     roots: Vec<Descriptor>,
     context: InstallContext<'a>,
@@ -149,6 +153,20 @@ pub struct InstallManager<'a> {
 }
 
 impl<'a> InstallManager<'a> {
+    pub fn new() -> Self {
+        InstallManager {
+            description: system::Description::from_current(),
+            initial_lockfile: Lockfile::new(),
+            roots: vec![],
+            context: InstallContext::default(),
+            result: Install::default(),
+            ops: vec![],
+            deferred: HashMap::new(),
+            running: FuturesUnordered::new(),
+            seen: HashSet::new(),
+        }
+    }
+
     pub fn with_context(mut self, context: InstallContext<'a>) -> Self {
         self.context = context;
         self
@@ -225,11 +243,20 @@ impl<'a> InstallManager<'a> {
             resolution: resolution.clone(),
         });
 
+        if let Some(requirements) = &resolution.conditions {
+            self.result.install_state.conditional_locators.insert(resolution.locator.clone());
+
+            if !requirements.validate(&self.description) {
+                self.result.install_state.disabled_locators.insert(resolution.locator.clone());
+            }
+        }
+
         if let Some(package_data) = package_data {
             self.record_fetch(resolution.locator.clone(), package_data.clone());
         } else {
             self.ops.push(InstallOp::Fetch {
                 locator: resolution.locator.clone(),
+                is_mock_request: self.result.install_state.disabled_locators.contains(&resolution.locator),
                 parent_data,
             });
         }
