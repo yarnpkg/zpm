@@ -1,7 +1,7 @@
 use arca::Path;
 use clipanion::cli;
 
-use crate::{error::Error, misc::string_or_if_empty, primitives::Ident, project};
+use crate::{error::Error, primitives::Ident, project};
 
 #[cli::command]
 #[cli::path("workspaces", "list")]

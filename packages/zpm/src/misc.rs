@@ -1,14 +1,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-pub fn string_or_if_empty<'a>(value: &'a str, default: &'a str) -> &'a str {
-    if value.is_empty() {
-        default
-    } else {
-        value
-    }
-}
-
 pub fn convert_to_hashmap<U, T, F>(items: Vec<T>, mut key_fn: F) -> HashMap<U, Vec<T>> where U: Eq + Hash, F: FnMut(&T) -> U {
     let mut map: HashMap<U, Vec<T>> = HashMap::new();
 

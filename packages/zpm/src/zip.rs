@@ -408,6 +408,7 @@ pub trait ZipSupport {
 impl ZipSupport for Path {
     fn fs_read_text_from_zip_buffer(&self, zip_data: &[u8]) -> Result<String, Error> {
         let path_as_string = self.to_string();
+
         let entries = entries_from_zip(zip_data)?;
 
         let entry = entries.iter()

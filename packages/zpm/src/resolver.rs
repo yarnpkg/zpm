@@ -4,7 +4,7 @@ use arca::Path;
 use bincode::{Decode, Encode};
 use serde::{de::{self, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer, Serialize};
 
-use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_remote_tarball_with_manifest, PackageData}, git::{resolve_git_treeish, GitRange}, http::http_client, install::InstallContext, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, system};
+use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_remote_tarball_with_manifest, PackageData}, git::{resolve_git_treeish, GitRange}, http::http_client, install::InstallContext, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, system, zip::ZipSupport};
 
 pub struct ResolveResult {
     pub resolution: Resolution,
@@ -180,8 +180,8 @@ pub fn resolve_portal(ident: &Ident, path: &str, parent: &Option<Locator>, paren
 
     let manifest_path = package_directory
         .with_join_str("package.json");
-    let manifest_text
-        = parent_data.read_text(&manifest_path)?;
+    let manifest_text = manifest_path
+        .fs_read_text_with_zip()?;
     let manifest
         = parse_manifest(manifest_text)?;
 

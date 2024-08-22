@@ -1280,7 +1280,7 @@
 🟩 Lock tests ► it should correctly lock dependencies
 🟥 Lock tests ► it shouldn't loose track of the resolutions when upgrading the lockfile version
 
-[14 / 58] packages/acceptance-tests/pkg-tests-specs/sources/node-modules.test.ts
+[16 / 58] packages/acceptance-tests/pkg-tests-specs/sources/node-modules.test.ts
 
 🟥 Node_Modules ► 'winLinkType: junctions' not-on Windows should use symlinks in node_modules directories
 🟥 Node_Modules ► 'winLinkType: symlinks' not-on Windows should use symlinks in node_modules directories
@@ -1326,7 +1326,7 @@
 🟥 Node_Modules ► should respect transitive peer dependencies
 🟩 Node_Modules ► should return real cwd for scripts inside workspaces
 🟥 Node_Modules ► should setup the right symlinks
-🟥 Node_Modules ► should skip linking incompatible package
+🟩 Node_Modules ► should skip linking incompatible package
 🟥 Node_Modules ► should still hoist direct dependencies from portal target to parent with nmHoistingLimits: dependencies
 🟩 Node_Modules ► should support 'yarn run' from within build scripts
 🟥 Node_Modules ► should support aliases
@@ -1339,7 +1339,7 @@
 🟩 Node_Modules ► should tolerate if node_modules is a symlink to other directory
 🟥 Node_Modules ► should warn about 'nohoist' usage and retain nohoist field in the manifest
 🟥 Node_Modules ► should wire via hardlinks files having the same content when in nmMode: hardlinks-global
-🟥 Node_Modules ► workspace packages shouldn't be hoisted if they conflict with root dependencies
+🟩 Node_Modules ► workspace packages shouldn't be hoisted if they conflict with root dependencies
 
 [0 / 40] packages/acceptance-tests/pkg-tests-specs/sources/plugins/plugin-typescript.test.ts
 
@@ -1638,9 +1638,9 @@
 🟥 Protocols ► patch: ► it should support applying a patch on a patch
 🟥 Protocols ► patch: ► it should throw on invalid patch files
 
-[4 / 5] packages/acceptance-tests/pkg-tests-specs/sources/protocols/portals.test.js
+[5 / 5] packages/acceptance-tests/pkg-tests-specs/sources/protocols/portals.test.js
 
-🟥 Protocols ► portal: ► it should allow portals to access their peer dependencies (multiple occurences)
+🟩 Protocols ► portal: ► it should allow portals to access their peer dependencies (multiple occurences)
 🟩 Protocols ► portal: ► it should allow portals to access their peer dependencies (single occurence)
 🟩 Protocols ► portal: ► it should link a remote project into the current dependency tree
 🟩 Protocols ► portal: ► it should support nested portals

@@ -96,25 +96,6 @@ impl PackageData {
             PackageData::Zip {..} => PackageLinking::Hard,
         }
     }
-
-    pub fn read_text(&self, p: &Path) -> Result<String, Error> {
-        match self {
-            PackageData::Local {package_directory, ..} => {
-                let text = package_directory
-                    .with_join(p)
-                    .fs_read_text()?;
-
-                Ok(text)
-            },
-
-            PackageData::MissingZip {..} => {
-                panic!("Cannot read files from a package that didn't get truly fetched");
-            },
-
-            PackageData::Zip {data, ..} => p
-                .fs_read_text_from_zip_buffer(data),
-        }
-    }
 }
 
 fn convert_tar_gz_to_zip(ident: &Ident, tar_gz_data: Bytes) -> Result<Vec<u8>, Error> {
