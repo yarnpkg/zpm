@@ -1646,10 +1646,10 @@
 🟩 Protocols ► portal: ► it should support nested portals
 🟩 Protocols ► portal: ► it should take into account portals' own dependencies
 
-[0 / 2] packages/acceptance-tests/pkg-tests-specs/sources/protocols/semver.test.js
+[2 / 2] packages/acceptance-tests/pkg-tests-specs/sources/protocols/semver.test.js
 
-🟥 Protocols ► Semver ► it should allow prefixing semver ranges with "v"
-🟥 Protocols ► Semver ► it should allow semver ranges with build metadata
+🟩 Protocols ► Semver ► it should allow prefixing semver ranges with "v"
+🟩 Protocols ► Semver ► it should allow semver ranges with build metadata
 
 [3 / 6] packages/acceptance-tests/pkg-tests-specs/sources/protocols/workspace.test.ts
 
