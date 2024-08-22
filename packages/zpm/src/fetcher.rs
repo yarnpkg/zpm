@@ -316,13 +316,13 @@ pub async fn fetch_semver<'a>(context: InstallContext<'a>, locator: &Locator, id
         });
     }
 
-    let registry_url = project.config.registry_url_for(ident);
-    let url = format!("{}/{}/-/{}-{}.tgz", registry_url, ident, ident.name(), version);
+    let registry_url
+        = project.config.registry_url_for_package_data(ident, version);
 
     let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob_or_mock(is_mock_request, locator.clone(), ".zip", || async {
         let client = http_client()?;
 
-        let response = client.get(url.clone()).send().await
+        let response = client.get(registry_url.clone()).send().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
         let archive = response.bytes().await

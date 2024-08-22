@@ -75,6 +75,10 @@ pub fn extract_version(str: &mut std::iter::Peekable<std::str::Chars>) -> Option
     let mut rc = None;
     let mut missing = 3;
 
+    if let Some('v') = str.peek() {
+        str.next();
+    }
+
     if let Some('*' | 'x' | 'X') = str.peek() {
         str.next();
     } else if let Some(n) = extract_number(str) {

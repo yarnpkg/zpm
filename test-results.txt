@@ -1616,16 +1616,16 @@
 🟩 Protocols ► link: ► it shouldn't cause the paths to be discarded when covered by other fetchers (alphabetical after)
 🟩 Protocols ► link: ► it shouldn't cause the paths to be discarded when covered by other fetchers (alphabetical before)
 
-[3 / 8] packages/acceptance-tests/pkg-tests-specs/sources/protocols/npm.test.js
+[7 / 8] packages/acceptance-tests/pkg-tests-specs/sources/protocols/npm.test.js
 
 🟩 Protocols ► npm: ► it should allow fetching packages that have an unconventional url (fragment)
 🟩 Protocols ► npm: ► it should allow fetching packages that have an unconventional url (query)
-🟥 Protocols ► npm: ► it should allow fetching packages that have an unconventional url (semver)
-🟥 Protocols ► npm: ► it should allow fetching packages that have an unconventional url (tag)
+🟩 Protocols ► npm: ► it should allow fetching packages that have an unconventional url (semver)
+🟩 Protocols ► npm: ► it should allow fetching packages that have an unconventional url (tag)
 🟥 Protocols ► npm: ► it should allow fetching packages that have an unconventional url without specifying version
-🟥 Protocols ► npm: ► it should allow prefixing semver ranges with "v"
+🟩 Protocols ► npm: ► it should allow prefixing semver ranges with "v"
 🟩 Protocols ► npm: ► it should allow renaming packages
-🟥 Protocols ► npm: ► it should allow semver ranges with build metadata
+🟩 Protocols ► npm: ► it should allow semver ranges with build metadata
 
 [0 / 8] packages/acceptance-tests/pkg-tests-specs/sources/protocols/patch.test.ts
 

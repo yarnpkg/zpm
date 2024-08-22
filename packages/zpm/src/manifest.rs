@@ -7,6 +7,12 @@ use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer,
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DistManifest {
+    pub tarball: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteManifest {
     #[serde(default)]
     pub version: semver::Version,
@@ -29,6 +35,9 @@ pub struct RemoteManifest {
     #[serde(serialize_with = "descriptor_map_serializer")]
     #[serde(deserialize_with = "descriptor_map_deserializer")]
     pub optional_dependencies: HashMap<Ident, Descriptor>,
+
+    #[serde(default)]
+    pub dist: Option<DistManifest>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

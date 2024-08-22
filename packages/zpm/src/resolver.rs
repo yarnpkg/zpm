@@ -238,7 +238,19 @@ pub async fn resolve_semver_tag(context: InstallContext<'_>, ident: Ident, tag: 
 
     let manifest = registry_data.versions.remove(version).unwrap();
 
-    let locator = Locator::new(ident.clone(), Reference::SemverAlias(ident.clone(), version.clone()));
+    let dist_manifest = manifest.dist
+        .as_ref()
+        .expect("Expected the registry to return a 'dist' field amongst the manifest data");
+
+    let expected_registry_url
+        = project.config.registry_url_for_package_data(&ident, &version);
+
+    let reference = match expected_registry_url == dist_manifest.tarball {
+        true => Reference::SemverAlias(ident.clone(), version.clone()),
+        false => Reference::Url(dist_manifest.tarball.clone()),
+    };
+
+    let locator = Locator::new(ident.clone(), reference);
     let resolution = Resolution::from_remote_manifest(locator, manifest);
 
     Ok(ResolveResult::new(resolution))
@@ -343,7 +355,19 @@ pub async fn resolve_semver(context: InstallContext<'_>, ident: &Ident, range: &
     let (version, manifest) = manifest_result
         .map_err(|_| Error::NoCandidatesFound(Range::Semver(range.clone())))?;
 
-    let locator = Locator::new(ident.clone(), Reference::Semver(version));
+    let dist_manifest = manifest.dist
+        .as_ref()
+        .expect("Expected the registry to return a 'dist' field amongst the manifest data");
+
+    let expected_registry_url
+        = project.config.registry_url_for_package_data(ident, &version);
+
+    let reference = match expected_registry_url == dist_manifest.tarball {
+        true => Reference::Semver(version),
+        false => Reference::Url(dist_manifest.tarball.clone()),
+    };
+
+    let locator = Locator::new(ident.clone(), reference);
     let resolution = Resolution::from_remote_manifest(locator, manifest);
 
     Ok(ResolveResult::new(resolution))
