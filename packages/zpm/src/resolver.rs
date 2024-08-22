@@ -36,7 +36,7 @@ pub struct Resolution {
     pub version: semver::Version,
 
     #[serde(flatten)]
-    pub conditions: system::Requirements,
+    pub requirements: system::Requirements,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "HashMap::is_empty")]
@@ -77,7 +77,7 @@ impl Resolution {
             peer_dependencies: manifest.peer_dependencies,
             optional_dependencies,
             missing_peer_dependencies: HashSet::new(),
-            conditions: manifest.conditions,
+            requirements: manifest.requirements,
         }
     }
 }
@@ -132,7 +132,7 @@ pub fn resolve_link(ident: &Ident, path: &str, parent: &Option<Locator>) -> Resu
         peer_dependencies: HashMap::new(),
         optional_dependencies: HashSet::new(),
         missing_peer_dependencies: HashSet::new(),
-        conditions: system::Requirements::default(),
+        requirements: system::Requirements::default(),
     };
 
     Ok(ResolveResult::new(resolution))
@@ -202,7 +202,7 @@ pub async fn resolve_git(ident: Ident, git_range: &GitRange) -> Result<ResolveRe
         peer_dependencies: HashMap::new(),
         optional_dependencies: HashSet::new(),
         missing_peer_dependencies: HashSet::new(),
-        conditions: system::Requirements::default(),
+        requirements: system::Requirements::default(),
     };
 
     Ok(ResolveResult::new(resolution))

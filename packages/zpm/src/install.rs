@@ -243,10 +243,10 @@ impl<'a> InstallManager<'a> {
             resolution: resolution.clone(),
         });
 
-        if resolution.conditions.is_conditional() {
+        if resolution.requirements.is_conditional() {
             self.result.install_state.conditional_locators.insert(resolution.locator.clone());
 
-            if !resolution.conditions.validate(&self.description) {
+            if !resolution.requirements.validate(&self.description) {
                 self.result.install_state.disabled_locators.insert(resolution.locator.clone());
             }
         }
