@@ -2,14 +2,16 @@ use std::{collections::{BTreeMap, HashMap}, fs::Permissions, os::unix::fs::Permi
 
 use arca::{Path, ToArcaPath};
 use serde::Deserialize;
-use serde_with::serde_as;
 use wax::walk::{Entry, FileIterator};
 use zpm_macros::track_time;
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, install::{InstallContext, InstallManager, InstallState}, lockfile::Lockfile, manifest::{read_manifest, Manifest}, primitives::{Descriptor, Ident, Locator, Range, Reference}, script::Binary, zip::ZipSupport};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::Lockfile, manifest::{read_manifest, BinField, BinManifest, Manifest}, primitives::{Descriptor, Ident, Locator, Range, Reference}, script::Binary};
 
-static LOCKFILE_NAME: &str = "yarn.lock";
-static MANIFEST_NAME: &str = "package.json";
+pub const LOCKFILE_NAME: &str = "yarn.lock";
+pub const MANIFEST_NAME: &str = "package.json";
+pub const PNP_CJS_NAME: &str = ".pnp.cjs";
+pub const PNP_ESM_NAME: &str = ".pnp.loader.mjs";
+pub const PNP_DATA_NAME: &str = ".pnp.data.json";
 
 pub struct Project {
     pub project_cwd: Path,
@@ -101,15 +103,15 @@ impl Project {
     }
 
     pub fn pnp_path(&self) -> Path {
-        self.project_cwd.with_join_str(".pnp.cjs")
+        self.project_cwd.with_join_str(PNP_CJS_NAME)
     }
 
     pub fn pnp_data_path(&self) -> Path {
-        self.project_cwd.with_join_str(".pnp.data.json")
+        self.project_cwd.with_join_str(PNP_DATA_NAME)
     }
 
     pub fn pnp_loader_path(&self) -> Path {
-        self.project_cwd.with_join_str(".pnp.loader.mjs")
+        self.project_cwd.with_join_str(PNP_ESM_NAME)
     }
 
     pub fn nm_path(&self) -> Path {
@@ -245,26 +247,25 @@ impl Project {
         Ok(active_package.clone())
     }
 
+    pub fn active_workspace(&self) -> Result<&Workspace, Error> {
+        let active_package = self.active_package()?;
+
+        match &active_package.reference {
+            Reference::Workspace(ident) => self.workspaces.get(&ident)
+                .ok_or(Error::WorkspaceNotFound(ident.clone())),
+
+            _ => {
+                Err(Error::ActivePackageNotWorkspace)
+            },
+        }
+    }
+
     pub fn package_self_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
 
         let location = install_state.locations_by_package.get(locator)
             .expect("Expected locator to have a location");
-
-        #[serde_as]
-        #[derive(Debug, Clone, Deserialize)]
-        #[serde(untagged)]
-        enum BinField {
-            String(Path),
-            Map(HashMap<String, Path>),
-        }
-
-        #[derive(Debug, Clone, Deserialize)]
-        struct BinManifest {
-            pub name: Option<Ident>,
-            pub bin: Option<BinField>,
-        }
 
         let manifest_text = self.project_cwd
             .with_join(location)

@@ -1,4 +1,4 @@
-use std::process::ExitCode;
+use std::process::ExitStatus;
 
 use clipanion::cli;
 
@@ -12,15 +12,14 @@ pub struct Node {
 
 impl Node {
     #[tokio::main()]
-    pub async fn execute(&self) -> Result<ExitCode, Error> {
+    pub async fn execute(&self) -> Result<ExitStatus, Error> {
         let project
             = project::Project::new(None)?;
 
-        let exit_code = ScriptEnvironment::new()
+        Ok(ScriptEnvironment::new()
             .with_project(&project)
             .run_exec("node", &self.args)
-            .await;
-
-        Ok(ExitCode::from(exit_code as u8))
+            .await
+            .into())
     }
 }

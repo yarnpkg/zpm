@@ -17,15 +17,15 @@ pub struct LooseDescriptor {
     pub descriptor: Descriptor,
 }
 
-impl<'a> std::convert::TryFrom<&'a str> for LooseDescriptor {
-    type Error = crate::error::Error;
-
-    fn try_from(src: &str) -> std::result::Result<Self, Self::Error> {
-        if let Ok(descriptor) = Descriptor::from_str(src) {
+impl<'a> FromStr for LooseDescriptor {
+    type Err = crate::error::Error;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(descriptor) = Descriptor::from_str(s) {
             return Ok(LooseDescriptor {descriptor});
         }
 
-        let ident = Ident::from_str(src)?;
+        let ident = Ident::from_str(s)?;
         let range = Range::from_str("latest").unwrap();
 
         let descriptor = Descriptor::new(ident, range);

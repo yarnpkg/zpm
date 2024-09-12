@@ -8,10 +8,11 @@ mod bin;
 mod default;
 mod exec;
 mod install;
-mod workspaces_list;
 mod node;
+mod pack;
 mod run;
 mod version;
+mod workspaces_list;
 
 clipanion::program!(YarnCli, [
     add::Add,
@@ -21,6 +22,7 @@ clipanion::program!(YarnCli, [
     exec::Exec,
     install::Install,
     node::Node,
+    pack::Pack,
     run::Run,
     version::Version,
     workspaces_list::WorkspacesList,

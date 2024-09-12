@@ -4,7 +4,7 @@ use arca::Path;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, hash::Sha256, http::http_client, install::InstallContext, manifest::Manifest, primitives::{Ident, Locator, Reference}, resolver::Resolution, semver, zip::{first_entry_from_zip, ZipSupport}};
+use crate::{error::Error, formats, git::clone_repository, hash::Sha256, http::http_client, install::InstallContext, manifest::{Manifest, RemoteManifest}, primitives::{Ident, Locator, Reference}, resolver::Resolution, script::ScriptEnvironment, semver};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
@@ -104,20 +104,40 @@ fn convert_tar_gz_to_zip(ident: &Ident, tar_gz_data: Bytes) -> Result<Vec<u8>, E
     flate2::read::GzDecoder::new(Cursor::new(tar_gz_data))
         .read_to_end(&mut decompressed)?;
 
-    let entries = crate::zip::entries_from_tar(&decompressed)?;
-    let entries = crate::zip::strip_first_segment(entries);
-    let entries = crate::zip::normalize_entries(entries);
-    let entries = crate::zip::prefix_entries(entries, format!("node_modules/{}", ident.as_str()));
+    let entries = formats::tar::entries_from_tar(&decompressed)?;
+    let entries = formats::strip_first_segment(entries);
+    let entries = formats::normalize_entries(entries);
+    let entries = formats::prefix_entries(entries, format!("node_modules/{}", ident.as_str()));
 
-    Ok(crate::zip::craft_zip(&entries))
+    Ok(formats::zip::craft_zip(&entries))
 }
 
 fn convert_folder_to_zip(ident: &Ident, folder_path: &Path) -> Result<Vec<u8>, Error> {
-    let entries = crate::zip::entries_from_folder(folder_path.to_path_buf())?;
-    let entries = crate::zip::normalize_entries(entries);
-    let entries = crate::zip::prefix_entries(entries, format!("node_modules/{}", ident.as_str()));
+    let entries = formats::entries_from_folder(folder_path)?;
+    let entries = formats::normalize_entries(entries);
+    let entries = formats::prefix_entries(entries, format!("node_modules/{}", ident.as_str()));
 
-    Ok(crate::zip::craft_zip(&entries))
+    Ok(formats::zip::craft_zip(&entries))
+}
+
+async fn convert_pack_folder_to_zip(ident: &Ident, folder_path: &Path) -> Result<Vec<u8>, Error> {
+    ScriptEnvironment::new()
+        .with_cwd(folder_path.clone())
+        .run_exec("yarn", vec!["install"])
+        .await
+        .ok()?;
+
+    ScriptEnvironment::new()
+        .with_cwd(folder_path.clone())
+        .run_exec("yarn", vec!["pack"])
+        .await
+        .ok()?;
+
+    let pack_tgz = folder_path
+        .with_join_str("package.tgz")
+        .fs_read()?;
+
+    Ok(convert_tar_gz_to_zip(ident, Bytes::from(pack_tgz))?)
 }
 
 pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_request: bool, parent_data: Option<PackageData>) -> Result<PackageData, Error> {
@@ -136,6 +156,9 @@ pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_r
 
         Reference::Folder(path)
             => Ok(fetch_folder_with_manifest(context, locator, path, parent_data).await?.1),
+
+        Reference::Git(repo, commit)
+            => Ok(fetch_repository_with_manifest(context, locator, repo, commit).await?.1),
 
         Reference::Semver(version)
             => fetch_semver(context, locator, &locator.ident, version, is_mock_request).await,
@@ -188,7 +211,7 @@ pub async fn fetch_remote_tarball_with_manifest<'a>(context: InstallContext<'a>,
         convert_tar_gz_to_zip(&locator.ident, archive)
     }).await?;
 
-    let first_entry = first_entry_from_zip(&data);
+    let first_entry = formats::zip::first_entry_from_zip(&data);
     let manifest = first_entry
         .and_then(|entry|
             serde_json::from_slice::<Manifest>(&entry.data)
@@ -222,7 +245,7 @@ pub async fn fetch_local_tarball_with_manifest<'a>(context: InstallContext<'a>, 
         convert_tar_gz_to_zip(&locator.ident, Bytes::from(tarball_path.fs_read()?))
     }).await?;
 
-    let first_entry = first_entry_from_zip(&data);
+    let first_entry = formats::zip::first_entry_from_zip(&data);
     let manifest = first_entry
         .and_then(|entry|
             serde_json::from_slice::<Manifest>(&entry.data)
@@ -256,16 +279,18 @@ pub async fn fetch_folder_with_manifest<'a>(context: InstallContext<'a>, locator
         convert_folder_to_zip(&locator.ident, &context_directory)
     }).await?;
 
-    let first_entry = first_entry_from_zip(&data);
-    let manifest = first_entry
+    let first_entry
+        = formats::zip::first_entry_from_zip(&data);
+
+    let remote_manifest = first_entry
         .and_then(|entry|
-            serde_json::from_slice::<Manifest>(&entry.data)
+            serde_json::from_slice::<RemoteManifest>(&entry.data)
                 .map_err(Arc::new)
                 .map_err(Error::InvalidJsonData)
         )?;
 
     let resolution
-        = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
+        = Resolution::from_remote_manifest(locator.clone(), remote_manifest);
 
     let package_directory = archive_path
         .with_join_str(locator.ident.nm_subdir());
@@ -273,6 +298,39 @@ pub async fn fetch_folder_with_manifest<'a>(context: InstallContext<'a>, locator
     Ok((resolution, PackageData::Zip {
         archive_path,
         context_directory,
+        package_directory,
+        data,
+        checksum,
+    }))
+}
+
+pub async fn fetch_repository_with_manifest<'a>(context: InstallContext<'a>, locator: &Locator, repo: &str, commit: &str) -> Result<(Resolution, PackageData), Error> {
+    let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
+        let repository_path
+            = clone_repository(&repo, &commit).await?;
+
+        convert_pack_folder_to_zip(&locator.ident, &repository_path).await
+    }).await?;
+
+    let first_entry
+        = formats::zip::first_entry_from_zip(&data);
+
+    let remote_manifest = first_entry
+        .and_then(|entry|
+            serde_json::from_slice::<RemoteManifest>(&entry.data)
+                .map_err(Arc::new)
+                .map_err(Error::InvalidJsonData)
+        )?;
+
+    let resolution
+        = Resolution::from_remote_manifest(locator.clone(), remote_manifest);
+
+    let package_directory = archive_path
+        .with_join_str(locator.ident.nm_subdir());
+
+    Ok((resolution, PackageData::Zip {
+        archive_path,
+        context_directory: package_directory.clone(),
         package_directory,
         data,
         checksum,

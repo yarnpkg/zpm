@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::fs::PermissionsExt, sync::LazyLock};
+use std::{collections::{BTreeMap, HashMap}, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::ExitStatus, sync::LazyLock};
 
 use arca::{Path, ToArcaPath};
 use itertools::Itertools;
@@ -96,6 +96,45 @@ impl Binary {
         Self {
             path: path_abs,
             kind,
+        }
+    }
+}
+
+pub enum ScriptResult {
+    Success(ExitStatus),
+    Failure(ExitStatus, String),
+}
+
+impl ScriptResult {
+    pub fn new_success() -> Self {
+        Self::Success(ExitStatus::from_raw(0))
+    }
+
+    pub fn new(exit_status: ExitStatus, program: &str) -> Self {
+        if exit_status.success() {
+            Self::Success(exit_status)
+        } else {
+            Self::Failure(exit_status, program.to_string())
+        }
+    }
+
+    pub fn success(&self) -> bool {
+        matches!(self, Self::Success(_))
+    }
+
+    pub fn ok(self) -> Result<(), Error> {
+        match self {
+            Self::Success(_) => Ok(()),
+            Self::Failure(_, program) => Err(Error::ChildProcessFailed(program)),
+        }
+    }
+}
+
+impl Into<ExitStatus> for ScriptResult {
+    fn into(self) -> ExitStatus {
+        match self {
+            ScriptResult::Success(exit_status) => exit_status,
+            ScriptResult::Failure(exit_status, _) => exit_status,
         }
     }
 }
@@ -275,7 +314,7 @@ impl ScriptEnvironment {
     }
 
     #[track_time]
-    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> i32 where I: IntoIterator<Item = S>, S: AsRef<OsStr> {
+    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<OsStr> {
         let mut cmd = Command::new(program);
 
         cmd.current_dir(self.cwd.to_path_buf());
@@ -285,10 +324,10 @@ impl ScriptEnvironment {
         let exit_status
             = cmd.status().await.unwrap();
 
-        exit_status.code().unwrap_or(1)
+        ScriptResult::new(exit_status, program)
     }
 
-    pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> i32 where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+    pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
         match binary.kind {
             BinaryKind::Node => {
                 let mut node_args = vec![];
@@ -305,7 +344,7 @@ impl ScriptEnvironment {
         }
     }
 
-    pub async fn run_script<I, S>(&mut self, script: &str, args: I) -> i32 where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+    pub async fn run_script<I, S>(&mut self, script: &str, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
         let mut bash_args = vec![];
 
         bash_args.push("-c".to_string());

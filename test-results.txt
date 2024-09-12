@@ -674,30 +674,30 @@
 🟥 Commands ► npm whoami ► it should throw an error when config has an invalid npmAuthToken
 🟥 Commands ► npm whoami ► it should throw an error when no auth config is found
 
-[0 / 42] packages/acceptance-tests/pkg-tests-specs/sources/commands/pack.test.js
+[15 / 42] packages/acceptance-tests/pkg-tests-specs/sources/commands/pack.test.js
 
 🟥 Commands ► pack ► it should allow to explicitly add back a file excluded by a gitignore
 🟥 Commands ► pack ► it should allow to explicitly add back a single file excluded by a gitignore
 🟥 Commands ► pack ► it should always include CHANGELOG (and its variants), even with a "files" field
 🟥 Commands ► pack ► it should always include README (and its variants), even with a "files" field
-🟥 Commands ► pack ► it should always include the binary files, even with a "files" field
-🟥 Commands ► pack ► it should always include the main file, even with a "files" field
-🟥 Commands ► pack ► it should always include the manifest, even with a "files" field
+🟩 Commands ► pack ► it should always include the binary files, even with a "files" field
+🟩 Commands ► pack ► it should always include the main file, even with a "files" field
+🟩 Commands ► pack ► it should always include the manifest, even with a "files" field
 🟥 Commands ► pack ► it should generate an archive with a custom name when using `--out`
-🟥 Commands ► pack ► it should ignore root .gitignore files when using the 'files' field
+🟩 Commands ► pack ► it should ignore root .gitignore files when using the 'files' field
 🟥 Commands ► pack ► it should ignore the files covered by the local gitignore file
 🟥 Commands ► pack ► it should ignore the files covered by the local npmignore file
 🟥 Commands ► pack ► it should ignore the folders covered by the local npmignore file
 🟥 Commands ► pack ► it should ignore the patterns from a gitignore if a npmignore exists
 🟥 Commands ► pack ► it should keep digging inside excluded folders (unlike gitignore!)
-🟥 Commands ► pack ► it should list all the files in a package
+🟩 Commands ► pack ► it should list all the files in a package
 🟥 Commands ► pack ► it should make the filename non-descriptive by default
 🟥 Commands ► pack ► it should never set the +x flag on files in general
-🟥 Commands ► pack ► it should not include any extra files when the "files" field is empty
-🟥 Commands ► pack ► it should only keep the files covered by the "files" field
+🟩 Commands ► pack ► it should not include any extra files when the "files" field is empty
+🟩 Commands ► pack ► it should only keep the files covered by the "files" field
 🟥 Commands ► pack ► it should override fields in the packed manifest
 🟥 Commands ► pack ► it should put the file relative to the cwd when using `--out`
-🟥 Commands ► pack ► it should put the file relative to the workspace root by default
+🟩 Commands ► pack ► it should put the file relative to the workspace root by default
 🟥 Commands ► pack ► it should reflect changes made to package.json during prepack
 🟥 Commands ► pack ► it should replace `%s` even if the package has no scope
 🟥 Commands ► pack ► it should replace as many patterns as needed in `--out`
@@ -706,18 +706,18 @@
 🟥 Commands ► pack ► it should replace the workspace: protocol correctly
 🟥 Commands ► pack ► it should set the +x flag executableFiles entries
 🟥 Commands ► pack ► it should set the +x flag on bin entries
-🟥 Commands ► pack ► it should support excluding folders from the "files" field
-🟥 Commands ► pack ► it should support excluding patterns from the "files" field
-🟥 Commands ► pack ► it should support excluding patterns in included parent directory from the "files" field
+🟩 Commands ► pack ► it should support excluding folders from the "files" field
+🟩 Commands ► pack ► it should support excluding patterns from the "files" field
+🟩 Commands ► pack ► it should support excluding patterns in included parent directory from the "files" field
 🟥 Commands ► pack ► it should support gitignore patterns (*)
 🟥 Commands ► pack ► it should support gitignore patterns (**)
 🟥 Commands ► pack ► it should support when the "browser" field is an object
 🟥 Commands ► pack ► it should support writing the archive in a absolute destination
-🟥 Commands ► pack ► it shouldn't add .gitignore files to the package files
+🟩 Commands ► pack ► it shouldn't add .gitignore files to the package files
 🟥 Commands ► pack ► it shouldn't add .npmignore files to the package files
-🟥 Commands ► pack ► it shouldn't add the cache to the package files
-🟥 Commands ► pack ► it shouldn't add the lockfile to the package files
-🟥 Commands ► pack ► it shouldn't pack Yarn files by default
+🟩 Commands ► pack ► it shouldn't add the cache to the package files
+🟩 Commands ► pack ► it shouldn't add the lockfile to the package files
+🟩 Commands ► pack ► it shouldn't pack Yarn files by default
 
 [0 / 2] packages/acceptance-tests/pkg-tests-specs/sources/commands/patch.test.ts
 
@@ -1585,20 +1585,20 @@
 🟥 Protocols ► git: ► it should use Yarn Classic to setup classic repositories
 🟥 Protocols ► git: ► it shouldn't install dependencies for packages without prepack
 
-[0 / 19] packages/acceptance-tests/pkg-tests-specs/sources/protocols/git.test.ts
+[11 / 19] packages/acceptance-tests/pkg-tests-specs/sources/protocols/git.test.ts
 
-🟥 Protocols ► git: ► it should guarantee that all dependencies will be installed when using npm to setup npm repositories
-🟥 Protocols ► git: ► it should install dependencies and run prepack if needed
-🟥 Protocols ► git: ► it should not add a 'packageManager' field to a Yarn classic project
+🟩 Protocols ► git: ► it should guarantee that all dependencies will be installed when using npm to setup npm repositories
+🟩 Protocols ► git: ► it should install dependencies and run prepack if needed
+🟩 Protocols ► git: ► it should not add a 'packageManager' field to a Yarn classic project
 🟥 Protocols ► git: ► it should not use Corepack to fetch Yarn Classic
-🟥 Protocols ► git: ► it should not use Corepack to install repositories that are installed via Yarn 2+
-🟥 Protocols ► git: ► it should resolve a git dependency (git://github.com/yarnpkg/util-deprecate.git#v1.0.1)
-🟥 Protocols ► git: ► it should resolve a git dependency (git+ssh://git@github.com/yarnpkg/util-deprecate.git#v1.0.1)
-🟥 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#b3562c2798507869edb767da869cd7b85487726d)
-🟥 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#master)
-🟥 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#semver:^1.0.0)
-🟥 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#semver:>=1.0.0 <1.0.2)
-🟥 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#v1.0.0)
+🟩 Protocols ► git: ► it should not use Corepack to install repositories that are installed via Yarn 2+
+🟩 Protocols ► git: ► it should resolve a git dependency (git://github.com/yarnpkg/util-deprecate.git#v1.0.1)
+🟩 Protocols ► git: ► it should resolve a git dependency (git+ssh://git@github.com/yarnpkg/util-deprecate.git#v1.0.1)
+🟩 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#b3562c2798507869edb767da869cd7b85487726d)
+🟩 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#master)
+🟩 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#semver:^1.0.0)
+🟩 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#semver:>=1.0.0 <1.0.2)
+🟩 Protocols ► git: ► it should resolve a git dependency (https://github.com/yarnpkg/util-deprecate.git#v1.0.0)
 🟥 Protocols ► git: ► it should support installing packages from projects in subfolders
 🟥 Protocols ► git: ► it should support installing specific workspaces
 🟥 Protocols ► git: ► it should support installing specific workspaces from npm repositories

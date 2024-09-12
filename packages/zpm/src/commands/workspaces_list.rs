@@ -6,7 +6,7 @@ use crate::{error::Error, primitives::Ident, project};
 #[cli::command]
 #[cli::path("workspaces", "list")]
 pub struct WorkspacesList {
-    #[cli::option("--json", initial = true)]
+    #[cli::option("--json", default = true)]
     json: bool,
 }
 

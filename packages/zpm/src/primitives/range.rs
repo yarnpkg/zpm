@@ -39,9 +39,6 @@ pub enum Range {
     #[try_pattern(pattern = r"(\.{0,2}/.*)")]
     Folder(String),
 
-    #[try_pattern(pattern = r"(https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
-    Url(String),
-
     #[try_pattern(prefix = "patch:")]
     Patch(String),
 
@@ -59,6 +56,9 @@ pub enum Range {
 
     #[try_pattern()]
     Git(git::GitRange),
+
+    #[try_pattern(pattern = r"(https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
+    Url(String),
 }
 
 impl Range {

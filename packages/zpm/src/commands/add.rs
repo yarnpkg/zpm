@@ -1,6 +1,6 @@
 use clipanion::cli;
 
-use crate::{error::{Error}, primitives::{descriptor::LooseDescriptor, Reference}, project};
+use crate::{error::Error, primitives::{descriptor::LooseDescriptor, Reference}, project};
 
 #[cli::command]
 #[cli::path("add")]

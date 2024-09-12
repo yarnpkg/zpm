@@ -6,7 +6,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::{build::{self, BuildRequests}, error::Error, fetcher::{PackageData, PackageLinking}, install::Install, primitives::{locator::IdentOrLocator, Descriptor, Ident, Locator, Reference}, project::Project, resolver::Resolution, settings, system, yarn_serialization_protocol, zip::{entries_from_zip, first_entry_from_zip, Entry}};
+use crate::{build::{self, BuildRequests}, error::Error, fetcher::{PackageData, PackageLinking}, formats::{self, Entry}, install::Install, primitives::{locator::IdentOrLocator, Descriptor, Ident, Locator, Reference}, project::Project, resolver::Resolution, settings, system, yarn_serialization_protocol};
 
 fn is_default<T: Default + PartialEq>(t: &T) -> bool {
     t == &T::default()
@@ -170,7 +170,8 @@ fn get_package_info(package_data: &PackageData) -> Result<Option<PackageInfo>, E
         },
 
         PackageData::Zip {data, ..} => {
-            let first_entry = first_entry_from_zip(data)?;
+            let first_entry
+                = formats::zip::first_entry_from_zip(data)?;
 
             Ok(Some(serde_json::from_slice::<PackageInfo>(&first_entry.data)?))
         },
@@ -228,7 +229,7 @@ fn extract_archive(project_root: &Path, locator: &Locator, package_data: &Packag
         .with_join_str(".ready");
 
     if !ready_path.fs_exists() && !matches!(package_data, &PackageData::MissingZip {..}) {
-        for entry in crate::zip::entries_from_zip(data)? {
+        for entry in formats::zip::entries_from_zip(data)? {
             let target_path = extract_path
                 .with_join(&Path::from(&entry.name));
 
@@ -495,7 +496,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         let relevant_build_entries = match physical_package_data {
             PackageData::Local {..} => vec![],
             PackageData::MissingZip {..} => vec![],
-            PackageData::Zip {data, ..} => entries_from_zip(data)?,
+            PackageData::Zip {data, ..} => formats::zip::entries_from_zip(data)?,
         };
 
         let build_commands
@@ -549,17 +550,11 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
             let build_cwd = match is_physically_on_disk {
                 true => package_location_rel.clone(),
                 false => {
-                    let nonce = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_nanos();
+                    let build_dir_pattern
+                        = format!("zpm/{}/build/<>", locator.slug());
 
-                    let build_dir = std::env::temp_dir()
-                        .to_arca()
-                        .with_join_str(format!("zpm/{}/build/{}", locator.slug(), nonce));
-
-                    build_dir.fs_create_dir_all()?;
-                    build_dir.relative_to(&project.project_cwd)
+                    Path::temp_dir_pattern(&build_dir_pattern)?
+                        .relative_to(&project.project_cwd)
                 },
             };
 

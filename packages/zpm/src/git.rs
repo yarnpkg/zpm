@@ -1,10 +1,14 @@
 use std::{collections::HashMap, fmt::{self, Display, Formatter}, str::FromStr, sync::LazyLock};
 
+use arca::Path;
 use bincode::{Decode, Encode};
 use fancy_regex::Regex;
 use serde::{Deserialize, Serialize};
+use tokio::process::Command;
 
 use crate::{error::Error, primitives::Range, semver, yarn_serialization_protocol};
+
+static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
 
 static GH_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:github:|https:\/\/github\.com\/|git:\/\/github\.com\/)?(?!\.{1,2}\/)([a-zA-Z0-9._-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z0-9._-]+?)(?:\.git)?(#.*)?$").unwrap());
 static GH_TARBALL_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^https?:\/\/github\.com\/(?!\.{1,2}\/)([a-zA-Z0-9._-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z0-9._-]+?)\/tarball\/(.+)?$").unwrap());
@@ -69,8 +73,11 @@ pub struct GitRange {
 
 yarn_serialization_protocol!(GitRange, "", {
     deserialize(src) {
-        let normalized = normalize_git_url(src);
+        if !is_git_url(src) {
+            return Err(Error::InvalidGitUrl(src.to_string()));
+        }
 
+        let normalized = normalize_git_url(src);
         extract_git_range(normalized)
     }
 
@@ -94,7 +101,7 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
     let subsequent = &subsequent[1..];
 
     // New-style: "#commit=abcdef&workspace=foobar"
-    if subsequent.find('=').is_some() {
+    if NEW_STYLE_GIT_SELECTOR.is_match(subsequent).unwrap() {
         let mut treeish = GitTreeish::Commit("HEAD".to_string());
 
         for pair in subsequent.split('&') {
@@ -118,18 +125,20 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
         });
     }
 
+    // Old-style: "#commit:abcdef"
     let treeish = if let Some(colon_index) = subsequent.find(':') {
         let (kind, subsequent) = subsequent.split_at(colon_index);
         let subsequent = &subsequent[1..];
 
         match kind {
-            "commit" => GitTreeish::Commit(subsequent.to_string()),
             "branch" => GitTreeish::Branch(subsequent.to_string()),
+            "commit" => GitTreeish::Commit(subsequent.to_string()),
+            "semver" => GitTreeish::Semver(semver::Range::from_str(subsequent)?),
             "tag" => GitTreeish::Tag(subsequent.to_string()),
             _ => GitTreeish::Commit(subsequent.to_string()),
         }
     } else {
-        GitTreeish::Branch(subsequent.to_string())
+        GitTreeish::AnythingGoes(subsequent.to_string())
     };
 
     Ok(GitRange {
@@ -209,8 +218,8 @@ async fn resolve_git_treeish_stricter(repo: &str, treeish: GitTreeish) -> Result
 
         GitTreeish::Semver(tag) => {
             let mut candidates: Vec<(String, semver::Version)> = refs.into_iter()
-                .filter(|(k, _)| k.starts_with("refs/tags/"))
-                .filter_map(|(k, _)| semver::Version::from_str(&k).ok().map(|v| (k, v)))
+                .filter(|(k, _)| k.starts_with("refs/tags/") && !k.ends_with("^{}"))
+                .filter_map(|(k, _)| semver::Version::from_str(&k[10..]).ok().map(|v| (k, v)))
                 .filter(|(_, v)| tag.check(v))
                 .collect();
 
@@ -234,4 +243,50 @@ async fn resolve_git_treeish_stricter(repo: &str, treeish: GitTreeish) -> Result
             Ok(head.to_string())
         }
     }
+}
+
+fn make_git_env() -> HashMap<String, String> {
+    let mut env = HashMap::new();
+
+    if let Err(std::env::VarError::NotPresent) = std::env::var("GIT_SSH_COMMAND") {
+        let ssh = std::env::var("GIT_SSH").unwrap_or("ssh".to_string());
+        let ssh_command = format!("{} -o BatchMode=yes", ssh);
+
+        env.insert("GIT_SSH_COMMAND".to_string(), ssh_command);
+    }
+
+    env
+}
+
+pub async fn clone_repository(url: &str, commit: &str) -> Result<Path, Error> {
+    let git_range = extract_git_range(url)?;
+    println!("Cloning {:?}", git_range);
+
+    let normalized_repo_url = normalize_git_url(git_range.repo);
+
+    let clone_dir
+        = Path::temp_dir()?;
+
+    Command::new("git")
+        .envs(make_git_env())
+        .arg("clone")
+        .arg("-c core.autocrlf=false")
+        .arg(&normalized_repo_url)
+        .arg(clone_dir.to_string())
+        .status().await?
+        .success()
+        .then_some(())
+        .ok_or_else(|| Error::RepositoryCloneFailed(normalized_repo_url.clone()))?;
+
+    Command::new("git")
+        .envs(make_git_env())
+        .arg("checkout")
+        .arg(commit)
+        .current_dir(clone_dir.to_string())
+        .status().await?
+        .success()
+        .then_some(())
+        .ok_or_else(|| Error::RepositoryCheckoutFailed(normalized_repo_url.clone(), commit.to_string()))?;
+
+    Ok(clone_dir)
 }

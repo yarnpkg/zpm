@@ -1,43 +1,17 @@
-use std::{borrow::Cow, os::unix::fs::PermissionsExt, path::PathBuf, sync::{Arc, LazyLock}};
+use std::{borrow::Cow, sync::{Arc, LazyLock}};
 
 use arca::Path;
-use itertools::Itertools;
 use regex::Regex;
 
 use crate::error::Error;
 
-#[cfg(test)]
-#[path = "./zip.test.rs"]
-mod zip_tests;
+use super::Entry;
 
 unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
     ::core::slice::from_raw_parts(
         (p as *const T) as *const u8,
         ::core::mem::size_of::<T>(),
     )
-}
-
-fn trim_zero(x: &[u8]) -> &[u8] {
-    match x.iter().find_position(|c| c == &&0) {
-        Some((i, _)) => &x[..i],
-        None => x,
-    }
-}
-
-fn from_oct(x: &[u8]) -> u64 {
-    let mut result = 0;
-    for i in x.iter().filter(|c| **c >= b'0' && **c <= b'7') {
-        result = result * 8 + (i - b'0') as u64;
-    }
-    result
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Entry<'a> {
-    pub name: String,
-    pub mode: u64,
-    pub crc: u32,
-    pub data: Cow<'a, [u8]>,
 }
 
 #[allow(dead_code)]
@@ -86,108 +60,6 @@ struct EndOfCentralDirectoryRecord {
     size_of_central_directory: u32,
     offset_of_central_directory: u32,
     comment_length: u16,
-}
-
-static ZIP_PATH_INVALID_PATTERNS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\\|/\.{0,2}/|^\.{0,2}/|/\.{0,2}$|^\.{0,2}$").unwrap()
-});
-
-fn clean_name(name: &str) -> Option<String> {
-    if name.starts_with('/') {
-        return None
-    }
-
-    let has_parent_specifier = name.split('/')
-        .any(|part| part == "..");
-
-    if has_parent_specifier {
-        return None
-    }
-
-    let mut name = arca::Path::from(name).to_string();
-
-    if name.ends_with('/') {
-        name.pop();
-    }
-
-    Some(name)
-}
-
-pub fn entries_from_tar(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
-    let mut offset = 0;
-    let mut entries = vec![];
-
-    while offset < buffer.len() {
-        let size = from_oct(&buffer[offset + 124..offset + 136]) as usize;
-
-        if buffer[offset] != 0 {
-            let name_slice = trim_zero(&buffer[offset..offset + 100]);
-
-            let name = match std::str::from_utf8(name_slice) {
-                Ok(v) => v,
-                Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-            }.to_string();
-
-            let name = clean_name(&name)
-                .ok_or(Error::InvalidTarFilePath(name))?;
-
-            if ZIP_PATH_INVALID_PATTERNS.is_match(&name) {
-                return Err(Error::InvalidTarFilePath(name));
-            }
-
-            if buffer[offset + 156] == b'0' {
-                let mode = from_oct(&buffer[offset + 100..offset + 108]);
-                let data = &buffer[offset + 512..offset + 512 + size];
-
-                entries.push(Entry {
-                    name,
-                    mode,
-                    crc: 0,
-                    data: Cow::Borrowed(data),
-                });
-            }
-        }
-
-        // round up to the next multiple of 512
-        offset += 512 + ((size + 511) / 512) * 512;
-    }
-
-    Ok(entries)
-}
-
-pub fn entries_from_folder<'a>(path: PathBuf) -> Result<Vec<Entry<'a>>, Error> {
-    let mut entries = vec![];
-    let mut process_queue = vec![path];
-
-    while let Some(path) = process_queue.pop() {
-        let listing = std::fs::read_dir(&path)?;
-
-        for entry in listing {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.is_dir() {
-                process_queue.push(path);
-                continue;
-            }
-
-            let name = entry.file_name().into_string().unwrap();
-            let data = std::fs::read(&path)?;
-            let metadata = path.metadata()?;
-
-            let is_exec = metadata.permissions().mode() & 0o111 != 0;
-            let mode = if is_exec { 0o755 } else { 0o644 };
-
-            entries.push(Entry {
-                name,
-                mode,
-                crc: 0,
-                data: Cow::Owned(data),
-            });
-        }
-    }
-
-    Ok(entries)
 }
 
 pub fn entries_from_zip(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
@@ -256,46 +128,6 @@ pub fn first_entry_from_zip(buffer: &[u8]) -> Result<Entry, Error> {
             data: Cow::Borrowed(data),
         })    
     }
-}
-
-pub fn strip_first_segment(entries: Vec<Entry>) -> Vec<Entry> {
-    let mut next = vec![];
-
-    for mut entry in entries.into_iter() {
-        if let Some(slash_index) = entry.name.find('/') {
-            entry.name = entry.name[slash_index + 1..].to_string();
-            next.push(entry);
-        }
-    }
-
-    next
-}
-
-pub fn compute_crc32(mut entries: Vec<Entry>) -> Vec<Entry> {
-    for entry in entries.iter_mut() {
-        entry.crc = crc32fast::hash(&entry.data);
-    }
-
-    entries
-}
-
-pub fn normalize_entries(mut entries: Vec<Entry>) -> Vec<Entry> {
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
-
-    if let Some(manifest_idx) = entries.iter().position(|entry| entry.name == "package.json") {
-        let manifest_entry = entries.remove(manifest_idx);
-        entries.insert(0, manifest_entry);
-    }
-
-    entries
-}
-
-pub fn prefix_entries<T: AsRef<str>>(mut entries: Vec<Entry>, prefix: T) -> Vec<Entry> {
-    for entry in entries.iter_mut() {
-        entry.name = format!("{}/{}", prefix.as_ref(), entry.name);
-    }
-
-    entries
 }
 
 pub fn craft_zip(entries: &[Entry]) -> Vec<u8> {

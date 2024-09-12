@@ -31,6 +31,9 @@ trust-dns = "0.23.2"
 wax = { git = "https://github.com/arcanis/wax.git" }
 clipanion = { path = "../../../clipanion-rs/packages/clipanion", version = "0.5.0" }
 rand = "0.8.5"
+ignore = "0.4.22"
+globset = "0.4.14"
+walkdir = "2.5.0"
 
 [[bench]]
 name = "json"

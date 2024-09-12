@@ -2,6 +2,7 @@ use std::{collections::HashMap, fs, sync::Arc};
 
 use arca::Path;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
 use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, PeerRange}, semver, system};
 
@@ -9,6 +10,31 @@ use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer,
 #[serde(rename_all = "camelCase")]
 pub struct DistManifest {
     pub tarball: String,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum BinField {
+    String(Path),
+    Map(HashMap<String, Path>),
+}
+
+impl Iterator for BinField {
+    type Item = (String, Path);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            BinField::String(_) => None,
+            BinField::Map(map) => map.iter().next().map(|(k, v)| (k.clone(), v.clone())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BinManifest {
+    pub name: Option<Ident>,
+    pub bin: Option<BinField>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -46,6 +72,26 @@ pub struct Manifest {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<Ident>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main: Option<String>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bin: Option<BinField>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<String>>,
 
     #[serde(flatten)]
     pub remote: RemoteManifest,

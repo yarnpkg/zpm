@@ -4,7 +4,7 @@ use arca::Path;
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use sha2::Digest;
 
-use crate::{error::Error, hash::Blake2b80, primitives::Locator, project::Project, script::ScriptEnvironment};
+use crate::{error::Error, hash::Blake2b80, primitives::Locator, project::Project, script::{ScriptEnvironment, ScriptResult}};
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -22,7 +22,7 @@ pub struct BuildRequest {
 }
 
 impl BuildRequest {
-    pub async fn run(self, project: &Project) -> Result<i32, Error> {
+    pub async fn run(self, project: &Project) -> Result<ScriptResult, Error> {
         let cwd_abs = project.project_cwd
             .with_join(&self.cwd);
 
@@ -32,22 +32,22 @@ impl BuildRequest {
             .with_cwd(cwd_abs);
 
         for command in self.commands.iter() {
-            let exit_code = match command {
+            let script_result = match command {
                 Command::Program(program, args) =>
                     script_env.run_exec(program, args).await,
                 Command::Script(script) =>
                     script_env.run_script(script, Vec::<&str>::new()).await,
             };
 
-            if exit_code != 0 {
+            if !script_result.success() {
                 return Ok(match self.allowed_to_fail {
-                    true => 0,
-                    false => exit_code,
+                    true => ScriptResult::new_success(),
+                    false => script_result,
                 });
             }
         }
 
-        Ok(0)
+        Ok(ScriptResult::new_success())
     }
 
     pub fn key(&self) -> (Locator, Path) {
@@ -70,7 +70,7 @@ pub struct BuildManager<'a> {
     pub dependents: HashMap<usize, HashSet<usize>>,
     pub tree_hashes: HashMap<Locator, String>,
     pub queued: Vec<usize>,
-    pub running: FuturesUnordered<BoxFuture<'a, (usize, String, Result<i32, Error>)>>,
+    pub running: FuturesUnordered<BoxFuture<'a, (usize, String, Result<ScriptResult, Error>)>>,
     pub build_errors: HashSet<(Locator, Path)>,
     pub build_state_out: HashMap<Path, String>,
 }
@@ -99,10 +99,10 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn record(&mut self, idx: usize, hash: String, exit_code: i32) {
+    fn record(&mut self, idx: usize, hash: String, script_result: ScriptResult) {
         let request = &self.requests.entries[idx];
 
-        if exit_code != 0 {
+        if !script_result.success() {
             self.build_errors.insert(request.key());
         } else {
             self.build_state_out.insert(request.cwd.clone(), hash.to_string());
@@ -133,7 +133,7 @@ impl<'a> BuildManager<'a> {
                     = self.get_hash(project, &req.locator);
 
                 if build_state.get(&req.cwd) == Some(&hash) && !req.force_rebuild {
-                    self.record(idx, hash, 0);
+                    self.record(idx, hash, ScriptResult::new_success());
                     continue;
                 }
 
@@ -231,8 +231,8 @@ impl<'a> BuildManager<'a> {
                 = &self.requests.entries[idx];
 
             match result {
-                Ok(exit_code) => {
-                    self.record(idx, hash, exit_code);
+                Ok(exit_status) => {
+                    self.record(idx, hash, exit_status);
                 }
 
                 Err(err) => {

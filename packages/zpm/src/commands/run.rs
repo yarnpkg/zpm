@@ -1,8 +1,8 @@
-use std::process::ExitCode;
+use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
 
-use clipanion::cli;
+use clipanion::{advanced::Info, cli};
 
-use crate::{error::{Error}, project, script::ScriptEnvironment};
+use crate::{error::Error, project, script::ScriptEnvironment};
 
 #[cli::command(proxy)]
 #[cli::path("run")]
@@ -10,13 +10,27 @@ pub struct Run {
     #[cli::option("-T,--top-level")]
     top_level: bool,
 
+    #[cli::option("--error-if-missing", default = true)]
+    error_if_missing: bool,
+
     name: String,
     args: Vec<String>,
 }
 
 impl Run {
+    pub fn new(cli_info: Info, cli_path: Vec<String>, name: String, args: Vec<String>, error_if_missing: bool) -> Self {
+        Self {
+            cli_info,
+            cli_path,
+            top_level: false,
+            error_if_missing,
+            name,
+            args,
+        }
+    }
+
     #[tokio::main()]
-    pub async fn execute(&self) -> Result<ExitCode, Error> {
+    pub async fn execute(&self) -> Result<ExitStatus, Error> {
         let mut project
             = project::Project::new(None)?;
 
@@ -31,24 +45,31 @@ impl Run {
             = project.find_binary(&self.name);
 
         if let Ok(binary) = maybe_binary {
-            let exit_code = ScriptEnvironment::new()
+            Ok(ScriptEnvironment::new()
                 .with_project(&project)
                 .with_package(&project, &project.active_package()?)?
                 .run_binary(&binary, &self.args)
-                .await;
-
-            Ok(ExitCode::from(exit_code as u8))
+                .await
+                .into())
         } else if let Err(Error::BinaryNotFound(_)) = maybe_binary {
-            let (locator, script)
-                = project.find_script(&self.name)?;
+            let maybe_script = project.find_script(&self.name);
 
-            let exit_code = ScriptEnvironment::new()
-                .with_project(&project)
-                .with_package(&project, &locator)?
-                .run_script(&script, &self.args)
-                .await;
-
-            Ok(ExitCode::from(exit_code as u8))
+            if let Ok((locator, script)) = maybe_script {
+                Ok(ScriptEnvironment::new()
+                    .with_project(&project)
+                    .with_package(&project, &locator)?
+                    .run_script(&script, &self.args)
+                    .await
+                    .into())
+            } else if let Err(Error::ScriptNotFound(script)) = maybe_script {
+                if self.error_if_missing {
+                    return Err(Error::ScriptNotFound(script));
+                } else {
+                    Ok(ExitStatus::from_raw(0))
+                }
+            } else {
+                Err(maybe_script.unwrap_err())
+            }
         } else {
             Err(maybe_binary.unwrap_err())
         }

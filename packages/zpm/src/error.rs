@@ -77,6 +77,9 @@ pub enum Error {
     #[error("Invalid workspace pattern ({0})")]
     InvalidWorkspacePattern(String),
 
+    #[error("Invalid file pattern ({0})")]
+    InvalidFilePattern(String),
+
     #[error("Remote registry error ({0})")]
     RemoteRegistryError(Arc<reqwest::Error>),
 
@@ -94,6 +97,12 @@ pub enum Error {
 
     #[error("Lockfile generation error")]
     LockfileGenerationError(Arc<serde_json::Error>),
+
+    #[error("Repository clone failed")]
+    RepositoryCloneFailed(String),
+
+    #[error("Repository checkout failed")]
+    RepositoryCheckoutFailed(String, String),
 
     #[error("Git error")]
     GitError,
@@ -131,6 +140,9 @@ pub enum Error {
     #[error("Couldn't find a package matching the current working directory")]
     ActivePackageNotFound,
 
+    #[error("The active package is not a workspace")]
+    ActivePackageNotWorkspace,
+
     #[error("Script not found ({0})")]
     ScriptNotFound(String),
 
@@ -148,6 +160,24 @@ pub enum Error {
 
     #[error("Some build scripts failed to run")]
     BuildScriptsFailedToRun,
+
+    #[error("Invalid pack pattern ({0})")]
+    InvalidPackPattern(String),
+
+    #[error("Invalid git url ({0})")]
+    InvalidGitUrl(String),
+
+    #[error("Child process failed ({0})")]
+    ChildProcessFailed(String),
+}
+
+impl Error {
+    pub fn ignore<T, F: FnOnce(&Error) -> bool>(self, f: F) -> Result<Option<T>, Error> {
+        match f(&self) {
+            true => Ok(None),
+            false => Err(self),
+        }
+    }
 }
 
 impl From<std::io::Error> for Error {
@@ -168,5 +198,19 @@ impl From<bincode::error::EncodeError> for Error {
 impl From<serde_json::Error> for Error {
     fn from(error: serde_json::Error) -> Self {
         Arc::new(error).into()
+    }
+}
+
+impl From<ignore::Error> for Error {
+    fn from(error: ignore::Error) -> Self {
+        match error {
+            ignore::Error::Io(err) => {
+                err.into()
+            }
+
+            _ => {
+                Error::UnknownError(Arc::new(Box::new(error)))
+            }
+        }
     }
 }

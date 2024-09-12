@@ -1,6 +1,6 @@
 use clipanion::cli;
 
-use crate::{error::{Error}, project};
+use crate::{error::Error, project};
 
 #[cli::command(default)]
 #[cli::path("install")]

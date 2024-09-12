@@ -2,7 +2,7 @@ use clipanion::cli;
 
 #[cli::command(default)]
 pub struct Version {
-    #[cli::option("-V,--version")]
+    #[cli::option("-V,--version", required)]
     version: bool,
 }
 

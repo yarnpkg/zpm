@@ -4,7 +4,7 @@ use arca::Path;
 use bincode::{Decode, Encode};
 use serde::{de::{self, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer, Serialize};
 
-use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_remote_tarball_with_manifest, PackageData}, git::{resolve_git_treeish, GitRange}, http::http_client, install::InstallContext, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, system, zip::ZipSupport};
+use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_remote_tarball_with_manifest, fetch_repository_with_manifest, PackageData}, formats::zip::ZipSupport, git::{resolve_git_treeish, GitRange}, http::http_client, install::InstallContext, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, system};
 
 pub struct ResolveResult {
     pub resolution: Resolution,
@@ -89,7 +89,7 @@ pub async fn resolve(context: InstallContext<'_>, descriptor: Descriptor, parent
             => resolve_semver_or_workspace(context, &descriptor.ident, range).await,
 
         Range::Git(range)
-            => resolve_git(descriptor.ident, range).await,
+            => resolve_git(context, descriptor.ident, range).await,
 
         Range::Semver(range)
             => resolve_semver(context, &descriptor.ident, range).await,
@@ -191,25 +191,14 @@ pub fn resolve_portal(ident: &Ident, path: &str, parent: &Option<Locator>, paren
     Ok(ResolveResult::new(resolution))
 }
 
-pub async fn resolve_git(ident: Ident, git_range: &GitRange) -> Result<ResolveResult, Error> {
-    let commit = resolve_git_treeish(git_range).await?;
+pub async fn resolve_git(context: InstallContext<'_>, ident: Ident, source: &GitRange) -> Result<ResolveResult, Error> {
+    let commit = resolve_git_treeish(source).await?;
+    let locator = Locator::new(ident, Reference::Git(source.repo.clone(), commit.clone()));
 
-    let locator = Locator::new(ident, Reference::Git(GitRange {
-        repo: git_range.repo.clone(),
-        treeish: crate::git::GitTreeish::Commit(commit),
-    }));
+    let (resolution, package_data)
+        = fetch_repository_with_manifest(context, &locator, &source.repo, &commit).await?;
 
-    let resolution = Resolution {
-        version: semver::Version::new(),
-        locator,
-        dependencies: HashMap::new(),
-        peer_dependencies: HashMap::new(),
-        optional_dependencies: HashSet::new(),
-        missing_peer_dependencies: HashSet::new(),
-        requirements: system::Requirements::default(),
-    };
-
-    Ok(ResolveResult::new(resolution))
+    Ok(ResolveResult::new_with_data(resolution, package_data))
 }
 
 pub async fn resolve_semver_tag(context: InstallContext<'_>, ident: Ident, tag: &str) -> Result<ResolveResult, Error> {
