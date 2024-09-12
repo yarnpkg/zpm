@@ -1,5 +1,8 @@
+use bincode::{Decode, Encode};
 use serde::ser::{Serialize, Serializer, SerializeStruct, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant, SerializeMap, SerializeSeq, SerializeStructVariant};
 use std::fmt;
+
+use crate::error::Error;
 
 pub struct NoopSerializer {
     pub output: String,
@@ -330,3 +333,34 @@ macro_rules! yarn_serialization_protocol {
         });
     };
 }
+
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct UrlEncoded<T>(pub T);
+
+impl<T: for<'t> TryFrom<&'t str, Error = Error>> TryFrom<&str> for UrlEncoded<T> {
+    type Error = Error;
+
+    fn try_from(value: &str) -> Result<Self, Error> {
+        let url_decoded
+            = urlencoding::decode(value).unwrap();
+        let converted
+            = T::try_from(url_decoded.as_ref()).unwrap();
+
+        Ok(UrlEncoded(converted))
+    }
+}
+
+impl<T: ToString> std::fmt::Display for UrlEncoded<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", urlencoding::encode(&self.0.to_string()))
+    }
+}
+
+impl<T: for<'t> TryFrom<&'t str, Error = Error>> TryFrom<&str> for Box<UrlEncoded<T>> {
+    type Error = Error;
+
+    fn try_from(value: &str) -> Result<Self, Error> {
+        UrlEncoded::try_from(value).map(Box::new)
+    }
+}
+

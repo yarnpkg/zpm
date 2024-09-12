@@ -3,9 +3,9 @@ use std::hash::Hash;
 use bincode::{Decode, Encode};
 use zpm_macros::Parsed;
 
-use crate::{error::Error, git, hash::Sha256, semver, yarn_serialization_protocol};
+use crate::{error::Error, git, hash::Sha256, semver, serialize::UrlEncoded, yarn_serialization_protocol};
 
-use super::Ident;
+use super::{Descriptor, Ident};
 
 #[derive(Clone, Debug, Decode, Encode, Parsed, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[parse_error(Error::InvalidRange)]
@@ -39,8 +39,8 @@ pub enum Range {
     #[try_pattern(pattern = r"(\.{0,2}/.*)")]
     Folder(String),
 
-    #[try_pattern(prefix = "patch:")]
-    Patch(String),
+    #[try_pattern(prefix = "patch:", pattern = r"(.*)#(.*)$")]
+    Patch(Box<UrlEncoded<Descriptor>>, String),
 
     #[try_pattern(prefix = "virtual:", pattern = r"(.*)#([a-f0-9]*)$")]
     Virtual(Box<Range>, Sha256),
@@ -63,11 +63,11 @@ pub enum Range {
 
 impl Range {
     pub fn must_bind(&self) -> bool {
-        matches!(&self, Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Folder(_) | Range::Patch(_))
+        matches!(&self, Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Folder(_) | Range::Patch(_, _))
     }
 
     pub fn is_transient_resolution(&self) -> bool {
-        matches!(&self, Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Folder(_) | Range::Patch(_) | Range::WorkspaceMagic(_) | Range::WorkspacePath(_) | Range::WorkspaceSemver(_))
+        matches!(&self, Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Folder(_) | Range::Patch(_, _) | Range::WorkspaceMagic(_) | Range::WorkspacePath(_) | Range::WorkspaceSemver(_))
     }
 }
 
@@ -78,7 +78,7 @@ yarn_serialization_protocol!(Range, "", {
             Range::Semver(range) => format!("npm:{}", range),
             Range::SemverTag(tag) => format!("npm:{}", tag),
             Range::SemverAlias(ident, range) => format!("npm:{}@{}", ident, range),
-            Range::Patch(patch) => format!("patch:{}", patch),
+            Range::Patch(inner, file) => format!("patch:{}#{}", inner, file),
             Range::Link(link) => format!("link:{}", link),
             Range::Portal(portal) => format!("portal:{}", portal),
             Range::Tarball(file) => format!("file:{}", file),

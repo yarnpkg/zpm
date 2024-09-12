@@ -85,6 +85,15 @@ impl Resolution {
 
 pub async fn resolve(context: InstallContext<'_>, descriptor: Descriptor, parent_data: Option<PackageData>) -> Result<ResolveResult, Error> {
     match &descriptor.range {
+        Range::Patch(inner, _)
+            => resolve_direct(context, inner.0.clone(), parent_data).await,
+
+        _ => resolve_direct(context, descriptor, parent_data).await,
+    }
+}
+
+async fn resolve_direct(context: InstallContext<'_>, descriptor: Descriptor, parent_data: Option<PackageData>) -> Result<ResolveResult, Error> {
+    match &descriptor.range {
         Range::SemverOrWorkspace(range)
             => resolve_semver_or_workspace(context, &descriptor.ident, range).await,
 
