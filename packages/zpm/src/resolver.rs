@@ -4,7 +4,7 @@ use arca::Path;
 use bincode::{Decode, Encode};
 use serde::{de::{self, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer, Serialize};
 
-use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_remote_tarball_with_manifest, fetch_repository_with_manifest, PackageData}, formats::zip::ZipSupport, git::{resolve_git_treeish, GitRange}, http::http_client, install::InstallContext, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, system};
+use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_remote_tarball_with_manifest, fetch_repository_with_manifest, PackageData}, formats::zip::ZipSupport, git::{resolve_git_treeish, GitRange, GitReference}, http::http_client, install::InstallContext, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, system};
 
 pub struct ResolveResult {
     pub resolution: Resolution,
@@ -202,10 +202,18 @@ pub fn resolve_portal(ident: &Ident, path: &str, parent: &Option<Locator>, paren
 
 pub async fn resolve_git(context: InstallContext<'_>, ident: Ident, source: &GitRange) -> Result<ResolveResult, Error> {
     let commit = resolve_git_treeish(source).await?;
-    let locator = Locator::new(ident, Reference::Git(source.repo.clone(), commit.clone()));
+
+    let git_reference = GitReference {
+        repo: source.repo.clone(),
+        commit: commit.clone(),
+        prepare_params: source.prepare_params.clone(),
+    };
+
+    let locator
+        = Locator::new(ident, Reference::Git(git_reference.clone()));
 
     let (resolution, package_data)
-        = fetch_repository_with_manifest(context, &locator, &source.repo, &commit).await?;
+        = fetch_repository_with_manifest(context, &locator, &git_reference).await?;
 
     Ok(ResolveResult::new_with_data(resolution, package_data))
 }

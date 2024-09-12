@@ -6,7 +6,7 @@ use fancy_regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-use crate::{error::Error, primitives::Range, semver, yarn_serialization_protocol};
+use crate::{error::Error, prepare::PrepareParams, primitives::Range, semver, yarn_serialization_protocol};
 
 static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
 
@@ -69,6 +69,7 @@ impl Display for GitTreeish {
 pub struct GitRange {
     pub repo: String,
     pub treeish: GitTreeish,
+    pub prepare_params: PrepareParams,
 }
 
 yarn_serialization_protocol!(GitRange, "", {
@@ -82,7 +83,89 @@ yarn_serialization_protocol!(GitRange, "", {
     }
 
     serialize(&self) {
-        format!("{}#{}", self.repo, self.treeish)
+        let mut params = vec![];
+
+        params.push(match &self.treeish {
+            GitTreeish::AnythingGoes(treeish) => treeish.to_string(),
+            GitTreeish::Branch(branch) => format!("branch={}", branch),
+            GitTreeish::Commit(commit) => format!("commit={}", commit),
+            GitTreeish::Semver(range) => format!("semver={}", range),
+            GitTreeish::Tag(tag) => format!("tag={}", tag),
+        });
+
+        if let Some(cwd) = &self.prepare_params.cwd {
+            params.push(format!("cwd={}", urlencoding::encode(cwd)));
+        }
+
+        if let Some(workspace) = &self.prepare_params.workspace {
+            params.push(format!("workspace={}", urlencoding::encode(workspace)));
+        }
+
+        format!("{}#{}", self.repo, params.join("&"))
+    }
+});
+
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct GitReference {
+    pub repo: String,
+    pub commit: String,
+    pub prepare_params: PrepareParams,
+}
+
+yarn_serialization_protocol!(GitReference, "", {
+    deserialize(src) {
+        let mut parts = src.splitn(2, '#');
+
+        let repo = parts.next().unwrap().to_string();
+        let qs = parts.next().unwrap();
+
+        let mut commit = None;
+        let mut prepare_params = PrepareParams::default();
+
+        for pair in qs.split('&') {
+            if let Some(eq_index) = pair.find('=') {
+                let (key, value) = pair.split_at(eq_index);
+                let value = &value[1..];
+
+                match key {
+                    "commit" =>
+                        commit = Some(value.to_string()),
+
+                    "cwd" =>
+                        prepare_params.cwd = Some(value.to_string()),
+
+                    "workspace" =>
+                        prepare_params.workspace = Some(value.to_string()),
+
+                    _ => {},
+                };
+            }
+        }
+
+        let commit = commit
+            .expect("Expected a commit to always be present in a git reference");
+
+        Ok(GitReference {
+            repo,
+            commit,
+            prepare_params,
+        })
+    }
+
+    serialize(&self) {
+        let mut params = vec![
+            format!("commit={}", urlencoding::encode(&self.commit)),
+        ];
+
+        if let Some(cwd) = &self.prepare_params.cwd {
+            params.push(format!("cwd={}", urlencoding::encode(cwd)));
+        }
+
+        if let Some(workspace) = &self.prepare_params.workspace {
+            params.push(format!("workspace={}", urlencoding::encode(workspace)));
+        }
+
+        format!("{}#{}", self.repo, params.join("&"))
     }
 });
 
@@ -94,6 +177,7 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
         return Ok(GitRange {
             repo: url.to_string(),
             treeish: GitTreeish::Branch("HEAD".to_string()),
+            prepare_params: PrepareParams::default(),
         });
     }
 
@@ -103,25 +187,41 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
     // New-style: "#commit=abcdef&workspace=foobar"
     if NEW_STYLE_GIT_SELECTOR.is_match(subsequent).unwrap() {
         let mut treeish = GitTreeish::Commit("HEAD".to_string());
+        let mut prepare_params = PrepareParams::default();
 
         for pair in subsequent.split('&') {
             if let Some(eq_index) = pair.find('=') {
                 let (key, value) = pair.split_at(eq_index);
                 let value = &value[1..];
 
-                treeish = match key {
-                    "branch" => GitTreeish::Branch(value.to_string()),
-                    "commit" => GitTreeish::Commit(value.to_string()),
-                    "semver" => GitTreeish::Semver(semver::Range::from_str(value)?),
-                    "tag" => GitTreeish::Tag(value.to_string()),
-                    _ => treeish,
-                };
+                match key {
+                    "branch" =>
+                        treeish = GitTreeish::Branch(value.to_string()),
+
+                    "commit" =>
+                        treeish = GitTreeish::Commit(value.to_string()),
+
+                    "semver" =>
+                        treeish = GitTreeish::Semver(semver::Range::from_str(value)?),
+
+                    "tag" =>
+                        treeish = GitTreeish::Tag(value.to_string()),
+
+                    "cwd" =>
+                        prepare_params.cwd = Some(value.to_string()),
+
+                    "workspace" =>
+                        prepare_params.workspace = Some(value.to_string()),
+
+                    _ => {},
+                }
             }
         }
 
         return Ok(GitRange {
             repo: repo.to_string(),
             treeish,
+            prepare_params,
         });
     }
 
@@ -144,6 +244,7 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
     Ok(GitRange {
         repo: repo.to_string(),
         treeish,
+        prepare_params: PrepareParams::default(),
     })
 }
 
@@ -273,7 +374,8 @@ pub async fn clone_repository(url: &str, commit: &str) -> Result<Path, Error> {
         .arg("-c core.autocrlf=false")
         .arg(&normalized_repo_url)
         .arg(clone_dir.to_string())
-        .status().await?
+        .output().await?
+        .status
         .success()
         .then_some(())
         .ok_or_else(|| Error::RepositoryCloneFailed(normalized_repo_url.clone()))?;
@@ -283,7 +385,8 @@ pub async fn clone_repository(url: &str, commit: &str) -> Result<Path, Error> {
         .arg("checkout")
         .arg(commit)
         .current_dir(clone_dir.to_string())
-        .status().await?
+        .output().await?
+        .status
         .success()
         .then_some(())
         .ok_or_else(|| Error::RepositoryCheckoutFailed(normalized_repo_url.clone(), commit.to_string()))?;

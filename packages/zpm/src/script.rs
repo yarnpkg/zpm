@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::ExitStatus, sync::LazyLock};
+use std::{collections::{BTreeMap, HashMap}, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
 
 use arca::{Path, ToArcaPath};
 use itertools::Itertools;
@@ -101,20 +101,24 @@ impl Binary {
 }
 
 pub enum ScriptResult {
-    Success(ExitStatus),
-    Failure(ExitStatus, String),
+    Success(Output),
+    Failure(Output, String),
 }
 
 impl ScriptResult {
     pub fn new_success() -> Self {
-        Self::Success(ExitStatus::from_raw(0))
+        Self::Success(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        })
     }
 
-    pub fn new(exit_status: ExitStatus, program: &str) -> Self {
-        if exit_status.success() {
-            Self::Success(exit_status)
+    pub fn new(output: Output, program: &str) -> Self {
+        if output.status.success() {
+            Self::Success(output)
         } else {
-            Self::Failure(exit_status, program.to_string())
+            Self::Failure(output, program.to_string())
         }
     }
 
@@ -122,10 +126,20 @@ impl ScriptResult {
         matches!(self, Self::Success(_))
     }
 
-    pub fn ok(self) -> Result<(), Error> {
+    pub fn ok(&self) -> Result<(), Error> {
+        if !self.success() {
+            println!("{}", String::from_utf8_lossy(&self.output().stderr));
+        }
         match self {
             Self::Success(_) => Ok(()),
-            Self::Failure(_, program) => Err(Error::ChildProcessFailed(program)),
+            Self::Failure(_, program) => Err(Error::ChildProcessFailed(program.clone())),
+        }
+    }
+
+    pub fn output(&self) -> &Output {
+        match self {
+            Self::Success(output) => output,
+            Self::Failure(output, _) => output,
         }
     }
 }
@@ -133,8 +147,8 @@ impl ScriptResult {
 impl Into<ExitStatus> for ScriptResult {
     fn into(self) -> ExitStatus {
         match self {
-            ScriptResult::Success(exit_status) => exit_status,
-            ScriptResult::Failure(exit_status, _) => exit_status,
+            ScriptResult::Success(output) => output.status,
+            ScriptResult::Failure(output, _) => output.status,
         }
     }
 }
@@ -321,10 +335,10 @@ impl ScriptEnvironment {
         cmd.envs(self.env.iter());
         cmd.args(args);
 
-        let exit_status
-            = cmd.status().await.unwrap();
+        let output
+            = cmd.output().await.unwrap();
 
-        ScriptResult::new(exit_status, program)
+        ScriptResult::new(output, program)
     }
 
     pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {

@@ -4,7 +4,7 @@ use arca::Path;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, formats, git::clone_repository, hash::Sha256, http::http_client, install::InstallContext, manifest::{Manifest, RemoteManifest}, primitives::{Ident, Locator, Reference}, resolver::Resolution, script::ScriptEnvironment, semver};
+use crate::{error::Error, formats, git::{clone_repository, GitReference}, hash::Sha256, http::http_client, install::InstallContext, manifest::{Manifest, RemoteManifest}, prepare, primitives::{Ident, Locator, Reference}, resolver::Resolution, semver};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
@@ -120,26 +120,6 @@ fn convert_folder_to_zip(ident: &Ident, folder_path: &Path) -> Result<Vec<u8>, E
     Ok(formats::zip::craft_zip(&entries))
 }
 
-async fn convert_pack_folder_to_zip(ident: &Ident, folder_path: &Path) -> Result<Vec<u8>, Error> {
-    ScriptEnvironment::new()
-        .with_cwd(folder_path.clone())
-        .run_exec("yarn", vec!["install"])
-        .await
-        .ok()?;
-
-    ScriptEnvironment::new()
-        .with_cwd(folder_path.clone())
-        .run_exec("yarn", vec!["pack"])
-        .await
-        .ok()?;
-
-    let pack_tgz = folder_path
-        .with_join_str("package.tgz")
-        .fs_read()?;
-
-    Ok(convert_tar_gz_to_zip(ident, Bytes::from(pack_tgz))?)
-}
-
 pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_request: bool, parent_data: Option<PackageData>) -> Result<PackageData, Error> {
     match &locator.reference {
         Reference::Link(path)
@@ -157,8 +137,8 @@ pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_r
         Reference::Folder(path)
             => Ok(fetch_folder_with_manifest(context, locator, path, parent_data).await?.1),
 
-        Reference::Git(repo, commit)
-            => Ok(fetch_repository_with_manifest(context, locator, repo, commit).await?.1),
+        Reference::Git(reference)
+            => Ok(fetch_repository_with_manifest(context, locator, reference).await?.1),
 
         Reference::Semver(version)
             => fetch_semver(context, locator, &locator.ident, version, is_mock_request).await,
@@ -304,12 +284,17 @@ pub async fn fetch_folder_with_manifest<'a>(context: InstallContext<'a>, locator
     }))
 }
 
-pub async fn fetch_repository_with_manifest<'a>(context: InstallContext<'a>, locator: &Locator, repo: &str, commit: &str) -> Result<(Resolution, PackageData), Error> {
+pub async fn fetch_repository_with_manifest<'a>(context: InstallContext<'a>, locator: &Locator, reference: &GitReference) -> Result<(Resolution, PackageData), Error> {
     let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let repository_path
-            = clone_repository(&repo, &commit).await?;
+            = clone_repository(&reference.repo, &reference.commit).await?;
 
-        convert_pack_folder_to_zip(&locator.ident, &repository_path).await
+        let pack_tgz = prepare::prepare_project(
+            &repository_path,
+            &reference.prepare_params,
+        ).await?;
+
+        convert_tar_gz_to_zip(&locator.ident, pack_tgz.into())
     }).await?;
 
     let first_entry

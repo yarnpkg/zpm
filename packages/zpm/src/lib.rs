@@ -17,6 +17,7 @@ pub mod manifest;
 pub mod misc;
 pub mod pack;
 pub mod path;
+pub mod prepare;
 pub mod primitives;
 pub mod project;
 pub mod resolver;

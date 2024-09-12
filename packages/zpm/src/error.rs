@@ -169,6 +169,9 @@ pub enum Error {
 
     #[error("Child process failed ({0})")]
     ChildProcessFailed(String),
+
+    #[error("Failed to interpret as an utf8 string")]
+    FromUtf8Error(#[from] std::string::FromUtf8Error),
 }
 
 impl Error {

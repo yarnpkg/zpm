@@ -26,7 +26,7 @@ impl<'a> FromStr for LooseDescriptor {
         }
 
         let ident = Ident::from_str(s)?;
-        let range = Range::from_str("latest").unwrap();
+        let range = Range::from_str("latest")?;
 
         let descriptor = Descriptor::new(ident, range);
 
@@ -96,7 +96,8 @@ pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<HashMap<Id
 
     for (k, v) in values.iter() {
         let serialized_range = format!("{}@{}", k, v);
-        let descriptor = Descriptor::from_str(&serialized_range).unwrap();
+        let descriptor = Descriptor::from_str(&serialized_range)
+            .map_err(serde::de::Error::custom)?;
 
         entries.insert(descriptor.ident.clone(), descriptor);
     }

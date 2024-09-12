@@ -3,7 +3,7 @@ use std::hash::Hash;
 use bincode::{Decode, Encode};
 use zpm_macros::Parsed;
 
-use crate::{error::Error, hash::Sha256, semver, yarn_serialization_protocol};
+use crate::{error::Error, git, hash::Sha256, semver, yarn_serialization_protocol};
 
 use super::Ident;
 
@@ -35,8 +35,8 @@ pub enum Reference {
     #[try_pattern(prefix = "workspace:")]
     Workspace(Ident),
 
-    #[try_pattern(prefix = "git:", pattern = r"(.*)#(.*)")]
-    Git(String, String),
+    #[try_pattern(prefix = "git:")]
+    Git(git::GitReference),
 
     #[try_pattern(pattern = r"(https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
     Url(String),
@@ -52,7 +52,7 @@ impl Reference {
 
     pub fn slug(&self) -> String {
         match self {
-            Reference::Git(_, _) => "git".to_string(),
+            Reference::Git(_) => "git".to_string(),
             Reference::Semver(version) => format!("npm-{}", version),
             Reference::SemverAlias(_, version) => format!("npm-{}", version),
             Reference::Tarball(_) => "file".to_string(),
@@ -69,7 +69,7 @@ impl Reference {
 yarn_serialization_protocol!(Reference, "", {
     serialize(&self) {
         match self {
-            Reference::Git(repo, commit) => format!("git:{}#{}", repo, commit),
+            Reference::Git(reference) => format!("git:{}", reference),
             Reference::Semver(version) => format!("npm:{}", version),
             Reference::SemverAlias(ident, version) => format!("npm:{}@{}", ident, version),
             Reference::Tarball(path) => format!("file:{}", path),

@@ -4,8 +4,6 @@ use clipanion::cli;
 
 use crate::{error::Error, formats, pack::pack_list, project, script::ScriptEnvironment};
 
-use super::run::Run;
-
 #[cli::command(proxy)]
 #[cli::path("pack")]
 pub struct Pack {
