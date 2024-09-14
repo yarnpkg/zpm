@@ -8,6 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::hash::Sha256;
 use crate::serialize::Serialized;
+use crate::{semver, yarn_check_serialize};
 use crate::{error::Error, yarn_serialization_protocol};
 
 use super::{Ident, Locator, Range};
@@ -48,6 +49,14 @@ impl Descriptor {
             range,
             parent: None,
         }
+    }
+
+    pub fn new_semver(ident: Ident, range: &str) -> Result<Descriptor, Error> {
+        Ok(Descriptor {
+            ident,
+            range: Range::Semver(semver::Range::from_str(range)?),
+            parent: None,
+        })
     }
 
     pub fn new_bound(ident: Ident, range: Range, parent: Option<Locator>) -> Descriptor {
@@ -131,10 +140,10 @@ yarn_serialization_protocol!(Descriptor, "", {
     }
 
     serialize(&self) {
-        match &self.parent {
+        yarn_check_serialize!(self, match &self.parent {
             Some(parent) => format!("{}@{}::parent={}", self.ident, self.range, parent),
             None => format!("{}@{}", self.ident, self.range),
-        }
+        })
     }
 });
 

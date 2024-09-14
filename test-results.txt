@@ -1585,9 +1585,9 @@
 🟥 Protocols ► git: ► it should use Yarn Classic to setup classic repositories
 🟥 Protocols ► git: ► it shouldn't install dependencies for packages without prepack
 
-[11 / 19] packages/acceptance-tests/pkg-tests-specs/sources/protocols/git.test.ts
+[10 / 19] packages/acceptance-tests/pkg-tests-specs/sources/protocols/git.test.ts
 
-🟩 Protocols ► git: ► it should guarantee that all dependencies will be installed when using npm to setup npm repositories
+🟥 Protocols ► git: ► it should guarantee that all dependencies will be installed when using npm to setup npm repositories
 🟩 Protocols ► git: ► it should install dependencies and run prepack if needed
 🟩 Protocols ► git: ► it should not add a 'packageManager' field to a Yarn classic project
 🟥 Protocols ► git: ► it should not use Corepack to fetch Yarn Classic
@@ -1627,7 +1627,7 @@
 🟩 Protocols ► npm: ► it should allow renaming packages
 🟩 Protocols ► npm: ► it should allow semver ranges with build metadata
 
-[0 / 8] packages/acceptance-tests/pkg-tests-specs/sources/protocols/patch.test.ts
+[1 / 8] packages/acceptance-tests/pkg-tests-specs/sources/protocols/patch.test.ts
 
 🟥 Protocols ► patch: ► it should apply a patch on the original package
 🟥 Protocols ► patch: ► it should apply patches relative to the package
@@ -1635,7 +1635,7 @@
 🟥 Protocols ► patch: ► it should generate the same file twice in a row (delayed)
 🟥 Protocols ► patch: ► it should only compute the hash from the effects of the patch
 🟥 Protocols ► patch: ► it should preserve the resolution when switching in and out of a patch
-🟥 Protocols ► patch: ► it should support applying a patch on a patch
+🟩 Protocols ► patch: ► it should support applying a patch on a patch
 🟥 Protocols ► patch: ► it should throw on invalid patch files
 
 [5 / 5] packages/acceptance-tests/pkg-tests-specs/sources/protocols/portals.test.js

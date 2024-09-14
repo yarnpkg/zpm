@@ -8,8 +8,8 @@ use zpm_macros::track_time;
 
 use crate::{error::Error, primitives::Locator, project::Project};
 
-static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
-static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
+// static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
+// static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
 static JS_EXTENSION: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
 
 fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: Vec<&str>) -> Result<(), Error> {
@@ -102,7 +102,7 @@ impl Binary {
 
 pub enum ScriptResult {
     Success(Output),
-    Failure(Output, String),
+    Failure(Output, String, Vec<String>),
 }
 
 impl ScriptResult {
@@ -114,11 +114,11 @@ impl ScriptResult {
         })
     }
 
-    pub fn new(output: Output, program: &str) -> Self {
+    pub fn new(output: Output, program: String, args: Vec<String>) -> Self {
         if output.status.success() {
             Self::Success(output)
         } else {
-            Self::Failure(output, program.to_string())
+            Self::Failure(output, program, args)
         }
     }
 
@@ -132,14 +132,14 @@ impl ScriptResult {
         }
         match self {
             Self::Success(_) => Ok(()),
-            Self::Failure(_, program) => Err(Error::ChildProcessFailed(program.clone())),
+            Self::Failure(_, program, _) => Err(Error::ChildProcessFailed(program.clone())),
         }
     }
 
     pub fn output(&self) -> &Output {
         match self {
             Self::Success(output) => output,
-            Self::Failure(output, _) => output,
+            Self::Failure(output, _, _) => output,
         }
     }
 }
@@ -148,7 +148,7 @@ impl Into<ExitStatus> for ScriptResult {
     fn into(self) -> ExitStatus {
         match self {
             ScriptResult::Success(output) => output.status,
-            ScriptResult::Failure(output, _) => output.status,
+            ScriptResult::Failure(output, _, _) => output.status,
         }
     }
 }
@@ -156,6 +156,7 @@ impl Into<ExitStatus> for ScriptResult {
 pub struct ScriptEnvironment {
     cwd: Path,
     env: HashMap<String, String>,
+    shell_forwarding: bool,
 }
 
 impl Default for ScriptEnvironment {
@@ -169,6 +170,7 @@ impl ScriptEnvironment {
         Self {
             cwd: std::env::current_dir().unwrap().to_arca(),
             env: HashMap::new(),
+            shell_forwarding: false,
         }
     }
 
@@ -192,6 +194,16 @@ impl ScriptEnvironment {
         }
 
         current.push_str(value);
+    }
+
+    pub fn with_env_variable(mut self, key: &str, value: &str) -> Self {
+        self.env.insert(key.to_string(), value.to_string());
+        self
+    }
+
+    pub fn enable_shell_forwarding(mut self) -> Self {
+        self.shell_forwarding = true;
+        self
     }
 
     pub fn with_project(mut self, project: &Project) -> Self {
@@ -328,26 +340,36 @@ impl ScriptEnvironment {
     }
 
     #[track_time]
-    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<OsStr> {
+    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<str> {
         let mut cmd = Command::new(program);
+
+        let args = args.into_iter()
+            .map(|arg| arg.as_ref().to_string())
+            .collect::<Vec<_>>();
 
         cmd.current_dir(self.cwd.to_path_buf());
         cmd.envs(self.env.iter());
-        cmd.args(args);
+        cmd.args(&args);
 
-        let output
-            = cmd.output().await.unwrap();
+        let output = match self.shell_forwarding {
+            false => cmd.output().await.unwrap(),
+            true => Output {
+                status: cmd.status().await.unwrap(),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+        };
 
-        ScriptResult::new(output, program)
+        ScriptResult::new(output, program.to_string(), args)
     }
 
-    pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+    pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<str> {
         match binary.kind {
             BinaryKind::Node => {
                 let mut node_args = vec![];
 
                 node_args.push(binary.path.to_string());
-                node_args.extend(args.into_iter().map(|arg| arg.to_string()));
+                node_args.extend(args.into_iter().map(|arg| arg.as_ref().to_string()));
 
                 self.run_exec("node", node_args).await
             },

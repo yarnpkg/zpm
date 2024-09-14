@@ -1,10 +1,14 @@
-use std::{collections::{HashMap, HashSet}, fmt, marker::PhantomData, str::FromStr, sync::Arc};
+use std::{collections::{HashMap, HashSet}, fmt, marker::PhantomData, str::FromStr, sync::{Arc, LazyLock}};
 
 use arca::Path;
 use bincode::{Decode, Encode};
+use regex::Regex;
 use serde::{de::{self, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer, Serialize};
 
 use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_remote_tarball_with_manifest, fetch_repository_with_manifest, PackageData}, formats::zip::ZipSupport, git::{resolve_git_treeish, GitRange, GitReference}, http::http_client, install::InstallContext, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, system};
+
+static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
+static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
 
 pub struct ResolveResult {
     pub resolution: Resolution,
@@ -356,18 +360,42 @@ pub async fn resolve_semver(context: InstallContext<'_>, ident: &Ident, range: &
     let mut deserializer
         = serde_json::Deserializer::from_str(registry_text.as_str());
 
+    #[derive(Clone, Deserialize)]
+    struct RemoteManifestWithScripts {
+        #[serde(flatten)]
+        remote: RemoteManifest,
+
+        #[serde(default)]
+        #[serde(skip_serializing_if = "HashMap::is_empty")]
+        scripts: HashMap<String, String>,
+    }
+
     let manifest_result = deserializer.deserialize_map(FindField {
         field: "versions",
         nested: FindVersion {
             range: range.clone(),
-            phantom: PhantomData::<RemoteManifest>,
+            phantom: PhantomData::<RemoteManifestWithScripts>,
         },
     });
 
-    let (version, manifest) = manifest_result
+    let (version, mut manifest) = manifest_result
         .map_err(|_| Error::NoCandidatesFound(Range::Semver(range.clone())))?;
 
-    let dist_manifest = manifest.dist
+    // Manually add node-gyp dependency if there is a script using it and not already set
+    // This is because the npm registry will automatically add a `node-gyp rebuild` install script
+    // in the metadata if there is not already an install script and a binding.gyp file exists.
+    // Also, node-gyp is not always set as a dependency in packages, so it will also be added if used in scripts.
+    //
+    if !manifest.remote.dependencies.contains_key(&NODE_GYP_IDENT) && !manifest.remote.peer_dependencies.contains_key(&NODE_GYP_IDENT) {
+        for script in manifest.scripts.values() {
+            if NODE_GYP_MATCH.is_match(script.as_str()) {
+                manifest.remote.dependencies.insert(NODE_GYP_IDENT.clone(), Descriptor::new_semver(NODE_GYP_IDENT.clone(), "*").unwrap());
+                break;
+            }
+        }
+    }
+
+    let dist_manifest = manifest.remote.dist
         .as_ref()
         .expect("Expected the registry to return a 'dist' field amongst the manifest data");
 
@@ -380,7 +408,7 @@ pub async fn resolve_semver(context: InstallContext<'_>, ident: &Ident, range: &
     };
 
     let locator = Locator::new(ident.clone(), reference);
-    let resolution = Resolution::from_remote_manifest(locator, manifest);
+    let resolution = Resolution::from_remote_manifest(locator, manifest.remote);
 
     Ok(ResolveResult::new(resolution))
 }

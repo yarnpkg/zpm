@@ -113,14 +113,10 @@ yarn_serialization_protocol!(Version, "", {
     deserialize(src) {
         let mut iter = src.chars().peekable();
 
-        let (version, missing) = extract::extract_version(&mut iter)
+        let (version, _) = extract::extract_version(&mut iter)
             .ok_or_else(|| Error::InvalidSemverVersion(src.to_string()))?;
 
         if iter.peek().is_some() {
-            return Err(Error::InvalidSemverVersion(src.to_string()))
-        }
-
-        if missing != 0 {
             return Err(Error::InvalidSemverVersion(src.to_string()))
         }
 

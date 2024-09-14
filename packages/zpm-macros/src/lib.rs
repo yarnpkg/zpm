@@ -84,9 +84,18 @@ fn extract_bool(meta: &ParseNestedMeta) -> syn::Result<bool> {
     panic!("Invalid syntax")
 }
 
-#[proc_macro_derive(Parsed, attributes(parse_error, try_from_str, try_pattern))]
+#[proc_macro_derive(Parsed, attributes(parse_error, parse_fallback, try_from_str, try_pattern))]
 pub fn parsed_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
+
+    let fallback = ast.attrs.iter().find_map(|attr| {
+        if let Meta::List(list) = &attr.meta {
+            if list.path.is_ident("parse_fallback") {
+                return Some(list.tokens.clone());
+            }
+        }
+        None
+    });
 
     let user_error = ast.attrs.iter().find_map(|attr| {
         if let Meta::List(list) = &attr.meta {
@@ -227,6 +236,12 @@ pub fn parsed_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream 
         arms.push(quote! { {
             #arm
         } });
+    }
+
+    if let Some(fallback) = fallback {
+        arms.push(quote! {
+            return Ok(#fallback);
+        });
     }
 
     let expanded = quote! {

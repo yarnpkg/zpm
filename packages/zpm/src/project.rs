@@ -182,20 +182,16 @@ impl Project {
             = serde_json::from_str(&contents)?;
 
         if re_parsed != *install_state {
-            // We'll print all fields' equality checks here
-            println!("install_state.lockfile == re_parsed.lockfile: {}", install_state.lockfile == re_parsed.lockfile);
-            println!("install_state.resolution_tree == re_parsed.resolution_tree: {}", install_state.resolution_tree == re_parsed.resolution_tree);
-            println!("install_state.packages_by_location == re_parsed.packages_by_location: {}", install_state.packages_by_location == re_parsed.packages_by_location);
-            println!("install_state.locations_by_package == re_parsed.locations_by_package: {}", install_state.locations_by_package == re_parsed.locations_by_package);
-            println!("install_state.optional_packages == re_parsed.optional_packages: {}", install_state.optional_packages == re_parsed.optional_packages);
-            println!("install_state.disabled_locators == re_parsed.disabled_locators: {}", install_state.disabled_locators == re_parsed.disabled_locators);
-            println!("install_state.conditional_locators == re_parsed.conditional_locators: {}", install_state.conditional_locators == re_parsed.conditional_locators);
+            let install_state_formatted = format!("{:#?}", install_state);
+            let re_parsed_formatted = format!("{:#?}", re_parsed);
 
-            println!("Pretty lockfile: {:#?} {:#?}", install_state.lockfile, re_parsed.lockfile);
-            println!("Pretty resolution tree: {:#?} {:#?}", install_state.resolution_tree, re_parsed.resolution_tree);
+            Path::from("/tmp/zpm-install-state-before.json")
+                .fs_write_text(install_state_formatted)?;
+            Path::from("/tmp/zpm-install-state-after.json")
+                .fs_write_text(re_parsed_formatted)?;
+
+            panic!("The generated install state does not match the original install state. See /tmp/zpm-install-state-{{before,after}}.json for details.");
         }
-
-        assert_eq!(&re_parsed, install_state);
 
         link_info_path
             .fs_create_parent()?
@@ -261,6 +257,11 @@ impl Project {
     }
 
     pub fn package_self_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
+        // Link dependencies never have any package.json, so we mustn't even try to read them.
+        if matches!(locator.reference, Reference::Link(_)) {
+            return Ok(BTreeMap::new());
+        }
+
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
 

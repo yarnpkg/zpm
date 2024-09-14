@@ -4,7 +4,7 @@ use arca::Path;
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use sha2::Digest;
 
-use crate::{error::Error, hash::Blake2b80, primitives::Locator, project::Project, script::{ScriptEnvironment, ScriptResult}};
+use crate::{error::Error, hash::Blake2b80, primitives::Locator, project::Project, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -29,6 +29,7 @@ impl BuildRequest {
         let mut script_env = ScriptEnvironment::new()
             .with_project(project)
             .with_package(project, &self.locator)?
+            .with_env_variable("INIT_CWD", cwd_abs.as_str())
             .with_cwd(cwd_abs);
 
         for command in self.commands.iter() {
@@ -70,7 +71,7 @@ pub struct BuildManager<'a> {
     pub dependents: HashMap<usize, HashSet<usize>>,
     pub tree_hashes: HashMap<Locator, String>,
     pub queued: Vec<usize>,
-    pub running: FuturesUnordered<BoxFuture<'a, (usize, String, Result<ScriptResult, Error>)>>,
+    pub running: FuturesUnordered<BoxFuture<'a, (usize, Option<String>, Result<ScriptResult, Error>)>>,
     pub build_errors: HashSet<(Locator, Path)>,
     pub build_state_out: HashMap<Path, String>,
 }
@@ -99,13 +100,86 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn record(&mut self, idx: usize, hash: String, script_result: ScriptResult) {
+    fn find_acyclic_locators(&self, project: &'a Project, root: &Locator) -> Vec<Locator> {
+        struct TraversalState<'a> {
+            resolution_tree: &'a ResolutionTree,
+            visited: HashMap<&'a Locator, VisitationState>,
+            in_cycle: HashSet<&'a Locator>,
+            result: Vec<&'a Locator>,
+            stack: Vec<&'a Locator>,
+        }
+
+        enum VisitationState {
+            Visiting,
+            Visited,
+        }
+        
+        fn dfs<'a>(
+            traversal_state: &mut TraversalState<'a>,
+            node: &'a Locator,
+        ) {
+            if let Some(visitation_state) = traversal_state.visited.get(node) {
+                match visitation_state {
+                    VisitationState::Visiting => {
+                        // Detected a cycle
+                        if let Some(pos) = traversal_state.stack.iter().position(|&n| n == node) {
+                            for &n in &traversal_state.stack[pos..] {
+                                traversal_state.in_cycle.insert(n);
+                            }
+                        }
+                        return;
+                    }
+                    VisitationState::Visited => return,
+                }
+            } else {
+                traversal_state.visited.insert(node, VisitationState::Visiting);
+                traversal_state.stack.push(node);
+        
+                let resolution = traversal_state.resolution_tree.locator_resolutions.get(&node)
+                    .expect("Expected package to have a resolution");
+
+                for dependency in resolution.dependencies.values() {
+                    let dependency_locator = traversal_state.resolution_tree.descriptor_to_locator.get(dependency)
+                        .expect("Expected dependency to have a locator");
+
+                    dfs(traversal_state, dependency_locator);
+                }
+        
+                traversal_state.visited.insert(node, VisitationState::Visited);
+                traversal_state.stack.pop();
+        
+                if !traversal_state.in_cycle.contains(node) {
+                    traversal_state.result.push(node);
+                }
+            }
+        }
+
+        let install_state = project.install_state.as_ref()
+            .expect("Expected the install state to be present");
+
+        let mut state = TraversalState {
+            resolution_tree: &install_state.resolution_tree,
+            visited: HashMap::new(),
+            in_cycle: HashSet::new(),
+            result: Vec::new(),
+            stack: Vec::new(),
+        };
+    
+        dfs(&mut state, root);
+        state.result.into_iter()
+            .map(|l| (*l).clone())
+            .collect::<Vec<_>>()
+    }
+
+    fn record(&mut self, idx: usize, hash: Option<String>, script_result: ScriptResult) {
         let request = &self.requests.entries[idx];
 
         if !script_result.success() {
             self.build_errors.insert(request.key());
         } else {
-            self.build_state_out.insert(request.cwd.clone(), hash.to_string());
+            if let Some(hash) = hash {
+                self.build_state_out.insert(request.cwd.clone(), hash);
+            }
 
             if let Some(dependents) = self.dependents.get_mut(&idx) {
                 for &dependent_idx in dependents.iter() {
@@ -124,7 +198,7 @@ impl<'a> BuildManager<'a> {
     }
 
     fn trigger(&mut self, project: &'a Project, build_state: &HashMap<Path, String>) {
-        while self.running.len() < 100 {
+        while self.running.len() < 5 {
             if let Some(idx) = self.queued.pop() {
                 let req
                     = self.requests.entries[idx].clone();
@@ -132,10 +206,18 @@ impl<'a> BuildManager<'a> {
                 let hash
                     = self.get_hash(project, &req.locator);
 
-                if build_state.get(&req.cwd) == Some(&hash) && !req.force_rebuild {
-                    self.record(idx, hash, ScriptResult::new_success());
-                    continue;
+                if hash.is_none() {
+                    println!("Package {} was queued for build but is the root of a dependency cycle; it'll always be rebuilt", req.locator);
                 }
+
+                if let Some(hash) = &hash {
+                    if build_state.get(&req.cwd) == Some(hash) && !req.force_rebuild {
+                        self.record(idx, Some(hash.to_string()), ScriptResult::new_success());
+                        continue;
+                    }
+                }
+
+                self.build_state_out.remove(&req.cwd);
 
                 let future = req.run(project).map(move |res| {
                     (idx, hash, res)
@@ -148,35 +230,18 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn get_hash(&mut self, project: &'a Project, locator: &Locator) -> String {
+    fn get_hash(&mut self, project: &'a Project, locator: &Locator) -> Option<String> {
         let install_state = project.install_state.as_ref()
             .expect("Expected the install state to be present");
 
-        let mut traversal_queue = vec![locator.clone()];
-        let mut dependencies_to_hash = vec![locator.clone()];
+        let acyclic_locators = self.find_acyclic_locators(project, locator);
 
-        // First we locate all dependencies that haven't been hashed yet
-        while let Some(locator) = traversal_queue.pop() {
-            let resolution = install_state.resolution_tree.locator_resolutions.get(&locator)
-                .expect("Expected package to have a resolution");
+        let locators_to_hash = acyclic_locators.iter()
+            .filter(|l| !self.tree_hashes.contains_key(l))
+            .cloned()
+            .collect::<Vec<_>>();
 
-            for dependency in resolution.dependencies.values() {
-                let dependency_locator = install_state.resolution_tree.descriptor_to_locator.get(dependency)
-                    .expect("Expected dependency to have a locator");
-
-                if !self.tree_hashes.contains_key(dependency_locator) {
-                    traversal_queue.push(dependency_locator.clone());
-                }
-            }
-
-            dependencies_to_hash.push(locator);
-        }
-
-        // We can reverse the list; since we know there are no cycles, we are
-        // guaranteed that all dependencies will be hashed before their dependents
-        dependencies_to_hash.reverse();
-
-        for locator in dependencies_to_hash.iter() {
+        for locator in locators_to_hash.iter() {
             let mut hasher
                 = Blake2b80::new();
 
@@ -200,7 +265,6 @@ impl<'a> BuildManager<'a> {
 
         self.tree_hashes.get(locator)
             .cloned()
-            .unwrap()
     }
 
     pub async fn run(mut self, project: &'a mut Project) -> Result<Build, Error> {
@@ -211,8 +275,17 @@ impl<'a> BuildManager<'a> {
             .fs_read_text()
             .unwrap_or_else(|_| "{}".to_string());
 
+        let paths_to_build = self.requests.entries.iter()
+            .map(|req| req.cwd.clone())
+            .collect::<HashSet<_>>();
+
         let build_state_in =
             serde_json::from_str::<HashMap<Path, String>>(&build_state_text_in)?;
+
+        self.build_state_out = build_state_in.iter()
+            .filter(|(p, _)| paths_to_build.contains(p))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<HashMap<_, _>>();
 
         for idx in 0..self.requests.entries.len() {
             if let Some(set) = self.requests.dependencies.get(&idx) {
@@ -225,6 +298,8 @@ impl<'a> BuildManager<'a> {
         }
 
         self.trigger(project, &build_state_in);
+        
+        let mut current_build_state_out = self.build_state_out.clone();
 
         while let Some((idx, hash, result)) = self.running.next().await {
             let request
@@ -236,19 +311,23 @@ impl<'a> BuildManager<'a> {
                 }
 
                 Err(err) => {
-                    println!("Error building package: {:?}", err);
+                    println!("Error building {}: {:?} {:#?}", request.locator, err, request);
                     self.build_errors.insert(request.key());
                 }
             }
 
             self.trigger(project, &build_state_in);
+
+            if current_build_state_out != self.build_state_out {
+                let build_state_text_out
+                    = serde_json::to_string(&self.build_state_out)?;
+
+                build_state_path
+                    .fs_change(build_state_text_out, Permissions::from_mode(0o644))?;
+
+                current_build_state_out = self.build_state_out.clone();
+            }
         }
-
-        let build_state_text_out =
-            serde_json::to_string(&self.build_state_out)?;
-
-        build_state_path
-            .fs_change(build_state_text_out, Permissions::from_mode(0o644))?;
 
         Ok(Build {
             build_errors: self.build_errors,

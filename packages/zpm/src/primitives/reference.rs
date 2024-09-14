@@ -3,7 +3,7 @@ use std::hash::Hash;
 use bincode::{Decode, Encode};
 use zpm_macros::Parsed;
 
-use crate::{error::Error, git, hash::Sha256, semver, yarn_serialization_protocol};
+use crate::{error::Error, git, hash::Sha256, semver, yarn_check_serialize, yarn_serialization_protocol};
 
 use super::Ident;
 
@@ -14,7 +14,7 @@ pub enum Reference {
     #[try_pattern(prefix = "npm:")]
     Semver(semver::Version),
 
-    #[try_pattern(prefix = "npm:", pattern = r"^(.*)@(.*)$")]
+    #[try_pattern(prefix = "npm:", pattern = r"(.*)@(.*)")]
     SemverAlias(Ident, semver::Version),
 
     #[try_pattern(prefix = "file:", pattern = r"(.*\.(?:tgz|tar\.gz))")]
@@ -68,7 +68,7 @@ impl Reference {
 
 yarn_serialization_protocol!(Reference, "", {
     serialize(&self) {
-        match self {
+        yarn_check_serialize!(self, match self {
             Reference::Git(reference) => format!("git:{}", reference),
             Reference::Semver(version) => format!("npm:{}", version),
             Reference::SemverAlias(ident, version) => format!("npm:{}@{}", ident, version),
@@ -79,6 +79,6 @@ yarn_serialization_protocol!(Reference, "", {
             Reference::Url(url) => url.to_string(),
             Reference::Virtual(inner, hash) => format!("virtual:{}#{}", inner, hash),
             Reference::Workspace(ident) => format!("workspace:{}", ident),
-        }
+        })
     }
 });

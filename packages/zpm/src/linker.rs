@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet, HashMap, HashSet}, fs::Permissions, os::unix::fs::PermissionsExt, sync::LazyLock};
+use std::{collections::{BTreeMap, BTreeSet, HashMap, HashSet}, fs::Permissions, os::unix::fs::PermissionsExt, sync::LazyLock, vec};
 
 use arca::{Path, ToArcaPath};
 use itertools::Itertools;
@@ -47,7 +47,8 @@ struct TopLevelConfiguration {
     #[serde(default)]
     dependencies_meta: Option<HashMap<IdentOrLocator, PackageMeta>>,
 }
-
+use serde_with::DefaultOnError;
+#[serde_as]
 #[derive(Debug, Default, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PackageInfo {
@@ -62,6 +63,7 @@ struct PackageInfo {
     prefer_unplugged: Option<bool>,
 
     #[serde(default)]
+    #[serde_as(deserialize_as = "DefaultOnError")]
     scripts: HashMap<String, String>,
 }
 
@@ -359,7 +361,9 @@ fn populate_build_entry_dependencies(package_build_entries: &HashMap<Locator, us
         let mut build_dependencies = HashSet::new();
 
         let mut queue = vec![locator.clone()];
-        let mut seen = HashSet::new();
+        let mut seen: HashSet<_> = HashSet::new();
+
+        seen.insert(locator.clone());
 
         while let Some(locator) = queue.pop() {
             let resolution = locator_resolutions.get(&locator)
@@ -369,12 +373,8 @@ fn populate_build_entry_dependencies(package_build_entries: &HashMap<Locator, us
                 let dependency_locator = descriptor_to_locator.get(dependency)
                     .expect("Failed to find dependency locator");
 
-                if !seen.insert(locator.clone()) {
+                if !seen.insert(dependency_locator.clone()) {
                     continue;
-                }
-
-                if dependency_locator == &locator {
-                    return Err(Error::CircularBuildDependency(locator));
                 }
 
                 if let Some(dependency_entry_idx) = package_build_entries.get(dependency_locator) {

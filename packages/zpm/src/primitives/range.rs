@@ -1,9 +1,9 @@
-use std::hash::Hash;
+use std::{hash::Hash, str::FromStr};
 
 use bincode::{Decode, Encode};
 use zpm_macros::Parsed;
 
-use crate::{error::Error, git, hash::Sha256, semver, serialize::UrlEncoded, yarn_serialization_protocol};
+use crate::{error::Error, git, hash::Sha256, semver, serialize::UrlEncoded, yarn_check_serialize, yarn_serialization_protocol};
 
 use super::{Descriptor, Ident};
 
@@ -73,7 +73,7 @@ impl Range {
 
 yarn_serialization_protocol!(Range, "", {
     serialize(&self) {
-        match self {
+        yarn_check_serialize!(self, match self {
             Range::SemverOrWorkspace(range) => range.to_string(),
             Range::Semver(range) => format!("npm:{}", range),
             Range::SemverTag(tag) => format!("npm:{}", tag),
@@ -90,33 +90,34 @@ yarn_serialization_protocol!(Range, "", {
             Range::Git(git) => git.to_string(),
             Range::MissingPeerDependency() => "missing!".to_string(),
             Range::Virtual(inner, hash) => format!("virtual:{}#{}", inner, hash),
-        }
+        })
     }
 });
 
 #[derive(Clone, Debug, Decode, Encode, Parsed, PartialEq, Eq, Hash)]
+#[parse_fallback(PeerRange::Semver(semver::Range::from_str("*").unwrap()))]
 #[parse_error(Error::InvalidRange)]
 pub enum PeerRange {
     #[try_pattern()]
     Semver(semver::Range),
 
     #[try_pattern(prefix = "workspace:")]
-    WorkspaceSemver(String),
+    WorkspaceSemver(semver::Range),
 
     #[try_pattern(prefix = "workspace:", pattern = r"^([~^=*])$")]
     WorkspaceMagic(String),
 
-    #[try_pattern(prefux = "workspace:")]
+    #[try_pattern(prefix = "workspace:")]
     WorkspacePath(String),
 }
 
 yarn_serialization_protocol!(PeerRange, "", {
     serialize(&self) {
-        match self {
+        yarn_check_serialize!(self, match self {
             PeerRange::Semver(range) => range.to_string(),
             PeerRange::WorkspaceSemver(semver) => format!("workspace:{}", semver),
             PeerRange::WorkspaceMagic(magic) => format!("workspace:{}", magic),
             PeerRange::WorkspacePath(path) => format!("workspace:{}", path),
-        }
+        })
     }
 });

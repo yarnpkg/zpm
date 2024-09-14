@@ -18,6 +18,7 @@ impl Node {
 
         Ok(ScriptEnvironment::new()
             .with_project(&project)
+            .enable_shell_forwarding()
             .run_exec("node", &self.args)
             .await
             .into())

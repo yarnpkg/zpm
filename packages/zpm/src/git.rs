@@ -125,7 +125,7 @@ yarn_serialization_protocol!(GitReference, "", {
         for pair in qs.split('&') {
             if let Some(eq_index) = pair.find('=') {
                 let (key, value) = pair.split_at(eq_index);
-                let value = &value[1..];
+                let value = urlencoding::decode(&value[1..]).unwrap();
 
                 match key {
                     "commit" =>
@@ -192,7 +192,7 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
         for pair in subsequent.split('&') {
             if let Some(eq_index) = pair.find('=') {
                 let (key, value) = pair.split_at(eq_index);
-                let value = &value[1..];
+                let value = urlencoding::decode(&value[1..]).unwrap();
 
                 match key {
                     "branch" =>
@@ -202,7 +202,7 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
                         treeish = GitTreeish::Commit(value.to_string()),
 
                     "semver" =>
-                        treeish = GitTreeish::Semver(semver::Range::from_str(value)?),
+                        treeish = GitTreeish::Semver(semver::Range::from_str(value.as_ref())?),
 
                     "tag" =>
                         treeish = GitTreeish::Tag(value.to_string()),

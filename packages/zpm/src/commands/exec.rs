@@ -22,6 +22,7 @@ impl Exec {
 
         Ok(ScriptEnvironment::new()
             .with_project(&project)
+            .enable_shell_forwarding()
             .run_script(&self.script, &self.args)
             .await
             .into())

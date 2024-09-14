@@ -3,6 +3,8 @@ use std::process::ExitCode;
 use clipanion::advanced::Cli;
 use zpm_macros::track_time;
 
+mod debug;
+
 mod add;
 mod bin;
 mod default;
@@ -15,6 +17,11 @@ mod version;
 mod workspaces_list;
 
 clipanion::program!(YarnCli, [
+    debug::check_ident::CheckIdent,
+    debug::check_range::CheckRange,
+    debug::check_reference::CheckReference,
+    debug::check_semver_version::CheckSemverVersion,
+
     add::Add,
     bin::BinList,
     bin::Bin,

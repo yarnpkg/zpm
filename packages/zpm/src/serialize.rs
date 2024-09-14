@@ -251,6 +251,22 @@ pub trait Serialized {
 }
 
 #[macro_export]
+macro_rules! yarn_check_serialize(
+    ($src:expr, $serialized:expr) => {
+        {
+            let serialized = $serialized;
+
+            use std::str::FromStr;
+            let re_parsed = Self::from_str(&serialized).unwrap();
+
+            assert_eq!($src, &re_parsed, "Serialized form of {:?} ({}) did not match the input (re-parsed as {:?} instead)", $src, serialized, re_parsed);
+
+            serialized
+        }
+    }
+);
+
+#[macro_export]
 macro_rules! yarn_serialization_protocol {
     ($type:ident, {
         deserialize($deserialize_src:ident) { $($deserialize_body:tt)* }

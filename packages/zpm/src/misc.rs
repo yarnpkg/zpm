@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::hash::Hash;
+use std::{collections::HashMap, hash::Hash, sync::LazyLock, time::Instant};
 
 pub fn convert_to_hashmap<U, T, F>(items: Vec<T>, mut key_fn: F) -> HashMap<U, Vec<T>> where U: Eq + Hash, F: FnMut(&T) -> U {
     let mut map: HashMap<U, Vec<T>> = HashMap::new();
@@ -10,6 +9,18 @@ pub fn convert_to_hashmap<U, T, F>(items: Vec<T>, mut key_fn: F) -> HashMap<U, V
     }
 
     map
+}
+
+pub static FIRST_TIME: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+#[macro_export]
+macro_rules! print_time {
+    ($msg:expr) => {
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(*crate::misc::FIRST_TIME);
+
+        println!("{:?} - {}", elapsed, $msg);
+    };
 }
 
 #[macro_export]

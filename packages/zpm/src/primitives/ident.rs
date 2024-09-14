@@ -2,7 +2,7 @@ use std::{hash::Hash, sync::LazyLock};
 
 use bincode::{Decode, Encode};
 
-use crate::{error::Error, yarn_serialization_protocol};
+use crate::{error::Error, yarn_check_serialize, yarn_serialization_protocol};
 
 #[derive(Clone, Debug, Default, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Ident(String);
@@ -34,7 +34,7 @@ impl Ident {
 
     pub fn type_ident(&self) -> Ident {
         match self.scope() {
-            Some(scope) => Ident::new(format!("@types/{}__{}", scope, self.name())),
+            Some(scope) => Ident::new(format!("@types/{}__{}", &scope[1..], self.name())),
             None => Ident::new(format!("@types/{}", self.name())),
         }
     }
@@ -60,6 +60,6 @@ yarn_serialization_protocol!(Ident, "", {
     }
 
     serialize(&self) {
-        self.as_str()
+        yarn_check_serialize!(self, self.as_str())
     }
 });

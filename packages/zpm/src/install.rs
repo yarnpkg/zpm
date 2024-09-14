@@ -4,7 +4,7 @@ use arca::Path;
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use crate::{build, cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator, PeerRange}, project::Project, resolver::{resolve, Resolution, ResolveResult}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator, PeerRange}, print_time, project::Project, resolver::{resolve, Resolution, ResolveResult}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 #[derive(Clone, Default)]
 pub struct InstallContext<'a> {
@@ -122,14 +122,20 @@ pub struct Install {
 
 impl Install {
     pub async fn finalize(mut self, project: &mut Project) -> Result<(), Error> {
+        print_time!("Before link");
+
         let build = linker::link_project(project, &mut self)
             .await?;
+
+        print_time!("Before build");
 
         project
             .attach_install_state(self.install_state)?;
 
         let result = build::BuildManager::new(build)
             .run(project).await?;
+
+        print_time!("Done");
 
         if !result.build_errors.is_empty() {
             println!("Build errors: {:?}", result.build_errors);
@@ -194,7 +200,7 @@ impl<'a> InstallManager<'a> {
         if descriptor.parent.is_none() {
             if let Some(locator) = self.initial_lockfile.resolutions.remove(&descriptor) {
                 let entry = self.initial_lockfile.entries.get(&locator)
-                    .expect("Expected a matching resolution to be found in the lockfile for any resolved locator.");
+                    .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator));
 
                 self.record_resolution(descriptor, entry.resolution.clone(), None);
                 return;

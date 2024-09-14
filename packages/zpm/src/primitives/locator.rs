@@ -5,7 +5,7 @@ use rstest::rstest;
 use sha2::Digest;
 use zpm_macros::Parsed;
 
-use crate::{error::Error, hash::Sha256, serialize::Serialized, yarn_serialization_protocol};
+use crate::{error::Error, hash::Sha256, serialize::Serialized, yarn_check_serialize, yarn_serialization_protocol};
 
 use super::{Ident, Reference};
 
@@ -96,10 +96,10 @@ yarn_serialization_protocol!(Locator, "", {
     }
 
     serialize(&self) {
-        match &self.parent {
+        yarn_check_serialize!(self, match &self.parent {
             Some(parent) => format!("{}@{}::parent={}", self.ident, self.reference, parent),
             None => format!("{}@{}", self.ident, self.reference),
-        }
+        })
     }
 });
 

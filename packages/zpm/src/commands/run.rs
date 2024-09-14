@@ -1,6 +1,6 @@
 use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
 
-use clipanion::{advanced::Info, cli};
+use clipanion::cli;
 
 use crate::{error::Error, project, script::ScriptEnvironment};
 
@@ -18,17 +18,6 @@ pub struct Run {
 }
 
 impl Run {
-    pub fn new(cli_info: Info, cli_path: Vec<String>, name: String, args: Vec<String>, error_if_missing: bool) -> Self {
-        Self {
-            cli_info,
-            cli_path,
-            top_level: false,
-            error_if_missing,
-            name,
-            args,
-        }
-    }
-
     #[tokio::main()]
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
         let mut project
@@ -48,6 +37,7 @@ impl Run {
             Ok(ScriptEnvironment::new()
                 .with_project(&project)
                 .with_package(&project, &project.active_package()?)?
+                .enable_shell_forwarding()
                 .run_binary(&binary, &self.args)
                 .await
                 .into())
@@ -58,6 +48,7 @@ impl Run {
                 Ok(ScriptEnvironment::new()
                     .with_project(&project)
                     .with_package(&project, &locator)?
+                    .enable_shell_forwarding()
                     .run_script(&script, &self.args)
                     .await
                     .into())
