@@ -3,9 +3,9 @@ use std::hash::Hash;
 use bincode::{Decode, Encode};
 use zpm_macros::Parsed;
 
-use crate::{error::Error, git, hash::Sha256, semver, yarn_check_serialize, yarn_serialization_protocol};
+use crate::{error::Error, git, hash::Sha256, semver, serialize::UrlEncoded, yarn_check_serialize, yarn_serialization_protocol};
 
-use super::Ident;
+use super::{Ident, Locator};
 
 #[derive(Clone, Debug, Decode, Encode, Parsed, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[parse_error(Error::InvalidReference)]
@@ -28,6 +28,9 @@ pub enum Reference {
 
     #[try_pattern(prefix = "portal:")]
     Portal(String),
+
+    #[try_pattern(prefix = "patch:", pattern = r"(.*)#(.*)$")]
+    Patch(Box<UrlEncoded<Locator>>, String),
 
     #[try_pattern(prefix = "virtual:", pattern = r"(.*)#([a-f0-9]*)$")]
     Virtual(Box<Reference>, Sha256),
@@ -58,6 +61,7 @@ impl Reference {
             Reference::Tarball(_) => "file".to_string(),
             Reference::Folder(_) => "file".to_string(),
             Reference::Link(_) => "link".to_string(),
+            Reference::Patch(_, _) => "patch".to_string(),
             Reference::Portal(_) => "portal".to_string(),
             Reference::Url(_) => "url".to_string(),
             Reference::Virtual(_, _) => "virtual".to_string(),
@@ -75,6 +79,7 @@ yarn_serialization_protocol!(Reference, "", {
             Reference::Tarball(path) => format!("file:{}", path),
             Reference::Folder(path) => format!("file:{}", path),
             Reference::Link(path) => format!("link:{}", path),
+            Reference::Patch(inner, file) => format!("patch:{}#{}", inner, file),
             Reference::Portal(path) => format!("portal:{}", path),
             Reference::Url(url) => url.to_string(),
             Reference::Virtual(inner, hash) => format!("virtual:{}#{}", inner, hash),

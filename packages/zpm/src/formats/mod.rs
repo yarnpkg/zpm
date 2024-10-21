@@ -106,6 +106,18 @@ pub fn strip_first_segment(entries: Vec<Entry>) -> Vec<Entry> {
     next
 }
 
+pub fn strip_prefix<T: AsRef<str>>(mut entries: Vec<Entry>, prefix: T) -> Vec<Entry> {
+    let prefix = prefix.as_ref();
+
+    for entry in entries.iter_mut() {
+        if entry.name.starts_with(prefix) {
+            entry.name = entry.name[prefix.len() + 1..].to_string();
+        }
+    }
+
+    entries
+}
+
 pub fn compute_crc32(mut entries: Vec<Entry>) -> Vec<Entry> {
     for entry in entries.iter_mut() {
         entry.crc = crc32fast::hash(&entry.data);

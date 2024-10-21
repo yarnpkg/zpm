@@ -11,7 +11,7 @@ pub trait GraphCache<TIn, TOut> where Self: Sized {
 }
 
 pub trait GraphIn<'a, TCtx, TOut, TErr> where Self: Sized, TCtx: Send {
-    fn graph_dependencies(&self) -> Vec<Self>;
+    fn graph_dependencies(&self, dependencies: &Vec<&TOut>) -> Vec<Self>;
     fn graph_run(self, ctx: TCtx, dependencies: Vec<TOut>) -> impl std::future::Future<Output = Result<TOut, TErr>> + Send + 'a;
 }
 
@@ -29,6 +29,14 @@ impl<TIn, TOut, TErr> GraphTaskResults<TIn, TOut, TErr> {
         Self {
             success: HashMap::new(),
             failed: Vec::new(),
+        }
+    }
+
+    pub fn get_failed(&self) -> Option<&Vec<(TIn, TErr)>> {
+        if self.failed.is_empty() {
+            None
+        } else {
+            Some(&self.failed)
         }
     }
 
@@ -90,37 +98,82 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
     pub fn register(&mut self, op: TIn) {
         if !self.tasks.contains_key(&op) {
             let dependencies
-                = op.graph_dependencies();
-
-            let resolved_dependencies = dependencies.iter()
-                .filter(|dep| self.results.success.contains_key(dep))
-                .count();
-
-            if resolved_dependencies == dependencies.len() {
-                self.ready.push(op.clone());
-            }
+                = op.graph_dependencies(&vec![]);
 
             if dependencies.is_empty() {
-                self.tasks.insert(op, (resolved_dependencies, vec![]));
-            } else {
-                self.tasks.insert(op.clone(), (resolved_dependencies, dependencies.clone()));
+                self.tasks.insert(op.clone(), (0, vec![]));
 
-                for dependency in dependencies {
+                self.try_ready(op);
+            } else {
+                let resolved_dependency_count = dependencies.iter()
+                    .filter(|dep| self.results.success.contains_key(dep))
+                    .count();
+
+                self.tasks.insert(op.clone(), (resolved_dependency_count, dependencies.clone()));
+
+                if resolved_dependency_count == dependencies.len() {
+                    self.try_ready(op.clone());
+                }
+
+                for dependency in &dependencies {
                     self.dependents.entry(dependency.clone())
                         .or_default()
                         .push(op.clone());
 
-                    self.register(dependency);
+                    self.register(dependency.clone());
                 }
             }
         }
+    }
+
+    fn try_ready(&mut self, op: TIn) {
+        loop {
+            let (resolved_dependency_count, dependency_ops) = self.tasks.get_mut(&op)
+                .expect("Expected the task entry to exist for ops registered in the ready list");
+
+            let resolved_dependencies = dependency_ops
+                .iter()
+                .filter_map(|dep| self.results.success.get(dep))
+                .collect::<Vec<_>>();
+
+            // If we're missing any of the dependency results we must wait for
+            // them to be resolved before we can proceed with the scheduling.
+            if resolved_dependencies.len() != dependency_ops.len() {
+                *resolved_dependency_count = resolved_dependencies.len();
+                return;
+            }
+
+            let next_dependencies
+                = op.graph_dependencies(&resolved_dependencies);
+
+            // If no new dependency has been added it means that everything
+            // needed has been resolved and we can just go on with scheduling
+            // the operation for evaluation.
+            if dependency_ops.len() == next_dependencies.len() {
+                break;
+            }
+
+            let previous_dependency_count
+                = std::mem::replace(dependency_ops, next_dependencies.clone())
+                    .len();
+
+            for dependency in &next_dependencies[previous_dependency_count..] {
+                self.dependents.entry(dependency.clone())
+                    .or_default()
+                    .push(op.clone());
+
+                self.register(dependency.clone());
+            }
+        }
+
+        self.ready.push(op);
     }
 
     fn update(&mut self) {
         while self.running.len() < 100 {
             if let Some(op) = self.ready.pop() {
                 if let Some(cached_value) = self.cache.graph_cache(&op) {
-                    self.accept(op, cached_value);
+                    self.accept_cached(op, cached_value);
                     continue;
                 }
 
@@ -148,8 +201,16 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
         }
     }
 
+    // This method is just here to make stacktraces contain information about
+    // whether or not a task was accepted as a cached value or not.
+    fn accept_cached(&mut self, op: TIn, out: TOut) {
+        self.accept(op, out);
+    }
+
     pub fn accept(&mut self, op: TIn, out: TOut) {
         let follow_ups = out.graph_follow_ups();
+
+        self.results.success.insert(op.clone(), out);
 
         if let Some(dependents) = self.dependents.remove(&op) {
             for dependent in dependents {
@@ -163,12 +224,10 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
                 }
 
                 if *resolved_dependency_count == dependencies.len() {
-                    self.ready.push(dependent.clone());
+                    self.try_ready(dependent.clone());
                 }
             }
         }
-
-        self.results.success.insert(op, out);
 
         for follow_up in follow_ups {
             self.register(follow_up);

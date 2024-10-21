@@ -1,4 +1,5 @@
 use bincode::{Decode, Encode};
+use reqwest::Url;
 use serde::ser::{Serialize, Serializer, SerializeStruct, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant, SerializeMap, SerializeSeq, SerializeStructVariant};
 use std::fmt;
 
@@ -352,6 +353,12 @@ macro_rules! yarn_serialization_protocol {
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UrlEncoded<T>(pub T);
+
+impl<T> UrlEncoded<T> {
+    pub fn new(value: T) -> UrlEncoded<T> {
+        UrlEncoded(value)
+    }
+}
 
 impl<T: for<'t> TryFrom<&'t str, Error = Error>> TryFrom<&str> for UrlEncoded<T> {
     type Error = Error;

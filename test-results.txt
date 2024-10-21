@@ -1627,12 +1627,12 @@
 🟩 Protocols ► npm: ► it should allow renaming packages
 🟩 Protocols ► npm: ► it should allow semver ranges with build metadata
 
-[1 / 8] packages/acceptance-tests/pkg-tests-specs/sources/protocols/patch.test.ts
+[5 / 8] packages/acceptance-tests/pkg-tests-specs/sources/protocols/patch.test.ts
 
-🟥 Protocols ► patch: ► it should apply a patch on the original package
-🟥 Protocols ► patch: ► it should apply patches relative to the package
-🟥 Protocols ► patch: ► it should generate the same file twice in a row
-🟥 Protocols ► patch: ► it should generate the same file twice in a row (delayed)
+🟩 Protocols ► patch: ► it should apply a patch on the original package
+🟩 Protocols ► patch: ► it should apply patches relative to the package
+🟩 Protocols ► patch: ► it should generate the same file twice in a row
+🟩 Protocols ► patch: ► it should generate the same file twice in a row (delayed)
 🟥 Protocols ► patch: ► it should only compute the hash from the effects of the patch
 🟥 Protocols ► patch: ► it should preserve the resolution when switching in and out of a patch
 🟩 Protocols ► patch: ► it should support applying a patch on a patch

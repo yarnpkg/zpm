@@ -5,7 +5,7 @@ use bincode::{Decode, Encode};
 use regex::Regex;
 use serde::{de::{self, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer, Serialize};
 
-use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_remote_tarball_with_manifest, fetch_repository_with_manifest, PackageData}, formats::zip::ZipSupport, git::{resolve_git_treeish, GitRange, GitReference}, http::http_client, install::{InstallContext, InstallOpResult, ResolutionResult}, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, system};
+use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_patched, fetch_remote_tarball_with_manifest, fetch_repository_with_manifest, PackageData}, formats::zip::ZipSupport, git::{resolve_git_treeish, GitRange, GitReference}, http::http_client, install::{InstallContext, InstallOpResult, ResolutionResult}, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, serialize::UrlEncoded, system};
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
@@ -67,35 +67,32 @@ impl Resolution {
 }
 
 pub async fn resolve(context: InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
-    let resolution = match &descriptor.range {
-        Range::Patch(inner, _)
-            => resolve_direct(context, inner.0.clone(), dependencies).await,
+    let mut resolution_result = resolve_direct(context, descriptor, dependencies).await?;
 
-        _ => resolve_direct(context, descriptor, dependencies).await,
-    };
+    normalize_resolution(&mut resolution_result.resolution);
 
-    resolution.map(|mut resolve_result| {
-        // Some protocols need to know about the package that declares the
-        // dependency (for example the `portal:` protocol, which always points
-        // to a location relative to the parent package. We mutate the
-        // descriptors for these protocols to "bind" them to a particular
-        // parent descriptor. In effect, it means we're creating a unique
-        // version of the package, which will be resolved / fetched
-        // independently from any other.
-        //
-        for descriptor in resolve_result.resolution.dependencies.values_mut() {
-            if descriptor.range.must_bind() {
-                descriptor.parent = Some(resolve_result.resolution.locator.clone());
-            }
+    Ok(resolution_result)
+}
+
+pub fn normalize_resolution(resolution: &mut Resolution) {
+    // Some protocols need to know about the package that declares the
+    // dependency (for example the `portal:` protocol, which always points
+    // to a location relative to the parent package. We mutate the
+    // descriptors for these protocols to "bind" them to a particular
+    // parent descriptor. In effect, it means we're creating a unique
+    // version of the package, which will be resolved / fetched
+    // independently from any other.
+    //
+    for descriptor in resolution.dependencies.values_mut() {
+        if descriptor.range.must_bind() {
+            descriptor.parent = Some(resolution.locator.clone());
         }
-    
-        for name in resolve_result.resolution.peer_dependencies.keys().cloned().collect::<Vec<_>>() {
-            resolve_result.resolution.peer_dependencies.entry(name.type_ident())
-                .or_insert(PeerRange::Semver(semver::Range::from_str("*").unwrap()));
-        }
+    }
 
-        resolve_result
-    })
+    for name in resolution.peer_dependencies.keys().cloned().collect::<Vec<_>>() {
+        resolution.peer_dependencies.entry(name.type_ident())
+            .or_insert(PeerRange::Semver(semver::Range::from_str("*").unwrap()));
+    }
 }
 
 async fn resolve_direct(context: InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
@@ -116,7 +113,10 @@ async fn resolve_direct(context: InstallContext<'_>, descriptor: Descriptor, dep
             => resolve_link(&descriptor.ident, path, &descriptor.parent),
 
         Range::Url(url)
-            => resolve_url(context, descriptor.ident, url, dependencies).await,
+            => resolve_url(context, descriptor.ident, url).await,
+
+        Range::Patch(_, file)
+            => resolve_patch(context, descriptor.ident, file, &descriptor.parent, dependencies).await,
 
         Range::Tarball(path)
             => resolve_tarball(context, descriptor.ident, path, &descriptor.parent, dependencies).await,
@@ -157,11 +157,28 @@ pub fn resolve_link(ident: &Ident, path: &str, parent: &Option<Locator>) -> Resu
     Ok(ResolutionResult::new(resolution))
 }
 
-pub async fn resolve_url(context: InstallContext<'_>, ident: Ident, url: &str, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+pub async fn resolve_url(context: InstallContext<'_>, ident: Ident, url: &str) -> Result<ResolutionResult, Error> {
     let locator = Locator::new(ident.clone(), Reference::Url(url.to_string()));
 
     let fetch_result
         = fetch_remote_tarball_with_manifest(context, &locator, url).await?;
+
+    Ok(fetch_result.into_resolution_result())
+}
+
+pub async fn resolve_patch(context: InstallContext<'_>, ident: Ident, path: &str, parent: &Option<Locator>, mut dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+    let inner_locator
+        = dependencies[1].as_resolved().resolution.locator.clone();
+
+    let locator
+        = Locator::new_bound(ident, Reference::Patch(Box::new(UrlEncoded::new(inner_locator)), path.to_string()), parent.clone().map(Arc::new));
+
+    // We need to remove the "resolve" operation where we resolved the
+    // descriptor into a locator before passing it to fetch
+    dependencies.remove(1);
+
+    let fetch_result
+        = fetch_patched(context, &locator, path, dependencies).await?;
 
     Ok(fetch_result.into_resolution_result())
 }
@@ -185,7 +202,7 @@ pub async fn resolve_folder(context: InstallContext<'_>, ident: Ident, path: &st
 }
 
 pub fn resolve_portal(ident: &Ident, path: &str, parent: &Option<Locator>, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
-    let parent_data = dependencies[0].expect_fetched();
+    let parent_data = dependencies[0].as_fetched();
 
     let parent = parent.as_ref()
         .expect("The parent locator is required for resolving a portal package");

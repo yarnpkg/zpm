@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, hash::Hash, marker::PhantomData};
 use arca::Path;
 use serde::{Deserialize, Serialize};
 
-use crate::{build, cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator}, print_time, project::Project, resolver::{resolve, Resolution}, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator, Range, Reference}, print_time, project::Project, resolver::{resolve, Resolution}, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -71,14 +71,28 @@ pub enum InstallOpResult {
 }
 
 impl InstallOpResult {
-    pub fn expect_resolved(&self) -> &ResolutionResult {
+    pub fn into_resolved(self) -> ResolutionResult {
         match self {
             InstallOpResult::Resolved(resolution) => resolution,
             _ => panic!("Expected a resolved result"),
         }
     }
 
-    pub fn expect_fetched(&self) -> &FetchResult {
+    pub fn into_fetched(self) -> FetchResult {
+        match self {
+            InstallOpResult::Fetched(fetch) => fetch,
+            _ => panic!("Expected a fetched result"),
+        }
+    }
+
+    pub fn as_resolved(&self) -> &ResolutionResult {
+        match self {
+            InstallOpResult::Resolved(resolution) => resolution,
+            _ => panic!("Expected a resolved result"),
+        }
+    }
+
+    pub fn as_fetched(&self) -> &FetchResult {
         match self {
             InstallOpResult::Fetched(fetch) => fetch,
             _ => panic!("Expected a fetched result"),
@@ -103,16 +117,8 @@ impl<'a> GraphOut<InstallOp<'a>> for InstallOpResult {
                 follow_ups
             },
 
-            InstallOpResult::Fetched(FetchResult {resolution, ..}) => {
-                resolution.as_ref().map(|resolution| {
-                    let transitive_dependencies = resolution.dependencies
-                        .values()
-                        .cloned()
-                        .map(|dependency| InstallOp::Resolve {descriptor: dependency})
-                        .collect();
-
-                    transitive_dependencies
-                }).unwrap_or_default()
+            InstallOpResult::Fetched(FetchResult {..}) => {
+                vec![]
             },
         }
     }
@@ -133,8 +139,9 @@ enum InstallOp<'a> {
 }
 
 impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'a> {
-    fn graph_dependencies(&self) -> Vec<Self> {
+    fn graph_dependencies(&self, resolved_dependencies: &Vec<&InstallOpResult>) -> Vec<Self> {
         let mut dependencies = vec![];
+        let mut resolved_it = resolved_dependencies.iter();
 
         match self {
             InstallOp::Phantom(_) =>
@@ -143,12 +150,35 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
             InstallOp::Resolve {descriptor} => {
                 if let Some(parent) = &descriptor.parent {
                     dependencies.push(InstallOp::Fetch {locator: parent.clone()});
+                    resolved_it.next();
+                }
+
+                if let Range::Patch(inner, _) = &descriptor.range {
+                    assert!(descriptor.parent.is_some(), "Expected a parent to be set for a patch resolution");
+
+                    let mut inner_descriptor = inner.to_owned().0.clone();
+
+                    if inner_descriptor.range.must_bind() {
+                        inner_descriptor.parent = descriptor.parent.clone();
+                    }
+
+                    dependencies.push(InstallOp::Resolve {descriptor: inner_descriptor});
+                    let patch_resolution = resolved_it.next();
+
+                    if let Some(result) = patch_resolution {
+                        let patch_resolution = result.as_resolved();
+                        dependencies.push(InstallOp::Fetch {locator: patch_resolution.resolution.locator.clone()});
+                    }
                 }
             },
 
             InstallOp::Fetch {locator} => {
                 if let Some(parent) = &locator.parent {
                     dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone()});
+                }
+
+                if let Reference::Patch(inner, _) = &locator.reference {
+                    dependencies.push(InstallOp::Fetch {locator: inner.to_owned().0.clone()});
                 }
             },
         }
@@ -289,144 +319,6 @@ impl<'a> InstallManager<'a> {
         self.with_roots(it.collect())
     }
 
-    // fn schedule(&mut self, descriptor: Descriptor) {
-    //     if !self.seen.insert(descriptor.clone()) {
-    //         return;
-    //     }
-
-    //     if descriptor.parent.is_none() {
-    //         if let Some(locator) = self.initial_lockfile.resolutions.remove(&descriptor) {
-    //             let entry = self.initial_lockfile.entries.get(&locator)
-    //                 .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator));
-
-    //             self.record_resolution(descriptor, entry.resolution.clone(), None);
-    //             return;
-    //         }
-    //     }
-
-    //     if let Some(parent) = &descriptor.parent {
-    //         if let Some(package_data) = self.result.package_data.get(parent) {
-    //             self.ops.push(InstallOp::Resolve {descriptor, parent_data: Some(package_data.clone())});
-    //         } else {
-    //             self.deferred.entry(parent.clone()).or_default().push(descriptor);
-    //         }
-    //     } else {
-    //         self.ops.push(InstallOp::Resolve {descriptor, parent_data: None});
-    //     }
-    // }
-
-    // fn record_resolution(&mut self, descriptor: Descriptor, mut resolution: Resolution, package_data: Option<PackageData>) {
-    //     for descriptor in resolution.dependencies.values_mut() {
-    //         if descriptor.range.must_bind() {
-    //             descriptor.parent = Some(resolution.locator.clone());
-    //         }
-    //     }
-
-    //     let transitive_dependencies = resolution.dependencies
-    //         .values()
-    //         .cloned();
-
-    //     for descriptor in transitive_dependencies {
-    //         self.schedule(descriptor);
-    //     }
-
-    //     let parent_data = match &descriptor.parent {
-    //         Some(parent) => Some(self.result.package_data.get(parent).expect("Parent data not found").clone()),
-    //         None => None,
-    //     };
-
-    //     for name in resolution.peer_dependencies.keys().cloned().collect::<Vec<_>>() {
-    //         resolution.peer_dependencies.entry(name.type_ident())
-    //             .or_insert(PeerRange::Semver(semver::Range::from_str("*").unwrap()));
-    //     }
-
-    //     self.result.install_state.lockfile.resolutions.insert(descriptor, resolution.locator.clone());
-    //     self.result.install_state.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
-    //         checksum: None,
-    //         resolution: resolution.clone(),
-    //     });
-
-    //     if resolution.requirements.is_conditional() {
-    //         self.result.install_state.conditional_locators.insert(resolution.locator.clone());
-
-    //         if !resolution.requirements.validate(&self.description) {
-    //             self.result.install_state.disabled_locators.insert(resolution.locator.clone());
-    //         }
-    //     }
-
-    //     if let Some(package_data) = package_data {
-    //         self.record_fetch(resolution.locator.clone(), package_data.clone());
-    //     } else {
-    //         self.ops.push(InstallOp::Fetch {
-    //             locator: resolution.locator.clone(),
-    //             is_mock_request: self.result.install_state.disabled_locators.contains(&resolution.locator),
-    //             parent_data,
-    //         });
-    //     }
-    // }
-
-    // fn record_fetch(&mut self, locator: Locator, package_data: PackageData) {
-    //     self.result.package_data.insert(locator.clone(), package_data.clone());
-
-    //     if let Some(deferred) = self.deferred.remove(&locator) {
-    //         for descriptor in deferred {
-    //             self.seen.remove(&descriptor);
-    //             self.schedule(descriptor);
-    //         }
-    //     }
-    // }
-
-    // fn trigger(&mut self) {
-    //     while self.running.len() < 100 {
-    //         if let Some(op) = self.ops.pop() {
-    //             // self.running.push(Box::pin(op.run(self.context.clone())));
-    //         } else {
-    //             break;
-    //         }
-    //     }
-    // }
-
-    // pub async fn resolve_and_fetch(mut self) -> Result<Install, Error> {
-    //     for descriptor in self.roots.clone() {
-    //         self.schedule(descriptor);
-    //     }
-
-    //     self.trigger();
-
-    //     while let Some(res) = self.running.next().await {
-    //         match res {
-    //             InstallOpResult::Resolved {descriptor, resolution, package_data} => {
-    //                 self.record_resolution(descriptor, resolution, package_data);
-    //             }
-
-    //             InstallOpResult::Fetched {locator, package_data} => {
-    //                 self.record_fetch(locator, package_data);
-    //             }
-
-    //             InstallOpResult::FetchFailed {locator, error} => {
-    //                 println!("{}: {:?}", locator, error);
-    //             }
-
-    //             InstallOpResult::ResolutionFailed {descriptor, error} => {
-    //                 println!("{}: {:?}", descriptor, error);
-    //             }
-    //         }
-
-    //         self.trigger();
-    //     }
-
-    //     if !self.deferred.is_empty() {
-    //         panic!("Some deferred descriptors were not resolved");
-    //     }
-
-    //     self.result.install_state.resolution_tree = TreeResolver::default()
-    //         .with_lockfile(self.result.install_state.lockfile.clone())
-    //         .with_roots(self.roots.clone())
-    //         .run();
-
-    //     Ok(self.result)
-    // }
-
     pub async fn resolve_and_fetch(mut self) -> Result<Install, Error> {
         let cache = InstallCache::new(self.initial_lockfile.clone());
 
@@ -439,7 +331,14 @@ impl<'a> InstallManager<'a> {
             });
         }
 
-        for entry in graph.run().await.unwrap() {
+        let graph_run
+            = graph.run().await;
+
+        if let Some(error) = graph_run.get_failed() {
+            println!("Graph errors: {:#?}", error);
+        }
+
+        for entry in graph_run.unwrap() {
             match entry {
                 (InstallOp::Resolve {descriptor, ..}, InstallOpResult::Resolved(ResolutionResult {resolution, package_data})) => {
                     self.record_resolution(descriptor, resolution, package_data);
