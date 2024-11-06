@@ -1,9 +1,9 @@
-use std::{collections::{HashMap, HashSet}, hash::Hash, marker::PhantomData};
+use std::{collections::{HashMap, HashSet}, hash::Hash, marker::PhantomData, str::FromStr};
 
 use arca::Path;
 use serde::{Deserialize, Serialize};
 
-use crate::{build, cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Locator, Range, Reference}, print_time, project::Project, resolver::{resolve, Resolution}, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, error::Error, fetcher::{fetch, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry}, manifest::ResolutionOverride, primitives::{Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolver::{resolve, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -27,16 +27,12 @@ impl<'a> InstallContext<'a> {
 #[derive(Clone, Debug)]
 pub struct ResolutionResult {
     pub resolution: Resolution,
+    pub original_resolution: Resolution,
     pub package_data: Option<PackageData>,
 }
 
-impl ResolutionResult {
-    pub fn new(resolution: Resolution) -> Self {
-        Self {
-            resolution,
-            package_data: None,
-        }
-    }
+pub trait IntoResolutionResult {
+    fn into_resolution_result(self, context: &InstallContext<'_>) -> ResolutionResult;
 }
 
 #[derive(Clone, Debug)]
@@ -52,13 +48,24 @@ impl FetchResult {
             package_data,
         }
     }
+}
 
-    pub fn into_resolution_result(self) -> ResolutionResult {
-        let resolution = self.resolution
+impl IntoResolutionResult for FetchResult {
+    fn into_resolution_result(self, context: &InstallContext<'_>) -> ResolutionResult {
+        let mut resolution = self.resolution
             .expect("Expected this fetch result to contain a resolution record to be convertible into a resolution result");
+
+        let original_resolution = resolution.clone();
+
+        let (dependencies, peer_dependencies)
+            = normalize_resolutions(context, &resolution);
+
+        resolution.dependencies = dependencies;
+        resolution.peer_dependencies = peer_dependencies;
 
         ResolutionResult {
             resolution,
+            original_resolution,
             package_data: Some(self.package_data),
         }
     }
@@ -100,8 +107,8 @@ impl InstallOpResult {
     }
 }
 
-impl<'a> GraphOut<InstallOp<'a>> for InstallOpResult {
-    fn graph_follow_ups(&self) -> Vec<InstallOp<'a>> {
+impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
+    fn graph_follow_ups(&self, ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
         match self {
             InstallOpResult::Resolved(ResolutionResult {resolution, ..}) => {
                 let mut follow_ups = vec![InstallOp::Fetch {
@@ -139,7 +146,7 @@ enum InstallOp<'a> {
 }
 
 impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'a> {
-    fn graph_dependencies(&self, resolved_dependencies: &Vec<&InstallOpResult>) -> Vec<Self> {
+    fn graph_dependencies(&self, ctx: &InstallContext<'a>, resolved_dependencies: &Vec<&InstallOpResult>) -> Vec<Self> {
         let mut dependencies = vec![];
         let mut resolved_it = resolved_dependencies.iter();
 
@@ -192,11 +199,11 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                 unreachable!("PhantomData should never be instantiated"),
 
             InstallOp::Resolve {descriptor} => {
-                Ok(InstallOpResult::Resolved(resolve(context, descriptor.clone(), dependencies).await?))
+                Ok(InstallOpResult::Resolved(resolve(context.clone(), descriptor.clone(), dependencies).await?))
             },
 
             InstallOp::Fetch {locator} => {
-                Ok(InstallOpResult::Fetched(fetch(context, &locator.clone(), false, dependencies).await?))
+                Ok(InstallOpResult::Fetched(fetch(context.clone(), &locator.clone(), false, dependencies).await?))
             },
 
         }
@@ -215,18 +222,15 @@ impl InstallCache {
     }
 }
 
-impl<'a> GraphCache<InstallOp<'a>, InstallOpResult> for InstallCache {
-    fn graph_cache(&self, op: &InstallOp) -> Option<InstallOpResult> {
+impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for InstallCache {
+    fn graph_cache(&self, ctx: &InstallContext<'a>, op: &InstallOp) -> Option<InstallOpResult> {
         match op {
             InstallOp::Resolve {descriptor} => {
                 if let Some(locator) = self.lockfile.resolutions.get(&descriptor) {
                     let entry = self.lockfile.entries.get(locator)
                         .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator));
 
-                    return Some(InstallOpResult::Resolved(ResolutionResult {
-                        resolution: entry.resolution.clone(),
-                        package_data: None,
-                    }));
+                    return Some(InstallOpResult::Resolved(entry.resolution.clone().into_resolution_result(ctx)));
                 }
             },
 
@@ -242,6 +246,7 @@ impl<'a> GraphCache<InstallOp<'a>, InstallOpResult> for InstallCache {
 pub struct InstallState {
     pub lockfile: Lockfile,
     pub resolution_tree: ResolutionTree,
+    pub normalized_resolutions: HashMap<Locator, Resolution>,
     pub packages_by_location: HashMap<Path, Locator>,
     pub locations_by_package: HashMap<Locator, Path>,
     pub optional_packages: HashSet<Locator>,
@@ -340,8 +345,8 @@ impl<'a> InstallManager<'a> {
 
         for entry in graph_run.unwrap() {
             match entry {
-                (InstallOp::Resolve {descriptor, ..}, InstallOpResult::Resolved(ResolutionResult {resolution, package_data})) => {
-                    self.record_resolution(descriptor, resolution, package_data);
+                (InstallOp::Resolve {descriptor, ..}, InstallOpResult::Resolved(ResolutionResult {resolution, original_resolution, package_data})) => {
+                    self.record_resolution(descriptor, resolution, original_resolution, package_data);
                 },
 
                 (InstallOp::Fetch {locator, ..}, InstallOpResult::Fetched(FetchResult {package_data, ..})) => {
@@ -353,18 +358,20 @@ impl<'a> InstallManager<'a> {
         }
 
         self.result.install_state.resolution_tree = TreeResolver::default()
-            .with_lockfile(self.result.install_state.lockfile.clone())
+            .with_resolutions(&self.result.install_state.lockfile.resolutions, &self.result.install_state.normalized_resolutions)
             .with_roots(self.roots.clone())
             .run();
 
         Ok(self.result)
     }
 
-    fn record_resolution(&mut self, descriptor: Descriptor, resolution: Resolution, package_data: Option<PackageData>) {
+    fn record_resolution(&mut self, descriptor: Descriptor, resolution: Resolution, original_resolution: Resolution, package_data: Option<PackageData>) {
+        self.result.install_state.normalized_resolutions.insert(resolution.locator.clone(), resolution.clone());
+
         self.result.install_state.lockfile.resolutions.insert(descriptor, resolution.locator.clone());
         self.result.install_state.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
             checksum: None,
-            resolution: resolution.clone(),
+            resolution: original_resolution.clone(),
         });
 
         if resolution.requirements.is_conditional() {
@@ -383,4 +390,50 @@ impl<'a> InstallManager<'a> {
     fn record_fetch(&mut self, locator: Locator, package_data: PackageData) {
         self.result.package_data.insert(locator.clone(), package_data.clone());
     }
+}
+
+pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resolution) -> (HashMap<Ident, Descriptor>, HashMap<Ident, PeerRange>) {
+    let root_workspace = context.project
+        .expect("The project is required to bind a parent to a descriptor")
+        .root_workspace();
+
+    let mut dependencies = resolution.dependencies.clone();
+    let mut peer_dependencies = resolution.peer_dependencies.clone();
+
+    // Some protocols need to know about the package that declares the
+    // dependency (for example the `portal:` protocol, which always points
+    // to a location relative to the parent package. We mutate the
+    // descriptors for these protocols to "bind" them to a particular
+    // parent descriptor. In effect, it means we're creating a unique
+    // version of the package, which will be resolved / fetched
+    // independently from any other.
+    //
+    for descriptor in dependencies.values_mut() {
+        let possible_resolution_overrides = context.project
+            .and_then(|project| project.resolution_overrides(&descriptor.ident));
+
+        let resolution_override = possible_resolution_overrides
+            .and_then(|overrides| {
+                overrides.iter().find_map(|(rule, range)| {
+                    rule.apply(&resolution.locator, &resolution.version, &descriptor, range)
+                })
+            });
+
+        if let Some(replacement_range) = resolution_override {
+            descriptor.range = replacement_range;
+
+            if descriptor.range.must_bind() {
+                descriptor.parent = Some(root_workspace.locator());
+            }
+        } else if descriptor.range.must_bind() {
+            descriptor.parent = Some(resolution.locator.clone());
+        }
+    }
+
+    for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
+        peer_dependencies.entry(name.type_ident())
+            .or_insert(PeerRange::Semver(semver::Range::from_str("*").unwrap()));
+    }
+
+    (dependencies, peer_dependencies)
 }

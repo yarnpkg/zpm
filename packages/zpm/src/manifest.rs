@@ -3,8 +3,9 @@ use std::{collections::HashMap, fs, sync::Arc};
 use arca::Path;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use zpm_macros::Parsed;
 
-use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, PeerRange}, semver, system};
+use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range}, semver::{self, Version}, system};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,6 +67,69 @@ pub struct RemoteManifest {
     pub dist: Option<DistManifest>,
 }
 
+#[derive(Clone, Debug, Parsed, Serialize, PartialEq, Eq, Hash)]
+#[parse_error(Error::InvalidResolution)]
+pub enum ResolutionOverride {
+    #[try_pattern()]
+    Ident(Ident),
+
+    #[try_pattern(pattern = r"^((?:@[^/*]*/)?[^/*]+)/([^*]+)$")]
+    DescriptorIdent(Descriptor, Ident),
+
+    #[try_pattern(pattern = r"^((?:@[^/*]*/)?[^/*]+)/([^*]+)$")]
+    IdentIdent(Ident, Ident),
+}
+
+impl ResolutionOverride {
+    pub fn target_ident(&self) -> &Ident {
+        match self {
+            ResolutionOverride::Ident(ident) => ident,
+            ResolutionOverride::DescriptorIdent(_, ident) => ident,
+            ResolutionOverride::IdentIdent(_, ident) => ident,
+        }
+    }
+
+    pub fn apply(&self, parent: &Locator, parent_version: &Version, descriptor: &Descriptor, replacement_range: &Range) -> Option<Range> {
+        match self {
+            ResolutionOverride::Ident(ident) => {
+                if ident != &descriptor.ident {
+                    return None;
+                }
+
+                Some(replacement_range.clone())
+            }
+
+            ResolutionOverride::DescriptorIdent(parent_descriptor, ident) => {
+                if ident != &descriptor.ident {
+                    return None;
+                }
+
+                if let Range::SemverOrWorkspace(semver_range) = &parent_descriptor.range {
+                    if !semver_range.check(parent_version) {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+
+                Some(replacement_range.clone())
+            }
+
+            ResolutionOverride::IdentIdent(parent_ident, ident) => {
+                if ident != &descriptor.ident {
+                    return None;
+                }
+
+                if parent.ident != *parent_ident {
+                    return None;
+                }
+
+                Some(replacement_range.clone())
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
@@ -108,6 +172,9 @@ pub struct Manifest {
     #[serde(default)]
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub scripts: HashMap<String, String>,
+
+    #[serde(default)]
+    pub resolutions: HashMap<ResolutionOverride, Range>,
 }
 
 pub fn parse_manifest(manifest_text: String) -> Result<Manifest, Error> {

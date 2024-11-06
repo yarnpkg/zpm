@@ -28,16 +28,15 @@ pub struct TreeResolver {
 }
 
 impl TreeResolver {
-    pub fn with_lockfile(mut self, lockfile: Lockfile) -> Self {
+    pub fn with_resolutions(mut self, descriptor_to_locators: &HashMap<Descriptor, Locator>, normalized_resolutions: &HashMap<Locator, Resolution>) -> Self {
         self.resolution_tree.descriptor_to_locator.clear();
         self.resolution_tree.locator_resolutions.clear();
 
         self.original_workspace_definitions.clear();
 
-        for (descriptor, locator) in lockfile.resolutions.iter().sorted_by_cached_key(|(d, _)| d.ident.clone()) {
-            let resolution = &lockfile.entries.get(locator)
-                .expect("Expected the locator to have a resolution")
-                .resolution;
+        for (descriptor, locator) in descriptor_to_locators.iter().sorted_by_cached_key(|(d, _)| d.ident.clone()) {
+            let resolution = normalized_resolutions.get(locator)
+                .expect("Expected the locator to have a resolution");
 
             self.resolution_tree.descriptor_to_locator.insert(descriptor.clone(), locator.clone());
             self.resolution_tree.locator_resolutions.insert(locator.clone(), resolution.clone());

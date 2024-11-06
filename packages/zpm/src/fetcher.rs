@@ -154,28 +154,28 @@ pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_r
             => fetch_portal(path, dependencies),
 
         Reference::Url(url)
-            => fetch_remote_tarball_with_manifest(context, locator, url).await,
+            => fetch_remote_tarball_with_manifest(&context, locator, url).await,
 
         Reference::Tarball(path)
-            => fetch_local_tarball_with_manifest(context, locator, path, dependencies).await,
+            => fetch_local_tarball_with_manifest(&context, locator, path, dependencies).await,
 
         Reference::Folder(path)
-            => fetch_folder_with_manifest(context, locator, path, dependencies).await,
+            => fetch_folder_with_manifest(&context, locator, path, dependencies).await,
 
         Reference::Git(reference)
-            => fetch_repository_with_manifest(context, locator, reference).await,
+            => fetch_repository_with_manifest(&context, locator, reference).await,
 
         Reference::Patch(_, path)
-            => fetch_patched(context, locator, path, dependencies).await,
+            => fetch_patched(&context, locator, path, dependencies).await,
 
         Reference::Semver(version)
-            => fetch_semver(context, locator, &locator.ident, version, is_mock_request).await,
+            => fetch_semver(&context, locator, &locator.ident, version, is_mock_request).await,
 
         Reference::SemverAlias(ident, version)
-            => fetch_semver(context, locator, ident, version, is_mock_request).await,
+            => fetch_semver(&context, locator, ident, version, is_mock_request).await,
 
         Reference::Workspace(ident)
-            => fetch_workspace(context, ident),
+            => fetch_workspace(&context, ident),
 
         _ => Err(Error::Unsupported),
     }
@@ -213,7 +213,7 @@ pub fn fetch_portal(path: &str, dependencies: Vec<InstallOpResult>) -> Result<Fe
     })
 }
 
-pub async fn fetch_remote_tarball_with_manifest<'a>(context: InstallContext<'a>, locator: &Locator, url: &str) -> Result<FetchResult, Error> {
+pub async fn fetch_remote_tarball_with_manifest<'a>(context: &InstallContext<'a>, locator: &Locator, url: &str) -> Result<FetchResult, Error> {
     let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let client = http_client()?;
         let response = client.get(url).send().await
@@ -251,7 +251,7 @@ pub async fn fetch_remote_tarball_with_manifest<'a>(context: InstallContext<'a>,
     })
 }
 
-pub async fn fetch_patched<'a>(context: InstallContext<'a>, locator: &Locator, path: &str, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+pub async fn fetch_patched<'a>(context: &InstallContext<'a>, locator: &Locator, path: &str, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     let parent_data = dependencies[0].as_fetched();
     let original_data = dependencies[1].as_fetched();
 
@@ -298,7 +298,7 @@ pub async fn fetch_patched<'a>(context: InstallContext<'a>, locator: &Locator, p
     })
 }
 
-pub async fn fetch_local_tarball_with_manifest<'a>(context: InstallContext<'a>, locator: &Locator, path: &str, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+pub async fn fetch_local_tarball_with_manifest<'a>(context: &InstallContext<'a>, locator: &Locator, path: &str, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     let parent_data = dependencies[0].as_fetched();
 
     let tarball_path = parent_data.package_data
@@ -337,7 +337,7 @@ pub async fn fetch_local_tarball_with_manifest<'a>(context: InstallContext<'a>, 
     })
 }
 
-pub async fn fetch_folder_with_manifest<'a>(context: InstallContext<'a>, locator: &Locator, path: &str, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+pub async fn fetch_folder_with_manifest<'a>(context: &InstallContext<'a>, locator: &Locator, path: &str, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     let parent_data = dependencies[0].as_fetched();
 
     let context_directory = parent_data.package_data
@@ -376,7 +376,7 @@ pub async fn fetch_folder_with_manifest<'a>(context: InstallContext<'a>, locator
     })
 }
 
-pub async fn fetch_repository_with_manifest<'a>(context: InstallContext<'a>, locator: &Locator, reference: &GitReference) -> Result<FetchResult, Error> {
+pub async fn fetch_repository_with_manifest<'a>(context: &InstallContext<'a>, locator: &Locator, reference: &GitReference) -> Result<FetchResult, Error> {
     let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let repository_path
             = clone_repository(&reference.repo, &reference.commit).await?;
@@ -417,7 +417,7 @@ pub async fn fetch_repository_with_manifest<'a>(context: InstallContext<'a>, loc
     })
 }
 
-pub async fn fetch_semver<'a>(context: InstallContext<'a>, locator: &Locator, ident: &Ident, version: &semver::Version, is_mock_request: bool) -> Result<FetchResult, Error> {
+pub async fn fetch_semver<'a>(context: &InstallContext<'a>, locator: &Locator, ident: &Ident, version: &semver::Version, is_mock_request: bool) -> Result<FetchResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -462,7 +462,7 @@ pub async fn fetch_semver<'a>(context: InstallContext<'a>, locator: &Locator, id
     }))
 }
 
-pub fn fetch_workspace(context: InstallContext, ident: &Ident) -> Result<FetchResult, Error> {
+pub fn fetch_workspace(context: &InstallContext<'_>, ident: &Ident) -> Result<FetchResult, Error> {
     let project = context.project
         .expect("The project is required for fetching a workspace package");
 

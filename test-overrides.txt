@@ -2,3 +2,8 @@ Plug'n'Play ► it should properly forward the NODE_OPTIONS environment variable
     Since ESM loaders are in a separate thread, they run `-r` on their own and asynchronously. As a result
     an additional `42` is printed after the main process exits when the ESM loader is enabled, which is always
     the case on zpm.
+
+Features ► Resolutions ► it should support overriding a packages with another, but only if it originally resolved to a specific reference
+    This test, despite its name, doesn't actually checks that we only overrides a specific resolved version. Instead,
+    it checks that we only overrides a specific _exact original range_. This capability is removed as it's both
+    confusing and quite useless.

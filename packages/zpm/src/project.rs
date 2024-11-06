@@ -5,7 +5,7 @@ use serde::Deserialize;
 use wax::walk::{Entry, FileIterator};
 use zpm_macros::track_time;
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::Lockfile, manifest::{read_manifest, BinField, BinManifest, Manifest}, primitives::{Descriptor, Ident, Locator, Range, Reference}, script::Binary};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::Lockfile, manifest::{read_manifest, BinField, BinManifest, Manifest, ResolutionOverride}, primitives::{Descriptor, Ident, Locator, Range, Reference}, script::Binary};
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
 pub const MANIFEST_NAME: &str = "package.json";
@@ -21,6 +21,7 @@ pub struct Project {
     pub config: Config,
     pub workspaces: HashMap<Ident, Workspace>,
     pub workspaces_by_rel_path: HashMap<Path, Ident>,
+    pub resolution_overrides: HashMap<Ident, Vec<(ResolutionOverride, Range)>>,
 
     pub install_state: Option<InstallState>,
 }
@@ -81,6 +82,15 @@ impl Project {
             .map(|w| (w.rel_path.clone(), w.locator().ident))
             .collect::<HashMap<_, _>>();
 
+        let mut resolutions_overrides: HashMap<Ident, Vec<(ResolutionOverride, Range)>>
+             = HashMap::new();
+
+        for (resolution, range) in root_workspace.manifest.resolutions {
+            resolutions_overrides.entry(resolution.target_ident().clone())
+                .or_default()
+                .push((resolution, range));
+        }
+
         Ok(Project {
             shell_cwd: shell_cwd.relative_to(&project_cwd),
             package_cwd: package_cwd.relative_to(&project_cwd),
@@ -89,6 +99,7 @@ impl Project {
             config,
             workspaces,
             workspaces_by_rel_path,
+            resolution_overrides: resolutions_overrides,
 
             install_state: None,
         })
@@ -143,6 +154,10 @@ impl Project {
 
         serde_json::from_str(&src)
             .map_err(|err| Error::LockfileParseError(Arc::new(err)))
+    }
+
+    pub fn resolution_overrides(&self, ident: &Ident) -> Option<&Vec<(ResolutionOverride, Range)>> {
+        self.resolution_overrides.get(ident)
     }
 
     #[track_time]
@@ -231,6 +246,14 @@ impl Project {
             global_cache,
             local_cache,
         }
+    }
+
+    pub fn root_workspace(&self) -> &Workspace {
+        let root_workspace = self.workspaces_by_rel_path.get(&Path::new())
+            .expect("Expected root workspace to be found");
+
+        self.workspaces.get(root_workspace)
+            .expect("Expected root workspace to be found")
     }
 
     pub fn active_package(&self) -> Result<Locator, Error> {

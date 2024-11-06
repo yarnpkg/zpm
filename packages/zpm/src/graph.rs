@@ -6,17 +6,17 @@ use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt}
 #[path = "./graph.test.rs"]
 mod graph_tests;
 
-pub trait GraphCache<TIn, TOut> where Self: Sized {
-    fn graph_cache(&self, value: &TIn) -> Option<TOut>;
+pub trait GraphCache<TCtx, TIn, TOut> where Self: Sized {
+    fn graph_cache(&self, ctx: &TCtx, value: &TIn) -> Option<TOut>;
 }
 
 pub trait GraphIn<'a, TCtx, TOut, TErr> where Self: Sized, TCtx: Send {
-    fn graph_dependencies(&self, dependencies: &Vec<&TOut>) -> Vec<Self>;
+    fn graph_dependencies(&self, ctx: &TCtx, dependencies: &Vec<&TOut>) -> Vec<Self>;
     fn graph_run(self, ctx: TCtx, dependencies: Vec<TOut>) -> impl std::future::Future<Output = Result<TOut, TErr>> + Send + 'a;
 }
 
-pub trait GraphOut<TIn> where Self: Sized {
-    fn graph_follow_ups(&self) -> Vec<TIn>;
+pub trait GraphOut<TCtx, TIn> where Self: Sized {
+    fn graph_follow_ups(&self, ctx: &TCtx) -> Vec<TIn>;
 }
 
 pub struct GraphTaskResults<TIn, TOut, TErr> {
@@ -78,8 +78,8 @@ pub struct GraphTasks<'a, TCtx, TIn, TOut, TErr, TCache> {
 impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TCache> where
     TCtx: Clone + Send,
     TIn: Clone + Debug + Eq + Hash + Send + GraphIn<'a, TCtx, TOut, TErr> + 'a,
-    TOut: Clone + GraphOut<TIn>,
-    TCache: GraphCache<TIn, TOut>
+    TOut: Clone + GraphOut<TCtx, TIn>,
+    TCache: GraphCache<TCtx, TIn, TOut>
 {
     pub fn new(context: TCtx, cache: TCache) -> Self {
         Self {
@@ -98,7 +98,7 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
     pub fn register(&mut self, op: TIn) {
         if !self.tasks.contains_key(&op) {
             let dependencies
-                = op.graph_dependencies(&vec![]);
+                = op.graph_dependencies(&self.context, &vec![]);
 
             if dependencies.is_empty() {
                 self.tasks.insert(op.clone(), (0, vec![]));
@@ -144,7 +144,7 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
             }
 
             let next_dependencies
-                = op.graph_dependencies(&resolved_dependencies);
+                = op.graph_dependencies(&self.context, &resolved_dependencies);
 
             // If no new dependency has been added it means that everything
             // needed has been resolved and we can just go on with scheduling
@@ -172,7 +172,7 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
     fn update(&mut self) {
         while self.running.len() < 100 {
             if let Some(op) = self.ready.pop() {
-                if let Some(cached_value) = self.cache.graph_cache(&op) {
+                if let Some(cached_value) = self.cache.graph_cache(&self.context, &op) {
                     self.accept_cached(op, cached_value);
                     continue;
                 }
@@ -208,7 +208,7 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
     }
 
     pub fn accept(&mut self, op: TIn, out: TOut) {
-        let follow_ups = out.graph_follow_ups();
+        let follow_ups = out.graph_follow_ups(&self.context);
 
         self.results.success.insert(op.clone(), out);
 

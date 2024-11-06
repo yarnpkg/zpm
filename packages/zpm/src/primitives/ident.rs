@@ -47,7 +47,7 @@ impl AsRef<str> for Ident {
 }
 
 static IDENT_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"^(?:@([^/]+?)/)?([^@/]+)$").unwrap()
+    regex::Regex::new(r"^(?:@[^/]*/)?([^@/]+)$").unwrap()
 });
 
 yarn_serialization_protocol!(Ident, "", {

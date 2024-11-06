@@ -220,6 +220,9 @@ pub enum Error {
 
     #[error("Unmatched hunk")]
     UnmatchedHunk(usize),
+
+    #[error("Invalid resolution")]
+    InvalidResolution(String),
 }
 
 impl Error {

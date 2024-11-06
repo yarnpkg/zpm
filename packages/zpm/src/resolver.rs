@@ -5,7 +5,7 @@ use bincode::{Decode, Encode};
 use regex::Regex;
 use serde::{de::{self, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer, Serialize};
 
-use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_patched, fetch_remote_tarball_with_manifest, fetch_repository_with_manifest, PackageData}, formats::zip::ZipSupport, git::{resolve_git_treeish, GitRange, GitReference}, http::http_client, install::{InstallContext, InstallOpResult, ResolutionResult}, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, serialize::UrlEncoded, system};
+use crate::{error::Error, fetcher::{fetch_folder_with_manifest, fetch_local_tarball_with_manifest, fetch_patched, fetch_remote_tarball_with_manifest, fetch_repository_with_manifest}, formats::zip::ZipSupport, git::{resolve_git_treeish, GitRange, GitReference}, http::http_client, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::{parse_manifest, RemoteManifest}, primitives::{descriptor::{self, descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range, Reference}, semver, serialize::UrlEncoded, system};
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
@@ -66,36 +66,29 @@ impl Resolution {
     }
 }
 
-pub async fn resolve(context: InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
-    let mut resolution_result = resolve_direct(context, descriptor, dependencies).await?;
+impl IntoResolutionResult for Resolution {
+    fn into_resolution_result(mut self, context: &InstallContext<'_>) -> ResolutionResult {
+        let original_resolution = self.clone();
 
-    normalize_resolution(&mut resolution_result.resolution);
+        let (dependencies, peer_dependencies)
+            = normalize_resolutions(context, &self);
 
-    Ok(resolution_result)
-}
+        self.dependencies = dependencies;
+        self.peer_dependencies = peer_dependencies;
 
-pub fn normalize_resolution(resolution: &mut Resolution) {
-    // Some protocols need to know about the package that declares the
-    // dependency (for example the `portal:` protocol, which always points
-    // to a location relative to the parent package. We mutate the
-    // descriptors for these protocols to "bind" them to a particular
-    // parent descriptor. In effect, it means we're creating a unique
-    // version of the package, which will be resolved / fetched
-    // independently from any other.
-    //
-    for descriptor in resolution.dependencies.values_mut() {
-        if descriptor.range.must_bind() {
-            descriptor.parent = Some(resolution.locator.clone());
+        ResolutionResult {
+            resolution: self,
+            original_resolution,
+            package_data: None,
         }
     }
-
-    for name in resolution.peer_dependencies.keys().cloned().collect::<Vec<_>>() {
-        resolution.peer_dependencies.entry(name.type_ident())
-            .or_insert(PeerRange::Semver(semver::Range::from_str("*").unwrap()));
-    }
 }
 
-async fn resolve_direct(context: InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+pub async fn resolve(context: InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+    resolve_direct(&context, descriptor, dependencies).await
+}
+
+async fn resolve_direct(context: &InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     match &descriptor.range {
         Range::SemverOrWorkspace(range)
             => resolve_semver_or_workspace(context, &descriptor.ident, range).await,
@@ -110,7 +103,7 @@ async fn resolve_direct(context: InstallContext<'_>, descriptor: Descriptor, dep
             => resolve_semver(context, ident, range).await,
 
         Range::Link(path)
-            => resolve_link(&descriptor.ident, path, &descriptor.parent),
+            => resolve_link(context, &descriptor.ident, path, &descriptor.parent),
 
         Range::Url(url)
             => resolve_url(context, descriptor.ident, url).await,
@@ -125,7 +118,7 @@ async fn resolve_direct(context: InstallContext<'_>, descriptor: Descriptor, dep
             => resolve_folder(context, descriptor.ident, path, &descriptor.parent, dependencies).await,
 
         Range::Portal(path)
-            => resolve_portal(&descriptor.ident, path, &descriptor.parent, dependencies),
+            => resolve_portal(context, &descriptor.ident, path, &descriptor.parent, dependencies),
 
         Range::SemverTag(tag)
             => resolve_semver_tag(context, descriptor.ident, tag).await,
@@ -143,7 +136,7 @@ async fn resolve_direct(context: InstallContext<'_>, descriptor: Descriptor, dep
     }
 }
 
-pub fn resolve_link(ident: &Ident, path: &str, parent: &Option<Locator>) -> Result<ResolutionResult, Error> {
+pub fn resolve_link(ctx: &InstallContext<'_>, ident: &Ident, path: &str, parent: &Option<Locator>) -> Result<ResolutionResult, Error> {
     let resolution = Resolution {
         version: semver::Version::new(),
         locator: Locator::new_bound(ident.clone(), Reference::Link(path.to_string()), parent.clone().map(Arc::new)),
@@ -154,19 +147,19 @@ pub fn resolve_link(ident: &Ident, path: &str, parent: &Option<Locator>) -> Resu
         requirements: system::Requirements::default(),
     };
 
-    Ok(ResolutionResult::new(resolution))
+    Ok(resolution.into_resolution_result(ctx))
 }
 
-pub async fn resolve_url(context: InstallContext<'_>, ident: Ident, url: &str) -> Result<ResolutionResult, Error> {
+pub async fn resolve_url(context: &InstallContext<'_>, ident: Ident, url: &str) -> Result<ResolutionResult, Error> {
     let locator = Locator::new(ident.clone(), Reference::Url(url.to_string()));
 
     let fetch_result
         = fetch_remote_tarball_with_manifest(context, &locator, url).await?;
 
-    Ok(fetch_result.into_resolution_result())
+    Ok(fetch_result.into_resolution_result(context))
 }
 
-pub async fn resolve_patch(context: InstallContext<'_>, ident: Ident, path: &str, parent: &Option<Locator>, mut dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+pub async fn resolve_patch(context: &InstallContext<'_>, ident: Ident, path: &str, parent: &Option<Locator>, mut dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     let inner_locator
         = dependencies[1].as_resolved().resolution.locator.clone();
 
@@ -180,28 +173,28 @@ pub async fn resolve_patch(context: InstallContext<'_>, ident: Ident, path: &str
     let fetch_result
         = fetch_patched(context, &locator, path, dependencies).await?;
 
-    Ok(fetch_result.into_resolution_result())
+    Ok(fetch_result.into_resolution_result(context))
 }
 
-pub async fn resolve_tarball(context: InstallContext<'_>, ident: Ident, path: &str, parent: &Option<Locator>, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+pub async fn resolve_tarball(context: &InstallContext<'_>, ident: Ident, path: &str, parent: &Option<Locator>, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     let locator = Locator::new_bound(ident, Reference::Tarball(path.to_string()), parent.clone().map(Arc::new));
 
     let fetch_result
         = fetch_local_tarball_with_manifest(context, &locator, path, dependencies).await?;
 
-    Ok(fetch_result.into_resolution_result())
+    Ok(fetch_result.into_resolution_result(context))
 }
 
-pub async fn resolve_folder(context: InstallContext<'_>, ident: Ident, path: &str, parent: &Option<Locator>, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+pub async fn resolve_folder(context: &InstallContext<'_>, ident: Ident, path: &str, parent: &Option<Locator>, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     let locator = Locator::new_bound(ident, Reference::Folder(path.to_string()), parent.clone().map(Arc::new));
 
     let fetch_result
         = fetch_folder_with_manifest(context, &locator, path, dependencies).await?;
 
-    Ok(fetch_result.into_resolution_result())
+    Ok(fetch_result.into_resolution_result(context))
 }
 
-pub fn resolve_portal(ident: &Ident, path: &str, parent: &Option<Locator>, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+pub fn resolve_portal(ctx: &InstallContext, ident: &Ident, path: &str, parent: &Option<Locator>, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     let parent_data = dependencies[0].as_fetched();
 
     let parent = parent.as_ref()
@@ -221,10 +214,10 @@ pub fn resolve_portal(ident: &Ident, path: &str, parent: &Option<Locator>, depen
     let locator = Locator::new_bound(ident.clone(), Reference::Portal(path.to_string()), Some(Arc::new(parent.clone())));
     let resolution = Resolution::from_remote_manifest(locator, manifest.remote);
 
-    Ok(ResolutionResult::new(resolution))
+    Ok(resolution.into_resolution_result(ctx))
 }
 
-pub async fn resolve_git(context: InstallContext<'_>, ident: Ident, source: &GitRange) -> Result<ResolutionResult, Error> {
+pub async fn resolve_git(context: &InstallContext<'_>, ident: Ident, source: &GitRange) -> Result<ResolutionResult, Error> {
     let commit = resolve_git_treeish(source).await?;
 
     let git_reference = GitReference {
@@ -239,10 +232,10 @@ pub async fn resolve_git(context: InstallContext<'_>, ident: Ident, source: &Git
     let fetch_result
         = fetch_repository_with_manifest(context, &locator, &git_reference).await?;
 
-    Ok(fetch_result.into_resolution_result())
+    Ok(fetch_result.into_resolution_result(context))
 }
 
-pub async fn resolve_semver_tag(context: InstallContext<'_>, ident: Ident, tag: &str) -> Result<ResolutionResult, Error> {
+pub async fn resolve_semver_tag(context: &InstallContext<'_>, ident: Ident, tag: &str) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -287,10 +280,10 @@ pub async fn resolve_semver_tag(context: InstallContext<'_>, ident: Ident, tag: 
     let locator = Locator::new(ident.clone(), reference);
     let resolution = Resolution::from_remote_manifest(locator, manifest);
 
-    Ok(ResolutionResult::new(resolution))
+    Ok(resolution.into_resolution_result(context))
 }
 
-pub async fn resolve_semver(context: InstallContext<'_>, ident: &Ident, range: &semver::Range) -> Result<ResolutionResult, Error> {
+pub async fn resolve_semver(context: &InstallContext<'_>, ident: &Ident, range: &semver::Range) -> Result<ResolutionResult, Error> {
     pub struct FindField<'a, T> {
         field: &'a str,
         nested: T,
@@ -430,15 +423,15 @@ pub async fn resolve_semver(context: InstallContext<'_>, ident: &Ident, range: &
     let locator = Locator::new(ident.clone(), reference);
     let resolution = Resolution::from_remote_manifest(locator, manifest.remote);
 
-    Ok(ResolutionResult::new(resolution))
+    Ok(resolution.into_resolution_result(context))
 }
 
-pub async fn resolve_semver_or_workspace(context: InstallContext<'_>, ident: &Ident, range: &semver::Range) -> Result<ResolutionResult, Error> {
+pub async fn resolve_semver_or_workspace(context: &InstallContext<'_>, ident: &Ident, range: &semver::Range) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
     if project.config.project.enable_transparent_workspaces.value {
-        if let Ok(workspace) = resolve_workspace_by_name(context.clone(), ident.clone()) {
+        if let Ok(workspace) = resolve_workspace_by_name(context, ident.clone()) {
             if range.check(&workspace.resolution.version) {
                 return Ok(workspace);
             }
@@ -448,7 +441,7 @@ pub async fn resolve_semver_or_workspace(context: InstallContext<'_>, ident: &Id
     resolve_semver(context, ident, range).await
 }
 
-pub fn resolve_workspace_by_name(context: InstallContext, ident: Ident) -> Result<ResolutionResult, Error> {
+pub fn resolve_workspace_by_name(context: &InstallContext<'_>, ident: Ident) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -461,14 +454,14 @@ pub fn resolve_workspace_by_name(context: InstallContext, ident: Ident) -> Resul
 
             resolution.dependencies.extend(manifest.dev_dependencies);
 
-            Ok(ResolutionResult::new(resolution))
+            Ok(resolution.into_resolution_result(context))
         }
 
         None => Err(Error::WorkspaceNotFound(ident)),
     }
 }
 
-pub fn resolve_workspace_by_path(context: InstallContext, path: &str) -> Result<ResolutionResult, Error> {
+pub fn resolve_workspace_by_path(context: &InstallContext<'_>, path: &str) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 

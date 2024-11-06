@@ -1239,16 +1239,17 @@
 🟥 Features ► Resolution cache ► it should properly separate the disk metadata cache from the network metadata cache
 🟥 Features ► Resolution cache ► it should use a cache metadata when resolving fixed versions
 
-[0 / 8] packages/acceptance-tests/pkg-tests-specs/sources/features/resolutions.test.js
+[8 / 9] packages/acceptance-tests/pkg-tests-specs/sources/features/resolutions.test.js
 
-🟥 Features ► Resolutions ► it should detect that a resolution entry got removed
-🟥 Features ► Resolutions ► it should error when legacy glob syntax is used
-🟥 Features ► Resolutions ► it should support overriding a packages with another
-🟥 Features ► Resolutions ► it should support overriding a packages with another, but only if it originally resolved to a specific reference
-🟥 Features ► Resolutions ► it should support overriding a packages with another, but only if it's the dependency of a specific other package
-🟥 Features ► Resolutions ► it should support overriding packages with directories
-🟥 Features ► Resolutions ► it should support overriding packages with portals
-🟥 Features ► Resolutions ► it should support overriding packages with tarballs
+🟩 Features ► Resolutions ► it should detect that a resolution entry got removed
+🟩 Features ► Resolutions ► it should error when legacy glob syntax is used
+🟩 Features ► Resolutions ► it should support overriding a packages with another
+🟦 Features ► Resolutions ► it should support overriding a packages with another, but only if it originally resolved to a specific reference
+🟩 Features ► Resolutions ► it should support overriding a packages with another, but only if it's the dependency of a specific other package
+🟩 Features ► Resolutions ► it should support overriding a packages with another, but only if its parent package has a specific version
+🟩 Features ► Resolutions ► it should support overriding packages with directories
+🟩 Features ► Resolutions ► it should support overriding packages with portals
+🟩 Features ► Resolutions ► it should support overriding packages with tarballs
 
 [0 / 1] packages/acceptance-tests/pkg-tests-specs/sources/features/unsafeHttpWhitelist.test.js
 
