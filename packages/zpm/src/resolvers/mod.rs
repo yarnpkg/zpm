@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, range, Descriptor, Ident, Locator, PeerRange, Range}, system};
+use crate::{error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, system};
 
 mod folder;
 mod git;
@@ -91,7 +91,7 @@ impl IntoResolutionResult for Resolution {
     }
 }
 
-pub async fn resolve(context: InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     match &descriptor.range {
         Range::AnonymousSemver(params)
             => semver::resolve_descriptor(&context, &descriptor, params).await,
@@ -134,6 +134,39 @@ pub async fn resolve(context: InstallContext<'_>, descriptor: Descriptor, depend
 
         Range::WorkspacePath(params)
             => workspace::resolve_path_descriptor(&context, &descriptor, params),
+
+        _ => Err(Error::Unsupported),
+    }
+}
+
+pub async fn resolve_locator<'a>(context: InstallContext<'a>, locator: &Locator, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+    match &locator.reference {
+        Reference::Link(params)
+            => link::resolve_locator(&context, locator, params),
+
+        Reference::Portal(params)
+            => portal::resolve_locator(&context, locator, params, dependencies),
+
+        Reference::Url(params)
+            => url::resolve_locator(&context, locator, params).await,
+
+        Reference::Tarball(params)
+            => tarball::resolve_locator(&context, locator, params, dependencies).await,
+
+        Reference::Folder(params)
+            => folder::resolve_locator(&context, locator, params, dependencies).await,
+
+        Reference::Git(params)
+            => git::resolve_locator(&context, locator, params).await,
+
+        Reference::Patch(params)
+            => patch::resolve_locator(&context, locator, params, dependencies).await,
+
+        Reference::Registry(params)
+            => npm::resolve_locator(&context, locator, params).await,
+
+        Reference::Workspace(params)
+            => workspace::resolve_locator(&context, locator, params),
 
         _ => Err(Error::Unsupported),
     }

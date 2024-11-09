@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt, marker::PhantomData, str::FromStr, sync::{A
 use regex::Regex;
 use serde::{de::{self, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
 
-use crate::{error::Error, http::http_client, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{range, reference, Descriptor, Ident}, resolvers::Resolution, semver};
+use crate::{error::Error, http::http_client, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{range, reference, Descriptor, Ident, Locator}, resolvers::Resolution, semver};
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
@@ -260,4 +260,29 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     })?;
 
     Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
+}
+
+pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &reference::RegistryReference) -> Result<ResolutionResult, Error> {
+    let project = context.project
+        .expect("The project is required for resolving a workspace package");
+
+    let client = http_client()?;
+
+    let registry_url = project.config.registry_url_for(&params.ident);
+    let url = format!("{}/{}/{}", registry_url, params.ident, params.version);
+
+    let response = client.get(url.clone()).send().await
+        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+
+    let registry_text = response.text().await
+        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+
+    let mut manifest: RemoteManifestWithScripts = serde_json::from_str(registry_text.as_str())
+        .map_err(Arc::new)?;
+
+    fix_manifest(&mut manifest);
+
+    let resolution = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
+
+    Ok(resolution.into_resolution_result(context))
 }

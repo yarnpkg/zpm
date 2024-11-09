@@ -127,7 +127,7 @@ impl PackageData {
     }
 }
 
-pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     match &locator.reference {
         Reference::Link(params)
             => link::fetch_locator(&context, locator, params, dependencies),
@@ -159,10 +159,3 @@ pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_r
         _ => Err(Error::Unsupported),
     }
 }
-
-
-
-
-
-
-

@@ -4,14 +4,14 @@ use crate::{error::Error, formats, git, install::{FetchResult, InstallContext}, 
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, reference: &reference::GitReference) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::GitReference) -> Result<FetchResult, Error> {
     let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let repository_path
-            = git::clone_repository(&reference.git.repo, &reference.git.commit).await?;
+            = git::clone_repository(&params.git.repo, &params.git.commit).await?;
 
         let pack_tgz = prepare::prepare_project(
             &repository_path,
-            &reference.git.prepare_params,
+            &params.git.prepare_params,
         ).await?;
 
         formats::convert::convert_tar_gz_to_zip(&locator.ident, pack_tgz.into())

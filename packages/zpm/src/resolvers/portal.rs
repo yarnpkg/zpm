@@ -1,6 +1,21 @@
-use crate::{error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::parse_manifest, primitives::{range, reference, Descriptor}, resolvers::Resolution};
+use crate::{error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::parse_manifest, primitives::{range, reference, Descriptor, Locator, Reference}, resolvers::Resolution};
 
 pub fn resolve_descriptor(ctx: &InstallContext, descriptor: &Descriptor, params: &range::PortalRange, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+    let reference = reference::PortalReference {
+        path: params.path.clone(),
+    };
+
+    let locator
+        = descriptor.resolve_with(reference.into());
+
+    let Reference::Portal(params) = &locator.reference else {
+        unreachable!()
+    };
+
+    resolve_locator(ctx, &locator, params, dependencies)
+}
+
+pub fn resolve_locator(context: &InstallContext, locator: &Locator, params: &reference::PortalReference, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     let parent_data = dependencies[0].as_fetched();
 
     let package_directory = parent_data.package_data
@@ -14,12 +29,8 @@ pub fn resolve_descriptor(ctx: &InstallContext, descriptor: &Descriptor, params:
     let manifest
         = parse_manifest(manifest_text)?;
 
-    let reference = reference::PortalReference {
-        path: params.path.clone(),
-    };
+    let resolution
+        = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
-    let locator = descriptor.resolve_with(reference.into());
-    let resolution = Resolution::from_remote_manifest(locator, manifest.remote);
-
-    Ok(resolution.into_resolution_result(ctx))
+    Ok(resolution.into_resolution_result(context))
 }

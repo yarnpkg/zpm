@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, hash::Hash, marker::PhantomData, str:
 use arca::Path;
 use serde::{Deserialize, Serialize};
 
-use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch_locator, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -199,11 +199,11 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                 unreachable!("PhantomData should never be instantiated"),
 
             InstallOp::Resolve {descriptor} => {
-                Ok(InstallOpResult::Resolved(resolve(context.clone(), descriptor.clone(), dependencies).await?))
+                Ok(InstallOpResult::Resolved(resolve_descriptor(context.clone(), descriptor.clone(), dependencies).await?))
             },
 
             InstallOp::Fetch {locator} => {
-                Ok(InstallOpResult::Fetched(fetch(context.clone(), &locator.clone(), false, dependencies).await?))
+                Ok(InstallOpResult::Fetched(fetch_locator(context.clone(), &locator.clone(), false, dependencies).await?))
             },
 
         }
