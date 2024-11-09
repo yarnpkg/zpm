@@ -2,16 +2,16 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 
-use crate::{error::Error, formats, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, primitives::Locator, resolvers::Resolution};
+use crate::{error::Error, formats, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, primitives::{reference, Locator}, resolvers::Resolution};
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, path: &str, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::TarballReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     let parent_data = dependencies[0].as_fetched();
 
     let tarball_path = parent_data.package_data
         .context_directory()
-        .with_join_str(path);
+        .with_join_str(&params.path);
 
     let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         formats::convert::convert_tar_gz_to_zip(&locator.ident, Bytes::from(tarball_path.fs_read()?))

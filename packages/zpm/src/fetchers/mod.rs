@@ -129,35 +129,32 @@ impl PackageData {
 
 pub async fn fetch<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     match &locator.reference {
-        Reference::Link(path)
-            => link::fetch_locator(path, dependencies),
+        Reference::Link(params)
+            => link::fetch_locator(&context, locator, params, dependencies),
 
-        Reference::Portal(path)
-            => portal::fetch_locator(path, dependencies),
+        Reference::Portal(params)
+            => portal::fetch_locator(&context, locator, params, dependencies),
 
-        Reference::Url(url)
-            => url::fetch_locator(&context, locator, url).await,
+        Reference::Url(params)
+            => url::fetch_locator(&context, locator, params).await,
 
-        Reference::Tarball(path)
-            => tarball::fetch_locator(&context, locator, path, dependencies).await,
+        Reference::Tarball(params)
+            => tarball::fetch_locator(&context, locator, params, dependencies).await,
 
-        Reference::Folder(path)
-            => folder::fetch_locator(&context, locator, path, dependencies).await,
+        Reference::Folder(params)
+            => folder::fetch_locator(&context, locator, params, dependencies).await,
 
-        Reference::Git(reference)
-            => git::fetch_locator(&context, locator, reference).await,
+        Reference::Git(params)
+            => git::fetch_locator(&context, locator, params).await,
 
-        Reference::Patch(_, path)
-            => patch::fetch_locator(&context, locator, path, dependencies).await,
+        Reference::Patch(params)
+            => patch::fetch_locator(&context, locator, params, dependencies).await,
 
-        Reference::Semver(version)
-            => npm::fetch_locator(&context, locator, &locator.ident, version, is_mock_request).await,
+        Reference::Registry(params)
+            => npm::fetch_locator(&context, locator, params, is_mock_request).await,
 
-        Reference::SemverAlias(ident, version)
-            => npm::fetch_locator(&context, locator, ident, version, is_mock_request).await,
-
-        Reference::Workspace(ident)
-            => workspace::fetch_locator(&context, ident),
+        Reference::Workspace(params)
+            => workspace::fetch_locator(&context, locator, params),
 
         _ => Err(Error::Unsupported),
     }

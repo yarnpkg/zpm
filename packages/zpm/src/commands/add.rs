@@ -20,8 +20,8 @@ impl Add {
         let active_package
             = project.active_package()?;
 
-        if let Reference::Workspace(ident) = &active_package.reference {
-            let workspace = project.workspaces.get_mut(ident)
+        if let Reference::Workspace(params) = &active_package.reference {
+            let workspace = project.workspaces.get_mut(&params.ident)
                 .expect("Expected the workspace to exist in the project instance");
 
             for loose_descriptor in &self.descriptors {

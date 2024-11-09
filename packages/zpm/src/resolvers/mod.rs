@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range}, system};
+use crate::{error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, range, Descriptor, Ident, Locator, PeerRange, Range}, system};
 
 mod folder;
 mod git;
@@ -12,6 +12,7 @@ mod patch;
 mod portal;
 mod npm;
 mod semver;
+mod tag;
 mod tarball;
 mod url;
 mod workspace;
@@ -91,52 +92,48 @@ impl IntoResolutionResult for Resolution {
 }
 
 pub async fn resolve(context: InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
-    resolve_direct(&context, descriptor, dependencies).await
-}
-
-async fn resolve_direct(context: &InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     match &descriptor.range {
-        Range::SemverOrWorkspace(range)
-            => semver::resolve_descriptor(context, &descriptor.ident, range).await,
+        Range::AnonymousSemver(params)
+            => semver::resolve_descriptor(&context, &descriptor, params).await,
 
-        Range::Git(range)
-            => git::resolve_descriptor(context, descriptor.ident, range).await,
+        Range::AnonymousTag(params)
+            => tag::resolve_descriptor(&context, &descriptor, params).await,
 
-        Range::Semver(range)
-            => npm::resolve_semver_descriptor(context, &descriptor.ident, range).await,
+        Range::Git(params)
+            => git::resolve_descriptor(&context, &descriptor, params).await,
 
-        Range::SemverAlias(ident, range)
-            => npm::resolve_semver_descriptor(context, ident, range).await,
+        Range::RegistrySemver(params)
+            => npm::resolve_semver_descriptor(&context, &descriptor, params).await,
 
-        Range::Link(path)
-            => link::resolve_descriptor(context, &descriptor.ident, path, &descriptor.parent),
+        Range::Link(params)
+            => link::resolve_descriptor(&context, &descriptor, params),
 
-        Range::Url(url)
-            => url::resolve_descriptor(context, descriptor.ident, url).await,
+        Range::Url(params)
+            => url::resolve_descriptor(&context, &descriptor, params).await,
 
-        Range::Patch(_, file)
-            => patch::resolve_descriptor(context, descriptor.ident, file, &descriptor.parent, dependencies).await,
+        Range::Patch(params)
+            => patch::resolve_descriptor(&context, &descriptor, params, dependencies).await,
 
-        Range::Tarball(path)
-            => tarball::resolve_descriptor(context, descriptor.ident, path, &descriptor.parent, dependencies).await,
+        Range::Tarball(params)
+            => tarball::resolve_descriptor(&context, &descriptor, params, dependencies).await,
 
-        Range::Folder(path)
-            => folder::resolve_descriptor(context, descriptor.ident, path, &descriptor.parent, dependencies).await,
+        Range::Folder(params)
+            => folder::resolve_descriptor(&context, &descriptor, params, dependencies).await,
 
-        Range::Portal(path)
-            => portal::resolve_descriptor(context, &descriptor.ident, path, &descriptor.parent, dependencies),
+        Range::Portal(params)
+            => portal::resolve_descriptor(&context, &descriptor, params, dependencies),
 
-        Range::SemverTag(tag)
-            => npm::resolve_tag_descriptor(context, descriptor.ident, tag).await,
+        Range::RegistryTag(params)
+            => npm::resolve_tag_descriptor(&context, &descriptor, params).await,
 
         Range::WorkspaceMagic(_)
-            => workspace::resolve_name_descriptor(context, descriptor.ident),
+            => workspace::resolve_name_descriptor(&context, &descriptor, &range::WorkspaceIdentRange {ident: descriptor.ident.clone()}),
 
         Range::WorkspaceSemver(_)
-            => workspace::resolve_name_descriptor(context, descriptor.ident),
+            => workspace::resolve_name_descriptor(&context, &descriptor, &range::WorkspaceIdentRange {ident: descriptor.ident.clone()}),
 
-        Range::WorkspacePath(path)
-            => workspace::resolve_path_descriptor(context, path),
+        Range::WorkspacePath(params)
+            => workspace::resolve_path_descriptor(&context, &descriptor, params),
 
         _ => Err(Error::Unsupported),
     }

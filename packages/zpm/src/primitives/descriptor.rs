@@ -12,6 +12,7 @@ use crate::serialize::Serialized;
 use crate::{semver, yarn_check_serialize};
 use crate::{error::Error, yarn_serialization_protocol};
 
+use super::range::{AnonymousSemverRange, VirtualRange};
 use super::{Ident, Locator, Range, Reference};
 
 #[derive(Debug)]
@@ -52,10 +53,14 @@ impl Descriptor {
         }
     }
 
-    pub fn new_semver(ident: Ident, range: &str) -> Result<Descriptor, Error> {
+    pub fn new_semver(ident: Ident, range_str: &str) -> Result<Descriptor, Error> {
+        let range = Range::AnonymousSemver(AnonymousSemverRange {
+            range: semver::Range::from_str(range_str)?,
+        });
+
         Ok(Descriptor {
             ident,
-            range: Range::Semver(semver::Range::from_str(range)?),
+            range,
             parent: None,
         })
     }
@@ -68,31 +73,29 @@ impl Descriptor {
         }
     }
 
+    pub fn resolve_with(&self, reference: Reference) -> Locator {
+        let parent = match reference.must_bind() {
+            true => self.parent.clone().map(Arc::new),
+            false => None,
+        };
+
+        Locator::new_bound(self.ident.clone(), reference, parent)
+    }
+
     pub fn virtualized_for(&self, parent: &Locator) -> Descriptor {
         let serialized = parent.serialized()
             .unwrap_or_else(|_| panic!("Failed to serialize locator: {:?}", self));
 
+        let range = Range::Virtual(VirtualRange {
+            inner: Box::new(self.range.clone()),
+            hash: Sha256::from_string(&serialized),
+        });
+
         Descriptor {
             ident: self.ident.clone(),
-            range: Range::Virtual(Box::new(self.range.clone()), Sha256::from_string(&serialized)),
+            range,
             parent: self.parent.clone(),
         }
-    }
-
-    pub fn to_locator(&self) -> Option<Locator> {
-        let reference = match &self.range {
-            Range::Folder(file) => Some(Reference::Folder(file.clone())),
-            Range::Tarball(file) => Some(Reference::Tarball(file.clone())),
-            Range::Url(url) => Some(Reference::Url(url.clone())),
-
-            _ => None,
-        };
-
-        reference.map(|reference| Locator {
-            parent: self.parent.clone().map(Arc::new),
-            ident: self.ident.clone(),
-            reference,
-        })
     }
 }
 

@@ -27,5 +27,6 @@ pub mod script;
 pub mod semver;
 pub mod serialize;
 pub mod settings;
+pub mod scratchpad;
 pub mod system;
 pub mod tree_resolver;

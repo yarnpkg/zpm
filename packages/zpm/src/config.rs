@@ -3,7 +3,7 @@ use std::{str::FromStr, sync::{LazyLock, Mutex}};
 use arca::{Path, ToArcaPath};
 use serde::{de::DeserializeOwned, Deserialize, Deserializer};
 
-use crate::{error::Error, primitives::Ident, semver, settings::{EnvConfig, ProjectConfig, UserConfig}};
+use crate::{error::Error, primitives::{reference, Ident}, settings::{EnvConfig, ProjectConfig, UserConfig}};
 
 pub static CONFIG_PATH: LazyLock<Mutex<Option<Path>>> = LazyLock::new(|| Mutex::new(None));
 
@@ -314,9 +314,9 @@ impl Config {
         self.project.npm_registry_server.value.clone()
     }
 
-    pub fn registry_url_for_package_data(&self, ident: &Ident, version: &semver::Version) -> String {
-        let registry_base = self.registry_url_for(&ident);
-        let url = format!("{}/{}/-/{}-{}.tgz", registry_base, ident, ident.name(), version);
+    pub fn registry_url_for_package_data(&self, reference: &reference::RegistryReference) -> String {
+        let registry_base = self.registry_url_for(&reference.ident);
+        let url = format!("{}/{}/-/{}-{}.tgz", registry_base, reference.ident, reference.ident.name(), reference.version);
 
         url
     }

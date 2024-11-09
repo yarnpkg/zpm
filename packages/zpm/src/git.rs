@@ -6,7 +6,7 @@ use fancy_regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-use crate::{error::Error, prepare::PrepareParams, primitives::Range, semver, yarn_serialization_protocol};
+use crate::{error::Error, prepare::PrepareParams, semver, yarn_serialization_protocol};
 
 static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
 
@@ -331,7 +331,7 @@ async fn resolve_git_treeish_stricter(repo: &str, treeish: GitTreeish) -> Result
             if let Some((k, _)) = candidates.first() {
                 Ok(k.to_string())
             } else {
-                Err(Error::NoCandidatesFound(Range::Semver(tag)))
+                Err(Error::NoCandidatesFound(tag.to_string()))
             }
         }
 

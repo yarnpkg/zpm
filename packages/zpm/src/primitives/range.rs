@@ -1,69 +1,110 @@
 use std::{hash::Hash, str::FromStr};
 
 use bincode::{Decode, Encode};
-use zpm_macros::Parsed;
+use zpm_macros::parse_enum;
 
 use crate::{error::Error, git, hash::Sha256, semver, serialize::UrlEncoded, yarn_check_serialize, yarn_serialization_protocol};
 
 use super::{Descriptor, Ident};
 
-#[derive(Clone, Debug, Decode, Encode, Parsed, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[parse_error(Error::InvalidRange)]
+#[parse_enum(or_else = |s| Err(Error::InvalidRange(s.to_string())))]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Range {
-    #[try_pattern(pattern = r"missing!")]
-    MissingPeerDependency(),
+    #[pattern(spec = r"missing!")]
+    MissingPeerDependency {},
 
-    #[try_pattern()]
-    SemverOrWorkspace(semver::Range),
+    #[pattern(spec = r"(?<range>.*)")]
+    AnonymousSemver {
+        range: semver::Range,
+    },
 
-    #[try_pattern(prefix = "npm:")]
-    Semver(semver::Range),
+    #[pattern(spec = r"npm:(?:(?<ident>.*)@)?(?<range>.*)")]
+    RegistrySemver {
+        ident: Option<Ident>,
+        range: semver::Range,
+    },
 
-    #[try_pattern(prefix = "npm:", pattern = r"([-a-z0-9._^v][-a-z0-9._]*)", optional_prefix = true)]
-    SemverTag(String),
+    #[pattern(spec = r"npm:(?:(?<ident>.*)@)?(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
+    RegistryTag {
+        ident: Option<Ident>,
+        tag: String,
+    },
 
-    #[try_pattern(prefix = "npm:", pattern = r"(.*)@(.*)")]
-    SemverAlias(Ident, semver::Range),
+    #[pattern(spec = r"link:(?<path>.*)")]
+    Link {
+        path: String,
+    },
 
-    #[try_pattern(prefix = "link:")]
-    Link(String),
+    #[pattern(spec = r"portal:(?<path>.*)")]
+    Portal {
+        path: String,
+    },
 
-    #[try_pattern(prefix = "portal:")]
-    Portal(String),
+    #[pattern(spec = r"file:(?<path>.*\.(?:tgz|tar\.gz))")]
+    #[pattern(spec = r"(?<path>\.{0,2}/.*\.(?:tgz|tar\.gz))")]
+    Tarball {
+        path: String,
+    },
 
-    #[try_pattern(prefix = "file:", pattern = r"(.*\.(?:tgz|tar\.gz))")]
-    #[try_pattern(pattern = r"(\.{0,2}/.*\.(?:tgz|tar\.gz))")]
-    Tarball(String),
+    #[pattern(spec = r"file:(?<path>.*)")]
+    #[pattern(spec = r"(?<path>\.{0,2}/.*)")]
+    Folder {
+        path: String,
+    },
 
-    #[try_pattern(prefix = "file:")]
-    #[try_pattern(pattern = r"(\.{0,2}/.*)")]
-    Folder(String),
+    #[pattern(spec = r"patch:(?<inner>.*)#(?<path>.*)$")]
+    Patch {
+        inner: Box<UrlEncoded<Descriptor>>,
+        path: String,
+    },
 
-    #[try_pattern(prefix = "patch:", pattern = r"(.*)#(.*)$")]
-    Patch(Box<UrlEncoded<Descriptor>>, String),
+    #[pattern(spec = r"virtual:(?<inner>.*)#(?<hash>[a-f0-9]*)$")]
+    Virtual {
+        inner: Box<Range>,
+        hash: Sha256,
+    },
 
-    #[try_pattern(prefix = "virtual:", pattern = r"(.*)#([a-f0-9]*)$")]
-    Virtual(Box<Range>, Sha256),
+    #[pattern(spec = r"workspace:(?<range>.*)")]
+    WorkspaceSemver {
+        range: semver::Range,
+    },
 
-    #[try_pattern(prefix = "workspace:")]
-    WorkspaceSemver(semver::Range),
+    #[pattern(spec = r"workspace:(?<magic>[~^=*])")]
+    WorkspaceMagic {
+        magic: String,
+    },
 
-    #[try_pattern(prefix = "workspace:", pattern = r"([~^=*])")]
-    WorkspaceMagic(String),
+    #[pattern(spec = r"workspace:\((?<ident>.*)\)")]
+    WorkspaceIdent {
+        ident: Ident,
+    },
 
-    #[try_pattern(prefix = "workspace:")]
-    WorkspacePath(String),
+    #[pattern(spec = r"workspace:(?<path>.*)")]
+    WorkspacePath {
+        path: String,
+    },
 
-    #[try_pattern()]
-    Git(git::GitRange),
+    #[pattern(spec = "(?<git>.*)")]
+    Git {
+        git: git::GitRange,
+    },
 
-    #[try_pattern(pattern = r"(https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
-    Url(String),
+    #[pattern(spec = r"(?<url>https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
+    Url {
+        url: String,
+    },
+
+    #[pattern(spec = r"(?<tag>.*)")]
+    AnonymousTag {
+        tag: String,
+    },
 }
 
 impl Range {
     pub fn must_bind(&self) -> bool {
-        matches!(&self, Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Folder(_) | Range::Patch(_, _))
+        // Keep this list in sync w/ Reference::must_bind
+        matches!(&self, Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Folder(_) | Range::Patch(_))
     }
 
     pub fn must_fetch_before_resolve(&self) -> bool {
@@ -71,57 +112,75 @@ impl Range {
     }
 
     pub fn is_transient_resolution(&self) -> bool {
-        matches!(&self, Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Folder(_) | Range::Patch(_, _) | Range::WorkspaceMagic(_) | Range::WorkspacePath(_) | Range::WorkspaceSemver(_))
+        matches!(&self, Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Folder(_) | Range::Patch(_) | Range::WorkspaceIdent(_) | Range::WorkspaceMagic(_) | Range::WorkspacePath(_) | Range::WorkspaceSemver(_))
     }
 }
 
 yarn_serialization_protocol!(Range, "", {
     serialize(&self) {
         yarn_check_serialize!(self, match self {
-            Range::SemverOrWorkspace(range) => range.to_string(),
-            Range::Semver(range) => format!("npm:{}", range),
-            Range::SemverTag(tag) => format!("npm:{}", tag),
-            Range::SemverAlias(ident, range) => format!("npm:{}@{}", ident, range),
-            Range::Patch(inner, file) => format!("patch:{}#{}", inner, file),
-            Range::Link(link) => format!("link:{}", link),
-            Range::Portal(portal) => format!("portal:{}", portal),
-            Range::Tarball(file) => format!("file:{}", file),
-            Range::Folder(file) => format!("file:{}", file),
-            Range::Url(url) => url.to_string(),
-            Range::WorkspaceSemver(semver) => format!("workspace:{}", semver),
-            Range::WorkspaceMagic(magic) => format!("workspace:{}", magic),
-            Range::WorkspacePath(path) => format!("workspace:{}", path),
-            Range::Git(git) => git.to_string(),
-            Range::MissingPeerDependency() => "missing!".to_string(),
-            Range::Virtual(inner, hash) => format!("virtual:{}#{}", inner, hash),
+            Range::AnonymousSemver(params) => params.range.to_string(),
+            Range::AnonymousTag(params) => params.tag.clone(),
+
+            Range::RegistrySemver(params) => match &params.ident {
+                Some(ident) => format!("npm:{}@{}", ident, params.range),
+                None => format!("npm:{}", params.range),
+            },
+
+            Range::RegistryTag(params) => match &params.ident {
+                Some(ident) => format!("npm:{}@{}", ident, params.tag),
+                None => format!("npm:{}", params.tag),
+            },
+
+            Range::Patch(params) => format!("patch:{}#{}", params.inner, params.path),
+            Range::Link(params) => format!("link:{}", params.path),
+            Range::Portal(params) => format!("portal:{}", params.path),
+            Range::Tarball(params) => format!("file:{}", params.path),
+            Range::Folder(params) => format!("file:{}", params.path),
+            Range::Url(params) => params.url.clone(),
+            Range::WorkspaceSemver(params) => format!("workspace:{}", params.range),
+            Range::WorkspaceMagic(params) => format!("workspace:{}", params.magic),
+            Range::WorkspacePath(params) => format!("workspace:{}", params.path),
+            Range::WorkspaceIdent(params) => format!("workspace:({})", params.ident),
+            Range::Git(params) => params.git.to_string(),
+            Range::MissingPeerDependency(_) => "missing!".to_string(),
+            Range::Virtual(params) => format!("virtual:{}#{}", params.inner, params.hash),
         })
     }
 });
 
-#[derive(Clone, Debug, Decode, Encode, Parsed, PartialEq, Eq, Hash)]
-#[parse_fallback(PeerRange::Semver(semver::Range::from_str("*").unwrap()))]
-#[parse_error(Error::InvalidRange)]
+#[parse_enum(or_else = |_| Ok(PeerRange::Semver(SemverPeerRange {range: semver::Range::from_str("*").unwrap()})))]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
+#[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
 pub enum PeerRange {
-    #[try_pattern()]
-    Semver(semver::Range),
+    #[pattern(spec = r"(?<range>.*)")]
+    Semver {
+        range: semver::Range,
+    },
 
-    #[try_pattern(prefix = "workspace:")]
-    WorkspaceSemver(semver::Range),
+    #[pattern(spec = "workspace:(?<range>.*)")]
+    WorkspaceSemver {
+        range: semver::Range,
+    },
 
-    #[try_pattern(prefix = "workspace:", pattern = r"^([~^=*])$")]
-    WorkspaceMagic(String),
+    #[pattern(spec = r"workspace:(?<magic>[~^=*])")]
+    WorkspaceMagic {
+        magic: String,
+    },
 
-    #[try_pattern(prefix = "workspace:")]
-    WorkspacePath(String),
+    #[pattern(spec = r"workspace:(?<path>.*)")]
+    WorkspacePath {
+        path: String,
+    }
 }
 
 yarn_serialization_protocol!(PeerRange, "", {
     serialize(&self) {
         yarn_check_serialize!(self, match self {
-            PeerRange::Semver(range) => range.to_string(),
-            PeerRange::WorkspaceSemver(semver) => format!("workspace:{}", semver),
-            PeerRange::WorkspaceMagic(magic) => format!("workspace:{}", magic),
-            PeerRange::WorkspacePath(path) => format!("workspace:{}", path),
+            PeerRange::Semver(params) => params.range.to_string(),
+            PeerRange::WorkspaceSemver(params) => format!("workspace:{}", params.range),
+            PeerRange::WorkspaceMagic(params) => format!("workspace:{}", params.magic),
+            PeerRange::WorkspacePath(params) => format!("workspace:{}", params.path),
         })
     }
 });

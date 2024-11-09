@@ -3,122 +3,140 @@ use std::{collections::HashMap, fmt, marker::PhantomData, str::FromStr, sync::{A
 use regex::Regex;
 use serde::{de::{self, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
 
-use crate::{error::Error, http::http_client, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{Descriptor, Ident, Locator, Range, Reference}, resolvers::Resolution, semver};
+use crate::{error::Error, http::http_client, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{range, reference, Descriptor, Ident}, resolvers::Resolution, semver};
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
 
-pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, ident: &Ident, range: &semver::Range) -> Result<ResolutionResult, Error> {
-    pub struct FindField<'a, T> {
-        field: &'a str,
-        nested: T,
+/**
+ * Deserializer that only deserializes the requested field and skips all others.
+ */
+pub struct FindFieldNested<'a, T> {
+    field: &'a str,
+    nested: T,
+}
+
+impl<'de, T> Visitor<'de> for FindFieldNested<'_, T> where T: DeserializeSeed<'de> + Clone {
+    type Value = T::Value;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "a map with a matching field")
     }
-    
-    impl<'de, T> Visitor<'de> for FindField<'_, T> where T: DeserializeSeed<'de> + Clone {
-        type Value = T::Value;
-    
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            write!(formatter, "a map with a matching field")
-        }
-    
-        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
-            let mut selected = None;
-    
-            while let Some(key) = map.next_key::<String>()? {
-                if key == self.field {
-                    selected = Some(map.next_value_seed(self.nested.clone())?);
-                } else {
-                    let _ = map.next_value::<IgnoredAny>();
-                }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
+        let mut selected = None;
+
+        while let Some(key) = map.next_key::<String>()? {
+            if key == self.field {
+                selected = Some(map.next_value_seed(self.nested.clone())?);
+            } else {
+                let _ = map.next_value::<IgnoredAny>();
             }
-    
-            selected
-                .ok_or(de::Error::missing_field(""))
         }
-    }
-    
-    #[derive(Clone)]
-    pub struct FindVersion<T> {
-        range: semver::Range,
-        phantom: PhantomData<T>,
-    }
-    
-    impl<'de, T> DeserializeSeed<'de> for FindVersion<T> where T: Deserialize<'de> {
-        type Value = (semver::Version, T);
-    
-        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error> where D: Deserializer<'de> {
-            deserializer.deserialize_map(self)
-        }
-    }
-    
-    impl<'de, T> Visitor<'de> for FindVersion<T> where T: Deserialize<'de> {
-        type Value = (semver::Version, T);
-    
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            write!(formatter, "a map with a matching version")
-        }
-    
-        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
-            let mut selected = None;
-    
-            while let Some(key) = map.next_key::<String>()? {
-                let version = semver::Version::from_str(key.as_str()).unwrap();
 
-                if self.range.check(&version) && selected.as_ref().map(|(current_version, _)| *current_version < version).unwrap_or(true) {
-                    selected = Some((version, map.next_value::<serde_json::Value>()?));
-                } else {
-                    map.next_value::<IgnoredAny>()?;
-                }
+        selected
+            .ok_or(de::Error::missing_field(""))
+    }
+}
+
+/**
+ * Deserializer that only deserializes the value for the highest key matching the provided semver range.
+ */
+#[derive(Clone)]
+pub struct FindHighestCompatibleVersion<T> {
+    range: semver::Range,
+    phantom: PhantomData<T>,
+}
+
+impl<'de, T> DeserializeSeed<'de> for FindHighestCompatibleVersion<T> where T: Deserialize<'de> {
+    type Value = Option<(semver::Version, T)>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error> where D: Deserializer<'de> {
+        deserializer.deserialize_map(self)
+    }
+}
+
+impl<'de, T> Visitor<'de> for FindHighestCompatibleVersion<T> where T: Deserialize<'de> {
+    type Value = Option<(semver::Version, T)>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "a map with a matching version")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
+        let mut selected = None;
+
+        while let Some(key) = map.next_key::<String>()? {
+            let version = semver::Version::from_str(key.as_str()).unwrap();
+
+            if self.range.check(&version) && selected.as_ref().map(|(current_version, _)| *current_version < version).unwrap_or(true) {
+                selected = Some((version, map.next_value::<serde_json::Value>()?));
+            } else {
+                map.next_value::<IgnoredAny>()?;
             }
-    
-            Ok(selected.map(|(version, version_payload)| {
-                (version, T::deserialize(version_payload).unwrap())
-            }).unwrap())
         }
+
+        Ok(selected.map(|(version, version_payload)| {
+            (version, T::deserialize(version_payload).unwrap())
+        }))
+    }
+}
+
+/**
+ * Deserializer that only deserializes the value for the highest key matching the provided semver range.
+ */
+#[derive(Clone)]
+pub struct FindField<'a, TVal> {
+    value: &'a str,
+    phantom: PhantomData<TVal>,
+}
+
+impl<'de, TVal> DeserializeSeed<'de> for FindField<'de, TVal> where TVal: Deserialize<'de> {
+    type Value = Option<TVal>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error> where D: Deserializer<'de> {
+        deserializer.deserialize_map(self)
+    }
+}
+
+impl<'de, TVal> Visitor<'de> for FindField<'de, TVal> where TVal: Deserialize<'de> {
+    type Value = Option<TVal>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "a map with a matching version")
     }
 
-    let project = context.project
-        .expect("The project is required for resolving a workspace package");
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
+        let mut selected = None;
 
-    let client = http_client()?;
+        while let Some(key) = map.next_key::<String>()? {
+            if self.value == key {
+                selected = Some(map.next_value::<serde_json::Value>()?);
+            } else {
+                map.next_value::<IgnoredAny>()?;
+            }
+        }
 
-    let registry_url = project.config.registry_url_for(ident);
-    let url = format!("{}/{}", registry_url, ident);
-
-    let response = client.get(url.clone()).send().await
-        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
-
-    if response.status().as_u16() == 404 {
-        return Err(Error::PackageNotFound(ident.clone(), url));
+        Ok(selected.map(|payload| {
+            TVal::deserialize(payload).unwrap()
+        }))
     }
- 
-    let registry_text = response.text().await
-        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+}
 
-    let mut deserializer
-        = serde_json::Deserializer::from_str(registry_text.as_str());
+/**
+ * We need to read the scripts to figure out whether the package has an implicit node-gyp dependency.
+ */
+#[derive(Clone, Deserialize)]
+struct RemoteManifestWithScripts {
+    #[serde(flatten)]
+    remote: RemoteManifest,
 
-    #[derive(Clone, Deserialize)]
-    struct RemoteManifestWithScripts {
-        #[serde(flatten)]
-        remote: RemoteManifest,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    scripts: HashMap<String, String>,
+}
 
-        #[serde(default)]
-        #[serde(skip_serializing_if = "HashMap::is_empty")]
-        scripts: HashMap<String, String>,
-    }
-
-    let manifest_result = deserializer.deserialize_map(FindField {
-        field: "versions",
-        nested: FindVersion {
-            range: range.clone(),
-            phantom: PhantomData::<RemoteManifestWithScripts>,
-        },
-    });
-
-    let (version, mut manifest) = manifest_result
-        .map_err(|_| Error::NoCandidatesFound(Range::Semver(range.clone())))?;
-
+fn fix_manifest(manifest: &mut RemoteManifestWithScripts) -> () {
     // Manually add node-gyp dependency if there is a script using it and not already set
     // This is because the npm registry will automatically add a `node-gyp rebuild` install script
     // in the metadata if there is not already an install script and a binding.gyp file exists.
@@ -132,33 +150,84 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, ident: &Ide
             }
         }
     }
+}
+
+fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: semver::Version, mut manifest: RemoteManifestWithScripts) -> ResolutionResult {
+    let project = context.project
+        .expect("The project is required for resolving a workspace package");
+
+    fix_manifest(&mut manifest);
 
     let dist_manifest = manifest.remote.dist
         .as_ref()
         .expect("Expected the registry to return a 'dist' field amongst the manifest data");
 
-    let expected_registry_url
-        = project.config.registry_url_for_package_data(ident, &version);
-
-    let reference = match expected_registry_url == dist_manifest.tarball {
-        true => Reference::Semver(version),
-        false => Reference::Url(dist_manifest.tarball.clone()),
+    let registry_reference = reference::RegistryReference {
+        ident: package_ident.clone(),
+        version,
     };
 
-    let locator = Locator::new(ident.clone(), reference);
-    let resolution = Resolution::from_remote_manifest(locator, manifest.remote);
+    let expected_registry_url
+        = project.config.registry_url_for_package_data(&registry_reference);
 
-    Ok(resolution.into_resolution_result(context))
+    let locator = descriptor.resolve_with(match expected_registry_url == dist_manifest.tarball {
+        true => registry_reference.into(),
+        false => reference::UrlReference {url: dist_manifest.tarball.clone()}.into(),
+    });
+
+    Resolution::from_remote_manifest(locator, manifest.remote)
+        .into_resolution_result(context)
 }
 
-pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, ident: Ident, tag: &str) -> Result<ResolutionResult, Error> {
+pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistrySemverRange) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
     let client = http_client()?;
 
-    let registry_url = project.config.registry_url_for(&ident);
-    let url = format!("{}/{}", registry_url, ident);
+    let package_ident = params.ident.as_ref()
+        .unwrap_or(&descriptor.ident);
+
+    let registry_url = project.config.registry_url_for(&package_ident);
+    let url = format!("{}/{}", registry_url, package_ident);
+
+    let response = client.get(url.clone()).send().await
+        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+
+    if response.status().as_u16() == 404 {
+        return Err(Error::PackageNotFound(package_ident.clone(), url));
+    }
+ 
+    let registry_text = response.text().await
+        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+
+    let mut deserializer
+        = serde_json::Deserializer::from_str(registry_text.as_str());
+
+    let (version, manifest) = deserializer.deserialize_map(FindFieldNested {
+        field: "versions",
+        nested: FindHighestCompatibleVersion {
+            range: params.range.clone(),
+            phantom: PhantomData::<RemoteManifestWithScripts>,
+        },
+    })?.ok_or_else(|| {
+        Error::NoCandidatesFound(params.range.to_string())
+    })?;
+
+    Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
+}
+
+pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistryTagRange) -> Result<ResolutionResult, Error> {
+    let project = context.project
+        .expect("The project is required for resolving a workspace package");
+
+    let client = http_client()?;
+
+    let package_ident = params.ident.as_ref()
+        .unwrap_or(&descriptor.ident);
+
+    let registry_url = project.config.registry_url_for(&package_ident);
+    let url = format!("{}/{}", registry_url, package_ident);
 
     let response = client.get(url.clone()).send().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
@@ -169,32 +238,26 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, ident: Ident, 
     #[derive(Deserialize)]
     struct RegistryMetadata {
         #[serde(rename(deserialize = "dist-tags"))]
-        dist_tags: HashMap<String, semver::Version>,
-        versions: HashMap<semver::Version, RemoteManifest>,
+        dist_tags: serde_json::Value,
+        versions: serde_json::Value,
     }
 
-    let mut registry_data: RegistryMetadata = serde_json::from_str(registry_text.as_str())
+    let registry_data: RegistryMetadata = serde_json::from_str(registry_text.as_str())
         .map_err(Arc::new)?;
 
-    let version = registry_data.dist_tags.get(tag)
-        .ok_or_else(|| Error::MissingSemverTag(tag.to_string()))?;
+    let version = registry_data.dist_tags.deserialize_map(FindField {
+        value: params.tag.as_str(),
+        phantom: PhantomData::<semver::Version>,
+    })?.ok_or_else(|| {
+        Error::TagNotFound(params.tag.clone())
+    })?;
 
-    let manifest = registry_data.versions.remove(version).unwrap();
+    let manifest = registry_data.versions.deserialize_map(FindField {
+        value: &version.to_string(),
+        phantom: PhantomData::<RemoteManifestWithScripts>,
+    })?.ok_or_else(|| {
+        Error::NoCandidatesFound(version.to_string())
+    })?;
 
-    let dist_manifest = manifest.dist
-        .as_ref()
-        .expect("Expected the registry to return a 'dist' field amongst the manifest data");
-
-    let expected_registry_url
-        = project.config.registry_url_for_package_data(&ident, &version);
-
-    let reference = match expected_registry_url == dist_manifest.tarball {
-        true => Reference::SemverAlias(ident.clone(), version.clone()),
-        false => Reference::Url(dist_manifest.tarball.clone()),
-    };
-
-    let locator = Locator::new(ident.clone(), reference);
-    let resolution = Resolution::from_remote_manifest(locator, manifest);
-
-    Ok(resolution.into_resolution_result(context))
+    Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
 }

@@ -1,12 +1,12 @@
-use std::sync::Arc;
+use crate::{error::Error, fetchers, install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, primitives::{range, reference, Descriptor}};
 
-use crate::{error::Error, fetchers, install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, primitives::{Ident, Locator, Reference}};
-
-pub async fn resolve_descriptor(context: &InstallContext<'_>, ident: Ident, path: &str, parent: &Option<Locator>, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
-    let locator = Locator::new_bound(ident, Reference::Folder(path.to_string()), parent.clone().map(Arc::new));
+pub async fn resolve_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, range: &range::FolderRange, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+    let locator = descriptor.resolve_with(reference::FolderReference {
+        path: range.path.to_string(),
+    }.into());
 
     let fetch_result
-        = fetchers::folder::fetch_locator(context, &locator, path, dependencies).await?;
+        = fetchers::fetch(context.clone(), &locator, false, dependencies).await?;
 
     Ok(fetch_result.into_resolution_result(context))
 }

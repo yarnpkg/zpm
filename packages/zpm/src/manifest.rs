@@ -3,7 +3,7 @@ use std::{collections::HashMap, fs, sync::Arc};
 use arca::Path;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use zpm_macros::Parsed;
+use zpm_macros::parse_enum;
 
 use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range}, semver::{self, Version}, system};
 
@@ -67,45 +67,54 @@ pub struct RemoteManifest {
     pub dist: Option<DistManifest>,
 }
 
-#[derive(Clone, Debug, Parsed, Serialize, PartialEq, Eq, Hash)]
-#[parse_error(Error::InvalidResolution)]
+#[parse_enum(or_else = |s| Err(Error::InvalidResolution(s.to_string())))]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, Hash)]
+#[derive_variants(Clone, Debug, Serialize, PartialEq, Eq, Hash)]
 pub enum ResolutionOverride {
-    #[try_pattern()]
-    Ident(Ident),
+    #[pattern(spec = r"^(?<ident>.*)$")]
+    Ident {
+        ident: Ident
+    },
 
-    #[try_pattern(pattern = r"^((?:@[^/*]*/)?[^/*]+)/([^*]+)$")]
-    DescriptorIdent(Descriptor, Ident),
+    #[pattern(spec = r"^(?<parent_descriptor>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
+    DescriptorIdent {
+        parent_descriptor: Descriptor,
+        ident: Ident,
+    },
 
-    #[try_pattern(pattern = r"^((?:@[^/*]*/)?[^/*]+)/([^*]+)$")]
-    IdentIdent(Ident, Ident),
+    #[pattern(spec = r"^(?<parent_ident>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
+    IdentIdent {
+        parent_ident: Ident,
+        ident: Ident,
+    },
 }
 
 impl ResolutionOverride {
     pub fn target_ident(&self) -> &Ident {
         match self {
-            ResolutionOverride::Ident(ident) => ident,
-            ResolutionOverride::DescriptorIdent(_, ident) => ident,
-            ResolutionOverride::IdentIdent(_, ident) => ident,
+            ResolutionOverride::Ident(params) => &params.ident,
+            ResolutionOverride::DescriptorIdent(params) => &params.ident,
+            ResolutionOverride::IdentIdent(params) => &params.ident,
         }
     }
 
     pub fn apply(&self, parent: &Locator, parent_version: &Version, descriptor: &Descriptor, replacement_range: &Range) -> Option<Range> {
         match self {
-            ResolutionOverride::Ident(ident) => {
-                if ident != &descriptor.ident {
+            ResolutionOverride::Ident(params) => {
+                if params.ident != descriptor.ident {
                     return None;
                 }
 
                 Some(replacement_range.clone())
             }
 
-            ResolutionOverride::DescriptorIdent(parent_descriptor, ident) => {
-                if ident != &descriptor.ident {
+            ResolutionOverride::DescriptorIdent(params) => {
+                if params.ident != descriptor.ident {
                     return None;
                 }
 
-                if let Range::SemverOrWorkspace(semver_range) = &parent_descriptor.range {
-                    if !semver_range.check(parent_version) {
+                if let Range::AnonymousSemver(parent_params) = &params.parent_descriptor.range {
+                    if !parent_params.range.check(parent_version) {
                         return None;
                     }
                 } else {
@@ -115,12 +124,12 @@ impl ResolutionOverride {
                 Some(replacement_range.clone())
             }
 
-            ResolutionOverride::IdentIdent(parent_ident, ident) => {
-                if ident != &descriptor.ident {
+            ResolutionOverride::IdentIdent(params) => {
+                if params.ident != descriptor.ident {
                     return None;
                 }
 
-                if parent.ident != *parent_ident {
+                if params.parent_ident != parent.ident {
                     return None;
                 }
 

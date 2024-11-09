@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::{primitives::{Descriptor, Ident, Locator, Range, Reference}, resolvers::Resolution};
+use crate::{primitives::{range, Descriptor, Ident, Locator, Range, Reference}, resolvers::Resolution};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolutionTree {
@@ -121,7 +121,7 @@ impl TreeResolver {
                 continue;
             }
 
-            if let Range::Virtual(_, _) = dependency_descriptor.range {
+            if matches!(dependency_descriptor.range, Range::Virtual(_)) {
                 panic!("Virtual packages shouldn't be encountered when virtualizing a branch");
             }
 
@@ -226,7 +226,7 @@ impl TreeResolver {
                 }
 
                 let is_provided_by_parent = match &peer_descriptor {
-                    Some(descriptor) => descriptor.range != Range::MissingPeerDependency(),
+                    Some(descriptor) => matches!(descriptor.range, Range::MissingPeerDependency(_)),
                     None => false,
                 };
 
@@ -245,7 +245,7 @@ impl TreeResolver {
 
                 let peer_descriptor = peer_descriptor.unwrap_or_else(|| Descriptor::new(
                     peer_ident.clone(),
-                    Range::MissingPeerDependency(),
+                    range::MissingPeerDependencyRange {}.into(),
                 ));
 
                 self.resolution_tree.locator_resolutions
@@ -255,12 +255,12 @@ impl TreeResolver {
 
                 // Need to track when a virtual descriptor is set as a dependency in case
                 // the descriptor will be consolidated.
-                if let Range::Virtual(_, _) = peer_descriptor.range {
+                if matches!(peer_descriptor.range, Range::Virtual(_)) {
                     self.virtual_dependents.entry(peer_descriptor.clone()).or_default()
                         .insert(operation.virtualized_locator.clone());
                 }
 
-                if peer_descriptor.range == Range::MissingPeerDependency() {
+                if matches!(peer_descriptor.range, Range::MissingPeerDependency(_)) {
                     missing_peer_dependencies.insert(peer_ident.clone());
                 }
 

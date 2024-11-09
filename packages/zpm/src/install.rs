@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, hash::Hash, marker::PhantomData, str:
 use arca::Path;
 use serde::{Deserialize, Serialize};
 
-use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -160,10 +160,10 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                     resolved_it.next();
                 }
 
-                if let Range::Patch(inner, _) = &descriptor.range {
+                if let Range::Patch(params) = &descriptor.range {
                     assert!(descriptor.parent.is_some(), "Expected a parent to be set for a patch resolution");
 
-                    let mut inner_descriptor = inner.to_owned().0.clone();
+                    let mut inner_descriptor = params.inner.to_owned().0.clone();
 
                     if inner_descriptor.range.must_bind() {
                         inner_descriptor.parent = descriptor.parent.clone();
@@ -184,8 +184,8 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                     dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone()});
                 }
 
-                if let Reference::Patch(inner, _) = &locator.reference {
-                    dependencies.push(InstallOp::Fetch {locator: inner.to_owned().0.clone()});
+                if let Reference::Patch(params) = &locator.reference {
+                    dependencies.push(InstallOp::Fetch {locator: params.inner.to_owned().0.clone()});
                 }
             },
         }
@@ -432,7 +432,7 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
 
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
         peer_dependencies.entry(name.type_ident())
-            .or_insert(PeerRange::Semver(semver::Range::from_str("*").unwrap()));
+            .or_insert(range::SemverPeerRange {range: semver::Range::from_str("*").unwrap()}.into());
     }
 
     (dependencies, peer_dependencies)

@@ -19,7 +19,7 @@
 🟥 Auth tests ► it should normalize registries url keys
 🟥 Auth tests ► it should support non-base64 encoded authentication ident
 
-[78 / 78] packages/acceptance-tests/pkg-tests-specs/sources/basic.test.js
+[72 / 78] packages/acceptance-tests/pkg-tests-specs/sources/basic.test.js
 
 🟩 Basic tests ► w/ the node-modules linker ► it should allow accessing a package via too many slashes
 🟩 Basic tests ► w/ the node-modules linker ► it should correctly create resolution mounting points when using the link protocol
@@ -31,7 +31,7 @@
 🟩 Basic tests ► w/ the node-modules linker ► it should correctly install a single scoped dependency that contains no sub-dependencies
 🟩 Basic tests ► w/ the node-modules linker ► it should correctly install a soft-link
 🟩 Basic tests ► w/ the node-modules linker ► it should correctly install an inter-dependency loop
-🟩 Basic tests ► w/ the node-modules linker ► it should fallback to dependencies if the parent doesn't provide the peer dependency
+🟥 Basic tests ► w/ the node-modules linker ► it should fallback to dependencies if the parent doesn't provide the peer dependency
 🟩 Basic tests ► w/ the node-modules linker ► it should fallback to the regular dependency if the peer dependency isn't met
 🟩 Basic tests ► w/ the node-modules linker ► it should install from archives on the filesystem
 🟩 Basic tests ► w/ the node-modules linker ► it should install from files on the internet
@@ -44,7 +44,7 @@
 🟩 Basic tests ► w/ the node-modules linker ► it should install the dependencies of any dependency fetched from the internet
 🟩 Basic tests ► w/ the node-modules linker ► it should not add the implicit self dependency if an explicit one already exists
 🟩 Basic tests ► w/ the node-modules linker ► it should not add the implicit self dependency if an explicit one already exists (aliases)
-🟩 Basic tests ► w/ the node-modules linker ► it should prefer peer dependencies when a package also has the same regular dependency
+🟥 Basic tests ► w/ the node-modules linker ► it should prefer peer dependencies when a package also has the same regular dependency
 🟩 Basic tests ► w/ the node-modules linker ► it should support self-requires in direct dependencies
 🟩 Basic tests ► w/ the node-modules linker ► it should support self-requires in transitive dependencies
 🟩 Basic tests ► w/ the pnp linker ► it should allow accessing a package via too many slashes
@@ -57,7 +57,7 @@
 🟩 Basic tests ► w/ the pnp linker ► it should correctly install a single scoped dependency that contains no sub-dependencies
 🟩 Basic tests ► w/ the pnp linker ► it should correctly install a soft-link
 🟩 Basic tests ► w/ the pnp linker ► it should correctly install an inter-dependency loop
-🟩 Basic tests ► w/ the pnp linker ► it should fallback to dependencies if the parent doesn't provide the peer dependency
+🟥 Basic tests ► w/ the pnp linker ► it should fallback to dependencies if the parent doesn't provide the peer dependency
 🟩 Basic tests ► w/ the pnp linker ► it should fallback to the regular dependency if the peer dependency isn't met
 🟩 Basic tests ► w/ the pnp linker ► it should install from archives on the filesystem
 🟩 Basic tests ► w/ the pnp linker ► it should install from files on the internet
@@ -70,7 +70,7 @@
 🟩 Basic tests ► w/ the pnp linker ► it should install the dependencies of any dependency fetched from the internet
 🟩 Basic tests ► w/ the pnp linker ► it should not add the implicit self dependency if an explicit one already exists
 🟩 Basic tests ► w/ the pnp linker ► it should not add the implicit self dependency if an explicit one already exists (aliases)
-🟩 Basic tests ► w/ the pnp linker ► it should prefer peer dependencies when a package also has the same regular dependency
+🟥 Basic tests ► w/ the pnp linker ► it should prefer peer dependencies when a package also has the same regular dependency
 🟩 Basic tests ► w/ the pnp linker ► it should support self-requires in direct dependencies
 🟩 Basic tests ► w/ the pnp linker ► it should support self-requires in transitive dependencies
 🟩 Basic tests ► w/ the pnpm linker ► it should allow accessing a package via too many slashes
@@ -83,7 +83,7 @@
 🟩 Basic tests ► w/ the pnpm linker ► it should correctly install a single scoped dependency that contains no sub-dependencies
 🟩 Basic tests ► w/ the pnpm linker ► it should correctly install a soft-link
 🟩 Basic tests ► w/ the pnpm linker ► it should correctly install an inter-dependency loop
-🟩 Basic tests ► w/ the pnpm linker ► it should fallback to dependencies if the parent doesn't provide the peer dependency
+🟥 Basic tests ► w/ the pnpm linker ► it should fallback to dependencies if the parent doesn't provide the peer dependency
 🟩 Basic tests ► w/ the pnpm linker ► it should fallback to the regular dependency if the peer dependency isn't met
 🟩 Basic tests ► w/ the pnpm linker ► it should install from archives on the filesystem
 🟩 Basic tests ► w/ the pnpm linker ► it should install from files on the internet
@@ -96,7 +96,7 @@
 🟩 Basic tests ► w/ the pnpm linker ► it should install the dependencies of any dependency fetched from the internet
 🟩 Basic tests ► w/ the pnpm linker ► it should not add the implicit self dependency if an explicit one already exists
 🟩 Basic tests ► w/ the pnpm linker ► it should not add the implicit self dependency if an explicit one already exists (aliases)
-🟩 Basic tests ► w/ the pnpm linker ► it should prefer peer dependencies when a package also has the same regular dependency
+🟥 Basic tests ► w/ the pnpm linker ► it should prefer peer dependencies when a package also has the same regular dependency
 🟩 Basic tests ► w/ the pnpm linker ► it should support self-requires in direct dependencies
 🟩 Basic tests ► w/ the pnpm linker ► it should support self-requires in transitive dependencies
 

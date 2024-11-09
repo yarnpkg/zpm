@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use arca::Path;
 
-use crate::primitives::{Ident, Locator, Range};
+use crate::primitives::{Ident, Locator};
 
 fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
     if backtrace.status() == std::backtrace::BacktraceStatus::Captured {
@@ -47,14 +47,14 @@ pub enum Error {
     #[error("Invalid semver range ({0})")]
     InvalidSemverRange(String),
 
-    #[error("Missing semver tag ({0})")]
-    MissingSemverTag(String),
+    #[error("Tag not found ({0})")]
+    TagNotFound(String),
 
     #[error("Package not found ({0}, at {1})")]
     PackageNotFound(Ident, String),
 
     #[error("No candidates found for {0:?}")]
-    NoCandidatesFound(Range),
+    NoCandidatesFound(String),
 
     #[error("I/O error ({inner})\n\n{}", render_backtrace(backtrace))]
     IoError {

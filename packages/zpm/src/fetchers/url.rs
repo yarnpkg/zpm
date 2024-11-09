@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-use crate::{error::Error, formats, http::http_client, install::{FetchResult, InstallContext}, manifest::Manifest, primitives::Locator, resolvers::Resolution};
+use crate::{error::Error, formats, http::http_client, install::{FetchResult, InstallContext}, manifest::Manifest, primitives::{reference, Locator}, resolvers::Resolution};
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, url: &str) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::UrlReference) -> Result<FetchResult, Error> {
     let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let client = http_client()?;
-        let response = client.get(url).send().await
+
+        let response = client.get(&params.url).send().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
         let archive = response.bytes().await

@@ -3,20 +3,25 @@ use std::{hash::Hash, str::FromStr, sync::Arc};
 use bincode::{Decode, Encode};
 use rstest::rstest;
 use sha2::Digest;
-use zpm_macros::Parsed;
+use zpm_macros::parse_enum;
 
 use crate::{error::Error, hash::Sha256, serialize::Serialized, yarn_check_serialize, yarn_serialization_protocol};
 
-use super::{Ident, Reference};
+use super::{reference::VirtualReference, Ident, Reference};
 
-#[derive(Clone, Debug, Parsed, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[parse_error(Error::InvalidIdentOrLocator)]
+#[parse_enum(or_else = |s| Err(Error::InvalidIdentOrLocator(s.to_string())))]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum IdentOrLocator {
-    #[try_pattern(pattern = "(@?[^@]+)")]
-    Ident(Ident),
+    #[pattern(spec = "(?<ident>@?[^@]+)")]
+    Ident {
+        ident: Ident,
+    },
 
-    #[try_pattern()]
-    Locator(Locator),
+    #[pattern(spec = "(?<locator>.*)")]
+    Locator {
+        locator: Locator,
+    },
 }
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -44,9 +49,10 @@ impl Locator {
     }
 
     pub fn physical_locator(&self) -> Locator {
-        match &self.reference {
-            Reference::Virtual(inner, _) => Locator::new_bound(self.ident.clone(), inner.physical_reference(), self.parent.clone()),
-            _ => self.clone(),
+        if let Reference::Virtual(params) = &self.reference {
+            Locator::new_bound(self.ident.clone(), params.inner.physical_reference(), self.parent.clone())
+        } else {
+            self.clone()
         }
     }
 
@@ -54,9 +60,14 @@ impl Locator {
         let serialized = parent.serialized()
             .unwrap_or_else(|_| panic!("Failed to serialize locator: {:?}", self));
 
+        let reference = Reference::Virtual(VirtualReference {
+            inner: Box::new(self.reference.clone()),
+            hash: Sha256::from_string(&serialized),
+        });
+
         Locator {
             ident: self.ident.clone(),
-            reference: Reference::Virtual(Box::new(self.reference.clone()), Sha256::from_string(&serialized)),
+            reference,
             parent: self.parent.clone(),
         }
     }

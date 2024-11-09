@@ -6,7 +6,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, formats::{self, Entry}, install::Install, primitives::{locator::IdentOrLocator, Descriptor, Ident, Locator, Reference}, project::Project, resolvers::Resolution, settings, system, yarn_serialization_protocol};
+use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, formats::{self, Entry}, install::Install, primitives::{locator::{IdentIdentOrLocator, IdentOrLocator, LocatorIdentOrLocator}, Descriptor, Ident, Locator, Reference}, project::Project, resolvers::Resolution, settings, system, yarn_serialization_protocol};
 
 fn is_default<T: Default + PartialEq>(t: &T) -> bool {
     t == &T::default()
@@ -447,7 +447,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         package_peers.sort();
 
         let virtual_dir = Path::from(match &locator.reference {
-            Reference::Virtual(_, hash) => format!("__virtual__/{}/0/", hash),
+            Reference::Virtual(params) => format!("__virtual__/{}/0/", params.hash),
             _ => "".to_string(),
         });
 
@@ -467,8 +467,8 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
             = get_package_info(&physical_package_data)?;
 
         let mut package_meta = dependencies_meta
-            .get(&IdentOrLocator::Locator(locator.clone()))
-            .or_else(|| dependencies_meta.get(&IdentOrLocator::Ident(locator.ident.clone())))
+            .get(&LocatorIdentOrLocator {locator: locator.clone()}.into())
+            .or_else(|| dependencies_meta.get(&IdentIdentOrLocator {ident: locator.ident.clone()}.into()))
             .cloned()
             .unwrap_or_default();
 

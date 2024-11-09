@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
-use crate::{error::Error, formats::{self, convert::convert_entries_to_zip, zip::ZipSupport}, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, patch, primitives::Locator, resolvers::Resolution};
+use crate::{error::Error, formats::{self, convert::convert_entries_to_zip, zip::ZipSupport}, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, patch, primitives::{reference, Locator}, resolvers::Resolution};
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, path: &str, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::PatchReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     let parent_data = dependencies[0].as_fetched();
     let original_data = dependencies[1].as_fetched();
 
     let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let patch_path = parent_data.package_data
             .context_directory()
-            .with_join_str(path)
+            .with_join_str(&params.path)
             .fs_read_text_with_zip()?;
 
         let file_entries

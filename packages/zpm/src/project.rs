@@ -5,7 +5,7 @@ use serde::Deserialize;
 use wax::walk::{Entry, FileIterator};
 use zpm_macros::track_time;
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::Lockfile, manifest::{read_manifest, BinField, BinManifest, Manifest, ResolutionOverride}, primitives::{Descriptor, Ident, Locator, Range, Reference}, script::Binary};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::Lockfile, manifest::{read_manifest, BinField, BinManifest, Manifest, ResolutionOverride}, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, script::Binary};
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
 pub const MANIFEST_NAME: &str = "package.json";
@@ -269,14 +269,12 @@ impl Project {
     pub fn active_workspace(&self) -> Result<&Workspace, Error> {
         let active_package = self.active_package()?;
 
-        match &active_package.reference {
-            Reference::Workspace(ident) => self.workspaces.get(&ident)
-                .ok_or(Error::WorkspaceNotFound(ident.clone())),
+        let Reference::Workspace(params) = &active_package.reference else {
+            return Err(Error::ActivePackageNotWorkspace);
+        };
 
-            _ => {
-                Err(Error::ActivePackageNotWorkspace)
-            },
-        }
+        self.workspaces.get(&params.ident)
+            .ok_or(Error::WorkspaceNotFound(params.ident.clone()))
     }
 
     pub fn package_self_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
@@ -447,11 +445,15 @@ impl Workspace {
     }
 
     pub fn descriptor(&self) -> Descriptor {
-        Descriptor::new(self.name.clone(), Range::WorkspaceMagic("^".to_string()))
+        Descriptor::new(self.name.clone(), range::WorkspaceMagicRange {
+            magic: "^".to_string(),
+        }.into())
     }
 
     pub fn locator(&self) -> Locator {
-        Locator::new(self.name.clone(), Reference::Workspace(self.name.clone()))
+        Locator::new(self.name.clone(), reference::WorkspaceReference {
+            ident: self.name.clone(),
+        }.into())
     }
 
     pub fn workspaces(&self) -> Result<Vec<Workspace>, Error> {
