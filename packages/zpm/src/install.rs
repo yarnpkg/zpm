@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, hash::Hash, marker::PhantomData, str:
 use arca::Path;
 use serde::{Deserialize, Serialize};
 
-use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch_locator, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch_locator, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, resolve_locator, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -22,6 +22,11 @@ impl<'a> InstallContext<'a> {
         self.project = project;
         self
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct PinnedResult {
+    pub locator: Locator,
 }
 
 #[derive(Clone, Debug)]
@@ -73,6 +78,7 @@ impl IntoResolutionResult for FetchResult {
 
 #[derive(Clone, Debug)]
 pub enum InstallOpResult {
+    Pinned(PinnedResult),
     Resolved(ResolutionResult),
     Fetched(FetchResult),
 }
@@ -110,6 +116,12 @@ impl InstallOpResult {
 impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
     fn graph_follow_ups(&self, _ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
         match self {
+            InstallOpResult::Pinned(PinnedResult {locator, ..}) => {
+                vec![InstallOp::Refresh {
+                    locator: locator.clone(),
+                }]
+            },
+
             InstallOpResult::Resolved(ResolutionResult {resolution, ..}) => {
                 let mut follow_ups = vec![InstallOp::Fetch {
                     locator: resolution.locator.clone(),
@@ -136,6 +148,10 @@ enum InstallOp<'a> {
     #[allow(dead_code)]
     Phantom(PhantomData<&'a ()>),
 
+    Refresh {
+        locator: Locator,
+    },
+
     Resolve {
         descriptor: Descriptor,
     },
@@ -153,6 +169,17 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
         match self {
             InstallOp::Phantom(_) =>
                 unreachable!("PhantomData should never be instantiated"),
+
+            InstallOp::Refresh {locator} => {
+                if let Some(parent) = &locator.parent {
+                    dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone()});
+                    resolved_it.next();
+                }
+
+                if let Reference::Patch(params) = &locator.reference {
+                    dependencies.push(InstallOp::Fetch {locator: params.inner.as_ref().0.clone()});
+                }
+            },
 
             InstallOp::Resolve {descriptor} => {
                 if let Some(parent) = &descriptor.parent {
@@ -198,6 +225,10 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
             InstallOp::Phantom(_) =>
                 unreachable!("PhantomData should never be instantiated"),
 
+            InstallOp::Refresh {locator} => {
+                Ok(InstallOpResult::Resolved(resolve_locator(context.clone(), locator.clone(), dependencies).await?))
+            },
+
             InstallOp::Resolve {descriptor} => {
                 Ok(InstallOpResult::Resolved(resolve_descriptor(context.clone(), descriptor.clone(), dependencies).await?))
             },
@@ -227,6 +258,12 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
         match op {
             InstallOp::Resolve {descriptor} => {
                 if let Some(locator) = self.lockfile.resolutions.get(&descriptor) {
+                    if self.lockfile.metadata.version != LockfileMetadata::new().version {
+                        return Some(InstallOpResult::Pinned(PinnedResult {
+                            locator: locator.clone(),
+                        }));
+                    }
+
                     let entry = self.lockfile.entries.get(locator)
                         .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator));
 
@@ -345,8 +382,12 @@ impl<'a> InstallManager<'a> {
 
         for entry in graph_run.unwrap() {
             match entry {
+                (InstallOp::Refresh {..}, InstallOpResult::Resolved(ResolutionResult {resolution, original_resolution, package_data})) => {
+                    self.record_resolution(resolution, original_resolution, package_data);
+                },
+
                 (InstallOp::Resolve {descriptor, ..}, InstallOpResult::Resolved(ResolutionResult {resolution, original_resolution, package_data})) => {
-                    self.record_resolution(descriptor, resolution, original_resolution, package_data);
+                    self.record_descriptor(descriptor, resolution, original_resolution, package_data);
                 },
 
                 (InstallOp::Fetch {locator, ..}, InstallOpResult::Fetched(FetchResult {package_data, ..})) => {
@@ -365,10 +406,9 @@ impl<'a> InstallManager<'a> {
         Ok(self.result)
     }
 
-    fn record_resolution(&mut self, descriptor: Descriptor, resolution: Resolution, original_resolution: Resolution, package_data: Option<PackageData>) {
+    fn record_resolution(&mut self, resolution: Resolution, original_resolution: Resolution, package_data: Option<PackageData>) {
         self.result.install_state.normalized_resolutions.insert(resolution.locator.clone(), resolution.clone());
 
-        self.result.install_state.lockfile.resolutions.insert(descriptor, resolution.locator.clone());
         self.result.install_state.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
             checksum: None,
             resolution: original_resolution.clone(),
@@ -385,6 +425,12 @@ impl<'a> InstallManager<'a> {
         if let Some(package_data) = package_data {
             self.record_fetch(resolution.locator.clone(), package_data.clone());
         }
+    }
+
+    fn record_descriptor(&mut self, descriptor: Descriptor, resolution: Resolution, original_resolution: Resolution, package_data: Option<PackageData>) {
+        self.result.install_state.lockfile.resolutions.insert(descriptor, resolution.locator.clone());
+
+        self.record_resolution(resolution, original_resolution, package_data);
     }
 
     fn record_fetch(&mut self, locator: Locator, package_data: PackageData) {

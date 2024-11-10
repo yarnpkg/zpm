@@ -149,6 +149,31 @@ yarn_serialization_protocol!(Range, "", {
     }
 });
 
+#[parse_enum(or_else = |s| Err(Error::InvalidIdentOrLocator(s.to_string())))]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PackageSelector {
+    #[pattern(spec = "(?<ident>@?[^@]+)")]
+    Ident {
+        ident: Ident,
+    },
+
+    #[pattern(spec = "(?<ident>@?[^@]+)@(?<range>.*)")]
+    Range {
+        ident: Ident,
+        range: semver::Range,
+    },
+}
+
+impl PackageSelector {
+    pub fn ident(&self) -> &Ident {
+        match self {
+            PackageSelector::Ident(params) => &params.ident,
+            PackageSelector::Range(params) => &params.ident,
+        }
+    }
+}
+
 #[parse_enum(or_else = |_| Ok(PeerRange::Semver(SemverPeerRange {range: semver::Range::from_str("*").unwrap()})))]
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]

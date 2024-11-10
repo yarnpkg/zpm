@@ -1,7 +1,7 @@
 use arca::Path;
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, formats, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, primitives::{Locator, Reference}};
+use crate::{error::Error, formats, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, primitives::{reference, Locator, Reference}};
 
 pub mod folder;
 pub mod git;
@@ -149,6 +149,9 @@ pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, i
 
         Reference::Patch(params)
             => patch::fetch_locator(&context, locator, params, dependencies).await,
+
+        Reference::Shorthand(params)
+            => npm::fetch_locator(&context, locator, &reference::RegistryReference {ident: locator.ident.clone(), version: params.version.clone()}, is_mock_request).await,
 
         Reference::Registry(params)
             => npm::fetch_locator(&context, locator, params, is_mock_request).await,

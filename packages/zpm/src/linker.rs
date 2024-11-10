@@ -6,7 +6,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, formats::{self, Entry}, install::Install, primitives::{locator::{IdentIdentOrLocator, IdentOrLocator, LocatorIdentOrLocator}, Descriptor, Ident, Locator, Reference}, project::Project, resolvers::Resolution, settings, system, yarn_serialization_protocol};
+use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, formats::{self, Entry}, install::Install, primitives::{range::PackageSelector, Descriptor, Ident, Locator, Reference}, project::Project, resolvers::Resolution, settings, system, yarn_serialization_protocol};
 
 fn is_default<T: Default + PartialEq>(t: &T) -> bool {
     t == &T::default()
@@ -41,11 +41,13 @@ struct PackageMeta {
     unplugged: Option<bool>,
 }
 
+#[serde_as]
 #[derive(Debug, Default, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct TopLevelConfiguration {
     #[serde(default)]
-    dependencies_meta: Option<HashMap<IdentOrLocator, PackageMeta>>,
+    #[serde_as(as = "HashMap<_, _>")]
+    dependencies_meta: Vec<(PackageSelector, PackageMeta)>,
 }
 use serde_with::DefaultOnError;
 #[serde_as]
@@ -403,9 +405,11 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
     let dependencies_meta = project.manifest_path()
         .if_exists()
         .and_then(|path| path.fs_read_text().ok())
-        .and_then(|data| serde_json::from_str::<TopLevelConfiguration>(&data).ok())
-        .and_then(|config| config.dependencies_meta)
-        .unwrap_or_default();
+        .and_then(|data| Some(serde_json::from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(selector, meta)| (selector.ident().clone(), (selector, meta)))
+        .into_group_map();
 
     let mut package_registry_data: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
     let mut dependency_tree_roots = Vec::new();
@@ -467,8 +471,13 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
             = get_package_info(&physical_package_data)?;
 
         let mut package_meta = dependencies_meta
-            .get(&LocatorIdentOrLocator {locator: locator.clone()}.into())
-            .or_else(|| dependencies_meta.get(&IdentIdentOrLocator {ident: locator.ident.clone()}.into()))
+            .get(&locator.ident)
+            .and_then(|meta_list| {
+                meta_list.iter().find_map(|(selector, meta)| match selector {
+                    PackageSelector::Range(params) => params.range.check(&resolution.version).then(|| meta),
+                    PackageSelector::Ident(_) => Some(meta),
+                })
+            })
             .cloned()
             .unwrap_or_default();
 

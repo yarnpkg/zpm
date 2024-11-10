@@ -139,34 +139,34 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
     }
 }
 
-pub async fn resolve_locator<'a>(context: InstallContext<'a>, locator: &Locator, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+pub async fn resolve_locator<'a>(context: InstallContext<'a>, locator: Locator, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     match &locator.reference {
         Reference::Link(params)
-            => link::resolve_locator(&context, locator, params),
+            => link::resolve_locator(&context, &locator, params),
 
         Reference::Portal(params)
-            => portal::resolve_locator(&context, locator, params, dependencies),
+            => portal::resolve_locator(&context, &locator, params, dependencies),
 
         Reference::Url(params)
-            => url::resolve_locator(&context, locator, params).await,
+            => url::resolve_locator(&context, &locator, params).await,
 
         Reference::Tarball(params)
-            => tarball::resolve_locator(&context, locator, params, dependencies).await,
+            => tarball::resolve_locator(&context, &locator, params, dependencies).await,
 
         Reference::Folder(params)
-            => folder::resolve_locator(&context, locator, params, dependencies).await,
+            => folder::resolve_locator(&context, &locator, params, dependencies).await,
 
         Reference::Git(params)
-            => git::resolve_locator(&context, locator, params).await,
+            => git::resolve_locator(&context, &locator, params).await,
 
         Reference::Patch(params)
-            => patch::resolve_locator(&context, locator, params, dependencies).await,
+            => patch::resolve_locator(&context, &locator, params, dependencies).await,
 
         Reference::Registry(params)
-            => npm::resolve_locator(&context, locator, params).await,
+            => npm::resolve_locator(&context, &locator, params).await,
 
         Reference::Workspace(params)
-            => workspace::resolve_locator(&context, locator, params),
+            => workspace::resolve_locator(&context, &locator, params),
 
         _ => Err(Error::Unsupported),
     }

@@ -962,13 +962,13 @@
 🟥 Commands ► workspace list -v,--verbose --json ► workspace-a requires mismatched version of workspace-b
 🟥 Commands ► workspace list -v,--verbose --json ► workspace-a requires workspace-b, workspace-b requires workspace-a
 
-[7 / 14] packages/acceptance-tests/pkg-tests-specs/sources/dragon.test.js
+[8 / 14] packages/acceptance-tests/pkg-tests-specs/sources/dragon.test.js
 
 🟩 Dragon tests ► it should pass the dragon test 1
 🟥 Dragon tests ► it should pass the dragon test 10
 🟥 Dragon tests ► it should pass the dragon test 11 with "nodeLinker: pnp"
 🟥 Dragon tests ► it should pass the dragon test 11 with "nodeLinker: pnpm"
-🟥 Dragon tests ► it should pass the dragon test 12
+🟩 Dragon tests ► it should pass the dragon test 12
 🟥 Dragon tests ► it should pass the dragon test 13
 🟩 Dragon tests ► it should pass the dragon test 2
 🟩 Dragon tests ► it should pass the dragon test 3
@@ -1276,12 +1276,12 @@
 🟥 Legacy tests ► it should import lock entries from v1 lockfiles preserving the alias
 🟥 Legacy tests ► it should import unconventional tarball entries
 
-[1 / 2] packages/acceptance-tests/pkg-tests-specs/sources/lock.test.ts
+[2 / 2] packages/acceptance-tests/pkg-tests-specs/sources/lock.test.ts
 
 🟩 Lock tests ► it should correctly lock dependencies
-🟥 Lock tests ► it shouldn't loose track of the resolutions when upgrading the lockfile version
+🟩 Lock tests ► it shouldn't loose track of the resolutions when upgrading the lockfile version
 
-[16 / 58] packages/acceptance-tests/pkg-tests-specs/sources/node-modules.test.ts
+[17 / 58] packages/acceptance-tests/pkg-tests-specs/sources/node-modules.test.ts
 
 🟥 Node_Modules ► 'winLinkType: junctions' not-on Windows should use symlinks in node_modules directories
 🟥 Node_Modules ► 'winLinkType: symlinks' not-on Windows should use symlinks in node_modules directories
@@ -1333,7 +1333,7 @@
 🟥 Node_Modules ► should support aliases
 🟥 Node_Modules ► should support dependencies hoist border
 🟥 Node_Modules ► should support dependency via link: protocol to a missing folder
-🟥 Node_Modules ► should support portals to external workspaces
+🟩 Node_Modules ► should support portals to external workspaces
 🟥 Node_Modules ► should support replacement of regular dependency with portal: protocol dependency
 🟥 Node_Modules ► should support supportedArchitectures
 🟥 Node_Modules ► should survive interrupted install

@@ -15,6 +15,7 @@ pub struct LockfileEntry {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Lockfile {
+    pub metadata: LockfileMetadata,
     pub resolutions: HashMap<Descriptor, Locator>,
     pub entries: HashMap<Locator, LockfileEntry>,
 }
@@ -22,6 +23,7 @@ pub struct Lockfile {
 impl Lockfile {
     pub fn new() -> Self {
         Self {
+            metadata: LockfileMetadata::new(),
             resolutions: HashMap::new(),
             entries: HashMap::new(),
         }
@@ -48,6 +50,8 @@ impl<'de> Deserialize<'de> for Lockfile {
         let payload = LockfilePayload::deserialize(deserializer)?;
 
         let mut lockfile = Lockfile::new();
+
+        lockfile.metadata = payload.metadata;
 
         for (key, entry) in payload.entries {
             for descriptor in key.0 {
@@ -149,11 +153,27 @@ impl<'de, T> Deserialize<'de> for MultiKey<T> where T: std::str::FromStr<Err = E
     }
 }
 
-#[derive(Deserialize, Serialize)]
-struct LockfileMetadata {
-    version: u64,
-    cache_key: u64,
-    linker_key: u64,
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct LockfileMetadata {
+    pub version: u64,
+    pub cache_key: u64,
+    pub linker_key: u64,
+}
+
+impl LockfileMetadata {
+    pub fn new() -> Self {
+        LockfileMetadata {
+            version: 0,
+            cache_key: 0,
+            linker_key: 0,
+        }
+    }
+}
+
+impl Default for LockfileMetadata {
+    fn default() -> Self {
+        LockfileMetadata::new()
+    }
 }
 
 #[derive(Deserialize, Serialize)]

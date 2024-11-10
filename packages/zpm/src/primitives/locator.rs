@@ -3,26 +3,10 @@ use std::{hash::Hash, str::FromStr, sync::Arc};
 use bincode::{Decode, Encode};
 use rstest::rstest;
 use sha2::Digest;
-use zpm_macros::parse_enum;
 
 use crate::{error::Error, hash::Sha256, serialize::Serialized, yarn_check_serialize, yarn_serialization_protocol};
 
 use super::{reference::VirtualReference, Ident, Reference};
-
-#[parse_enum(or_else = |s| Err(Error::InvalidIdentOrLocator(s.to_string())))]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum IdentOrLocator {
-    #[pattern(spec = "(?<ident>@?[^@]+)")]
-    Ident {
-        ident: Ident,
-    },
-
-    #[pattern(spec = "(?<locator>.*)")]
-    Locator {
-        locator: Locator,
-    },
-}
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Locator {

@@ -13,7 +13,7 @@ use crate::{semver, yarn_check_serialize};
 use crate::{error::Error, yarn_serialization_protocol};
 
 use super::range::{AnonymousSemverRange, VirtualRange};
-use super::{Ident, Locator, Range, Reference};
+use super::{reference, Ident, Locator, Range, Reference};
 
 #[derive(Debug)]
 pub struct LooseDescriptor {
@@ -77,6 +77,14 @@ impl Descriptor {
         let parent = match reference.must_bind() {
             true => self.parent.clone().map(Arc::new),
             false => None,
+        };
+
+        let reference = match reference {
+            Reference::Registry(params) if params.ident == self.ident => reference::ShorthandReference {
+                version: params.version,
+            }.into(),
+
+            _ => reference,
         };
 
         Locator::new_bound(self.ident.clone(), reference, parent)

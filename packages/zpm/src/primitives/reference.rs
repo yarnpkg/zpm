@@ -11,6 +11,11 @@ use super::{Ident, Locator};
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Reference {
+    #[pattern(spec = r"npm:(?<version>.*)")]
+    Shorthand {
+        version: semver::Version,
+    },
+
     #[pattern(spec = r"npm:(?<ident>.*)@(?<version>.*)")]
     Registry {
         ident: Ident,
@@ -80,6 +85,7 @@ impl Reference {
 
     pub fn slug(&self) -> String {
         match self {
+            Reference::Shorthand(params) => format!("npm-{}", params.version),
             Reference::Git(_) => "git".to_string(),
             Reference::Registry(params) => format!("npm-{}", params.version),
             Reference::Tarball(_) => "file".to_string(),
@@ -97,6 +103,7 @@ impl Reference {
 yarn_serialization_protocol!(Reference, "", {
     serialize(&self) {
         yarn_check_serialize!(self, match self {
+            Reference::Shorthand(params) => format!("npm:{}", params.version),
             Reference::Git(params) => format!("git:{}", params.git),
             Reference::Registry(params) => format!("npm:{}@{}", params.ident, params.version),
             Reference::Tarball(params) => format!("file:{}", params.path),
