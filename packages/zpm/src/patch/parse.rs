@@ -1,6 +1,7 @@
 use std::{str::FromStr, sync::LazyLock};
 
 use arca::Path;
+use regex::Regex;
 
 use crate::{error::Error, semver, yarn_serialization_protocol};
 
@@ -201,7 +202,7 @@ pub struct PatchParser<'a> {
 }
 
 fn parse_file_mode(mode: &str) -> Result<u32, Error> {
-    let mode = u32::from_str_radix(mode, 8)?;
+    let mode = u32::from_str_radix(mode, 8)? & 0o777;
 
     if mode != 0o644 && mode != 0o755 {
         return Err(Error::InvalidModeInPatchFile(mode));
@@ -277,7 +278,7 @@ impl<'a> PatchParser<'a> {
                 .or(file_patch.from_path)
                 .ok_or(Error::MissingFromPath)?;
 
-            self.result.push(PatchFilePart::FileCreation {
+            self.result.push(PatchFilePart::FileDeletion {
                 semver_exclusivity: semver_exclusivity.clone(),
                 path: Path::from(path),
                 mode: parse_file_mode(deleted_file_mode)?,
@@ -329,12 +330,18 @@ impl<'a> PatchParser<'a> {
     }
 
     fn process(&mut self, content: &'a str) -> Result<Vec<PatchFilePart>, Error> {
-        let trimmed_content = match content.ends_with('\n') {
-            true => &content[..content.len() - 1],
-            false => content,
-        };
+        static SEPARATOR: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"\r\n|\r|\n").unwrap()
+        });
 
-        let lines = trimmed_content.split('\n').collect::<Vec<_>>();
+        let mut lines = SEPARATOR
+            .split(content)
+            .collect::<Vec<_>>();
+
+        if lines.last() == Some(&"") {
+            lines.pop();
+        }
+    
         let mut idx = 0;
 
         while idx < lines.len() {

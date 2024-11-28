@@ -1,5 +1,7 @@
 #![deny(unused_crate_dependencies)]
 
+use console_subscriber as _;
+
 pub mod build;
 pub mod cache;
 pub mod commands;
@@ -30,3 +32,4 @@ pub mod settings;
 pub mod scratchpad;
 pub mod system;
 pub mod tree_resolver;
+pub mod ui;

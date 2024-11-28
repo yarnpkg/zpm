@@ -10,6 +10,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             = git::clone_repository(&params.git.repo, &params.git.commit).await?;
 
         let pack_tgz = prepare::prepare_project(
+            locator,
             &repository_path,
             &params.git.prepare_params,
         ).await?;

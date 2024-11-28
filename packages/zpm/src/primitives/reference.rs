@@ -54,12 +54,13 @@ pub enum Reference {
         hash: Sha256,
     },
 
-    #[pattern(spec = "workspace:(?<ident>.*)")]
+    #[pattern(spec = r"workspace:(?<ident>.*)")]
     Workspace {
         ident: Ident,
     },
 
-    #[pattern(spec = "git:(?<git>.*)")]
+    #[pattern(spec = r"git:(?<git>.*)")]
+    #[pattern(spec = r"(?<git>https?://.*\.git#.*)")]
     Git {
         git: git::GitReference,
     },

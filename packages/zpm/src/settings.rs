@@ -36,6 +36,9 @@ pub struct ProjectConfig {
     pub enable_global_cache: BoolField,
 
     #[default(true)]
+    pub enable_scripts: BoolField,
+
+    #[default(true)]
     pub enable_transparent_workspaces: BoolField,
 
     #[default("https://registry.npmjs.org".to_string())]

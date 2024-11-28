@@ -21,7 +21,7 @@ enum Modification {
 fn evaluate_hunk(hunk: &Hunk, file_lines: &[String], mut offset: usize) -> Option<Vec<Modification>> {
     let mut modifications = vec![];
 
-    for part in hunk.parts.iter() {
+    for part in &hunk.parts {
         match part.kind {
             PatchMutationPartKind::Context | PatchMutationPartKind::Deletion => {
                 for line in part.lines.iter() {
@@ -29,7 +29,7 @@ fn evaluate_hunk(hunk: &Hunk, file_lines: &[String], mut offset: usize) -> Optio
                         return None;
                     }
 
-                    if file_lines[offset].as_str() != line {
+                    if file_lines[offset].as_str().trim_end() != line.trim_end() {
                         return None;
                     }
 
@@ -139,7 +139,7 @@ pub fn apply_patch<'a>(entries: Vec<Entry<'a>>, patch: &str) -> Result<Vec<Entry
                 let mut fixup_offset: isize = 0;
                 let mut max_frozen_line = 0;
 
-                for hunk in hunks {
+                for (hunk_idx, hunk) in hunks.iter().enumerate() {
                     let first_guess = cmp::max(max_frozen_line, hunk.header.modified.start.checked_add_signed(fixup_offset).unwrap());
 
                     let max_prefix_fuzz = first_guess.saturating_sub(max_frozen_line);
@@ -176,7 +176,7 @@ pub fn apply_patch<'a>(entries: Vec<Entry<'a>>, patch: &str) -> Result<Vec<Entry
                     }
 
                     let modifications = modifications
-                        .ok_or_else(|| Error::UnmatchedHunk(0))?;
+                        .ok_or_else(|| Error::UnmatchedHunk(hunk_idx))?;
 
                     all_modifications.push(modifications);
 

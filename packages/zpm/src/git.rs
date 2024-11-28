@@ -370,7 +370,8 @@ pub async fn clone_repository(url: &str, commit: &str) -> Result<Path, Error> {
     Command::new("git")
         .envs(make_git_env())
         .arg("clone")
-        .arg("-c core.autocrlf=false")
+        .arg("-c")
+        .arg("core.autocrlf=false")
         .arg(&normalized_repo_url)
         .arg(clone_dir.to_string())
         .output().await?

@@ -100,6 +100,7 @@ impl Binary {
     }
 }
 
+#[derive(Debug)]
 pub enum ScriptResult {
     Success(Output),
     Failure(Output, String, Vec<String>),
@@ -126,13 +127,35 @@ impl ScriptResult {
         matches!(self, Self::Success(_))
     }
 
-    pub fn ok(&self) -> Result<(), Error> {
+    pub fn ok(self) -> Result<Self, Error> {
         if !self.success() {
             println!("{}", String::from_utf8_lossy(&self.output().stderr));
         }
+
         match self {
-            Self::Success(_) => Ok(()),
-            Self::Failure(_, program, _) => Err(Error::ChildProcessFailed(program.clone())),
+            Self::Success(_) => Ok(self),
+            Self::Failure(output, program, _) => {
+                if output.stdout.is_empty() {
+                    return Err(Error::ChildProcessFailed(program.clone()));
+                }
+
+                if let Ok(temp_dir) = Path::temp_dir() {
+                    let log_path = temp_dir
+                        .with_join_str("error.log");
+                    
+                    // open a fd and write stdout/err into it
+                    let log_write = log_path
+                        .fs_write_text(&format!("=== STDOUT ===\n\n{}\n=== STDERR ===\n\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)));
+
+                    if log_write.is_ok() {
+                        return Err(Error::ChildProcessFailedWithLog(program.clone(), log_path));
+                    } else {
+                        return Err(Error::ChildProcessFailed(program.clone()));
+                    }
+                } else {
+                    return Err(Error::ChildProcessFailed(program.clone()));
+                }
+            },
         }
     }
 
@@ -198,6 +221,11 @@ impl ScriptEnvironment {
 
     pub fn with_env_variable(mut self, key: &str, value: &str) -> Self {
         self.env.insert(key.to_string(), value.to_string());
+        self
+    }
+
+    pub fn delete_env_variable(mut self, key: &str) -> Self {
+        self.env.remove(key);
         self
     }
 

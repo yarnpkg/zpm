@@ -299,8 +299,6 @@ pub struct Config {
     pub project: ProjectConfig,
 }
 
-thread_local! {
-}
 pub static ENV_CONFIG: LazyLock<EnvConfig> = LazyLock::new(|| {
     *CONFIG_PATH.lock().unwrap() = None;
     serde_json::from_str("{}").unwrap()

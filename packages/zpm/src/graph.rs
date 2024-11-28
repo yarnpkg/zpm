@@ -63,7 +63,7 @@ impl<TIn, TOut, TErr> GraphTaskResults<TIn, TOut, TErr> {
     }
 }
 
-pub struct GraphTasks<'a, TCtx, TIn, TOut, TErr, TCache> {
+pub struct  GraphTasks<'a, TCtx, TIn, TOut, TErr, TCache> {
     context: TCtx,
     cache: TCache,
 
@@ -136,10 +136,11 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
                 .filter_map(|dep| self.results.success.get(dep))
                 .collect::<Vec<_>>();
 
+            *resolved_dependency_count = resolved_dependencies.len();
+
             // If we're missing any of the dependency results we must wait for
             // them to be resolved before we can proceed with the scheduling.
             if resolved_dependencies.len() != dependency_ops.len() {
-                *resolved_dependency_count = resolved_dependencies.len();
                 return;
             }
 

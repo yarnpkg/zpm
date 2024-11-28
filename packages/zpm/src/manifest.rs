@@ -71,6 +71,11 @@ pub struct RemoteManifest {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq, Hash)]
 #[derive_variants(Clone, Debug, Serialize, PartialEq, Eq, Hash)]
 pub enum ResolutionOverride {
+    #[pattern(spec = r"^(?<descriptor>.*)$")]
+    Descriptor {
+        descriptor: Descriptor,
+    },
+
     #[pattern(spec = r"^(?<ident>.*)$")]
     Ident {
         ident: Ident
@@ -92,6 +97,7 @@ pub enum ResolutionOverride {
 impl ResolutionOverride {
     pub fn target_ident(&self) -> &Ident {
         match self {
+            ResolutionOverride::Descriptor(params) => &params.descriptor.ident,
             ResolutionOverride::Ident(params) => &params.ident,
             ResolutionOverride::DescriptorIdent(params) => &params.ident,
             ResolutionOverride::IdentIdent(params) => &params.ident,
@@ -100,6 +106,14 @@ impl ResolutionOverride {
 
     pub fn apply(&self, parent: &Locator, parent_version: &Version, descriptor: &Descriptor, replacement_range: &Range) -> Option<Range> {
         match self {
+            ResolutionOverride::Descriptor(params) => {
+                if params.descriptor != *descriptor {
+                    return None;
+                }
+
+                Some(replacement_range.clone())
+            }
+
             ResolutionOverride::Ident(params) => {
                 if params.ident != descriptor.ident {
                     return None;

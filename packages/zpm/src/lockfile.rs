@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, fmt, marker::PhantomData, sync::Arc};
+use std::{collections::{BTreeMap, HashMap}, fmt::{self, Debug}, hash::{Hash}, marker::PhantomData, sync::Arc};
 
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
@@ -97,6 +97,49 @@ impl Serialize for Lockfile {
     }
 }
 
+#[derive(Clone, Debug)]
+struct TolerantMap<K, V>(HashMap<K, V>);
+
+impl<'de, K, V> Deserialize<'de> for TolerantMap<K, V> where K: Debug + Eq + Hash + Deserialize<'de>, V: Debug + Deserialize<'de> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        struct MapVisitor<K, V> {
+            marker: PhantomData<fn() -> TolerantMap<K, V>>,
+        }
+
+        impl<'de, K, V> Visitor<'de> for MapVisitor<K, V> where K: Debug + Eq + Hash + Deserialize<'de>, V: Debug + Deserialize<'de> {
+            type Value = TolerantMap<K, V>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a map")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<TolerantMap<K, V>, A::Error> where A: de::MapAccess<'de> {
+                let mut values = HashMap::new();
+
+                loop {
+                    let entry = map.next_entry::<K, V>();
+
+                    if let Ok(val) = entry {
+                        if let Some((key, value)) = val {
+                            values.insert(key, value);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                Ok(TolerantMap(values))
+            }
+        }
+
+        let visitor = MapVisitor {
+            marker: PhantomData
+        };
+
+        deserializer.deserialize_map(visitor)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 struct MultiKey<T>(Vec<T>);
 
@@ -181,7 +224,7 @@ struct LockfilePayload {
     entries: BTreeMap<MultiKey<Descriptor>, LockfileEntry>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct LegacyBerryLockfileEntry {
     resolution: Locator,
 }
@@ -192,7 +235,7 @@ struct LegacyBerryLockfilePayload {
     _metadata: serde_yaml::Value,
 
     #[serde(flatten)]
-    entries: HashMap<MultiKey<Descriptor>, LegacyBerryLockfileEntry>,
+    entries: TolerantMap<MultiKey<Descriptor>, LegacyBerryLockfileEntry>,
 }
 
 pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
@@ -203,7 +246,7 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
 
     lockfile.metadata.version = 1;
 
-    for (key, entry) in payload.entries {
+    for (key, entry) in payload.entries.0 {
         for descriptor in key.0 {
             lockfile.resolutions.insert(descriptor, entry.resolution.clone());
         }
@@ -221,8 +264,6 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
             },
         });
     }
-
-    println!("Legacy lockfile: {:#?}", lockfile);
 
     Ok(lockfile)
 }

@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, hash::Hash, marker::PhantomData, str:
 use arca::Path;
 use serde::{Deserialize, Serialize};
 
-use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch_locator, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, resolve_locator, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch_locator, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, resolve_locator, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}, ui};
 
 
 #[derive(Clone, Default)]
@@ -101,7 +101,7 @@ impl InstallOpResult {
     pub fn as_resolved(&self) -> &ResolutionResult {
         match self {
             InstallOpResult::Resolved(resolution) => resolution,
-            _ => panic!("Expected a resolved result"),
+            _ => panic!("Expected a resolved result; got {:?}", self),
         }
     }
 
@@ -109,6 +109,14 @@ impl InstallOpResult {
         match self {
             InstallOpResult::Fetched(fetch) => fetch,
             _ => panic!("Expected a fetched result"),
+        }
+    }
+
+    pub fn as_resolved_locator(&self) -> &Locator {
+        match self {
+            InstallOpResult::Resolved(params) => &params.resolution.locator,
+            InstallOpResult::Pinned(params) => &params.locator,
+            _ => panic!("Expected a resolved locator; got {:?}", self),
         }
     }
 }
@@ -200,8 +208,8 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                     let patch_resolution = resolved_it.next();
 
                     if let Some(result) = patch_resolution {
-                        let patch_resolution = result.as_resolved();
-                        dependencies.push(InstallOp::Fetch {locator: patch_resolution.resolution.locator.clone()});
+                        let patch_resolved_locator = result.as_resolved_locator();
+                        dependencies.push(InstallOp::Fetch {locator: patch_resolved_locator.clone()});
                     }
                 }
             },
@@ -221,20 +229,36 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
     }
 
     async fn graph_run(self, context: InstallContext<'a>, dependencies: Vec<InstallOpResult>) -> Result<InstallOpResult, Error> {
+        let timeout = std::time::Duration::from_secs(600);
         match self {
             InstallOp::Phantom(_) =>
                 unreachable!("PhantomData should never be instantiated"),
 
             InstallOp::Refresh {locator} => {
-                Ok(InstallOpResult::Resolved(resolve_locator(context.clone(), locator.clone(), dependencies).await?))
+                let future = tokio::time::timeout(
+                    timeout,
+                    resolve_locator(context.clone(), locator.clone(), dependencies)
+                ).await.map_err(|_| Error::TaskTimeout)?;
+
+                Ok(InstallOpResult::Resolved(future?))
             },
 
             InstallOp::Resolve {descriptor} => {
-                Ok(InstallOpResult::Resolved(resolve_descriptor(context.clone(), descriptor.clone(), dependencies).await?))
+                let future = tokio::time::timeout(
+                    timeout,
+                    resolve_descriptor(context.clone(), descriptor.clone(), dependencies)
+                ).await.map_err(|_| Error::TaskTimeout)?;
+
+                Ok(InstallOpResult::Resolved(future?))
             },
 
             InstallOp::Fetch {locator} => {
-                Ok(InstallOpResult::Fetched(fetch_locator(context.clone(), &locator.clone(), false, dependencies).await?))
+                let future = tokio::time::timeout(
+                    timeout,
+                    fetch_locator(context.clone(), &locator.clone(), false, dependencies)
+                ).await.map_err(|_| Error::TaskTimeout)?;
+
+                Ok(InstallOpResult::Fetched(future?))
             },
 
         }
@@ -373,8 +397,12 @@ impl<'a> InstallManager<'a> {
             });
         }
 
+        let spinner = ui::spinner::Spinner::open();
+
         let graph_run
             = graph.run().await;
+
+        spinner.close();
 
         if let Some(error) = graph_run.get_failed() {
             println!("Graph errors: {:#?}", error);

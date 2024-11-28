@@ -182,6 +182,9 @@ pub enum Error {
     #[error("Child process failed ({0})")]
     ChildProcessFailed(String),
 
+    #[error("Child process failed ({0}); check {1} for details")]
+    ChildProcessFailedWithLog(String, Path),
+
     #[error("Failed to interpret as an utf8 string")]
     FromUtf8Error(#[from] std::string::FromUtf8Error),
 
@@ -226,6 +229,9 @@ pub enum Error {
 
     #[error("Invalid resolution")]
     InvalidResolution(String),
+
+    #[error("Task timeout")]
+    TaskTimeout,
 }
 
 impl Error {

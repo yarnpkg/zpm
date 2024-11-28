@@ -489,14 +489,19 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
             package_meta.unplugged = Some(true);
         }
 
+        // If the builds are disabled by default, let's reflect that in the
+        // package's meta
+        if project.config.project.enable_scripts.value == false && package_meta.built.is_none() {
+            package_meta.built = Some(false);
+        }
+
         // We don't need to run the build if the package was marked as
         // incompatible with the current system (even if the package isn't
         // marked as optional).
         //
-        let is_build_enabled_for_system = match &package_info {
-            Some(info) => info.requirements.validate(&system_description),
-            None => false,
-        };
+        let is_build_enabled_for_system = package_info.as_ref()
+            .map(|info| info.requirements.validate(&system_description))
+            .unwrap_or(false);
 
         if !is_build_enabled_for_system {
             package_meta.built = Some(false);

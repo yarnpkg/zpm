@@ -2,7 +2,7 @@ use crate::{error::Error, fetchers, install::{InstallContext, InstallOpResult, I
 
 pub async fn resolve_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::PatchRange, mut dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     let inner_locator
-        = dependencies[1].as_resolved().resolution.locator.clone();
+        = dependencies[1].as_resolved_locator().clone();
 
     let reference = reference::PatchReference {
         inner: Box::new(UrlEncoded::new(inner_locator)),
