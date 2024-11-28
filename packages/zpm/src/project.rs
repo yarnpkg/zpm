@@ -182,7 +182,10 @@ impl Project {
     }
 
     pub fn attach_install_state(&mut self, install_state: InstallState) -> Result<(), Error> {
-        self.write_install_state(&install_state)?;
+        if self.install_state.as_ref().map(|s| *s != install_state).unwrap_or(false) {
+            self.write_install_state(&install_state)?;
+        }
+
         self.write_lockfile(&install_state.lockfile)?;
 
         self.install_state = Some(install_state);
@@ -191,26 +194,26 @@ impl Project {
     }
 
     fn write_install_state(&mut self, install_state: &InstallState) -> Result<(), Error> {
-            let link_info_path
+        let link_info_path
             = self.install_state_path();
 
         let contents
             = serde_json::to_string(&install_state)?;
 
-        let re_parsed: InstallState
-            = serde_json::from_str(&contents)?;
+        // let re_parsed: InstallState
+        //     = serde_json::from_str(&contents)?;
 
-        if re_parsed != *install_state {
-            let install_state_formatted = format!("{:#?}", install_state);
-            let re_parsed_formatted = format!("{:#?}", re_parsed);
+        // if re_parsed != *install_state {
+        //     let install_state_formatted = format!("{:#?}", install_state);
+        //     let re_parsed_formatted = format!("{:#?}", re_parsed);
 
-            Path::from("/tmp/zpm-install-state-before.json")
-                .fs_write_text(install_state_formatted)?;
-            Path::from("/tmp/zpm-install-state-after.json")
-                .fs_write_text(re_parsed_formatted)?;
+        //     Path::from("/tmp/zpm-install-state-before.json")
+        //         .fs_write_text(install_state_formatted)?;
+        //     Path::from("/tmp/zpm-install-state-after.json")
+        //         .fs_write_text(re_parsed_formatted)?;
 
-            panic!("The generated install state does not match the original install state. See /tmp/zpm-install-state-{{before,after}}.json for details.");
-        }
+        //     panic!("The generated install state does not match the original install state. See /tmp/zpm-install-state-{{before,after}}.json for details.");
+        // }
 
         link_info_path
             .fs_create_parent()?

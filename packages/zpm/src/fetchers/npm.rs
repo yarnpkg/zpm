@@ -25,7 +25,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let registry_url
         = project.config.registry_url_for_package_data(params);
 
-    let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob_or_mock(is_mock_request, locator.clone(), ".zip", || async {
+    let cached_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let client = http_client()?;
 
         let response = client.get(registry_url.clone()).send().await
@@ -37,14 +37,12 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         formats::convert::convert_tar_gz_to_zip(&params.ident, archive)
     }).await?;
 
-    let package_directory = archive_path
+    let package_directory = cached_blob.path
         .with_join_str(params.ident.nm_subdir());
 
     Ok(FetchResult::new(PackageData::Zip {
-        archive_path,
+        cached_blob,
         context_directory: package_directory.clone(),
         package_directory,
-        data,
-        checksum,
     }))
 }

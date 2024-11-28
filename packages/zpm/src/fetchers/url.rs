@@ -5,7 +5,7 @@ use crate::{error::Error, formats, http::http_client, install::{FetchResult, Ins
 use super::PackageData;
 
 pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::UrlReference) -> Result<FetchResult, Error> {
-    let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
+    let cached_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let client = http_client()?;
 
         let response = client.get(&params.url).send().await
@@ -17,7 +17,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         formats::convert::convert_tar_gz_to_zip(&locator.ident, archive)
     }).await?;
 
-    let first_entry = formats::zip::first_entry_from_zip(&data);
+    let first_entry = formats::zip::first_entry_from_zip(&cached_blob.data);
     let manifest = first_entry
         .and_then(|entry|
             serde_json::from_slice::<Manifest>(&entry.data)
@@ -28,17 +28,15 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
-    let package_directory = archive_path
+    let package_directory = cached_blob.path
         .with_join_str(locator.ident.nm_subdir());
 
     Ok(FetchResult {
         resolution: Some(resolution),
         package_data: PackageData::Zip {
-            archive_path,
+            cached_blob,
             context_directory: package_directory.clone(),
             package_directory,
-            data,
-            checksum,
         },
     })
 }

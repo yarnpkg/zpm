@@ -11,7 +11,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let parent_data = dependencies[0].as_fetched();
     let original_data = dependencies[1].as_fetched();
 
-    let (archive_path, data, checksum) = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
+    let cached_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let patch_path = match params.path.starts_with("~/") {
             true => project.project_cwd.with_join_str(&params.path[2..]),
             false => parent_data.package_data.context_directory().with_join_str(&params.path),
@@ -30,7 +30,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     }).await?;
 
     let first_entry
-        = formats::zip::first_entry_from_zip(&data);
+        = formats::zip::first_entry_from_zip(&cached_blob.data);
 
     let manifest = first_entry
         .and_then(|entry|
@@ -42,17 +42,15 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
-    let package_directory = archive_path
+    let package_directory = cached_blob.path
         .with_join_str(locator.ident.nm_subdir());
 
     Ok(FetchResult {
         resolution: Some(resolution),
         package_data: PackageData::Zip {
-            archive_path,
+            cached_blob,
             context_directory: package_directory.clone(),
             package_directory,
-            data,
-            checksum,
         },
     })
 }

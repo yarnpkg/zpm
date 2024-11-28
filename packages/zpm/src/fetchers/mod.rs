@@ -1,7 +1,7 @@
 use arca::Path;
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, formats, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, primitives::{reference, Locator, Reference}};
+use crate::{cache::CachedBlob, error::Error, formats, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, primitives::{reference, Locator, Reference}};
 
 pub mod folder;
 pub mod git;
@@ -42,16 +42,13 @@ pub enum PackageData {
 
     Zip {
         /** Path of the .zip file on disk */
-        archive_path: Path,
+        cached_blob: CachedBlob,
 
         /** Directory from which relative links from link:/file:/portal: dependencies will be resolved */
         context_directory: Path,
 
         /** Directory that contains the package.json file */
         package_directory: Path,
-
-        data: Vec<u8>,
-        checksum: Sha256,
     },
 }
 
@@ -61,7 +58,7 @@ impl PackageData {
         match self {
             PackageData::Local {package_directory, ..} => package_directory,
             PackageData::MissingZip {archive_path, ..} => archive_path,
-            PackageData::Zip {archive_path, ..} => archive_path,
+            PackageData::Zip {cached_blob, ..} => &cached_blob.path,
         }
     }
 
@@ -92,7 +89,7 @@ impl PackageData {
         match self {
             PackageData::Local {..} => None,
             PackageData::MissingZip {..} => None,
-            PackageData::Zip {checksum, ..} => Some(checksum.clone()),
+            PackageData::Zip {cached_blob, ..} => cached_blob.checksum.clone(),
         }
     }
 
@@ -110,9 +107,9 @@ impl PackageData {
                 formats::entries_from_folder(package_directory)
             },
 
-            PackageData::Zip {data, ..} => {
+            PackageData::Zip {cached_blob, ..} => {
                 let entries
-                    = formats::zip::entries_from_zip(data)?;
+                    = formats::zip::entries_from_zip(&cached_blob.data)?;
 
                 let package_subpath
                     = self.package_subpath();

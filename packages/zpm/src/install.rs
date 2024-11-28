@@ -456,7 +456,7 @@ impl<'a> InstallManager<'a> {
         }
 
         if let Some(package_data) = package_data {
-            self.record_fetch(resolution.locator.clone(), package_data.clone());
+            self.record_fetch(resolution.locator.clone(), package_data);
         }
     }
 
@@ -465,7 +465,7 @@ impl<'a> InstallManager<'a> {
     }
 
     fn record_fetch(&mut self, locator: Locator, package_data: PackageData) {
-        self.result.package_data.insert(locator.clone(), package_data.clone());
+        self.result.package_data.insert(locator.clone(), package_data);
     }
 }
 

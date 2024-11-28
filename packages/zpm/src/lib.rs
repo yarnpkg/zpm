@@ -1,6 +1,7 @@
 #![deny(unused_crate_dependencies)]
 
 use console_subscriber as _;
+use ring as _;
 
 pub mod build;
 pub mod cache;

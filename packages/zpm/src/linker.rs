@@ -173,9 +173,9 @@ fn get_package_info(package_data: &PackageData) -> Result<Option<PackageInfo>, E
             Ok(None)
         },
 
-        PackageData::Zip {data, ..} => {
+        PackageData::Zip {cached_blob, ..} => {
             let first_entry
-                = formats::zip::first_entry_from_zip(data)?;
+                = formats::zip::first_entry_from_zip(&cached_blob.data)?;
 
             Ok(Some(serde_json::from_slice::<PackageInfo>(&first_entry.data)?))
         },
@@ -510,7 +510,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         let relevant_build_entries = match physical_package_data {
             PackageData::Local {..} => vec![],
             PackageData::MissingZip {..} => vec![],
-            PackageData::Zip {data, ..} => formats::zip::entries_from_zip(data)?,
+            PackageData::Zip {cached_blob, ..} => formats::zip::entries_from_zip(&cached_blob.data)?,
         };
 
         let build_commands
@@ -519,9 +519,9 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         let mut is_physically_on_disk = true;
         let mut is_freshly_unplugged = false;
 
-        if let PackageData::Zip {data, ..} = physical_package_data {
+        if let PackageData::Zip {cached_blob, ..} = physical_package_data {
             if check_extract(&package_info, &package_meta, &build_commands, &relevant_build_entries) {
-                (package_location_abs, is_freshly_unplugged) = extract_archive(&project.project_cwd, locator, physical_package_data, data)?;
+                (package_location_abs, is_freshly_unplugged) = extract_archive(&project.project_cwd, locator, physical_package_data, &cached_blob.data)?;
             } else {
                 is_physically_on_disk = false;
             }

@@ -5,10 +5,25 @@ use std::sync::Arc;
 use arca::Path;
 use bincode::{self, Decode, Encode};
 use futures::Future;
+use serde::{Deserialize, Serialize};
 use sha2::Digest;
+use tokio::io::AsyncReadExt;
 
 use crate::error::Error;
 use crate::hash::Sha256;
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
+pub struct CachedBlob {
+    pub path: Path,
+    pub data: Vec<u8>,
+    pub checksum: Option<Sha256>,
+}
+
+#[derive(Debug)]
+pub struct SerializedResult<T> {
+    pub path: Path,
+    pub data: T,
+}
 
 #[derive(Clone)]
 pub struct CompositeCache {
@@ -29,23 +44,7 @@ impl CompositeCache {
         panic!("Expected at least one cache to be set");
     }
 
-    pub async fn upsert_blob_or_mock<K, R, F>(&self, is_mock_request: bool, key: K, ext: &str, func: F) -> Result<(Path, Vec<u8>, Sha256), Error>
-    where
-        K: Clone + Decode + Encode,
-        R: Future<Output = Result<Vec<u8>, Error>>,
-        F: FnOnce() -> R,
-    {
-        if is_mock_request {
-            let data = func().await?;
-            let checksum = Sha256::from_data(&data);
-
-            Ok((Path::new(), data, checksum))
-        } else {
-            self.upsert_blob(key, ext, func).await
-        }
-    }
-
-    pub async fn upsert_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<(Path, Vec<u8>, Sha256), Error>
+    pub async fn upsert_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<CachedBlob, Error>
     where
         K: Clone + Decode + Encode,
         R: Future<Output = Result<Vec<u8>, Error>>,
@@ -54,7 +53,7 @@ impl CompositeCache {
         if let Some(ref cache) = self.local_cache {
             return cache.upsert_blob(key.clone(), ext, || async {
                 if let Some(ref cache) = self.global_cache {
-                    Ok(cache.upsert_blob(key, ext, func).await?.1)
+                    Ok(cache.upsert_blob(key, ext, func).await?.data)
                 } else {
                     func().await
                 }
@@ -68,7 +67,7 @@ impl CompositeCache {
         panic!("Expected at least one cache to be set");
     }
 
-    pub async fn upsert_serialized<K, T, R, F>(&self, key: K, func: F) -> Result<(Path, T), Error>
+    pub async fn upsert_serialized<K, T, R, F>(&self, key: K, func: F) -> Result<SerializedResult<T>, Error>
     where
         K: Clone + Encode + Decode,
         T: Encode + Decode + std::fmt::Debug,
@@ -78,7 +77,7 @@ impl CompositeCache {
         if let Some(ref cache) = self.local_cache {
             return cache.upsert_serialized(key.clone(), || async {
                 if let Some(ref cache) = self.global_cache {
-                    Ok(cache.upsert_serialized(key, func).await?.1)
+                    Ok(cache.upsert_serialized(key, func).await?.data)
                 } else {
                     func().await
                 }
@@ -124,7 +123,7 @@ impl DiskCache {
         Ok(key_path)
     }
 
-    pub async fn upsert_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<(Path, Vec<u8>, Sha256), Error>
+    pub async fn upsert_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<CachedBlob, Error>
     where
         K: Decode + Encode,
         R: Future<Output = Result<Vec<u8>, Error>>,
@@ -136,26 +135,39 @@ impl DiskCache {
             = key_path.to_path_buf();
 
         let read
-            = std::fs::read(key_path_buf.clone());
+            = tokio::fs::read(key_path_buf.clone()).await;
 
-        let data = match read {
-            Ok(data) => data,
+        Ok(match read {
+            Ok(data) => {
+                CachedBlob {
+                    path: key_path,
+                    data,
+                    checksum: None,
+                }    
+            },
+
             Err(err) => {
                 if err.kind() != std::io::ErrorKind::NotFound {
                     return Err(err)?;
                 }
 
-                self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?
-            },
-        };
+                let data = self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?;
 
-        Ok(tokio::task::spawn(async move {
-            let checksum = Sha256::from_data(&data);
-            (key_path, data, checksum)
-        }).await.unwrap())
+                tokio::task::spawn(async move {
+                    let checksum
+                        = Some(Sha256::from_data(&data));
+
+                    CachedBlob {
+                        path: key_path,
+                        data,
+                        checksum,
+                    }
+                }).await.unwrap()
+            },
+        })
     }
 
-    pub async fn upsert_serialized<K, T, R, F>(&self, key: K, func: F) -> Result<(Path, T), Error>
+    pub async fn upsert_serialized<K, T, R, F>(&self, key: K, func: F) -> Result<SerializedResult<T>, Error>
     where
         K: Encode + Decode,
         T: Encode + Decode + std::fmt::Debug,
@@ -175,11 +187,11 @@ impl DiskCache {
         let key_path_buf = key_path
             .to_path_buf();
 
-        let data = match File::open(&key_path_buf) {
+        let data = match tokio::fs::File::open(&key_path_buf).await {
             Ok(mut file) => {
                 let mut buffer = Vec::new();
 
-                file.read_to_end(&mut buffer)?;
+                file.read_to_end(&mut buffer).await?;
 
                 let decode: Result<(T, _), _>
                     = bincode::decode_from_slice(&buffer, self.data_config);
@@ -200,7 +212,10 @@ impl DiskCache {
             }
         };
 
-        data.map(|data| (key_path, data))
+        data.map(|data| SerializedResult {
+            path: key_path,
+            data,
+        })
     }
 
     async fn fetch_and_store_blob<R, F>(&self, key_path: PathBuf, func: F) -> Result<Vec<u8>, Error>
