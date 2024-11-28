@@ -87,16 +87,17 @@ async fn prepare_npm_project(folder_path: &Path) -> Result<Vec<u8>, Error> {
 
     let stdout = &pack_result.output().stdout;
 
-    let last_line_index = stdout.iter()
+    // We retrieve the last line of the output; it's the name of the pack file
+    let first_char_index = stdout.iter()
         .enumerate()
         .rev()
         .skip(1)
         .find_position(|(_, c)| **c == b'\n')
-        .map(|(_, (i, _))| i)
-        .unwrap();
+        .map(|(_, (i, _))| i + 1)
+        .unwrap_or(0);
 
     let last_line
-        = &stdout[last_line_index + 1..stdout.len() - 1];
+        = &stdout[first_char_index..stdout.len() - 1];
 
     let pack_file
         = String::from_utf8(last_line.to_vec())?;
