@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, sync::Arc};
+use std::{collections::HashMap, fs, io::ErrorKind, sync::Arc};
 
 use arca::Path;
 use serde::{Deserialize, Serialize};
@@ -208,8 +208,14 @@ pub fn parse_manifest(manifest_text: String) -> Result<Manifest, Error> {
 }
 
 pub fn read_manifest(p: &Path) -> Result<Manifest, Error> {
-    let manifest_text = fs::read_to_string(p.to_path_buf())?;
-    let manifest_data = serde_json::from_str(manifest_text.as_str())?;
+    let manifest_text = fs::read_to_string(p.to_path_buf())
+        .map_err(|err| match err.kind() {
+            ErrorKind::NotFound | ErrorKind::NotADirectory => Error::ManifestNotFound,
+            _ => err.into(),
+        })?;
+
+    let manifest_data
+        = serde_json::from_str(manifest_text.as_str())?;
 
     Ok(manifest_data)
 }

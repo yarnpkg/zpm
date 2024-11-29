@@ -26,6 +26,9 @@ pub enum Error {
     #[error("Invalid ident ({0})")]
     InvalidIdent(String),
 
+    #[error("Package manifest not found")]
+    ManifestNotFound,
+
     #[error("Invalid descriptor ({0})")]
     InvalidDescriptor(String),
 

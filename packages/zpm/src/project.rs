@@ -1,11 +1,13 @@
-use std::{collections::{BTreeMap, HashMap}, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
+use std::{collections::{BTreeMap, HashMap, HashSet}, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
 
 use arca::{Path, ToArcaPath};
+use itertools::Itertools;
 use serde::Deserialize;
+use walkdir::WalkDir;
 use wax::walk::{Entry, FileIterator};
 use zpm_macros::track_time;
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{read_manifest, BinField, BinManifest, Manifest, ResolutionOverride}, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, script::Binary};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, fetchers::workspace, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{read_manifest, BinField, BinManifest, Manifest, ResolutionOverride}, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, script::Binary};
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
 pub const MANIFEST_NAME: &str = "package.json";
@@ -174,9 +176,13 @@ impl Project {
         }
 
         let src = install_state_path
-            .fs_read_text()?;
+            .fs_read()?;
 
-        self.install_state = serde_json::from_str(&src)?;
+        let (install_state, _): (InstallState, _)
+            = bincode::serde::decode_from_slice(src.as_slice(), bincode::config::standard()).unwrap();
+
+        self.install_state
+            = Some(install_state);
 
         Ok(self)
     }
@@ -198,7 +204,7 @@ impl Project {
             = self.install_state_path();
 
         let contents
-            = serde_json::to_string(&install_state)?;
+            = bincode::serde::encode_to_vec(install_state, bincode::config::standard()).unwrap();
 
         // let re_parsed: InstallState
         //     = serde_json::from_str(&contents)?;
@@ -467,54 +473,50 @@ impl Workspace {
         let mut workspaces = vec![];
 
         if let Some(patterns) = &self.manifest.workspaces {
-            let (negated_patterns, regular_patterns): (Vec<_>, Vec<_>) = patterns.iter()
-                .partition(|p| p.starts_with("!"));
+            let mut workspace_dirs = HashSet::new();
 
-            let regular_globs = regular_patterns.iter()
-                .map(|p| wax::Glob::new(p).map_err(|_| Error::InvalidWorkspacePattern(p.to_string())))
-                .collect::<Result<Vec<_>, _>>()?;
+            for pattern in patterns {
+                let segments = pattern.split('/')
+                    .collect::<Vec<_>>();
 
-            let negated_globs = negated_patterns.iter()
-                .map(|p| wax::Glob::new(&p[1..]).map_err(|_| Error::InvalidWorkspacePattern(p.to_string())))
-                .collect::<Result<Vec<_>, _>>()?;
+                let leading_static_segment_count = segments.iter()
+                    .take_while(|s| **s != "*")
+                    .count();
 
-            let aggregated_negated_glob
-                = wax::any(negated_globs)
-                    .unwrap();
+                let star_segment_count = segments.iter()
+                    .skip(leading_static_segment_count)
+                    .take_while(|s| **s == "*")
+                    .count();
 
-            for glob in regular_globs {
-                let it = glob
-                    .walk(self.path.to_path_buf())
-                    .not(aggregated_negated_glob.clone())
-                    .unwrap();
+                if leading_static_segment_count + star_segment_count != segments.len() {
+                    return Err(Error::InvalidWorkspacePattern(pattern.clone()));
+                }
 
-                for entry in it {
-                    let path = entry
-                        .unwrap()
-                        .path()
-                        .to_arca();
+                let prefix_path = segments.iter()
+                    .take(leading_static_segment_count)
+                    .join("/");
 
-                    if path.with_join_str(MANIFEST_NAME).fs_is_file() {
-                        workspaces.push(Workspace::from_path(&self.path, path)?);
-                    }
+                let base_path = self.path
+                    .with_join_str(prefix_path);
+
+                let iter = WalkDir::new(base_path.to_path_buf())
+                    .min_depth(star_segment_count)
+                    .max_depth(star_segment_count)
+                    .into_iter()
+                    .filter_map(Result::ok);
+
+                for entry in iter {
+                    workspace_dirs.insert(entry.path().to_arca());
                 }
             }
 
-            // for pattern in patterns {
-            //     let glob = wax::Glob::new(pattern)
-            //         .map_err(|_| Error::InvalidWorkspacePattern(pattern.to_string()))?;
-
-            //     for entry in glob.walk(self.path.to_path_buf()) {
-            //         let path = entry
-            //             .unwrap()
-            //             .path()
-            //             .to_arca();
-
-            //         if path.with_join_str(MANIFEST_NAME).fs_is_file() {
-            //             workspaces.push(Workspace::from_path(&self.path, path)?);
-            //         }
-            //     }
-            // }
+            for workspace_dir in workspace_dirs {
+                match Workspace::from_path(&self.path, workspace_dir) {
+                    Ok(workspace) => workspaces.push(workspace),
+                    Err(Error::ManifestNotFound) => {},
+                    Err(err) => return Err(err),
+                }
+            }
         }
 
         Ok(workspaces)
