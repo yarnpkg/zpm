@@ -152,7 +152,7 @@ pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<BTreeMap<I
                 let parent_marker = "::parent=";
                 let parent_split = value.find(parent_marker);
             
-                let ident = Ident::from_str(&key)
+                let ident = Ident::from_str(key)
                     .map_err(serde::de::Error::custom)?;
                 let range = Range::from_str(&value[..parent_split.map_or(value.len(), |idx| idx)])
                     .map_err(serde::de::Error::custom)?;

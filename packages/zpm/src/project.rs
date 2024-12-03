@@ -188,7 +188,7 @@ impl Project {
 
     pub fn attach_install_state(&mut self, install_state: InstallState) -> Result<(), Error> {
         if self.install_state.as_ref().map(|s| *s != install_state).unwrap_or(true) {
-            println!("Writing install state");
+            println!("Writing install state; {:?}", self.install_state.as_ref().map(|s| *s == install_state));
             self.write_install_state(&install_state)?;
         }
 
@@ -381,7 +381,7 @@ impl Project {
             = sonic_rs::from_str::<ScriptManifest>(&manifest_text)?;
 
         if let Some(script) = manifest.scripts.as_ref().and_then(|s| s.get(name)) {
-            return Ok((active_package.clone(), script.clone()));
+            return Ok((active_package, script.clone()));
         }
 
         if !name.contains(':') {

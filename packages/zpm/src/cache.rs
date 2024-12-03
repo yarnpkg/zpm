@@ -154,7 +154,7 @@ impl DiskCache {
                     path: key_path,
                     checksum: None,
                 }.into()
-        },
+            },
 
             false => {
                 let data = self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?;

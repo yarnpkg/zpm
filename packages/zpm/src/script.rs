@@ -136,7 +136,7 @@ impl ScriptResult {
             Self::Success(_) => Ok(self),
             Self::Failure(output, program, _) => {
                 if output.stdout.is_empty() {
-                    return Err(Error::ChildProcessFailed(program.clone()));
+                    return Err(Error::ChildProcessFailed(program));
                 }
 
                 if let Ok(temp_dir) = Path::temp_dir() {
@@ -145,15 +145,15 @@ impl ScriptResult {
                     
                     // open a fd and write stdout/err into it
                     let log_write = log_path
-                        .fs_write_text(&format!("=== STDOUT ===\n\n{}\n=== STDERR ===\n\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)));
+                        .fs_write_text(format!("=== STDOUT ===\n\n{}\n=== STDERR ===\n\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)));
 
                     if log_write.is_ok() {
-                        Err(Error::ChildProcessFailedWithLog(program.clone(), log_path))
+                        Err(Error::ChildProcessFailedWithLog(program, log_path))
                     } else {
-                        Err(Error::ChildProcessFailed(program.clone()))
+                        Err(Error::ChildProcessFailed(program))
                     }
                 } else {
-                    Err(Error::ChildProcessFailed(program.clone()))
+                    Err(Error::ChildProcessFailed(program))
                 }
             },
         }

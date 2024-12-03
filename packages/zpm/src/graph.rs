@@ -11,7 +11,7 @@ pub trait GraphCache<TCtx, TIn, TOut> where Self: Sized {
 }
 
 pub trait GraphIn<'a, TCtx, TOut, TErr> where Self: Sized, TCtx: Send {
-    fn graph_dependencies(&self, ctx: &TCtx, dependencies: &Vec<&TOut>) -> Vec<Self>;
+    fn graph_dependencies(&self, ctx: &TCtx, dependencies: &[&TOut]) -> Vec<Self>;
     fn graph_run(self, ctx: TCtx, dependencies: Vec<TOut>) -> impl std::future::Future<Output = Result<TOut, TErr>> + Send + 'a;
 }
 
@@ -104,7 +104,7 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
     pub fn register(&mut self, op: TIn) {
         if !self.tasks.contains_key(&op) {
             let dependencies
-                = op.graph_dependencies(&self.context, &vec![]);
+                = op.graph_dependencies(&self.context, &[]);
 
             if dependencies.is_empty() {
                 self.tasks.insert(op.clone(), (0, vec![]));

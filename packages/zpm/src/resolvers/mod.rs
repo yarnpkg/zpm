@@ -138,7 +138,7 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
     }
 }
 
-pub async fn resolve_locator<'a>(context: InstallContext<'a>, locator: Locator, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     match &locator.reference {
         Reference::Link(params)
             => link::resolve_locator(&context, &locator, params),

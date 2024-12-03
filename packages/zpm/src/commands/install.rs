@@ -16,9 +16,6 @@ impl Install {
         let mut project
             = project::Project::new(None)?;
 
-        project
-            .import_install_state();
-
         print_time!("Before install");
         project.run_install().await?;
 

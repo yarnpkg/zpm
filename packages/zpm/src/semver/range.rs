@@ -49,7 +49,7 @@ impl Range {
     pub fn check<P: Borrow<Version>>(&self, version: P) -> bool {
         let mut n = 0;
 
-        return self.check_from(version.borrow(), &mut n);
+        self.check_from(version.borrow(), &mut n)
     }
 
     fn check_from(&self, version: &Version, n: &mut usize) -> bool {

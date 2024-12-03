@@ -3,12 +3,19 @@ use std::{collections::BTreeMap, fmt::{self, Debug}, hash::Hash, marker::Phantom
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{config::ENV_CONFIG, error::Error, hash::Sha256, primitives::{Descriptor, Locator}, resolvers::Resolution, serialize::Serialized};
+use crate::{config::ENV_CONFIG, content_flags::ContentFlags, error::Error, hash::Sha256, primitives::{Descriptor, Locator}, resolvers::Resolution, serialize::Serialized};
+
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    value == &T::default()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockfileEntry {
     pub checksum: Option<Sha256>,
     pub resolution: Resolution,
+
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub flags: ContentFlags,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -169,7 +176,7 @@ impl<'de, T> Deserialize<'de> for MultiKey<T> where T: std::str::FromStr<Err = E
             marker: PhantomData<fn() -> T>,
         }
 
-        impl<'de, T> Visitor<'de> for VecVisitor<T> where T: std::str::FromStr<Err = Error> {
+        impl<T> Visitor<'_> for VecVisitor<T> where T: std::str::FromStr<Err = Error> {
             type Value = Vec<T>;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -259,6 +266,7 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
                 optional_dependencies: Default::default(),
                 missing_peer_dependencies: Default::default(),
             },
+            flags: Default::default(),
         });
     }
 

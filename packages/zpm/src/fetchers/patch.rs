@@ -17,7 +17,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
         let original_entries = match &original_data.package_data {
             PackageData::Local {package_directory, ..} => {
-                formats::entries_from_folder(&package_directory)?
+                formats::entries_from_folder(package_directory)?
             },
 
             PackageData::Zip {..} => {

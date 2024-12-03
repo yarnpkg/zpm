@@ -22,7 +22,7 @@ impl NoopSerializer {
     }
 }
 
-impl<'a> Serializer for &'a mut NoopSerializer {
+impl Serializer for &mut NoopSerializer {
     type Ok = ();
     type Error = fmt::Error;
 

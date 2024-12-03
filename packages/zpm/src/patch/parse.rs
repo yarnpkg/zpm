@@ -211,7 +211,7 @@ fn parse_file_mode(mode: &str) -> Result<u32, Error> {
     Ok(mode)
 }
 
-impl<'a> Default for PatchParser<'a> {
+impl Default for PatchParser<'_> {
     fn default() -> Self {
         PatchParser {
             result: Vec::new(),
@@ -363,25 +363,25 @@ impl<'a> PatchParser<'a> {
 
                         self.current_file_patch.diff_line_from_path = m.get(1).map(|m| m.as_str());
                         self.current_file_patch.diff_line_to_path = m.get(2).map(|m| m.as_str());
-                    }  else if line.starts_with("old mode ") {
-                        self.current_file_patch.old_mode = Some(&line[9..]);
-                    } else if line.starts_with("new mode ") {
-                        self.current_file_patch.new_mode = Some(&line[9..]);
-                    } else if line.starts_with("deleted file mode ") {
-                        self.current_file_patch.deleted_file_mode = Some(&line[18..]);
-                    } else if line.starts_with("new file mode ") {
-                        self.current_file_patch.new_file_mode = Some(&line[14..]);
-                    } else if line.starts_with("rename from ") {
-                        self.current_file_patch.rename_from = Some(&line[12..]);
-                    } else if line.starts_with("rename to ") {
-                        self.current_file_patch.rename_to = Some(&line[10..]);
+                    }  else if let Some(rest) = line.strip_prefix("old mode ") {
+                        self.current_file_patch.old_mode = Some(rest);
+                    } else if let Some(rest) = line.strip_prefix("new mode ") {
+                        self.current_file_patch.new_mode = Some(rest);
+                    } else if let Some(rest) = line.strip_prefix("deleted file mode ") {
+                        self.current_file_patch.deleted_file_mode = Some(rest);
+                    } else if let Some(rest) = line.strip_prefix("new file mode ") {
+                        self.current_file_patch.new_file_mode = Some(rest);
+                    } else if let Some(rest) = line.strip_prefix("rename from ") {
+                        self.current_file_patch.rename_from = Some(rest);
+                    } else if let Some(rest) = line.strip_prefix("rename to ") {
+                        self.current_file_patch.rename_to = Some(rest);
                     } else if line.starts_with("index ") {
                         if let Some(m) = INDEX_REGEXP.captures(line) {
                             self.current_file_patch.before_hash = m.get(1).map(|m| m.as_str());
                             self.current_file_patch.after_hash = m.get(2).map(|m| m.as_str());
                         }
-                    } else if line.starts_with("semver exclusivity ") {
-                        self.current_file_patch.semver_exclusivity = Some(&line[20..]);
+                    } else if let Some(rest) = line.strip_prefix("semver exclusivity ") {
+                        self.current_file_patch.semver_exclusivity = Some(rest);
                     } else if line.starts_with("--- ") {
                         self.current_file_patch.from_path = Some(&line[6..]);
                     } else if line.starts_with("+++ ") {

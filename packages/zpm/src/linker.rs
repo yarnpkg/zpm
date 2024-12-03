@@ -335,9 +335,10 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         // should always be the same for the same package, so we keep them in
         // the install state so we don't have to recompute them at every install.
         //
-        let package_flags = install.install_state.package_flags
+        let package_flags = &install.install_state.lockfile.entries
             .get(&locator.physical_locator())
-            .expect("Expected package flags to be set");
+            .expect("Expected package flags to be set")
+            .flags;
 
         // Optional dependencies are always unplugged, as we have no way to
         // know whether they would be unplugged if we were to download them
@@ -403,7 +404,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
                 discard_from_lookup,
             });
 
-        if package_flags.build_commands.len() > 0 && package_meta.built.unwrap_or(true) {
+        if !package_flags.build_commands.is_empty() && package_meta.built.unwrap_or(true) {
             let build_cwd = match is_physically_on_disk {
                 true => package_location_rel.clone(),
                 false => {
