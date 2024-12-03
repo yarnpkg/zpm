@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
+use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
 
 use arca::{Path, ToArcaPath};
 use itertools::Itertools;
@@ -178,7 +178,7 @@ impl From<ScriptResult> for ExitStatus {
 
 pub struct ScriptEnvironment {
     cwd: Path,
-    env: HashMap<String, String>,
+    env: BTreeMap<String, String>,
     shell_forwarding: bool,
 }
 
@@ -192,7 +192,7 @@ impl ScriptEnvironment {
     pub fn new() -> Self {
         Self {
             cwd: std::env::current_dir().unwrap().to_arca(),
-            env: HashMap::new(),
+            env: BTreeMap::new(),
             shell_forwarding: false,
         }
     }

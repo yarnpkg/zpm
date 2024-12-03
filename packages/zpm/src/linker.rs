@@ -1,34 +1,14 @@
-use std::{collections::{BTreeMap, BTreeSet, HashMap, HashSet}, fs::Permissions, os::unix::fs::PermissionsExt, sync::LazyLock, vec};
+use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
 
 use arca::{Path, ToArcaPath};
 use itertools::Itertools;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, formats::{self, Entry}, install::Install, primitives::{range::PackageSelector, Descriptor, Ident, Locator, Reference}, project::Project, resolvers::Resolution, settings, system, yarn_serialization_protocol};
+use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, formats, install::Install, primitives::{range::PackageSelector, Descriptor, Ident, Locator, Reference}, project::Project, resolvers::Resolution, settings, yarn_serialization_protocol};
 
 fn is_default<T: Default + PartialEq>(t: &T) -> bool {
     t == &T::default()
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PnpLinkerData {
-    #[serde(default, skip_serializing_if = "is_default")]
-    enable_build: bool,
-
-    #[serde(default, skip_serializing_if = "is_default")]
-    enable_esm: bool,
-
-    #[serde(default, skip_serializing_if = "is_default")]
-    enable_extract: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(tag = "linkerType")]
-pub enum LinkerData {
-    Pnp(PnpLinkerData),
 }
 
 #[derive(Debug, Default, Clone, Deserialize, PartialEq, Eq, Serialize)]
@@ -46,140 +26,8 @@ struct PackageMeta {
 #[serde(rename_all = "camelCase")]
 struct TopLevelConfiguration {
     #[serde(default)]
-    #[serde_as(as = "HashMap<_, _>")]
+    #[serde_as(as = "BTreeMap<_, _>")]
     dependencies_meta: Vec<(PackageSelector, PackageMeta)>,
-}
-use serde_with::DefaultOnError;
-#[serde_as]
-#[derive(Debug, Default, Clone, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PackageInfo {
-    #[serde(default)]
-    r#type: Option<String>,
-
-    #[serde(default)]
-    #[serde(flatten)]
-    requirements: system::Requirements,
-
-    #[serde(default,)]
-    prefer_unplugged: Option<bool>,
-
-    #[serde(default)]
-    #[serde_as(deserialize_as = "DefaultOnError")]
-    scripts: HashMap<String, String>,
-}
-
-static UNPLUG_SCRIPTS: &[&str] = &["preinstall", "install", "postinstall"];
-
-static UNPLUG_EXT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\.(exe|bin|h|hh|hpp|c|cc|cpp|java|jar|node)$").unwrap()
-});
-
-fn check_build(locator: &Locator, package_info: &Option<PackageInfo>, package_meta: &PackageMeta, entries: &[Entry]) -> Vec<build::Command> {
-    if !package_meta.built.unwrap_or(true) {
-        return vec![];
-    }
-
-    let binding_gyp_name
-        = format!("node_modules/{}/binding.gyp", locator.ident.as_str());
-
-    if let Some(package_info) = package_info {
-        let build_scripts = UNPLUG_SCRIPTS.iter()
-            .filter_map(|k| package_info.scripts.get(*k))
-            .map(|v| build::Command::Script(v.clone()))
-            .collect::<Vec<_>>();
-
-        if !build_scripts.is_empty() {
-            return build_scripts;
-        }
-    }
-
-    if entries.iter().any(|entry| entry.name == binding_gyp_name) {
-        return vec![build::Command::Program("node-gyp".to_string(), vec!["rebuild".to_string()])];
-    }
-
-    vec![]
-}
-
-fn check_extract(package_info: &Option<PackageInfo>, package_meta: &PackageMeta, build_commands: &[build::Command], entries: &[Entry]) -> bool {
-    if let Some(unplugged) = package_meta.unplugged {
-        return unplugged;
-    }
-
-    if let Some(package_info) = package_info {
-        if let Some(prefer_unplugged) = package_info.prefer_unplugged {
-            return prefer_unplugged;
-        }
-    }
-
-    if !build_commands.is_empty() {
-        return true;
-    }
-
-    if entries.iter().any(|entry| UNPLUG_EXT_REGEX.is_match(&entry.name)) {
-        return true;
-    }
-
-    false
-}
-
-// fn get_pnp_linker_data(locator: &Locator, data: &PackageData) -> Result<PnpLinkerData, Error> {
-//     match data {
-//         PackageData::Zip {data, ..} => {
-//             let first_entry = first_entry_from_zip(&data);
-//             let manifest = first_entry
-//                 .and_then(|entry|
-//                     serde_json::from_slice::<PackageInfo>(&entry.data)
-//                         .map_err(Arc::new)
-//                         .map_err(Error::InvalidJsonData)
-//                 )?;
-        
-//             let enable_build = check_build(&manifest);
-//             let enable_esm = manifest.r#type.as_ref().is_some_and(|v| v == "module");
-//             let enable_extract = check_extract(locator, &manifest);
-
-//             Ok(PnpLinkerData {
-//                 enable_build,
-//                 enable_esm,
-//                 enable_extract,
-//             })
-//         }
-
-//         _ => {
-//             Ok(PnpLinkerData {
-//                 enable_build: false,
-//                 enable_esm: false,
-//                 enable_extract: false,
-//             })
-//         }
-//     }
-// }
-
-fn get_package_info(package_data: &PackageData) -> Result<Option<PackageInfo>, Error> {
-    match package_data {
-        PackageData::Local {package_directory, discard_from_lookup, ..} => {
-            if *discard_from_lookup {
-                return Ok(None);
-            }
-
-            let manifest_text = package_directory
-                .with_join_str("package.json")
-                .fs_read_text()?;
-
-            Ok(Some(serde_json::from_str::<PackageInfo>(&manifest_text)?))
-        },
-
-        PackageData::MissingZip {..} => {
-            Ok(None)
-        },
-
-        PackageData::Zip {cached_blob, ..} => {
-            let first_entry
-                = formats::zip::first_entry_from_zip(&cached_blob.data)?;
-
-            Ok(Some(serde_json::from_slice::<PackageInfo>(&first_entry.data)?))
-        },
-    }
 }
 
 fn remove_nm(nm_path: Path) -> Result<(), Error> {
@@ -220,7 +68,7 @@ fn remove_nm(nm_path: Path) -> Result<(), Error> {
     }
 }
 
-fn extract_archive(project_root: &Path, locator: &Locator, package_data: &PackageData, data: &[u8]) -> Result<(Path, bool), Error> {
+fn extract_archive(project_root: &Path, locator: &Locator, package_data: &PackageData) -> Result<(Path, bool), Error> {
     let extract_path = project_root
         .with_join_str(".yarn/unplugged")
         .with_join_str(locator.slug());
@@ -233,7 +81,12 @@ fn extract_archive(project_root: &Path, locator: &Locator, package_data: &Packag
         .with_join_str(".ready");
 
     if !ready_path.fs_exists() && !matches!(package_data, &PackageData::MissingZip {..}) {
-        for entry in formats::zip::entries_from_zip(data)? {
+        let package_bytes = match package_data {
+            PackageData::Zip {archive_path, ..} => archive_path.fs_read()?,
+            _ => panic!("Expected a zip archive"),
+        };
+
+        for entry in formats::zip::entries_from_zip(&package_bytes)? {
             let target_path = extract_path
                 .with_join(&Path::from(&entry.name));
 
@@ -356,14 +209,14 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
     Ok(())
 }
 
-fn populate_build_entry_dependencies(package_build_entries: &HashMap<Locator, usize>, locator_resolutions: &HashMap<Locator, Resolution>, descriptor_to_locator: &HashMap<Descriptor, Locator>) -> Result<HashMap<usize, HashSet<usize>>, Error> {
-    let mut package_build_dependencies = HashMap::new();
+fn populate_build_entry_dependencies(package_build_entries: &BTreeMap<Locator, usize>, locator_resolutions: &BTreeMap<Locator, Resolution>, descriptor_to_locator: &BTreeMap<Descriptor, Locator>) -> Result<BTreeMap<usize, BTreeSet<usize>>, Error> {
+    let mut package_build_dependencies = BTreeMap::new();
 
     for locator in package_build_entries.keys() {
-        let mut build_dependencies = HashSet::new();
+        let mut build_dependencies = BTreeSet::new();
 
         let mut queue = vec![locator.clone()];
-        let mut seen: HashSet<_> = HashSet::new();
+        let mut seen: BTreeSet<_> = BTreeSet::new();
 
         seen.insert(locator.clone());
 
@@ -414,9 +267,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
     let mut dependency_tree_roots = Vec::new();
 
     let mut all_build_entries = Vec::new();
-    let mut package_build_entries = HashMap::new();
-
-    let system_description = system::Description::from_current();
+    let mut package_build_entries = BTreeMap::new();
 
     for (locator, resolution) in &tree.locator_resolutions {
         let physical_package_data = install.package_data.get(&locator.physical_locator())
@@ -466,9 +317,9 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
             _ => false,
         };
 
-        let package_info
-            = get_package_info(physical_package_data)?;
-
+        // The package meta is based on the top-level configuration extracted
+        // from the `dependenciesMeta` field.
+        //
         let mut package_meta = dependencies_meta
             .get(&locator.ident)
             .and_then(|meta_list| {
@@ -479,6 +330,14 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
             })
             .cloned()
             .unwrap_or_default();
+
+        // The package flags are based on the actual package content. The flags
+        // should always be the same for the same package, so we keep them in
+        // the install state so we don't have to recompute them at every install.
+        //
+        let package_flags = install.install_state.package_flags
+            .get(&locator.physical_locator())
+            .expect("Expected package flags to be set");
 
         // Optional dependencies are always unplugged, as we have no way to
         // know whether they would be unplugged if we were to download them
@@ -498,32 +357,17 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         // incompatible with the current system (even if the package isn't
         // marked as optional).
         //
-        let is_build_enabled_for_system = package_info.as_ref()
-            .map(|info| info.requirements.validate(&system_description))
-            .unwrap_or(false);
-
-        if !is_build_enabled_for_system {
+        if !package_flags.is_compatible {
             package_meta.built = Some(false);
         }
-
-        let relevant_build_entries = match physical_package_data {
-            PackageData::Local {..} => vec![],
-            PackageData::MissingZip {..} => vec![],
-            PackageData::Zip {cached_blob, ..} => formats::zip::entries_from_zip(&cached_blob.data)?,
-        };
-
-        let build_commands
-            = check_build(locator, &package_info, &package_meta, &relevant_build_entries);
 
         let mut is_physically_on_disk = true;
         let mut is_freshly_unplugged = false;
 
-        if let PackageData::Zip {cached_blob, ..} = physical_package_data {
-            if check_extract(&package_info, &package_meta, &build_commands, &relevant_build_entries) {
-                (package_location_abs, is_freshly_unplugged) = extract_archive(&project.project_cwd, locator, physical_package_data, &cached_blob.data)?;
-            } else {
-                is_physically_on_disk = false;
-            }
+        if package_flags.prefer_extracted.unwrap_or_else(|| package_meta.built == Some(true) || package_flags.suggest_extracted) {
+            (package_location_abs, is_freshly_unplugged) = extract_archive(&project.project_cwd, locator, physical_package_data)?;
+        } else {
+            is_physically_on_disk = false;
         }
 
         let package_location_rel = package_location_abs
@@ -559,7 +403,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
                 discard_from_lookup,
             });
 
-        if !build_commands.is_empty() {
+        if package_flags.build_commands.len() > 0 && package_meta.built.unwrap_or(true) {
             let build_cwd = match is_physically_on_disk {
                 true => package_location_rel.clone(),
                 false => {
@@ -575,7 +419,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
             all_build_entries.push(build::BuildRequest {
                 cwd: build_cwd,
                 locator: locator.clone(),
-                commands: build_commands,
+                commands: package_flags.build_commands.clone(),
                 allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
                 force_rebuild: is_freshly_unplugged,
             });

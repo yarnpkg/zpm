@@ -1,11 +1,14 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use bincode::{Decode, Encode};
 use rstest::rstest;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::de::{MapAccess, Visitor};
+use serde::ser::SerializeMap;
+use serde::Deserializer;
 
 use crate::hash::Sha256;
 use crate::serialize::Serialized;
@@ -107,8 +110,9 @@ impl Descriptor {
     }
 }
 
-pub fn descriptor_map_serializer<S>(value: &HashMap<Ident, Descriptor>, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
-    let mut map = BTreeMap::new();
+pub fn descriptor_map_serializer<S>(value: &BTreeMap<Ident, Descriptor>, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+    let mut map
+        = serializer.serialize_map(Some(value.len()))?;
 
     for v in value.values() {
         let serialized_range = v.to_string();
@@ -121,25 +125,54 @@ pub fn descriptor_map_serializer<S>(value: &HashMap<Ident, Descriptor>, serializ
         let ident_str = &serialized_range[0..at_split];
         let range_str = &serialized_range[at_split + 1..];
 
-        map.insert(ident_str.to_string(), range_str.to_string());
+        map.serialize_entry(ident_str, range_str)?;
     }
 
-    map.serialize(serializer)
+    map.end()
 }
 
-pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<HashMap<Ident, Descriptor>, D::Error> where D: Deserializer<'de> {
-    let values = HashMap::<String, String>::deserialize(deserializer)?;
-    let mut entries = HashMap::new();
+pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<BTreeMap<Ident, Descriptor>, D::Error> where D: Deserializer<'de> {
+    struct MyMapVisitor {}
 
-    for (k, v) in values.iter() {
-        let serialized_range = format!("{}@{}", k, v);
-        let descriptor = Descriptor::from_str(&serialized_range)
-            .map_err(serde::de::Error::custom)?;
+    impl<'de> Visitor<'de> for MyMapVisitor {
+        type Value = BTreeMap<Ident, Descriptor>;
 
-        entries.insert(descriptor.ident.clone(), descriptor);
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a map-like structure")
+        }
+
+        fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+        where
+            M: MapAccess<'de>,
+        {
+            let mut map
+                = BTreeMap::new();
+
+            while let Some((key, value)) = access.next_entry::<&str, &str>()? {
+                let parent_marker = "::parent=";
+                let parent_split = value.find(parent_marker);
+            
+                let ident = Ident::from_str(&key)
+                    .map_err(serde::de::Error::custom)?;
+                let range = Range::from_str(&value[..parent_split.map_or(value.len(), |idx| idx)])
+                    .map_err(serde::de::Error::custom)?;
+        
+                let parent = parent_split
+                    .map(|idx| Locator::from_str(&value[idx + parent_marker.len()..]))
+                    .transpose()
+                    .map_err(serde::de::Error::custom)?;
+        
+                let descriptor
+                    = Descriptor::new_bound(ident.clone(), range, parent);
+
+                map.insert(ident, descriptor);
+            }
+
+            Ok(map)
+        }
     }
 
-    Ok(entries)
+    deserializer.deserialize_map(MyMapVisitor {})
 }
 
 yarn_serialization_protocol!(Descriptor, "", {

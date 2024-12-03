@@ -1,13 +1,12 @@
-use std::{collections::{BTreeMap, HashMap, HashSet}, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
+use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
 
 use arca::{Path, ToArcaPath};
 use itertools::Itertools;
 use serde::Deserialize;
 use walkdir::WalkDir;
-use wax::walk::{Entry, FileIterator};
 use zpm_macros::track_time;
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, fetchers::workspace, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{read_manifest, BinField, BinManifest, Manifest, ResolutionOverride}, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, script::Binary};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{read_manifest, BinField, BinManifest, Manifest, ResolutionOverride}, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, script::Binary};
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
 pub const MANIFEST_NAME: &str = "package.json";
@@ -21,9 +20,9 @@ pub struct Project {
     pub shell_cwd: Path,
 
     pub config: Config,
-    pub workspaces: HashMap<Ident, Workspace>,
-    pub workspaces_by_rel_path: HashMap<Path, Ident>,
-    pub resolution_overrides: HashMap<Ident, Vec<(ResolutionOverride, Range)>>,
+    pub workspaces: BTreeMap<Ident, Workspace>,
+    pub workspaces_by_rel_path: BTreeMap<Path, Ident>,
+    pub resolution_overrides: BTreeMap<Ident, Vec<(ResolutionOverride, Range)>>,
 
     pub install_state: Option<InstallState>,
 }
@@ -69,7 +68,7 @@ impl Project {
         let root_workspace
             = Workspace::from_path(&project_cwd, project_cwd.clone())?;
 
-        let mut workspaces: HashMap<_, _> = root_workspace
+        let mut workspaces: BTreeMap<_, _> = root_workspace
             .workspaces()?
             .into_iter()
             .map(|w| (w.locator().ident, w))
@@ -82,10 +81,10 @@ impl Project {
 
         let workspaces_by_rel_path = workspaces.values()
             .map(|w| (w.rel_path.clone(), w.locator().ident))
-            .collect::<HashMap<_, _>>();
+            .collect::<BTreeMap<_, _>>();
 
-        let mut resolutions_overrides: HashMap<Ident, Vec<(ResolutionOverride, Range)>>
-             = HashMap::new();
+        let mut resolutions_overrides: BTreeMap<Ident, Vec<(ResolutionOverride, Range)>>
+             = BTreeMap::new();
 
         for (resolution, range) in root_workspace.manifest.resolutions {
             resolutions_overrides.entry(resolution.target_ident().clone())
@@ -158,7 +157,7 @@ impl Project {
             return from_legacy_berry_lockfile(&src);
         }
 
-        serde_json::from_str(&src)
+        sonic_rs::from_str(&src)
             .map_err(|err| Error::LockfileParseError(Arc::new(err)))
     }
 
@@ -178,8 +177,8 @@ impl Project {
         let src = install_state_path
             .fs_read()?;
 
-        let (install_state, _): (InstallState, _)
-            = bincode::serde::decode_from_slice(src.as_slice(), bincode::config::standard()).unwrap();
+        let install_state: InstallState
+            = sonic_rs::from_slice(src.as_slice()).unwrap();
 
         self.install_state
             = Some(install_state);
@@ -188,7 +187,8 @@ impl Project {
     }
 
     pub fn attach_install_state(&mut self, install_state: InstallState) -> Result<(), Error> {
-        if self.install_state.as_ref().map(|s| *s != install_state).unwrap_or(false) {
+        if self.install_state.as_ref().map(|s| *s != install_state).unwrap_or(true) {
+            println!("Writing install state");
             self.write_install_state(&install_state)?;
         }
 
@@ -204,7 +204,7 @@ impl Project {
             = self.install_state_path();
 
         let contents
-            = bincode::serde::encode_to_vec(install_state, bincode::config::standard()).unwrap();
+            = sonic_rs::to_vec(install_state).unwrap();
 
         // let re_parsed: InstallState
         //     = serde_json::from_str(&contents)?;
@@ -233,7 +233,7 @@ impl Project {
             = self.project_cwd.with_join_str(LOCKFILE_NAME);
 
         let contents
-            = serde_json::to_string_pretty(lockfile)
+            = sonic_rs::to_string_pretty(lockfile)
                 .map_err(|err| Error::LockfileGenerationError(Arc::new(err)))?;
 
         lockfile_path
@@ -307,8 +307,8 @@ impl Project {
             .with_join_str(MANIFEST_NAME)
             .fs_read_text_with_zip()?;
 
-        let manifest = serde_json::from_str::<BinManifest>(&manifest_text)
-            .map_err(|err| Error::InvalidJsonData(Arc::new(err)))?;
+        let manifest
+            = sonic_rs::from_str::<BinManifest>(&manifest_text)?;
 
         Ok(match manifest.bin {
             Some(BinField::String(bin)) => {
@@ -336,7 +336,7 @@ impl Project {
         let resolution = install_state.resolution_tree.locator_resolutions.get(locator)
             .expect("Expected active package to have a resolution tree");
 
-        let mut all_bins = HashMap::new();
+        let mut all_bins = BTreeMap::new();
 
         for descriptor in resolution.dependencies.values() {
             let locator = install_state.resolution_tree.descriptor_to_locator.get(descriptor)
@@ -369,7 +369,7 @@ impl Project {
 
         #[derive(Debug, Clone, Deserialize)]
         struct ScriptManifest {
-            pub scripts: Option<HashMap<String, String>>,
+            pub scripts: Option<BTreeMap<String, String>>,
         }
 
         let manifest_text = self.project_cwd
@@ -377,8 +377,8 @@ impl Project {
             .with_join_str(MANIFEST_NAME)
             .fs_read_text_with_zip()?;
 
-        let manifest = serde_json::from_str::<ScriptManifest>(&manifest_text)
-            .map_err(|err| Error::InvalidJsonData(Arc::new(err)))?;
+        let manifest
+            = sonic_rs::from_str::<ScriptManifest>(&manifest_text)?;
 
         if let Some(script) = manifest.scripts.as_ref().and_then(|s| s.get(name)) {
             return Ok((active_package.clone(), script.clone()));
@@ -473,7 +473,7 @@ impl Workspace {
         let mut workspaces = vec![];
 
         if let Some(patterns) = &self.manifest.workspaces {
-            let mut workspace_dirs = HashSet::new();
+            let mut workspace_dirs = BTreeSet::new();
 
             for pattern in patterns {
                 let segments = pattern.split('/')
@@ -517,13 +517,18 @@ impl Workspace {
                     Err(err) => return Err(err),
                 }
             }
+
+            workspaces.sort_by(|w1, w2| {
+                w1.name.cmp(&w2.name)
+            });
         }
 
         Ok(workspaces)
     }
 
     pub fn write_manifest(&self) -> Result<(), Error> {
-        let serialized = serde_json::to_string_pretty(&self.manifest)?;
+        let serialized
+            = sonic_rs::to_string_pretty(&self.manifest)?;
 
         self.path
             .with_join_str(MANIFEST_NAME)

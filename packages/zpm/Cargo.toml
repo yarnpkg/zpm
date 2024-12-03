@@ -37,3 +37,5 @@ walkdir = "2.5.0"
 urlencoding = "2.1.3"
 console-subscriber = "0.4.1"
 ring = "0.17.8"
+sonic-rs = "0.3.16"
+postcard = { git = "https://github.com/jamesmunns/postcard.git", rev = "refs/pull/157/head", features = ["alloc", "use-std"] }

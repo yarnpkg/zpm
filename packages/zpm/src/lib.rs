@@ -2,11 +2,13 @@
 
 use console_subscriber as _;
 use ring as _;
+use postcard as _;
 
 pub mod build;
 pub mod cache;
 pub mod commands;
 pub mod config;
+pub mod content_flags;
 pub mod error;
 pub mod fetchers;
 pub mod formats;

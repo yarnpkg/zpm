@@ -72,7 +72,7 @@ pub enum Error {
     Utf8Error2(#[from] std::str::Utf8Error),
 
     #[error("Invalid JSON data ({0})")]
-    InvalidJsonData(#[from] Arc<serde_json::Error>),
+    InvalidJsonData(#[from] Arc<sonic_rs::Error>),
 
     #[error("Error parsing an integer value")]
     ParseIntError(#[from] std::num::ParseIntError),
@@ -105,13 +105,13 @@ pub enum Error {
     LockfileReadError(Arc<std::io::Error>),
 
     #[error("An error occured while parsing the lockfile ({0})")]
-    LockfileParseError(Arc<serde_json::Error>),
+    LockfileParseError(Arc<sonic_rs::Error>),
 
     #[error("An error occured while parsing the lockfile ({0})")]
     LegacyLockfileParseError(Arc<serde_yaml::Error>),
 
     #[error("Lockfile generation error")]
-    LockfileGenerationError(Arc<serde_json::Error>),
+    LockfileGenerationError(Arc<sonic_rs::Error>),
 
     #[error("Repository clone failed")]
     RepositoryCloneFailed(String),
@@ -261,8 +261,8 @@ impl From<bincode::error::EncodeError> for Error {
     }
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(error: serde_json::Error) -> Self {
+impl From<sonic_rs::Error> for Error {
+    fn from(error: sonic_rs::Error) -> Self {
         Arc::new(error).into()
     }
 }

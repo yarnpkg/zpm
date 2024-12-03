@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use bytes::Bytes;
 
 use crate::{error::Error, formats, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, primitives::{reference, Locator}, resolvers::Resolution};
@@ -21,22 +19,19 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         = formats::zip::first_entry_from_zip(&cached_blob.data);
 
     let manifest = first_entry
-        .and_then(|entry|
-            serde_json::from_slice::<Manifest>(&entry.data)
-                .map_err(Arc::new)
-                .map_err(Error::InvalidJsonData)
-        )?;
+        .and_then(|entry| Ok(sonic_rs::from_slice::<Manifest>(&entry.data)?))?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
-    let package_directory = cached_blob.path
+    let package_directory = cached_blob.info.path
         .with_join_str(locator.ident.nm_subdir());
 
     Ok(FetchResult {
         resolution: Some(resolution),
         package_data: PackageData::Zip {
-            cached_blob,
+            archive_path: cached_blob.info.path,
+            checksum: cached_blob.info.checksum,
             context_directory: package_directory.clone(),
             package_directory,
         },

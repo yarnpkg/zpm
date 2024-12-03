@@ -1,7 +1,7 @@
 use arca::Path;
 use serde::{Deserialize, Serialize};
 
-use crate::{cache::CachedBlob, error::Error, formats, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, primitives::{reference, Locator, Reference}};
+use crate::{error::Error, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, primitives::{reference, Locator, Reference}};
 
 pub mod folder;
 pub mod git;
@@ -20,7 +20,7 @@ pub enum PackageLinking {
     Soft,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PackageData {
     Local {
         /** Directory that contains the package.json file */
@@ -42,7 +42,10 @@ pub enum PackageData {
 
     Zip {
         /** Path of the .zip file on disk */
-        cached_blob: CachedBlob,
+        archive_path: Path,
+
+        /** Checksum of the archive; only present when the archive was newly cached */
+        checksum: Option<Sha256>,
 
         /** Directory from which relative links from link:/file:/portal: dependencies will be resolved */
         context_directory: Path,
@@ -58,7 +61,7 @@ impl PackageData {
         match self {
             PackageData::Local {package_directory, ..} => package_directory,
             PackageData::MissingZip {archive_path, ..} => archive_path,
-            PackageData::Zip {cached_blob, ..} => &cached_blob.path,
+            PackageData::Zip {archive_path, ..} => archive_path,
         }
     }
 
@@ -89,7 +92,7 @@ impl PackageData {
         match self {
             PackageData::Local {..} => None,
             PackageData::MissingZip {..} => None,
-            PackageData::Zip {cached_blob, ..} => cached_blob.checksum.clone(),
+            PackageData::Zip {checksum, ..} => checksum.clone(),
         }
     }
 
@@ -98,28 +101,6 @@ impl PackageData {
             PackageData::Local {..} => PackageLinking::Soft,
             PackageData::MissingZip {..} => PackageLinking::Hard,
             PackageData::Zip {..} => PackageLinking::Hard,
-        }
-    }
-
-    pub fn file_entries(&self) -> Result<Vec<formats::Entry>, Error> {
-        match self {
-            PackageData::Local {package_directory, ..} => {
-                formats::entries_from_folder(package_directory)
-            },
-
-            PackageData::Zip {cached_blob, ..} => {
-                let entries
-                    = formats::zip::entries_from_zip(&cached_blob.data)?;
-
-                let package_subpath
-                    = self.package_subpath();
-
-                Ok(formats::strip_prefix(entries, package_subpath.as_str()))
-            },
-
-            PackageData::MissingZip {..} => {
-                Err(Error::Unsupported)
-            },
         }
     }
 }

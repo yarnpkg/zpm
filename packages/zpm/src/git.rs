@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::{self, Display, Formatter}, str::FromStr, sync::LazyLock};
+use std::{collections::BTreeMap, fmt::{self, Display, Formatter}, str::FromStr, sync::LazyLock};
 
 use arca::Path;
 use bincode::{Decode, Encode};
@@ -248,7 +248,7 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
     })
 }
 
-async fn ls_remote(repo: &str) -> Result<HashMap<String, String>, Error> {
+async fn ls_remote(repo: &str) -> Result<BTreeMap<String, String>, Error> {
     let output = tokio::process::Command::new("git")
         .arg("ls-remote")
         .arg(repo)
@@ -257,7 +257,7 @@ async fn ls_remote(repo: &str) -> Result<HashMap<String, String>, Error> {
         .map_err(|_| Error::GitError)?;
 
     let output = String::from_utf8(output.stdout).unwrap();
-    let mut refs = HashMap::new();
+    let mut refs = BTreeMap::new();
 
     for line in output.lines() {
         let mut parts = line.split_whitespace();
@@ -346,8 +346,8 @@ async fn resolve_git_treeish_stricter(repo: &str, treeish: GitTreeish) -> Result
     }
 }
 
-fn make_git_env() -> HashMap<String, String> {
-    let mut env = HashMap::new();
+fn make_git_env() -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
 
     if let Err(std::env::VarError::NotPresent) = std::env::var("GIT_SSH_COMMAND") {
         let ssh = std::env::var("GIT_SSH").unwrap_or("ssh".to_string());

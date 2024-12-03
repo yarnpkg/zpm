@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -26,34 +26,33 @@ pub struct Resolution {
     pub locator: Locator,
     pub version: crate::semver::Version,
 
-    #[serde(flatten)]
     pub requirements: system::Requirements,
 
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     #[serde(serialize_with = "descriptor_map_serializer")]
     #[serde(deserialize_with = "descriptor_map_deserializer")]
-    pub dependencies: HashMap<Ident, Descriptor>,
+    pub dependencies: BTreeMap<Ident, Descriptor>,
 
     #[serde(default)]
     #[serde(rename = "peerDependencies")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub peer_dependencies: HashMap<Ident, PeerRange>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub peer_dependencies: BTreeMap<Ident, PeerRange>,
 
     #[serde(default)]
     #[serde(rename = "optionalDependencies")]
-    #[serde(skip_serializing_if = "HashSet::is_empty")]
-    pub optional_dependencies: HashSet<Ident>,
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub optional_dependencies: BTreeSet<Ident>,
 
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashSet::is_empty")]
-    pub missing_peer_dependencies: HashSet<Ident>,
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub missing_peer_dependencies: BTreeSet<Ident>,
 }
 
 impl Resolution {
     pub fn from_remote_manifest(locator: Locator, manifest: RemoteManifest) -> Resolution {
         let optional_dependencies
-            = HashSet::from_iter(manifest.optional_dependencies.keys().cloned());
+            = BTreeSet::from_iter(manifest.optional_dependencies.keys().cloned());
 
         let mut dependencies
             = manifest.dependencies;
@@ -67,7 +66,7 @@ impl Resolution {
             dependencies,
             peer_dependencies: manifest.peer_dependencies,
             optional_dependencies,
-            missing_peer_dependencies: HashSet::new(),
+            missing_peer_dependencies: BTreeSet::new(),
             requirements: manifest.requirements,
         }
     }

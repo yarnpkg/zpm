@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{error::Error, install::{InstallContext, IntoResolutionResult, ResolutionResult}, primitives::{range, reference, Descriptor, Locator, Reference}, resolvers::Resolution, semver, system};
 
@@ -21,10 +21,10 @@ pub fn resolve_locator(ctx: &InstallContext<'_>, locator: &Locator, _params: &re
     let resolution = Resolution {
         version: semver::Version::new(),
         locator: locator.clone(),
-        dependencies: HashMap::new(),
-        peer_dependencies: HashMap::new(),
-        optional_dependencies: HashSet::new(),
-        missing_peer_dependencies: HashSet::new(),
+        dependencies: BTreeMap::new(),
+        peer_dependencies: BTreeMap::new(),
+        optional_dependencies: BTreeSet::new(),
+        missing_peer_dependencies: BTreeSet::new(),
         requirements: system::Requirements::default(),
     };
 

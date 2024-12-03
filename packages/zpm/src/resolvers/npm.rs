@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, marker::PhantomData, str::FromStr, sync::{Arc, LazyLock}};
+use std::{collections::BTreeMap, fmt, marker::PhantomData, str::FromStr, sync::{Arc, LazyLock}};
 
 use regex::Regex;
 use serde::{de::{self, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
@@ -66,8 +66,9 @@ impl<'de, T> Visitor<'de> for FindHighestCompatibleVersion<T> where T: Deseriali
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
         let mut selected = None;
 
-        while let Some(key) = map.next_key::<String>()? {
-            let version = semver::Version::from_str(key.as_str()).unwrap();
+        while let Some(key) = map.next_key::<&str>()? {
+            let version
+                = semver::Version::from_str(key).unwrap();
 
             if self.range.check(&version) && selected.as_ref().map(|(current_version, _)| *current_version < version).unwrap_or(true) {
                 selected = Some((version, map.next_value::<serde_json::Value>()?));
@@ -132,8 +133,8 @@ struct RemoteManifestWithScripts {
     remote: RemoteManifest,
 
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    scripts: HashMap<String, String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    scripts: BTreeMap<String, String>,
 }
 
 fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
@@ -202,7 +203,7 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
     let mut deserializer
-        = serde_json::Deserializer::from_str(registry_text.as_str());
+        = sonic_rs::Deserializer::from_str(registry_text.as_str());
 
     let (version, manifest) = deserializer.deserialize_map(FindFieldNested {
         field: "versions",
@@ -238,11 +239,11 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     #[derive(Deserialize)]
     struct RegistryMetadata {
         #[serde(rename(deserialize = "dist-tags"))]
-        dist_tags: serde_json::Value,
-        versions: serde_json::Value,
+        dist_tags: sonic_rs::Value,
+        versions: sonic_rs::Value,
     }
 
-    let registry_data: RegistryMetadata = serde_json::from_str(registry_text.as_str())
+    let registry_data: RegistryMetadata = sonic_rs::from_str(registry_text.as_str())
         .map_err(Arc::new)?;
 
     let version = registry_data.dist_tags.deserialize_map(FindField {
@@ -277,8 +278,8 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
-    let mut manifest: RemoteManifestWithScripts = serde_json::from_str(registry_text.as_str())
-        .map_err(Arc::new)?;
+    let mut manifest: RemoteManifestWithScripts
+        = sonic_rs::from_str(registry_text.as_str())?;
 
     fix_manifest(&mut manifest);
 

@@ -36,7 +36,7 @@ impl WorkspacesList {
                     name: &workspace.name,
                 };
 
-                println!("{}", serde_json::to_string(&payload)?);
+                println!("{}", sonic_rs::to_string(&payload)?);
             } else {
                 println!("{}", workspace.rel_path);
             }

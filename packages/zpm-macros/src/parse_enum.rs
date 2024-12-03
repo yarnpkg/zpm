@@ -1,5 +1,5 @@
 use core::panic;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use quote::quote;
 use syn::{spanned::Spanned, Data, DeriveInput, Expr, Fields, Meta};
@@ -45,7 +45,7 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
 
         // 1. Extracting the fields from the enum variant. We only support named fields (ie `Foo { a: i32, b: i32 }`, not `Foo(i32, i32)`)
 
-        let mut fields = HashMap::new();
+        let mut fields = BTreeMap::new();
 
         let Fields::Named(enum_fields) = &variant.fields else {
             panic!("Only named fields are supported for variants with named capture groups");
@@ -123,7 +123,7 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
             let capture_names = regex.capture_names()
                 .skip(1)
                 .map(|name| name.ok_or(()))
-                .collect::<Result<HashSet<_>, ()>>()
+                .collect::<Result<BTreeSet<_>, ()>>()
                 .map_err(|_| syn::Error::new(attr.span(), "Named capture groups are required"))?;
 
             let field_creators = fields.iter().map(|(name, ty)| {

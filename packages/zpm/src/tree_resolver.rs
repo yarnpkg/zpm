@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -8,27 +8,27 @@ use crate::{primitives::{range, Descriptor, Ident, Locator, Range, Reference}, r
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolutionTree {
     pub roots: Vec<Descriptor>,
-    pub descriptor_to_locator: HashMap<Descriptor, Locator>,
-    pub locator_resolutions: HashMap<Locator, Resolution>,
-    pub optional_builds: HashSet<Locator>,
+    pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
+    pub locator_resolutions: BTreeMap<Locator, Resolution>,
+    pub optional_builds: BTreeSet<Locator>,
 }
 
 #[derive(Default)]
 pub struct TreeResolver {
     resolution_tree: ResolutionTree,
-    accessible_locators: HashSet<Locator>,
-    virtual_stack: HashMap<Locator, u8>,
+    accessible_locators: BTreeSet<Locator>,
+    virtual_stack: BTreeMap<Locator, u8>,
     resolution_stack: Vec<Locator>,
-    virtual_dependents: HashMap<Descriptor, HashSet<Locator>>,
-    original_workspace_definitions: HashMap<Locator, Resolution>,
-    peer_dependency_links: HashMap<Locator, HashMap<Ident, HashSet<Locator>>>,
-    peer_dependency_dependents: HashMap<Locator, HashSet<Locator>>,
-    virtual_instances: HashMap<Locator, HashMap<(Ident, Vec<Locator>), Descriptor>>,
-    volatile_descriptor: HashSet<Descriptor>,
+    virtual_dependents: BTreeMap<Descriptor, BTreeSet<Locator>>,
+    original_workspace_definitions: BTreeMap<Locator, Resolution>,
+    peer_dependency_links: BTreeMap<Locator, BTreeMap<Ident, BTreeSet<Locator>>>,
+    peer_dependency_dependents: BTreeMap<Locator, BTreeSet<Locator>>,
+    virtual_instances: BTreeMap<Locator, BTreeMap<(Ident, Vec<Locator>), Descriptor>>,
+    volatile_descriptor: BTreeSet<Descriptor>,
 }
 
 impl TreeResolver {
-    pub fn with_resolutions(mut self, descriptor_to_locators: &HashMap<Descriptor, Locator>, normalized_resolutions: &HashMap<Locator, Resolution>) -> Self {
+    pub fn with_resolutions(mut self, descriptor_to_locators: &BTreeMap<Descriptor, Locator>, normalized_resolutions: &BTreeMap<Locator, Resolution>) -> Self {
         self.resolution_tree.descriptor_to_locator.clear();
         self.resolution_tree.locator_resolutions.clear();
 
@@ -70,7 +70,7 @@ impl TreeResolver {
             self.resolve_peer_dependencies(
                 &root_descriptor,
                 &resolution,
-                &HashMap::new(),
+                &BTreeMap::new(),
                 &resolution,
                 false,
             );
@@ -85,7 +85,7 @@ impl TreeResolver {
         self.resolution_tree
     }
 
-    fn resolve_peer_dependencies_impl(&mut self, parent_descriptor: &Descriptor, parent_locator: &Locator, peer_slots: &HashMap<Ident, Locator>, top_locator: &Locator, is_optional: bool) {
+    fn resolve_peer_dependencies_impl(&mut self, parent_descriptor: &Descriptor, parent_locator: &Locator, peer_slots: &BTreeMap<Ident, Locator>, top_locator: &Locator, is_optional: bool) {
         if !is_optional {
             self.resolution_tree.optional_builds.remove(parent_locator);
         }
@@ -100,7 +100,7 @@ impl TreeResolver {
             virtualized_descriptor: Descriptor,
             virtualized_locator: Locator,
 
-            next_peer_slots: HashMap<Ident, Locator>,
+            next_peer_slots: BTreeMap<Ident, Locator>,
 
             is_optional: bool,
         }
@@ -176,7 +176,7 @@ impl TreeResolver {
                 virtualized_descriptor: virtualized_descriptor.clone(),
                 virtualized_locator: virtualized_locator.clone(),
 
-                next_peer_slots: HashMap::new(),
+                next_peer_slots: BTreeMap::new(),
 
                 is_optional,
             });
@@ -203,7 +203,7 @@ impl TreeResolver {
                 .peer_dependencies
                 .keys().cloned().sorted().collect();
 
-            let mut missing_peer_dependencies = HashSet::new();
+            let mut missing_peer_dependencies = BTreeSet::new();
             let mut peer_dependencies_to_remove = vec![];
 
             for peer_ident in peer_dependencies {
@@ -422,7 +422,7 @@ impl TreeResolver {
         }
     }
 
-    fn resolve_peer_dependencies(&mut self, parent_descriptor: &Descriptor, parent_locator: &Locator, peer_slots: &HashMap<Ident, Locator>, top_locator: &Locator, is_optional: bool) {
+    fn resolve_peer_dependencies(&mut self, parent_descriptor: &Descriptor, parent_locator: &Locator, peer_slots: &BTreeMap<Ident, Locator>, top_locator: &Locator, is_optional: bool) {
         if self.resolution_stack.len() > 1000 {
             return;
         }

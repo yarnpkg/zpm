@@ -1,7 +1,7 @@
-use std::{collections::HashMap, hash::Hash, sync::LazyLock, time::Instant};
+use std::{collections::BTreeMap, sync::LazyLock, time::Instant};
 
-pub fn convert_to_hashmap<U, T, F>(items: Vec<T>, mut key_fn: F) -> HashMap<U, Vec<T>> where U: Eq + Hash, F: FnMut(&T) -> U {
-    let mut map: HashMap<U, Vec<T>> = HashMap::new();
+pub fn convert_to_hashmap<U, T, F>(items: Vec<T>, mut key_fn: F) -> BTreeMap<U, Vec<T>> where U: Eq + Ord, F: FnMut(&T) -> U {
+    let mut map: BTreeMap<U, Vec<T>> = BTreeMap::new();
 
     for item in items {
         let key = key_fn(&item);

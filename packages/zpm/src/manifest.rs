@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, io::ErrorKind, sync::Arc};
+use std::{collections::BTreeMap, fs, io::ErrorKind, sync::Arc};
 
 use arca::Path;
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ pub struct DistManifest {
 #[serde(untagged)]
 pub enum BinField {
     String(Path),
-    Map(HashMap<String, Path>),
+    Map(BTreeMap<String, Path>),
 }
 
 impl Iterator for BinField {
@@ -48,28 +48,28 @@ pub struct RemoteManifest {
     pub requirements: system::Requirements,
 
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     #[serde(serialize_with = "descriptor_map_serializer")]
     #[serde(deserialize_with = "descriptor_map_deserializer")]
-    pub dependencies: HashMap<Ident, Descriptor>,
+    pub dependencies: BTreeMap<Ident, Descriptor>,
 
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub peer_dependencies: HashMap<Ident, PeerRange>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub peer_dependencies: BTreeMap<Ident, PeerRange>,
 
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     #[serde(serialize_with = "descriptor_map_serializer")]
     #[serde(deserialize_with = "descriptor_map_deserializer")]
-    pub optional_dependencies: HashMap<Ident, Descriptor>,
+    pub optional_dependencies: BTreeMap<Ident, Descriptor>,
 
     #[serde(default)]
     pub dist: Option<DistManifest>,
 }
 
 #[parse_enum(or_else = |s| Err(Error::InvalidResolution(s.to_string())))]
-#[derive(Clone, Debug, Serialize, PartialEq, Eq, Hash)]
-#[derive_variants(Clone, Debug, Serialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive_variants(Clone, Debug, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ResolutionOverride {
     #[pattern(spec = r"^(?<descriptor>.*)$")]
     Descriptor {
@@ -187,21 +187,21 @@ pub struct Manifest {
     pub workspaces: Option<Vec<String>>,
 
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     #[serde(serialize_with = "descriptor_map_serializer")]
     #[serde(deserialize_with = "descriptor_map_deserializer")]
-    pub dev_dependencies: HashMap<Ident, Descriptor>,
+    pub dev_dependencies: BTreeMap<Ident, Descriptor>,
 
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub scripts: HashMap<String, String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub scripts: BTreeMap<String, String>,
 
     #[serde(default)]
-    pub resolutions: HashMap<ResolutionOverride, Range>,
+    pub resolutions: BTreeMap<ResolutionOverride, Range>,
 }
 
 pub fn parse_manifest(manifest_text: String) -> Result<Manifest, Error> {
-    let manifest_data = serde_json::from_str(manifest_text.as_str())
+    let manifest_data = sonic_rs::from_str(manifest_text.as_str())
         .map_err(Arc::new)?;
 
     Ok(manifest_data)
@@ -215,7 +215,7 @@ pub fn read_manifest(p: &Path) -> Result<Manifest, Error> {
         })?;
 
     let manifest_data
-        = serde_json::from_str(manifest_text.as_str())?;
+        = sonic_rs::from_str(manifest_text.as_str())?;
 
     Ok(manifest_data)
 }

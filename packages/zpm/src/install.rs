@@ -1,9 +1,9 @@
-use std::{collections::{HashMap, HashSet}, hash::Hash, marker::PhantomData, str::FromStr};
+use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, str::FromStr};
 
 use arca::Path;
 use serde::{Deserialize, Serialize};
 
-use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch_locator, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, resolve_locator, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}, ui};
+use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch_locator, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, content_flags::ContentFlags, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, resolve_locator, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}, ui};
 
 
 #[derive(Clone, Default)]
@@ -302,17 +302,18 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
 pub struct InstallState {
     pub lockfile: Lockfile,
     pub resolution_tree: ResolutionTree,
-    pub normalized_resolutions: HashMap<Locator, Resolution>,
-    pub packages_by_location: HashMap<Path, Locator>,
-    pub locations_by_package: HashMap<Locator, Path>,
-    pub optional_packages: HashSet<Locator>,
-    pub disabled_locators: HashSet<Locator>,
-    pub conditional_locators: HashSet<Locator>,
+    pub normalized_resolutions: BTreeMap<Locator, Resolution>,
+    pub packages_by_location: BTreeMap<Path, Locator>,
+    pub locations_by_package: BTreeMap<Locator, Path>,
+    pub optional_packages: BTreeSet<Locator>,
+    pub disabled_locators: BTreeSet<Locator>,
+    pub conditional_locators: BTreeSet<Locator>,
+    pub package_flags: BTreeMap<Locator, ContentFlags>,
 }
 
 #[derive(Clone, Default)]
 pub struct Install {
-    pub package_data: HashMap<Locator, PackageData>,
+    pub package_data: BTreeMap<Locator, PackageData>,
     pub install_state: InstallState,
 }
 
@@ -416,16 +417,16 @@ impl<'a> InstallManager<'a> {
                 },
 
                 (InstallOp::Refresh {..}, InstallOpResult::Resolved(ResolutionResult {resolution, original_resolution, package_data})) => {
-                    self.record_resolution(resolution, original_resolution, package_data);
+                    self.record_resolution(resolution, original_resolution, package_data)?;
                 },
 
                 (InstallOp::Resolve {descriptor, ..}, InstallOpResult::Resolved(ResolutionResult {resolution, original_resolution, package_data})) => {
                     self.record_descriptor(descriptor, resolution.locator.clone());
-                    self.record_resolution(resolution, original_resolution, package_data);
+                    self.record_resolution(resolution, original_resolution, package_data)?;
                 },
 
                 (InstallOp::Fetch {locator, ..}, InstallOpResult::Fetched(FetchResult {package_data, ..})) => {
-                    self.record_fetch(locator, package_data);
+                    self.record_fetch(locator, package_data)?;
                 },
 
                 _ => panic!("Unsupported install result ({:?})", entry),
@@ -440,7 +441,7 @@ impl<'a> InstallManager<'a> {
         Ok(self.result)
     }
 
-    fn record_resolution(&mut self, resolution: Resolution, original_resolution: Resolution, package_data: Option<PackageData>) {
+    fn record_resolution(&mut self, resolution: Resolution, original_resolution: Resolution, package_data: Option<PackageData>) -> Result<(), Error> {
         self.result.install_state.normalized_resolutions.insert(resolution.locator.clone(), resolution.clone());
 
         self.result.install_state.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
@@ -457,20 +458,33 @@ impl<'a> InstallManager<'a> {
         }
 
         if let Some(package_data) = package_data {
-            self.record_fetch(resolution.locator.clone(), package_data);
+            self.record_fetch(resolution.locator.clone(), package_data)?;
         }
+
+        Ok(())
     }
 
     fn record_descriptor(&mut self, descriptor: Descriptor, locator: Locator) {
         self.result.install_state.lockfile.resolutions.insert(descriptor, locator);
     }
 
-    fn record_fetch(&mut self, locator: Locator, package_data: PackageData) {
-        self.result.package_data.insert(locator.clone(), package_data);
+    fn record_fetch(&mut self, locator: Locator, package_data: PackageData) -> Result<(), Error> {
+        let project = self.context.project
+            .expect("The project is required to record a fetch result");
+
+        let content_flags = match project.install_state.as_ref().and_then(|s| s.package_flags.get(&locator)) {
+            Some(flags) => flags.clone(),
+            None => ContentFlags::extract(&locator, &package_data)?,
+        };
+
+        self.result.install_state.package_flags.insert(locator.clone(), content_flags);
+        self.result.package_data.insert(locator, package_data);
+
+        Ok(())
     }
 }
 
-pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resolution) -> (HashMap<Ident, Descriptor>, HashMap<Ident, PeerRange>) {
+pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resolution) -> (BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>) {
     let root_workspace = context.project
         .expect("The project is required to bind a parent to a descriptor")
         .root_workspace();

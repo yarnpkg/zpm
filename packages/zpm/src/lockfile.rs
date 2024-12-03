@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, fmt::{self, Debug}, hash::{Hash}, marker::PhantomData, sync::Arc};
+use std::{collections::BTreeMap, fmt::{self, Debug}, hash::Hash, marker::PhantomData, sync::Arc};
 
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
@@ -8,24 +8,22 @@ use crate::{config::ENV_CONFIG, error::Error, hash::Sha256, primitives::{Descrip
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockfileEntry {
     pub checksum: Option<Sha256>,
-
-    #[serde(flatten)]
     pub resolution: Resolution,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Lockfile {
     pub metadata: LockfileMetadata,
-    pub resolutions: HashMap<Descriptor, Locator>,
-    pub entries: HashMap<Locator, LockfileEntry>,
+    pub resolutions: BTreeMap<Descriptor, Locator>,
+    pub entries: BTreeMap<Locator, LockfileEntry>,
 }
 
 impl Lockfile {
     pub fn new() -> Self {
         Self {
             metadata: LockfileMetadata::new(),
-            resolutions: HashMap::new(),
-            entries: HashMap::new(),
+            resolutions: BTreeMap::new(),
+            entries: BTreeMap::new(),
         }
     }
 
@@ -72,7 +70,7 @@ impl Serialize for Lockfile {
             inner: LockfileEntry,
         }
 
-        let mut descriptors_to_resolutions: HashMap<Locator, MultiKeyLockfileEntry> = HashMap::new();
+        let mut descriptors_to_resolutions: BTreeMap<Locator, MultiKeyLockfileEntry> = BTreeMap::new();
         for (descriptor, locator) in self.resolutions.iter().sorted_by_key(|(descriptor, _)| (*descriptor).clone()) {
             let entry = self.entries.get(locator)
                 .expect("Expected a matching resolution to be found in the lockfile for any resolved locator.");
@@ -98,15 +96,15 @@ impl Serialize for Lockfile {
 }
 
 #[derive(Clone, Debug)]
-struct TolerantMap<K, V>(HashMap<K, V>);
+struct TolerantMap<K, V>(BTreeMap<K, V>);
 
-impl<'de, K, V> Deserialize<'de> for TolerantMap<K, V> where K: Debug + Eq + Hash + Deserialize<'de>, V: Debug + Deserialize<'de> {
+impl<'de, K, V> Deserialize<'de> for TolerantMap<K, V> where K: Debug + Eq + Ord + Deserialize<'de>, V: Debug + Deserialize<'de> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
         struct MapVisitor<K, V> {
             marker: PhantomData<fn() -> TolerantMap<K, V>>,
         }
 
-        impl<'de, K, V> Visitor<'de> for MapVisitor<K, V> where K: Debug + Eq + Hash + Deserialize<'de>, V: Debug + Deserialize<'de> {
+        impl<'de, K, V> Visitor<'de> for MapVisitor<K, V> where K: Debug + Eq + Ord + Deserialize<'de>, V: Debug + Deserialize<'de> {
             type Value = TolerantMap<K, V>;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -114,7 +112,7 @@ impl<'de, K, V> Deserialize<'de> for TolerantMap<K, V> where K: Debug + Eq + Has
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<TolerantMap<K, V>, A::Error> where A: de::MapAccess<'de> {
-                let mut values = HashMap::new();
+                let mut values = BTreeMap::new();
 
                 loop {
                     let entry = map.next_entry::<K, V>();
@@ -220,7 +218,6 @@ struct LockfilePayload {
     #[serde(rename = "__metadata")]
     metadata: LockfileMetadata,
 
-    #[serde(flatten)]
     entries: BTreeMap<MultiKey<Descriptor>, LockfileEntry>,
 }
 

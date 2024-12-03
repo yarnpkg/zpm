@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cmp, collections::HashMap};
+use std::{borrow::Cow, cmp, collections::BTreeMap};
 
 use crate::{error::Error, formats::Entry};
 
@@ -73,7 +73,7 @@ fn evaluate_hunk(hunk: &Hunk, file_lines: &[String], mut offset: usize) -> Optio
 pub fn apply_patch<'a>(entries: Vec<Entry<'a>>, patch: &str) -> Result<Vec<Entry<'a>>, Error> {
     let mut entry_map = entries.into_iter()
         .map(|entry| (entry.name.clone(), entry))
-        .collect::<HashMap<_, _>>();
+        .collect::<BTreeMap<_, _>>();
 
     let patch_entries
         = crate::patch::parse::PatchParser::parse(patch)?;

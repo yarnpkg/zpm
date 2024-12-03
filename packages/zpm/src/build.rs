@@ -1,12 +1,13 @@
-use std::{collections::{HashMap, HashSet}, fs::Permissions, os::unix::fs::PermissionsExt};
+use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt};
 
 use arca::Path;
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
+use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
 use crate::{error::Error, hash::Blake2b80, primitives::Locator, project::Project, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Command {
     Program(String, Vec<String>),
     Script(String),
@@ -59,32 +60,31 @@ impl BuildRequest {
 #[derive(Debug)]
 pub struct BuildRequests {
     pub entries: Vec<BuildRequest>,
-    pub dependencies: HashMap<usize, HashSet<usize>>,
+    pub dependencies: BTreeMap<usize, BTreeSet<usize>>,
 }
 
 pub struct Build {
-    pub build_errors: HashSet<(Locator, Path)>,
+    pub build_errors: BTreeSet<(Locator, Path)>,
 }
 
 pub struct BuildManager<'a> {
     pub requests: BuildRequests,
-    pub dependents: HashMap<usize, HashSet<usize>>,
-    pub tree_hashes: HashMap<Locator, String>,
+    pub dependents: BTreeMap<usize, BTreeSet<usize>>,
+    pub tree_hashes: BTreeMap<Locator, String>,
     pub queued: Vec<usize>,
     pub running: FuturesUnordered<BoxFuture<'a, (usize, Option<String>, Result<ScriptResult, Error>)>>,
-    pub build_errors: HashSet<(Locator, Path)>,
-    pub build_state_out: HashMap<Path, String>,
+    pub build_errors: BTreeSet<(Locator, Path)>,
+    pub build_state_out: BTreeMap<Path, String>,
 }
 
 impl<'a> BuildManager<'a> {
     pub fn new(requests: BuildRequests) -> Self {
-        let mut dependents = HashMap::new();
-        dependents.reserve(requests.entries.len());
+        let mut dependents = BTreeMap::new();
 
         for (idx, set) in requests.dependencies.iter() {
             for &dep_idx in set.iter() {
                 dependents.entry(dep_idx)
-                    .or_insert_with(HashSet::new)
+                    .or_insert_with(BTreeSet::new)
                     .insert(*idx);
             }
         }
@@ -92,19 +92,19 @@ impl<'a> BuildManager<'a> {
         Self {
             requests,
             dependents,
-            tree_hashes: HashMap::new(),
+            tree_hashes: BTreeMap::new(),
             queued: Vec::new(),
             running: FuturesUnordered::new(),
-            build_errors: HashSet::new(),
-            build_state_out: HashMap::new(),
+            build_errors: BTreeSet::new(),
+            build_state_out: BTreeMap::new(),
         }
     }
 
     fn find_acyclic_locators(&self, project: &'a Project, root: &Locator) -> Vec<Locator> {
         struct TraversalState<'a> {
             resolution_tree: &'a ResolutionTree,
-            visited: HashMap<&'a Locator, VisitationState>,
-            in_cycle: HashSet<&'a Locator>,
+            visited: BTreeMap<&'a Locator, VisitationState>,
+            in_cycle: BTreeSet<&'a Locator>,
             result: Vec<&'a Locator>,
             stack: Vec<&'a Locator>,
         }
@@ -158,8 +158,8 @@ impl<'a> BuildManager<'a> {
 
         let mut state = TraversalState {
             resolution_tree: &install_state.resolution_tree,
-            visited: HashMap::new(),
-            in_cycle: HashSet::new(),
+            visited: BTreeMap::new(),
+            in_cycle: BTreeSet::new(),
             result: Vec::new(),
             stack: Vec::new(),
         };
@@ -196,7 +196,7 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn trigger(&mut self, project: &'a Project, build_state: &HashMap<Path, String>) {
+    fn trigger(&mut self, project: &'a Project, build_state: &BTreeMap<Path, String>) {
         while self.running.len() < 5 {
             if let Some(idx) = self.queued.pop() {
                 let req
@@ -276,15 +276,15 @@ impl<'a> BuildManager<'a> {
 
         let paths_to_build = self.requests.entries.iter()
             .map(|req| req.cwd.clone())
-            .collect::<HashSet<_>>();
+            .collect::<BTreeSet<_>>();
 
         let build_state_in =
-            serde_json::from_str::<HashMap<Path, String>>(&build_state_text_in)?;
+            sonic_rs::from_str::<BTreeMap<Path, String>>(&build_state_text_in)?;
 
         self.build_state_out = build_state_in.iter()
             .filter(|(p, _)| paths_to_build.contains(p))
             .map(|(k, v)| (k.clone(), v.clone()))
-            .collect::<HashMap<_, _>>();
+            .collect::<BTreeMap<_, _>>();
 
         for idx in 0..self.requests.entries.len() {
             if let Some(set) = self.requests.dependencies.get(&idx) {
@@ -319,7 +319,7 @@ impl<'a> BuildManager<'a> {
 
             if current_build_state_out != self.build_state_out {
                 let build_state_text_out
-                    = serde_json::to_string(&self.build_state_out)?;
+                    = sonic_rs::to_string(&self.build_state_out)?;
 
                 build_state_path
                     .fs_change(build_state_text_out, Permissions::from_mode(0o644))?;
