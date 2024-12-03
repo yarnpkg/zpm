@@ -1,6 +1,7 @@
 use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, str::FromStr};
 
 use arca::Path;
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch_locator, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, content_flags::ContentFlags, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, resolve_locator, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}, ui};
@@ -280,17 +281,19 @@ impl InstallCache {
 impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for InstallCache {
     fn graph_cache(&self, ctx: &InstallContext<'a>, op: &InstallOp) -> Option<InstallOpResult> {
         if let InstallOp::Resolve {descriptor} = op {
-            if let Some(locator) = self.lockfile.resolutions.get(descriptor) {
-                if self.lockfile.metadata.version != LockfileMetadata::new().version {
-                    return Some(InstallOpResult::Pinned(PinnedResult {
-                        locator: locator.clone(),
-                    }));
+            if !descriptor.range.is_transient_resolution() {
+                if let Some(locator) = self.lockfile.resolutions.get(descriptor) {
+                    if self.lockfile.metadata.version != LockfileMetadata::new().version {
+                        return Some(InstallOpResult::Pinned(PinnedResult {
+                            locator: locator.clone(),
+                        }));
+                    }
+
+                    let entry = self.lockfile.entries.get(locator)
+                        .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator));
+
+                    return Some(InstallOpResult::Resolved(entry.resolution.clone().into_resolution_result(ctx)));
                 }
-
-                let entry = self.lockfile.entries.get(locator)
-                    .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator));
-
-                return Some(InstallOpResult::Resolved(entry.resolution.clone().into_resolution_result(ctx)));
             }
         }
 
@@ -298,9 +301,8 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Encode, Decode, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstallState {
-    pub lockfile: Lockfile,
     pub resolution_tree: ResolutionTree,
     pub normalized_resolutions: BTreeMap<Locator, Resolution>,
     pub packages_by_location: BTreeMap<Path, Locator>,
@@ -312,6 +314,8 @@ pub struct InstallState {
 
 #[derive(Clone, Default)]
 pub struct Install {
+    pub lockfile: Lockfile,
+    pub lockfile_changed: bool,
     pub package_data: BTreeMap<Locator, PackageData>,
     pub install_state: InstallState,
 }
@@ -325,8 +329,11 @@ impl Install {
 
         print_time!("Before build");
 
-        project
-            .attach_install_state(self.install_state)?;
+        project.attach_install_state(self.install_state)?;
+
+        if self.lockfile_changed {
+            project.write_lockfile(&self.lockfile)?;
+        }
 
         let result = build::BuildManager::new(build)
             .run(project).await?;
@@ -432,7 +439,7 @@ impl<'a> InstallManager<'a> {
             }
         }
 
-        for entry in self.result.install_state.lockfile.entries.values_mut() {
+        for entry in self.result.lockfile.entries.values_mut() {
             let package_data = self.result.package_data.get(&entry.resolution.locator)
                 .unwrap_or_else(|| panic!("Expected a matching package data to be found for any fetched locator; not found for {}.", entry.resolution.locator));
 
@@ -450,9 +457,11 @@ impl<'a> InstallManager<'a> {
         }
 
         self.result.install_state.resolution_tree = TreeResolver::default()
-            .with_resolutions(&self.result.install_state.lockfile.resolutions, &self.result.install_state.normalized_resolutions)
+            .with_resolutions(&self.result.lockfile.resolutions, &self.result.install_state.normalized_resolutions)
             .with_roots(self.roots.clone())
             .run();
+
+        self.result.lockfile_changed = self.result.lockfile != self.initial_lockfile;
 
         Ok(self.result)
     }
@@ -460,7 +469,7 @@ impl<'a> InstallManager<'a> {
     fn record_resolution(&mut self, resolution: Resolution, original_resolution: Resolution, package_data: Option<PackageData>) -> Result<(), Error> {
         self.result.install_state.normalized_resolutions.insert(resolution.locator.clone(), resolution.clone());
 
-        self.result.install_state.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
+        self.result.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
             checksum: None,
             resolution: original_resolution,
             flags: ContentFlags::default(),
@@ -482,7 +491,7 @@ impl<'a> InstallManager<'a> {
     }
 
     fn record_descriptor(&mut self, descriptor: Descriptor, locator: Locator) {
-        self.result.install_state.lockfile.resolutions.insert(descriptor, locator);
+        self.result.lockfile.resolutions.insert(descriptor, locator);
     }
 
     fn record_fetch(&mut self, locator: Locator, package_data: PackageData) {

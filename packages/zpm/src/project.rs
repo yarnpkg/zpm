@@ -177,8 +177,8 @@ impl Project {
         let src = install_state_path
             .fs_read()?;
 
-        let install_state: InstallState
-            = sonic_rs::from_slice(src.as_slice()).unwrap();
+        let (install_state, _): (InstallState, _)
+            = bincode::decode_from_slice(src.as_slice(), bincode::config::standard()).unwrap();
 
         self.install_state
             = Some(install_state);
@@ -192,8 +192,6 @@ impl Project {
             self.write_install_state(&install_state)?;
         }
 
-        self.write_lockfile(&install_state.lockfile)?;
-
         self.install_state = Some(install_state);
 
         Ok(())
@@ -204,7 +202,7 @@ impl Project {
             = self.install_state_path();
 
         let contents
-            = sonic_rs::to_vec(install_state).unwrap();
+            = bincode::encode_to_vec(install_state, bincode::config::standard()).unwrap();
 
         // let re_parsed: InstallState
         //     = serde_json::from_str(&contents)?;
@@ -228,7 +226,7 @@ impl Project {
         Ok(())
     }
 
-    fn write_lockfile(&self, lockfile: &Lockfile) -> Result<(), Error> {
+    pub fn write_lockfile(&self, lockfile: &Lockfile) -> Result<(), Error> {
         let lockfile_path
             = self.project_cwd.with_join_str(LOCKFILE_NAME);
 
@@ -412,12 +410,9 @@ impl Project {
             .with_package_cache(Some(&package_cache))
             .with_project(Some(self));
 
-        let mut lockfile = self.lockfile()?;
-        lockfile.forget_transient_resolutions();
-
         InstallManager::new()
             .with_context(install_context)
-            .with_lockfile(lockfile)
+            .with_lockfile(self.lockfile()?)
             .with_roots_iter(self.workspaces.values().map(|w| w.descriptor()))
             .resolve_and_fetch().await?
             .finalize(self).await?;

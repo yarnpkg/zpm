@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, sync::LazyLock};
 
+use bincode::{Decode, Encode};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{DefaultOnError, serde_as};
@@ -24,7 +25,7 @@ fn is_default<T: Default + PartialEq>(value: &T) -> bool {
  * inside the install state so we can avoid having to recompute it every time,
  * which would otherwise require to parse the zip archives every time.
  */
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContentFlags {
     /**
      * Set to true if the package can work on the current system. If false, the

@@ -75,6 +75,8 @@ checksum = "4c95c10ba0b00a02636238b814946408b1322d5ac4760326e6fb8ec956d85775"
 name = "arca"
 version = "0.8.0"
 dependencies = [
+ "bincode",
+ "bincode_derive",
  "clean-path",
  "path-slash",
  "radix_trie",

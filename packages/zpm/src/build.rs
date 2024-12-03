@@ -1,13 +1,14 @@
 use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt};
 
 use arca::Path;
+use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
 use crate::{error::Error, hash::Blake2b80, primitives::Locator, project::Project, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Command {
     Program(String, Vec<String>),
     Script(String),

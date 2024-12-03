@@ -170,7 +170,7 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
         "\"use strict\";\n",
         "\n",
         "const RAW_RUNTIME_STATE =\n",
-        &serde_json::to_string(&serde_json::to_string(&state).unwrap()).unwrap(), ";\n",
+        &sonic_rs::to_string(&sonic_rs::to_string(&state).unwrap()).unwrap(), ";\n",
         "\n",
         "function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n",
         "  return hydrateRuntimeState(JSON.parse(RAW_RUNTIME_STATE), {basePath: basePath || __dirname});\n",
@@ -204,7 +204,7 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
         .fs_change(script, Permissions::from_mode(0o755))?;
 
     project.pnp_data_path()
-        .fs_change(serde_json::to_string(&state).unwrap(), Permissions::from_mode(0o644))?;
+        .fs_change(sonic_rs::to_string(&state).unwrap(), Permissions::from_mode(0o644))?;
 
     Ok(())
 }
@@ -257,7 +257,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
 
     let dependencies_meta = project.manifest_path()
         .if_exists()
-        .and_then(|path| path.fs_read_text().ok()).map(|data| serde_json::from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta)
+        .and_then(|path| path.fs_read_text().ok()).map(|data| sonic_rs::from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta)
         .unwrap_or_default()
         .into_iter()
         .map(|(selector, meta)| (selector.ident().clone(), (selector, meta)))
@@ -335,7 +335,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         // should always be the same for the same package, so we keep them in
         // the install state so we don't have to recompute them at every install.
         //
-        let package_flags = &install.install_state.lockfile.entries
+        let package_flags = &install.lockfile.entries
             .get(&locator.physical_locator())
             .expect("Expected package flags to be set")
             .flags;

@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, fmt::{self, Debug}, hash::Hash, marker::PhantomData, sync::Arc};
 
+use bincode::{Decode, Encode};
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
 
@@ -9,7 +10,7 @@ fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     value == &T::default()
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockfileEntry {
     pub checksum: Option<Sha256>,
     pub resolution: Resolution,
@@ -18,7 +19,7 @@ pub struct LockfileEntry {
     pub flags: ContentFlags,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Encode, Decode, PartialEq, Eq)]
 pub struct Lockfile {
     pub metadata: LockfileMetadata,
     pub resolutions: BTreeMap<Descriptor, Locator>,
@@ -31,21 +32,6 @@ impl Lockfile {
             metadata: LockfileMetadata::new(),
             resolutions: BTreeMap::new(),
             entries: BTreeMap::new(),
-        }
-    }
-
-    pub fn forget_transient_resolutions(&mut self) {
-        let mut to_remove = vec![];
-
-        for (descriptor, locator) in self.resolutions.iter() {
-            if descriptor.range.is_transient_resolution() {
-                to_remove.push((descriptor.clone(), locator.clone()));
-            }
-        }
-
-        for (descriptor, locator) in to_remove {
-            self.resolutions.remove(&descriptor);
-            self.entries.remove(&locator);
         }
     }
 }
@@ -197,7 +183,7 @@ impl<'de, T> Deserialize<'de> for MultiKey<T> where T: std::str::FromStr<Err = E
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Encode, Decode, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LockfileMetadata {
     pub version: u64,
     pub cache_key: u64,

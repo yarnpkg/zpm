@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use bincode::{Decode, Encode};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::{primitives::{range, Descriptor, Ident, Locator, Range, Reference}, resolvers::Resolution};
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolutionTree {
     pub roots: Vec<Descriptor>,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,

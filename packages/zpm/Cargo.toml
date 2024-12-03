@@ -10,7 +10,7 @@ tokio = { version = "1.39.2", features = ["full"] }
 reqwest = { version = "0.12.5", features = ["gzip", "rustls-tls", "trust-dns"] }
 regex = "1.10.6"
 rstest = "0.22.0"
-arca = { path = "../../../arca-rs", version = "0.8.0", features = ["serde"] }
+arca = { path = "../../../arca-rs", version = "0.8.0", features = ["bincode", "serde"] }
 thiserror = "1.0.63"
 serde_json = "1.0.124"
 serde = { version = "1.0.207", features = ["derive"] }
