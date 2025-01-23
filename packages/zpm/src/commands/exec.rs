@@ -18,7 +18,8 @@ impl Exec {
             = project::Project::new(None).await?;
 
         project
-            .import_install_state()?;
+            .import_install_state()?
+            .lazy_install().await?;
 
         Ok(ScriptEnvironment::new()
             .with_project(&project)

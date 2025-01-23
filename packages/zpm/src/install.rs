@@ -4,7 +4,7 @@ use arca::Path;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-use crate::{build, cache::CompositeCache, error::Error, fetchers::{fetch_locator, PackageData}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, content_flags::ContentFlags, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, resolve_locator, Resolution}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}, ui};
+use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, Resolution, SyncResolutionAttempt}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}, ui};
 
 
 #[derive(Clone, Default)]
@@ -245,6 +245,11 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
             },
 
             InstallOp::Resolve {descriptor} => {
+                let dependencies = match try_resolve_descriptor_sync(context.clone(), descriptor.clone(), dependencies)? {
+                    SyncResolutionAttempt::Success(result) => return Ok(InstallOpResult::Resolved(result)),
+                    SyncResolutionAttempt::Failure(dependencies) => dependencies,
+                };
+
                 let future = tokio::time::timeout(
                     timeout,
                     resolve_descriptor(context.clone(), descriptor.clone(), dependencies)
@@ -254,6 +259,11 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
             },
 
             InstallOp::Fetch {locator} => {
+                let dependencies = match try_fetch_locator_sync(context.clone(), &locator, false, dependencies)? {
+                    SyncFetchAttempt::Success(result) => return Ok(InstallOpResult::Fetched(result)),
+                    SyncFetchAttempt::Failure(dependencies) => dependencies,
+                };
+
                 let future = tokio::time::timeout(
                     timeout,
                     fetch_locator(context.clone(), &locator.clone(), false, dependencies)
@@ -303,6 +313,7 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
 
 #[derive(Clone, Debug, Encode, Decode, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstallState {
+    pub last_installed_at: u128,
     pub resolution_tree: ResolutionTree,
     pub normalized_resolutions: BTreeMap<Locator, Resolution>,
     pub packages_by_location: BTreeMap<Path, Locator>,
@@ -322,6 +333,8 @@ pub struct Install {
 
 impl Install {
     pub async fn finalize(mut self, project: &mut Project) -> Result<(), Error> {
+        self.install_state.last_installed_at = project.last_changed_at;
+
         print_time!("Before link");
 
         let build = linker::link_project(project, &mut self)

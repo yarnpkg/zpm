@@ -71,6 +71,9 @@ pub enum Error {
     #[error("UTF-8 error")]
     Utf8Error2(#[from] std::str::Utf8Error),
 
+    #[error("Error while traversing directories")]
+    WalkDirError(#[from] Arc<walkdir::Error>),
+
     #[error("Invalid JSON data ({0})")]
     InvalidJsonData(#[from] Arc<sonic_rs::Error>),
 
@@ -252,6 +255,12 @@ impl From<std::io::Error> for Error {
             inner: Arc::new(error),
             backtrace: Arc::new(std::backtrace::Backtrace::capture()),
         }
+    }
+}
+
+impl From<walkdir::Error> for Error {
+    fn from(error: walkdir::Error) -> Self {
+        Arc::new(error).into()
     }
 }
 

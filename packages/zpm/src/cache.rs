@@ -1,4 +1,4 @@
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -51,6 +51,36 @@ impl CompositeCache {
 
         if let Some(ref cache) = self.global_cache {
             return cache.key_path(key, ext);
+        }
+
+        panic!("Expected at least one cache to be set");
+    }
+
+    pub fn cache_entry<K>(&self, key: K, ext: &str) -> Result<InfoCacheEntry, Error>
+    where
+        K: Decode + Encode,
+    {
+        if let Some(ref cache) = self.local_cache {
+            return cache.cache_entry(key, ext);
+        }
+
+        if let Some(ref cache) = self.global_cache {
+            return cache.cache_entry(key, ext);
+        }
+
+        panic!("Expected at least one cache to be set");
+    }
+
+    pub fn check_cache_entry<K>(&self, key: K, ext: &str) -> Result<Option<InfoCacheEntry>, Error>
+    where
+        K: Decode + Encode,
+    {
+        if let Some(ref cache) = self.local_cache {
+            return cache.check_cache_entry(key, ext);
+        }
+
+        if let Some(ref cache) = self.global_cache {
+            return cache.check_cache_entry(key, ext);
         }
 
         panic!("Expected at least one cache to be set");
@@ -111,7 +141,8 @@ pub struct DiskCache {
 
 impl DiskCache {
     pub fn new(cache_path: Path) -> Self {
-        fs::create_dir_all(cache_path.to_path_buf())
+        cache_path
+            .fs_create_dir_all()
             .unwrap();
 
         DiskCache {
@@ -132,6 +163,34 @@ impl DiskCache {
             .with_join_str(format!("{:064x}{}", key, ext));
 
         Ok(key_path)
+    }
+
+    pub fn cache_entry<K>(&self, key: K, ext: &str) -> Result<InfoCacheEntry, Error>
+    where
+        K: Decode + Encode,
+    {
+        let key_path
+            = self.key_path(&key, ext)?;
+
+        Ok(InfoCacheEntry {
+            path: key_path,
+            checksum: None,
+        })
+    }
+
+    pub fn check_cache_entry<K>(&self, key: K, ext: &str) -> Result<Option<InfoCacheEntry>, Error>
+    where
+        K: Decode + Encode,
+    {
+        let key_path
+            = self.key_path(&key, ext)?;
+
+        Ok(key_path.if_exists().map(|path| {
+            InfoCacheEntry {
+                path,
+                checksum: None,
+            }
+        }))
     }
 
     pub async fn ensure_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<CacheEntry, Error>
@@ -159,7 +218,7 @@ impl DiskCache {
             false => {
                 let data = self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?;
 
-                tokio::task::spawn(async move {
+                tokio::task::spawn_blocking(move || {
                     let checksum
                         = Sha256::from_data(&data);
 

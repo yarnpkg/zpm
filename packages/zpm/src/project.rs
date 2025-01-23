@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, io::ErrorKind, os::unix::fs::PermissionsExt, sync::Arc};
+use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, io::{ErrorKind, Read}, os::unix::fs::{MetadataExt, PermissionsExt}, sync::Arc, time::UNIX_EPOCH};
 
 use arca::{Path, ToArcaPath};
 use itertools::Itertools;
@@ -24,6 +24,7 @@ pub struct Project {
     pub workspaces_by_rel_path: BTreeMap<Path, Ident>,
     pub resolution_overrides: BTreeMap<Ident, Vec<(ResolutionOverride, Range)>>,
 
+    pub last_changed_at: u128,
     pub install_state: Option<InstallState>,
 }
 
@@ -68,8 +69,10 @@ impl Project {
         let root_workspace
             = Workspace::from_path(&project_cwd, project_cwd.clone()).await?;
 
-        let mut workspaces: BTreeMap<_, _> = root_workspace
-            .workspaces().await?
+        let (workspaces, last_changed_at) = root_workspace
+            .workspaces().await?;
+
+        let mut workspaces: BTreeMap<_, _> = workspaces
             .into_iter()
             .map(|w| (w.locator().ident, w))
             .collect();
@@ -102,6 +105,7 @@ impl Project {
             workspaces_by_rel_path,
             resolution_overrides: resolutions_overrides,
 
+            last_changed_at,
             install_state: None,
         })
     }
@@ -131,7 +135,7 @@ impl Project {
     }
 
     pub fn install_state_path(&self) -> Path {
-        self.project_cwd.with_join_str(".yarn/install-state.json")
+        self.project_cwd.with_join_str(".yarn/install-state.dat")
     }
 
     pub fn build_state_path(&self) -> Path {
@@ -188,7 +192,6 @@ impl Project {
 
     pub fn attach_install_state(&mut self, install_state: InstallState) -> Result<(), Error> {
         if self.install_state.as_ref().map(|s| *s != install_state).unwrap_or(true) {
-            println!("Writing install state; {:?}", self.install_state.as_ref().map(|s| *s == install_state));
             self.write_install_state(&install_state)?;
         }
 
@@ -245,7 +248,7 @@ impl Project {
             .with_join_str("cache");
 
         let local_cache_path
-            = self.project_cwd.with_join_str(".yarn/cache");
+            = self.project_cwd.with_join_str(".yarn/cache2");
 
         let global_cache
             = Some(DiskCache::new(global_cache_path));
@@ -402,6 +405,16 @@ impl Project {
         Ok(script_match.unwrap())
     }
 
+    pub async fn lazy_install(&mut self) -> Result<(), Error> {
+        if let Some(install_state) = &self.install_state {
+            if self.last_changed_at <= install_state.last_installed_at {
+                return Ok(());
+            }
+        }
+
+        self.run_install().await
+    }
+
     pub async fn run_install(&mut self) -> Result<(), Error> {
         let package_cache
             = self.package_cache();
@@ -427,6 +440,7 @@ pub struct Workspace {
     pub path: Path,
     pub rel_path: Path,
     pub manifest: Manifest,
+    pub last_changed_at: u128,
 }
 
 impl Workspace {
@@ -434,12 +448,19 @@ impl Workspace {
         let manifest_path
             = path.with_join_str(MANIFEST_NAME);
 
-        let manifest_text = manifest_path
-            .fs_read_text()
-            .map_err(|err| match err.kind() {
-                ErrorKind::NotFound | ErrorKind::NotADirectory => Error::ManifestNotFound,
-                _ => err.into(),
-            })?;
+        let manifest_meta = manifest_path.fs_metadata().map_err(|err| match err.kind() {
+            ErrorKind::NotFound | ErrorKind::NotADirectory => Error::ManifestNotFound,
+            _ => err.into(),
+        })?;
+
+        let last_changed_at = manifest_meta.modified()?
+            .duration_since(UNIX_EPOCH).unwrap()
+            .as_nanos();
+
+        let mut manifest_text = String::with_capacity(manifest_meta.size() as usize);
+
+        let mut file = std::fs::File::open(manifest_path.to_path_buf())?;
+        file.read_to_string(&mut manifest_text)?;
 
         let manifest: Manifest
             = sonic_rs::from_str(manifest_text.as_str())?;
@@ -460,6 +481,7 @@ impl Workspace {
             path,
             rel_path,
             manifest,
+            last_changed_at,
         })
     }
 
@@ -475,8 +497,9 @@ impl Workspace {
         }.into())
     }
 
-    pub async fn workspaces(&self) -> Result<Vec<Workspace>, Error> {
+    pub async fn workspaces(&self) -> Result<(Vec<Workspace>, u128), Error> {
         let mut workspaces = vec![];
+        let mut last_changed_at = self.last_changed_at;
 
         if let Some(patterns) = &self.manifest.workspaces {
             let mut workspace_dirs = BTreeSet::new();
@@ -509,9 +532,18 @@ impl Workspace {
                     .min_depth(star_segment_count)
                     .max_depth(star_segment_count)
                     .into_iter()
-                    .filter_map(Result::ok);
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 for entry in iter {
+                    let last_modified_at = entry.metadata()?
+                        .modified()?
+                        .elapsed().unwrap()
+                        .as_nanos();
+
+                    if last_modified_at > last_changed_at {
+                        last_changed_at = last_modified_at;
+                    }
+
                     workspace_dirs.insert(entry.path().to_arca());
                 }
             }
@@ -536,12 +568,18 @@ impl Workspace {
                 }
             }
 
+            for workspace in workspaces.iter_mut() {
+                if workspace.last_changed_at > last_changed_at {
+                    last_changed_at = workspace.last_changed_at;
+                }
+            }
+
             workspaces.sort_by(|w1, w2| {
                 w1.name.cmp(&w2.name)
             });
         }
 
-        Ok(workspaces)
+        Ok((workspaces, last_changed_at))
     }
 
     pub fn write_manifest(&self) -> Result<(), Error> {

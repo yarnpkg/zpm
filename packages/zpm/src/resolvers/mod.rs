@@ -17,6 +17,10 @@ mod tarball;
 mod url;
 mod workspace;
 
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    value == &T::default()
+}
+
 /**
  * Contains the information we keep in the lockfile for a given package.
  */
@@ -26,6 +30,8 @@ pub struct Resolution {
     pub locator: Locator,
     pub version: crate::semver::Version,
 
+    #[serde(default)]
+    #[serde(skip_serializing_if = "is_default")]
     pub requirements: system::Requirements,
 
     #[serde(default)]
@@ -87,6 +93,32 @@ impl IntoResolutionResult for Resolution {
             original_resolution,
             package_data: None,
         }
+    }
+}
+
+pub enum SyncResolutionAttempt {
+    Success(ResolutionResult),
+    Failure(Vec<InstallOpResult>),
+}
+
+pub fn try_resolve_descriptor_sync(context: InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<SyncResolutionAttempt, Error> {
+    match &descriptor.range {
+        Range::Link(params)
+            => Ok(SyncResolutionAttempt::Success(link::resolve_descriptor(&context, &descriptor, params)?)),
+
+        Range::Portal(params)
+            => Ok(SyncResolutionAttempt::Success(portal::resolve_descriptor(&context, &descriptor, params, dependencies)?)),
+
+        Range::WorkspaceMagic(_)
+            => Ok(SyncResolutionAttempt::Success(workspace::resolve_name_descriptor(&context, &descriptor, &range::WorkspaceIdentRange {ident: descriptor.ident.clone()})?)),
+
+        Range::WorkspaceSemver(_)
+            => Ok(SyncResolutionAttempt::Success(workspace::resolve_name_descriptor(&context, &descriptor, &range::WorkspaceIdentRange {ident: descriptor.ident.clone()})?)),
+
+        Range::WorkspacePath(params)
+            => Ok(SyncResolutionAttempt::Success(workspace::resolve_path_descriptor(&context, &descriptor, params)?)),
+
+        _ => Ok(SyncResolutionAttempt::Failure(dependencies)),
     }
 }
 

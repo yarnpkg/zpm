@@ -17,8 +17,11 @@ pub fn convert_entries_to_zip(ident: &Ident, entries: Vec<Entry>) -> Result<Vec<
 pub fn convert_tar_gz_to_zip(ident: &Ident, tar_gz_data: Bytes) -> Result<Vec<u8>, Error> {
     let mut decompressed = vec![];
 
-    flate2::read::GzDecoder::new(Cursor::new(tar_gz_data))
-        .read_to_end(&mut decompressed)?;
+    if tar_gz_data.starts_with(&[0x1f, 0x8b]) {
+        flate2::read::GzDecoder::new(Cursor::new(tar_gz_data)).read_to_end(&mut decompressed)?;
+    } else {
+        decompressed = tar_gz_data.to_vec();
+    }
 
     let entries = tar::entries_from_tar(&decompressed)?;
     let entries = strip_first_segment(entries);

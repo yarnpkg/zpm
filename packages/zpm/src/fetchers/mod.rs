@@ -105,6 +105,38 @@ impl PackageData {
     }
 }
 
+pub enum SyncFetchAttempt {
+    Success(FetchResult),
+    Failure(Vec<InstallOpResult>),
+}
+
+pub fn try_fetch_locator_sync(context: InstallContext, locator: &Locator, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<SyncFetchAttempt, Error> {
+    match &locator.reference {
+        Reference::Shorthand(params)
+            => match npm::try_fetch_locator_sync(&context, locator, &reference::RegistryReference {ident: locator.ident.clone(), version: params.version.clone()}, is_mock_request)? {
+                Some(fetch_result) => Ok(SyncFetchAttempt::Success(fetch_result)),
+                None => Ok(SyncFetchAttempt::Failure(dependencies)),
+            },
+
+        Reference::Registry(params)
+            => match npm::try_fetch_locator_sync(&context, locator, params, is_mock_request)? {
+                Some(fetch_result) => Ok(SyncFetchAttempt::Success(fetch_result)),
+                None => Ok(SyncFetchAttempt::Failure(dependencies)),
+            },
+
+        Reference::Link(params)
+            => Ok(SyncFetchAttempt::Success(link::fetch_locator(&context, locator, params, dependencies)?)),
+
+        Reference::Portal(params)
+            => Ok(SyncFetchAttempt::Success(portal::fetch_locator(&context, locator, params, dependencies)?)),
+
+        Reference::Workspace(params)
+            => Ok(SyncFetchAttempt::Success(workspace::fetch_locator(&context, locator, params)?)),
+
+        _ => Ok(SyncFetchAttempt::Failure(dependencies)),
+    }
+}
+
 pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     match &locator.reference {
         Reference::Link(params)
