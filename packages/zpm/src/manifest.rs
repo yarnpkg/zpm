@@ -1,20 +1,21 @@
-use std::{collections::BTreeMap, fs, io::ErrorKind, sync::Arc};
+use std::{collections::BTreeMap, io::{self, ErrorKind, Read}, sync::Arc};
 
 use arca::Path;
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use zpm_macros::parse_enum;
 
 use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range}, semver::{self, Version}, system};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Encode, Decode)]
 #[serde(rename_all = "camelCase")]
 pub struct DistManifest {
     pub tarball: String,
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 #[serde(untagged)]
 pub enum BinField {
     String(Path),
@@ -32,13 +33,13 @@ impl Iterator for BinField {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct BinManifest {
     pub name: Option<Ident>,
     pub bin: Option<BinField>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Encode, Decode)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteManifest {
     #[serde(default)]
@@ -68,8 +69,8 @@ pub struct RemoteManifest {
 }
 
 #[parse_enum(or_else = |s| Err(Error::InvalidResolution(s.to_string())))]
-#[derive(Clone, Debug, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[derive_variants(Clone, Debug, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode)]
+#[derive_variants(Clone, Debug, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode)]
 pub enum ResolutionOverride {
     #[pattern(spec = r"^(?<descriptor>.*)$")]
     Descriptor {
@@ -153,7 +154,7 @@ impl ResolutionOverride {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Encode, Decode)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     #[serde(default)]
@@ -207,15 +208,28 @@ pub fn parse_manifest(manifest_text: String) -> Result<Manifest, Error> {
     Ok(manifest_data)
 }
 
+fn wrap_error<T>(result: Result<T, io::Error>) -> Result<T, Error> {
+    result.map_err(|err| match err.kind() {
+        ErrorKind::NotFound | ErrorKind::NotADirectory => Error::ManifestNotFound,
+        _ => err.into(),
+    })
+}
+
 pub fn read_manifest(p: &Path) -> Result<Manifest, Error> {
-    let manifest_text = fs::read_to_string(p.to_path_buf())
-        .map_err(|err| match err.kind() {
-            ErrorKind::NotFound | ErrorKind::NotADirectory => Error::ManifestNotFound,
-            _ => err.into(),
-        })?;
+    let metadata = wrap_error(p.fs_metadata())?;
 
-    let manifest_data
-        = sonic_rs::from_str(manifest_text.as_str())?;
+    Ok(read_manifest_with_size(p, metadata.len())?)
+}
 
-    Ok(manifest_data)
+pub fn read_manifest_with_size(abs_path: &Path, size: u64) -> Result<Manifest, Error> {
+    let mut manifest_text = String::with_capacity(size as usize);
+
+    let mut file = wrap_error(std::fs::File::open(abs_path.to_path_buf()))?;
+    file.read_to_string(&mut manifest_text)?;
+
+    if manifest_text.len() == 0 {
+        return Ok(Manifest::default());
+    }
+
+    Ok(sonic_rs::from_str(&manifest_text)?)
 }

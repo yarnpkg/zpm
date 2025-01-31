@@ -1,23 +1,36 @@
-use std::{collections::{BTreeMap, BTreeSet}, io, time::UNIX_EPOCH};
+use std::{collections::BTreeMap, io, time::UNIX_EPOCH};
 
 use arca::Path;
 use bincode::{Decode, Encode};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-use crate::error::Error;
+use crate::{error::Error, manifest::{read_manifest_with_size, Manifest}};
+
+#[derive(Debug, Encode, Decode)]
+pub enum SaveEntry {
+    Manifest(u128, Manifest),
+    Directory(u128),
+}
+
+impl SaveEntry {
+    pub fn mtime(&self) -> u128 {
+        match self {
+            SaveEntry::Manifest(mtime, _) => *mtime,
+            SaveEntry::Directory(mtime) => *mtime,
+        }
+    }
+}
 
 #[derive(Default, Debug, Encode, Decode)]
 pub struct SaveState {
-    cache: BTreeMap<Path, u128>,
-    manifests: BTreeSet<Path>,
-    roots: Vec<Path>,
+    pub cache: BTreeMap<Path, SaveEntry>,
+    pub roots: Vec<Path>,
 }
 
 impl SaveState {
     pub fn new(roots: Vec<Path>) -> Self {
         Self {
-            cache: BTreeMap::from_iter(roots.iter().map(|root| (root.clone(), 0))),
-            manifests: BTreeSet::new(),
+            cache: BTreeMap::from_iter(roots.iter().map(|root| (root.clone(), SaveEntry::Directory(0)))),
             roots,
         }
     }
@@ -30,7 +43,7 @@ pub enum PollResult {
 }
 
 pub trait ManifestFinder {
-    fn rsync(&mut self) -> Result<Vec<&Path>, Error>;
+    fn rsync(&mut self) -> Result<Vec<Path>, Error>;
 }
 
 /**
@@ -44,9 +57,9 @@ pub trait ManifestFinder {
  */
 #[derive(Default, Debug)]
 pub struct CachedManifestFinder {
-    root_path: Path,
-    save_state_path: Path,
-    save_state: SaveState,
+    pub root_path: Path,
+    pub save_state_path: Path,
+    pub save_state: SaveState,
 }
 
 impl CachedManifestFinder {
@@ -91,9 +104,8 @@ impl CachedManifestFinder {
         Ok(())
     }
 
-
-    fn refresh_directory(&mut self, rel_path: &Path, current_time: u128) -> Result<(), Error> {
-        self.save_state.cache.insert(rel_path.clone(), current_time);
+    fn refresh_directory(&mut self, manifest_paths: &mut Vec<Path>, rel_path: &Path, current_time: u128) -> Result<(), Error> {
+        self.save_state.cache.insert(rel_path.clone(), SaveEntry::Directory(current_time));
 
         let abs_path = self.root_path
             .with_join(rel_path);
@@ -102,31 +114,25 @@ impl CachedManifestFinder {
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?;
 
-        let has_package_json = directory_entries
-            .iter()
-            .any(|entry| entry.file_name() == "package.json");
+        for entry in directory_entries {
+            let is_dir = entry.file_type()?.is_dir();
 
-        if has_package_json {
-            self.save_state.manifests.insert(rel_path.clone());
-        } else {
-            self.save_state.manifests.remove(&rel_path);
-        }
+            if !is_dir && entry.file_name() != "package.json" {
+                continue;
+            }
 
-        let directory_entries_and_types = directory_entries
-            .into_iter()
-            .map(|entry| entry.file_type().map(|file_type| (entry, file_type.is_dir())))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let new_directories = directory_entries_and_types
-            .into_iter()
-            .filter_map(|(entry, is_dir)| is_dir.then_some(entry))
-            .collect::<Vec<_>>();
-
-        for directory in new_directories {
             let entry_rel_path = rel_path
-                .with_join_str(directory.file_name().to_str().unwrap());
+                .with_join_str(entry.file_name().to_str().unwrap());
 
-            self.refresh_directory(&entry_rel_path, current_time)?;
+            if self.save_state.cache.contains_key(&entry_rel_path) {
+                continue;
+            }
+
+            if is_dir {
+                self.refresh_directory(manifest_paths, &entry_rel_path, current_time)?;
+            } else {
+                manifest_paths.push(entry_rel_path.clone());
+            }
         }
 
         Ok(())
@@ -134,18 +140,22 @@ impl CachedManifestFinder {
 }
 
 impl ManifestFinder for CachedManifestFinder {
-    fn rsync(&mut self) -> Result<Vec<&Path>, Error> {
-        let current_time = std::time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_nanos() as u128;
+    fn rsync(&mut self) -> Result<Vec<Path>, Error> {
+        enum CacheCheck {
+            Skip,
+            NotFound(Path),
+            StableFile(Path),
+            ChangedFile(Path, u128, Manifest),
+            ChangedDirectory(Path, u128),
+        }
 
-        let cache_check = self.save_state.cache.par_iter().map(|(rel_path, stored_mtime)| -> Result<Option<(Path, PollResult, Option<u128>)>, Error> {
+        let cache_checks = self.save_state.cache.par_iter().map(|(rel_path, save_entry)| {
             let abs_path = self.root_path
                 .with_join(&rel_path);
 
             let metadata = match abs_path.fs_metadata() {
                 Ok(metadata) => metadata,
-                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Some((rel_path.clone(), PollResult::NotFound, None))),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(CacheCheck::NotFound(rel_path.clone())),
                 Err(e) => return Err(e.into()),
             };
 
@@ -153,40 +163,77 @@ impl ManifestFinder for CachedManifestFinder {
                 .duration_since(UNIX_EPOCH)?
                 .as_nanos() as u128;
 
-            let status = match mtime <= *stored_mtime {
-                true => return Ok(None),
-                false => PollResult::Changed,
-            };
-
-            Ok(Some((rel_path.clone(), status, Some(mtime))))
+            if metadata.is_dir() {
+                if mtime > save_entry.mtime() {
+                    Ok(CacheCheck::ChangedDirectory(rel_path.clone(), mtime))
+                } else {
+                    Ok(CacheCheck::Skip)
+                }
+            } else {
+                if mtime > save_entry.mtime() {
+                    Ok(CacheCheck::ChangedFile(rel_path.clone(), mtime, read_manifest_with_size(&abs_path, metadata.len())?))
+                } else {
+                    Ok(CacheCheck::StableFile(rel_path.clone()))
+                }
+            }
         }).collect::<Result<Vec<_>, Error>>()?;
 
         let mut has_changed = false;
 
-        for check_entry in cache_check {
-            if let Some((rel_path, poll_result, _)) = check_entry {
-                has_changed = true;
+        let mut manifest_paths = vec![];
+        let mut new_manifest_paths = vec![];
 
-                match poll_result {
-                    PollResult::Changed => {
-                        self.refresh_directory(&rel_path, current_time)?;
-                    },
+        for cache_check in cache_checks {
+            match cache_check {
+                CacheCheck::Skip => {
+                    // Nothing to do, it's just a directory that didn't change
+                },
 
-                    PollResult::NotFound => {
-                        self.save_state.cache.remove(&rel_path);
-                        self.save_state.manifests.remove(&rel_path);
-                    },
-                }
+                CacheCheck::StableFile(rel_path) => {
+                    manifest_paths.push(rel_path);
+                },
+
+                CacheCheck::ChangedFile(rel_path, mtime, manifest) => {
+                    self.save_state.cache.insert(rel_path.clone(), SaveEntry::Manifest(mtime, manifest));
+                    manifest_paths.push(rel_path);
+                    has_changed = true;
+                },
+
+                CacheCheck::ChangedDirectory(rel_path, mtime) => {
+                    self.refresh_directory(&mut new_manifest_paths, &rel_path, mtime)?;
+                    has_changed = true;
+                },
+
+                CacheCheck::NotFound(rel_path) => {
+                    self.save_state.cache.remove(&rel_path);
+                    has_changed = true;
+                },
             }
+        }
+
+        let new_manifests = new_manifest_paths.into_par_iter()
+            .map(|manifest_path| {
+                let metadata = manifest_path.fs_metadata()?;
+                let manifest = read_manifest_with_size(&manifest_path, metadata.len())?;
+
+                let mtime = metadata.modified()?
+                    .duration_since(UNIX_EPOCH)?
+                    .as_nanos() as u128;
+
+                Ok((manifest_path, SaveEntry::Manifest(mtime, manifest)))
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        for (rel_path, save_entry) in new_manifests {
+            self.save_state.cache.insert(rel_path.clone(), save_entry);
+            manifest_paths.push(rel_path);
         }
 
         if has_changed {
             self.save()?;
         }
 
-        let manifests = self.save_state.manifests.iter()
-            .collect::<Vec<_>>();
-
-        Ok(manifests)
+        manifest_paths.sort();
+        Ok(manifest_paths)
     }
 }

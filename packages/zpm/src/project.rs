@@ -1,12 +1,11 @@
-use std::{collections::BTreeMap, fs::Permissions, io::{ErrorKind, Read}, os::unix::fs::{MetadataExt, PermissionsExt}, sync::Arc, time::UNIX_EPOCH};
+use std::{collections::BTreeMap, fs::Permissions, io::ErrorKind, os::unix::fs::PermissionsExt, sync::Arc, time::UNIX_EPOCH};
 
 use arca::{Path, ToArcaPath};
 use globset::Glob;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::Deserialize;
 use zpm_macros::track_time;
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{BinField, BinManifest, Manifest, ResolutionOverride}, manifest_finder::{CachedManifestFinder, ManifestFinder}, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, script::Binary};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{read_manifest_with_size, BinField, BinManifest, Manifest, ResolutionOverride}, manifest_finder::{CachedManifestFinder, ManifestFinder, SaveEntry}, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, script::Binary};
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
 pub const MANIFEST_NAME: &str = "package.json";
@@ -68,7 +67,7 @@ impl Project {
         let config = Config::new(Some(project_cwd.clone()));
 
         let root_workspace
-            = Workspace::from_path(&project_cwd, Path::new())?;
+            = Workspace::from_root_path(&project_cwd)?;
 
         let (mut workspaces, last_changed_at) = root_workspace
             .workspaces().await?;
@@ -76,13 +75,13 @@ impl Project {
         let mut resolutions_overrides: BTreeMap<Ident, Vec<(ResolutionOverride, Range)>>
             = BTreeMap::new();
 
-       for (resolution, range) in &root_workspace.manifest.resolutions {
-           resolutions_overrides.entry(resolution.target_ident().clone())
+        for (resolution, range) in &root_workspace.manifest.resolutions {
+            resolutions_overrides.entry(resolution.target_ident().clone())
                .or_default()
                .push((resolution.clone(), range.clone()));
-       }
+        }
 
-       // Add root workspace to the beginning
+        // Add root workspace to the beginning
         workspaces.insert(0, root_workspace);
 
         let mut workspaces_by_ident = BTreeMap::new();
@@ -454,12 +453,15 @@ pub struct Workspace {
     pub last_changed_at: u128,
 }
 
-impl Workspace {
-    pub fn from_path(root: &Path, rel_path: Path) -> Result<Workspace, Error> {
-        let path = root
-            .with_join(&rel_path);
+pub struct WorkspaceInfo {
+    pub rel_path: Path,
+    pub manifest: Manifest,
+    pub last_changed_at: u128,
+}
 
-        let manifest_path = path
+impl Workspace {
+    pub fn from_root_path(root: &Path) -> Result<Workspace, Error> {
+        let manifest_path = root
             .with_join_str(MANIFEST_NAME);
 
         let manifest_meta = manifest_path.fs_metadata().map_err(|err| match err.kind() {
@@ -471,28 +473,34 @@ impl Workspace {
             .duration_since(UNIX_EPOCH).unwrap()
             .as_nanos();
 
-        let mut manifest_text = String::with_capacity(manifest_meta.size() as usize);
+        let manifest
+            = read_manifest_with_size(&manifest_path, manifest_meta.len())?;
 
-        let mut file = std::fs::File::open(manifest_path.to_path_buf())?;
-        file.read_to_string(&mut manifest_text)?;
+        Workspace::from_info(root, WorkspaceInfo {
+            rel_path: Path::new(),
+            manifest,
+            last_changed_at,
+        })
+    }
 
-        let manifest: Manifest
-            = sonic_rs::from_str(manifest_text.as_str())?;
+    pub fn from_info(root: &Path, info: WorkspaceInfo) -> Result<Workspace, Error> {
+        let path = root
+            .with_join(&info.rel_path);
 
-        let name = manifest.name.clone().unwrap_or_else(|| {
-            Ident::new(if rel_path == Path::new() {
+        let name = info.manifest.name.clone().unwrap_or_else(|| {
+            Ident::new(if info.rel_path == Path::new() {
                 "root-workspace".to_string()
             } else {
-                rel_path.basename().map_or_else(|| "unnamed-workspace".to_string(), |b| b.to_string())
+                info.rel_path.basename().map_or_else(|| "unnamed-workspace".to_string(), |b| b.to_string())
             })
         });
 
         Ok(Workspace {
             name,
             path,
-            rel_path,
-            manifest,
-            last_changed_at,
+            rel_path: info.rel_path,
+            manifest: info.manifest,
+            last_changed_at: info.last_changed_at,
         })
     }
 
@@ -510,15 +518,9 @@ impl Workspace {
 
     pub async fn workspaces(&self) -> Result<(Vec<Workspace>, u128), Error> {
         let mut workspaces = vec![];
-        let mut last_changed_at = self.last_changed_at;
+        let mut project_last_changed_at = self.last_changed_at;
 
         if let Some(patterns) = &self.manifest.workspaces {
-            let mut manifest_finder
-                = CachedManifestFinder::new(self.path.clone())?;
-
-            let candidate_workspaces = manifest_finder
-                .rsync()?;
-
             let pattern_matchers = patterns.iter()
                 .map(|p| Glob::new(p))
                 .collect::<Result<Vec<_>, _>>()?
@@ -526,28 +528,34 @@ impl Workspace {
                 .map(|g| g.compile_matcher())
                 .collect::<Vec<_>>();
 
-            let matching_workspaces = candidate_workspaces.into_iter()
-                .filter(|w| pattern_matchers.iter().any(|m| m.is_match(w.as_str())))
+            let mut manifest_finder
+                = CachedManifestFinder::new(self.path.clone())?;
+
+            let workspace_paths = manifest_finder.rsync()?.into_iter()
+                .filter(|p| pattern_matchers.iter().any(|m| m.is_match(p.as_str())))
+                .map(|p| manifest_finder.save_state.cache.remove(&p).map(|manifest| (p, manifest)).unwrap())
                 .collect::<Vec<_>>();
 
-            let mut hydrated_workspaces = matching_workspaces.into_par_iter()
-                .map(|w| Workspace::from_path(&self.path, w.to_owned()))
-                .collect::<Result<Vec<_>, _>>()?;
+            for (rel_path, save_entry) in workspace_paths {
+                if let SaveEntry::Manifest(last_changed_at, manifest) = save_entry {
+                    workspaces.push(Workspace::from_info(&self.path, WorkspaceInfo {
+                        rel_path,
+                        manifest,
+                        last_changed_at,
+                    })?);
 
-            for workspace in hydrated_workspaces.iter_mut() {
-                if workspace.last_changed_at > last_changed_at {
-                    last_changed_at = workspace.last_changed_at;
+                    if last_changed_at > project_last_changed_at {
+                        project_last_changed_at = last_changed_at;
+                    }
                 }
             }
 
-            hydrated_workspaces.sort_by(|w1, w2| {
+            workspaces.sort_by(|w1, w2| {
                 w1.rel_path.cmp(&w2.rel_path)
             });
-
-            workspaces.extend(hydrated_workspaces);
         }
 
-        Ok((workspaces, last_changed_at))
+        Ok((workspaces, project_last_changed_at))
     }
 
     pub fn write_manifest(&self) -> Result<(), Error> {
