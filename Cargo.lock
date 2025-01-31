@@ -73,7 +73,9 @@ checksum = "4c95c10ba0b00a02636238b814946408b1322d5ac4760326e6fb8ec956d85775"
 
 [[package]]
 name = "arca"
-version = "0.9.0"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1162e0e541cafead91bbd9bd4bc9753dfc0947ad054eca2bd1cf8ba9873a6b47"
 dependencies = [
  "bincode",
  "bincode_derive",

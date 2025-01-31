@@ -27,7 +27,7 @@ pub fn resolve_locator(context: &InstallContext, locator: &Locator, params: &ref
     let manifest_text = manifest_path
         .fs_read_text_with_zip()?;
     let manifest
-        = parse_manifest(manifest_text)?;
+        = parse_manifest(&manifest_text)?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);

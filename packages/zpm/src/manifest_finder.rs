@@ -74,13 +74,14 @@ impl CachedManifestFinder {
         // We tolerate any errors; worst case, we'll just re-scan the entire
         // directory to rebuild the cache.
         let mut save_state = save_state_path
-            .fs_read()
+            .fs_read_prealloc()
             .ok()
             .and_then(|save_data| bincode::decode_from_slice::<SaveState, _>(save_data.as_slice(), bincode::config::standard()).ok())
             .map(|(save_state, _)| save_state)
             .unwrap_or_default();
 
         if save_state.roots != roots {
+            println!("Save state roots don't match; rebuilding cache");
             save_state = SaveState::new(roots);
         }
 

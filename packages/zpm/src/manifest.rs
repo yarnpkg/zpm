@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, io::{self, ErrorKind, Read}, sync::Arc};
+use std::{collections::BTreeMap, io::{self, ErrorKind}};
 
 use arca::Path;
 use bincode::{Decode, Encode};
@@ -201,13 +201,6 @@ pub struct Manifest {
     pub resolutions: BTreeMap<ResolutionOverride, Range>,
 }
 
-pub fn parse_manifest(manifest_text: String) -> Result<Manifest, Error> {
-    let manifest_data = sonic_rs::from_str(manifest_text.as_str())
-        .map_err(Arc::new)?;
-
-    Ok(manifest_data)
-}
-
 fn wrap_error<T>(result: Result<T, io::Error>) -> Result<T, Error> {
     result.map_err(|err| match err.kind() {
         ErrorKind::NotFound | ErrorKind::NotADirectory => Error::ManifestNotFound,
@@ -215,21 +208,22 @@ fn wrap_error<T>(result: Result<T, io::Error>) -> Result<T, Error> {
     })
 }
 
-pub fn read_manifest(p: &Path) -> Result<Manifest, Error> {
-    let metadata = wrap_error(p.fs_metadata())?;
+pub fn read_manifest(abs_path: &Path) -> Result<Manifest, Error> {
+    let metadata = wrap_error(abs_path.fs_metadata())?;
 
-    Ok(read_manifest_with_size(p, metadata.len())?)
+    Ok(read_manifest_with_size(abs_path, metadata.len())?)
 }
 
 pub fn read_manifest_with_size(abs_path: &Path, size: u64) -> Result<Manifest, Error> {
-    let mut manifest_text = String::with_capacity(size as usize);
+    let manifest_text = wrap_error(abs_path.fs_read_text_with_size(size))?;
 
-    let mut file = wrap_error(std::fs::File::open(abs_path.to_path_buf()))?;
-    file.read_to_string(&mut manifest_text)?;
+    parse_manifest(&manifest_text)
+}
 
-    if manifest_text.len() == 0 {
-        return Ok(Manifest::default());
+pub fn parse_manifest(manifest_text: &str) -> Result<Manifest, Error> {
+    if manifest_text.len() > 0 {
+        Ok(sonic_rs::from_str(&manifest_text)?)
+    } else {
+        Ok(Manifest::default())
     }
-
-    Ok(sonic_rs::from_str(&manifest_text)?)
 }
