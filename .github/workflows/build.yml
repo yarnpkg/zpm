@@ -54,6 +54,7 @@ jobs:
   test-report:
     needs: build
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -62,6 +63,11 @@ jobs:
         with:
           name: zpm-linux
           path: artifacts
+
+      - uses: actions/checkout@master
+        with:
+          name: yarnpkg/berry
+          path: ~/berry
 
       - name: Generate the test report
         env:
@@ -78,6 +84,7 @@ jobs:
   publish:
     needs: [build, test-report]
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       pages: write
@@ -89,10 +96,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
