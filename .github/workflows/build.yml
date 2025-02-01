@@ -15,28 +15,91 @@ jobs:
       matrix:
         platform:
           - [linux, ubuntu-latest]
-          - [macos, macos-latest]
+          - [darwin, macos-latest]
 
     name: 'Building the binary for ${{matrix.platform[0]}}'
     runs-on: ${{matrix.platform[1]}}
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-    - name: Build
-      run: cargo build --verbose --release
+      - name: Build
+        run: cargo build --verbose --release
 
-    - name: Prepare artifacts
-      run: |
-        mkdir artifacts
-        cp target/release/zpm artifacts/zpm-${{matrix.platform[0]}}
+      - name: Prepare artifacts
+        run: |
+          mkdir artifacts
+          cp target/release/zpm artifacts/zpm-${{matrix.platform[0]}}
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: zpm-${{matrix.platform[0]}}
-        path: artifacts/
-        retention-days: 7 
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpm-${{matrix.platform[0]}}
+          path: artifacts/
+          retention-days: 7
+
+  test-report:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: zpm-linux
+          path: artifacts
+
+      - name: Generate the test report
+        env:
+          TEST_BINARY: artifact
+        run: |
+          bash ./scripts/jest.sh --json --outputFile=$(pwd)/artifacts/test-report.json || true
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: artifacts/
+
+  publish:
+    needs: [build, test-report]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{steps.deployment.outputs.page_url}}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate downloads page
+        run: yarn build:site-artifacts
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/site-artifacts/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4 

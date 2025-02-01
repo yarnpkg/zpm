@@ -1,6 +1,12 @@
 {
-    "rust-analyzer.linkedProjects": [
-        "./Cargo.toml"
-    ],
-    "cSpell.enabled": false
+  "rust-analyzer.linkedProjects": [
+    "./Cargo.toml"
+  ],
+  "cSpell.enabled": false,
+  "search.exclude": {
+    "**/.yarn": true,
+    "**/.pnp.*": true
+  },
+  "typescript.tsdk": ".yarn/sdks/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true
 }
