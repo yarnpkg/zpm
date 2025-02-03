@@ -71,12 +71,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: yarnpkg/berry
-          path: ~/berry
+          path: berry
 
       - name: Generate the test report
-        env:
-          TEST_BINARY: artifact
         run: |
+          export BERRY_DIR=$GITHUB_WORKSPACE/berry
+          export TEST_BINARY=artifact
+
           mkdir -p artifacts/test-report
           bash ./scripts/jest.sh --json --outputFile=$(pwd)/artifacts/test-report/report.json || true
 
