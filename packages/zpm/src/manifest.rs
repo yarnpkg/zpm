@@ -2,11 +2,12 @@ use std::{collections::BTreeMap, io::{self, ErrorKind}};
 
 use arca::Path;
 use bincode::{Decode, Encode};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::serde_as;
 use zpm_macros::parse_enum;
+use zpm_utils::FromFileString;
 
-use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range}, semver::{self, Version}, system};
+use crate::{error::Error, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, Locator, PeerRange, Range}, system};
 
 #[derive(Clone, Debug, Deserialize, Serialize, Encode, Decode)]
 #[serde(rename_all = "camelCase")]
@@ -43,7 +44,7 @@ pub struct BinManifest {
 #[serde(rename_all = "camelCase")]
 pub struct RemoteManifest {
     #[serde(default)]
-    pub version: semver::Version,
+    pub version: zpm_semver::Version,
 
     #[serde(flatten)]
     pub requirements: system::Requirements,
@@ -105,7 +106,7 @@ impl ResolutionOverride {
         }
     }
 
-    pub fn apply(&self, parent: &Locator, parent_version: &Version, descriptor: &Descriptor, replacement_range: &Range) -> Option<Range> {
+    pub fn apply(&self, parent: &Locator, parent_version: &zpm_semver::Version, descriptor: &Descriptor, replacement_range: &Range) -> Option<Range> {
         match self {
             ResolutionOverride::Descriptor(params) => {
                 if params.descriptor != *descriptor {
@@ -151,6 +152,13 @@ impl ResolutionOverride {
                 Some(replacement_range.clone())
             }
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for ResolutionOverride {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        let s = String::deserialize(deserializer)?;
+        ResolutionOverride::from_file_string(&s).map_err(serde::de::Error::custom)
     }
 }
 

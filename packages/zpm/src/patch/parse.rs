@@ -2,8 +2,9 @@ use std::{str::FromStr, sync::LazyLock};
 
 use arca::Path;
 use regex::Regex;
+use zpm_utils::FromFileString;
 
-use crate::{error::Error, semver, yarn_serialization_protocol};
+use crate::error::Error;
 
 #[cfg(test)]
 #[path = "./parse.test.rs"]
@@ -33,8 +34,10 @@ pub struct HunkHeader {
     pub modified: Range,
 }
 
-yarn_serialization_protocol!(HunkHeader, {
-    deserialize(src) {
+impl FromFileString for HunkHeader {
+    type Error = Error;
+
+    fn from_file_string(src: &str) -> Result<Self, Error> {
         let m = HEADER_REGEXP.captures(src)
             .ok_or_else(|| Error::InvalidHunkHeader(src.to_string()))?;
 
@@ -55,7 +58,7 @@ yarn_serialization_protocol!(HunkHeader, {
             },
         })
     }
-});
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PatchMutationPartKind {
@@ -112,7 +115,7 @@ impl Hunk {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PatchFilePart {
     FilePatch {
-        semver_exclusivity: Option<semver::Range>,
+        semver_exclusivity: Option<zpm_semver::Range>,
         path: Path,
         hunks: Vec<Hunk>,
         before_hash: Option<String>,
@@ -120,7 +123,7 @@ pub enum PatchFilePart {
     },
 
     FileDeletion {
-        semver_exclusivity: Option<semver::Range>,
+        semver_exclusivity: Option<zpm_semver::Range>,
         path: Path,
         mode: u32,
         hunk: Option<Hunk>,
@@ -128,7 +131,7 @@ pub enum PatchFilePart {
     },
 
     FileCreation {
-        semver_exclusivity: Option<semver::Range>,
+        semver_exclusivity: Option<zpm_semver::Range>,
         path: Path,
         mode: u32,
         hunk: Option<Hunk>,
@@ -136,13 +139,13 @@ pub enum PatchFilePart {
     },
 
     FileRename {
-        semver_exclusivity: Option<semver::Range>,
+        semver_exclusivity: Option<zpm_semver::Range>,
         from: Path,
         to: Path,
     },
 
     FileModeChange {
-        semver_exclusivity: Option<semver::Range>,
+        semver_exclusivity: Option<zpm_semver::Range>,
         path: Path,
         old_mode: u32,
         new_mode: u32,
@@ -257,7 +260,7 @@ impl<'a> PatchParser<'a> {
         }
 
         let semver_exclusivity = file_patch.semver_exclusivity
-            .map(semver::Range::from_str)
+            .map(zpm_semver::Range::from_str)
             .transpose()?;
 
         let mut current_destination_file_path = None;
@@ -412,7 +415,7 @@ impl<'a> PatchParser<'a> {
                             self.commit_hunk();
 
                             let hunk_header
-                                = HunkHeader::from_str(line)?;
+                                = HunkHeader::from_file_string(line)?;
 
                             self.current_hunk = Some(Hunk {
                                 header: hunk_header,

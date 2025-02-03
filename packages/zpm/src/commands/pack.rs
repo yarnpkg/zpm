@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use clipanion::cli;
 
-use crate::{error::Error, formats, pack::pack_list, project, script::ScriptEnvironment};
+use crate::{error::Error, pack::pack_list, project, script::ScriptEnvironment};
 
 #[cli::command(proxy)]
 #[cli::path("pack")]
@@ -55,13 +55,13 @@ impl Pack {
         }
 
         let entries
-            = formats::entries_from_files(&active_workspace.path, &pack_list)?;
+            = zpm_formats::entries_from_files(&active_workspace.path, &pack_list)?;
 
         let entries
-            = formats::prefix_entries(entries, active_workspace.name.nm_subdir());
+            = zpm_formats::prefix_entries(entries, active_workspace.name.nm_subdir());
 
         let packed_file
-            = formats::tar::craft_tgz(&entries)?;
+            = zpm_formats::tar::craft_tgz(&entries)?;
 
         if let Some((locator, script)) = postpack_script {
             ScriptEnvironment::new()

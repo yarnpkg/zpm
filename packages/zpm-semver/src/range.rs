@@ -1,8 +1,7 @@
 use std::borrow::Borrow;
+use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use bincode::{Decode, Encode};
-
-use crate::{error::Error, yarn_serialization_protocol};
+use crate::Error;
 
 use super::{extract, Version};
 
@@ -10,7 +9,8 @@ use super::{extract, Version};
 #[path = "./range.test.rs"]
 mod range_tests;
 
-#[derive(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "bincode", derive(bincode_derive::Decode, bincode_derive::Encode))]
 pub enum TokenType {
     LParen,
     RParen,
@@ -19,7 +19,8 @@ pub enum TokenType {
     Or,
 }
 
-#[derive(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "bincode", derive(bincode_derive::Decode, bincode_derive::Encode))]
 pub enum OperatorType {
     Equal,
     LessThan,
@@ -28,13 +29,15 @@ pub enum OperatorType {
     GreaterThanOrEqual,
 }
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "bincode", derive(bincode_derive::Decode, bincode_derive::Encode))]
 pub enum Token {
     Syntax(TokenType),
     Operation(OperatorType, Version),
 }
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "bincode", derive(bincode_derive::Decode, bincode_derive::Encode))]
 pub struct Range {
     pub source: String,
 
@@ -98,21 +101,33 @@ impl Range {
     }
 }
 
-yarn_serialization_protocol!(Range, "", {
-    deserialize(src) {
+impl FromFileString for Range {
+    type Error = Error;
+
+    fn from_file_string(src: &str) -> Result<Self, Error> {
         let tokens = Range::tokenize(src)
-            .ok_or_else(|| Error::InvalidSemverRange(src.to_string()))?;
+            .ok_or_else(|| Error::InvalidRange(src.to_string()))?;
 
         let prefix = extract::infix_to_prefix(&tokens)
-            .ok_or_else(|| Error::InvalidSemverRange(src.to_string()))?;
+            .ok_or_else(|| Error::InvalidRange(src.to_string()))?;
 
         Ok(Range {
             source: src.to_string(),
             tokens: prefix,
         })
     }
+}
 
-    serialize(&self) {
-        &self.source
+impl ToFileString for Range {
+    fn to_file_string(&self) -> String {
+        self.source.clone()
     }
-});
+}
+
+impl ToHumanString for Range {
+    fn to_print_string(&self) -> String {
+        self.to_file_string()
+    }
+}
+
+impl_serialization_traits!(Range);

@@ -5,7 +5,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{DefaultOnError, serde_as};
 
-use crate::{build, error::Error, fetchers::PackageData, formats, primitives::Locator, system};
+use crate::{build, error::Error, fetchers::PackageData, primitives::Locator, system};
 
 static UNPLUG_SCRIPTS: &[&str] = &["preinstall", "install", "postinstall"];
 
@@ -91,7 +91,7 @@ impl ContentFlags {
             return Ok(Self::default());
         };
 
-        let first_entry = formats::zip::first_entry_from_zip(&package_bytes)
+        let first_entry = zpm_formats::zip::first_entry_from_zip(&package_bytes)
             .unwrap();
 
         let meta_manifest = serde_json::from_slice::<Manifest>(&first_entry.data)
@@ -103,7 +103,7 @@ impl ContentFlags {
             .collect::<Vec<_>>();
 
         let entries
-            = formats::zip::entries_from_zip(&package_bytes)?;
+            = zpm_formats::zip::entries_from_zip(&package_bytes)?;
 
         if build_commands.is_empty() {
             let binding_gyp_name

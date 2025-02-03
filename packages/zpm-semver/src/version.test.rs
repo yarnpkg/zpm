@@ -1,6 +1,6 @@
 use rstest::rstest;
 
-use crate::{semver::Version, semver::VersionRc};
+use crate::{Version, VersionRc};
 
 #[rstest]
 #[case("1.2.3", Version { major: 1, minor: 2, patch: 3, rc: None })]

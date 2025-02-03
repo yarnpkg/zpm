@@ -298,13 +298,8 @@ impl ScriptEnvironment {
         }
 
         if !dir.fs_exists() {
-            let nonce = format!("{:08x}", rand::random::<u64>());
-
-            let temp_dir = std::env::temp_dir()
-                .to_arca()
-                .with_join_str(format!("zpm-temp-{}", nonce));
-
-            temp_dir.fs_create_dir()?;
+            let temp_dir = Path::temp_dir_pattern("zpm-temp-{}")?;
+            temp_dir.fs_create_dir_all()?;
 
             temp_dir
                 .with_join_str(".ready")

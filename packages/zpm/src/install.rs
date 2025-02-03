@@ -1,10 +1,11 @@
-use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, str::FromStr};
+use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData};
 
 use arca::Path;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
+use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, Resolution, SyncResolutionAttempt}, semver, system, tree_resolver::{ResolutionTree, TreeResolver}, ui};
+use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}, ui};
 
 
 #[derive(Clone, Default)]
@@ -454,7 +455,7 @@ impl<'a> InstallManager<'a> {
 
         for entry in self.result.lockfile.entries.values_mut() {
             let package_data = self.result.package_data.get(&entry.resolution.locator)
-                .unwrap_or_else(|| panic!("Expected a matching package data to be found for any fetched locator; not found for {}.", entry.resolution.locator));
+                .unwrap_or_else(|| panic!("Expected a matching package data to be found for any fetched locator; not found for {}.", entry.resolution.locator.to_file_string()));
 
             let previous_entry = self.initial_lockfile.entries.get(&entry.resolution.locator);
             let previous_checksum = previous_entry.and_then(|s| s.checksum.as_ref());
@@ -562,7 +563,7 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
 
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
         peer_dependencies.entry(name.type_ident())
-            .or_insert(range::SemverPeerRange {range: semver::Range::from_str("*").unwrap()}.into());
+            .or_insert(range::SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}.into());
     }
 
     (dependencies, peer_dependencies)

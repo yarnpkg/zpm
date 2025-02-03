@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt, marker::PhantomData, str::FromStr, sync::{
 use regex::Regex;
 use serde::{de::{self, DeserializeOwned, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
 
-use crate::{error::Error, http::http_client, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{range, reference, Descriptor, Ident, Locator}, resolvers::Resolution, semver};
+use crate::{error::Error, http::http_client, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{range, reference, Descriptor, Ident, Locator}, resolvers::Resolution};
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
@@ -44,12 +44,12 @@ impl<'de, T> Visitor<'de> for FindFieldNested<'_, T> where T: DeserializeSeed<'d
  */
 #[derive(Clone)]
 pub struct FindHighestCompatibleVersion<T> {
-    range: semver::Range,
+    range: zpm_semver::Range,
     phantom: PhantomData<T>,
 }
 
 impl<'de, T> DeserializeSeed<'de> for FindHighestCompatibleVersion<T> where T: DeserializeOwned {
-    type Value = Option<(semver::Version, T)>;
+    type Value = Option<(zpm_semver::Version, T)>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error> where D: Deserializer<'de> {
         deserializer.deserialize_map(self)
@@ -57,7 +57,7 @@ impl<'de, T> DeserializeSeed<'de> for FindHighestCompatibleVersion<T> where T: D
 }
 
 impl<'de, T> Visitor<'de> for FindHighestCompatibleVersion<T> where T: DeserializeOwned {
-    type Value = Option<(semver::Version, T)>;
+    type Value = Option<(zpm_semver::Version, T)>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         write!(formatter, "a map with a matching version")
@@ -68,7 +68,7 @@ impl<'de, T> Visitor<'de> for FindHighestCompatibleVersion<T> where T: Deseriali
 
         while let Some(key) = map.next_key::<String>()? {
             let version
-                = semver::Version::from_str(key.as_str()).unwrap();
+                = zpm_semver::Version::from_str(key.as_str()).unwrap();
 
             if self.range.check(&version) && selected.as_ref().map(|(current_version, _)| *current_version < version).unwrap_or(true) {
                 selected = Some((version, map.next_value::<sonic_rs::Value>()?));
@@ -157,7 +157,7 @@ fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
     }
 }
 
-fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: semver::Version, mut manifest: RemoteManifestWithScripts) -> ResolutionResult {
+fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: zpm_semver::Version, mut manifest: RemoteManifestWithScripts) -> ResolutionResult {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -252,7 +252,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
 
     let version = registry_data.dist_tags.deserialize_map(FindField {
         value: params.tag.as_str(),
-        phantom: PhantomData::<semver::Version>,
+        phantom: PhantomData::<zpm_semver::Version>,
     })?.ok_or_else(|| {
         Error::TagNotFound(params.tag.clone())
     })?;

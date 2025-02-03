@@ -1,9 +1,11 @@
 use std::hash::Hash;
 
 use bincode::{Decode, Encode};
+use colored::Colorize;
 use zpm_macros::parse_enum;
+use zpm_utils::{impl_serialization_traits, ToFileString, ToHumanString};
 
-use crate::{error::Error, git, hash::Sha256, semver, serialize::UrlEncoded, yarn_check_serialize, yarn_serialization_protocol};
+use crate::{error::Error, git, hash::Sha256, serialize::UrlEncoded};
 
 use super::{Ident, Locator};
 
@@ -13,13 +15,13 @@ use super::{Ident, Locator};
 pub enum Reference {
     #[pattern(spec = r"npm:(?<version>.*)")]
     Shorthand {
-        version: semver::Version,
+        version: zpm_semver::Version,
     },
 
     #[pattern(spec = r"npm:(?<ident>.*)@(?<version>.*)")]
     Registry {
         ident: Ident,
-        version: semver::Version,
+        version: zpm_semver::Version,
     },
 
     #[pattern(spec = r"file:(?<path>.*\.(?:tgz|tar\.gz))")]
@@ -101,9 +103,9 @@ impl Reference {
     }
 }
 
-yarn_serialization_protocol!(Reference, "", {
-    serialize(&self) {
-        yarn_check_serialize!(self, match self {
+impl ToFileString for Reference {
+    fn to_file_string(&self) -> String {
+        match self {
             Reference::Shorthand(params) => format!("npm:{}", params.version),
             Reference::Git(params) => format!("git:{}", params.git),
             Reference::Registry(params) => format!("npm:{}@{}", params.ident, params.version),
@@ -115,6 +117,14 @@ yarn_serialization_protocol!(Reference, "", {
             Reference::Url(params) => params.url.to_string(),
             Reference::Virtual(params) => format!("virtual:{}#{}", params.inner, params.hash),
             Reference::Workspace(params) => format!("workspace:{}", params.ident),
-        })
+        }
     }
-});
+}
+
+impl ToHumanString for Reference {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(135, 175, 255).to_string()
+    }
+}
+
+impl_serialization_traits!(Reference);

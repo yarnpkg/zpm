@@ -1,4 +1,4 @@
-use std::{borrow::Cow, io::Write, sync::LazyLock};
+use std::{borrow::Cow, io::{Read, Write}, sync::LazyLock};
 
 use itertools::Itertools;
 use regex::Regex;
@@ -187,6 +187,15 @@ pub fn craft_tar(entries: &[Entry]) -> Vec<u8> {
     archive.extend_from_slice(&end);
 
     archive
+}
+
+pub fn unpack_tgz(buffer: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut gz = flate2::read::GzDecoder::new(buffer);
+
+    let mut buffer = Vec::new();
+    gz.read_to_end(&mut buffer)?;
+
+    Ok(buffer)
 }
 
 pub fn craft_tgz(entries: &[Entry]) -> Result<Vec<u8>, Error> {

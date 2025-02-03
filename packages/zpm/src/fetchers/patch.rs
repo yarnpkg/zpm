@@ -1,4 +1,6 @@
-use crate::{error::Error, formats::{self, convert::convert_entries_to_zip, zip::ZipSupport}, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, patch, primitives::{reference, Locator}, resolvers::Resolution};
+use zpm_formats::zip::ZipSupport;
+
+use crate::{error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, patch, primitives::{reference, Locator}, resolvers::Resolution};
 
 use super::PackageData;
 
@@ -17,17 +19,17 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
         let original_entries = match &original_data.package_data {
             PackageData::Local {package_directory, ..} => {
-                formats::entries_from_folder(package_directory)?
+                zpm_formats::entries_from_folder(package_directory)?
             },
 
             PackageData::Zip {..} => {
                 let entries
-                    = formats::zip::entries_from_zip(original_bytes.as_ref().unwrap())?;
+                    = zpm_formats::zip::entries_from_zip(original_bytes.as_ref().unwrap())?;
 
                 let package_subpath
                     = original_data.package_data.package_subpath();
 
-                formats::strip_prefix(entries, package_subpath.as_str())
+                zpm_formats::strip_prefix(entries, package_subpath.as_str())
             },
 
             PackageData::MissingZip {..} => {
@@ -46,14 +48,14 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         let patched_entries
             = patch::apply::apply_patch(original_entries, &patch_content)?;
 
-        convert_entries_to_zip(&locator.ident, patched_entries)
+        Ok(zpm_formats::convert::convert_entries_to_zip(&locator.ident.nm_subdir(), patched_entries)?)
     }).await?;
 
     let first_entry
-        = formats::zip::first_entry_from_zip(&cached_blob.data);
+        = zpm_formats::zip::first_entry_from_zip(&cached_blob.data)?;
 
-    let manifest = first_entry
-        .and_then(|entry| Ok(sonic_rs::from_slice::<Manifest>(&entry.data)?))?;
+    let manifest
+        = sonic_rs::from_slice::<Manifest>(&first_entry.data)?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);

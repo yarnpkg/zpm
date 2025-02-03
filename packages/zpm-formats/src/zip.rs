@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::{Arc, LazyLock}};
+use std::{borrow::Cow, sync::LazyLock};
 
 use arca::Path;
 use regex::Regex;
@@ -89,9 +89,7 @@ pub fn entries_from_zip(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
         let name_offset = local_file_header_offset + std::mem::size_of::<GeneralRecord>();
         let data_offset = name_offset + general_record.header.file_name_length as usize;
 
-        let name = std::str::from_utf8(&buffer[name_offset..name_offset + general_record.header.file_name_length as usize])
-            .map_err(Arc::new)
-            .map_err(Error::Utf8Error)?;
+        let name = std::str::from_utf8(&buffer[name_offset..name_offset + general_record.header.file_name_length as usize])?;
 
         let data_size = general_record.header.compressed_size as usize;
         let data = &buffer[data_offset..data_offset + data_size];
@@ -114,9 +112,7 @@ pub fn entries_from_zip(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
 pub fn first_entry_from_zip(buffer: &[u8]) -> Result<Entry, Error> {
     unsafe {
         let general_record = &*(buffer.as_ptr() as *const GeneralRecord);
-        let name = std::str::from_utf8(&buffer[30..30 + general_record.header.file_name_length as usize])
-            .map_err(Arc::new)
-            .map_err(Error::Utf8Error)?;
+        let name = std::str::from_utf8(&buffer[30..30 + general_record.header.file_name_length as usize])?;
 
         let size = general_record.header.compressed_size as usize;
         let data = &buffer[30 + general_record.header.file_name_length as usize..30 + general_record.header.file_name_length as usize + size];

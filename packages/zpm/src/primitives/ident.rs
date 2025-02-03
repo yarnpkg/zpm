@@ -1,8 +1,10 @@
 use std::{hash::Hash, sync::LazyLock};
 
 use bincode::{Decode, Encode};
+use colored::Colorize;
+use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, yarn_check_serialize, yarn_serialization_protocol};
+use crate::error::Error;
 
 #[derive(Clone, Debug, Default, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Ident(String);
@@ -50,16 +52,28 @@ static IDENT_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^(?:@[^/]*/)?([^@/]+)$").unwrap()
 });
 
-yarn_serialization_protocol!(Ident, "", {
-    deserialize(src) {
+impl FromFileString for Ident {
+    type Error = Error;
+
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
         if !IDENT_REGEX.is_match(src) {
             return Err(Error::InvalidIdent(src.to_string()));
         }
 
         Ok(Ident::new(src))
     }
+}
 
-    serialize(&self) {
-        yarn_check_serialize!(self, self.as_str())
+impl ToFileString for Ident {
+    fn to_file_string(&self) -> String {
+        self.as_str().to_string()
     }
-});
+}
+
+impl ToHumanString for Ident {
+    fn to_print_string(&self) -> String {
+        self.as_str().truecolor(215, 135, 95).to_string()
+    }
+}
+
+impl_serialization_traits!(Ident);

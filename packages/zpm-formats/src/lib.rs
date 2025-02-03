@@ -2,11 +2,12 @@ use std::{borrow::Cow, os::unix::fs::PermissionsExt};
 
 use arca::{Path, ToArcaPath};
 
-use crate::error::Error;
-
 pub mod convert;
+pub mod error;
 pub mod tar;
 pub mod zip;
+
+pub use error::Error;
 
 #[derive(Debug, PartialEq)]
 pub struct Entry<'a> {

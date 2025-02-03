@@ -1,10 +1,12 @@
-use std::{hash::Hash, str::FromStr, sync::Arc};
+use std::{hash::Hash, sync::Arc};
 
 use bincode::{Decode, Encode};
+use colored::Colorize;
 use rstest::rstest;
 use sha2::Digest;
+use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, hash::Sha256, serialize::Serialized, yarn_check_serialize, yarn_serialization_protocol};
+use crate::{error::Error, hash::Sha256};
 
 use super::{reference::VirtualReference, Ident, Reference};
 
@@ -41,8 +43,7 @@ impl Locator {
     }
 
     pub fn virtualized_for(&self, parent: &Locator) -> Locator {
-        let serialized = parent.serialized()
-            .unwrap_or_else(|_| panic!("Failed to serialize locator: {:?}", self));
+        let serialized = parent.to_file_string();
 
         let reference = Reference::Virtual(VirtualReference {
             inner: Box::new(self.reference.clone()),
@@ -58,15 +59,17 @@ impl Locator {
 
     pub fn slug(&self) -> String {
         let mut key = sha2::Sha256::new();
-        key.update(self.to_string());
+        key.update(self.to_file_string());
         let key = key.finalize();
 
         format!("{}-{}-{:064x}", self.ident.slug(), self.reference.slug(), key)
     }
 }
 
-yarn_serialization_protocol!(Locator, "", {
-    deserialize(src) {
+impl FromFileString for Locator {
+    type Error = Error;
+
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
         let at_split = if src.starts_with('@') {
             src[1..src.len()].find('@').map(|x| x + 1)
         } else {
@@ -79,28 +82,61 @@ yarn_serialization_protocol!(Locator, "", {
         let parent_marker = "::parent=";
         let parent_split = src.find(parent_marker);
 
-        let ident = Ident::from_str(&src[..at_split])?;
-        let reference = Reference::from_str(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
+        let ident = Ident::from_file_string(&src[..at_split])?;
+        let reference = Reference::from_file_string(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
 
         let parent = match parent_split {
-            Some(idx) => Some(Arc::new(Locator::from_str(&src[idx + parent_marker.len()..])?)),
+            Some(idx) => Some(Arc::new(Locator::from_file_string(&src[idx + parent_marker.len()..])?)),
             None => None,
         };
 
         Ok(Locator::new_bound(ident, reference, parent))
     }
+}
 
-    serialize(&self) {
-        yarn_check_serialize!(self, match &self.parent {
-            Some(parent) => format!("{}@{}::parent={}", self.ident, self.reference, parent),
-            None => format!("{}@{}", self.ident, self.reference),
-        })
+impl ToFileString for Locator {
+    fn to_file_string(&self) -> String {
+        let serialized_ident = self.ident.to_file_string();
+        let serialized_reference = self.reference.to_file_string();
+
+        let mut final_str = String::new();
+        final_str.push_str(&serialized_ident);
+        final_str.push('@');
+        final_str.push_str(&serialized_reference);
+
+        if let Some(parent) = &self.parent {
+            final_str.push_str("::parent=");
+            final_str.push_str(&parent.to_file_string());
+        }
+
+        final_str
     }
-});
+}
+
+impl ToHumanString for Locator {
+    fn to_print_string(&self) -> String {
+        let serialized_ident = self.ident.to_file_string();
+        let serialized_reference = self.reference.to_file_string();
+
+        let mut final_str = String::new();
+        final_str.push_str(&serialized_ident);
+        final_str.push_str(&"@".truecolor(135, 175, 255).to_string());
+        final_str.push_str(&serialized_reference);
+
+        if let Some(parent) = &self.parent {
+            final_str.push_str("::parent=");
+            final_str.push_str(&parent.to_file_string());
+        }
+
+        final_str
+    }
+}
+
+impl_serialization_traits!(Locator);
 
 #[rstest]
 #[case("foo@npm:1.0.0")]
 #[case("foo@npm:1.0.0::parent=root@workspace:")]
 fn test_locator_serialization(#[case] str: &str) {
-    assert_eq!(str, Locator::from_str(str).unwrap().to_string());
+    assert_eq!(str, Locator::from_file_string(str).unwrap().to_file_string());
 }

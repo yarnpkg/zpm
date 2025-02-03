@@ -2,10 +2,11 @@ use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::Perm
 
 use arca::{Path, ToArcaPath};
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_with::serde_as;
+use zpm_utils::ToFileString;
 
-use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, formats, install::Install, primitives::{range::PackageSelector, Descriptor, Ident, Locator, Reference}, project::Project, resolvers::Resolution, settings, yarn_serialization_protocol};
+use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, install::Install, primitives::{range::PackageSelector, Descriptor, Ident, Locator, Reference}, project::Project, resolvers::Resolution, settings};
 
 fn is_default<T: Default + PartialEq>(t: &T) -> bool {
     t == &T::default()
@@ -86,7 +87,7 @@ fn extract_archive(project_root: &Path, locator: &Locator, package_data: &Packag
             _ => panic!("Expected a zip archive"),
         };
 
-        for entry in formats::zip::entries_from_zip(&package_bytes)? {
+        for entry in zpm_formats::zip::entries_from_zip(&package_bytes)? {
             let target_path = extract_path
                 .with_join(&Path::from(&entry.name));
 
@@ -109,14 +110,27 @@ fn extract_archive(project_root: &Path, locator: &Locator, package_data: &Packag
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct PnpReference(Locator);
 
-yarn_serialization_protocol!(PnpReference, "", {
-    serialize(&self) {
-        match &self.0.parent {
-            Some(parent) => format!("{}::parent={}", self.0.reference, parent),
-            None => self.0.reference.to_string(),
+impl ToFileString for PnpReference {
+    fn to_file_string(&self) -> String {
+        let serialized_locator = self.0.reference.to_file_string();
+
+        let mut final_str = String::new();
+        final_str.push_str(&serialized_locator);
+
+        if let Some(parent) = &self.0.parent {
+            final_str.push_str("::parent=");
+            final_str.push_str(&parent.to_file_string());
         }
+
+        final_str
     }
-});
+}
+
+impl Serialize for PnpReference {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        serializer.serialize_str(&self.to_file_string())
+    }
+}
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize)]

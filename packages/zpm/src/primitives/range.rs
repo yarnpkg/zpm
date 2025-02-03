@@ -1,9 +1,12 @@
-use std::{hash::Hash, str::FromStr};
+use std::hash::Hash;
 
 use bincode::{Decode, Encode};
+use colored::Colorize;
+use serde::{Deserialize, Deserializer};
 use zpm_macros::parse_enum;
+use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, git, hash::Sha256, semver, serialize::UrlEncoded, yarn_check_serialize, yarn_serialization_protocol};
+use crate::{error::Error, git, hash::Sha256, serialize::UrlEncoded};
 
 use super::{Descriptor, Ident};
 
@@ -16,13 +19,13 @@ pub enum Range {
 
     #[pattern(spec = r"(?<range>.*)")]
     AnonymousSemver {
-        range: semver::Range,
+        range: zpm_semver::Range,
     },
 
     #[pattern(spec = r"npm:(?:(?<ident>.*)@)?(?<range>.*)")]
     RegistrySemver {
         ident: Option<Ident>,
-        range: semver::Range,
+        range: zpm_semver::Range,
     },
 
     #[pattern(spec = r"npm:(?:(?<ident>.*)@)?(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
@@ -67,7 +70,7 @@ pub enum Range {
 
     #[pattern(spec = r"workspace:(?<range>.*)")]
     WorkspaceSemver {
-        range: semver::Range,
+        range: zpm_semver::Range,
     },
 
     #[pattern(spec = r"workspace:(?<magic>[~^=*])")]
@@ -116,9 +119,9 @@ impl Range {
     }
 }
 
-yarn_serialization_protocol!(Range, "", {
-    serialize(&self) {
-        yarn_check_serialize!(self, match self {
+impl ToFileString for Range {
+    fn to_file_string(&self) -> String {
+        match self {
             Range::AnonymousSemver(params) => params.range.to_string(),
             Range::AnonymousTag(params) => params.tag.clone(),
 
@@ -145,9 +148,17 @@ yarn_serialization_protocol!(Range, "", {
             Range::Git(params) => params.git.to_string(),
             Range::MissingPeerDependency(_) => "missing!".to_string(),
             Range::Virtual(params) => format!("virtual:{}#{}", params.inner, params.hash),
-        })
+        }
     }
-});
+}
+
+impl ToHumanString for Range {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(0, 175, 175).to_string()
+    }
+}
+
+impl_serialization_traits!(Range);
 
 #[parse_enum(or_else = |s| Err(Error::InvalidIdentOrLocator(s.to_string())))]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -161,7 +172,7 @@ pub enum PackageSelector {
     #[pattern(spec = "(?<ident>@?[^@]+)@(?<range>.*)")]
     Range {
         ident: Ident,
-        range: semver::Range,
+        range: zpm_semver::Range,
     },
 }
 
@@ -174,18 +185,25 @@ impl PackageSelector {
     }
 }
 
-#[parse_enum(or_else = |_| Ok(PeerRange::Semver(SemverPeerRange {range: semver::Range::from_str("*").unwrap()})))]
+impl<'de> Deserialize<'de> for PackageSelector {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        let s = String::deserialize(deserializer)?;
+        PackageSelector::from_file_string(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+#[parse_enum(or_else = |_| Ok(PeerRange::Semver(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()})))]
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
 pub enum PeerRange {
     #[pattern(spec = r"(?<range>.*)")]
     Semver {
-        range: semver::Range,
+        range: zpm_semver::Range,
     },
 
     #[pattern(spec = "workspace:(?<range>.*)")]
     WorkspaceSemver {
-        range: semver::Range,
+        range: zpm_semver::Range,
     },
 
     #[pattern(spec = r"workspace:(?<magic>[~^=*])")]
@@ -199,13 +217,21 @@ pub enum PeerRange {
     }
 }
 
-yarn_serialization_protocol!(PeerRange, "", {
-    serialize(&self) {
-        yarn_check_serialize!(self, match self {
+impl ToFileString for PeerRange {
+    fn to_file_string(&self) -> String {
+        match self {
             PeerRange::Semver(params) => params.range.to_string(),
             PeerRange::WorkspaceSemver(params) => format!("workspace:{}", params.range),
             PeerRange::WorkspaceMagic(params) => format!("workspace:{}", params.magic),
             PeerRange::WorkspacePath(params) => format!("workspace:{}", params.path),
-        })
+        }
     }
-});
+}
+
+impl ToHumanString for PeerRange {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(0, 175, 175).to_string()
+    }
+}
+
+impl_serialization_traits!(PeerRange);

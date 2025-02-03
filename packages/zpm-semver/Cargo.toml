@@ -1,0 +1,19 @@
+[package]
+name = "zpm-semver"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bincode_derive = { version = "2.0.0-rc.3", optional = true }
+bincode = { version = "2.0.0-rc.3", optional = true }
+colored = "3.0.0"
+rstest = "0.22.0"
+serde = { version = "1.0.207", features = ["derive"] }
+thiserror = "1.0.63"
+zpm-utils = { path = "../zpm-utils" }
+
+[dev-dependencies]
+bincode = { version = "2.0.0-rc.3" }
+
+[features]
+bincode = ["dep:bincode_derive", "dep:bincode"]

@@ -1,8 +1,7 @@
-use std::str::FromStr;
-
 use rstest::rstest;
+use zpm_utils::FromFileString;
 
-use crate::semver::{range::{OperatorType, Token, TokenType}, Range, Version};
+use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 
 #[rstest]
 #[case("1.2.3", "1.2.3", true)]
@@ -76,117 +75,117 @@ fn test_range_tokenize() {
     assert_eq!(Range::tokenize("1.2.3"), Some(vec![
         Token::Operation(
             OperatorType::Equal,
-            Version::from_str("1.2.3").unwrap(),
+            Version::from_file_string("1.2.3").unwrap(),
         ),
     ]));
 
     assert_eq!(Range::tokenize("  1.2.3"), Some(vec![
         Token::Operation(
             OperatorType::Equal,
-            Version::from_str("1.2.3").unwrap(),
+            Version::from_file_string("1.2.3").unwrap(),
         ),
     ]));
 
     assert_eq!(Range::tokenize("1.2.3   "), Some(vec![
         Token::Operation(
             OperatorType::Equal,
-            Version::from_str("1.2.3").unwrap(),
+            Version::from_file_string("1.2.3").unwrap(),
         ),
     ]));
 
     assert_eq!(Range::tokenize("1.2.3 || 2.3.4"), Some(vec![
         Token::Operation(
             OperatorType::Equal,
-            Version::from_str("1.2.3").unwrap(),
+            Version::from_file_string("1.2.3").unwrap(),
         ),
         Token::Syntax(TokenType::Or),
         Token::Operation(
             OperatorType::Equal,
-            Version::from_str("2.3.4").unwrap(),
+            Version::from_file_string("2.3.4").unwrap(),
         ),
     ]));
 
     assert_eq!(Range::tokenize("1.2.3 && 2.3.4"), Some(vec![
         Token::Operation(
             OperatorType::Equal,
-            Version::from_str("1.2.3").unwrap(),
+            Version::from_file_string("1.2.3").unwrap(),
         ),
         Token::Syntax(TokenType::And),
         Token::Operation(
             OperatorType::Equal,
-            Version::from_str("2.3.4").unwrap(),
+            Version::from_file_string("2.3.4").unwrap(),
         ),
     ]));
 
     assert_eq!(Range::tokenize("1.2.3 2.3.4"), Some(vec![
         Token::Operation(
             OperatorType::Equal,
-            Version::from_str("1.2.3").unwrap(),
+            Version::from_file_string("1.2.3").unwrap(),
         ),
         Token::Syntax(TokenType::SAnd),
         Token::Operation(
             OperatorType::Equal,
-            Version::from_str("2.3.4").unwrap(),
+            Version::from_file_string("2.3.4").unwrap(),
         ),
     ]));
 
     assert_eq!(Range::tokenize("1.2.3 - 2.3.4"), Some(vec![
         Token::Operation(
             OperatorType::GreaterThanOrEqual,
-            Version::from_str("1.2.3").unwrap(),
+            Version::from_file_string("1.2.3").unwrap(),
         ),
         Token::Syntax(TokenType::SAnd),
         Token::Operation(
             OperatorType::LessThan,
-            Version::from_str("2.3.4").unwrap(),
+            Version::from_file_string("2.3.4").unwrap(),
         ),
     ]));
 
     assert_eq!(Range::tokenize("1"), Some(vec![
         Token::Operation(
             OperatorType::GreaterThanOrEqual,
-            Version::from_str("1.0.0").unwrap(),
+            Version::from_file_string("1.0.0").unwrap(),
         ),
         Token::Syntax(TokenType::SAnd),
         Token::Operation(
             OperatorType::LessThan,
-            Version::from_str("2.0.0").unwrap(),
+            Version::from_file_string("2.0.0").unwrap(),
         ),
     ]));
 
     assert_eq!(Range::tokenize("1.2"), Some(vec![
         Token::Operation(
             OperatorType::GreaterThanOrEqual,
-            Version::from_str("1.2.0").unwrap(),
+            Version::from_file_string("1.2.0").unwrap(),
         ),
         Token::Syntax(TokenType::SAnd),
         Token::Operation(
             OperatorType::LessThan,
-            Version::from_str("1.3.0").unwrap(),
+            Version::from_file_string("1.3.0").unwrap(),
         ),
     ]));
 
     assert_eq!(Range::tokenize("^1.2.3"), Some(vec![
         Token::Operation(
             OperatorType::GreaterThanOrEqual,
-            Version::from_str("1.2.3").unwrap(),
+            Version::from_file_string("1.2.3").unwrap(),
         ),
         Token::Syntax(TokenType::SAnd),
         Token::Operation(
             OperatorType::LessThan,
-            Version::from_str("2.0.0-0").unwrap(),
+            Version::from_file_string("2.0.0-0").unwrap(),
         ),
     ]));
 
     assert_eq!(Range::tokenize("~1.2.3"), Some(vec![
         Token::Operation(
             OperatorType::GreaterThanOrEqual,
-            Version::from_str("1.2.3").unwrap(),
+            Version::from_file_string("1.2.3").unwrap(),
         ),
         Token::Syntax(TokenType::SAnd),
         Token::Operation(
             OperatorType::LessThan,
-            Version::from_str("1.3.0-0").unwrap(),
+            Version::from_file_string("1.3.0-0").unwrap(),
         ),
     ]));
 
@@ -194,7 +193,7 @@ fn test_range_tokenize() {
         Token::Syntax(TokenType::LParen),
         Token::Operation(
             OperatorType::Equal,
-            Version::from_str("1.2.3").unwrap(),
+            Version::from_file_string("1.2.3").unwrap(),
         ),
         Token::Syntax(TokenType::RParen),
     ]));

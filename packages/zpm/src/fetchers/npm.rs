@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{error::Error, formats, http::http_client, install::{FetchResult, InstallContext}, primitives::{reference, Locator}};
+use crate::{error::Error, http::http_client, install::{FetchResult, InstallContext}, primitives::{reference, Locator}};
 
 use super::PackageData;
 
@@ -59,7 +59,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         let archive = response.bytes().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
-        formats::convert::convert_tar_gz_to_zip(&params.ident, archive)
+        Ok(zpm_formats::convert::convert_tar_gz_to_zip(&params.ident.nm_subdir(), archive)?)
     }).await?.into_info();
 
     let package_directory = cached_blob.path

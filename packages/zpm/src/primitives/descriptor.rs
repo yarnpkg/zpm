@@ -5,15 +5,15 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use bincode::{Decode, Encode};
+use colored::Colorize;
 use rstest::rstest;
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::Deserializer;
+use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
 use crate::hash::Sha256;
-use crate::serialize::Serialized;
-use crate::{semver, yarn_check_serialize};
-use crate::{error::Error, yarn_serialization_protocol};
+use crate::error::Error;
 
 use super::range::{AnonymousSemverRange, VirtualRange};
 use super::{reference, Ident, Locator, Range, Reference};
@@ -25,14 +25,22 @@ pub struct LooseDescriptor {
 
 impl FromStr for LooseDescriptor {
     type Err = crate::error::Error;
-    
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Ok(descriptor) = Descriptor::from_str(s) {
+        LooseDescriptor::from_file_string(s)
+    }
+}
+
+impl FromFileString for LooseDescriptor {
+    type Error = crate::error::Error;
+    
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        if let Ok(descriptor) = Descriptor::from_file_string(s) {
             return Ok(LooseDescriptor {descriptor});
         }
 
-        let ident = Ident::from_str(s)?;
-        let range = Range::from_str("latest")?;
+        let ident = Ident::from_file_string(s)?;
+        let range = Range::from_file_string("latest")?;
 
         let descriptor = Descriptor::new(ident, range);
 
@@ -58,7 +66,7 @@ impl Descriptor {
 
     pub fn new_semver(ident: Ident, range_str: &str) -> Result<Descriptor, Error> {
         let range = Range::AnonymousSemver(AnonymousSemverRange {
-            range: semver::Range::from_str(range_str)?,
+            range: zpm_semver::Range::from_str(range_str)?,
         });
 
         Ok(Descriptor {
@@ -94,8 +102,7 @@ impl Descriptor {
     }
 
     pub fn virtualized_for(&self, parent: &Locator) -> Descriptor {
-        let serialized = parent.serialized()
-            .unwrap_or_else(|_| panic!("Failed to serialize locator: {:?}", self));
+        let serialized = parent.to_file_string();
 
         let range = Range::Virtual(VirtualRange {
             inner: Box::new(self.range.clone()),
@@ -115,7 +122,7 @@ pub fn descriptor_map_serializer<S>(value: &BTreeMap<Ident, Descriptor>, seriali
         = serializer.serialize_map(Some(value.len()))?;
 
     for v in value.values() {
-        let serialized_range = v.to_string();
+        let serialized_range = v.to_file_string();
 
         let at_split = match serialized_range.starts_with('@') {
             true => serialized_range[1..serialized_range.len()].find('@').map(|x| x + 1),
@@ -154,11 +161,11 @@ pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<BTreeMap<I
             
                 let ident = Ident::from_str(key)
                     .map_err(serde::de::Error::custom)?;
-                let range = Range::from_str(&value[..parent_split.map_or(value.len(), |idx| idx)])
+                let range = Range::from_file_string(&value[..parent_split.map_or(value.len(), |idx| idx)])
                     .map_err(serde::de::Error::custom)?;
         
                 let parent = parent_split
-                    .map(|idx| Locator::from_str(&value[idx + parent_marker.len()..]))
+                    .map(|idx| Locator::from_file_string(&value[idx + parent_marker.len()..]))
                     .transpose()
                     .map_err(serde::de::Error::custom)?;
         
@@ -175,8 +182,10 @@ pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<BTreeMap<I
     deserializer.deserialize_map(MyMapVisitor {})
 }
 
-yarn_serialization_protocol!(Descriptor, "", {
-    deserialize(src) {
+impl FromFileString for Descriptor {
+    type Error = Error;
+
+    fn from_file_string(src: &str) -> Result<Self, Error> {
         let at_split = if src.starts_with('@') {
             src[1..src.len()].find('@').map(|x| x + 1)
         } else {
@@ -189,28 +198,56 @@ yarn_serialization_protocol!(Descriptor, "", {
         let parent_marker = "::parent=";
         let parent_split = src.find(parent_marker);
     
-        let ident = Ident::from_str(&src[..at_split])?;
-        let range = Range::from_str(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
+        let ident = Ident::from_file_string(&src[..at_split])?;
+        let range = Range::from_file_string(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
 
         let parent = match parent_split {
-            Some(idx) => Some(Locator::from_str(&src[idx + parent_marker.len()..])?),
+            Some(idx) => Some(Locator::from_file_string(&src[idx + parent_marker.len()..])?),
             None => None,
         };
 
         Ok(Descriptor::new_bound(ident, range, parent))
     }
+}
 
-    serialize(&self) {
-        yarn_check_serialize!(self, match &self.parent {
-            Some(parent) => format!("{}@{}::parent={}", self.ident, self.range, parent),
-            None => format!("{}@{}", self.ident, self.range),
-        })
+impl ToFileString for Descriptor {
+    fn to_file_string(&self) -> String {
+        let serialized_ident = self.ident.to_file_string();
+        let serialized_range = self.range.to_file_string();
+
+        let mut final_str = String::new();
+        final_str.push_str(&serialized_ident);
+        final_str.push('@');
+        final_str.push_str(&serialized_range);
+
+        if let Some(parent) = &self.parent {
+            final_str.push_str("::parent=");
+            final_str.push_str(&parent.to_file_string());
+        }
+
+        final_str
     }
-});
+}
+
+impl ToHumanString for Descriptor {
+    fn to_print_string(&self) -> String {
+        let serialized_ident = self.ident.to_print_string();
+        let serialized_range = self.range.to_print_string();
+
+        let mut final_str = String::new();
+        final_str.push_str(&serialized_ident);
+        final_str.push_str(&"@".truecolor(0, 175, 175).to_string());
+        final_str.push_str(&serialized_range);
+
+        final_str
+    }
+}
+
+impl_serialization_traits!(Descriptor);
 
 #[rstest]
 #[case("foo@npm:1.0.0")]
 #[case("foo@npm:1.0.0::parent=root@workspace:")]
 fn test_descriptor_serialization(#[case] str: &str) {
-    assert_eq!(str, Descriptor::from_str(str).unwrap().to_string());
+    assert_eq!(str, Descriptor::from_file_string(str).unwrap().to_file_string());
 }

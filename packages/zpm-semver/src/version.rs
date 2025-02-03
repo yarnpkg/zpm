@@ -1,20 +1,20 @@
-use bincode::{Decode, Encode};
+use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, yarn_serialization_protocol};
-
-use super::extract;
+use crate::{extract::extract_version, Error};
 
 #[cfg(test)]
 #[path = "./version.test.rs"]
 mod version_tests;
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "bincode", derive(bincode_derive::Decode, bincode_derive::Encode))]
 pub enum VersionRc {
     Number(u32),
     String(String),
 }
 
-#[derive(Clone, Debug, Decode, Default, Encode, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "bincode", derive(bincode_derive::Decode, bincode_derive::Encode))]
 pub struct Version {
     pub major: u32,
     pub minor: u32,
@@ -109,21 +109,25 @@ impl PartialOrd for Version {
     }
 }
 
-yarn_serialization_protocol!(Version, "", {
-    deserialize(src) {
+impl FromFileString for Version {
+    type Error = Error;
+
+    fn from_file_string(src: &str) -> Result<Self, Error> {
         let mut iter = src.chars().peekable();
 
-        let (version, _) = extract::extract_version(&mut iter)
-            .ok_or_else(|| Error::InvalidSemverVersion(src.to_string()))?;
+        let (version, _) = extract_version(&mut iter)
+            .ok_or_else(|| Error::InvalidVersion(src.to_string()))?;
 
         if iter.peek().is_some() {
-            return Err(Error::InvalidSemverVersion(src.to_string()))
+            return Err(Error::InvalidVersion(src.to_string()))
         }
 
         Ok(version)
     }
+}
 
-    serialize(&self) {
+impl ToFileString for Version {
+    fn to_file_string(&self) -> String {
         let mut res = format!("{}.{}.{}", self.major, self.minor, self.patch);
 
         if let Some(rc) = &self.rc {
@@ -148,4 +152,12 @@ yarn_serialization_protocol!(Version, "", {
 
         res
     }
-});
+}
+
+impl ToHumanString for Version {
+    fn to_print_string(&self) -> String {
+        self.to_file_string()
+    }
+}
+
+impl_serialization_traits!(Version);

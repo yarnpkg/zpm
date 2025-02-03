@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{error::Error, install::{InstallContext, IntoResolutionResult, ResolutionResult}, primitives::{range, reference, Descriptor, Locator, Reference}, resolvers::Resolution, semver, system};
+use crate::{error::Error, install::{InstallContext, IntoResolutionResult, ResolutionResult}, primitives::{range, reference, Descriptor, Locator, Reference}, resolvers::Resolution, system};
 
 pub fn resolve_descriptor(ctx: &InstallContext<'_>, descriptor: &Descriptor, params: &range::LinkRange) -> Result<ResolutionResult, Error> {
     let reference = reference::LinkReference {
@@ -19,7 +19,7 @@ pub fn resolve_descriptor(ctx: &InstallContext<'_>, descriptor: &Descriptor, par
 
 pub fn resolve_locator(ctx: &InstallContext<'_>, locator: &Locator, _params: &reference::LinkReference) -> Result<ResolutionResult, Error> {
     let resolution = Resolution {
-        version: semver::Version::new(),
+        version: zpm_semver::Version::new(),
         locator: locator.clone(),
         dependencies: BTreeMap::new(),
         peer_dependencies: BTreeMap::new(),

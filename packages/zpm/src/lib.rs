@@ -1,9 +1,5 @@
 #![deny(unused_crate_dependencies)]
 
-use console_subscriber as _;
-use ring as _;
-use postcard as _;
-
 pub mod build;
 pub mod cache;
 pub mod commands;
@@ -12,7 +8,6 @@ pub mod content_flags;
 pub mod manifest_finder;
 pub mod error;
 pub mod fetchers;
-pub mod formats;
 pub mod git;
 pub mod graph;
 pub mod hash;
@@ -30,7 +25,6 @@ pub mod primitives;
 pub mod project;
 pub mod resolvers;
 pub mod script;
-pub mod semver;
 pub mod serialize;
 pub mod settings;
 pub mod scratchpad;

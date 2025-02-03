@@ -1,6 +1,8 @@
 use std::{borrow::Cow, cmp, collections::BTreeMap};
 
-use crate::{error::Error, formats::Entry};
+use zpm_formats::Entry;
+
+use crate::error::Error;
 
 use super::parse::{Hunk, PatchFilePart, PatchMutationPartKind};
 

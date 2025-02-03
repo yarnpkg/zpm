@@ -3,9 +3,10 @@ use std::{collections::BTreeMap, fs::Permissions, io::ErrorKind, os::unix::fs::P
 use arca::{Path, ToArcaPath};
 use globset::Glob;
 use serde::Deserialize;
+use zpm_formats::zip::ZipSupport;
 use zpm_macros::track_time;
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{read_manifest_with_size, BinField, BinManifest, Manifest, ResolutionOverride}, manifest_finder::{CachedManifestFinder, ManifestFinder, SaveEntry}, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, script::Binary};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{read_manifest_with_size, BinField, BinManifest, Manifest, ResolutionOverride}, manifest_finder::{CachedManifestFinder, ManifestFinder, SaveEntry}, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, script::Binary};
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
 pub const MANIFEST_NAME: &str = "package.json";

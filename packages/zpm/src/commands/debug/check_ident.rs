@@ -1,6 +1,5 @@
-use std::str::FromStr;
-
 use clipanion::cli;
+use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{error::Error, primitives::Ident};
 
@@ -12,8 +11,8 @@ pub struct CheckIdent {
 
 impl CheckIdent {
     pub fn execute(&self) -> Result<(), Error> {
-        let ident = Ident::from_str(&self.ident)?;
-        let stringified = ident.to_string();
+        let ident = Ident::from_file_string(&self.ident)?;
+        let stringified = ident.to_file_string();
 
         println!("{}", stringified);
         println!("{:#?}", ident);

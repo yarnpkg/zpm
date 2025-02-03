@@ -1,4 +1,6 @@
-use crate::{error::Error, formats::zip::ZipSupport, install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::parse_manifest, primitives::{range, reference, Descriptor, Locator, Reference}, resolvers::Resolution};
+use zpm_formats::zip::ZipSupport;
+
+use crate::{error::Error, install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::parse_manifest, primitives::{range, reference, Descriptor, Locator, Reference}, resolvers::Resolution};
 
 pub fn resolve_descriptor(ctx: &InstallContext, descriptor: &Descriptor, params: &range::PortalRange, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     let reference = reference::PortalReference {

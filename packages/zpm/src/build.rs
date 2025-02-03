@@ -5,6 +5,7 @@ use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
+use zpm_utils::ToFileString;
 
 use crate::{error::Error, hash::Blake2b80, primitives::Locator, project::Project, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
 
@@ -207,7 +208,7 @@ impl<'a> BuildManager<'a> {
                     = self.get_hash(project, &req.locator);
 
                 if hash.is_none() {
-                    println!("Package {} was queued for build but is the root of a dependency cycle; it'll always be rebuilt", req.locator);
+                    println!("Package {} was queued for build but is the root of a dependency cycle; it'll always be rebuilt", req.locator.to_file_string());
                 }
 
                 if let Some(hash) = &hash {
@@ -311,7 +312,7 @@ impl<'a> BuildManager<'a> {
                 }
 
                 Err(err) => {
-                    println!("Error building {}: {:?} {:#?}", request.locator, err, request);
+                    println!("Error building {}: {:?} {:#?}", request.locator.to_file_string(), err, request);
                     self.build_errors.insert(request.key());
                 }
             }

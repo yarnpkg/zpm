@@ -1,7 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
+    "packages/zpm-formats",
     "packages/zpm-macros",
+    "packages/zpm-semver",
+    "packages/zpm-utils",
     "packages/zpm",
 ]
 
@@ -10,3 +13,6 @@ debug = true
 
 [profile.release]
 debug = true
+
+[patch.crates-io]
+arca = { path = "../arca-rs" }

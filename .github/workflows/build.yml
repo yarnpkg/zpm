@@ -70,7 +70,7 @@ jobs:
       - name: Clone the berry repo
         uses: actions/checkout@v4
         with:
-          name: yarnpkg/berry
+          repository: yarnpkg/berry
           path: ~/berry
 
       - name: Generate the test report
@@ -112,7 +112,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: artifacts/
 
       - name: Install dependencies
         run: yarn install

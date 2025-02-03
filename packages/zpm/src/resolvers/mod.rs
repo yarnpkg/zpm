@@ -28,7 +28,7 @@ fn is_default<T: Default + PartialEq>(value: &T) -> bool {
 pub struct Resolution {
     #[serde(rename = "resolution")]
     pub locator: Locator,
-    pub version: crate::semver::Version,
+    pub version: zpm_semver::Version,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "is_default")]

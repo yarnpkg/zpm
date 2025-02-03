@@ -23,6 +23,12 @@ pub enum Error {
     #[error("Failed to change the current working directory")]
     FailedToChangeCwd,
 
+    #[error("Format error ({0})")]
+    FormatError(#[from] zpm_formats::Error),
+
+    #[error("Semver error ({0})")]
+    SemverError(#[from] zpm_semver::Error),
+
     #[error("Invalid ident ({0})")]
     InvalidIdent(String),
 
@@ -43,12 +49,6 @@ pub enum Error {
 
     #[error("Invalid value; expected an ident or a locator ({0})")]
     InvalidIdentOrLocator(String),
-
-    #[error("Invalid semver version ({0})")]
-    InvalidSemverVersion(String),
-
-    #[error("Invalid semver range ({0})")]
-    InvalidSemverRange(String),
 
     #[error("Tag not found ({0})")]
     TagNotFound(String),
@@ -76,9 +76,6 @@ pub enum Error {
 
     #[error("UTF-8 error")]
     Utf8Error2(#[from] std::str::Utf8Error),
-
-    #[error("Error while traversing directories")]
-    WalkDirError(#[from] Arc<jwalk::Error>),
 
     #[error("Invalid JSON data ({0})")]
     InvalidJsonData(#[from] Arc<sonic_rs::Error>),
@@ -264,12 +261,6 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<jwalk::Error> for Error {
-    fn from(error: jwalk::Error) -> Self {
-        Arc::new(error).into()
-    }
-}
-
 impl From<bincode::error::EncodeError> for Error {
     fn from(error: bincode::error::EncodeError) -> Self {
         Arc::new(error).into()
@@ -279,19 +270,5 @@ impl From<bincode::error::EncodeError> for Error {
 impl From<sonic_rs::Error> for Error {
     fn from(error: sonic_rs::Error) -> Self {
         Arc::new(error).into()
-    }
-}
-
-impl From<ignore::Error> for Error {
-    fn from(error: ignore::Error) -> Self {
-        match error {
-            ignore::Error::Io(err) => {
-                err.into()
-            }
-
-            _ => {
-                Error::UnknownError(Arc::new(Box::new(error)))
-            }
-        }
     }
 }

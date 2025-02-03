@@ -1,8 +1,7 @@
-use std::str::FromStr;
-
 use clipanion::cli;
+use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{error::Error, semver};
+use crate::error::Error;
 
 #[cli::command(proxy)]
 #[cli::path("debug", "check-semver-version")]
@@ -12,8 +11,8 @@ pub struct CheckSemverVersion {
 
 impl CheckSemverVersion {
     pub fn execute(&self) -> Result<(), Error> {
-        let version = semver::Version::from_str(&self.version)?;
-        let stringified = version.to_string();
+        let version = zpm_semver::Version::from_file_string(&self.version)?;
+        let stringified = version.to_file_string();
 
         println!("{}", stringified);
         println!("{:#?}", version);

@@ -2,8 +2,10 @@ use std::hash::Hash;
 
 use bincode::{Decode, Encode};
 use blake2::{Blake2b, Digest, digest::consts::U64};
+use colored::Colorize;
+use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, yarn_serialization_protocol};
+use crate::error::Error;
 
 pub type Blake2b80 = Blake2b<U64>;
 
@@ -32,15 +34,27 @@ impl Sha256 {
     }
 }
 
-yarn_serialization_protocol!(Sha256, "", {
-    deserialize(src) {
+impl FromFileString for Sha256 {
+    type Error = Error;
+
+    fn from_file_string(src: &str) -> Result<Self, Error> {
         let state = hex::decode(src)
             .map_err(|_| Error::InvalidSha256(src.to_string()))?;
 
         Ok(Sha256 {state})
     }
+}
 
-    serialize(&self) {
+impl ToFileString for Sha256 {
+    fn to_file_string(&self) -> String {
         hex::encode(self.state.clone())
     }
-});
+}
+
+impl ToHumanString for Sha256 {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(135, 175, 255).to_string()
+    }
+}
+
+impl_serialization_traits!(Sha256);

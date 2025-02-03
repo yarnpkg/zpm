@@ -1,12 +1,14 @@
-use std::{collections::BTreeMap, fmt::{self, Display, Formatter}, str::FromStr, sync::LazyLock};
+use std::{collections::BTreeMap, fmt::{self, Display, Formatter}, sync::LazyLock};
 
 use arca::Path;
 use bincode::{Decode, Encode};
+use colored::Colorize;
 use fancy_regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
+use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, prepare::PrepareParams, semver, yarn_serialization_protocol};
+use crate::{error::Error, prepare::PrepareParams};
 
 static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
 
@@ -49,7 +51,7 @@ pub enum GitTreeish {
     AnythingGoes(String),
     Branch(String),
     Commit(String),
-    Semver(semver::Range),
+    Semver(zpm_semver::Range),
     Tag(String),
 }
 
@@ -72,8 +74,10 @@ pub struct GitRange {
     pub prepare_params: PrepareParams,
 }
 
-yarn_serialization_protocol!(GitRange, "", {
-    deserialize(src) {
+impl FromFileString for GitRange {
+    type Error = Error;
+
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
         if !is_git_url(src) {
             return Err(Error::InvalidGitUrl(src.to_string()));
         }
@@ -81,8 +85,10 @@ yarn_serialization_protocol!(GitRange, "", {
         let normalized = normalize_git_url(src);
         extract_git_range(normalized)
     }
+}
 
-    serialize(&self) {
+impl ToFileString for GitRange {
+    fn to_file_string(&self) -> String {
         let mut params = vec![];
 
         params.push(match &self.treeish {
@@ -103,7 +109,15 @@ yarn_serialization_protocol!(GitRange, "", {
 
         format!("{}#{}", self.repo, params.join("&"))
     }
-});
+}
+
+impl ToHumanString for GitRange {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(135, 175, 255).to_string()
+    }
+}
+
+impl_serialization_traits!(GitRange);
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GitReference {
@@ -112,8 +126,10 @@ pub struct GitReference {
     pub prepare_params: PrepareParams,
 }
 
-yarn_serialization_protocol!(GitReference, "", {
-    deserialize(src) {
+impl FromFileString for GitReference {
+    type Error = Error;
+
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
         let mut parts = src.splitn(2, '#');
 
         let repo = parts.next().unwrap().to_string();
@@ -151,8 +167,10 @@ yarn_serialization_protocol!(GitReference, "", {
             prepare_params,
         })
     }
+}
 
-    serialize(&self) {
+impl ToFileString for GitReference {
+    fn to_file_string(&self) -> String {
         let mut params = vec![
             format!("commit={}", urlencoding::encode(&self.commit)),
         ];
@@ -161,13 +179,17 @@ yarn_serialization_protocol!(GitReference, "", {
             params.push(format!("cwd={}", urlencoding::encode(cwd)));
         }
 
-        if let Some(workspace) = &self.prepare_params.workspace {
-            params.push(format!("workspace={}", urlencoding::encode(workspace)));
-        }
-
         format!("{}#{}", self.repo, params.join("&"))
     }
-});
+}
+
+impl ToHumanString for GitReference {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(135, 175, 255).to_string()
+    }
+}
+
+impl_serialization_traits!(GitReference);
 
 pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
     let url = url.as_ref();
@@ -202,7 +224,7 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
                         treeish = GitTreeish::Commit(value.to_string()),
 
                     "semver" =>
-                        treeish = GitTreeish::Semver(semver::Range::from_str(value.as_ref())?),
+                        treeish = GitTreeish::Semver(zpm_semver::Range::from_file_string(value.as_ref())?),
 
                     "tag" =>
                         treeish = GitTreeish::Tag(value.to_string()),
@@ -233,7 +255,7 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
         match kind {
             "branch" => GitTreeish::Branch(subsequent.to_string()),
             "commit" => GitTreeish::Commit(subsequent.to_string()),
-            "semver" => GitTreeish::Semver(semver::Range::from_str(subsequent)?),
+            "semver" => GitTreeish::Semver(zpm_semver::Range::from_file_string(subsequent)?),
             "tag" => GitTreeish::Tag(subsequent.to_string()),
             _ => GitTreeish::Commit(subsequent.to_string()),
         }
@@ -318,9 +340,9 @@ async fn resolve_git_treeish_stricter(repo: &str, treeish: GitTreeish) -> Result
         }
 
         GitTreeish::Semver(tag) => {
-            let mut candidates: Vec<(String, semver::Version)> = refs.into_iter()
+            let mut candidates: Vec<(String, zpm_semver::Version)> = refs.into_iter()
                 .filter(|(k, _)| k.starts_with("refs/tags/") && !k.ends_with("^{}"))
-                .filter_map(|(k, _)| semver::Version::from_str(&k[10..]).ok().map(|v| (k, v)))
+                .filter_map(|(k, _)| zpm_semver::Version::from_file_string(&k[10..]).ok().map(|v| (k, v)))
                 .filter(|(_, v)| tag.check(v))
                 .collect();
 

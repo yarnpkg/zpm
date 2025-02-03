@@ -3,8 +3,9 @@ use std::{collections::BTreeMap, fmt::{self, Debug}, hash::Hash, marker::Phantom
 use bincode::{Decode, Encode};
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
+use zpm_utils::ToFileString;
 
-use crate::{config::ENV_CONFIG, content_flags::ContentFlags, error::Error, hash::Sha256, primitives::{Descriptor, Locator}, resolvers::Resolution, serialize::Serialized};
+use crate::{config::ENV_CONFIG, content_flags::ContentFlags, error::Error, hash::Sha256, primitives::{Descriptor, Locator}, resolvers::Resolution};
 
 fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     value == &T::default()
@@ -140,7 +141,7 @@ impl<T> MultiKey<T> {
     }
 }
 
-impl<T> Serialize for MultiKey<T> where T: Serialized {
+impl<T> Serialize for MultiKey<T> where T: ToFileString {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
         let mut string = String::new();
 
@@ -149,7 +150,7 @@ impl<T> Serialize for MultiKey<T> where T: Serialized {
                 string.push_str(", ");
             }
 
-            string.push_str(&item.serialized().unwrap());
+            string.push_str(&item.to_file_string());
         }
 
         serializer.serialize_str(&string)

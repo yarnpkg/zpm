@@ -1,6 +1,5 @@
-use std::str::FromStr;
-
 use clipanion::cli;
+use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{error::Error, primitives::Range};
 
@@ -12,8 +11,8 @@ pub struct CheckRange {
 
 impl CheckRange {
     pub fn execute(&self) -> Result<(), Error> {
-        let range = Range::from_str(&self.range)?;
-        let stringified = range.to_string();
+        let range = Range::from_file_string(&self.range)?;
+        let stringified = range.to_file_string();
 
         println!("{}", stringified);
         println!("{:#?}", range);

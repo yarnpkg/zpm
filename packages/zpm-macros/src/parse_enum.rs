@@ -183,12 +183,14 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
             #(#generated_variants),*
         }
 
-        crate::yarn_serialization_protocol!(#name, {
-            deserialize(src) {
+        impl zpm_utils::FromFileString for #name {
+            type Error = Error;
+
+            fn from_file_string(src: &str) -> Result<Self, Error> {
                 #(#deserialization_arms)*
                 #(#arms)*
             }
-        });
+        }
     };
 
     //panic!("{:?}", expanded.to_string());

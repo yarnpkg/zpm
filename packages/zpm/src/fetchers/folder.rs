@@ -1,4 +1,4 @@
-use crate::{error::Error, formats, install::{FetchResult, InstallContext, InstallOpResult}, manifest::RemoteManifest, primitives::{reference, Locator}, resolvers::Resolution};
+use crate::{error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::RemoteManifest, primitives::{reference, Locator}, resolvers::Resolution};
 
 use super::PackageData;
 
@@ -10,14 +10,14 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .with_join_str(&params.path);
 
     let pkg_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
-        formats::convert::convert_folder_to_zip(&locator.ident, &context_directory)
+        Ok(zpm_formats::convert::convert_folder_to_zip(&locator.ident.nm_subdir(), &context_directory)?)
     }).await?;
 
     let first_entry
-        = formats::zip::first_entry_from_zip(&pkg_blob.data);
+        = zpm_formats::zip::first_entry_from_zip(&pkg_blob.data)?;
 
-    let remote_manifest = first_entry
-        .and_then(|entry| Ok(sonic_rs::from_slice::<RemoteManifest>(&entry.data)?))?;
+    let remote_manifest
+        = sonic_rs::from_slice::<RemoteManifest>(&first_entry.data)?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), remote_manifest);
