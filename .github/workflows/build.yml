@@ -43,7 +43,7 @@ jobs:
 
       - name: Prepare artifacts
         run: |
-          mkdir artifacts/zpm-${{matrix.platform[0]}}
+          mkdir -p artifacts/zpm-${{matrix.platform[0]}}
           cp target/release/zpm artifacts/zpm-${{matrix.platform[0]}}/
 
       - name: Upload artifacts
