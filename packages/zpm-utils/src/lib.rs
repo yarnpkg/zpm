@@ -16,7 +16,7 @@ pub trait ToHumanString {
 }
 
 #[macro_export]
-macro_rules! impl_serialization_traits(($type:ident) => {
+macro_rules! impl_serialization_traits(($type:ty) => {
     impl std::str::FromStr for $type {
         type Err = <$type as zpm_utils::FromFileString>::Error;
 

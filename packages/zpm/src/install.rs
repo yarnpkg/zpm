@@ -5,7 +5,7 @@ use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}, ui};
+use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, print_time, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -251,12 +251,14 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                     SyncResolutionAttempt::Failure(dependencies) => dependencies,
                 };
 
-                let future = tokio::time::timeout(
-                    timeout,
-                    resolve_descriptor(context.clone(), descriptor.clone(), dependencies)
-                ).await.map_err(|_| Error::TaskTimeout)?;
+                with_context_result(ReportContext::Descriptor(descriptor.clone()), async {
+                    let future = tokio::time::timeout(
+                        timeout,
+                        resolve_descriptor(context.clone(), descriptor.clone(), dependencies)
+                    ).await.map_err(|_| Error::TaskTimeout)?;
 
-                Ok(InstallOpResult::Resolved(future?))
+                    Ok(InstallOpResult::Resolved(future?))
+                }).await
             },
 
             InstallOp::Fetch {locator} => {
@@ -336,12 +338,11 @@ impl Install {
     pub async fn finalize(mut self, project: &mut Project) -> Result<(), Error> {
         self.install_state.last_installed_at = project.last_changed_at;
 
-        print_time!("Before link");
+        let link_future
+            = linker::link_project(project, &mut self);
 
-        let build = linker::link_project(project, &mut self)
-            .await?;
-
-        print_time!("Before build");
+        let build_requests
+            = async_section("Linking the project", link_future).await?;
 
         project.attach_install_state(self.install_state)?;
 
@@ -349,14 +350,16 @@ impl Install {
             project.write_lockfile(&self.lockfile)?;
         }
 
-        let result = build::BuildManager::new(build)
-            .run(project).await?;
+        if !build_requests.entries.is_empty() {
+            let build_future
+                = build::BuildManager::new(build_requests).run(project);
 
-        print_time!("Done");
+            let build_result
+                = async_section("Building the project", build_future).await?;
 
-        if !result.build_errors.is_empty() {
-            println!("Build errors: {:?}", result.build_errors);
-            return Err(Error::Unsupported);
+            if !build_result.build_errors.is_empty() {
+                return Err(Error::SilentError);
+            }
         }
 
         Ok(())
@@ -419,18 +422,13 @@ impl<'a> InstallManager<'a> {
             });
         }
 
-        let spinner = ui::spinner::Spinner::open();
-
         let graph_run
-            = graph.run().await;
+            = async_section("Installing packages", graph.run()).await;
 
-        spinner.close();
+        let installed_entries = graph_run
+            .ok_or(Error::SilentError)?;
 
-        if let Some(error) = graph_run.get_failed() {
-            println!("Graph errors: {:#?}", error);
-        }
-
-        for entry in graph_run.unwrap() {
+        for entry in installed_entries {
             match entry {
                 (InstallOp::Resolve {descriptor, ..}, InstallOpResult::Pinned(PinnedResult {locator})) => {
                     self.record_descriptor(descriptor, locator);

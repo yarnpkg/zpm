@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, hash::Blake2b80, primitives::Locator, project::Project, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
+use crate::{error::Error, hash::Blake2b80, primitives::Locator, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
 
 #[derive(Clone, Debug, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Command {
@@ -35,23 +35,25 @@ impl BuildRequest {
             .with_env_variable("INIT_CWD", cwd_abs.as_str())
             .with_cwd(cwd_abs);
 
-        for command in self.commands.iter() {
-            let script_result = match command {
-                Command::Program(program, args) =>
-                    script_env.run_exec(program, args).await,
-                Command::Script(script) =>
-                    script_env.run_script(script, Vec::<&str>::new()).await,
-            };
+        with_context_result(ReportContext::Locator(self.locator.clone()), async {
+            for command in self.commands.iter() {
+                let script_result = match command {
+                    Command::Program(program, args) =>
+                        script_env.run_exec(program, args).await,
+                    Command::Script(script) =>
+                        script_env.run_script(script, Vec::<&str>::new()).await,
+                };
 
-            if !script_result.success() {
-                return Ok(match self.allowed_to_fail {
-                    true => ScriptResult::new_success(),
-                    false => script_result,
-                });
+                if !script_result.success() {
+                    return Ok(match self.allowed_to_fail {
+                        true => ScriptResult::new_success(),
+                        false => script_result,
+                    });
+                }
             }
-        }
 
-        Ok(ScriptResult::new_success())
+            Ok(ScriptResult::new_success())
+        }).await
     }
 
     pub fn key(&self) -> (Locator, Path) {
@@ -311,8 +313,7 @@ impl<'a> BuildManager<'a> {
                     self.record(idx, hash, exit_status);
                 }
 
-                Err(err) => {
-                    println!("Error building {}: {:?} {:#?}", request.locator.to_file_string(), err, request);
+                Err(_) => {
                     self.build_errors.insert(request.key());
                 }
             }

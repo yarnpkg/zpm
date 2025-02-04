@@ -14,7 +14,7 @@ impl Spinner {
         let running_r = running_w.clone();
 
         let handle = std::thread::spawn(move || {
-            let chars = "◐◓◑◒".chars().collect::<Vec<_>>();
+            let chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".chars().collect::<Vec<_>>();
             let mut idx = 0;
 
             while *running_r.lock().unwrap() {
@@ -32,6 +32,12 @@ impl Spinner {
             handle,
             running_w,
         }
+    }
+
+    pub fn clear(&self, text: &str) {
+        let mut stdout = std::io::stdout();
+        write!(stdout, "\x1b[2K\r").unwrap();
+        stdout.flush().unwrap();
     }
 
     pub fn close(self) {

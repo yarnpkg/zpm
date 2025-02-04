@@ -1,8 +1,9 @@
 use bincode::{Decode, Encode};
 use serde::ser::{Serialize, Serializer, SerializeStruct, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant, SerializeMap, SerializeSeq, SerializeStructVariant};
+use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 use std::fmt;
 
-use crate::error::Error;
+use crate::{error::Error, primitives::{Descriptor, Locator}};
 
 pub struct NoopSerializer {
     pub output: String,
@@ -259,30 +260,28 @@ impl<T> UrlEncoded<T> {
     }
 }
 
-impl<T: for<'t> TryFrom<&'t str, Error = Error>> TryFrom<&str> for UrlEncoded<T> {
+impl<T: FromFileString<Error = Error>> FromFileString for UrlEncoded<T> {
     type Error = Error;
 
-    fn try_from(value: &str) -> Result<Self, Error> {
+    fn from_file_string(value: &str) -> Result<Self, Error> {
         let url_decoded
             = urlencoding::decode(value).unwrap();
-        let converted
-            = T::try_from(url_decoded.as_ref()).unwrap();
 
-        Ok(UrlEncoded(converted))
+        Ok(UrlEncoded(T::from_file_string(url_decoded.as_ref())?))
     }
 }
 
-impl<T: ToString> std::fmt::Display for UrlEncoded<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", urlencoding::encode(&self.0.to_string()))
+impl<T: ToFileString> ToFileString for UrlEncoded<T> {
+    fn to_file_string(&self) -> String {
+        urlencoding::encode(&self.0.to_file_string()).to_string()
     }
 }
 
-impl<T: for<'t> TryFrom<&'t str, Error = Error>> TryFrom<&str> for Box<UrlEncoded<T>> {
-    type Error = Error;
-
-    fn try_from(value: &str) -> Result<Self, Error> {
-        UrlEncoded::try_from(value).map(Box::new)
+impl<T: ToHumanString> ToHumanString for UrlEncoded<T> {
+    fn to_print_string(&self) -> String {
+        self.0.to_print_string()
     }
 }
 
+impl_serialization_traits!(UrlEncoded<Descriptor>);
+impl_serialization_traits!(UrlEncoded<Locator>);

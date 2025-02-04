@@ -302,9 +302,9 @@ checksum = "aaa6b4b263a5d737e9bf6b7c09b72c41a5480aec4d7219af827f6564e950b6a5"
 
 [[package]]
 name = "clipanion"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81c212d0b250176e25e1c97fe2c349c70de6225a4e97355b9e62434a840b50dd"
+checksum = "1d088a298368b085771c3115430d42752d54a356d9225a541d6bfa9fe85c6192"
 dependencies = [
  "clipanion-core",
  "clipanion-derive",
@@ -1419,6 +1419,12 @@ checksum = "77957b295656769bb8ad2b6a6b09d897d94f05c41b069aede1fcdaa675eaea04"
 dependencies = [
  "zerocopy",
 ]
+
+[[package]]
+name = "pretty-duration"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8868e7264af614b3634ff0abbe37b178e61000611b8a75221aea40221924aba"
 
 [[package]]
 name = "proc-macro-crate"
@@ -3019,6 +3025,7 @@ dependencies = [
  "globset",
  "hex",
  "itertools 0.13.0",
+ "pretty-duration",
  "rayon",
  "regex",
  "reqwest",

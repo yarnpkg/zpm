@@ -126,12 +126,12 @@ impl ToFileString for Range {
             Range::AnonymousTag(params) => params.tag.clone(),
 
             Range::RegistrySemver(params) => match &params.ident {
-                Some(ident) => format!("npm:{}@{}", ident, params.range),
-                None => format!("npm:{}", params.range),
+                Some(ident) => format!("npm:{}@{}", ident.to_file_string(), params.range.to_file_string()),
+                None => format!("npm:{}", params.range.to_file_string()),
             },
 
             Range::RegistryTag(params) => match &params.ident {
-                Some(ident) => format!("npm:{}@{}", ident, params.tag),
+                Some(ident) => format!("npm:{}@{}", ident.to_file_string(), params.tag),
                 None => format!("npm:{}", params.tag),
             },
 
@@ -141,11 +141,11 @@ impl ToFileString for Range {
             Range::Tarball(params) => format!("file:{}", params.path),
             Range::Folder(params) => format!("file:{}", params.path),
             Range::Url(params) => params.url.clone(),
-            Range::WorkspaceSemver(params) => format!("workspace:{}", params.range),
+            Range::WorkspaceSemver(params) => format!("workspace:{}", params.range.to_file_string()),
             Range::WorkspaceMagic(params) => format!("workspace:{}", params.magic),
             Range::WorkspacePath(params) => format!("workspace:{}", params.path),
-            Range::WorkspaceIdent(params) => format!("workspace:({})", params.ident),
-            Range::Git(params) => params.git.to_string(),
+            Range::WorkspaceIdent(params) => format!("workspace:{}", params.ident.to_file_string()),
+            Range::Git(params) => params.git.to_file_string(),
             Range::MissingPeerDependency(_) => "missing!".to_string(),
             Range::Virtual(params) => format!("virtual:{}#{}", params.inner, params.hash),
         }
@@ -220,8 +220,8 @@ pub enum PeerRange {
 impl ToFileString for PeerRange {
     fn to_file_string(&self) -> String {
         match self {
-            PeerRange::Semver(params) => params.range.to_string(),
-            PeerRange::WorkspaceSemver(params) => format!("workspace:{}", params.range),
+            PeerRange::Semver(params) => params.range.to_file_string(),
+            PeerRange::WorkspaceSemver(params) => format!("workspace:{}", params.range.to_file_string()),
             PeerRange::WorkspaceMagic(params) => format!("workspace:{}", params.magic),
             PeerRange::WorkspacePath(params) => format!("workspace:{}", params.path),
         }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 use arca::Path;
 
@@ -10,6 +10,13 @@ fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
     } else {
         "Run with RUST_BACKTRACE=1 to get a backtrace".to_string()
     }
+}
+
+pub async fn set_timeout<F: Future>(timeout: std::time::Duration, f: F) -> Result<F::Output, Error> {
+    let res = tokio::time::timeout(timeout, f).await
+        .map_err(|_| Error::TaskTimeout)?;
+
+    Ok(res)
 }
 
 #[derive(thiserror::Error, Clone, Debug)]
@@ -241,6 +248,10 @@ pub enum Error {
 
     #[error("Task timeout")]
     TaskTimeout,
+
+    // Silent error; no particular message, just exit with an exit code 1
+    #[error("")]
+    SilentError,
 }
 
 impl Error {

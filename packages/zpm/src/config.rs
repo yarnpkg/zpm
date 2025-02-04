@@ -2,6 +2,7 @@ use std::{str::FromStr, sync::{LazyLock, Mutex}};
 
 use arca::{Path, ToArcaPath};
 use serde::{de::DeserializeOwned, Deserialize, Deserializer};
+use zpm_utils::ToFileString;
 
 use crate::{error::Error, primitives::{reference, Ident}, settings::{EnvConfig, ProjectConfig, UserConfig}};
 
@@ -336,14 +337,7 @@ impl Config {
         }
     }
 
-    pub fn registry_url_for(&self, _ident: &Ident) -> String {
+    pub fn registry_base_for(&self, _ident: &Ident) -> String {
         self.project.npm_registry_server.value.clone()
-    }
-
-    pub fn registry_url_for_package_data(&self, reference: &reference::RegistryReference) -> String {
-        let registry_base = self.registry_url_for(&reference.ident);
-        let url = format!("{}/{}/-/{}-{}.tgz", registry_base, reference.ident, reference.ident.name(), reference.version);
-
-        url
     }
 }

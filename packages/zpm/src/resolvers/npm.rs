@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt, marker::PhantomData, str::FromStr, sync::{
 use regex::Regex;
 use serde::{de::{self, DeserializeOwned, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
 
-use crate::{error::Error, http::http_client, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{range, reference, Descriptor, Ident, Locator}, resolvers::Resolution};
+use crate::{error::Error, http::http_client, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, npm, primitives::{range, reference, Descriptor, Ident, Locator}, resolvers::Resolution};
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
@@ -77,8 +77,9 @@ impl<'de, T> Visitor<'de> for FindHighestCompatibleVersion<T> where T: Deseriali
             }
         }
 
-        let (version, version_payload) = selected
-            .ok_or(de::Error::missing_field(""))?;
+        let Some((version, version_payload)) = selected else {
+            return Ok(None);
+        };
 
         let deserialized_payload
             = T::deserialize(&version_payload).unwrap();
@@ -173,7 +174,7 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
     };
 
     let expected_registry_url
-        = project.config.registry_url_for_package_data(&registry_reference);
+        = npm::registry_url_for_package_data(&project.config.registry_base_for(&registry_reference.ident), &registry_reference.ident, &registry_reference.version);
 
     let locator = descriptor.resolve_with(match expected_registry_url == dist_manifest.tarball {
         true => registry_reference.into(),
@@ -193,14 +194,14 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     let package_ident = params.ident.as_ref()
         .unwrap_or(&descriptor.ident);
 
-    let registry_url = project.config.registry_url_for(package_ident);
-    let url = format!("{}/{}", registry_url, package_ident);
+    let registry_url
+        = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
 
-    let response = client.get(url.clone()).send().await
+    let response = client.get(registry_url.clone()).send().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
     if response.status().as_u16() == 404 {
-        return Err(Error::PackageNotFound(package_ident.clone(), url));
+        return Err(Error::PackageNotFound(package_ident.clone(), registry_url));
     }
  
     let registry_text = response.text().await
@@ -231,10 +232,10 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let package_ident = params.ident.as_ref()
         .unwrap_or(&descriptor.ident);
 
-    let registry_url = project.config.registry_url_for(package_ident);
-    let url = format!("{}/{}", registry_url, package_ident);
+    let registry_url
+        = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
 
-    let response = client.get(url.clone()).send().await
+    let response = client.get(registry_url.clone()).send().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
     let registry_text = response.text().await
@@ -273,10 +274,10 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
 
     let client = http_client()?;
 
-    let registry_url = project.config.registry_url_for(&params.ident);
-    let url = format!("{}/{}/{}", registry_url, params.ident, params.version);
+    let registry_url
+        = npm::registry_url_for_one_version(&project.config.registry_base_for(&params.ident), &params.ident, &params.version);
 
-    let response = client.get(url.clone()).send().await
+    let response = client.get(registry_url.clone()).send().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
     let registry_text = response.text().await
