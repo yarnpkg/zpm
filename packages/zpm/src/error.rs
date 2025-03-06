@@ -183,6 +183,12 @@ pub enum Error {
     #[error("Binary not found ({0})")]
     BinaryNotFound(String),
 
+    #[error("No binaries available in the dlx context")]
+    MissingBinariesDlxContent,
+
+    #[error("Ambiguous dlx context; use the -p syntax to clarify package and binary names")]
+    AmbiguousDlxContext,
+
     #[error("Circular build dependency detected")]
     CircularBuildDependency(Locator),
 

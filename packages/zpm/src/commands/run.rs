@@ -1,5 +1,6 @@
 use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
 
+use arca::Path;
 use clipanion::cli;
 
 use crate::{error::Error, project, script::ScriptEnvironment};
@@ -12,6 +13,9 @@ pub struct Run {
 
     #[cli::option("--error-if-missing", default = true)]
     error_if_missing: bool,
+
+    #[cli::option("--run-cwd")]
+    run_cwd: Option<Path>,
 
     name: String,
     args: Vec<String>,

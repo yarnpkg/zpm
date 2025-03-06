@@ -113,19 +113,15 @@ impl<'de, TVal> Visitor<'de> for FindField<'de, TVal> where TVal: Deserialize<'d
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
-        let mut selected = None;
-
         while let Some(key) = map.next_key::<String>()? {
             if self.value == key {
-                selected = Some(map.next_value::<serde_json::Value>()?);
+                return Ok(Some(map.next_value::<TVal>()?));
             } else {
                 map.next_value::<IgnoredAny>()?;
             }
         }
 
-        Ok(selected.map(|payload| {
-            TVal::deserialize(payload).unwrap()
-        }))
+        Ok(None)
     }
 }
 

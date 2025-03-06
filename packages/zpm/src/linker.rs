@@ -387,15 +387,6 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         let mut is_physically_on_disk = true;
         let mut is_freshly_unplugged = false;
 
-        println!("locator: {}", locator.slug());
-        println!("  must_extract: {}", must_extract);
-        println!("  must_build: {}", must_build);
-        println!("  is_compatible: {}", is_compatible);
-        println!("  is_optional: {}", is_optional);
-        println!("  should_build_if_compatible: {}", should_build_if_compatible);
-        println!("  package_meta: {:?}", package_meta);
-        println!("  package_flags: {:?}", package_flags);
-        
         if must_extract {
             (package_location_abs, is_freshly_unplugged) = extract_archive(&project.project_cwd, locator, physical_package_data)?;
         } else {

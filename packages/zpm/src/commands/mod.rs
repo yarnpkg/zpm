@@ -8,6 +8,7 @@ mod debug;
 mod add;
 mod bin;
 mod default;
+mod dlx;
 mod exec;
 mod install;
 mod node;
@@ -26,6 +27,8 @@ clipanion::program!(YarnCli, [
     bin::BinList,
     bin::Bin,
     default::Default,
+    dlx::DlxWithPackages,
+    dlx::Dlx,
     exec::Exec,
     install::Install,
     node::Node,

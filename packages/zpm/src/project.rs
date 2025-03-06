@@ -267,6 +267,10 @@ impl Project {
         &self.workspaces[0]
     }
 
+    pub fn root_workspace_mut(&mut self) -> &mut Workspace {
+        &mut self.workspaces[0]
+    }
+
     pub fn active_package(&self) -> Result<Locator, Error> {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;

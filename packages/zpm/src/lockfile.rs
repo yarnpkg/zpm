@@ -210,8 +210,10 @@ impl Default for LockfileMetadata {
 #[derive(Deserialize, Serialize)]
 struct LockfilePayload {
     #[serde(rename = "__metadata")]
+    #[serde(default)]
     metadata: LockfileMetadata,
 
+    #[serde(default)]
     entries: BTreeMap<MultiKey<Descriptor>, LockfileEntry>,
 }
 

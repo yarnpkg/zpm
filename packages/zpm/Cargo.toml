@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arca = { version = "0.11.0", features = ["bincode", "serde", "tokio"] }
+arca = { version = "0.12.0", features = ["bincode", "serde", "tokio"] }
 bytes = "1.7.1"
 bincode = {version = "2.0.0-rc.3", features = ["serde"] }
 blake2 = { version = "0.10.6" }
-clipanion = { version = "0.6.1" }
+clipanion = { version = "0.7.0" }
 colored = "3.0.0"
 fancy-regex = "0.13.0"
 futures = "0.3.30"
