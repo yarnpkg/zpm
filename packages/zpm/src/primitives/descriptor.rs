@@ -15,55 +15,8 @@ use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHuman
 use crate::hash::Sha256;
 use crate::error::Error;
 
-use super::range::{AnonymousSemverRange, RegistryTagRange, VirtualRange};
+use super::range::{AnonymousSemverRange, VirtualRange};
 use super::{reference, Ident, Locator, Range, Reference};
-
-#[derive(Clone, Debug)]
-pub struct LooseDescriptor {
-    pub descriptor: Descriptor,
-}
-
-impl Default for LooseDescriptor {
-    fn default() -> Self {
-        LooseDescriptor {
-            descriptor: Descriptor::new(Ident::new("unknown"), Range::RegistryTag(RegistryTagRange {
-                ident: None,
-                tag: "latest".to_string(),
-            })),
-        }
-    }
-}
-
-impl FromFileString for LooseDescriptor {
-    type Error = crate::error::Error;
-    
-    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        if let Ok(descriptor) = Descriptor::from_file_string(s) {
-            return Ok(LooseDescriptor {descriptor});
-        }
-
-        let ident = Ident::from_file_string(s)?;
-        let range = Range::from_file_string("latest")?;
-
-        let descriptor = Descriptor::new(ident, range);
-
-        Ok(LooseDescriptor {descriptor})
-    }
-}
-
-impl ToFileString for LooseDescriptor {
-    fn to_file_string(&self) -> String {
-        self.descriptor.to_file_string()
-    }
-}
-
-impl ToHumanString for LooseDescriptor {
-    fn to_print_string(&self) -> String {
-        self.descriptor.to_print_string()
-    }
-}
-
-impl_serialization_traits!(LooseDescriptor);
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Descriptor {

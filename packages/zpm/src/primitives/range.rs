@@ -117,6 +117,13 @@ impl Range {
     pub fn is_transient_resolution(&self) -> bool {
         matches!(&self, Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Folder(_) | Range::Patch(_) | Range::WorkspaceIdent(_) | Range::WorkspaceMagic(_) | Range::WorkspacePath(_) | Range::WorkspaceSemver(_))
     }
+
+    pub fn to_peer_range(&self) -> Result<PeerRange, Error> {
+        match self {
+            Range::AnonymousSemver(params) => Ok(PeerRange::Semver(SemverPeerRange { range: params.range.clone() })),
+            _ => Err(Error::InvalidRange(self.to_file_string())),
+        }
+    }
 }
 
 impl ToFileString for Range {
@@ -127,12 +134,12 @@ impl ToFileString for Range {
 
             Range::RegistrySemver(params) => match &params.ident {
                 Some(ident) => format!("npm:{}@{}", ident.to_file_string(), params.range.to_file_string()),
-                None => format!("npm:{}", params.range.to_file_string()),
+                None => params.range.to_file_string(),
             },
 
             Range::RegistryTag(params) => match &params.ident {
                 Some(ident) => format!("npm:{}@{}", ident.to_file_string(), params.tag),
-                None => format!("npm:{}", params.tag),
+                None => params.tag.clone(),
             },
 
             Range::Patch(params) => format!("patch:{}#{}", params.inner.to_file_string(), params.path),

@@ -5,17 +5,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::{error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, range, reference, Descriptor, Ident, Locator, PeerRange, Range, Reference}, system};
 
-mod folder;
-mod git;
-mod link;
-mod patch;
-mod portal;
-mod npm;
-mod semver;
-mod tag;
-mod tarball;
-mod url;
-mod workspace;
+pub mod folder;
+pub mod git;
+pub mod link;
+pub mod patch;
+pub mod portal;
+pub mod npm;
+pub mod semver;
+pub mod tag;
+pub mod tarball;
+pub mod url;
+pub mod workspace;
 
 fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     value == &T::default()

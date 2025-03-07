@@ -2,8 +2,9 @@ use std::process::ExitStatus;
 
 use arca::Path;
 use clipanion::cli;
+use zpm_semver::RangeKind;
 
-use crate::{error::Error, primitives::{descriptor::LooseDescriptor, Descriptor}, project, script::ScriptEnvironment};
+use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, Descriptor, LooseDescriptor}, project::{self, Project}, script::{Binary, ScriptEnvironment}};
 
 #[cli::command(proxy)]
 #[cli::path("dlx")]
@@ -18,11 +19,30 @@ pub struct DlxWithPackages {
 impl DlxWithPackages {
     #[tokio::main()]
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let packages = self.packages.iter()
-            .map(|p| p.descriptor.clone())
-            .collect();
+        let (mut project, current_cwd)
+            = setup_project().await?;
 
-        run_dlx(packages, self.name.clone(), self.args.clone()).await
+        let package_cache
+            = project.package_cache();
+
+        let install_context = InstallContext::default()
+            .with_package_cache(Some(&package_cache))
+            .with_project(Some(&project));
+
+        let resolve_options = loose_descriptor::ResolveOptions {
+            range_kind: RangeKind::Exact,
+            resolve_tags: true,
+        };
+
+        let descriptors
+            = LooseDescriptor::resolve_all(&install_context, &resolve_options, &self.packages).await?;
+
+        install_dependencies(&mut project, descriptors).await?;
+
+        let bin
+            = find_binary(&project, self.name.as_str(), false)?;
+
+        run_binary(&project, bin, self.args.clone(), current_cwd).await
     }
 }
 
@@ -36,16 +56,34 @@ pub struct Dlx {
 impl Dlx {
     #[tokio::main()]
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let name
-            = self.package.descriptor.ident.name().to_string();
-        let packages
-            = vec![self.package.descriptor.clone()];
+        let (mut project, current_cwd)
+            = setup_project().await?;
 
-        run_dlx(packages, name, self.args.clone()).await
+        let package_cache
+            = project.package_cache();
+
+        let install_context = InstallContext::default()
+            .with_package_cache(Some(&package_cache))
+            .with_project(Some(&project));
+
+        let resolve_options = loose_descriptor::ResolveOptions {
+            range_kind: RangeKind::Exact,
+            resolve_tags: true,
+        };
+
+        let descriptor
+            = self.package.resolve(&install_context, &resolve_options).await?;
+
+        install_dependencies(&mut project, vec![descriptor.clone()]).await?;
+
+        let bin
+            = find_binary(&project, descriptor.ident.name(), true)?;
+
+        run_binary(&project, bin, self.args.clone(), current_cwd).await
     }
 }
 
-async fn run_dlx(packages: Vec<Descriptor>, name: String, args: Vec<String>) -> Result<ExitStatus, Error> {
+async fn setup_project() -> Result<(Project, Path), Error> {
     let temp_dir
         = Path::temp_dir_pattern("dlx-<>")?;
 
@@ -59,14 +97,18 @@ async fn run_dlx(packages: Vec<Descriptor>, name: String, args: Vec<String>) -> 
 
     std::env::set_current_dir(temp_dir.to_path_buf())?;
 
-    let mut project
+    let project
         = project::Project::new(None).await?;
 
+    Ok((project, current_cwd))
+}
+
+async fn install_dependencies(project: &mut Project, descriptors: Vec<Descriptor>) -> Result<(), Error> {
     let root_workspace
         = project.root_workspace_mut();
 
-    for package in packages.into_iter() {
-        root_workspace.manifest.remote.dependencies.insert(package.ident.clone(), package);
+    for descriptor in descriptors.into_iter() {
+        root_workspace.manifest.remote.dependencies.insert(descriptor.ident.clone(), descriptor);
     }
 
     root_workspace.write_manifest()?;
@@ -74,6 +116,10 @@ async fn run_dlx(packages: Vec<Descriptor>, name: String, args: Vec<String>) -> 
     project
         .run_install().await?;
 
+    Ok(())
+}
+
+fn find_binary(project: &Project, preferred_name: &str, fallback: bool) -> Result<Binary, Error> {
     let root_workspace
         = project.root_workspace();
 
@@ -84,14 +130,20 @@ async fn run_dlx(packages: Vec<Descriptor>, name: String, args: Vec<String>) -> 
         return Err(Error::MissingBinariesDlxContent);
     }
 
-    let bin = if let Some(bin) = visible_bins.get(name.as_str()) {
-        bin.clone()
-    } else if visible_bins.len() == 1 {
-        visible_bins.into_iter().next().unwrap().1
+    if let Some(bin) = visible_bins.get(preferred_name) {
+        Ok(bin.clone())
+    } else if fallback {
+        if visible_bins.len() == 1 {
+            Ok(visible_bins.into_iter().next().unwrap().1)
+        } else {
+            Err(Error::AmbiguousDlxContext)
+        }
     } else {
-        return Err(Error::AmbiguousDlxContext);
-    };
+        Err(Error::BinaryNotFound(preferred_name.to_string()))
+    }
+}
 
+async fn run_binary(project: &Project, bin: Binary, args: Vec<String>, current_cwd: Path) -> Result<ExitStatus, Error> {
     Ok(ScriptEnvironment::new()
         .with_project(&project)
         .with_package(&project, &project.active_package()?)?

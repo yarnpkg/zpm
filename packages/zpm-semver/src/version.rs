@@ -1,6 +1,6 @@
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{extract::extract_version, Error};
+use crate::{extract::extract_version, range::RangeKind, Error, Range};
 
 #[cfg(test)]
 #[path = "./version.test.rs"]
@@ -93,6 +93,14 @@ impl Version {
             patch: self.patch + 1,
             rc: Some(vec![VersionRc::Number(0)]),
         }
+    }
+
+    pub fn to_range(&self, kind: RangeKind) -> Range {
+        match kind {
+            RangeKind::Caret => Range::from_file_string(&format!("^{}", self.to_file_string())),
+            RangeKind::Tilde => Range::from_file_string(&format!("~{}", self.to_file_string())),
+            RangeKind::Exact => Range::from_file_string(&self.to_file_string()),
+        }.expect("Converting a version to a range should be trivial")
     }
 }
 

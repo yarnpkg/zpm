@@ -97,7 +97,7 @@ pub struct FindField<'a, TVal> {
     phantom: PhantomData<TVal>,
 }
 
-impl<'de, TVal> DeserializeSeed<'de> for FindField<'de, TVal> where TVal: Deserialize<'de> {
+impl<'de, TVal> DeserializeSeed<'de> for FindField<'de, TVal> where TVal: Deserialize<'de> + std::fmt::Debug {
     type Value = Option<TVal>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error> where D: Deserializer<'de> {
@@ -105,7 +105,7 @@ impl<'de, TVal> DeserializeSeed<'de> for FindField<'de, TVal> where TVal: Deseri
     }
 }
 
-impl<'de, TVal> Visitor<'de> for FindField<'de, TVal> where TVal: Deserialize<'de> {
+impl<'de, TVal> Visitor<'de> for FindField<'de, TVal> where TVal: Deserialize<'de> + std::fmt::Debug {
     type Value = Option<TVal>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -113,22 +113,24 @@ impl<'de, TVal> Visitor<'de> for FindField<'de, TVal> where TVal: Deserialize<'d
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
+        let mut res = None;
+
         while let Some(key) = map.next_key::<String>()? {
             if self.value == key {
-                return Ok(Some(map.next_value::<TVal>()?));
+                res = Some(map.next_value::<TVal>()?);
             } else {
                 map.next_value::<IgnoredAny>()?;
             }
         }
 
-        Ok(None)
+        Ok(res)
     }
 }
 
 /**
  * We need to read the scripts to figure out whether the package has an implicit node-gyp dependency.
  */
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Debug)]
 struct RemoteManifestWithScripts {
     #[serde(flatten)]
     remote: RemoteManifest,

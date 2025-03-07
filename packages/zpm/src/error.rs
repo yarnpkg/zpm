@@ -1,6 +1,7 @@
 use std::{future::Future, sync::Arc};
 
 use arca::Path;
+use tokio::task::JoinError;
 
 use crate::primitives::{Ident, Locator};
 
@@ -255,6 +256,9 @@ pub enum Error {
     #[error("Task timeout")]
     TaskTimeout,
 
+    #[error("Internal error: Join failed ({0})")]
+    JoinFailed(#[from] Arc<JoinError>),
+
     // Silent error; no particular message, just exit with an exit code 1
     #[error("")]
     SilentError,
@@ -266,6 +270,12 @@ impl Error {
             true => Ok(None),
             false => Err(self),
         }
+    }
+}
+
+impl From<JoinError> for Error {
+    fn from(error: JoinError) -> Self {
+        Arc::new(error).into()
     }
 }
 

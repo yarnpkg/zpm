@@ -10,6 +10,13 @@ use super::{extract, Version};
 mod range_tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RangeKind {
+    Caret,
+    Tilde,
+    Exact,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "bincode", derive(bincode_derive::Decode, bincode_derive::Encode))]
 pub enum TokenType {
     LParen,
@@ -53,6 +60,18 @@ impl Range {
         let mut n = 0;
 
         self.check_from(version.borrow(), &mut n)
+    }
+
+    pub fn kind(&self) -> Option<RangeKind> {
+        match self.source.chars().next() {
+            Some('0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9')
+                => Some(RangeKind::Exact),
+
+            Some('^') => Some(RangeKind::Caret),
+            Some('~') => Some(RangeKind::Tilde),
+
+            _ => None,
+        }
     }
 
     fn check_from(&self, version: &Version, n: &mut usize) -> bool {
