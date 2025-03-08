@@ -1,6 +1,7 @@
 use arca::Path;
 use serde::Deserialize;
 use zpm_macros::yarn_config;
+use zpm_utils::{ToFileString, ToHumanString};
 use crate::config::{BoolField, EnumField, GlobField, PathField, StringField, UintField, VecField};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -9,6 +10,22 @@ pub enum PnpFallbackMode {
     None,
     DependenciesOnly,
     All,
+}
+
+impl ToFileString for PnpFallbackMode {
+    fn to_file_string(&self) -> String {
+        match self {
+            PnpFallbackMode::None => "none".to_string(),
+            PnpFallbackMode::DependenciesOnly => "dependencies-only".to_string(),
+            PnpFallbackMode::All => "all".to_string(),
+        }
+    }
+}
+
+impl ToHumanString for PnpFallbackMode {
+    fn to_print_string(&self) -> String {
+        self.to_file_string()
+    }
 }
 
 /**

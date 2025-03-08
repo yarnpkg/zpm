@@ -2,9 +2,14 @@ use std::{borrow::Cow, os::unix::fs::PermissionsExt};
 
 use arca::{Path, ToArcaPath};
 
+pub(crate) mod zip_structs;
+
 pub mod convert;
 pub mod error;
+pub mod iter_ext;
+pub mod tar_iter;
 pub mod tar;
+pub mod zip_iter;
 pub mod zip;
 
 pub use error::Error;

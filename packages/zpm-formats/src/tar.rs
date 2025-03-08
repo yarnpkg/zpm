@@ -1,9 +1,6 @@
-use std::{borrow::Cow, io::{Read, Write}, sync::LazyLock};
+use std::io::{Read, Write};
 
-use itertools::Itertools;
-use regex::Regex;
-
-use crate::error::Error;
+use crate::{error::Error, tar_iter::TarIterator};
 
 use super::Entry;
 
@@ -12,46 +9,6 @@ unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
         (p as *const T) as *const u8,
         ::core::mem::size_of::<T>(),
     )
-}
-
-fn trim_zero(x: &[u8]) -> &[u8] {
-    match x.iter().find_position(|c| c == &&0) {
-        Some((i, _)) => &x[..i],
-        None => x,
-    }
-}
-
-fn from_oct(x: &[u8]) -> u64 {
-    let mut result = 0;
-    for i in x.iter().filter(|c| **c >= b'0' && **c <= b'7') {
-        result = result * 8 + (i - b'0') as u64;
-    }
-    result
-}
-
-static ZIP_PATH_INVALID_PATTERNS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\\|/\.{0,2}/|^\.{0,2}/|/\.{0,2}$|^\.{0,2}$").unwrap()
-});
-
-fn clean_name(name: &str) -> Option<String> {
-    if name.starts_with('/') {
-        return None
-    }
-
-    let has_parent_specifier = name.split('/')
-        .any(|part| part == "..");
-
-    if has_parent_specifier {
-        return None
-    }
-
-    let mut name = arca::Path::from(name).to_string();
-
-    if name.ends_with('/') {
-        name.pop();
-    }
-
-    Some(name)
 }
 
 #[allow(dead_code)]
@@ -70,45 +27,7 @@ struct FileHeader {
 }
 
 pub fn entries_from_tar(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
-    let mut offset = 0;
-    let mut entries = vec![];
-
-    while offset < buffer.len() {
-        let size = from_oct(&buffer[offset + 124..offset + 136]) as usize;
-
-        if buffer[offset] != 0 {
-            let name_slice = trim_zero(&buffer[offset..offset + 100]);
-
-            let name = match std::str::from_utf8(name_slice) {
-                Ok(v) => v,
-                Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-            }.to_string();
-
-            let name = clean_name(&name)
-                .ok_or(Error::InvalidTarFilePath(name))?;
-
-            if ZIP_PATH_INVALID_PATTERNS.is_match(&name) {
-                return Err(Error::InvalidTarFilePath(name));
-            }
-
-            if buffer[offset + 156] == b'0' {
-                let mode = from_oct(&buffer[offset + 100..offset + 108]);
-                let data = &buffer[offset + 512..offset + 512 + size];
-
-                entries.push(Entry {
-                    name,
-                    mode,
-                    crc: 0,
-                    data: Cow::Borrowed(data),
-                });
-            }
-        }
-
-        // round up to the next multiple of 512
-        offset += 512 + ((size + 511) / 512) * 512;
-    }
-
-    Ok(entries)
+    TarIterator::new(buffer).collect()
 }
 
 pub fn craft_tar(entries: &[Entry]) -> Vec<u8> {

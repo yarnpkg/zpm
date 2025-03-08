@@ -1,7 +1,9 @@
 use std::{str::FromStr, sync::{LazyLock, Mutex}};
 
 use arca::{Path, ToArcaPath};
+use colored::Colorize;
 use serde::{de::DeserializeOwned, Deserialize, Deserializer};
+use zpm_utils::{ToFileString, ToHumanString};
 
 use crate::{error::Error, primitives::Ident, settings::{EnvConfig, ProjectConfig, UserConfig}};
 
@@ -42,6 +44,18 @@ impl<T> StringLikeField<T> {
     }
 }
 
+impl<T: ToFileString> ToFileString for StringLikeField<T> {
+    fn to_file_string(&self) -> String {
+        self.value.to_file_string()
+    }
+}
+
+impl<T: ToHumanString> ToHumanString for StringLikeField<T> {
+    fn to_print_string(&self) -> String {
+        self.value.to_print_string()
+    }
+}
+
 impl<T: FromEnv> FromEnv for StringLikeField<T> {
     type Err = T::Err;
 
@@ -72,6 +86,18 @@ pub struct BoolField {
 impl BoolField {
     pub fn new(value: bool) -> Self {
         Self {value, source: SettingSource::Default}
+    }
+}
+
+impl ToFileString for BoolField {
+    fn to_file_string(&self) -> String {
+        self.value.to_string()
+    }
+}
+
+impl ToHumanString for BoolField {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(255, 153, 0).to_string()
     }
 }
 
@@ -109,6 +135,18 @@ impl UintField {
     }
 }
 
+impl ToFileString for UintField {
+    fn to_file_string(&self) -> String {
+        self.value.to_string()
+    }
+}
+
+impl ToHumanString for UintField {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(255, 255, 0).to_string()
+    }
+}
+
 impl FromEnv for UintField {
     type Err = <u64 as FromStr>::Err;
 
@@ -132,6 +170,18 @@ pub struct JsonField<T> {
 impl<T> JsonField<T> {
     pub fn new(value: T) -> Self {
         Self {value, source: SettingSource::Default}
+    }
+}
+
+impl<T: ToFileString> ToFileString for JsonField<T> {
+    fn to_file_string(&self) -> String {
+        self.value.to_file_string()
+    }
+}
+
+impl<T: ToHumanString> ToHumanString for JsonField<T> {
+    fn to_print_string(&self) -> String {
+        self.value.to_print_string()
     }
 }
 
@@ -161,6 +211,18 @@ pub struct VecField<T> {
 impl<T> VecField<T> {
     pub fn new(value: Vec<T>) -> Self {
         Self {value}
+    }
+}
+
+impl<T: ToFileString> ToFileString for VecField<T> {
+    fn to_file_string(&self) -> String {
+        self.value.iter().map(|v| v.to_file_string()).collect::<Vec<_>>().join(",")
+    }
+}
+
+impl<T: ToHumanString> ToHumanString for VecField<T> {
+    fn to_print_string(&self) -> String {
+        self.value.iter().map(|v| v.to_print_string()).collect::<Vec<_>>().join(",")
     }
 }
 
@@ -201,6 +263,18 @@ impl<T> EnumField<T> {
     }
 }
 
+impl<T: ToFileString> ToFileString for EnumField<T> {
+    fn to_file_string(&self) -> String {
+        self.value.to_file_string()
+    }
+}
+
+impl<T: ToHumanString> ToHumanString for EnumField<T> {
+    fn to_print_string(&self) -> String {
+        self.value.to_print_string()
+    }
+}
+
 impl<T: DeserializeOwned> FromEnv for EnumField<T> {
     type Err = serde_json::Error;
 
@@ -229,6 +303,18 @@ pub struct PathField {
 impl PathField {
     pub fn new(value: Path) -> Self {
         Self {value, source: SettingSource::Default}
+    }
+}
+
+impl ToFileString for PathField {
+    fn to_file_string(&self) -> String {
+        self.value.to_string()
+    }
+}
+
+impl ToHumanString for PathField {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(153, 153, 255).to_string()
     }
 }
 
@@ -273,6 +359,18 @@ impl Glob {
             .unwrap()
             .to_regex()
             .to_string()
+    }
+}
+
+impl ToFileString for Glob {
+    fn to_file_string(&self) -> String {
+        self.pattern.clone()
+    }
+}
+
+impl ToHumanString for Glob {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(153, 153, 255).to_string()
     }
 }
 

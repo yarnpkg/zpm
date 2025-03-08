@@ -7,6 +7,9 @@ mod debug;
 
 mod add;
 mod bin;
+mod config;
+mod config_get;
+mod config_set;
 mod default;
 mod dlx;
 mod exec;
@@ -26,6 +29,9 @@ clipanion::program!(YarnCli, [
     add::Add,
     bin::BinList,
     bin::Bin,
+    config::Config,
+    config_get::ConfigGet,
+    config_set::ConfigSet,
     default::Default,
     dlx::DlxWithPackages,
     dlx::Dlx,

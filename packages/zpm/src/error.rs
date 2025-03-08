@@ -3,7 +3,7 @@ use std::{future::Future, sync::Arc};
 use arca::Path;
 use tokio::task::JoinError;
 
-use crate::primitives::{Ident, Locator};
+use crate::primitives::{Ident, Locator, Range};
 
 fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
     if backtrace.status() == std::backtrace::BacktraceStatus::Captured {
@@ -153,6 +153,15 @@ pub enum Error {
 
     #[error("Missing package manifest")]
     MissingPackageManifest,
+
+    #[error("Missing package name")]
+    MissingPackageName,
+
+    #[error("We don't know how to infer the package name with only the provided range ({0})")]
+    UnsufficientLooseDescriptor(Range),
+
+    #[error("Config key not found ({0})")]
+    ConfigKeyNotFound(String),
 
     #[error("Package conversion error ({0})")]
     PackageConversionError(Arc<Box<dyn std::error::Error + Send + Sync>>),

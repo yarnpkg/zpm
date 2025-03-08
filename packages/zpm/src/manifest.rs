@@ -228,6 +228,14 @@ pub fn read_manifest_with_size(abs_path: &Path, size: u64) -> Result<Manifest, E
     parse_manifest(&manifest_text)
 }
 
+pub fn parse_manifest_from_bytes(bytes: &[u8]) -> Result<Manifest, Error> {
+    if bytes.len() > 0 {
+        Ok(sonic_rs::from_slice(bytes)?)
+    } else {
+        Ok(Manifest::default())
+    }
+}
+
 pub fn parse_manifest(manifest_text: &str) -> Result<Manifest, Error> {
     if manifest_text.len() > 0 {
         Ok(sonic_rs::from_str(&manifest_text)?)

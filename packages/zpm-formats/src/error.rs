@@ -2,6 +2,9 @@ use std::sync::Arc;
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum Error {
+    #[error("Invalid zip file: {0}")]
+    InvalidZipFile(String),
+
     #[error("I/O error: {0}")]
     Io(#[from] Arc<std::io::Error>),
 

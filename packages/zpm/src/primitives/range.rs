@@ -1,7 +1,8 @@
-use std::hash::Hash;
+use std::{hash::Hash, sync::LazyLock};
 
 use bincode::{Decode, Encode};
 use colored::Colorize;
+use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use zpm_macros::parse_enum;
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
@@ -9,6 +10,10 @@ use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHuman
 use crate::{error::Error, git, hash::Sha256, serialize::UrlEncoded};
 
 use super::{Descriptor, Ident};
+
+pub static EXPLICIT_PATH_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^.{0,2}/").unwrap()
+});
 
 #[parse_enum(or_else = |s| Err(Error::InvalidRange(s.to_string())))]
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -142,11 +147,26 @@ impl ToFileString for Range {
                 None => params.tag.clone(),
             },
 
+            Range::Tarball(params) => {
+                if EXPLICIT_PATH_REGEX.is_match(params.path.as_str()) {
+                    params.path.clone()
+                } else {
+                    format!("file:{}", params.path)
+                }
+            },
+
+            Range::Folder(params) => {
+                if EXPLICIT_PATH_REGEX.is_match(params.path.as_str()) {
+                    params.path.clone()
+                } else {
+                    format!("file:{}", params.path)
+                }
+            },
+
             Range::Patch(params) => format!("patch:{}#{}", params.inner.to_file_string(), params.path),
             Range::Link(params) => format!("link:{}", params.path),
             Range::Portal(params) => format!("portal:{}", params.path),
-            Range::Tarball(params) => format!("file:{}", params.path),
-            Range::Folder(params) => format!("file:{}", params.path),
+
             Range::Url(params) => params.url.clone(),
             Range::WorkspaceSemver(params) => format!("workspace:{}", params.range.to_file_string()),
             Range::WorkspaceMagic(params) => format!("workspace:{}", params.magic),

@@ -1,8 +1,12 @@
 extern crate proc_macro;
 
+use std::{collections::HashMap, sync::LazyLock};
+
 use parse_enum::ParseEnumArgs;
+use proc_macro2::Span;
 use quote::{quote, ToTokens, TokenStreamExt};
-use syn::{parse_macro_input, DeriveInput, Expr, ImplItem, ImplItemFn};
+use regex::Regex;
+use syn::{parse_macro_input, DeriveInput, Expr, Ident, ImplItem, ImplItemFn, Type};
 
 mod helpers;
 mod parse_enum;
@@ -81,10 +85,28 @@ pub fn track_time(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream)
     input_fn.to_token_stream().into()
 }
 
+static SLUG_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[^a-zA-Z_]+").unwrap()
+});
+
+fn get_ident_from_type(ty: &Type) -> Ident {
+    let type_string = ty.to_token_stream().to_string();
+
+    let slug = SLUG_REGEX
+        .replace_all(&type_string, "_");
+
+    let slug
+        = slug.trim_matches('_');
+
+    // Build a new Ident from the slug
+    Ident::new(&slug, Span::call_site())
+}
+
 #[proc_macro_attribute]
 pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     let struct_name = &input.ident;
+    let enum_name = Ident::new(&format!("{}Type", struct_name), Span::call_site());
 
     let fields = if let syn::Data::Struct(data_struct) = &input.data {
         &data_struct.fields
@@ -96,6 +118,8 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
 
     let mut default_functions = vec![];
     let mut new_fields = vec![];
+    let mut enum_variants = HashMap::new();
+    let mut extract_stmts = vec![];
 
     for field in fields.iter() {
         let field_name = field.ident.as_ref().unwrap();
@@ -137,7 +161,36 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                 pub #field_name: #field_type,
             });
         }
+
+        let enum_variant_ident
+            = get_ident_from_type(field_type);
+
+        extract_stmts.push(quote! {
+            map.insert(stringify!(#field_name).to_string(), #enum_name::#enum_variant_ident(self.#field_name.clone()));
+        });
+    
+        if !enum_variants.contains_key(&enum_variant_ident.to_string()) {
+            enum_variants.insert(enum_variant_ident.to_string(), (enum_variant_ident, field_type));
+        }
     }
+
+    let enum_variants_vec = enum_variants.into_values()
+        .collect::<Vec<_>>();
+
+    let enum_variants_fields = enum_variants_vec.iter()
+        .map(|(ident, ty)| quote! {
+            #ident(#ty),
+        });
+
+    let enum_variants_to_file_string = enum_variants_vec.iter()
+        .map(|(ident, _ty)| quote! {
+            #enum_name::#ident(inner) => inner.to_file_string(),
+        });
+
+    let enum_variants_to_human_string = enum_variants_vec.iter()
+        .map(|(ident, _ty)| quote! {
+            #enum_name::#ident(inner) => inner.to_print_string(),
+        });
 
     let expanded = quote! {
         #(#default_functions)*
@@ -146,6 +199,41 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
         #[serde(rename_all = "camelCase")]
         pub struct #struct_name {
             #(#new_fields)*
+        }
+
+        impl #struct_name {
+            pub fn to_btree_map(&self) -> std::collections::BTreeMap<String, #enum_name> {
+                let mut map = std::collections::BTreeMap::new();
+                #(#extract_stmts)*
+                map
+            }
+        }
+
+        #[derive(Clone, Debug)]
+        pub enum #enum_name {
+            #(#enum_variants_fields)*
+        }
+
+        impl zpm_utils::ToFileString for #enum_name {
+            fn to_file_string(&self) -> String {
+                match self {
+                    #(#enum_variants_to_file_string)*
+
+                    // Needed to workaround a warning when enum_variants_to_human_string is empty
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        impl zpm_utils::ToHumanString for #enum_name {
+            fn to_print_string(&self) -> String {
+                match self {
+                    #(#enum_variants_to_human_string)*
+
+                    // Needed to workaround a warning when enum_variants_to_human_string is empty
+                    _ => unreachable!(),
+                }
+            }
         }
     };
 

@@ -3,7 +3,7 @@ use std::{borrow::Cow, sync::LazyLock};
 use arca::Path;
 use regex::Regex;
 
-use crate::error::Error;
+use crate::{error::Error, zip_iter::ZipIterator, zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, FileHeader, GeneralRecord}};
 
 use super::Entry;
 
@@ -14,116 +14,13 @@ unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
     )
 }
 
-#[allow(dead_code)]
-#[repr(packed)]
-struct FileHeader {
-    version_needed_to_extract: u16,
-    general_purpose_bit_flag: u16,
-    compression_method: u16,
-    last_mod_file_time: u16,
-    last_mod_file_date: u16,
-    crc_32: u32,
-    compressed_size: u32,
-    uncompressed_size: u32,
-    file_name_length: u16,
-    extra_field_length: u16,
-}
-
-#[allow(dead_code)]
-#[repr(packed)]
-struct GeneralRecord {
-    signature: [u8; 4],
-    header: FileHeader,
-}
-
-#[allow(dead_code)]
-#[repr(packed)]
-struct CentralDirectoryRecord {
-    signature: [u8; 4],
-    version_made_by: u16,
-    header: FileHeader,
-    file_comment_length: u16,
-    disk_number_start: u16,
-    internal_file_attributes: u16,
-    external_file_attributes: u32,
-    relative_offset_of_local_header: u32,
-}
-
-#[allow(dead_code)]
-#[repr(packed)]
-struct EndOfCentralDirectoryRecord {
-    signature: [u8; 4],
-    disk_number: u16,
-    disk_with_central_directory: u16,
-    number_of_files_on_this_disk: u16,
-    number_of_files: u16,
-    size_of_central_directory: u32,
-    offset_of_central_directory: u32,
-    comment_length: u16,
-}
-
 pub fn entries_from_zip(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
-    let end_of_central_directory_record_offset = buffer.len() - std::mem::size_of::<EndOfCentralDirectoryRecord>();
-
-    let end_of_central_directory_record = unsafe {
-        &*(buffer[end_of_central_directory_record_offset..].as_ptr() as *const EndOfCentralDirectoryRecord)
-    };
-
-    let mut entries = vec![];
-
-    let mut central_directory_record_offset
-        = end_of_central_directory_record.offset_of_central_directory as usize;
-
-    while central_directory_record_offset < end_of_central_directory_record_offset {
-        let central_directory_record = unsafe {
-            &*(buffer[central_directory_record_offset..].as_ptr() as *const CentralDirectoryRecord)
-        };
-
-        let local_file_header_offset
-            = central_directory_record.relative_offset_of_local_header as usize;
-
-        let general_record = unsafe {
-            &*(buffer[local_file_header_offset..].as_ptr() as *const GeneralRecord)
-        };
-
-        let name_offset = local_file_header_offset + std::mem::size_of::<GeneralRecord>();
-        let data_offset = name_offset + general_record.header.file_name_length as usize;
-
-        let name = std::str::from_utf8(&buffer[name_offset..name_offset + general_record.header.file_name_length as usize])?;
-
-        let data_size = general_record.header.compressed_size as usize;
-        let data = &buffer[data_offset..data_offset + data_size];
-
-        entries.push(Entry {
-            name: name.to_string(),
-            mode: central_directory_record.external_file_attributes as u64 >> 16,
-            crc: general_record.header.crc_32,
-            data: Cow::Borrowed(data),
-        });
-
-        central_directory_record_offset += std::mem::size_of::<CentralDirectoryRecord>()
-            + general_record.header.file_name_length as usize
-            + general_record.header.extra_field_length as usize;
-    }
-
-    Ok(entries)
+    ZipIterator::new(buffer)?.collect()
 }
 
 pub fn first_entry_from_zip(buffer: &[u8]) -> Result<Entry, Error> {
-    unsafe {
-        let general_record = &*(buffer.as_ptr() as *const GeneralRecord);
-        let name = std::str::from_utf8(&buffer[30..30 + general_record.header.file_name_length as usize])?;
-
-        let size = general_record.header.compressed_size as usize;
-        let data = &buffer[30 + general_record.header.file_name_length as usize..30 + general_record.header.file_name_length as usize + size];
-
-        Ok(Entry {
-            name: name.to_string(),
-            mode: 0o644,
-            crc: general_record.header.crc_32,
-            data: Cow::Borrowed(data),
-        })    
-    }
+    ZipIterator::new(buffer)?.next()
+        .unwrap_or_else(|| Err(Error::InvalidZipFile("Empty".to_string())))
 }
 
 pub fn craft_zip(entries: &[Entry]) -> Vec<u8> {

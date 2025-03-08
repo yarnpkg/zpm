@@ -36,3 +36,4 @@ zpm-macros = { path = "../zpm-macros" }
 zpm-semver = { path = "../zpm-semver", features = ["bincode"] }
 zpm-utils = { path = "../zpm-utils" }
 pretty-duration = "0.1.1"
+convert_case = "0.8.0"

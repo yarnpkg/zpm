@@ -1,3 +1,5 @@
+use colored::Colorize;
+
 pub mod serialization;
 
 pub trait FromFileString {
@@ -13,6 +15,18 @@ pub trait ToFileString {
 
 pub trait ToHumanString {
     fn to_print_string(&self) -> String;
+}
+
+impl ToFileString for String {
+    fn to_file_string(&self) -> String {
+        sonic_rs::to_string(self).unwrap()
+    }
+}
+
+impl ToHumanString for String {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(0, 153, 0).to_string()
+    }
 }
 
 #[macro_export]
