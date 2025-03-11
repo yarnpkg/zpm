@@ -1,7 +1,7 @@
 use arca::Path;
 use serde::Deserialize;
 use zpm_macros::yarn_config;
-use zpm_utils::{ToFileString, ToHumanString};
+use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 use crate::config::{BoolField, EnumField, GlobField, PathField, StringField, UintField, VecField};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]

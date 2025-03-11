@@ -17,6 +17,14 @@ pub trait ToHumanString {
     fn to_print_string(&self) -> String;
 }
 
+impl FromFileString for String {
+    type Error = std::convert::Infallible;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        Ok(s.to_string())
+    }
+}
+
 impl ToFileString for String {
     fn to_file_string(&self) -> String {
         sonic_rs::to_string(self).unwrap()

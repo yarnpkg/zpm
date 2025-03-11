@@ -34,6 +34,9 @@ pub enum Error {
     #[error("Format error ({0})")]
     FormatError(#[from] zpm_formats::Error),
 
+    #[error("File parsing error ({0})")]
+    FileParsingError(#[from] zpm_parsers::Error),
+
     #[error("Semver error ({0})")]
     SemverError(#[from] zpm_semver::Error),
 
@@ -162,6 +165,9 @@ pub enum Error {
 
     #[error("Config key not found ({0})")]
     ConfigKeyNotFound(String),
+
+    #[error("Invalid config value ({0})")]
+    InvalidConfigValue(String),
 
     #[error("Package conversion error ({0})")]
     PackageConversionError(Arc<Box<dyn std::error::Error + Send + Sync>>),
@@ -306,5 +312,11 @@ impl From<bincode::error::EncodeError> for Error {
 impl From<sonic_rs::Error> for Error {
     fn from(error: sonic_rs::Error) -> Self {
         Arc::new(error).into()
+    }
+}
+
+impl From<std::convert::Infallible> for Error {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!()
     }
 }

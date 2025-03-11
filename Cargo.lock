@@ -303,8 +303,6 @@ checksum = "aaa6b4b263a5d737e9bf6b7c09b72c41a5480aec4d7219af827f6564e950b6a5"
 [[package]]
 name = "clipanion"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ef5e240627db250944327001cb58af02df82622f728dc245888d8129ac2dc90"
 dependencies = [
  "clipanion-core",
  "clipanion-derive",
@@ -315,8 +313,6 @@ dependencies = [
 [[package]]
 name = "clipanion-core"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a221ae8946a35cb9e5fd79c11d781a89bb815e323d508f3f1104ea58b006c07"
 dependencies = [
  "thiserror 2.0.7",
 ]
@@ -324,8 +320,6 @@ dependencies = [
 [[package]]
 name = "clipanion-derive"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "897978f97adb81b2e356beb6cbfcbc4387a2c6003e12b7be792523fc443d7e4b"
 dependencies = [
  "indoc",
  "proc-macro2",
@@ -3060,6 +3054,7 @@ dependencies = [
  "wax",
  "zpm-formats",
  "zpm-macros",
+ "zpm-parsers",
  "zpm-semver",
  "zpm-utils",
 ]
@@ -3086,6 +3081,17 @@ dependencies = [
  "regex",
  "rstest",
  "syn",
+]
+
+[[package]]
+name = "zpm-parsers"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_yaml",
+ "sonic-rs",
+ "thiserror 1.0.63",
 ]
 
 [[package]]

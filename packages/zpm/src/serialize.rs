@@ -285,3 +285,4 @@ impl<T: ToHumanString> ToHumanString for UrlEncoded<T> {
 
 impl_serialization_traits!(UrlEncoded<Descriptor>);
 impl_serialization_traits!(UrlEncoded<Locator>);
+

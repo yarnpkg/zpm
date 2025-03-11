@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "packages/zpm-formats",
     "packages/zpm-macros",
+    "packages/zpm-parsers",
     "packages/zpm-semver",
     "packages/zpm-utils",
     "packages/zpm",

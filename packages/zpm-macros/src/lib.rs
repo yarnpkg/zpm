@@ -123,6 +123,7 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
 
     for field in fields.iter() {
         let field_name = field.ident.as_ref().unwrap();
+
         let field_type = &field.ty;
         let field_type_path = get_expr_path_from_type(field_type);
 
@@ -142,10 +143,8 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
 
             default_functions.push(quote! {
                 fn #func_name() -> #field_type {
-                    use crate::config::FromEnv;
-
                     match std::env::var(concat!("YARN_", stringify!(#field_name)).to_uppercase()) {
-                        Ok(value) => #field_type_path::from_env(&value).unwrap(),
+                        Ok(value) => #field_type_path::from_file_string(&value).unwrap(),
                         Err(_) => #field_type_path::new(#default),
                     }
                 }
@@ -182,6 +181,22 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
             #ident(#ty),
         });
 
+    let enum_variants_from_file_string = fields.iter()
+        .map(|field| {
+            let field_name = field.ident.as_ref().unwrap();
+            let field_type = &field.ty;
+
+            let field_type_path
+                = get_expr_path_from_type(field_type);
+
+            let enum_variant_ident
+                = get_ident_from_type(field_type);
+
+            quote! {
+                stringify!(#field_name) => Ok(#enum_name::#enum_variant_ident(#field_type_path::from_file_string(&value)?)),
+            }
+        });
+
     let enum_variants_to_file_string = enum_variants_vec.iter()
         .map(|(ident, _ty)| quote! {
             #enum_name::#ident(inner) => inner.to_file_string(),
@@ -198,6 +213,8 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
         #[derive(Clone, Debug, serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
         pub struct #struct_name {
+            pub path: Option<arca::Path>,
+
             #(#new_fields)*
         }
 
@@ -212,6 +229,39 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
         #[derive(Clone, Debug)]
         pub enum #enum_name {
             #(#enum_variants_fields)*
+        }
+
+        impl #enum_name {
+            pub fn from_file_string(key: &str, value: &str) -> Result<Self, crate::error::Error> {
+                match key {
+                    #(#enum_variants_from_file_string)*
+
+                    _ => Err(crate::error::Error::InvalidConfigValue(value.to_string())),
+                }
+            }
+        }
+
+        impl #struct_name {
+            pub fn set(&self, name: &str, value: #enum_name) -> Result<(), crate::error::Error> {
+                use convert_case::{Casing, Case};
+
+                let config_path = self.path.as_ref()
+                    .expect("config path not set");
+                let config_text = config_path
+                    .fs_read_text()?;
+
+                let updated_config
+                    = zpm_parsers::yaml::update_document_field(
+                        &config_text,
+                        &name.to_case(Case::Camel),
+                        &value.to_file_string()
+                    )?;
+
+                config_path
+                    .fs_write_text(&updated_config)?;
+
+                Ok(())
+            }
         }
 
         impl zpm_utils::ToFileString for #enum_name {

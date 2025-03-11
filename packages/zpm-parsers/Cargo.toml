@@ -1,0 +1,11 @@
+[package]
+name = "zpm-parsers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sonic-rs = "0.3.17"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+regex = "1.10.2"
+thiserror = "1.0"

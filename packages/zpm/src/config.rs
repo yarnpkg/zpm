@@ -1,27 +1,13 @@
-use std::{str::FromStr, sync::{LazyLock, Mutex}};
+use std::sync::{LazyLock, Mutex};
 
 use arca::{Path, ToArcaPath};
 use colored::Colorize;
-use serde::{de::DeserializeOwned, Deserialize, Deserializer};
-use zpm_utils::{ToFileString, ToHumanString};
+use serde::{Deserialize, Deserializer};
+use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 
 use crate::{error::Error, primitives::Ident, settings::{EnvConfig, ProjectConfig, UserConfig}};
 
 pub static CONFIG_PATH: LazyLock<Mutex<Option<Path>>> = LazyLock::new(|| Mutex::new(None));
-
-pub trait FromEnv: Sized {
-    type Err;
-
-    fn from_env(raw: &str) -> Result<Self, Self::Err>;
-}
-
-impl FromEnv for String {
-    type Err = <std::string::String as FromStr>::Err;
-
-    fn from_env(raw: &str) -> Result<Self, Self::Err> {
-        Ok(raw.to_string())
-    }
-}
 
 #[derive(Debug, Default, Clone)]
 pub enum SettingSource {
@@ -56,21 +42,21 @@ impl<T: ToHumanString> ToHumanString for StringLikeField<T> {
     }
 }
 
-impl<T: FromEnv> FromEnv for StringLikeField<T> {
-    type Err = T::Err;
+impl<T: FromFileString> FromFileString for StringLikeField<T> where Error: From<<T as FromFileString>::Error> {
+    type Error = Error;
 
-    fn from_env(raw: &str) -> Result<Self, Self::Err> {
-        let value = T::from_env(raw)?;
+    fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
+        let value = T::from_file_string(raw)?;
 
-        Ok(Self {value, source: SettingSource::Env})
+        Ok(Self {value, source: SettingSource::Project})
     }
 }
 
-impl<'de, T: FromEnv> Deserialize<'de> for StringLikeField<T> {
+impl<'de, T: FromFileString> Deserialize<'de> for StringLikeField<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
         let str = String::deserialize(deserializer)?;
 
-        let value = T::from_env(&str)
+        let value = T::from_file_string(&str)
             .map_err(|_| serde::de::Error::custom("Failed to call FromEnv"))?;
 
         Ok(Self {value, source: SettingSource::Default})
@@ -89,22 +75,10 @@ impl BoolField {
     }
 }
 
-impl ToFileString for BoolField {
-    fn to_file_string(&self) -> String {
-        self.value.to_string()
-    }
-}
+impl FromFileString for BoolField {
+    type Error = Error;
 
-impl ToHumanString for BoolField {
-    fn to_print_string(&self) -> String {
-        self.to_file_string().truecolor(255, 153, 0).to_string()
-    }
-}
-
-impl FromEnv for BoolField {
-    type Err = <bool as FromStr>::Err;
-
-    fn from_env(raw: &str) -> Result<Self, Self::Err> {
+    fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
         let value = match raw {
             "true" | "1" => true,
             "false" | "0" => false,
@@ -120,6 +94,18 @@ impl<'de> Deserialize<'de> for BoolField {
         let value = bool::deserialize(deserializer)?;
 
         Ok(BoolField {value, source: SettingSource::Default})
+    }
+}
+
+impl ToFileString for BoolField {
+    fn to_file_string(&self) -> String {
+        self.value.to_string()
+    }
+}
+
+impl ToHumanString for BoolField {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(255, 153, 0).to_string()
     }
 }
 
@@ -147,11 +133,11 @@ impl ToHumanString for UintField {
     }
 }
 
-impl FromEnv for UintField {
-    type Err = <u64 as FromStr>::Err;
+impl FromFileString for UintField {
+    type Error = Error;
 
-    fn from_env(raw: &str) -> Result<Self, Self::Err> {
-        Ok(UintField {value: raw.parse()?, source: SettingSource::Env})
+    fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
+        Ok(UintField {value: raw.parse()?, source: SettingSource::Project})
     }
 }
 
@@ -185,11 +171,11 @@ impl<T: ToHumanString> ToHumanString for JsonField<T> {
     }
 }
 
-impl<T: DeserializeOwned> FromEnv for JsonField<T> {
-    type Err = serde_json::Error;
+impl<T: for<'a> Deserialize<'a>> FromFileString for JsonField<T> {
+    type Error = sonic_rs::Error;
 
-    fn from_env(raw: &str) -> Result<Self, Self::Err> {
-        let value = serde_json::from_str::<T>(raw)?;
+    fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
+        let value = sonic_rs::from_str::<T>(raw)?;
 
         Ok(JsonField {value, source: SettingSource::Env})
     }
@@ -226,17 +212,17 @@ impl<T: ToHumanString> ToHumanString for VecField<T> {
     }
 }
 
-impl<T: DeserializeOwned + FromEnv> FromEnv for VecField<T> {
-    type Err = serde_json::Error;
+impl<T: FromFileString + for<'a> Deserialize<'a>> FromFileString for VecField<T> {
+    type Error = sonic_rs::Error;
 
-    fn from_env(raw: &str) -> Result<Self, Self::Err> {
+    fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
         if raw.starts_with('[') {
-            let value = serde_json::from_str::<Vec<T>>(raw)?;
+            let value = sonic_rs::from_str::<Vec<T>>(raw)?;
 
             Ok(Self {value})  
         } else {
-            let value = T::from_env(raw)
-                .map_err(|_| serde::de::Error::custom("Failed to call FromEnv"))?;
+            let value = T::from_file_string(raw)
+                .map_err(|_| serde::de::Error::custom("Failed to call FromFileString"))?;
 
             Ok(Self {value: vec![value]})
         }
@@ -275,12 +261,12 @@ impl<T: ToHumanString> ToHumanString for EnumField<T> {
     }
 }
 
-impl<T: DeserializeOwned> FromEnv for EnumField<T> {
-    type Err = serde_json::Error;
+impl<T: for<'a> Deserialize<'a>> FromFileString for EnumField<T> {
+    type Error = sonic_rs::Error;
 
-    fn from_env(raw: &str) -> Result<Self, Self::Err> {
-        let str = serde_json::to_string(&raw)?;
-        let value = serde_json::from_str::<T>(&str)?;
+    fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
+        let str = sonic_rs::to_string(&raw)?;
+        let value = sonic_rs::from_str::<T>(&str)?;
 
         Ok(EnumField {value, source: SettingSource::Env})
     }
@@ -318,10 +304,10 @@ impl ToHumanString for PathField {
     }
 }
 
-impl FromEnv for PathField {
-    type Err = Error;
+impl FromFileString for PathField {
+    type Error = Error;
 
-    fn from_env(raw: &str) -> Result<Self, Self::Err> {
+    fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
         let mut value = Path::from(raw);
 
         if !value.is_absolute() {
@@ -374,10 +360,10 @@ impl ToHumanString for Glob {
     }
 }
 
-impl FromEnv for Glob {
-    type Err = Error;
+impl FromFileString for Glob {
+    type Error = Error;
 
-    fn from_env(raw: &str) -> Result<Self, Self::Err> {
+    fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
         Ok(Glob {pattern: raw.to_string()})
     }
 }
@@ -399,7 +385,7 @@ pub struct Config {
 
 pub static ENV_CONFIG: LazyLock<EnvConfig> = LazyLock::new(|| {
     *CONFIG_PATH.lock().unwrap() = None;
-    serde_json::from_str("{}").unwrap()
+    sonic_rs::from_str("{}").unwrap()
 });
 
 impl Config {
@@ -421,10 +407,12 @@ impl Config {
             .map(|cwd| cwd.with_join_str(".yarnrc.yml"));
 
         *CONFIG_PATH.lock().unwrap() = user_yarnrc_path.clone();
-        let user_config = Config::import_config::<UserConfig>(user_yarnrc_path);
+        let mut user_config = Config::import_config::<UserConfig>(user_yarnrc_path.clone());
+        user_config.path = user_yarnrc_path;
 
         *CONFIG_PATH.lock().unwrap() = project_yarnrc_path.clone();
-        let project_config = Config::import_config::<ProjectConfig>(project_yarnrc_path);
+        let mut project_config = Config::import_config::<ProjectConfig>(project_yarnrc_path.clone());
+        project_config.path = project_yarnrc_path;
 
         *CONFIG_PATH.lock().unwrap() = None;
 
