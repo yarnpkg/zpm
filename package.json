@@ -5,9 +5,5 @@
   ],
   "scripts": {
     "test:integration": "bash ./scripts/jest.sh"
-  },
-  "dependencies": {
-    "ejs": "^3.1.10",
-    "typescript": "^5.7.3"
   }
 }

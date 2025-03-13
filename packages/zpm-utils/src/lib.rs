@@ -27,7 +27,7 @@ impl FromFileString for String {
 
 impl ToFileString for String {
     fn to_file_string(&self) -> String {
-        sonic_rs::to_string(self).unwrap()
+        self.clone()
     }
 }
 

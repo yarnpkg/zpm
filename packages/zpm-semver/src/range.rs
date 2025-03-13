@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use serde::{Deserialize, Serialize};
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
 use crate::Error;
@@ -8,11 +9,16 @@ use super::{extract, Version};
 #[cfg(test)]
 #[path = "./range.test.rs"]
 mod range_tests;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RangeKind {
+#[serde(alias = "name")]
+    #[serde(rename = "caret", alias = "^")]
     Caret,
+
+    #[serde(rename = "tilde", alias = "~")]
     Tilde,
+
+    #[serde(rename = "exact", alias = "=", alias = "")]
     Exact,
 }
 

@@ -125,8 +125,13 @@ impl Range {
 
     pub fn to_peer_range(&self) -> Result<PeerRange, Error> {
         match self {
-            Range::AnonymousSemver(params) => Ok(PeerRange::Semver(SemverPeerRange { range: params.range.clone() })),
-            _ => Err(Error::InvalidRange(self.to_file_string())),
+            Range::AnonymousSemver(params)
+                => Ok(PeerRange::Semver(SemverPeerRange { range: params.range.clone() })),
+
+            Range::RegistrySemver(params)
+                => Ok(PeerRange::Semver(SemverPeerRange { range: params.range.clone() })),
+
+            _ => Err(Error::InvalidRange(self.to_file_string()))
         }
     }
 }

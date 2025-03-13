@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arca = "0.12.0"
+arca = { version = "0.12.0", path = "../../../arca-rs" }
 bytes = "1.7.1"
 crc32fast = "1.4.2"
 flate2 = "1.0.31"

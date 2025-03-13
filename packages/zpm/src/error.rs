@@ -28,6 +28,9 @@ pub enum Error {
     #[error("Unsupported code path")]
     Unsupported,
 
+    #[error("Conflicting options: {0}")]
+    ConflictingOptions(String),
+
     #[error("Failed to change the current working directory")]
     FailedToChangeCwd,
 
@@ -166,7 +169,7 @@ pub enum Error {
     #[error("Config key not found ({0})")]
     ConfigKeyNotFound(String),
 
-    #[error("Invalid config value ({0})")]
+    #[error("Invalid config value for {0}")]
     InvalidConfigValue(String),
 
     #[error("Package conversion error ({0})")]

@@ -3,6 +3,7 @@
 pub mod build;
 pub mod cache;
 pub mod commands;
+pub mod config_fields;
 pub mod config;
 pub mod content_flags;
 pub mod manifest_finder;

@@ -236,19 +236,22 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                 match key {
                     #(#enum_variants_from_file_string)*
 
-                    _ => Err(crate::error::Error::InvalidConfigValue(value.to_string())),
+                    _ => Err(crate::error::Error::InvalidConfigValue(key.to_string())),
                 }
             }
         }
 
         impl #struct_name {
             pub fn set(&self, name: &str, value: #enum_name) -> Result<(), crate::error::Error> {
+                use arca::OkMissing;
                 use convert_case::{Casing, Case};
 
                 let config_path = self.path.as_ref()
                     .expect("config path not set");
                 let config_text = config_path
-                    .fs_read_text()?;
+                    .fs_read_text()
+                    .ok_missing()?
+                    .unwrap_or_default();
 
                 let updated_config
                     = zpm_parsers::yaml::update_document_field(

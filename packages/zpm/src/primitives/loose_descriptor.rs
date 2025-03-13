@@ -13,7 +13,7 @@ use crate::install::InstallContext;
 use crate::manifest::{parse_manifest_from_bytes, read_manifest};
 use crate::resolvers;
 
-use super::range::{AnonymousSemverRange, AnonymousTagRange, FolderRange, RegistrySemverRange, RegistryTagRange, TarballRange};
+use super::range::{AnonymousSemverRange, AnonymousTagRange, FolderRange, RegistrySemverRange, RegistryTagRange, TarballRange, WorkspaceMagicRange};
 use super::{Ident, Range, Descriptor};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -236,6 +236,22 @@ impl LooseDescriptor {
             },
 
             LooseDescriptor::Ident(IdentLooseDescriptor {ident}) => {
+                let project = context.project.as_ref()
+                    .expect("Project is required for resolving loose identifiers");
+
+                if project.workspace_by_ident(&ident).is_ok() {
+                    let range = Range::WorkspaceMagic(match options.range_kind {
+                        RangeKind::Exact => WorkspaceMagicRange {magic: "*".to_string()},
+                        RangeKind::Tilde => WorkspaceMagicRange {magic: "~".to_string()},
+                        RangeKind::Caret => WorkspaceMagicRange {magic: "^".to_string()},
+                    });
+
+                    return Ok(Descriptor::new(
+                        ident.clone(),
+                        range,
+                    ));
+                }
+
                 let descriptor = Descriptor::new(
                     ident.clone(),
                     Range::RegistryTag(RegistryTagRange {

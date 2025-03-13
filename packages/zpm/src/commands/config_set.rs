@@ -1,4 +1,5 @@
 use clipanion::cli;
+use convert_case::{Case, Casing};
 
 use crate::{error::Error, project::Project, settings::ProjectConfigType};
 
@@ -16,8 +17,14 @@ impl ConfigSet {
         let project
             = Project::new(None).await?;
 
+        let snake_case_name
+            = &self.name.to_case(Case::Snake);
+
+        let hydrated_value
+            = ProjectConfigType::from_file_string(snake_case_name, &self.value)?;
+
         project.config.project
-            .set(&self.name, ProjectConfigType::from_file_string(&self.name, &self.value)?)?;
+            .set(snake_case_name, hydrated_value)?;
 
         Ok(())
     }

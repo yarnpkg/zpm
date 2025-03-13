@@ -68,8 +68,6 @@ checksum = "1bec1de6f59aedf83baf9ff929c98f2ad654b97c9510f4e70cf6f661d49fd5b1"
 [[package]]
 name = "arca"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74ad91e5a0234b2e55e8a3a94cf1a8a911871eb3e4d621f6b100d0a10138b5e6"
 dependencies = [
  "bincode",
  "bincode_derive",
@@ -1936,6 +1934,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_plain"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ce1fc6db65a611022b23a0dec6975d63fb80a302cb3388835ff02c097258d50"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_spanned"
 version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3042,6 +3049,7 @@ dependencies = [
  "rstest",
  "serde",
  "serde_json",
+ "serde_plain",
  "serde_with",
  "serde_yaml",
  "sha2",

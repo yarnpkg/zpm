@@ -1,8 +1,10 @@
 use clipanion::cli;
 use zpm_semver::RangeKind;
+use zpm_utils::FromFileString;
 
-use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, LooseDescriptor}, project};
+use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, range::SemverPeerRange, LooseDescriptor, PeerRange}, project};
 
+#[derive(Debug)]
 #[cli::command]
 #[cli::path("add")]
 pub struct Add {
@@ -43,16 +45,16 @@ impl Add {
         let mut project
             = project::Project::new(None).await?;
 
-        println!("descriptors: {:#?}", self.descriptors);
-
         let range_kind = if self.fixed {
             RangeKind::Exact
         } else if self.exact {
             RangeKind::Exact
         } else if self.tilde {
             RangeKind::Tilde
-        } else {
+        } else if self.caret {
             RangeKind::Caret
+        } else {
+            project.config.project.default_semver_range_prefix.value
         };
 
         let resolve_options = loose_descriptor::ResolveOptions {
@@ -73,23 +75,61 @@ impl Add {
         let active_workspace
             = project.active_workspace_mut()?;
 
-        if self.peer {
-            for descriptor in &descriptors {
-                active_workspace.manifest.remote.peer_dependencies.insert(descriptor.ident.clone(), descriptor.range.to_peer_range()?);
-            }
-        } else {
-            let target = if self.dev {
-                &mut active_workspace.manifest.dev_dependencies
-            } else if self.optional {
-                &mut active_workspace.manifest.remote.optional_dependencies
-            } else {
-                &mut active_workspace.manifest.remote.dependencies
-            };
+        for descriptor in &descriptors {
+            let mut dev = self.dev;
+            let mut optional = self.optional;
+            let mut prod = false;
 
-            for descriptor in &descriptors {
-                target.insert(descriptor.ident.clone(), descriptor.clone());
-            }    
-        }
+            // FUTURE: We probably should use a similar logic as for the dev/optional/prod flags, where
+            // we check if the dependency is already listed in the manifest, and if so, we set the flag
+            // to true. But since we always set peer dependencies to `*` at the moment, it's not very
+            // useful. In the future I'd like to instead set it to the current major/rc.
+            let peer = self.peer;
+
+            if !dev && !optional && !peer {
+                if active_workspace.manifest.dev_dependencies.contains_key(&descriptor.ident) {
+                    dev = true;
+                }
+                if active_workspace.manifest.remote.optional_dependencies.contains_key(&descriptor.ident) {
+                    optional = true;
+                }
+                if !dev && !optional && !peer {
+                    prod = true;
+                }
+            }
+
+            if dev && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
+                return Err(Error::ConflictingOptions(format!("{} is already listed as a regular dependency of this workspace", descriptor.ident)));
+            }
+
+            if optional && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
+                return Err(Error::ConflictingOptions(format!("{} is already listed as an regular dependency of this workspace", descriptor.ident)));
+            }
+
+            if peer && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
+                return Err(Error::ConflictingOptions(format!("{} is already listed as a regular dependency of this workspace", descriptor.ident)));
+            }
+
+            if prod && active_workspace.manifest.remote.peer_dependencies.contains_key(&descriptor.ident) {
+                return Err(Error::ConflictingOptions(format!("{} is already listed as a peer dependency of this workspace", descriptor.ident)));
+            }
+
+            if dev {
+                active_workspace.manifest.dev_dependencies.insert(descriptor.ident.clone(), descriptor.clone());
+            }
+
+            if optional {
+                active_workspace.manifest.remote.optional_dependencies.insert(descriptor.ident.clone(), descriptor.clone());
+            }
+
+            if peer {
+                active_workspace.manifest.remote.peer_dependencies.insert(descriptor.ident.clone(), PeerRange::Semver(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}));
+            }
+
+            if prod {
+                active_workspace.manifest.remote.dependencies.insert(descriptor.ident.clone(), descriptor.clone());
+            }
+        }    
 
         active_workspace.write_manifest()?;
 
