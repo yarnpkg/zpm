@@ -125,6 +125,9 @@ impl Add {
                 active_workspace.manifest.remote.peer_dependencies.insert(descriptor.ident.clone(), PeerRange::Semver(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}));
             }
 
+            if prod {
+                active_workspace.manifest.remote.dependencies.insert(descriptor.ident.clone(), descriptor.clone());
+            }
         }    
 
         active_workspace.write_manifest()?;
