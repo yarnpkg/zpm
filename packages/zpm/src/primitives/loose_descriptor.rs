@@ -191,8 +191,7 @@ impl LooseDescriptor {
                 let Some(range_kind) = range_params.range.kind() else {
                     return Ok(Descriptor::new(
                         ident.clone(),
-                        Range::RegistrySemver(RegistrySemverRange {
-                            ident: None,
+                        Range::AnonymousSemver(AnonymousSemverRange {
                             range: range.clone(),
                         }),
                     ));
@@ -206,14 +205,22 @@ impl LooseDescriptor {
 
                 Ok(Descriptor::new(
                     ident.clone(),
-                    Range::RegistrySemver(RegistrySemverRange {
-                        ident: None,
+                    Range::AnonymousSemver(AnonymousSemverRange {
                         range,
                     }),
                 ))
             }
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::AnonymousTag(AnonymousTagRange {tag}), ..}}) => {
+                if !options.resolve_tags {
+                    return Ok(Descriptor::new(
+                        ident.clone(),
+                        Range::AnonymousTag(AnonymousTagRange {
+                            tag: tag.clone(),
+                        }),
+                    ));
+                }
+
                 let descriptor = Descriptor::new(
                     ident.clone(),
                     Range::RegistryTag(RegistryTagRange {
@@ -221,10 +228,6 @@ impl LooseDescriptor {
                         tag: tag.clone(),
                     }),
                 );
-
-                if !options.resolve_tags {
-                    return Ok(descriptor);
-                }
 
                 let Range::RegistryTag(range_params) = &descriptor.range else {
                     panic!("Invalid range");
@@ -240,7 +243,7 @@ impl LooseDescriptor {
                     ident.clone(),
                     Range::RegistrySemver(RegistrySemverRange {
                         ident: None,
-                        range,
+                        range: range.clone(),
                     }),
                 );
 
@@ -259,22 +262,24 @@ impl LooseDescriptor {
                 let resolution_check_result
                     = resolvers::npm::resolve_semver_descriptor(context, &descriptor, &range_params).await?;
 
-                let descriptor = if resolution_check_result.resolution.version == resolution_result.resolution.version {
-                    descriptor
+                if resolution_check_result.resolution.version == resolution_result.resolution.version {
+                    Ok(Descriptor::new(
+                        ident.clone(),
+                        Range::AnonymousSemver(AnonymousSemverRange {
+                            range,
+                        }),
+                    ))
                 } else {
                     let fixed_range = resolution_result.resolution.version
                         .to_range(RangeKind::Exact);
 
-                    Descriptor::new(
+                    Ok(Descriptor::new(
                         ident.clone(),
-                        Range::RegistrySemver(RegistrySemverRange {
-                            ident: None,
+                        Range::AnonymousSemver(AnonymousSemverRange {
                             range: fixed_range,
                         }),
-                    )
-                };
-
-                Ok(descriptor)
+                    ))
+                }
             },
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor}) => {
@@ -318,8 +323,7 @@ impl LooseDescriptor {
 
                 Ok(Descriptor::new(
                     ident.clone(),
-                    Range::RegistrySemver(RegistrySemverRange {
-                        ident: None,
+                    Range::AnonymousSemver(AnonymousSemverRange {
                         range,
                     }),
                 ))
