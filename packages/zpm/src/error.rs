@@ -37,6 +37,9 @@ pub enum Error {
     #[error("[YN0056] Cache entry required but missing for {0}.")]
     ImmutableCache(String),
 
+    #[error("[YN0056] {0} appears to be unused and would be marked for deletion, but the cache is immutable")]
+    ImmutableCacheCleanup(Path),
+
     #[error("[YN0091] Cache path does not exist ({0}).")]
     MissingCacheFolder(Path),
 

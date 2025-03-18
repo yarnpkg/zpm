@@ -477,6 +477,10 @@ impl<'a> InstallManager<'a> {
 
         self.result.lockfile_changed = self.result.lockfile != self.initial_lockfile;
 
+        if let Some(cache) = &self.context.package_cache {
+            cache.clean().await?;
+        }
+
         Ok(self.result)
     }
 

@@ -2,8 +2,10 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::Mutex;
 use arca::Path;
-use bincode::{self, Decode, Encode};
+use bincode;
 use futures::Future;
 use sha2::Digest;
 use zpm_macros::parse_enum;
@@ -11,6 +13,7 @@ use zpm_utils::ToHumanString;
 
 use crate::error::Error;
 use crate::hash::Sha256;
+use crate::primitives::locator::Locator;
 
 #[parse_enum]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -38,14 +41,13 @@ impl CacheEntry {
     }
 }
 
-#[derive(Clone)]
 pub struct CompositeCache {
     pub global_cache: Option<DiskCache>,
     pub local_cache: Option<DiskCache>,
 }
 
 impl CompositeCache {
-    pub fn key_path<K: Decode + Encode>(&self, key: &K, ext: &str) -> Result<Path, Error> {
+    pub fn key_path(&self, key: &Locator, ext: &str) -> Result<Path, Error> {
         if let Some(ref cache) = self.local_cache {
             return cache.key_path(key, ext);
         }
@@ -57,10 +59,7 @@ impl CompositeCache {
         panic!("Expected at least one cache to be set");
     }
 
-    pub fn cache_entry<K>(&self, key: K, ext: &str) -> Result<InfoCacheEntry, Error>
-    where
-        K: Decode + Encode,
-    {
+    pub fn cache_entry(&self, key: Locator, ext: &str) -> Result<InfoCacheEntry, Error> {
         if let Some(ref cache) = self.local_cache {
             return cache.cache_entry(key, ext);
         }
@@ -72,10 +71,7 @@ impl CompositeCache {
         panic!("Expected at least one cache to be set");
     }
 
-    pub fn check_cache_entry<K>(&self, key: K, ext: &str) -> Result<Option<InfoCacheEntry>, Error>
-    where
-        K: Decode + Encode,
-    {
+    pub fn check_cache_entry(&self, key: Locator, ext: &str) -> Result<Option<InfoCacheEntry>, Error> {
         if let Some(ref cache) = self.local_cache {
             return cache.check_cache_entry(key, ext);
         }
@@ -87,9 +83,8 @@ impl CompositeCache {
         panic!("Expected at least one cache to be set");
     }
 
-    pub async fn ensure_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<CacheEntry, Error>
+    pub async fn ensure_blob<R, F>(&self, key: Locator, ext: &str, func: F) -> Result<CacheEntry, Error>
     where
-        K: Clone + Decode + Encode + ToHumanString,
         R: Future<Output = Result<Vec<u8>, Error>>,
         F: FnOnce() -> R,
     {
@@ -110,9 +105,8 @@ impl CompositeCache {
         panic!("Expected at least one cache to be set");
     }
 
-    pub async fn upsert_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<DataCacheEntry, Error>
+    pub async fn upsert_blob<R, F>(&self, key: Locator, ext: &str, func: F) -> Result<DataCacheEntry, Error>
     where
-        K: Clone + Decode + Encode + ToHumanString,
         R: Future<Output = Result<Vec<u8>, Error>>,
         F: FnOnce() -> R,
     {
@@ -132,13 +126,21 @@ impl CompositeCache {
 
         panic!("Expected at least one cache to be set");
     }
+
+    pub async fn clean(&self) -> Result<usize, Error> {
+        if let Some(ref cache) = self.local_cache {
+            return cache.clean().await;
+        }
+
+        Ok(0)
+    }
 }
 
-#[derive(Clone)]
 pub struct DiskCache {
     cache_path: Path,
     data_config: bincode::config::Configuration,
     immutable: bool,
+    accessed_files: Arc<Mutex<HashSet<String>>>,
 }
 
 impl DiskCache {
@@ -147,10 +149,11 @@ impl DiskCache {
             cache_path,
             data_config: bincode::config::standard(),
             immutable,
+            accessed_files: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
-    pub fn key_path<K: Decode + Encode>(&self, key: &K, ext: &str) -> Result<Path, Error> {
+    pub fn key_path(&self, key: &Locator, ext: &str) -> Result<Path, Error> {
         let serialized_key = bincode::encode_to_vec(key, self.data_config)
             .map_err(Arc::new)?;
 
@@ -158,18 +161,21 @@ impl DiskCache {
         key.update(serialized_key);
         let key = key.finalize();
 
+        let key_name
+            = format!("{:064x}{}", key, ext);
+
         let key_path = self.cache_path
-            .with_join_str(format!("{:064x}{}", key, ext));
+            .with_join_str(&key_name);
+
+        if let Ok(mut accessed) = self.accessed_files.lock() {
+            accessed.insert(key_name);
+        }
 
         Ok(key_path)
     }
 
-    pub fn cache_entry<K>(&self, key: K, ext: &str) -> Result<InfoCacheEntry, Error>
-    where
-        K: Decode + Encode,
-    {
-        let key_path
-            = self.key_path(&key, ext)?;
+    pub fn cache_entry(&self, key: Locator, ext: &str) -> Result<InfoCacheEntry, Error> {
+        let key_path = self.key_path(&key, ext)?;
 
         Ok(InfoCacheEntry {
             path: key_path,
@@ -177,12 +183,8 @@ impl DiskCache {
         })
     }
 
-    pub fn check_cache_entry<K>(&self, key: K, ext: &str) -> Result<Option<InfoCacheEntry>, Error>
-    where
-        K: Decode + Encode,
-    {
-        let key_path
-            = self.key_path(&key, ext)?;
+    pub fn check_cache_entry(&self, key: Locator, ext: &str) -> Result<Option<InfoCacheEntry>, Error> {
+        let key_path = self.key_path(&key, ext)?;
 
         Ok(key_path.if_exists().map(|path| {
             InfoCacheEntry {
@@ -192,19 +194,15 @@ impl DiskCache {
         }))
     }
 
-    pub async fn ensure_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<CacheEntry, Error>
+    pub async fn ensure_blob<R, F>(&self, key: Locator, ext: &str, func: F) -> Result<CacheEntry, Error>
     where
-        K: Decode + Encode + ToHumanString,
         R: Future<Output = Result<Vec<u8>, Error>>,
         F: FnOnce() -> R,
     {
-        let key_path
-            = self.key_path(&key, ext)?;
-        let key_path_buf
-            = key_path.to_path_buf();
+        let key_path = self.key_path(&key, ext)?;
+        let key_path_buf = key_path.to_path_buf();
 
-        let exists
-            = tokio::fs::try_exists(key_path_buf.clone()).await?;
+        let exists = tokio::fs::try_exists(key_path_buf.clone()).await?;
 
         Ok(match exists {
             true => {
@@ -222,8 +220,7 @@ impl DiskCache {
                 let data = self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?;
 
                 tokio::task::spawn_blocking(move || {
-                    let checksum
-                        = Sha256::from_data(&data);
+                    let checksum = Sha256::from_data(&data);
 
                     InfoCacheEntry {
                         path: key_path,
@@ -234,19 +231,15 @@ impl DiskCache {
         })
     }
 
-    pub async fn upsert_blob<K, R, F>(&self, key: K, ext: &str, func: F) -> Result<DataCacheEntry, Error>
+    pub async fn upsert_blob<R, F>(&self, key: Locator, ext: &str, func: F) -> Result<DataCacheEntry, Error>
     where
-        K: Decode + Encode + ToHumanString,
         R: Future<Output = Result<Vec<u8>, Error>>,
         F: FnOnce() -> R,
     {
-        let key_path
-            = self.key_path(&key, ext)?;
-        let key_path_buf
-            = key_path.to_path_buf();
+        let key_path = self.key_path(&key, ext)?;
+        let key_path_buf = key_path.to_path_buf();
 
-        let read
-            = tokio::fs::read(key_path_buf.clone()).await;
+        let read = tokio::fs::read(key_path_buf.clone()).await;
 
         Ok(match read {
             Ok(data) => {
@@ -271,8 +264,7 @@ impl DiskCache {
                 let data = self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?;
 
                 tokio::task::spawn(async move {
-                    let checksum
-                        = Sha256::from_data(&data);
+                    let checksum = Sha256::from_data(&data);
 
                     DataCacheEntry {
                         info: InfoCacheEntry {
@@ -297,5 +289,40 @@ impl DiskCache {
         file.write_all(&data)?;
 
         Ok(data)
+    }
+
+    pub async fn clean(&self) -> Result<usize, Error> {
+        let accessed_files = match self.accessed_files.lock() {
+            Ok(accessed) => accessed.clone(),
+            Err(_) => return Err(Error::Unsupported),
+        };
+
+        let cache_entries = self.cache_path
+            .fs_read_dir()?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let extraneous_cache_files = cache_entries
+            .iter()
+            .filter(|entry| entry.file_type().unwrap().is_file())
+            .map(|entry| entry.file_name().to_os_string().into_string().unwrap())
+            .filter(|file| !accessed_files.contains(file))
+            .collect::<Vec<_>>();
+
+        let extraneous_count
+            = extraneous_cache_files.len();
+
+        println!("Extraneous cache files: {:?}", extraneous_cache_files);
+
+        if extraneous_count > 0 && self.immutable {
+            return Err(Error::ImmutableCacheCleanup(Path::from(extraneous_cache_files[0].clone())));
+        }
+
+        for file in extraneous_cache_files {
+            self.cache_path
+                .with_join_str(&file)
+                .fs_rm_file()?;
+        }
+
+        Ok(extraneous_count)
     }
 }
