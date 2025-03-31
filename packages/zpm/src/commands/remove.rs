@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 use clipanion::cli;
 use wax::{Glob, Program};
 
-use crate::{config::Config, error::Error, primitives::Ident, project::{Project, Workspace}};
+use crate::{config::Config, error::Error, primitives::Ident, project::{Project, RunInstallOptions, Workspace}};
 
 #[cli::command]
 #[cli::path("remove")]
@@ -38,7 +38,10 @@ impl Remove {
             self.remove_dependencies_from_manifest(&project.config, active_workspace, &ident_globs)?;
         }
 
-        project.run_install().await?;
+        project.run_install(RunInstallOptions {
+            check_resolutions: false,
+            refresh_lockfile: false,
+        }).await?;
 
         Ok(())
     }

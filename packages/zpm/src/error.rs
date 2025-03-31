@@ -3,7 +3,7 @@ use std::{future::Future, sync::Arc};
 use arca::Path;
 use tokio::task::JoinError;
 
-use crate::primitives::{Ident, Locator, Range};
+use crate::primitives::{Descriptor, Ident, Locator, Range};
 
 fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
     if backtrace.status() == std::backtrace::BacktraceStatus::Captured {
@@ -285,6 +285,9 @@ pub enum Error {
 
     #[error("Invalid resolution")]
     InvalidResolution(String),
+
+    #[error("Bad resolution")]
+    BadResolution(Descriptor, Locator),
 
     #[error("Task timeout")]
     TaskTimeout,

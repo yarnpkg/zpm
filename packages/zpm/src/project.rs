@@ -14,6 +14,11 @@ pub const PNP_CJS_NAME: &str = ".pnp.cjs";
 pub const PNP_ESM_NAME: &str = ".pnp.loader.mjs";
 pub const PNP_DATA_NAME: &str = ".pnp.data.json";
 
+pub struct RunInstallOptions {
+    pub check_resolutions: bool,
+    pub refresh_lockfile: bool,
+}
+
 pub struct Project {
     pub project_cwd: Path,
     pub package_cwd: Path,
@@ -483,10 +488,13 @@ impl Project {
             }
         }
 
-        self.run_install().await
+        self.run_install(RunInstallOptions {
+            check_resolutions: false,
+            refresh_lockfile: false,
+        }).await
     }
 
-    pub async fn run_install(&mut self) -> Result<(), Error> {
+    pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<(), Error> {
         let report = StreamReport::new(StreamReportConfig {
             enable_timers: true,
         });
@@ -497,7 +505,8 @@ impl Project {
 
             let install_context = InstallContext::default()
                 .with_package_cache(Some(&package_cache))
-                .with_project(Some(self));
+                .with_project(Some(self))
+                .set_refresh_lockfile(options.refresh_lockfile);
 
             InstallManager::new()
                 .with_context(install_context)

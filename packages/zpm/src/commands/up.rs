@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use clipanion::cli;
 use zpm_semver::RangeKind;
 
-use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, Ident, LooseDescriptor}, project::{self, Workspace}};
+use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, Ident, LooseDescriptor}, project::{self, RunInstallOptions, Workspace}};
 
 #[cli::command]
 #[cli::path("up")]
@@ -84,7 +84,10 @@ impl Up {
             workspace.write_manifest()?;
         }
 
-        project.run_install().await?;
+        project.run_install(RunInstallOptions {
+            check_resolutions: false,
+            refresh_lockfile: false,
+        }).await?;
 
         Ok(())
     }

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, range, reference, Descriptor, Ident, Locator, PeerRange, Range, Reference}, system};
+use crate::{error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult, ValidatedResult}, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, range, reference, Descriptor, Ident, Locator, PeerRange, Range, Reference}, system};
 
 pub mod folder;
 pub mod git;
@@ -205,4 +205,18 @@ pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, depe
         Reference::Workspace(params)
             => workspace::resolve_locator(&context, &locator, params),
     }
+}
+
+pub async fn validate_resolution(context: InstallContext<'_>, descriptor: Descriptor, locator: Locator, dependencies: Vec<InstallOpResult>) -> Result<(), Error> {
+    let success = match &descriptor.range {
+        _ => {
+            resolve_descriptor(context, descriptor.clone(), dependencies).await?.resolution.locator == locator
+        }
+    };
+
+    if !success {
+        return Err(Error::BadResolution(descriptor, locator));
+    }
+
+    Ok(())
 }

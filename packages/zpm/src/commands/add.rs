@@ -242,7 +242,10 @@ impl Add {
 
         active_workspace.write_manifest()?;
 
-        project.run_install().await?;
+        project.run_install(project::RunInstallOptions {
+            check_resolutions: false,
+            refresh_lockfile: false,
+        }).await?;
 
         Ok(())
     }

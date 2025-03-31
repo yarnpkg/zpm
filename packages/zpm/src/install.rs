@@ -5,13 +5,15 @@ use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
 pub struct InstallContext<'a> {
     pub package_cache: Option<&'a CompositeCache>,
     pub project: Option<&'a Project>,
+    pub check_resolutions: bool,
+    pub refresh_lockfile: bool,
 }
 
 impl<'a> InstallContext<'a> {
@@ -24,11 +26,26 @@ impl<'a> InstallContext<'a> {
         self.project = project;
         self
     }
+
+    pub fn set_check_resolutions(mut self, check_resolutions: bool) -> Self {
+        self.check_resolutions = check_resolutions;
+        self
+    }
+
+    pub fn set_refresh_lockfile(mut self, refresh_lockfile: bool) -> Self {
+        self.refresh_lockfile = refresh_lockfile;
+        self
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct PinnedResult {
     pub locator: Locator,
+}
+
+#[derive(Clone, Debug)]
+pub struct ValidatedResult {
+    pub success: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -80,6 +97,7 @@ impl IntoResolutionResult for FetchResult {
 
 #[derive(Clone, Debug)]
 pub enum InstallOpResult {
+    Validated,
     Pinned(PinnedResult),
     Resolved(ResolutionResult),
     Fetched(FetchResult),
@@ -126,6 +144,10 @@ impl InstallOpResult {
 impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
     fn graph_follow_ups(&self, _ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
         match self {
+            InstallOpResult::Validated => {
+                vec![]
+            },
+
             InstallOpResult::Pinned(PinnedResult {locator, ..}) => {
                 vec![InstallOp::Refresh {
                     locator: locator.clone(),
@@ -162,6 +184,11 @@ enum InstallOp<'a> {
         locator: Locator,
     },
 
+    Validate {
+        descriptor: Descriptor,
+        locator: Locator,
+    },
+
     Resolve {
         descriptor: Descriptor,
     },
@@ -172,13 +199,19 @@ enum InstallOp<'a> {
 }
 
 impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'a> {
-    fn graph_dependencies(&self, _ctx: &InstallContext<'a>, resolved_dependencies: &[&InstallOpResult]) -> Vec<Self> {
+    fn graph_dependencies(&self, ctx: &InstallContext<'a>, resolved_dependencies: &[&InstallOpResult]) -> Vec<Self> {
         let mut dependencies = vec![];
         let mut resolved_it = resolved_dependencies.iter();
 
         match self {
             InstallOp::Phantom(_) =>
                 unreachable!("PhantomData should never be instantiated"),
+
+            InstallOp::Validate {descriptor, ..} => {
+                InstallOp::Resolve {
+                    descriptor: descriptor.clone(),
+                }.graph_dependencies(ctx, resolved_dependencies);
+            },
 
             InstallOp::Refresh {locator} => {
                 if let Some(parent) = &locator.parent {
@@ -235,6 +268,15 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
         match self {
             InstallOp::Phantom(_) =>
                 unreachable!("PhantomData should never be instantiated"),
+
+            InstallOp::Validate {descriptor, locator} => {
+                tokio::time::timeout(
+                    timeout,
+                    validate_resolution(context.clone(), descriptor.clone(), locator.clone(), dependencies)
+                ).await.map_err(|_| Error::TaskTimeout)??;
+
+                Ok(InstallOpResult::Validated)
+            },
 
             InstallOp::Refresh {locator} => {
                 let future = tokio::time::timeout(
@@ -298,7 +340,7 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
         if let InstallOp::Resolve {descriptor} = op {
             if !descriptor.range.is_transient_resolution() {
                 if let Some(locator) = self.lockfile.resolutions.get(descriptor) {
-                    if self.lockfile.metadata.version != LockfileMetadata::new().version {
+                    if self.lockfile.metadata.version != LockfileMetadata::new().version || ctx.refresh_lockfile {
                         return Some(InstallOpResult::Pinned(PinnedResult {
                             locator: locator.clone(),
                         }));
@@ -432,6 +474,9 @@ impl<'a> InstallManager<'a> {
 
         for entry in installed_entries {
             match entry {
+                (InstallOp::Resolve {descriptor, ..}, InstallOpResult::Validated) => {
+                },
+
                 (InstallOp::Resolve {descriptor, ..}, InstallOpResult::Pinned(PinnedResult {locator})) => {
                     self.record_descriptor(descriptor, locator);
                 },

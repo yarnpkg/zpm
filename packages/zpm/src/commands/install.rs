@@ -1,15 +1,21 @@
 use clipanion::cli;
 
-use crate::{error::Error, project};
+use crate::{error::Error, project::{self, RunInstallOptions}};
 
 #[cli::command(default)]
 #[cli::path("install")]
 pub struct Install {
+    #[cli::option("--check-resolutions", default = false)]
+    check_resolutions: bool,
+
     #[cli::option("--immutable", default = false)]
     immutable: bool,
 
     #[cli::option("--immutable-cache", default = false)]
     immutable_cache: bool,
+
+    #[cli::option("--refresh-lockfile", default = false)]
+    refresh_lockfile: bool,
 }
 
 impl Install {
@@ -26,7 +32,10 @@ impl Install {
             project.config.project.enable_immutable_cache.value = true;
         }
 
-        project.run_install().await?;
+        project.run_install(RunInstallOptions {
+            check_resolutions: self.check_resolutions,
+            refresh_lockfile: self.refresh_lockfile,
+        }).await?;
 
         Ok(())
     }

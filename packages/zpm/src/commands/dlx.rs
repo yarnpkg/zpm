@@ -114,7 +114,10 @@ async fn install_dependencies(project: &mut Project, descriptors: Vec<Descriptor
     root_workspace.write_manifest()?;
 
     project
-        .run_install().await?;
+        .run_install(project::RunInstallOptions {
+            check_resolutions: false,
+            refresh_lockfile: false,
+        }).await?;
 
     Ok(())
 }
