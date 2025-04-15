@@ -1,6 +1,6 @@
 use std::{future::Future, sync::Arc};
 
-use arca::Path;
+use zpm_utils::Path;
 use tokio::task::JoinError;
 
 use crate::primitives::{Descriptor, Ident, Locator, Range};
@@ -27,6 +27,9 @@ pub enum Error {
 
     #[error("Unsupported code path")]
     Unsupported,
+
+    #[error("{0}")]
+    PathError(#[from] zpm_utils::PathError),
 
     #[error("Conflicting options: {0}")]
     ConflictingOptions(String),

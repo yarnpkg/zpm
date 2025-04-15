@@ -1,6 +1,6 @@
-use arca::Path;
+use zpm_utils::Path;
 use colored::Colorize;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 
 use crate::{config::{SettingSource, CONFIG_PATH}, error::Error};
@@ -352,7 +352,7 @@ impl FromFileString for PathField {
     type Error = Error;
 
     fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
-        let mut value = Path::from(raw);
+        let mut value = Path::try_from(raw)?;
 
         if !value.is_absolute() {
             value = CONFIG_PATH.lock().unwrap()
@@ -368,7 +368,8 @@ impl FromFileString for PathField {
 
 impl<'de> Deserialize<'de> for PathField {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
-        let mut value = Path::from(String::deserialize(deserializer)?);
+        let mut value = Path::try_from(String::deserialize(deserializer)?)
+            .map_err(|err| de::Error::custom(err.to_string()))?;
 
         if !value.is_absolute() {
             value = CONFIG_PATH.lock().unwrap()
@@ -638,7 +639,7 @@ mod tests {
     #[test]
     fn test_path_field() {
         // We need to set up the CONFIG_PATH for this test
-        let temp_path = Path::from("/tmp/test_config.toml");
+        let temp_path = Path::try_from("/tmp/test_config.toml").unwrap();
         *CONFIG_PATH.lock().unwrap() = Some(ConfigPaths {
             rc_path: Some(temp_path.clone()),
             project_cwd: None,

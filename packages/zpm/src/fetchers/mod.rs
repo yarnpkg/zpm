@@ -1,4 +1,4 @@
-use arca::Path;
+use zpm_utils::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::{error::Error, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, primitives::{reference, Locator, Reference}};

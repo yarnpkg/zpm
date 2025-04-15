@@ -1,6 +1,6 @@
 use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
 
-use arca::Path;
+use zpm_utils::Path;
 use clipanion::cli;
 
 use crate::{error::Error, project, script::ScriptEnvironment};
@@ -32,7 +32,7 @@ impl Run {
             .lazy_install().await?;
 
         if self.top_level {
-            project.package_cwd = ".".into();
+            project.package_cwd = Path::new();
         }
 
         let maybe_binary

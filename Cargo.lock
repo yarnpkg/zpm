@@ -66,22 +66,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1bec1de6f59aedf83baf9ff929c98f2ad654b97c9510f4e70cf6f661d49fd5b1"
 
 [[package]]
-name = "arca"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3105146c10543abe6a3118837276d32c4d672fea281ccc01d4211026d2ab161f"
-dependencies = [
- "bincode",
- "bincode_derive",
- "clean-path",
- "path-slash",
- "radix_trie",
- "serde",
- "serde_derive",
- "tokio",
-]
-
-[[package]]
 name = "async-compression"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3116,7 +3100,6 @@ checksum = "ced3678a2879b30306d323f4542626697a464a97c0a07c9aebf7ebca65cd4dde"
 name = "zpm"
 version = "0.1.0"
 dependencies = [
- "arca",
  "bincode",
  "blake2",
  "bytes",
@@ -3156,13 +3139,13 @@ dependencies = [
 name = "zpm-formats"
 version = "0.1.0"
 dependencies = [
- "arca",
  "bytes",
  "crc32fast",
  "flate2",
  "itertools 0.13.0",
  "regex",
  "thiserror 1.0.63",
+ "zpm-utils",
 ]
 
 [[package]]

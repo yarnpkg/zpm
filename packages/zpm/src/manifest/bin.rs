@@ -1,11 +1,9 @@
 use std::collections::BTreeMap;
 
 use serde_with::serde_as;
-use arca::Path;
+use zpm_utils::{Path, RawPath};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
-
-use super::RawPath;
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialEq, Eq)]

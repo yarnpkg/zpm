@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use arca::Path;
+use zpm_utils::Path;
 use bincode::{Decode, Encode};
 use colored::Colorize;
 use futures::future::BoxFuture;
@@ -114,7 +114,7 @@ impl LooseDescriptor {
         match self {
             LooseDescriptor::Range(RangeLooseDescriptor {range: Range::Tarball(params)}) => {
                 let path
-                    = Path::from(&params.path);
+                    = Path::try_from(&params.path)?;
 
                 let tgz_content = path
                     .fs_read_prealloc()?;
@@ -150,7 +150,7 @@ impl LooseDescriptor {
 
             LooseDescriptor::Range(RangeLooseDescriptor {range: Range::Folder(params)}) => {
                 let path
-                    = Path::from(&params.path);
+                    = Path::try_from(&params.path)?;
 
                 let manifest_path = path
                     .with_join_str("package.json");

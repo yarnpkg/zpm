@@ -4,7 +4,7 @@ use bincode::{Decode, Encode};
 
 use crate::{impl_serialization_traits, path_resolve::resolve_path, FromFileString, PathError, OkMissing, PathIterator, ToFileString, ToHumanString};
 
-#[derive(Clone, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RawPath {
     pub raw: String,
     pub path: Path,
@@ -33,26 +33,26 @@ impl ToHumanString for RawPath {
 
 impl_serialization_traits!(RawPath);
 
-#[derive(Clone, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Path {
     path: String,
 }
 
 impl Path {
     pub fn temp_dir_pattern(str: &str) -> Result<Path, PathError> {
-        let index = str.find("<>")
-            .unwrap();
-
-        let before = &str[..index];
-        let after = &str[index + 2..];
-
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let name = str.find("<>").map_or_else(|| str.to_string(), |index| {
+            let before = &str[..index];
+            let after = &str[index + 2..];
+    
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+    
+            format!("{}{:032x}{}", before, nonce, after)
+        });
 
         let mut dir = Path::try_from(std::env::temp_dir())?;
-        let name = format!("{}{:032x}{}", before, nonce, after);
 
         dir.join_str(name);
         dir.fs_create_dir_all()?;
@@ -309,15 +309,14 @@ impl Path {
 
         let update_content = std::fs::read(&path_buf)
             .ok_missing()
-            .map(|current| current.map(|current| current.ne(data.as_ref())).unwrap_or(true))
-            .map_err(PathError::Io)?;
+            .map(|current| current.map(|current| current.ne(data.as_ref())).unwrap_or(true))?;
 
         if update_content {
             return Err(PathError::Immutable);
         }
 
         let update_permissions = update_content ||
-            std::fs::metadata(&path_buf).map_err(PathError::Io)?.permissions() != permissions;
+            std::fs::metadata(&path_buf)?.permissions() != permissions;
 
         if update_permissions {
             return Err(PathError::Immutable);
@@ -521,7 +520,7 @@ impl FromFileString for Path {
     type Error = PathError;
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        Ok(Path::from_str(s)?)
+        Ok(Path {path: resolve_path(s)})
     }
 }
 

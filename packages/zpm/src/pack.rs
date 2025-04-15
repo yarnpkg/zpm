@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use arca::Path;
+use zpm_utils::Path;
 use globset::GlobBuilder;
 use globset::GlobMatcher;
 use regex::Regex;
@@ -333,7 +333,7 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<Manifes
     Ok(manifest)
 }
 
-pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) -> Result<Vec<arca::Path>, Error> {
+pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) -> Result<Vec<zpm_utils::Path>, Error> {
     let mut pack_list = PackList::new(workspace.path.clone());
 
     pack_list.skip_traversal_by_name.insert(".git".to_string());

@@ -91,7 +91,7 @@ fn simple_case() {
     assert_eq!(PatchParser::parse(PATCH).unwrap(), vec![
         PatchFilePart::FilePatch {
             semver_exclusivity: None,
-            path: Path::from("index.ts"),
+            path: Path::try_from("index.ts").unwrap(),
             hunks: vec![
                 Hunk {
                     header: HunkHeader {

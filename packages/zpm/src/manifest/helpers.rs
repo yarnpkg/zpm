@@ -1,6 +1,6 @@
 use std::io::{self, ErrorKind};
 
-use arca::Path;
+use zpm_utils::Path;
 
 use crate::error::Error;
 

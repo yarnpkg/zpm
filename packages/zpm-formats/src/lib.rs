@@ -1,6 +1,6 @@
 use std::{borrow::Cow, os::unix::fs::PermissionsExt};
 
-use arca::{Path, ToArcaPath};
+use zpm_utils::Path;
 
 pub(crate) mod zip_structs;
 
@@ -31,8 +31,7 @@ pub fn entries_from_folder<'a>(path: &Path) -> Result<Vec<Entry<'a>>, Error> {
 
         for entry in listing {
             let entry = entry?;
-            let path = entry.path()
-                .to_arca();
+            let path = Path::try_from(entry.path())?;
 
             if path.fs_is_dir() {
                 process_queue.push(path);

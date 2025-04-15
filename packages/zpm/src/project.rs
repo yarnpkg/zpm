@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fs::Permissions, io::ErrorKind, os::unix::fs::PermissionsExt, sync::Arc, time::UNIX_EPOCH};
 
-use arca::{ImmutableErr, Path, ToArcaPath};
+use zpm_utils::Path;
 use globset::Glob;
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
@@ -70,7 +70,7 @@ impl Project {
     pub async fn new(cwd: Option<Path>) -> Result<Project, Error> {
         let shell_cwd = cwd
             .map(Ok)
-            .unwrap_or_else(|| std::env::current_dir().map(|p| p.to_arca()))?;
+            .unwrap_or_else(|| Path::current_dir())?;
 
         let (project_cwd, package_cwd)
             = Project::find_closest_project(shell_cwd.clone())?;
@@ -78,7 +78,7 @@ impl Project {
         let config = Config::new(
             Some(project_cwd.clone()),
             Some(package_cwd.clone()),
-        );
+        )?;
 
         let root_workspace
             = Workspace::from_root_path(&project_cwd)?;
@@ -250,10 +250,7 @@ impl Project {
                 .map_err(|err| Error::LockfileGenerationError(Arc::new(err)))?;
 
         if self.config.project.enable_immutable_installs.value {
-            lockfile_path.fs_expect(contents, Permissions::from_mode(0o644)).map_err(|err| match err {
-                ImmutableErr::Immutable => Error::ImmutableLockfile,
-                ImmutableErr::Io(err) => err.into(),
-            })?;
+            lockfile_path.fs_expect(contents, Permissions::from_mode(0o644))?;
         } else {
             lockfile_path.fs_change(contents, Permissions::from_mode(0o644))?;
         }
@@ -599,10 +596,15 @@ impl Workspace {
         let mut project_last_changed_at = self.last_changed_at;
 
         if let Some(patterns) = &self.manifest.workspaces {
-            let pattern_matchers = patterns.iter()
-                .map(|p| Glob::new(Path::from(p).as_str()))
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
+            let normalized_patterns = patterns.iter()
+                .map(|p| Path::try_from(p.as_str()))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let glob_patterns = normalized_patterns.into_iter()
+                .map(|p| Glob::new(p.as_str()))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let pattern_matchers = glob_patterns.into_iter()
                 .map(|g| g.compile_matcher())
                 .collect::<Vec<_>>();
 

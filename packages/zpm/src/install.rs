@@ -1,6 +1,6 @@
 use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData};
 
-use arca::Path;
+use zpm_utils::Path;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};

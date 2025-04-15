@@ -1,7 +1,7 @@
 use std::io::{Cursor, Read};
 
-use arca::Path;
 use bytes::Bytes;
+use zpm_utils::Path;
 
 use crate::error::Error;
 

@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
-use arca::Path;
+use zpm_utils::Path;
 use bin::BinField;
 use bincode::{Decode, Encode};
 use exports::ExportsField;
 use imports::ImportsField;
 use resolutions::ResolutionSelector;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use crate::{primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, PeerRange, Range}, system};
 
@@ -20,32 +20,6 @@ pub mod resolutions;
 #[serde(rename_all = "camelCase")]
 pub struct DistManifest {
     pub tarball: String,
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq, Eq)]
-pub struct RawPath {
-    pub path: Path,
-    pub raw: String,
-}
-
-impl RawPath {
-    pub fn from<P: AsRef<str>>(path: P) -> Self {
-        let raw = path.as_ref().to_string();
-        Self {path: Path::from(&raw), raw}
-    }
-}
-
-impl<'de> Deserialize<'de> for RawPath {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
-        let raw = String::deserialize(deserializer)?;
-        Ok(RawPath { path: Path::from(&raw), raw })
-    }
-}
-
-impl Serialize for RawPath {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
-        serializer.serialize_str(&self.raw)
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]

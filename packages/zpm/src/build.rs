@@ -1,6 +1,6 @@
 use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt};
 
-use arca::Path;
+use zpm_utils::Path;
 use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};

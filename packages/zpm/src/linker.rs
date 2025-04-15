@@ -1,6 +1,6 @@
 use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
 
-use arca::{Path, ToArcaPath};
+use zpm_utils::Path;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_with::serde_as;
@@ -41,8 +41,8 @@ fn remove_nm(nm_path: Path) -> Result<(), Error> {
             let mut has_dot_entries = false;
 
             for entry in entries.flatten() {
-                let path = entry.path()
-                    .to_arca();
+                let path
+                    = Path::try_from(entry.path())?;
         
                 let basename = path.basename()
                     .unwrap();
@@ -85,7 +85,7 @@ fn extract_archive(project_root: &Path, locator: &Locator, package_data: &Packag
 
         for entry in zpm_formats::zip::entries_from_zip(&package_bytes)? {
             let target_path = extract_path
-                .with_join(&Path::from(&entry.name));
+                .with_join_str(&entry.name);
 
             target_path
                 .fs_create_parent()?
@@ -310,10 +310,10 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
 
         package_peers.sort();
 
-        let virtual_dir = Path::from(match &locator.reference {
-            Reference::Virtual(params) => format!("__virtual__/{}/0/", params.hash.to_file_string()),
-            _ => "".to_string(),
-        });
+        let virtual_dir = match &locator.reference {
+            Reference::Virtual(params) => Path::try_from(format!("__virtual__/{}/0/", params.hash.to_file_string())).unwrap(),
+            _ => Path::new(),
+        };
 
         let rel_path = physical_package_data.package_directory()
             .relative_to(physical_package_data.data_root());

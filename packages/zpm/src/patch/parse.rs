@@ -1,6 +1,6 @@
 use std::{str::FromStr, sync::LazyLock};
 
-use arca::Path;
+use zpm_utils::Path;
 use regex::Regex;
 use zpm_utils::FromFileString;
 
@@ -271,11 +271,11 @@ impl<'a> PatchParser<'a> {
 
             self.result.push(PatchFilePart::FileRename {
                 semver_exclusivity: semver_exclusivity.clone(),
-                from: Path::from(rename_from),
-                to: Path::from(rename_to),
+                from: Path::try_from(rename_from)?,
+                to: Path::try_from(rename_to)?,
             });
 
-            current_destination_file_path = Some(Path::from(rename_to));
+            current_destination_file_path = Some(Path::try_from(rename_to)?);
         } else if let Some(deleted_file_mode) = file_patch.deleted_file_mode {
             let path = file_patch.diff_line_from_path
                 .or(file_patch.from_path)
@@ -283,7 +283,7 @@ impl<'a> PatchParser<'a> {
 
             self.result.push(PatchFilePart::FileDeletion {
                 semver_exclusivity: semver_exclusivity.clone(),
-                path: Path::from(path),
+                path: Path::try_from(path)?,
                 mode: parse_file_mode(deleted_file_mode)?,
                 hunk: file_patch.hunks.first().cloned(),
                 hash: file_patch.before_hash.map(|s| s.to_string()),
@@ -295,7 +295,7 @@ impl<'a> PatchParser<'a> {
 
             self.result.push(PatchFilePart::FileCreation {
                 semver_exclusivity: semver_exclusivity.clone(),
-                path: Path::from(path),
+                path: Path::try_from(path)?,
                 mode: parse_file_mode(new_file_mode)?,
                 hunk: file_patch.hunks.first().cloned(),
                 hash: file_patch.after_hash.map(|s| s.to_string()),
@@ -303,7 +303,8 @@ impl<'a> PatchParser<'a> {
         } else {
             current_destination_file_path = file_patch.to_path
                 .or(file_patch.diff_line_to_path)
-                .map(Path::from);
+                .map(Path::try_from)
+                .transpose()?;
         }
 
         if let Some(current_destination_file_path) = &current_destination_file_path {

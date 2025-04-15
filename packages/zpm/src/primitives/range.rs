@@ -1,6 +1,6 @@
 use std::{hash::Hash, sync::LazyLock};
 
-use arca::Path;
+use zpm_utils::Path;
 use bincode::{Decode, Encode};
 use colored::Colorize;
 use regex::Regex;

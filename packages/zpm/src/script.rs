@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
 
-use arca::{Path, ToArcaPath};
+use zpm_utils::Path;
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -191,7 +191,7 @@ impl Default for ScriptEnvironment {
 impl ScriptEnvironment {
     pub fn new() -> Self {
         Self {
-            cwd: std::env::current_dir().unwrap().to_arca(),
+            cwd: Path::current_dir().unwrap(),
             env: BTreeMap::new(),
             shell_forwarding: false,
         }
@@ -280,9 +280,8 @@ impl ScriptEnvironment {
         binaries.hash(&mut hash);
         let hash = hash.finish();
 
-        let dir = std::env::temp_dir()
-            .to_arca()
-            .with_join_str(format!("zpm-{}-{}", locator.slug(), hash));
+        let dir_name = format!("zpm-{}-{}", locator.slug(), hash);
+        let dir = Path::temp_dir_pattern(&dir_name)?;
 
         // We try to reuse directories rather than generate the binaries at
         // every command; I noticed that on OSX the content of these directories
@@ -305,24 +304,21 @@ impl ScriptEnvironment {
                 .with_join_str(".ready")
                 .fs_write_text("")?;
 
-            let self_path_str = std::env::current_exe()?
-                .to_arca()
-                .to_string();
+            let self_path = Path::current_exe()?;
 
-            make_path_wrapper(&temp_dir, "run", &self_path_str, vec!["run"])?;
-            make_path_wrapper(&temp_dir, "yarn", &self_path_str, vec![])?;
-            make_path_wrapper(&temp_dir, "yarnpkg", &self_path_str, vec![])?;
-            make_path_wrapper(&temp_dir, "node-gyp", &self_path_str, vec!["run", "--top-level", "node-gyp"])?;
+            make_path_wrapper(&temp_dir, "run", self_path.as_str(), vec!["run"])?;
+            make_path_wrapper(&temp_dir, "yarn", self_path.as_str(), vec![])?;
+            make_path_wrapper(&temp_dir, "yarnpkg", self_path.as_str(), vec![])?;
+            make_path_wrapper(&temp_dir, "node-gyp", self_path.as_str(), vec!["run", "--top-level", "node-gyp"])?;
 
             for (name, binary) in binaries {
                 let binary_path_abs = relative_to
-                    .with_join(&binary.path)
-                    .to_string();
+                    .with_join(&binary.path);
 
                 if binary.kind == BinaryKind::Node {
-                    make_path_wrapper(&temp_dir, name, "node", vec![&binary_path_abs])?;
+                    make_path_wrapper(&temp_dir, name, "node", vec![binary_path_abs.as_str()])?;
                 } else {
-                    make_path_wrapper(&temp_dir, name, &binary_path_abs, vec![])?;
+                    make_path_wrapper(&temp_dir, name, binary_path_abs.as_str(), vec![])?;
                 }
             }
 

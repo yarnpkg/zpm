@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use arca::Path;
+use zpm_utils::Path;
 use clipanion::cli;
 use zpm_utils::ToFileString;
 
@@ -112,7 +112,7 @@ impl Pack {
         }
 
         for entry in entries.iter_mut() {
-            if executable_files.contains(&Path::from(&entry.name)) {
+            if executable_files.contains(&Path::try_from(&entry.name)?) {
                 entry.mode = 0o755;
             } else {
                 entry.mode = 0o644;

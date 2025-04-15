@@ -1,9 +1,9 @@
 use std::sync::{LazyLock, Mutex};
 
-use arca::{Path, ToArcaPath};
+use zpm_utils::Path;
 use serde::Deserialize;
 
-use crate::{primitives::Ident, settings::{EnvConfig, ProjectConfig, UserConfig}};
+use crate::{error::Error, primitives::Ident, settings::{EnvConfig, ProjectConfig, UserConfig}};
 
 #[derive(Debug, Default, Clone)]
 pub struct ConfigPaths {
@@ -45,10 +45,10 @@ impl Config {
             .unwrap()
     }
 
-    pub fn new(project_cwd: Option<Path>, package_cwd: Option<Path>) -> Self {
+    pub fn new(project_cwd: Option<Path>, package_cwd: Option<Path>) -> Result<Self, Error> {
         #[allow(deprecated)]
-        let user_yarnrc_path = std::env::home_dir()
-            .map(|dir| dir.to_arca().with_join_str(".yarnrc.yml"));
+        let user_yarnrc_path = Path::home_dir()?
+            .map(|dir| dir.with_join_str(".yarnrc.yml"));
 
         let project_yarnrc_path = project_cwd.clone()
             .map(|cwd| cwd.with_join_str(".yarnrc.yml"));
@@ -73,10 +73,10 @@ impl Config {
 
         *CONFIG_PATH.lock().unwrap() = None;
 
-        Config {
+        Ok(Config {
             user: user_config,
             project: project_config,
-        }
+        })
     }
 
     pub fn registry_base_for(&self, _ident: &Ident) -> String {

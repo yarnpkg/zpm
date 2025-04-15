@@ -24,7 +24,7 @@ impl<'a> TarIterator<'a> {
         let name
             = std::str::from_utf8(name_slice)?;
 
-        let name = clean_name(&name)
+        let name = clean_name(&name)?
             .ok_or_else(|| Error::InvalidTarFilePath(name.to_string()))?;
 
         if ZIP_PATH_INVALID_PATTERNS.is_match(&name) {
@@ -86,23 +86,24 @@ static ZIP_PATH_INVALID_PATTERNS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\\|/\.{0,2}/|^\.{0,2}/|/\.{0,2}$|^\.{0,2}$").unwrap()
 });
 
-fn clean_name(name: &str) -> Option<String> {
+fn clean_name(name: &str) -> Result<Option<String>, Error> {
     if name.starts_with('/') {
-        return None
+        return Ok(None)
     }
 
     let has_parent_specifier = name.split('/')
         .any(|part| part == "..");
 
     if has_parent_specifier {
-        return None
+        return Ok(None)
     }
 
-    let mut name = arca::Path::from(name).to_string();
+    let mut name = zpm_utils::Path::try_from(name)?
+        .to_string();
 
     if name.ends_with('/') {
         name.pop();
     }
 
-    Some(name)
+    Ok(Some(name))
 }

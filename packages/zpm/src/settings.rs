@@ -1,4 +1,4 @@
-use arca::Path;
+use zpm_utils::Path;
 use serde::{Deserialize, Serialize};
 use zpm_macros::yarn_config;
 use zpm_semver::RangeKind;
@@ -85,7 +85,7 @@ pub struct ProjectConfig {
     #[default(true)]
     pub enable_transparent_workspaces: BoolField,
 
-    #[default(crate::path::home(&Path::from(".yarn/zpm")))]
+    #[default(Path::home_dir().unwrap().unwrap().with_join_str(".yarn/zpm"))]
     pub global_folder: PathField,
 
     #[default("cache".to_string())]

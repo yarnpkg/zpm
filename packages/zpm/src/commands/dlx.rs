@@ -1,6 +1,6 @@
 use std::process::ExitStatus;
 
-use arca::Path;
+use zpm_utils::Path;
 use clipanion::cli;
 use zpm_semver::RangeKind;
 

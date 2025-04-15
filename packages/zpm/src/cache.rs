@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::collections::HashSet;
 use std::sync::Mutex;
-use arca::Path;
+use zpm_utils::Path;
 use bincode;
 use futures::Future;
 use sha2::Digest;
@@ -312,7 +312,7 @@ impl DiskCache {
             = extraneous_cache_files.len();
 
         if extraneous_count > 0 && self.immutable {
-            return Err(Error::ImmutableCacheCleanup(Path::from(extraneous_cache_files[0].clone())));
+            return Err(Error::ImmutableCacheCleanup(Path::try_from(extraneous_cache_files[0].clone()).unwrap()));
         }
 
         for file in extraneous_cache_files {

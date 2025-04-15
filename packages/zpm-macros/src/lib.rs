@@ -258,7 +258,7 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
         #[derive(Clone, Debug, serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
         pub struct #struct_sym {
-            pub path: Option<arca::Path>,
+            pub path: Option<zpm_utils::Path>,
 
             #(#new_fields)*
         }
@@ -288,7 +288,7 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
 
         impl #struct_sym {
             pub fn set(&self, name: &str, value: #enum_sym) -> Result<(), crate::error::Error> {
-                use arca::OkMissing;
+                use zpm_utils::OkMissing;
                 use convert_case::{Casing, Case};
 
                 let config_path = self.path.as_ref()

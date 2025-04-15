@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt::{self, Display, Formatter}, sync::LazyLock};
 
-use arca::Path;
+use zpm_utils::Path;
 use bincode::{Decode, Encode};
 use colored::Colorize;
 use fancy_regex::Regex;

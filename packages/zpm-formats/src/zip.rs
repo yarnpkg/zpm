@@ -1,6 +1,6 @@
 use std::{borrow::Cow, sync::LazyLock};
 
-use arca::Path;
+use zpm_utils::Path;
 use regex::Regex;
 
 use crate::{error::Error, zip_iter::ZipIterator, zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, FileHeader, GeneralRecord}};
@@ -152,11 +152,11 @@ impl ZipSupport for Path {
 
             let zip_data = std::fs::read(zip_path)?;
 
-            Path::from(subpath).fs_read_text_from_zip_buffer(&zip_data)
+            Path::try_from(subpath)?.fs_read_text_from_zip_buffer(&zip_data)
         } else {
             Ok(match VIRTUAL_REGEX.replace(&path_str, "/") {
                 Cow::Borrowed(_) => self.fs_read_text()?,
-                Cow::Owned(path_str) => Path::from(path_str).fs_read_text()?,
+                Cow::Owned(path_str) => Path::try_from(path_str)?.fs_read_text()?,
             })
         }
     }

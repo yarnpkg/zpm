@@ -1,10 +1,8 @@
 use std::fmt;
 
-use arca::Path;
+use zpm_utils::{Path, RawPath};
 use bincode::{Decode, Encode};
 use serde::{de::{self, Visitor}, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
-
-use super::RawPath;
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, Eq)]
 pub enum ImportsField {
@@ -52,7 +50,10 @@ impl<'de> Visitor<'de> for ImportsFieldEntriesVisitor {
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> where E: de::Error {
-        Ok(ImportsField::Path(RawPath { path: Path::from(value), raw: value.to_string() }))
+        let path = Path::try_from(value)
+            .map_err(|err| de::Error::custom(err))?;
+
+        Ok(ImportsField::Path(RawPath {path, raw: value.to_string()}))
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
