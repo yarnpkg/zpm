@@ -121,6 +121,7 @@ struct Manifest {
     package_manager: Option<PackageManagerField>,
 }
 
+#[derive(Debug)]
 pub struct FindResult {
     pub detected_root_path: Option<Path>,
     pub detected_package_manager: Option<PackageManagerField>,
@@ -133,7 +134,7 @@ const ROOT_FILES: &[&'static str] = &[
 pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
     let mut last_package_folder = None;
 
-    for mut parent in path.iter_path() {
+    for mut parent in path.iter_path().rev() {
         let manifest_path = parent
             .with_join_str("package.json");
 
