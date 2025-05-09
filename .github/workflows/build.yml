@@ -30,7 +30,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run:
+        run: |
           cargo build --verbose --release
           zip -r artifacts.zip target/release/{zpm,zpm-switch}
 
@@ -55,8 +55,7 @@ jobs:
           name: zpm-linux
 
       - name: Puts back the binaries
-        run:
-          unzip ./artifacts.zip
+        run: unzip ./artifacts.zip
    
       - name: Clone the berry repo
         uses: actions/checkout@v4
@@ -110,8 +109,7 @@ jobs:
           name: zpm-linux
 
       - name: Puts back the binaries
-        run:
-          unzip ./artifacts.zip
+        run: unzip ./artifacts.zip
   
       - name: Install dependencies
         run: ./yarn.sh install
