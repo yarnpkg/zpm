@@ -7,6 +7,18 @@ use crate::error::Error;
 
 use super::{entries_from_folder, normalize_entries, prefix_entries, strip_first_segment, tar, zip, Entry};
 
+pub fn convert_tar_gz_to_tar(tar_gz_data: Bytes) -> Result<Vec<u8>, Error> {
+    let mut decompressed = vec![];
+
+    if tar_gz_data.starts_with(&[0x1f, 0x8b]) {
+        flate2::read::GzDecoder::new(Cursor::new(tar_gz_data)).read_to_end(&mut decompressed)?;
+    } else {
+        return Ok(tar_gz_data.to_vec());
+    }
+
+    Ok(decompressed)
+}
+
 pub fn convert_entries_to_zip(prefix: &str, entries: Vec<Entry>) -> Result<Vec<u8>, Error> {
     let entries = normalize_entries(entries);
     let entries = prefix_entries(entries, prefix);

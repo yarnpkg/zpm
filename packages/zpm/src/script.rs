@@ -1,6 +1,6 @@
-use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
+use std::{collections::{BTreeMap, BTreeSet}, env::var, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
 
-use zpm_utils::Path;
+use zpm_utils::{to_shell_line, FromFileString, Path};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -12,7 +12,7 @@ use crate::{error::Error, primitives::Locator, project::Project};
 // static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
 static JS_EXTENSION: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
 
-fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: Vec<&str>) -> Result<(), Error> {
+fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &Vec<String>) -> Result<(), Error> {
     if cfg!(windows) {
         let cmd_script = format!(
             r#"@goto #_undefined_# 2>NUL || @title %COMSPEC% & @setlocal & @"{}" {} %*"#,
@@ -100,10 +100,89 @@ impl Binary {
     }
 }
 
+// fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: Vec<&str>) -> Result<(), Error>
+
+#[derive(Hash)]
+pub struct ScriptBinary {
+    pub name: String,
+    pub argv0: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Default, Hash)]
+pub struct ScriptBinaries {
+    pub binaries: Vec<ScriptBinary>,
+}
+
+impl ScriptBinaries {
+    pub fn new() -> Self {
+        Self {
+            binaries: Vec::new(),
+        }
+    }
+
+    pub fn with_standard(mut self) -> Result<Self, Error> {
+        let self_path = std::env::var("YARN_SWITCH_EXEC_PATH")
+            .ok()
+            .map(|path| Path::from_file_string(&path))
+            .unwrap_or_else(|| Path::current_exe())?
+            .to_string();
+
+        self.binaries.push(ScriptBinary {
+            name: "run".to_string(),
+            argv0: self_path.clone(),
+            args: vec!["run".to_string()],
+        });
+
+        self.binaries.push(ScriptBinary {
+            name: "yarn".to_string(),
+            argv0: self_path.clone(),
+            args: vec![],
+        });
+
+        self.binaries.push(ScriptBinary {
+            name: "yarnpkg".to_string(),
+            argv0: self_path.clone(),
+            args: vec![],
+        });
+
+        self.binaries.push(ScriptBinary {
+            name: "node-gyp".to_string(),
+            argv0: self_path.clone(),
+            args: vec!["run".to_string(), "--top-level".to_string(), "node-gyp".to_string()],
+        });
+
+        Ok(self)
+    }
+
+    pub fn with_package(mut self, binaries: &BTreeMap<String, Binary>, relative_to: &Path) -> Result<Self, Error> {
+        for (name, binary) in binaries {
+            let binary_path_abs = relative_to
+                .with_join(&binary.path);
+
+            if binary.kind == BinaryKind::Node {
+                self.binaries.push(ScriptBinary {
+                    name: name.clone(),
+                    argv0: "node".to_string(),
+                    args: vec![binary_path_abs.to_string()],
+                });
+            } else {
+                self.binaries.push(ScriptBinary {
+                    name: name.clone(),
+                    argv0: binary_path_abs.to_string(),
+                    args: vec![],
+                });
+            }
+        }
+
+        Ok(self)
+    }
+}
+
 #[derive(Debug)]
 pub enum ScriptResult {
     Success(Output),
-    Failure(Output, String, Vec<String>),
+    Failure(Output, String, String),
 }
 
 impl ScriptResult {
@@ -115,11 +194,11 @@ impl ScriptResult {
         })
     }
 
-    pub fn new(output: Output, program: String, args: Vec<String>) -> Self {
+    pub fn new(output: Output, cmd: &std::process::Command) -> Self {
         if output.status.success() {
             Self::Success(output)
         } else {
-            Self::Failure(output, program, args)
+            Self::Failure(output, cmd.get_program().to_str().unwrap().to_string(), to_shell_line(cmd).unwrap())
         }
     }
 
@@ -134,7 +213,7 @@ impl ScriptResult {
 
         match self {
             Self::Success(_) => Ok(self),
-            Self::Failure(output, program, _) => {
+            Self::Failure(output, program, shell_line) => {
                 if output.stdout.is_empty() {
                     return Err(Error::ChildProcessFailed(program));
                 }
@@ -142,10 +221,10 @@ impl ScriptResult {
                 if let Ok(temp_dir) = Path::temp_dir() {
                     let log_path = temp_dir
                         .with_join_str("error.log");
-                    
+
                     // open a fd and write stdout/err into it
                     let log_write = log_path
-                        .fs_write_text(format!("=== STDOUT ===\n\n{}\n=== STDERR ===\n\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)));
+                        .fs_write_text(format!("=== COMMAND ===\n\n{}\n\n=== STDOUT ===\n\n{}\n=== STDERR ===\n\n{}", shell_line, String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)));
 
                     if log_write.is_ok() {
                         Err(Error::ChildProcessFailedWithLog(program, log_path))
@@ -178,35 +257,39 @@ impl From<ScriptResult> for ExitStatus {
 
 pub struct ScriptEnvironment {
     cwd: Path,
+    binaries: ScriptBinaries,
     env: BTreeMap<String, String>,
+    deleted_env: BTreeSet<String>,
     shell_forwarding: bool,
 }
 
-impl Default for ScriptEnvironment {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ScriptEnvironment {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self, Error> {
+        let mut value = Self {
             cwd: Path::current_dir().unwrap(),
+            binaries: ScriptBinaries::new().with_standard()?,
             env: BTreeMap::new(),
+            deleted_env: BTreeSet::new(),
             shell_forwarding: false,
-        }
-    }
+        };
 
-    fn prepend_env(&mut self, key: &str, separator: char, value: &str) {
-        let current = self.env.entry(key.to_string())
-            .or_insert(std::env::var(key).unwrap_or_default());
-
-        if !current.is_empty() {
-            current.insert(0, separator);
+        if let Ok(val) = std::env::var("YARN_SWITCH_DETECTED_ROOT") {
+            value.env.insert("YARN_SWITCH_DETECTED_ROOT".to_string(), val);
         }
 
-        current.insert_str(0, value);
+        Ok(value)
     }
+
+    // fn prepend_env(&mut self, key: &str, separator: char, value: &str) {
+    //     let current = self.env.entry(key.to_string())
+    //         .or_insert(std::env::var(key).unwrap_or_default());
+
+    //     if !current.is_empty() {
+    //         current.insert(0, separator);
+    //     }
+
+    //     current.insert_str(0, value);
+    // }
 
     fn append_env(&mut self, key: &str, separator: char, value: &str) {
         let current = self.env.entry(key.to_string())
@@ -225,7 +308,7 @@ impl ScriptEnvironment {
     }
 
     pub fn delete_env_variable(mut self, key: &str) -> Self {
-        self.env.remove(key);
+        self.deleted_env.insert(key.to_string());
         self
     }
 
@@ -246,6 +329,11 @@ impl ScriptEnvironment {
         self.env.insert("PROJECT_CWD".to_string(), project.project_cwd.to_string());
         self.env.insert("INIT_CWD".to_string(), project.project_cwd.with_join(&project.shell_cwd).to_string());
 
+        self
+    }
+
+    pub fn with_standard_binaries(mut self) -> Self {
+        self.binaries = ScriptBinaries::new().with_standard().unwrap();
         self
     }
 
@@ -274,13 +362,41 @@ impl ScriptEnvironment {
         Ok(())
     }
 
-    #[track_time]
-    fn attach_binaries(&mut self, locator: &Locator, binaries: &BTreeMap<String, Binary>, relative_to: &Path) -> Result<(), Error> {
+    pub fn with_package(mut self, project: &Project, locator: &Locator) -> Result<Self, Error> {
+        let install_state = project.install_state
+            .as_ref()
+            .ok_or(Error::InstallStateNotFound)?;
+
+        let package_cwd_rel = install_state.locations_by_package.get(locator)
+            .expect("Expected the package to be installed");
+
+        self.cwd = project.project_cwd
+            .with_join(package_cwd_rel);
+    
+        self.attach_package_variables(project, locator)?;
+
+        let binaries
+            = project.package_visible_binaries(locator)?;
+
+        self.binaries = self.binaries
+            .with_package(&binaries, &project.project_cwd)?;
+
+        Ok(self)
+    }
+
+    pub fn with_cwd(mut self, cwd: Path) -> Self {
+        self.cwd = cwd;
+        self
+    }
+
+    fn install_binaries(&mut self) -> Result<Path, Error> {
         let mut hash = DefaultHasher::new();
-        binaries.hash(&mut hash);
+        self.binaries.hash(&mut hash);
         let hash = hash.finish();
 
-        let dir_name = format!("zpm-{}-{}", locator.slug(), hash);
+        // We don't use a nonce in this pattern because we want to use the same
+        // temporary directory for the same package.
+        let dir_name = format!("zpm-{}", hash);
         let dir = Path::temp_dir_pattern(&dir_name)?;
 
         // We try to reuse directories rather than generate the binaries at
@@ -297,65 +413,22 @@ impl ScriptEnvironment {
         }
 
         if !dir.fs_exists() {
-            let temp_dir = Path::temp_dir_pattern("zpm-temp-<>")?;
+            let temp_dir = Path::temp_dir()?;
             temp_dir.fs_create_dir_all()?;
 
             temp_dir
                 .with_join_str(".ready")
                 .fs_write_text("")?;
 
-            let self_path = Path::current_exe()?;
-
-            make_path_wrapper(&temp_dir, "run", self_path.as_str(), vec!["run"])?;
-            make_path_wrapper(&temp_dir, "yarn", self_path.as_str(), vec![])?;
-            make_path_wrapper(&temp_dir, "yarnpkg", self_path.as_str(), vec![])?;
-            make_path_wrapper(&temp_dir, "node-gyp", self_path.as_str(), vec!["run", "--top-level", "node-gyp"])?;
-
-            for (name, binary) in binaries {
-                let binary_path_abs = relative_to
-                    .with_join(&binary.path);
-
-                if binary.kind == BinaryKind::Node {
-                    make_path_wrapper(&temp_dir, name, "node", vec![binary_path_abs.as_str()])?;
-                } else {
-                    make_path_wrapper(&temp_dir, name, binary_path_abs.as_str(), vec![])?;
-                }
+            for binary in &self.binaries.binaries {
+                make_path_wrapper(&temp_dir, &binary.name, &binary.argv0, &binary.args)?;
             }
-
+    
             temp_dir
                 .fs_rename(&dir)?;
         }
 
-        let bin_dir_str = dir.to_string();
-    
-        self.prepend_env("PATH", ':', &bin_dir_str);
-        self.env.insert("BERRY_BIN_FOLDER".to_string(), bin_dir_str);
-
-        Ok(())
-    }
-
-    pub fn with_package(mut self, project: &Project, locator: &Locator) -> Result<Self, Error> {
-        let install_state = project.install_state
-            .as_ref()
-            .ok_or(Error::InstallStateNotFound)?;
-
-        let package_cwd_rel = install_state.locations_by_package.get(locator)
-            .expect("Expected the package to be installed");
-
-        self.cwd = project.project_cwd
-            .with_join(package_cwd_rel);
-    
-        self.attach_package_variables(project, locator)?;
-
-        let binaries = project.package_visible_binaries(locator)?;
-        self.attach_binaries(locator, &binaries, &project.project_cwd)?;
-
-        Ok(self)
-    }
-
-    pub fn with_cwd(mut self, cwd: Path) -> Self {
-        self.cwd = cwd;
-        self
+        Ok(dir)
     }
 
     #[track_time]
@@ -367,7 +440,30 @@ impl ScriptEnvironment {
             .collect::<Vec<_>>();
 
         cmd.current_dir(self.cwd.to_path_buf());
+
+        for key in &self.deleted_env {
+            cmd.env_remove(key);
+        }
+
         cmd.envs(self.env.iter());
+
+        let bin_dir
+            = self.install_binaries().unwrap();
+
+        let env_path = self.env.iter()
+            .find(|(key, _)| key == &"PATH")
+            .map(|(_, value)| value.to_string())
+            .or_else(|| std::env::var("PATH").ok())
+            .unwrap_or_default();
+
+        let next_env_path = match env_path.is_empty() {
+            true => bin_dir.to_string(),
+            false => format!("{}:{}", bin_dir, env_path),
+        };
+
+        cmd.env("PATH", next_env_path);
+        cmd.env("BERRY_BIN_FOLDER", bin_dir.to_string());
+
         cmd.args(&args);
 
         let output = match self.shell_forwarding {
@@ -379,7 +475,7 @@ impl ScriptEnvironment {
             },
         };
 
-        ScriptResult::new(output, program.to_string(), args)
+        ScriptResult::new(output, cmd.as_std())
     }
 
     pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<str> {

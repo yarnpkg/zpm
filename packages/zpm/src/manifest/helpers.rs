@@ -1,28 +1,24 @@
-use std::io::{self, ErrorKind};
-
-use zpm_utils::Path;
+use zpm_utils::{OkMissing, Path};
 
 use crate::error::Error;
 
 use super::Manifest;
 
-fn wrap_error<T>(result: Result<T, io::Error>) -> Result<T, Error> {
-    result.map_err(|err| match err.kind() {
-        ErrorKind::NotFound | ErrorKind::NotADirectory => Error::ManifestNotFound,
-        _ => err.into(),
-    })
-}
-
 pub fn read_manifest(abs_path: &Path) -> Result<Manifest, Error> {
-    let metadata = wrap_error(abs_path.fs_metadata())?;
+    let metadata = abs_path.fs_metadata()
+        .ok_missing()?
+        .ok_or(Error::ManifestNotFound)?;
 
     Ok(read_manifest_with_size(abs_path, metadata.len())?)
 }
 
 pub fn read_manifest_with_size(abs_path: &Path, size: u64) -> Result<Manifest, Error> {
-    let manifest_text = wrap_error(abs_path.fs_read_text_with_size(size))?;
+    let manifest_text = abs_path.fs_read_text_with_size(size)
+        .ok_missing()?
+        .ok_or(Error::ManifestNotFound)?;
 
     parse_manifest(&manifest_text)
+        .map_err(|_| Error::ManifestParseError(abs_path.clone()))
 }
 
 pub fn parse_manifest_from_bytes(bytes: &[u8]) -> Result<Manifest, Error> {

@@ -88,10 +88,12 @@ impl<'a> Iterator for ImportsFieldPathIter<'a> {
                 ImportsField::Path(path) => {
                     return Some(path);
                 },
+
                 ImportsField::Package(_) => {
                     // Import entries that map to a package don't have
                     // an associated path, so we just skip them
                 },
+
                 ImportsField::Map(entries) => {
                     for (_, child) in entries.iter().rev() {
                         self.stack.push(child);

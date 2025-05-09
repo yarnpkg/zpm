@@ -5,6 +5,7 @@ members = [
     "packages/zpm-macros",
     "packages/zpm-parsers",
     "packages/zpm-semver",
+    "packages/zpm-switch",
     "packages/zpm-utils",
     "packages/zpm",
 ]

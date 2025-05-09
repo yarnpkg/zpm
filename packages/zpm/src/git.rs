@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, prepare::PrepareParams};
+use crate::{error::Error, github, prepare::PrepareParams};
 
 static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
 
-static GH_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:github:|https:\/\/github\.com\/|git:\/\/github\.com\/)?(?!\.{1,2}\/)([a-zA-Z0-9._-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z0-9._-]+?)(?:\.git)?(#.*)?$").unwrap());
+static GH_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:github:|(?:https):\/\/github\.com\/|git(?:\+ssh)?:\/\/(?:git@)?github\.com\/)?(?!\.{1,2}\/)([a-zA-Z0-9._-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z0-9._-]+?)(?:\.git)?(#.*)?$").unwrap());
 static GH_TARBALL_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^https?:\/\/github\.com\/(?!\.{1,2}\/)([a-zA-Z0-9._-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z0-9._-]+?)\/tarball\/(.+)?$").unwrap());
 
 static GH_URL_SET: LazyLock<Vec<Regex>> = LazyLock::new(|| vec![
@@ -49,7 +49,7 @@ pub fn normalize_git_url<P: AsRef<str>>(url: P) -> String {
 #[derive(Clone, Debug, Decode, Deserialize, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub enum GitTreeish {
     AnythingGoes(String),
-    Branch(String),
+    Head(String),
     Commit(String),
     Semver(zpm_semver::Range),
     Tag(String),
@@ -59,7 +59,7 @@ impl Display for GitTreeish {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             GitTreeish::AnythingGoes(treeish) => write!(f, "{}", treeish),
-            GitTreeish::Branch(branch) => write!(f, "branch={}", branch),
+            GitTreeish::Head(head) => write!(f, "head={}", head),
             GitTreeish::Commit(commit) => write!(f, "commit={}", commit),
             GitTreeish::Semver(range) => write!(f, "semver={}", range),
             GitTreeish::Tag(tag) => write!(f, "tag={}", tag),
@@ -78,6 +78,9 @@ impl FromFileString for GitRange {
     type Error = Error;
 
     fn from_file_string(src: &str) -> Result<Self, Self::Error> {
+        // TODO: I have the feeling we should do the other way around: first normalize, then validate.
+        // Otherwise I'm concerned we'd forget to normalize some patterns.
+
         if !is_git_url(src) {
             return Err(Error::InvalidGitUrl(src.to_string()));
         }
@@ -93,7 +96,7 @@ impl ToFileString for GitRange {
 
         params.push(match &self.treeish {
             GitTreeish::AnythingGoes(treeish) => treeish.to_string(),
-            GitTreeish::Branch(branch) => format!("branch={}", branch),
+            GitTreeish::Head(head) => format!("head={}", head),
             GitTreeish::Commit(commit) => format!("commit={}", commit),
             GitTreeish::Semver(range) => format!("semver={}", range),
             GitTreeish::Tag(tag) => format!("tag={}", tag),
@@ -202,7 +205,7 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
     if hash_index.is_none() {
         return Ok(GitRange {
             repo: url.to_string(),
-            treeish: GitTreeish::Branch("HEAD".to_string()),
+            treeish: GitTreeish::Head("HEAD".to_string()),
             prepare_params: PrepareParams::default(),
         });
     }
@@ -212,7 +215,7 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
 
     // New-style: "#commit=abcdef&workspace=foobar"
     if NEW_STYLE_GIT_SELECTOR.is_match(subsequent).unwrap() {
-        let mut treeish = GitTreeish::Commit("HEAD".to_string());
+        let mut treeish = GitTreeish::Head("HEAD".to_string());
         let mut prepare_params = PrepareParams::default();
 
         for pair in subsequent.split('&') {
@@ -221,8 +224,8 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
                 let value = urlencoding::decode(&value[1..]).unwrap();
 
                 match key {
-                    "branch" =>
-                        treeish = GitTreeish::Branch(value.to_string()),
+                    "head" =>
+                        treeish = GitTreeish::Head(value.to_string()),
 
                     "commit" =>
                         treeish = GitTreeish::Commit(value.to_string()),
@@ -257,7 +260,7 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
         let subsequent = &subsequent[1..];
 
         match kind {
-            "branch" => GitTreeish::Branch(subsequent.to_string()),
+            "head" => GitTreeish::Head(subsequent.to_string()),
             "commit" => GitTreeish::Commit(subsequent.to_string()),
             "semver" => GitTreeish::Semver(zpm_semver::Range::from_file_string(subsequent)?),
             "tag" => GitTreeish::Tag(subsequent.to_string()),
@@ -303,7 +306,7 @@ pub async fn resolve_git_treeish(git_range: &GitRange) -> Result<String, Error> 
                 Ok(result)
             } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Tag(treeish.clone())).await {
                 Ok(result)
-            } else if let Ok(result ) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Branch(treeish.clone())).await {
+            } else if let Ok(result ) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Head(treeish.clone())).await {
                 Ok(result)
             } else {
                 Err(Error::InvalidGitSpecifier)
@@ -322,15 +325,15 @@ async fn resolve_git_treeish_stricter(repo: &str, treeish: GitTreeish) -> Result
             unreachable!();
         },
 
-        GitTreeish::Branch(branch) => {
-            let ref_name = if branch == "HEAD" {
+        GitTreeish::Head(head) => {
+            let ref_name = if head == "HEAD" {
                 "HEAD".to_string()
             } else {
-                format!("refs/heads/{}", branch)
+                format!("refs/heads/{}", head)
             };
 
             let head = refs.get(&ref_name)
-                .ok_or(Error::InvalidGitBranch(branch))?;
+                .ok_or(Error::InvalidGitBranch(head))?;
 
             Ok(head.to_string())
         }
@@ -386,13 +389,32 @@ fn make_git_env() -> BTreeMap<String, String> {
 }
 
 pub async fn clone_repository(url: &str, commit: &str) -> Result<Path, Error> {
-    let git_range = extract_git_range(url)?;
+    let git_range
+        = extract_git_range(url)?;
 
-    let normalized_repo_url = normalize_git_url(git_range.repo);
+    let normalized_repo_url
+        = normalize_git_url(git_range.repo);
 
     let clone_dir
         = Path::temp_dir()?;
 
+    if download_into(&normalized_repo_url, commit, &clone_dir).await?.is_some() {
+        return Ok(clone_dir);
+    }
+
+    git_clone_into(&normalized_repo_url, commit, &clone_dir).await?;
+    Ok(clone_dir)
+}
+
+async fn download_into(normalized_repo_url: &str, commit: &str, download_dir: &Path) -> Result<Option<()>, Error> {
+    if github::download_into(normalized_repo_url, commit, download_dir).await?.is_some() {
+        return Ok(Some(()));
+    }
+
+    Ok(None)
+}
+
+async fn git_clone_into(normalized_repo_url: &str, commit: &str, clone_dir: &Path) -> Result<(), Error> {
     Command::new("git")
         .envs(make_git_env())
         .arg("clone")
@@ -404,7 +426,7 @@ pub async fn clone_repository(url: &str, commit: &str) -> Result<Path, Error> {
         .status
         .success()
         .then_some(())
-        .ok_or_else(|| Error::RepositoryCloneFailed(normalized_repo_url.clone()))?;
+        .ok_or_else(|| Error::RepositoryCloneFailed(normalized_repo_url.to_string()))?;
 
     Command::new("git")
         .envs(make_git_env())
@@ -415,7 +437,7 @@ pub async fn clone_repository(url: &str, commit: &str) -> Result<Path, Error> {
         .status
         .success()
         .then_some(())
-        .ok_or_else(|| Error::RepositoryCheckoutFailed(normalized_repo_url.clone(), commit.to_string()))?;
+        .ok_or_else(|| Error::RepositoryCheckoutFailed(normalized_repo_url.to_string(), commit.to_string()))?;
 
-    Ok(clone_dir)
+    Ok(())
 }

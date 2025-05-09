@@ -10,6 +10,7 @@ pub mod content_flags;
 pub mod manifest_finder;
 pub mod error;
 pub mod fetchers;
+pub mod github;
 pub mod git;
 pub mod graph;
 pub mod hash;

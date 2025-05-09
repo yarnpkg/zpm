@@ -52,6 +52,9 @@ pub enum Error {
     #[error("Failed to change the current working directory")]
     FailedToChangeCwd,
 
+    #[error("Failed to retrieve the latest Yarn Classic version")]
+    FailedToRetrieveLatestClassicVersion,
+
     #[error("Format error ({0})")]
     FormatError(#[from] zpm_formats::Error),
 
@@ -66,6 +69,9 @@ pub enum Error {
 
     #[error("Package manifest not found")]
     ManifestNotFound,
+
+    #[error("Package manifest failed to parse ({0})")]
+    ManifestParseError(Path),
 
     #[error("Invalid descriptor ({0})")]
     InvalidDescriptor(String),
@@ -303,6 +309,12 @@ pub enum Error {
 
     #[error("Internal error: Join failed ({0})")]
     JoinFailed(#[from] Arc<JoinError>),
+
+    #[error("Your version of npm doesn't support workspaces")]
+    UnsupportedNpmWorkspaces(zpm_semver::Version),
+
+    #[error("Failed to get detected root")]
+    FailedToGetSwitchDetectedRoot,
 
     // Silent error; no particular message, just exit with an exit code 1
     #[error("")]

@@ -96,7 +96,7 @@ pub fn apply_patch<'a>(entries: Vec<Entry<'a>>, patch: &str) -> Result<Vec<Entry
 
                 let entry = Entry {
                     name: path.to_string(),
-                    mode: *mode as u64,
+                    mode: *mode,
                     crc: 0,
                     data: Cow::Owned(data),
                 };
@@ -115,7 +115,7 @@ pub fn apply_patch<'a>(entries: Vec<Entry<'a>>, patch: &str) -> Result<Vec<Entry
                     .get_mut(path.as_str())
                     .ok_or_else(|| Error::PatchedFileNotFound(path.to_string()))?;
 
-                entry.mode = *new_mode as u64;
+                entry.mode = *new_mode;
             },
 
             PatchFilePart::FileRename {from, to, ..} => {

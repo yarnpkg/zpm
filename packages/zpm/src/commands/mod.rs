@@ -1,7 +1,8 @@
-use std::process::ExitCode;
+use std::{process::ExitCode, str::FromStr};
 
-use clipanion::advanced::Cli;
+use clipanion::{prelude::*, program, Environment};
 use zpm_macros::track_time;
+use zpm_utils::ExplicitPath;
 
 mod debug;
 
@@ -10,7 +11,6 @@ mod bin;
 mod config;
 mod config_get;
 mod config_set;
-mod default;
 mod dlx;
 mod exec;
 mod install;
@@ -18,11 +18,13 @@ mod node;
 mod pack;
 mod remove;
 mod run;
+mod set_version;
 mod up;
 mod version;
 mod workspaces_list;
+mod workspace;
 
-clipanion::program!(YarnCli, [
+program!(YarnCli, [
     debug::check_ident::CheckIdent,
     debug::check_range::CheckRange,
     debug::check_reference::CheckReference,
@@ -34,11 +36,11 @@ clipanion::program!(YarnCli, [
     config::Config,
     config_get::ConfigGet,
     config_set::ConfigSet,
-    default::Default,
     dlx::DlxWithPackages,
     dlx::Dlx,
     exec::Exec,
     install::Install,
+    set_version::SetVersion,
     node::Node,
     pack::Pack,
     remove::Remove,
@@ -46,9 +48,28 @@ clipanion::program!(YarnCli, [
     up::Up,
     version::Version,
     workspaces_list::WorkspacesList,
+    workspace::Workspace,
 ]);
 
 #[track_time]
 pub fn run_default() -> ExitCode {
-    YarnCli::run_default()
+    let mut args = std::env::args()
+        .skip(1)
+        .collect::<Vec<_>>();
+
+    if let Some(first_arg) = args.first() {
+        let explicit_path
+            = ExplicitPath::from_str(first_arg);
+
+        if let Ok(explicit_path) = explicit_path {
+            explicit_path.raw_path.path.sys_set_current_dir().unwrap();
+            args.remove(0);
+        }
+    }
+
+    let env
+        = Environment::default()
+            .with_argv(args);
+
+    YarnCli::run(env)
 }

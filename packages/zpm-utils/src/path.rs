@@ -1,8 +1,30 @@
-use std::{io::Read, os::unix::ffi::OsStrExt, str::FromStr};
+use std::{io::{Read, Write}, os::unix::ffi::OsStrExt, str::FromStr};
 
 use bincode::{Decode, Encode};
 
 use crate::{impl_serialization_traits, path_resolve::resolve_path, FromFileString, PathError, OkMissing, PathIterator, ToFileString, ToHumanString};
+
+#[derive(Debug)]
+pub struct ExplicitPath {
+    pub raw_path: RawPath,
+}
+
+impl FromStr for ExplicitPath {
+    type Err = PathError;
+
+    fn from_str(val: &str) -> Result<ExplicitPath, PathError> {
+        if !val.contains('/') {
+            return Err(PathError::InvalidExplicitPathParameter(val.to_string()));
+        }
+
+        let raw_path
+            = RawPath::try_from(val)?;
+
+        Ok(ExplicitPath {
+            raw_path,
+        })
+    }
+}
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RawPath {
@@ -185,7 +207,12 @@ impl Path {
         self.path.starts_with("../") || self.path == ".."
     }
 
-    pub fn fs_create_parent(&self) -> std::io::Result<&Self> {
+    pub fn sys_set_current_dir(&self) -> Result<(), PathError> {
+        std::env::set_current_dir(&self.path)?;
+        Ok(())
+    }
+
+    pub fn fs_create_parent(&self) -> Result<&Self, PathError> {
         if let Some(parent) = self.dirname() {
             parent.fs_create_dir_all()?;
         }
@@ -193,23 +220,23 @@ impl Path {
         Ok(self)
     }
 
-    pub fn fs_create_dir_all(&self) -> std::io::Result<&Self> {
+    pub fn fs_create_dir_all(&self) -> Result<&Self, PathError> {
         std::fs::create_dir_all(&self.path)?;
         Ok(self)
     }
 
-    pub fn fs_create_dir(&self) -> std::io::Result<&Self> {
+    pub fn fs_create_dir(&self) -> Result<&Self, PathError> {
         std::fs::create_dir(&self.path)?;
         Ok(self)
     }
 
-    pub fn fs_set_permissions(&self, permissions: std::fs::Permissions) -> std::io::Result<&Self> {
+    pub fn fs_set_permissions(&self, permissions: std::fs::Permissions) -> Result<&Self, PathError> {
         std::fs::set_permissions(&self.path, permissions)?;
         Ok(self)
     }
 
-    pub fn fs_metadata(&self) -> std::io::Result<std::fs::Metadata> {
-        std::fs::metadata(&self.path)
+    pub fn fs_metadata(&self) -> Result<std::fs::Metadata, PathError> {
+        Ok(std::fs::metadata(&self.path)?)
     }
 
     pub fn fs_exists(&self) -> bool {
@@ -248,17 +275,17 @@ impl Path {
         }
     }
 
-    pub fn fs_read(&self) -> std::io::Result<Vec<u8>> {
-        std::fs::read(&self.to_path_buf())
+    pub fn fs_read(&self) -> Result<Vec<u8>, PathError> {
+        Ok(std::fs::read(&self.to_path_buf())?)
     }
 
-    pub fn fs_read_prealloc(&self) -> std::io::Result<Vec<u8>> {
+    pub fn fs_read_prealloc(&self) -> Result<Vec<u8>, PathError> {
         let metadata = self.fs_metadata()?;
 
-        self.fs_read_with_size(metadata.len())
+        Ok(self.fs_read_with_size(metadata.len())?)
     }
 
-    pub fn fs_read_with_size(&self, size: u64) -> std::io::Result<Vec<u8>> {
+    pub fn fs_read_with_size(&self, size: u64) -> Result<Vec<u8>, PathError> {
         let mut data = Vec::with_capacity(size as usize);
 
         let mut file = std::fs::File::open(&self.to_path_buf())?;
@@ -267,17 +294,17 @@ impl Path {
         Ok(data)
     }
 
-    pub fn fs_read_text(&self) -> std::io::Result<String> {
-        std::fs::read_to_string(self.to_path_buf())
+    pub fn fs_read_text(&self) -> Result<String, PathError> {
+        Ok(std::fs::read_to_string(self.to_path_buf())?)
     }
 
-    pub fn fs_read_text_prealloc(&self) -> std::io::Result<String> {
+    pub fn fs_read_text_prealloc(&self) -> Result<String, PathError> {
         let metadata = self.fs_metadata()?;
 
-        self.fs_read_text_with_size(metadata.len())
+        Ok(self.fs_read_text_with_size(metadata.len())?)
     }
 
-    pub fn fs_read_text_with_size(&self, size: u64) -> std::io::Result<String> {
+    pub fn fs_read_text_with_size(&self, size: u64) -> Result<String, PathError> {
         let mut data = String::with_capacity(size as usize);
 
         let mut file = std::fs::File::open(&self.to_path_buf())?;
@@ -286,28 +313,43 @@ impl Path {
         Ok(data)
     }
 
-    pub async fn fs_read_text_async(&self) -> std::io::Result<String> {
-        tokio::fs::read_to_string(self.to_path_buf()).await
+    pub async fn fs_read_text_async(&self) -> Result<String, PathError> {
+        Ok(tokio::fs::read_to_string(self.to_path_buf()).await?)
     }
 
-    pub fn fs_read_dir(&self) -> std::io::Result<std::fs::ReadDir> {
-        std::fs::read_dir(&self.to_path_buf())
+    pub fn fs_read_dir(&self) -> Result<std::fs::ReadDir, PathError> {
+        Ok(std::fs::read_dir(&self.to_path_buf())?)
     }
 
-    pub fn fs_write<T: AsRef<[u8]>>(&self, data: T) -> std::io::Result<&Self> {
+    pub fn fs_write<T: AsRef<[u8]>>(&self, data: T) -> Result<&Self, PathError> {
         std::fs::write(self.to_path_buf(), data)?;
         Ok(self)
     }
 
-    pub fn fs_write_text<T: AsRef<str>>(&self, text: T) -> std::io::Result<&Self> {
+    pub fn fs_write_text<T: AsRef<str>>(&self, text: T) -> Result<&Self, PathError> {
         std::fs::write(self.to_path_buf(), text.as_ref())?;
         Ok(self)
+    }
+
+    pub fn fs_append<T: AsRef<[u8]>>(&self, data: T) -> Result<&Self, PathError> {
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&self.to_path_buf())?;
+
+        file.write_all(data.as_ref())?;
+
+        Ok(self)
+    }
+
+    pub fn fs_append_text<T: AsRef<str>>(&self, text: T) -> Result<&Self, PathError> {
+        self.fs_append(text.as_ref())
     }
 
     pub fn fs_expect<T: AsRef<[u8]>>(&self, data: T, permissions: std::fs::Permissions) -> Result<&Self, PathError> {
         let path_buf = self.to_path_buf();
 
-        let update_content = std::fs::read(&path_buf)
+        let update_content = self.fs_read()
             .ok_missing()
             .map(|current| current.map(|current| current.ne(data.as_ref())).unwrap_or(true))?;
 
@@ -325,10 +367,10 @@ impl Path {
         Ok(self)
     }
 
-    pub fn fs_change<T: AsRef<[u8]>>(&self, data: T, permissions: std::fs::Permissions) -> std::io::Result<&Self> {
+    pub fn fs_change<T: AsRef<[u8]>>(&self, data: T, permissions: std::fs::Permissions) -> Result<&Self, PathError> {
         let path_buf = self.to_path_buf();
 
-        let update_content = std::fs::read(&path_buf)
+        let update_content = self.fs_read()
             .ok_missing()
             .map(|current| current.map(|current| current.ne(data.as_ref())).unwrap_or(true))?;
 
@@ -346,17 +388,17 @@ impl Path {
         Ok(self)
     }
 
-    pub fn fs_rename(&self, new_path: &Path) -> std::io::Result<&Self> {
+    pub fn fs_rename(&self, new_path: &Path) -> Result<&Self, PathError> {
         std::fs::rename(self.to_path_buf(), new_path.to_path_buf())?;
         Ok(self)
     }
 
-    pub fn fs_rm_file(&self) -> std::io::Result<&Self> {
+    pub fn fs_rm_file(&self) -> Result<&Self, PathError> {
         std::fs::remove_file(self.to_path_buf())?;
         Ok(self)
     }
 
-    pub fn fs_rm(&self) -> std::io::Result<&Self> {
+    pub fn fs_rm(&self) -> Result<&Self, PathError> {
         match self.fs_is_dir() {
             true => std::fs::remove_dir_all(self.to_path_buf()),
             false => std::fs::remove_file(self.to_path_buf()),

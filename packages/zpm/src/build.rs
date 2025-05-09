@@ -29,7 +29,7 @@ impl BuildRequest {
         let cwd_abs = project.project_cwd
             .with_join(&self.cwd);
 
-        let mut script_env = ScriptEnvironment::new()
+        let mut script_env = ScriptEnvironment::new()?
             .with_project(project)
             .with_package(project, &self.locator)?
             .with_env_variable("INIT_CWD", cwd_abs.as_str())

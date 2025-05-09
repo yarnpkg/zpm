@@ -16,7 +16,7 @@ impl Node {
         let project
             = project::Project::new(None).await?;
 
-        Ok(ScriptEnvironment::new()
+        Ok(ScriptEnvironment::new()?
             .with_project(&project)
             .enable_shell_forwarding()
             .run_exec("node", &self.args)

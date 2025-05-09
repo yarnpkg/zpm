@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use browser::BrowserField;
+use zpm_switch::PackageManagerField;
 use zpm_utils::Path;
 use bin::BinField;
 use bincode::{Decode, Encode};
@@ -11,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::{primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, PeerRange, Range}, system};
 
 pub mod bin;
+pub mod browser;
 pub mod exports;
 pub mod helpers;
 pub mod imports;
@@ -86,7 +89,7 @@ pub struct PublishConfig {
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub browser: Option<String>,
+    pub browser: Option<BrowserField>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,6 +103,10 @@ pub struct PublishConfig {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Encode, Decode)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package_manager: Option<PackageManagerField>,
+
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<Ident>,
@@ -126,7 +133,7 @@ pub struct Manifest {
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub browser: Option<String>,
+    pub browser: Option<BrowserField>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]

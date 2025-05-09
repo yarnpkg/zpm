@@ -4,7 +4,7 @@ use zpm_utils::Path;
 use clipanion::cli;
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, pack::{pack_list, pack_manifest}, primitives::Locator, project::{self, Project, Workspace}, script::ScriptEnvironment};
+use crate::{error::Error, pack::{pack_list, pack_manifest}, primitives::Locator, project::{self, Project, RunInstallOptions, Workspace}, script::ScriptEnvironment};
 
 #[cli::command(proxy)]
 #[cli::path("pack")]
@@ -28,16 +28,27 @@ impl Pack {
         let mut project
             = project::Project::new(None).await?;
 
-        project
-            .import_install_state()?;
+        let active_workspace
+            = project.active_workspace()?;
 
         let prepack_script
-            = project.find_script("prepack")
+            = project.find_package_script(&active_workspace.locator(), "prepack")
                 .map(Some).or_else(|e| e.ignore(|e| matches!(e, Error::ScriptNotFound(_))))?;
 
         let postpack_script
-            = project.find_script("postpack")
+            = project.find_package_script(&active_workspace.locator(), "postpack")
                 .map(Some).or_else(|e| e.ignore(|e| matches!(e, Error::ScriptNotFound(_))))?;
+
+        if prepack_script.is_some() || postpack_script.is_some() {
+            if self.install_if_needed {
+                project.run_install(RunInstallOptions {
+                    check_resolutions: false,
+                    refresh_lockfile: false,
+                }).await?;
+            } else {
+                project.import_install_state()?;
+            }
+        }
 
         self.maybe_run_script(&project, prepack_script).await?;
         let result = self.run_command(&project).await;
@@ -48,7 +59,7 @@ impl Pack {
 
     async fn maybe_run_script(&self, project: &Project, script: Option<(Locator, String)>) -> Result<(), Error> {
         if let Some((locator, script)) = script {
-            ScriptEnvironment::new()
+            ScriptEnvironment::new()?
                 .with_project(&project)
                 .with_package(&project, &locator)?
                 .run_script(&script, &Vec::<&str>::new())

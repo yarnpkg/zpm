@@ -31,7 +31,7 @@ impl<'a> TarIterator<'a> {
             return Err(Error::InvalidTarFilePath(name));
         }
 
-        let mode = from_oct(&self.buffer[offset + 100..offset + 108]);
+        let mode = from_oct(&self.buffer[offset + 100..offset + 108]) as u32;
         let data = &self.buffer[offset + 512..offset + 512 + size];
 
         Ok(Entry {

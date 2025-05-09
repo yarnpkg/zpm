@@ -17,9 +17,19 @@ pub use error::Error;
 #[derive(Debug, PartialEq)]
 pub struct Entry<'a> {
     pub name: String,
-    pub mode: u64,
+    pub mode: u32,
     pub crc: u32,
     pub data: Cow<'a, [u8]>,
+}
+
+pub fn entries_to_disk<'a>(entries: &[Entry<'a>], base: &Path) -> Result<(), Error> {
+    for entry in entries {
+        base.with_join_str(&entry.name)
+            .fs_create_parent()?
+            .fs_change(&entry.data, PermissionsExt::from_mode(entry.mode))?;
+    }
+
+    Ok(())
 }
 
 pub fn entries_from_folder<'a>(path: &Path) -> Result<Vec<Entry<'a>>, Error> {

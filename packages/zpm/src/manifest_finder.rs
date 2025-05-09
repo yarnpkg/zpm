@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, io, time::UNIX_EPOCH};
 
-use zpm_utils::Path;
 use bincode::{Decode, Encode};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use zpm_utils::Path;
 
 use crate::{error::Error, manifest::{helpers::read_manifest_with_size, Manifest}};
 
@@ -122,6 +122,10 @@ impl CachedManifestFinder {
                 continue;
             }
 
+            if is_dir && entry.file_name() == ".yarn" {
+                continue;
+            }
+
             let entry_rel_path = rel_path
                 .with_join_str(entry.file_name().to_str().unwrap());
 
@@ -156,7 +160,7 @@ impl ManifestFinder for CachedManifestFinder {
 
             let metadata = match abs_path.fs_metadata() {
                 Ok(metadata) => metadata,
-                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(CacheCheck::NotFound(rel_path.clone())),
+                Err(e) if e.io_kind() == Some(io::ErrorKind::NotFound) => return Ok(CacheCheck::NotFound(rel_path.clone())),
                 Err(e) => return Err(e.into()),
             };
 

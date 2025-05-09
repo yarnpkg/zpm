@@ -5,10 +5,10 @@ use clipanion::cli;
 
 use crate::{error::Error, project, script::ScriptEnvironment};
 
-#[cli::command(proxy)]
+#[cli::command(default, proxy)]
 #[cli::path("run")]
 pub struct Run {
-    #[cli::option("-T,--top-level")]
+    #[cli::option("-T,--top-level", default = false)]
     top_level: bool,
 
     #[cli::option("--error-if-missing", default = true)]
@@ -39,7 +39,7 @@ impl Run {
             = project.find_binary(&self.name);
 
         if let Ok(binary) = maybe_binary {
-            Ok(ScriptEnvironment::new()
+            Ok(ScriptEnvironment::new()?
                 .with_project(&project)
                 .with_package(&project, &project.active_package()?)?
                 .enable_shell_forwarding()
@@ -50,7 +50,7 @@ impl Run {
             let maybe_script = project.find_script(&self.name);
 
             if let Ok((locator, script)) = maybe_script {
-                Ok(ScriptEnvironment::new()
+                Ok(ScriptEnvironment::new()?
                     .with_project(&project)
                     .with_package(&project, &locator)?
                     .enable_shell_forwarding()

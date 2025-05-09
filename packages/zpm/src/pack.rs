@@ -423,7 +423,9 @@ pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) 
     }
 
     if let Some(browser) = &manifest.browser {
-        glob_ignore.add(&Path::new(), &format!("!/{}", browser))?;
+        for import_path in browser.paths() {
+            glob_ignore.add(&Path::new(), &format!("!/{}", import_path))?;
+        }
     }
 
     if let Some(module) = &manifest.module {

@@ -1,6 +1,8 @@
-use zpm_utils::Path;
-use bincode::{Decode, Encode};
+use std::str::FromStr;
+
 use itertools::Itertools;
+use zpm_utils::{Path, ToFileString};
+use bincode::{Decode, Encode};
 
 use crate::{error::Error, primitives::Locator, script::ScriptEnvironment};
 
@@ -25,9 +27,9 @@ pub async fn prepare_project(_locator: &Locator, folder_path: &Path, params: &Pr
     let package_manager = get_package_manager(folder_path)?;
 
     match package_manager {
-        PackageManager::Npm => prepare_npm_project(folder_path).await,
+        PackageManager::Npm => prepare_npm_project(folder_path, params).await,
         PackageManager::Pnpm => prepare_pnpm_project(folder_path, params).await,
-        PackageManager::YarnClassic => prepare_yarn_zpm_project(folder_path, params).await,
+        PackageManager::YarnClassic => prepare_yarn_classic_project(folder_path, params).await,
         PackageManager::YarnModern => prepare_yarn_modern_project(folder_path, params).await,
         PackageManager::YarnZpm => prepare_yarn_zpm_project(folder_path, params).await,
     }
@@ -51,7 +53,7 @@ fn get_package_manager(folder_path: &Path) -> Result<PackageManager, Error> {
             return Ok(PackageManager::YarnClassic);
         }
     } else if let Err(err) = yarn_lock_path {
-        if err.kind() != std::io::ErrorKind::NotFound {
+        if err.io_kind() != Some(std::io::ErrorKind::NotFound) {
             return Err(err.into());
         }
     }
@@ -63,8 +65,29 @@ fn get_package_manager(folder_path: &Path) -> Result<PackageManager, Error> {
     Ok(PackageManager::YarnZpm)
 }
 
-async fn prepare_npm_project(folder_path: &Path) -> Result<Vec<u8>, Error> {
-    ScriptEnvironment::new()
+async fn prepare_npm_project(folder_path: &Path, params: &PrepareParams) -> Result<Vec<u8>, Error> {
+    if params.workspace.is_some() {
+        // We run "npm version" and check it returns >=7.x
+
+        let version_result = ScriptEnvironment::new()?
+            .with_cwd(folder_path.clone())
+            .run_exec("npm", vec!["--version"])
+            .await
+            .ok()?;
+
+        let version_stdout
+            = String::from_utf8(version_result.output().stdout.trim_ascii().to_vec())?;
+
+        let version
+            = zpm_semver::Version::from_str(&version_stdout)
+               .expect("Expected a valid version");
+
+        if version.major < 7 {
+            return Err(Error::UnsupportedNpmWorkspaces(version));
+        }
+    }
+
+    ScriptEnvironment::new()?
         .with_cwd(folder_path.clone())
 
         // Otherwise npm won't properly set the user agent, using the Yarn one instead
@@ -75,13 +98,21 @@ async fn prepare_npm_project(folder_path: &Path) -> Result<Vec<u8>, Error> {
         .delete_env_variable("NPM_CONFIG_PRODUCTION")
         .delete_env_variable("NODE_ENV")
 
+        // We can't use `npm ci` because some projects don't have npm
+        // lockfiles that are up-to-date. Hopefully npm won't decide
+        // to change the versions randomly.
         .run_exec("npm", vec!["install", "--legacy-peer-deps"])
         .await
         .ok()?;
 
-    let pack_result = ScriptEnvironment::new()
+    let pack_args = match &params.workspace {
+        Some(workspace) => vec!["pack", "--silent", "--workspace", workspace],
+        None => vec!["pack", "--silent"],
+    };
+
+    let pack_result = ScriptEnvironment::new()?
         .with_cwd(folder_path.clone())
-        .run_exec("npm", vec!["pack", "--silent"])
+        .run_exec("npm", pack_args)
         .await
         .ok()?;
 
@@ -109,6 +140,50 @@ async fn prepare_npm_project(folder_path: &Path) -> Result<Vec<u8>, Error> {
     Ok(pack_tgz)
 }
 
+async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams) -> Result<Vec<u8>, Error> {
+    // Otherwise Yarn 1 will pack the .yarn directory :(
+    folder_path
+        .with_join_str(".npmignore")
+        .fs_append("/.yarn\n")?;
+
+    let default_yarn
+        = zpm_switch::get_latest_stable_version(Some("classic"))
+            .await
+            .map_err(|_| Error::FailedToRetrieveLatestClassicVersion)?
+            .to_file_string();
+
+    ScriptEnvironment::new()?
+        .with_cwd(folder_path.clone())
+        .with_env_variable("YARN_SWITCH_DEFAULT", &default_yarn)
+
+        // Remove environment variables that limit the install to just production dependencies
+        .delete_env_variable("NODE_ENV")
+
+        .run_exec("yarn", vec!["install"])
+        .await
+        .ok()?;
+
+    let pack_path = folder_path
+        .with_join_str("package.tgz");
+    
+    let pack_args = match &params.workspace {
+        Some(workspace) => vec!["workspace", workspace.as_str(), "pack", "--filename", pack_path.as_str()],
+        None => vec!["pack", "--filename", pack_path.as_str()],
+    };
+
+    ScriptEnvironment::new()?
+        .with_cwd(folder_path.clone())
+        .with_env_variable("YARN_SWITCH_DEFAULT", &default_yarn)
+        .run_exec("yarn", pack_args)
+        .await
+        .ok()?;
+
+    let pack_tgz
+        = pack_path.fs_read()?;
+    
+    Ok(pack_tgz)
+}
+
 async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams) -> Result<Vec<u8>, Error> {
     let pack_path = folder_path
         .with_join_str("package.tgz");
@@ -131,7 +206,7 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
         lockfile_path.fs_write(b"")?;
     }
 
-    ScriptEnvironment::new()
+    ScriptEnvironment::new()?
         .with_cwd(folder_path.clone())
 
         // We enable inline builds, because nobody wants to
@@ -149,13 +224,13 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
 }
 
 async fn prepare_pnpm_project(folder_path: &Path, _params: &PrepareParams) -> Result<Vec<u8>, Error> {
-    ScriptEnvironment::new()
+    ScriptEnvironment::new()?
         .with_cwd(folder_path.clone())
         .run_exec("pnpm", vec!["install"])
         .await
         .ok()?;
 
-    let pack_result = ScriptEnvironment::new()
+    let pack_result = ScriptEnvironment::new()?
         .with_cwd(folder_path.clone())
         .run_exec("pnpm", vec!["pack"])
         .await
@@ -172,14 +247,12 @@ async fn prepare_pnpm_project(folder_path: &Path, _params: &PrepareParams) -> Re
 }
 
 async fn prepare_yarn_zpm_project(folder_path: &Path, params: &PrepareParams) -> Result<Vec<u8>, Error> {
+    let cwd_path = params.cwd.as_ref()
+        .map(|cwd| folder_path.with_join_str(cwd))
+        .unwrap_or(folder_path.clone());
+
     let archive_path = folder_path
         .with_join_str("archive.tgz");
-
-    ScriptEnvironment::new()
-        .with_cwd(folder_path.clone())
-        .run_exec("yarn", vec!["install"])
-        .await
-        .ok()?;
 
     let mut pack_args = vec![];
 
@@ -189,11 +262,12 @@ async fn prepare_yarn_zpm_project(folder_path: &Path, params: &PrepareParams) ->
     }
 
     pack_args.push("pack");
-    pack_args.push("--filename");
+    pack_args.push("--install-if-needed");
+    pack_args.push("--out");
     pack_args.push(archive_path.as_str());
 
-    ScriptEnvironment::new()
-        .with_cwd(folder_path.clone())
+    ScriptEnvironment::new()?
+        .with_cwd(cwd_path.clone())
         .run_exec("yarn", pack_args)
         .await
         .ok()?;

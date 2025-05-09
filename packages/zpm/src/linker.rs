@@ -1,6 +1,6 @@
 use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
 
-use zpm_utils::Path;
+use zpm_utils::{Path, PathError};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_with::serde_as;
@@ -31,7 +31,7 @@ fn remove_nm(nm_path: Path) -> Result<(), Error> {
     let entries = nm_path.fs_read_dir();
 
     match entries {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+        Err(PathError::IoError {inner, ..}) if inner.kind() == std::io::ErrorKind::NotFound
             => Ok(()),
 
         Err(error)

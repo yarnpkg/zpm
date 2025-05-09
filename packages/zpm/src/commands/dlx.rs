@@ -1,7 +1,7 @@
 use std::process::ExitStatus;
 
 use zpm_utils::Path;
-use clipanion::cli;
+use clipanion::{prelude::*, cli};
 use zpm_semver::RangeKind;
 
 use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, Descriptor, LooseDescriptor}, project::{self, Project}, script::{Binary, ScriptEnvironment}};
@@ -9,7 +9,7 @@ use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor
 #[cli::command(proxy)]
 #[cli::path("dlx")]
 pub struct DlxWithPackages {
-    #[cli::option("-p,--package", required)]
+    #[cli::option("-p,--package", min_len = 1)]
     packages: Vec<LooseDescriptor>,
 
     name: String,
@@ -147,7 +147,7 @@ fn find_binary(project: &Project, preferred_name: &str, fallback: bool) -> Resul
 }
 
 async fn run_binary(project: &Project, bin: Binary, args: Vec<String>, current_cwd: Path) -> Result<ExitStatus, Error> {
-    Ok(ScriptEnvironment::new()
+    Ok(ScriptEnvironment::new()?
         .with_project(&project)
         .with_package(&project, &project.active_package()?)?
         .with_cwd(current_cwd)

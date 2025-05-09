@@ -52,7 +52,7 @@ impl<'a> ZipIterator<'a> {
 
         Ok(Entry {
             name: name.to_string(),
-            mode: central_directory_record.external_file_attributes as u64 >> 16,
+            mode: (central_directory_record.external_file_attributes as u64 >> 16) as u32,
             crc: general_record.header.crc_32,
             data: Cow::Borrowed(data),
         })

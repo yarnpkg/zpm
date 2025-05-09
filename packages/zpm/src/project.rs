@@ -382,7 +382,8 @@ impl Project {
             .fs_read_text_with_zip()?;
 
         let manifest
-            = sonic_rs::from_str::<BinManifest>(&manifest_text)?;
+            = sonic_rs::from_str::<BinManifest>(&manifest_text)
+                .map_err(|_| Error::ManifestParseError(location.clone()))?;
 
         Ok(match manifest.bin {
             Some(BinField::String(bin)) => {
@@ -441,6 +442,10 @@ impl Project {
     pub fn find_script(&self, name: &str) -> Result<(Locator, String), Error> {
         let active_package = self.active_package()?;
 
+        self.find_package_script(&active_package, name)
+    }
+
+    pub fn find_package_script(&self, locator: &Locator, name: &str) -> Result<(Locator, String), Error> {
         #[derive(Debug, Clone, Deserialize)]
         struct ScriptManifest {
             pub scripts: Option<BTreeMap<String, String>>,
@@ -455,7 +460,7 @@ impl Project {
             = sonic_rs::from_str::<ScriptManifest>(&manifest_text)?;
 
         if let Some(script) = manifest.scripts.as_ref().and_then(|s| s.get(name)) {
-            return Ok((active_package, script.clone()));
+            return Ok((locator.clone(), script.clone()));
         }
 
         if !name.contains(':') {
@@ -539,8 +544,8 @@ impl Workspace {
         let manifest_path = root
             .with_join_str(MANIFEST_NAME);
 
-        let manifest_meta = manifest_path.fs_metadata().map_err(|err| match err.kind() {
-            ErrorKind::NotFound | ErrorKind::NotADirectory => Error::ManifestNotFound,
+        let manifest_meta = manifest_path.fs_metadata().map_err(|err| match err.io_kind() {
+            Some(ErrorKind::NotFound) | Some(ErrorKind::NotADirectory) => Error::ManifestNotFound,
             _ => err.into(),
         })?;
 

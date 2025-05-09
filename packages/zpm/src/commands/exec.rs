@@ -21,7 +21,7 @@ impl Exec {
             .import_install_state()?
             .lazy_install().await?;
 
-        Ok(ScriptEnvironment::new()
+        Ok(ScriptEnvironment::new()?
             .with_project(&project)
             .enable_shell_forwarding()
             .run_script(&self.script, &self.args)
