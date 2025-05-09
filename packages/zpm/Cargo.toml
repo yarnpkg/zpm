@@ -7,7 +7,7 @@ edition = "2021"
 bytes = "1.7.1"
 bincode = {version = "2.0.0-rc.3", features = ["serde"] }
 blake2 = { version = "0.10.6" }
-clipanion = { path = "../../../clipanion-rs/packages/clipanion" }
+clipanion = { git = "ssh://git@github.com/arcanis/clipanion-rs.git" }
 colored = "3.0.0"
 fancy-regex = "0.13.0"
 futures = "0.3.30"
