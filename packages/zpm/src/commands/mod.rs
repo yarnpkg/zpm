@@ -73,19 +73,16 @@ pub fn run_default() -> ExitCode {
         = option_env!("INFRA_GIT_SHA");
 
     if let Some(sha) = git_sha {
-        let version
+        let mut version
             = zpm_semver::Version::from_str(&version_str).unwrap();
 
-        let mut next_patch_version
-            = version.next_patch();
-
-        next_patch_version.rc = Some(vec![
+        version.rc = Some(vec![
             zpm_semver::VersionRc::String("commit".to_string()),
             zpm_semver::VersionRc::String(sha.to_string()),
         ]);
 
         version_str
-            = next_patch_version.to_string();
+            = version.to_string();
     }
 
     let env
