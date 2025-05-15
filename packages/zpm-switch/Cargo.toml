@@ -3,6 +3,10 @@ name = "zpm-switch"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "yarn-switch"
+path = "src/main.rs"
+
 [dependencies]
 bincode = {version = "2.0.0-rc.3", features = ["serde"] }
 blake2 = { version = "0.10.6" }

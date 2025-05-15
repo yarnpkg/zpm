@@ -46,7 +46,7 @@ async fn cache<T: Serialize, R: Future<Output = Result<(), Error>>, F: FnOnce(Pa
     Ok(cache_path)
 }
 
-async fn install_native_from_url(url: &str) -> Result<Command, Error> {
+async fn install_native_from_zip(url: &str, binary_name: &str) -> Result<Command, Error> {
     let cache_path = cache(url, |p| async move {
         let zip
             = fetch(url).await?;
@@ -63,7 +63,8 @@ async fn install_native_from_url(url: &str) -> Result<Command, Error> {
     }).await?;
 
     let main_file_abs = cache_path
-        .with_join_str("bin/zpm");
+        .with_join_str("bin")
+        .with_join_str(binary_name);
 
     let command
         = Command::new(main_file_abs.to_path_buf());
@@ -128,7 +129,7 @@ pub async fn install_package_manager(package_manager: &VersionPackageManagerRefe
         = format!("https://repo.yarnpkg.com/tags/{}/{}", version, platform);
 
     if zpm_semver::Range::from_file_string(">=6.0.0-0").unwrap().check(&package_manager.version) {
-        return install_native_from_url(&url).await;
+        return install_native_from_zip(&url, "yarn").await;
     }
 
     if zpm_semver::Range::from_file_string(">=2.0.0-0").unwrap().check(&package_manager.version) {

@@ -90,6 +90,8 @@ pub fn run_default() -> ExitCode {
 
     let env
         = Environment::default()
+            .with_program_name("Yarn Package Manager".to_string())
+            .with_binary_name("yarn".to_string())
             .with_version(version_str)
             .with_argv(args);
 

@@ -3,6 +3,10 @@ name = "zpm"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "yarn"
+path = "src/main.rs"
+
 [dependencies]
 bytes = "1.7.1"
 bincode = {version = "2.0.0-rc.3", features = ["serde"] }
