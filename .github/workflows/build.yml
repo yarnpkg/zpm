@@ -35,7 +35,6 @@ jobs:
 
           cargo build --verbose --release
           strip target/release/{zpm,zpm-switch}
-          zip -r artifacts.zip target/release/{zpm,zpm-switch}
 
           echo "INFRA_PLATFORM=$(./target/release/zpm debug print-platform)" >> $GITHUB_ENV
 
@@ -43,7 +42,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: zpm-${{env.INFRA_PLATFORM}}
-          path: artifacts.zip
+          path: |
+            target/release/zpm
+            target/release/zpm-switch
           retention-days: 7
 
   test-report:
@@ -60,8 +61,11 @@ jobs:
           name: zpm-x86_64-unknown-linux-gnu
 
       - name: Puts back the binaries
-        run: unzip ./artifacts.zip
-   
+        run: |
+          mkdir -p target/release
+          mv {zpm,zpm-switch} target/release/
+          chmod +x target/release/{zpm,zpm-switch}
+
       - name: Clone the berry repo
         uses: actions/checkout@v4
         with:
@@ -110,8 +114,11 @@ jobs:
           name: zpm-x86_64-unknown-linux-gnu
   
       - name: Puts back the binaries
-        run: unzip ./artifacts.zip
-    
+        run: |
+          mkdir -p target/release
+          mv {zpm,zpm-switch} target/release/
+          chmod +x target/release/{zpm,zpm-switch}
+      
       - name: Download the test report
         uses: actions/download-artifact@v4
         with:

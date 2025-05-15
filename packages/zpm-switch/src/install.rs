@@ -1,7 +1,8 @@
-use std::{future::Future, process::Command};
+use std::{fs::Permissions, future::Future, os::unix::fs::PermissionsExt, process::Command};
 
 use blake2::{Blake2s256, Digest};
 use serde::Serialize;
+use zpm_formats::entries_to_disk;
 use zpm_utils::{get_system_string, FromFileString, Path};
 
 use crate::{errors::Error, http::fetch, manifest::VersionPackageManagerReference};
@@ -47,12 +48,22 @@ async fn cache<T: Serialize, R: Future<Output = Result<(), Error>>, F: FnOnce(Pa
 
 async fn install_native_from_url(url: &str) -> Result<Command, Error> {
     let cache_path = cache(url, |p| async move {
-        p.with_join_str("bin").fs_write(fetch(url).await?)?;
+        let zip
+            = fetch(url).await?;
+
+        let entries
+            = zpm_formats::zip::entries_from_zip(&zip)?;
+
+        let target_dir
+            = p.with_join_str("bin");
+
+        entries_to_disk(&entries, &target_dir)?;
+
         Ok(())
     }).await?;
 
     let main_file_abs = cache_path
-        .with_join_str("bin");
+        .with_join_str("bin/zpm");
 
     let command
         = Command::new(main_file_abs.to_path_buf());
