@@ -34,17 +34,17 @@ jobs:
           export INFRA_GIT_SHA=$GITHUB_SHA
 
           cargo build --verbose --release
-          strip target/release/{zpm,zpm-switch}
+          strip target/release/{yarn,yarn-switch}
 
-          echo "INFRA_PLATFORM=$(./target/release/zpm debug print-platform)" >> $GITHUB_ENV
+          echo "INFRA_PLATFORM=$(./target/release/yarn debug print-platform)" >> $GITHUB_ENV
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: zpm-${{env.INFRA_PLATFORM}}
+          name: yarn-${{env.INFRA_PLATFORM}}
           path: |
-            target/release/zpm
-            target/release/zpm-switch
+            target/release/yarn
+            target/release/yarn-switch
           retention-days: 7
 
   test-report:
@@ -58,13 +58,13 @@ jobs:
       - name: Download the binary
         uses: actions/download-artifact@v4
         with:
-          name: zpm-x86_64-unknown-linux-gnu
+          name: yarn-x86_64-unknown-linux-gnu
 
       - name: Puts back the binaries
         run: |
           mkdir -p target/release
-          mv {zpm,zpm-switch} target/release/
-          chmod +x target/release/{zpm,zpm-switch}
+          mv {yarn,yarn-switch} target/release/
+          chmod +x target/release/{yarn,yarn-switch}
 
       - name: Clone the berry repo
         uses: actions/checkout@v4
@@ -111,13 +111,13 @@ jobs:
       - name: Download the binary
         uses: actions/download-artifact@v4
         with:
-          name: zpm-x86_64-unknown-linux-gnu
+          name: yarn-x86_64-unknown-linux-gnu
   
       - name: Puts back the binaries
         run: |
           mkdir -p target/release
-          mv {zpm,zpm-switch} target/release/
-          chmod +x target/release/{zpm,zpm-switch}
+          mv {yarn,yarn-switch} target/release/
+          chmod +x target/release/{yarn,yarn-switch}
       
       - name: Download the test report
         uses: actions/download-artifact@v4
