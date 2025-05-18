@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::{self, Display, Formatter}, sync::LazyLock};
+use std::{clone, collections::BTreeMap, fmt::{self, Display, Formatter}, sync::LazyLock};
 
 use zpm_utils::Path;
 use bincode::{Decode, Encode};
@@ -279,11 +279,15 @@ pub fn extract_git_range<P: AsRef<str>>(url: P) -> Result<GitRange, Error> {
 
 async fn ls_remote(repo: &str) -> Result<BTreeMap<String, String>, Error> {
     let output = tokio::process::Command::new("git")
+        .envs(make_git_env())
         .arg("ls-remote")
         .arg(repo)
         .output()
-        .await
-        .map_err(|_| Error::GitError)?;
+        .await?;
+
+    if !output.status.success() {
+        return Err(Error::GitError);
+    }
 
     let output = String::from_utf8(output.stdout).unwrap();
     let mut refs = BTreeMap::new();
@@ -299,14 +303,22 @@ async fn ls_remote(repo: &str) -> Result<BTreeMap<String, String>, Error> {
     Ok(refs)
 }
 
+fn tolerate_non_git_errors<T>(result: Result<T, Error>) -> Result<Result<T, Error>, Error> {
+    if let Err(Error::GitError) = result {
+        Err(Error::GitError)
+    } else {
+        Ok(result)
+    }
+}
+
 pub async fn resolve_git_treeish(git_range: &GitRange) -> Result<String, Error> {
     match &git_range.treeish {
         GitTreeish::AnythingGoes(treeish) => {
-            if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Commit(treeish.clone())).await {
+            if let Ok(result) = tolerate_non_git_errors(resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Commit(treeish.clone())).await)? {
                 Ok(result)
-            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Tag(treeish.clone())).await {
+            } else if let Ok(result) = tolerate_non_git_errors(resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Tag(treeish.clone())).await)? {
                 Ok(result)
-            } else if let Ok(result ) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Head(treeish.clone())).await {
+            } else if let Ok(result) = tolerate_non_git_errors(resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Head(treeish.clone())).await)? {
                 Ok(result)
             } else {
                 Err(Error::InvalidGitSpecifier)

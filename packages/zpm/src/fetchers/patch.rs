@@ -41,7 +41,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             true => project.project_cwd.with_join_str(&params.path[2..]),
             false => parent_data.package_data.context_directory().with_join_str(&params.path),
         };
-            
+
         let patch_content = patch_path
             .fs_read_text_with_zip()?;
 

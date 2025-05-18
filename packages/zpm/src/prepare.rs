@@ -62,6 +62,10 @@ fn get_package_manager(folder_path: &Path) -> Result<PackageManager, Error> {
         return Ok(PackageManager::Pnpm);
     }
 
+    if folder_path.with_join_str("package-lock.json").fs_exists() {
+        return Ok(PackageManager::Npm);
+    }
+
     Ok(PackageManager::YarnZpm)
 }
 
@@ -185,16 +189,6 @@ async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams
 }
 
 async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams) -> Result<Vec<u8>, Error> {
-    let pack_path = folder_path
-        .with_join_str("package.tgz");
-
-    let pack_args = match &params.workspace {
-        Some(workspace_name) =>
-            vec!["workspace", workspace_name.as_str(), "pack", "--install-if-needed", "--filename", pack_path.as_str()],
-        None =>
-            vec!["pack", "--install-if-needed", "--filename", pack_path.as_str()],
-    };
-
     // If a lockfile doesn't exist we create a empty one to
     // prevent the project root detection from thinking it's in an
     // undeclared workspace when the user has a lockfile in their home
@@ -206,12 +200,30 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
         lockfile_path.fs_write(b"")?;
     }
 
+    let default_yarn
+        = zpm_switch::get_latest_stable_version(Some("berry"))
+            .await
+            .map_err(|_| Error::FailedToRetrieveLatestClassicVersion)?
+            .to_file_string();
+
+    let pack_path = folder_path
+        .with_join_str("package.tgz");
+
+    let pack_args = match &params.workspace {
+        Some(workspace_name) =>
+            vec!["workspace", workspace_name.as_str(), "pack", "--install-if-needed", "--filename", pack_path.as_str()],
+        None =>
+            vec!["pack", "--install-if-needed", "--filename", pack_path.as_str()],
+    };
+
     ScriptEnvironment::new()?
         .with_cwd(folder_path.clone())
+        .with_standard_binaries()
 
         // We enable inline builds, because nobody wants to
         // read a logfile telling them to open another logfile
         .with_env_variable("YARN_ENABLE_INLINE_BUILDS", "1")
+        .with_env_variable("YARNSW_DEFAULT", &default_yarn)
 
         .run_exec("yarn", pack_args)
         .await

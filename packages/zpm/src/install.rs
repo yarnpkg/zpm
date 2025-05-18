@@ -270,21 +270,25 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                 unreachable!("PhantomData should never be instantiated"),
 
             InstallOp::Validate {descriptor, locator} => {
-                tokio::time::timeout(
-                    timeout,
-                    validate_resolution(context.clone(), descriptor.clone(), locator.clone(), dependencies)
-                ).await.map_err(|_| Error::TaskTimeout)??;
+                with_context_result(ReportContext::Descriptor(descriptor.clone()), async {
+                    tokio::time::timeout(
+                        timeout,
+                        validate_resolution(context.clone(), descriptor.clone(), locator.clone(), dependencies)
+                    ).await.map_err(|_| Error::TaskTimeout)??;
 
-                Ok(InstallOpResult::Validated)
+                    Ok(InstallOpResult::Validated)
+                }).await
             },
 
             InstallOp::Refresh {locator} => {
-                let future = tokio::time::timeout(
-                    timeout,
-                    resolve_locator(context.clone(), locator.clone(), dependencies)
-                ).await.map_err(|_| Error::TaskTimeout)?;
+                with_context_result(ReportContext::Locator(locator.clone()), async {
+                    let future = tokio::time::timeout(
+                        timeout,
+                        resolve_locator(context.clone(), locator.clone(), dependencies)
+                    ).await.map_err(|_| Error::TaskTimeout)?;
 
-                Ok(InstallOpResult::Resolved(future?))
+                    Ok(InstallOpResult::Resolved(future?))
+                }).await
             },
 
             InstallOp::Resolve {descriptor} => {
