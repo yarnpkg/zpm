@@ -25,6 +25,7 @@ mod workspaces_list;
 mod workspace;
 
 program!(YarnCli, [
+    debug::check_descriptor::CheckDescriptor,
     debug::check_ident::CheckIdent,
     debug::check_range::CheckRange,
     debug::check_reference::CheckReference,

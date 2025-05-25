@@ -1,8 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, fs::Permissions, os::unix::fs::PermissionsExt};
 
 use clipanion::cli;
+use zpm_parsers::{JsonFormatter, JsonPath, JsonValue};
 use zpm_semver::RangeKind;
-use zpm_utils::FromFileString;
+use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{algolia::query_algolia, error::Error, install::InstallContext, primitives::{loose_descriptor, range::{AnonymousSemverRange, SemverPeerRange}, Descriptor, LooseDescriptor, PeerRange, Range}, project};
 
@@ -139,7 +140,7 @@ pub struct Add {
 impl Add {
     #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
-        let mut project
+        let project
             = project::Project::new(None).await?;
 
         let range_kind = if self.fixed {
@@ -205,9 +206,15 @@ impl Add {
         let requests
             = expand_with_types(&install_context, &resolve_options, requests).await?;
 
-        let active_workspace
-            = project.active_workspace_mut()?;
+        let manifest_path = active_workspace.path
+            .with_join_str(project::MANIFEST_NAME);
 
+        let manifest_content = manifest_path
+            .fs_read_text_prealloc()?;
+
+        let mut formatter
+            = JsonFormatter::from(&manifest_content).unwrap();
+        
         for (descriptor, request) in &requests {
             if request.dev && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
                 return Err(Error::ConflictingOptions(format!("{} is already listed as a regular dependency of this workspace", descriptor.ident)));
@@ -226,23 +233,43 @@ impl Add {
             }
 
             if request.dev {
-                active_workspace.manifest.dev_dependencies.insert(descriptor.ident.clone(), descriptor.clone());
+                formatter.set(
+                    &vec!["devDependencies".to_string(), descriptor.ident.to_string()].into(), 
+                    JsonValue::String(descriptor.range.to_file_string()),
+                ).unwrap();
             }
 
             if request.optional {
-                active_workspace.manifest.remote.optional_dependencies.insert(descriptor.ident.clone(), descriptor.clone());
+                formatter.set(
+                    &vec!["optionalDependencies".to_string(), descriptor.ident.to_string()].into(), 
+                    JsonValue::String(descriptor.range.to_file_string()),
+                ).unwrap();
             }
 
             if request.peer {
-                active_workspace.manifest.remote.peer_dependencies.insert(descriptor.ident.clone(), PeerRange::Semver(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}));
+                formatter.set(
+                    &vec!["peerDependencies".to_string(), descriptor.ident.to_string()].into(), 
+                    JsonValue::String(descriptor.range.to_file_string()),
+                ).unwrap();
             }
 
             if request.prod {
-                active_workspace.manifest.remote.dependencies.insert(descriptor.ident.clone(), descriptor.clone());
+                formatter.set(
+                    &vec!["dependencies".to_string(), descriptor.ident.to_string()].into(), 
+                    JsonValue::String(descriptor.range.to_file_string()),
+                ).unwrap();
             }
         }    
 
-        active_workspace.write_manifest()?;
+        // Write the formatted result back
+        let updated_content
+            = formatter.to_string();
+
+        manifest_path
+            .fs_change(&updated_content, Permissions::from_mode(0o644))?;
+
+        let mut project
+            = project::Project::new(None).await?;
 
         project.run_install(project::RunInstallOptions {
             check_resolutions: false,
