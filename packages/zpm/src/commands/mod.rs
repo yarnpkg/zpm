@@ -72,16 +72,19 @@ pub fn run_default() -> ExitCode {
     let mut version_str
         = env!("CARGO_PKG_VERSION").to_string();
 
+    let git_date
+        = option_env!("INFRA_GIT_DATE");
     let git_sha
         = option_env!("INFRA_GIT_SHA");
 
-    if let Some(sha) = git_sha {
+    if let (Some(date), Some(sha)) = (git_date, git_sha) {
         let mut version
             = zpm_semver::Version::from_str(&version_str).unwrap();
 
         version.rc = Some(vec![
-            zpm_semver::VersionRc::String("commit".to_string()),
-            zpm_semver::VersionRc::String(sha.to_string()),
+            zpm_semver::VersionRc::String("git".to_string()),
+            zpm_semver::VersionRc::Number(date.parse::<u32>().unwrap()),
+            zpm_semver::VersionRc::String(format!("hash-{}", sha.to_string())),
         ]);
 
         version_str

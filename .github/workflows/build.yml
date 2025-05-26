@@ -32,6 +32,7 @@ jobs:
       - name: Build
         run: |
           export INFRA_GIT_SHA=$GITHUB_SHA
+          export INFRA_GIT_DATE=$(git show -s --format=%ct --date=format:'%Y%m%d' $GITHUB_SHA)
 
           cargo build --verbose --release
           strip target/release/{yarn,yarn-switch}
