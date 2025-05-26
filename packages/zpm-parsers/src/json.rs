@@ -1,6 +1,6 @@
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::Error;
+use crate::JsonPath;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
@@ -44,190 +44,6 @@ impl From<serde_json::Value> for JsonValue {
         }
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct JsonPath {
-    segments: Vec<String>,
-}
-
-impl JsonPath {
-    pub fn new() -> Self {
-        Self {
-            segments: Vec::new(),
-        }
-    }
-
-    pub fn from_segments(segments: Vec<String>) -> Self {
-        Self { segments }
-    }
-
-    pub fn segments(&self) -> &[String] {
-        &self.segments
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.segments.is_empty()
-    }
-}
-
-impl From<Vec<String>> for JsonPath {
-    fn from(segments: Vec<String>) -> Self {
-        Self::from_segments(segments)
-    }
-}
-
-impl From<Vec<&str>> for JsonPath {
-    fn from(segments: Vec<&str>) -> Self {
-        Self::from_segments(segments.into_iter().map(|s| s.to_string()).collect())
-    }
-}
-
-impl FromFileString for JsonPath {
-    type Error = Error;
-
-    fn from_file_string(src: &str) -> Result<Self, Error> {
-        let mut segments = Vec::new();
-        let mut chars = src.chars().peekable();
-        let mut current_segment = String::new();
-
-        while let Some(ch) = chars.next() {
-            match ch {
-                '.' => {
-                    if !current_segment.is_empty() {
-                        segments.push(current_segment);
-                        current_segment = String::new();
-                    }
-                }
-
-                '[' => {
-                    if !current_segment.is_empty() {
-                        segments.push(current_segment);
-                        current_segment = String::new();
-                    }
-
-                    // Check if it's a string or number
-                    match chars.peek() {
-                        Some('"') | Some('\'') => {
-                            // String index
-                            let quote_char = chars.next().unwrap();
-                            let mut escaped = false;
-                            
-                            while let Some(ch) = chars.next() {
-                                if escaped {
-                                    current_segment.push(ch);
-                                    escaped = false;
-                                } else if ch == '\\' {
-                                    escaped = true;
-                                } else if ch == quote_char {
-                                    break;
-                                } else {
-                                    current_segment.push(ch);
-                                }
-                            }
-
-                            // Expect closing bracket
-                            match chars.next() {
-                                Some(']') => {
-                                    segments.push(current_segment);
-                                    current_segment = String::new();
-                                }
-                                _ => return Err(Error::InvalidSyntax("Expected ']' after quoted string".to_string())),
-                            }
-                        },
-
-                        Some('0'..='9') => {
-                            // Numeric index
-                            while let Some(ch) = chars.peek() {
-                                if ch.is_ascii_digit() {
-                                    current_segment.push(chars.next().unwrap());
-                                } else {
-                                    break;
-                                }
-                            }
-
-                            // Expect closing bracket
-                            match chars.next() {
-                                Some(']') => {
-                                    segments.push(current_segment);
-                                    current_segment = String::new();
-                                }
-                                _ => return Err(Error::InvalidSyntax("Expected ']' after number".to_string())),
-                            }
-                        },
-
-                        _ => {
-                            return Err(Error::InvalidSyntax("Invalid bracket notation".to_string()))
-                        },
-                    }
-                },
-
-                _ => {
-                    current_segment.push(ch);
-                },
-            }
-        }
-
-        if !current_segment.is_empty() {
-            segments.push(current_segment);
-        }
-
-        Ok(Self { segments })
-    }
-}
-
-impl ToFileString for JsonPath {
-    fn to_file_string(&self) -> String {
-        let mut result = String::new();
-        
-        for (i, segment) in self.segments.iter().enumerate() {
-            // Check if the segment is a valid identifier (can use dot notation)
-            let is_valid_identifier = segment.chars().enumerate().all(|(idx, ch)| {
-                if idx == 0 {
-                    ch.is_alphabetic() || ch == '_' || ch == '$'
-                } else {
-                    ch.is_alphanumeric() || ch == '_' || ch == '$'
-                }
-            });
-
-            // Check if it's a number
-            let is_number = segment.chars().all(|ch| ch.is_ascii_digit());
-
-            if i > 0 && is_valid_identifier {
-                result.push('.');
-                result.push_str(segment);
-            } else if is_number {
-                result.push('[');
-                result.push_str(segment);
-                result.push(']');
-            } else if i == 0 && is_valid_identifier {
-                result.push_str(segment);
-            } else {
-                // Use bracket notation with quotes
-                result.push('[');
-                result.push('"');
-                for ch in segment.chars() {
-                    match ch {
-                        '"' => result.push_str("\\\""),
-                        '\\' => result.push_str("\\\\"),
-                        _ => result.push(ch),
-                    }
-                }
-                result.push('"');
-                result.push(']');
-            }
-        }
-
-        result
-    }
-}
-
-impl ToHumanString for JsonPath {
-    fn to_print_string(&self) -> String {
-        self.to_file_string()
-    }
-}
-
-impl_serialization_traits!(JsonPath);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Span {
@@ -979,7 +795,7 @@ impl JsonFormatter {
             },
 
             JsonValue::String(s) => {
-                format!("\"{}\"", escape_string(s))
+                escape_string(s)
             },
 
             JsonValue::Array(elements) => {
@@ -1025,7 +841,7 @@ impl JsonFormatter {
                     
                     for (i, (key, value)) in valid_entries.iter().enumerate() {
                         result.push_str(&self.format_prefs.indent.repeat(depth + 1));
-                        result.push_str(&format!("\"{}\"", escape_string(key)));
+                        result.push_str(&escape_string(key));
                         result.push(':');
                         
                         if self.format_prefs.object_spacing {
@@ -1054,8 +870,11 @@ impl JsonFormatter {
     }
 }
 
-fn escape_string(s: &str) -> String {
-    let mut result = String::new();
+pub fn escape_string(s: &str) -> String {
+    let mut result
+        = String::with_capacity(s.len() + 2);
+
+    result.push('"');
 
     for ch in s.chars() {
         match ch {
@@ -1096,6 +915,8 @@ fn escape_string(s: &str) -> String {
             },
         }
     }
+
+    result.push('"');
 
     result
 }

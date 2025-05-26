@@ -1,10 +1,10 @@
-use std::{collections::BTreeMap, fs::Permissions, os::unix::fs::PermissionsExt};
+use std::{collections::BTreeMap, fs::Permissions, os::unix::fs::PermissionsExt, process::ExitCode};
 
 use clipanion::cli;
 use colored::Colorize;
 use convert_case::{Case, Casing};
 use serde::{Deserialize, Serialize};
-use zpm_utils::{Path, ToHumanString, FromFileString};
+use zpm_utils::{DataType, FromFileString, Path, ToFileString, ToHumanString};
 use zpm_parsers::{JsonFormatter, JsonValue, JsonPath};
 
 use crate::{constraints::{structs::{ConstraintsContext, WorkspaceError, ConstraintsOutput, WorkspaceOperation}, to_constraints_package, to_constraints_workspace}, error::Error, install::InstallState, manifest::Manifest, primitives::{Ident, Locator, Reference}, project::{Project, Workspace}, resolvers::Resolution, script::ScriptEnvironment, settings::ProjectConfigType, ui::tree};
@@ -19,7 +19,7 @@ pub struct Constraints {
 
 impl Constraints {
     #[tokio::main]
-    pub async fn execute(&self) -> Result<(), Error> {
+    pub async fn execute(&self) -> Result<ExitCode, Error> {
         let mut project
             = Project::new(None).await?;
 
@@ -39,7 +39,7 @@ impl Constraints {
 
             let constraints_workspaces
                 = project.workspaces.iter()
-                    .map(|workspace| to_constraints_workspace(workspace))
+                    .map(|workspace| to_constraints_workspace(workspace, install_state))
                     .collect::<Result<Vec<_>, _>>()?;
 
             let constraints_packages
@@ -113,13 +113,14 @@ impl Constraints {
             if should_break {
                 if !output.all_workspace_errors.is_empty() {
                     display_report(&project, &output)?;
+                    return Ok(ExitCode::FAILURE);
+                } else {
+                    return Ok(ExitCode::SUCCESS);
                 }
-
-                break;
             }
         }
 
-        Ok(())
+        unreachable!()
     }
 }
 
@@ -138,8 +139,32 @@ fn generate_constraints_adapter(config_path: &Path, context: &ConstraintsContext
 }
 
 fn display_report(project: &Project, output: &ConstraintsOutput) -> Result<(), Error> {
+    let are_all_errors_fixable = output.all_workspace_errors.iter().all(|(_, errors)| errors.iter().all(|error| match error {
+        WorkspaceError::MissingField { .. } => true,
+        WorkspaceError::ExtraneousField { .. } => true,
+        WorkspaceError::InvalidField { .. } => true,
+        WorkspaceError::ConflictingValues { .. } => false,
+        WorkspaceError::UserError { .. } => false,
+    }));
+
+    let are_some_errors_fixable = output.all_workspace_errors.iter().any(|(_, errors)| errors.iter().any(|error| match error {
+        WorkspaceError::MissingField { .. } => true,
+        WorkspaceError::ExtraneousField { .. } => true,
+        WorkspaceError::InvalidField { .. } => true,
+        WorkspaceError::ConflictingValues { .. } => false,
+        WorkspaceError::UserError { .. } => false,
+    }));
+
+    if are_all_errors_fixable {
+        println!("Those errors can all be fixed by running {}", DataType::Code.colorize("yarn constraints --fix"));
+        println!();
+    } else if are_some_errors_fixable {
+        println!("Errors prefixed by '⚙' can be fixed by running {}", DataType::Code.colorize("yarn constraints --fix"));
+        println!();
+    }
+
     let mut root = tree::Node {
-        label: ".".to_string(),
+        label: String::new(),
         children: vec![],
     };
 
@@ -151,7 +176,7 @@ fn display_report(project: &Project, output: &ConstraintsOutput) -> Result<(), E
             = project.workspace_by_rel_path(&workspace_rel_path)?;
 
         let mut workspace_node = tree::Node {
-            label: workspace.name.to_print_string(),
+            label: workspace.locator().to_print_string(),
             children: vec![],
         };
 
@@ -159,33 +184,47 @@ fn display_report(project: &Project, output: &ConstraintsOutput) -> Result<(), E
             match error {
                 WorkspaceError::MissingField { field_path, expected } => {
                     workspace_node.children.push(tree::Node {
-                        label: format!("{cog} Missing field at {}; expected {}", field_path, expected),
+                        label: format!("{cog} Missing field {}; expected {}", field_path, expected),
                         children: vec![],
                     });
                 },
 
                 WorkspaceError::ExtraneousField { field_path, current_value } => {
                     workspace_node.children.push(tree::Node {
-                        label: format!("{cog} Extraneous field at {}; current value {}", field_path, current_value),
+                        label: format!("{cog} Extraneous field {} currently set to {}", field_path, current_value),
                         children: vec![],
                     });
                 },
 
                 WorkspaceError::InvalidField { field_path, expected, current_value } => {
                     workspace_node.children.push(tree::Node {
-                        label: format!("{cog} Invalid field at {}; expected {}, but got {}", field_path, expected, current_value),
+                        label: format!("{cog} Invalid field {}; expected {}, found {}", field_path, expected, current_value),
                         children: vec![],
                     });
                 },
 
-                WorkspaceError::ConflictingValues { field_path, values } => {
-                    let options = values.iter()
-                        .flat_map(|(value, callers)| callers.iter().map(|caller| format!("{} as {:?}", value.to_print_string(), caller)))
+                WorkspaceError::ConflictingValues { field_path, set_values, unset_values } => {
+                    let entries = unset_values.as_ref()
+                        .map(|unset_values| (DataType::Code.colorize("undefined"), unset_values))
+                        .into_iter()
+                        .chain(set_values.iter().map(|(value, info)| (value.to_print_string(), info)))
+                        .collect::<Vec<_>>();
+
+                    let mut flat_entries = entries.iter()
+                        .flat_map(|(value, info)| info.callers.iter().map(|caller| (value.as_str(), caller)))
+                        .collect::<Vec<_>>();
+
+                    flat_entries.sort_by_cached_key(|(_, caller)| {
+                        caller.to_file_string()
+                    });
+
+                    let options = flat_entries.iter()
+                        .map(|(value, caller)| format!("{} at {}", value, caller.to_print_string()))
                         .map(|option| tree::Node {label: option, children: vec![]})
                         .collect::<Vec<_>>();
 
                     workspace_node.children.push(tree::Node {
-                        label: format!("Conflicting values at {}; expected values are:", field_path),
+                        label: format!("Conflict detected in constraint targeting {}; conflicting values are:", field_path),
                         children: options,
                     });
                 },

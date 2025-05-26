@@ -2,19 +2,86 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use zpm_utils::{ColoredJsonValue, JsonPath, Path};
+use zpm_parsers::JsonPath;
+use zpm_utils::{ColoredJsonValue, DataType, Path, ToFileString, ToHumanString};
 
-use crate::{manifest::Manifest, primitives::{Ident, Locator}};
+use crate::primitives::{Ident, Locator};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct Caller {
     pub file: Option<String>,
-    pub method_name: String,
+    pub method_name: Option<String>,
     pub arguments: Vec<String>,
     pub line: Option<u32>,
     pub column: Option<u32>,
+}
+
+impl ToFileString for Caller {
+    fn to_file_string(&self) -> String {
+        let mut parts
+            = vec![];
+
+        if let Some(method_name) = &self.method_name {
+            parts.push(method_name.clone());
+        }
+
+        if let Some(file) = &self.file {
+            let mut file_parts
+                = vec![];
+
+            file_parts.push(file.clone());
+
+            if let Some(line) = &self.line {
+                file_parts.push(line.to_string());
+
+                if let Some(column) = &self.column {
+                    file_parts.push(column.to_string());
+                }
+            }
+
+            parts.push(format!("({})", file_parts.join(":")));
+        }
+
+        parts.join(" ")
+    }
+}
+
+impl ToHumanString for Caller {
+    fn to_print_string(&self) -> String {
+        let mut parts
+            = vec![];
+
+        if let Some(method_name) = &self.method_name {
+            parts.push(DataType::Code.colorize(method_name));
+        }
+
+        if let Some(file) = &self.file {
+            let mut file_parts
+                = vec![];
+
+            file_parts.push(DataType::Path.colorize(file));
+
+            if let Some(line) = &self.line {
+                file_parts.push(DataType::Number.colorize(&line.to_string()));
+
+                if let Some(column) = &self.column {
+                    file_parts.push(DataType::Number.colorize(&column.to_string()));
+                }
+            }
+
+            parts.push(format!("({})", file_parts.join(&DataType::Code.colorize(":"))));
+        }
+
+        parts.join(" ")
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerValueInfo {
+    pub callers: Vec<Caller>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,7 +107,8 @@ pub enum WorkspaceError {
 
     ConflictingValues {
         field_path: JsonPath,
-        values: Vec<(ColoredJsonValue, Vec<Caller>)>,
+        set_values: Vec<(ColoredJsonValue, PerValueInfo)>,
+        unset_values: Option<PerValueInfo>,
     },
 
     UserError {
@@ -83,9 +151,21 @@ pub struct ConstraintsContext<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConstraintsDependency {
+    pub ident: Ident,
+    pub range: String,
+    pub dependency_type: String,
+    pub resolution: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConstraintsWorkspace {
     pub cwd: Path,
     pub ident: Ident,
+    pub dependencies: Vec<ConstraintsDependency>,
+    pub peer_dependencies: Vec<ConstraintsDependency>,
+    pub dev_dependencies: Vec<ConstraintsDependency>,
 }
 
 #[derive(Serialize)]

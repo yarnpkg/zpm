@@ -12,7 +12,7 @@ export type AnnotatedError =
   | {type: `missingField`, fieldPath: string[], expected: any}
   | {type: `extraneousField`, fieldPath: string[], currentValue: any}
   | {type: `invalidField`, fieldPath: string[], expected: any, currentValue: any}
-  | {type: `conflictingValues`, fieldPath: string[], values: Array<[any, PerValueInfo]>}
+  | {type: `conflictingValues`, fieldPath: string[], setValues: Array<[any, PerValueInfo]>, unsetValues: PerValueInfo | null}
   | {type: `userError`, message: string};
 
 export type Operation = 
@@ -59,10 +59,20 @@ declare const SERIALIZED_CONTEXT: string;
 declare const CONFIG_PATH: string;
 declare const FIX: boolean;
 
+type InputDependency = {
+  ident: string;
+  range: string;
+  dependencyType: Yarn.Constraints.DependencyType;
+  resolution: string | null;
+};
+
 const input: {
   workspaces: Array<{
     cwd: string;
     name: string;
+    dependencies: Array<InputDependency>;
+    peerDependencies: Array<InputDependency>;
+    devDependencies: Array<InputDependency>;
   }>,
   packages: Array<{
     locator: string;
@@ -128,6 +138,91 @@ for (const pkg of input.packages) {
   packageIndex.insert(hydratedPackage);
 }
 
+for (const workspace of input.workspaces) {
+  const setFn = createSetFn(workspace.cwd);
+
+  const hydratedWorkspace = workspaceByCwd.get(workspace.cwd);
+  if (typeof hydratedWorkspace === 'undefined')
+    throw new Error(`Workspace ${workspace.cwd} not found`);
+
+  for (const dependency of workspace.dependencies) {
+    const resolution = dependency.resolution !== null
+      ? packageByLocator.get(dependency.resolution)!
+      : null;
+
+    if (typeof resolution === 'undefined')
+      throw new Error(`Dependency ${dependency.ident} not found`);
+
+    const hydratedDependency: Yarn.Constraints.Dependency = {
+      workspace: hydratedWorkspace,
+      ident: dependency.ident,
+      range: dependency.range,
+      type: dependency.dependencyType,
+      resolution,
+      update: range => {
+        setFn([dependency.dependencyType, dependency.ident], range, {caller: nodeUtils.getCaller()});
+      },
+      delete: () => {
+        setFn([dependency.dependencyType, dependency.ident], undefined, {caller: nodeUtils.getCaller()});
+      },
+      error: message => {
+        miscUtils.getArrayWithDefault(userWorkspaceErrors, workspace.cwd).push({type: `userError`, message});
+      },
+    };
+
+    dependencyIndex.insert(hydratedDependency);
+  }
+
+  for (const peerDependency of workspace.peerDependencies) {
+    const hydratedPeerDependency: Yarn.Constraints.Dependency = {
+      workspace: hydratedWorkspace,
+      ident: peerDependency.ident,
+      range: peerDependency.range,
+      type: `peerDependencies`,
+      resolution: null,
+      update: () => {
+        setFn([`peerDependencies`, peerDependency.ident], peerDependency.range, {caller: nodeUtils.getCaller()});
+      },
+      delete: () => {
+        setFn([`peerDependencies`, peerDependency.ident], undefined, {caller: nodeUtils.getCaller()});
+      },
+      error: message => {
+        miscUtils.getArrayWithDefault(userWorkspaceErrors, workspace.cwd).push({type: `userError`, message});
+      },
+    };
+
+    dependencyIndex.insert(hydratedPeerDependency);
+  }
+
+  for (const devDependency of workspace.devDependencies) {
+    const resolution = devDependency.resolution !== null
+      ? packageByLocator.get(devDependency.resolution)!
+      : null;
+
+    if (typeof resolution === 'undefined')
+      throw new Error(`Dependency ${devDependency.ident} not found`);
+
+    const hydratedDevDependency: Yarn.Constraints.Dependency = {
+      workspace: hydratedWorkspace,
+      ident: devDependency.ident,
+      range: devDependency.range,
+      type: `devDependencies`,
+      resolution,
+      update: () => {
+        setFn([`devDependencies`, devDependency.ident], devDependency.range, {caller: nodeUtils.getCaller()});
+      },
+      delete: () => {
+        setFn([`devDependencies`, devDependency.ident], undefined, {caller: nodeUtils.getCaller()});
+      },
+      error: message => {
+        miscUtils.getArrayWithDefault(userWorkspaceErrors, workspace.cwd).push({type: `userError`, message});
+      },
+    };
+
+    dependencyIndex.insert(hydratedDevDependency);
+  }
+}
+
 for (const pkg of input.packages) {
   const hydratedPackage = packageByLocator.get(pkg.locator)!;
 
@@ -173,10 +268,20 @@ function applyEngineReport(fix: boolean) {
 
     for (const {fieldPath, values} of workspaceUpdates.values()) {
       if (values.size > 1) {
+        const valuesArray = [...values];
+
+        const unsetValues = valuesArray
+          .filter(([value]) => typeof value === `undefined`)
+          ?.[0]?.[1] ?? null;
+
+        const setValues = valuesArray
+          .filter(([value]) => typeof value !== `undefined`);
+
         workspaceErrors.push({
           type: `conflictingValues`,
           fieldPath: fieldPath,
-          values: [...values],
+          setValues,
+          unsetValues,
         });
       } else {
         const [[newValue]] = values;
@@ -223,7 +328,7 @@ async function main() {
   const require = createRequire(CONFIG_PATH);
   const config = require(CONFIG_PATH) as Yarn.Config;
 
-  await config.constraints(context);
+  await config.constraints?.(context);
 
   const output = applyEngineReport(FIX);
 

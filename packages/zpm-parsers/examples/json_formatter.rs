@@ -1,4 +1,4 @@
-use zpm_parsers::json::{JsonFormatter, JsonValue, JsonPath};
+use zpm_parsers::{json::{JsonFormatter, JsonValue}, JsonPath};
 use zpm_utils::FromFileString;
 use indoc::indoc;
 

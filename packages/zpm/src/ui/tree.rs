@@ -22,13 +22,13 @@ impl Node {
             
             // Choose the appropriate characters based on whether this is the last child
             let (connector, next_prefix) = if is_last {
-                ("└── ", prefix.clone() + "    ")
+                ("└─ ", prefix.clone() + "   ")
             } else {
-                ("├── ", prefix.clone() + "│   ")
+                ("├─ ", prefix.clone() + "│  ")
             };
 
             // Check if we need to add a newline between children
-            if index > 0 {
+            if prefix.len() == 0 && index > 0 {
                 let prev_child_has_children = !self.children[index - 1].children.is_empty();
                 let current_child_has_children = !child.children.is_empty();
                 
@@ -81,8 +81,8 @@ mod tests {
         // No newlines between siblings without children
         let expected = "\
 Root
-├── Child 1
-└── Child 2
+├─ Child 1
+└─ Child 2
 ";
 
         assert_eq!(node.to_string(), expected);
@@ -121,13 +121,13 @@ Root
         // Newlines between siblings with proper indentation
         let expected = "\
 Root
-├── Child 1
-│   └── Grandchild 1
+├─ Child 1
+│  └─ Grandchild 1
 │
-├── Child 2
+├─ Child 2
 │
-└── Child 3
-    └── Grandchild 2
+└─ Child 3
+   └─ Grandchild 2
 ";
 
         assert_eq!(node.to_string(), expected);
@@ -169,14 +169,14 @@ Root
 
         let expected = "\
 Root
-├── Child 1
-│   ├── Grandchild 1
-│   └── Grandchild 2
+├─ Child 1
+│  ├─ Grandchild 1
+│  └─ Grandchild 2
 │
-├── Child 2
-│   └── Grandchild 3
+├─ Child 2
+│  └─ Grandchild 3
 │
-└── Child 3
+└─ Child 3
 ";
 
         assert_eq!(node.to_string(), expected);
@@ -210,11 +210,11 @@ Root
 
         let expected = "\
 Root
-├── Child 1
-│   └── Grandchild 1
-│       └── Great-grandchild 1
+├─ Child 1
+│  └─ Grandchild 1
+│     └─ Great-grandchild 1
 │
-└── Child 2
+└─ Child 2
 ";
 
         assert_eq!(node.to_string(), expected);
