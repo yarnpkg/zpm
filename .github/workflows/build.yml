@@ -39,7 +39,7 @@ jobs:
 
           cp LICENSE.md target/release/
 
-          echo "INFRA_PLATFORM=$(./target/release/yarn debug print-platform)" >> $GITHUB_ENV
+          echo "INFRA_PLATFORM=$(./yarn.sh debug print-platform)" >> $GITHUB_ENV
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
