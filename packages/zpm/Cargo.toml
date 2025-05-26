@@ -4,7 +4,7 @@ version = "6.0.0-alpha.0"
 edition = "2021"
 
 [[bin]]
-name = "yarn"
+name = "yarn-bin"
 path = "src/main.rs"
 
 [dependencies]

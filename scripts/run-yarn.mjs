@@ -3,8 +3,8 @@ import {resolve} from 'path';
 
 const zpmBuild = process.env.TEST_BUILD ?? `release`;
 
-const zpmSwitchBinaryPath = resolve(import.meta.dirname, `../target/${zpmBuild}/yarn-switch`);
-const zpmBinaryPath = resolve(import.meta.dirname, `../target/${zpmBuild}/yarn`);
+const zpmSwitchBinaryPath = resolve(import.meta.dirname, `../target/${zpmBuild}/yarn`);
+const zpmBinaryPath = resolve(import.meta.dirname, `../target/${zpmBuild}/yarn-bin`);
 
 // So that Yarn Switch knows it should load a local binary; this requires
 // that the repository doesn't have a `packageManager` field set up.

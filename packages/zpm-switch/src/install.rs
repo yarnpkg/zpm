@@ -129,7 +129,7 @@ pub async fn install_package_manager(package_manager: &VersionPackageManagerRefe
         = format!("https://repo.yarnpkg.com/tags/{}/{}", version, platform);
 
     if zpm_semver::Range::from_file_string(">=6.0.0-0").unwrap().check(&package_manager.version) {
-        return install_native_from_zip(&url, "yarn").await;
+        return install_native_from_zip(&url, "yarn-bin").await;
     }
 
     if zpm_semver::Range::from_file_string(">=2.0.0-0").unwrap().check(&package_manager.version) {

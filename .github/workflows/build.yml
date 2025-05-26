@@ -2,9 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -44,8 +44,8 @@ jobs:
         with:
           name: yarn-${{env.INFRA_PLATFORM}}
           path: |
+            target/release/yarn-bin
             target/release/yarn
-            target/release/yarn-switch
           retention-days: 7
 
   test-report:
@@ -64,8 +64,8 @@ jobs:
       - name: Puts back the binaries
         run: |
           mkdir -p target/release
-          mv {yarn,yarn-switch} target/release/
-          chmod +x target/release/{yarn,yarn-switch}
+          mv {yarn-bin,yarn} target/release/
+          chmod +x target/release/{yarn-bin,yarn}
 
       - name: Clone the berry repo
         uses: actions/checkout@v4
@@ -117,8 +117,8 @@ jobs:
       - name: Puts back the binaries
         run: |
           mkdir -p target/release
-          mv {yarn,yarn-switch} target/release/
-          chmod +x target/release/{yarn,yarn-switch}
+          mv {yarn-bin,yarn} target/release/
+          chmod +x target/release/{yarn-bin,yarn}
       
       - name: Download the test report
         uses: actions/download-artifact@v4

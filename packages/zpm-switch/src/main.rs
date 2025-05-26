@@ -82,6 +82,18 @@ impl InitCommand {
     }
 }
 
+#[cli::command(default)]
+#[cli::path("switch", "postinstall")]
+#[derive(Debug)]
+pub struct PostinstallCommand {
+}
+
+impl PostinstallCommand {
+    async fn execute(&self) -> Result<ExitCode, Error> {
+        Ok(ExitCode::SUCCESS)
+    }
+}
+
 #[cli::command(default, proxy)]
 #[cli::path("switch")]
 #[derive(Debug)]
@@ -127,6 +139,7 @@ impl ExplicitCommand {
 }
 
 clipanion::program_async!(SwitchExecCli, [
+    PostinstallCommand,
     ExplicitCommand,
     ProxyCommand,
     InitCommand,
