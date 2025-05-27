@@ -19,7 +19,9 @@ impl<'a> TarIterator<'a> {
     }
 
     fn parse_entry_at(&self, offset: usize, size: usize) -> Result<Entry<'a>, Error> {
-        let name_slice = trim_zero(&self.buffer[offset..offset + 100]);
+        let name_slice = self.buffer.get(offset..offset + 100)
+            .map(trim_zero)
+            .ok_or(Error::InvalidTarFile)?;
 
         let name
             = std::str::from_utf8(name_slice)?;
@@ -31,8 +33,13 @@ impl<'a> TarIterator<'a> {
             return Err(Error::InvalidTarFilePath(name));
         }
 
-        let mode = from_oct(&self.buffer[offset + 100..offset + 108]) as u32;
-        let data = &self.buffer[offset + 512..offset + 512 + size];
+        let mode = self.buffer.get(offset + 100..offset + 108)
+            .map(|raw| from_oct(&raw) as u32)
+            .ok_or(Error::InvalidTarFile)?;
+
+        let data = self.buffer
+            .get(offset + 512..offset + 512 + size)
+            .ok_or(Error::InvalidTarFile)?;
 
         Ok(Entry {
             name,
@@ -41,29 +48,37 @@ impl<'a> TarIterator<'a> {
             data: Cow::Borrowed(data),
         })
     }
+
+    fn next_impl(&mut self) -> Result<Option<Entry<'a>>, Error> {
+        loop {
+            if self.offset >= self.buffer.len() {
+                return Ok(None);
+            }
+
+            let offset = self.offset;
+
+            let size
+                = self.buffer.get(offset + 124..offset + 136)
+                    .map(|raw| from_oct(&raw) as usize)
+                    .ok_or(Error::InvalidTarFile)?;
+
+            // round up to the next multiple of 512
+            self.offset += 512 + ((size + 511) / 512) * 512;
+
+            if self.buffer[offset + 156] != 0 {
+                if self.buffer[offset + 156] == b'0' {
+                    return Ok(Some(self.parse_entry_at(offset, size)?))
+                }
+            }
+        }
+    }
 }
 
 impl<'a> Iterator for TarIterator<'a> {
     type Item = Result<Entry<'a>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.offset >= self.buffer.len() {
-                return None;
-            }
-
-            let offset = self.offset;
-            let size = from_oct(&self.buffer[offset + 124..offset + 136]) as usize;
-
-            // round up to the next multiple of 512
-            self.offset += 512 + ((size + 511) / 512) * 512;
-
-            if self.buffer[offset] != 0 {
-                if self.buffer[offset + 156] == b'0' {
-                    return Some(self.parse_entry_at(offset, size))
-                }
-            }
-        }
+        self.next_impl().transpose()
     }
 }
 

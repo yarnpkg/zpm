@@ -4,7 +4,7 @@ use clipanion::{cli, prelude::*};
 use install::install_package_manager;
 use manifest::{find_closest_package_manager, validate_package_manager, PackageManagerField, PackageManagerReference};
 use yarn::get_default_yarn_version;
-use zpm_utils::{ExplicitPath, Path, PathError};
+use zpm_utils::{DataType, ExplicitPath, Path};
 
 mod errors;
 mod http;
@@ -151,10 +151,10 @@ fn insert_rc_line(rc_path: Path, line: String) {
     let _ = rc_path
         .fs_change(rc_content, Permissions::from_mode(0o644));
 
-    println!("Inserted line");
+    println!("We updated the {} file for you; please restart your shell to apply the changes.", DataType::Path.colorize(rc_path.as_str()));
 }
 
-#[cli::command(default)]
+#[cli::command]
 #[cli::path("switch", "postinstall")]
 #[derive(Debug)]
 pub struct PostinstallCommand {
@@ -163,34 +163,35 @@ pub struct PostinstallCommand {
 }
 
 impl PostinstallCommand {
-    async fn execute(&self) -> Result<ExitCode, Error> {
+    async fn execute(&self) {
         let bin_dir = Path::current_exe()
             .ok()
             .and_then(|p| p.dirname());
 
         let Some(bin_dir) = bin_dir else {
-            println!("No bin dir found");
-            return Ok(ExitCode::SUCCESS);
+            return;
         };
 
+        println!(
+            "Yarn {} was successfully installed to {}.",
+            DataType::Code.colorize(self.cli_environment.info.version.as_str()),
+            DataType::Path.colorize(bin_dir.as_str())
+        );
+
         let Ok(shell) = std::env::var("SHELL") else {
-            println!("No shell found");
-            return Ok(ExitCode::SUCCESS);
+            return;
         };
 
         let Ok(shell_path) = Path::from_str(&shell) else {
-            println!("No shell path found");
-            return Ok(ExitCode::SUCCESS);
+            return;
         };
 
         let Some(shell_name) = shell_path.basename() else {
-            println!("No shell name found");
-            return Ok(ExitCode::SUCCESS);
+            return;
         };
 
         let Some(home) = self.home_dir.clone().or_else(|| Path::home_dir().unwrap_or_default()) else {
-            println!("No home dir found");
-            return Ok(ExitCode::SUCCESS);
+            return;
         };
 
         match shell_name {
@@ -202,8 +203,6 @@ impl PostinstallCommand {
                     .with_join_str(".bashrc");
 
                 insert_rc_line(bashrc_path, insert_line);
-
-                Ok(ExitCode::SUCCESS)
             },
 
             "zsh" => {
@@ -214,18 +213,17 @@ impl PostinstallCommand {
                     .with_join_str(".zshrc");
 
                 insert_rc_line(zshrc_path, insert_line);
-
-                Ok(ExitCode::SUCCESS)
             },
 
             _ => {
-                Ok(ExitCode::SUCCESS)
+                println!("We couldn't find a supported shell to update ({}). Please manually add the following line to your shell configuration file:", DataType::Code.colorize(&format!("SHELL={}", shell)));
+                println!("{}", DataType::Code.colorize(&format!("export PATH=\"{}:$PATH\"", bin_dir)));
             },
         }
     }
 }
 
-#[cli::command(default, proxy)]
+#[cli::command(proxy)]
 #[cli::path("switch")]
 #[derive(Debug)]
 pub struct ExplicitCommand {

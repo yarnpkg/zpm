@@ -18,6 +18,9 @@ pub enum Error {
 
     #[error("Invalid tar file path: {0}")]
     InvalidTarFilePath(String),
+
+    #[error("Invalid tar file")]
+    InvalidTarFile,
 }
 
 impl From<std::io::Error> for Error {

@@ -55,6 +55,4 @@ rm "$archive"
 rm -rf "$install_dir"
 mv "$tmp_dir" "$install_dir"
 
-echo "Yarn $tag was installed successfully to $(tildify "$install_dir")"
-
 "$install_dir"/yarn switch postinstall
