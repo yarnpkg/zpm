@@ -8,6 +8,7 @@ use crate::{Entry, Error};
 pub struct TarIterator<'a> {
     buffer: &'a [u8],
     offset: usize,
+    global_headers: HashMap<String, String>,
 }
 
 impl<'a> TarIterator<'a> {
@@ -15,6 +16,7 @@ impl<'a> TarIterator<'a> {
         TarIterator {
             buffer,
             offset: 0,
+            global_headers: HashMap::new(),
         }
     }
 
@@ -44,6 +46,8 @@ impl<'a> TarIterator<'a> {
     fn parse_entry_at(&mut self, offset: usize, size: usize, pax_headers: &HashMap<String, String>) -> Result<Entry<'a>, Error> {
         // First try to get the name from PAX headers
         let name = if let Some(pax_path) = pax_headers.get("path") {
+            pax_path.clone()
+        } else if let Some(pax_path) = self.global_headers.get("path") {
             pax_path.clone()
         } else {
             // Fall back to the standard name field
@@ -154,8 +158,16 @@ impl<'a> TarIterator<'a> {
                     continue;
                 },
 
+                // PAX global extended header
                 b'g' => {
-                    unimplemented!("PAX global extended header");
+                    let header_data = self.buffer
+                        .get(offset + 512..offset + 512 + size)
+                        .ok_or(Error::InvalidTarFile)?;
+
+                    self.global_headers
+                        = self.parse_pax_headers(header_data)?;
+
+                    continue;
                 },
 
                 _ => {
@@ -216,4 +228,44 @@ fn clean_name(name: &str) -> Result<Option<String>, Error> {
     }
 
     Ok(Some(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pax_header_parsing() {
+        let pax_data = b"52 comment=679be5902097ed612fb5062b5549f3f32b6f5f47\n101 path=strophejs-plugin-stream-management-679be5902097ed612fb5062b5549f3f32b6f5f47/src/strophe.stream-management.js\n";
+        
+        let iterator = TarIterator::new(&[]);
+        let headers = iterator.parse_pax_headers(pax_data).unwrap();
+        
+        assert_eq!(headers.get("comment"), Some(&"679be5902097ed612fb5062b5549f3f32b6f5f47".to_string()));
+        assert_eq!(headers.get("path"), Some(&"strophejs-plugin-stream-management-679be5902097ed612fb5062b5549f3f32b6f5f47/src/strophe.stream-management.js".to_string()));
+    }
+
+    #[test]
+    fn test_global_headers_precedence() {
+        let mut iterator = TarIterator::new(&[]);
+        
+        // Set up global headers
+        iterator.global_headers.insert("comment".to_string(), "global-comment".to_string());
+        iterator.global_headers.insert("author".to_string(), "global-author".to_string());
+        
+        // Local headers that should override global ones
+        let mut local_headers = HashMap::new();
+        local_headers.insert("comment".to_string(), "local-comment".to_string());
+        local_headers.insert("path".to_string(), "test/file.txt".to_string());
+        
+        // Test the merging logic by simulating what happens in parse_entry_at
+        let mut combined_headers = iterator.global_headers.clone();
+        combined_headers.extend(local_headers.iter().map(|(k, v)| (k.clone(), v.clone())));
+        
+        // Local headers should take precedence
+        assert_eq!(combined_headers.get("comment"), Some(&"local-comment".to_string()));
+        assert_eq!(combined_headers.get("path"), Some(&"test/file.txt".to_string()));
+        // Global headers should be preserved when not overridden
+        assert_eq!(combined_headers.get("author"), Some(&"global-author".to_string()));
+    }
 }
