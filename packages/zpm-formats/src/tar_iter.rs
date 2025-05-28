@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::LazyLock};
+use std::{borrow::Cow, collections::HashMap, sync::LazyLock};
 
 use itertools::Itertools;
 use regex::Regex;
@@ -18,13 +18,58 @@ impl<'a> TarIterator<'a> {
         }
     }
 
-    fn parse_entry_at(&self, offset: usize, size: usize) -> Result<Entry<'a>, Error> {
-        let name_slice = self.buffer.get(offset..offset + 100)
-            .map(trim_zero)
-            .ok_or(Error::InvalidTarFile)?;
+    fn parse_pax_headers(&self, data: &[u8]) -> Result<HashMap<String, String>, Error> {
+        let mut headers = HashMap::new();
+        let content = std::str::from_utf8(data)?;
+        
+        for line in content.lines() {
+            if line.is_empty() {
+                continue;
+            }
+            
+            // PAX format: "length keyword=value\n"
+            if let Some(space_pos) = line.find(' ') {
+                let keyword_value = &line[space_pos + 1..];
+                if let Some(eq_pos) = keyword_value.find('=') {
+                    let keyword = &keyword_value[..eq_pos];
+                    let value = &keyword_value[eq_pos + 1..];
+                    headers.insert(keyword.to_string(), value.to_string());
+                }
+            }
+        }
+        
+        Ok(headers)
+    }
 
-        let name
-            = std::str::from_utf8(name_slice)?;
+    fn parse_entry_at(&mut self, offset: usize, size: usize) -> Result<Entry<'a>, Error> {
+        // First try to get the name from PAX headers
+        let name = if let Some(pax_path) = self.pax_headers.get("path") {
+            pax_path.clone()
+        } else {
+            // Fall back to the standard name field
+            let name_slice = self.buffer.get(offset..offset + 100)
+                .map(trim_zero)
+                .ok_or(Error::InvalidTarFile)?;
+
+            let mut name = std::str::from_utf8(name_slice)?.to_string();
+            
+            // Check for UStar format prefix (at offset 345, length 155)
+            if let Some(prefix_slice) = self.buffer.get(offset + 345..offset + 500) {
+                let prefix_slice = trim_zero(prefix_slice);
+                if !prefix_slice.is_empty() {
+                    if let Ok(prefix) = std::str::from_utf8(prefix_slice) {
+                        name = format!("{}/{}", prefix, name);
+                    }
+                }
+            }
+            
+            name
+        };
+
+        // Skip empty names
+        if name.is_empty() {
+            return Err(Error::InvalidTarFilePath("empty filename".to_string()));
+        }
 
         let name = clean_name(&name)?
             .ok_or_else(|| Error::InvalidTarFilePath(name.to_string()))?;
@@ -50,12 +95,16 @@ impl<'a> TarIterator<'a> {
     }
 
     fn next_impl(&mut self) -> Result<Option<Entry<'a>>, Error> {
+        let mut pax_headers
+            = HashMap::new();
+
         loop {
             if self.offset >= self.buffer.len() {
                 return Ok(None);
             }
 
-            let offset = self.offset;
+            let offset
+                = self.offset;
 
             let size
                 = self.buffer.get(offset + 124..offset + 136)
@@ -65,10 +114,51 @@ impl<'a> TarIterator<'a> {
             // round up to the next multiple of 512
             self.offset += 512 + ((size + 511) / 512) * 512;
 
-            if self.buffer[offset + 156] != 0 {
-                if self.buffer[offset + 156] == b'0' {
-                    return Ok(Some(self.parse_entry_at(offset, size)?))
-                }
+            let type_flag
+                = self.buffer[offset + 156];
+            
+            match type_flag {
+                // Regular file
+                b'0' | 0 => {
+                    match self.parse_entry_at(offset, size) {
+                        Ok(entry) => {
+                            return Ok(Some(entry));
+                        },
+
+                        Err(Error::InvalidTarFilePath(_)) => {
+                            // Skip invalid entries (like empty filenames)
+                            pax_headers.clear();
+                            continue;
+                        },
+
+                        Err(e) => {
+                            return Err(e)
+                        },
+                    }
+                },
+
+                // PAX extended header for next file
+                b'x' => {
+                    let header_data = self.buffer
+                        .get(offset + 512..offset + 512 + size)
+                        .ok_or(Error::InvalidTarFile)?;
+                    
+                    let headers
+                        = self.parse_pax_headers(header_data)?;
+
+                    pax_headers.extend(headers);
+
+                    continue;
+                },
+
+                b'g' => {
+                    unimplemented!("PAX global extended header");
+                },
+
+                _ => {
+                    // Other types (directories, symlinks, etc.) - skip
+                    // Continue to next entry
+                },
             }
         }
     }

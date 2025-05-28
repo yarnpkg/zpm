@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::collections::HashSet;
 use std::sync::Mutex;
-use zpm_utils::Path;
+use zpm_utils::{Path, ToFileString};
 use bincode;
 use futures::Future;
 use sha2::Digest;
@@ -153,16 +153,16 @@ impl DiskCache {
         }
     }
 
-    pub fn key_path(&self, key: &Locator, ext: &str) -> Result<Path, Error> {
-        let serialized_key = bincode::encode_to_vec(key, self.data_config)
-            .map_err(Arc::new)?;
+    pub fn key_path(&self, locator: &Locator, ext: &str) -> Result<Path, Error> {
+        let serialized_key
+            = locator.to_file_string();
 
         let mut key = sha2::Sha256::new();
         key.update(serialized_key);
         let key = key.finalize();
 
         let key_name
-            = format!("{:064x}{}", key, ext);
+            = format!("{}-{:064x}{}", locator.slug(), key, ext);
 
         let key_path = self.cache_path
             .with_join_str(&key_name);

@@ -35,10 +35,12 @@ pub async fn download_into(normalized_repo_url: &str, commit: &str, download_dir
         return Ok(None);
     };
 
-    let client = http_client()?;
+    let client
+        = http_client()?;
 
     let response
-        = client.get(public_tarball_url(&repository, commit)).send().await;
+        = client.get(public_tarball_url(&repository, commit)).send().await
+            .and_then(|response| response.error_for_status());
 
     let data = match response {
         Ok(response) => {

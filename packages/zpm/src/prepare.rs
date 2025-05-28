@@ -46,10 +46,6 @@ pub async fn prepare_project(_locator: &Locator, folder_path: &Path, params: &Pr
 }
 
 fn get_package_manager(folder_path: &Path) -> Result<PackageManager, Error> {
-    if folder_path.with_join_str("package-lock.json").fs_exists() {
-        return Ok(PackageManager::Npm);
-    }
-
     let yarn_lock_path = folder_path
         .with_join_str("yarn.lock")
         .fs_read_text();
@@ -289,8 +285,14 @@ async fn prepare_yarn_zpm_project(folder_path: &Path, params: &PrepareParams) ->
     pack_args.push("--out");
     pack_args.push(archive_path.as_str());
 
+    let current_exe
+        = Path::current_exe()?;
+
     ScriptEnvironment::new()?
         .with_cwd(cwd_path.clone())
+
+        .with_env_variable("YARNSW_DEFAULT", &format!("local:{}", current_exe.to_file_string()))
+
         .run_exec("yarn", pack_args)
         .await
         .ok()?;
