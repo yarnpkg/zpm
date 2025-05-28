@@ -41,9 +41,9 @@ impl<'a> TarIterator<'a> {
         Ok(headers)
     }
 
-    fn parse_entry_at(&mut self, offset: usize, size: usize) -> Result<Entry<'a>, Error> {
+    fn parse_entry_at(&mut self, offset: usize, size: usize, pax_headers: &HashMap<String, String>) -> Result<Entry<'a>, Error> {
         // First try to get the name from PAX headers
-        let name = if let Some(pax_path) = self.pax_headers.get("path") {
+        let name = if let Some(pax_path) = pax_headers.get("path") {
             pax_path.clone()
         } else {
             // Fall back to the standard name field
@@ -51,11 +51,14 @@ impl<'a> TarIterator<'a> {
                 .map(trim_zero)
                 .ok_or(Error::InvalidTarFile)?;
 
-            let mut name = std::str::from_utf8(name_slice)?.to_string();
+            let mut name
+                = std::str::from_utf8(name_slice)?.to_string();
             
             // Check for UStar format prefix (at offset 345, length 155)
             if let Some(prefix_slice) = self.buffer.get(offset + 345..offset + 500) {
-                let prefix_slice = trim_zero(prefix_slice);
+                let prefix_slice
+                    = trim_zero(prefix_slice);
+
                 if !prefix_slice.is_empty() {
                     if let Ok(prefix) = std::str::from_utf8(prefix_slice) {
                         name = format!("{}/{}", prefix, name);
@@ -120,7 +123,7 @@ impl<'a> TarIterator<'a> {
             match type_flag {
                 // Regular file
                 b'0' | 0 => {
-                    match self.parse_entry_at(offset, size) {
+                    match self.parse_entry_at(offset, size, &pax_headers) {
                         Ok(entry) => {
                             return Ok(Some(entry));
                         },
@@ -142,7 +145,7 @@ impl<'a> TarIterator<'a> {
                     let header_data = self.buffer
                         .get(offset + 512..offset + 512 + size)
                         .ok_or(Error::InvalidTarFile)?;
-                    
+
                     let headers
                         = self.parse_pax_headers(header_data)?;
 
@@ -181,9 +184,11 @@ fn trim_zero(x: &[u8]) -> &[u8] {
 
 fn from_oct(x: &[u8]) -> u64 {
     let mut result = 0;
+
     for i in x.iter().filter(|c| **c >= b'0' && **c <= b'7') {
         result = result * 8 + (i - b'0') as u64;
     }
+
     result
 }
 
