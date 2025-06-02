@@ -434,11 +434,16 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
                 },
             };
 
-            package_build_entries.insert(locator.clone(), all_build_entries.len());
+            package_build_entries.insert(
+                locator.clone(),
+                all_build_entries.len(),
+            );
+
             all_build_entries.push(build::BuildRequest {
                 cwd: build_cwd,
                 locator: locator.clone(),
                 commands: package_flags.build_commands.clone(),
+                tree_hash: install.install_state.locator_tree_hash(locator),
                 allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
                 force_rebuild: is_freshly_unplugged,
             });

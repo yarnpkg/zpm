@@ -153,6 +153,10 @@ impl Path {
             }
         }
 
+        if slice_len > 0 {
+            return Some(Path::new());
+        }
+
         None
     }
 

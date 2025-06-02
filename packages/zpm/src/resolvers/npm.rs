@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt, marker::PhantomData, str::FromStr, sync::{
 use regex::Regex;
 use serde::{de::{self, DeserializeOwned, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
 
-use crate::{error::Error, http::http_client, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, npm, primitives::{range, reference, Descriptor, Ident, Locator}, resolvers::Resolution};
+use crate::{error::Error, http::http_get, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, npm, primitives::{range, reference, Descriptor, Ident, Locator}, resolvers::Resolution};
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
@@ -187,21 +187,15 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
-    let client = http_client()?;
-
     let package_ident = params.ident.as_ref()
         .unwrap_or(&descriptor.ident);
 
     let registry_url
         = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
 
-    let response = client.get(registry_url.clone()).send().await
-        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+    let response
+        = http_get(&registry_url).await?;
 
-    if response.status().as_u16() == 404 {
-        return Err(Error::PackageNotFound(package_ident.clone(), registry_url));
-    }
- 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
@@ -225,16 +219,14 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
-    let client = http_client()?;
-
     let package_ident = params.ident.as_ref()
         .unwrap_or(&descriptor.ident);
 
     let registry_url
         = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
 
-    let response = client.get(registry_url.clone()).send().await
-        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+    let response
+        = http_get(&registry_url).await?;
 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
@@ -270,13 +262,11 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
-    let client = http_client()?;
-
     let registry_url
         = npm::registry_url_for_one_version(&project.config.registry_base_for(&params.ident), &params.ident, &params.version);
 
-    let response = client.get(registry_url.clone()).send().await
-        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+    let response
+        = http_get(&registry_url).await?;
 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;

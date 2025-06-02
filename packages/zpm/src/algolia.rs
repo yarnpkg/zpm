@@ -43,7 +43,8 @@ struct AlgoliaTypes {
 }
 
 pub async fn query_algolia(idents: &[Ident]) -> Result<HashMap<Ident, Ident>, Error> {
-    let client = http_client()?;
+    let client
+        = http_client()?;
 
     let input_payload = AlgoliaInputPayload {
         requests: idents.iter().map(|ident| AlgoliaRequest {
@@ -58,8 +59,8 @@ pub async fn query_algolia(idents: &[Ident]) -> Result<HashMap<Ident, Ident>, Er
         .header("x-algolia-application-id", "OFCNCOG2CU")
         .header("x-algolia-api-key", "e8e1bd300d860104bb8c58453ffa1eb4")
         .body(sonic_rs::to_string(&input_payload).unwrap())
-        .send().await
-        .map_err(|err| Error::AlgoliaRegistryError(Arc::new(err)))?;
+        .send().await?
+        .error_for_status()?;
 
     if response.status().as_u16() != 200 {
         return Ok(HashMap::new());

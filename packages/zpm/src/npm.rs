@@ -34,7 +34,7 @@ pub fn registry_url_for_package_data(registry_base: &str, ident: &Ident, version
     url.push_str("/-/");
     url.push_str(&ident.name());
     url.push('-');
-    url.push_str(&version.to_string());
+    url.push_str(&version.to_file_string());
     url.push_str(".tgz");
 
     url

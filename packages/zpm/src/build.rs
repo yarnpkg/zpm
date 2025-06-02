@@ -1,24 +1,50 @@
 use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt};
 
-use zpm_utils::Path;
+use zpm_utils::{OkMissing, Path};
 use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, hash::Blake2b80, primitives::Locator, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
+use crate::{diff_finder::{DiffController, DiffFinder}, error::Error, hash::Blake2b80, primitives::Locator, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
 
 #[derive(Clone, Debug, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type")]
 pub enum Command {
-    Program(String, Vec<String>),
-    Script(String),
+    Program {
+        name: String,
+        args: Vec<String>
+    },
+
+    Script {
+        script: String,
+    },
+}
+
+pub struct ArtifactFinder;
+
+impl DiffController for ArtifactFinder {
+    type Data = ();
+
+    fn get_file_data(_path: &Path, _metadata: &std::fs::Metadata) -> Result<Self::Data, Error> {
+        Ok(())
+    }
+
+    fn is_relevant_entry(entry: &std::fs::DirEntry, file_type: &std::fs::FileType) -> bool {
+        if file_type.is_dir() {
+            return entry.file_name() != "node_modules";
+        }
+
+        file_type.is_file()
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct BuildRequest {
     pub cwd: Path,
     pub locator: Locator,
+    pub tree_hash: String,
     pub commands: Vec<Command>,
     pub allowed_to_fail: bool,
     pub force_rebuild: bool,
@@ -33,24 +59,44 @@ impl BuildRequest {
             .with_project(project)
             .with_package(project, &self.locator)?
             .with_env_variable("INIT_CWD", cwd_abs.as_str())
-            .with_cwd(cwd_abs);
+            .with_cwd(cwd_abs.clone());
 
         with_context_result(ReportContext::Locator(self.locator.clone()), async {
+            let build_cache_folder = project.project_cwd
+                .with_join_str(".yarn/ignore/builds")
+                .with_join_str(format!("{}-{}", self.locator.slug(), self.tree_hash));
+
+            let mut artifact_finder
+                = DiffFinder::<ArtifactFinder>::new(cwd_abs, Default::default())?;
+
+            artifact_finder.rsync()?;
+
             for command in self.commands.iter() {
                 let script_result = match command {
-                    Command::Program(program, args) =>
-                        script_env.run_exec(program, args).await,
-                    Command::Script(script) =>
+                    Command::Program {name, args} =>
+                        script_env.run_exec(name, args).await,
+                    Command::Script {script} =>
                         script_env.run_script(script, Vec::<&str>::new()).await,
                 };
 
                 if !script_result.success() {
-                    return Ok(match self.allowed_to_fail {
-                        true => ScriptResult::new_success(),
-                        false => script_result,
-                    });
+                    return match self.allowed_to_fail {
+                        true => Ok(ScriptResult::new_success()),
+                        false => Err(script_result.ok().unwrap_err()),
+                    };
                 }
             }
+
+            let (_has_changed, diff_list)
+                = artifact_finder.rsync()?;
+
+            build_cache_folder
+                .fs_rm()
+                .ok_missing()?;
+
+            build_cache_folder
+                .fs_create_parent()?
+                .fs_write_text(format!("{:#?}", diff_list))?;
 
             Ok(ScriptResult::new_success())
         }).await

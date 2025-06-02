@@ -8,6 +8,7 @@ pub mod constraints;
 pub mod config_fields;
 pub mod config;
 pub mod content_flags;
+pub mod diff_finder;
 pub mod manifest_finder;
 pub mod error;
 pub mod fetchers;

@@ -1,13 +1,12 @@
 use std::{collections::BTreeMap, fs::Permissions, io::ErrorKind, os::unix::fs::PermissionsExt, sync::Arc, time::UNIX_EPOCH};
 
-use indexmap::IndexMap;
 use zpm_utils::Path;
 use globset::GlobBuilder;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 use zpm_macros::track_time;
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, error::Error, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{bin::BinField, helpers::read_manifest_with_size, resolutions::ResolutionSelector, BinManifest, Manifest}, manifest_finder::{CachedManifestFinder, ManifestFinder, SaveEntry}, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, report::{with_report_result, StreamReport, StreamReportConfig}, script::Binary};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, diff_finder::SaveEntry, error::Error, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{bin::BinField, helpers::read_manifest_with_size, resolutions::ResolutionSelector, BinManifest, Manifest}, manifest_finder::CachedManifestFinder, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, report::{with_report_result, StreamReport, StreamReportConfig}, script::Binary};
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
 pub const MANIFEST_NAME: &str = "package.json";
@@ -619,13 +618,26 @@ impl Workspace {
             let mut manifest_finder
                 = CachedManifestFinder::new(self.path.clone())?;
 
-            let workspace_paths = manifest_finder.rsync()?.into_iter()
-                .filter(|p| pattern_matchers.iter().any(|m| p.dirname().map(|workspace_rel_dir| m.is_match(workspace_rel_dir.as_str())).unwrap_or(false)))
-                .map(|p| manifest_finder.save_state.cache.remove(&p).map(|manifest| (p, manifest)).unwrap())
+            manifest_finder.rsync()?;
+
+            let lookup_state
+                = manifest_finder.into_state();
+
+            let workspace_paths = lookup_state.cache.into_iter()
+                .filter(|(_, entry)| matches!(entry, SaveEntry::File(_, _)))
+                .filter(|(p, _)| {
+                    println!("{p}");
+                    let candidate_workspace_rel_dir = p.dirname()
+                        .expect("Expected this path to have a parent directory, since it's supposed to be the relative path to a package.json file");
+
+                    pattern_matchers.iter().any(|m| {
+                        m.is_match(candidate_workspace_rel_dir.as_str())
+                    })
+                })
                 .collect::<Vec<_>>();
 
             for (manifest_rel_path, save_entry) in workspace_paths {
-                if let SaveEntry::Manifest(last_changed_at, manifest) = save_entry {
+                if let SaveEntry::File(last_changed_at, manifest) = save_entry {
                     workspaces.push(Workspace::from_info(&self.path, WorkspaceInfo {
                         rel_path: manifest_rel_path.dirname().unwrap(),
                         manifest,

@@ -207,10 +207,6 @@ impl ScriptResult {
     }
 
     pub fn ok(self) -> Result<Self, Error> {
-        if !self.success() {
-            println!("{}", String::from_utf8_lossy(&self.output().stderr));
-        }
-
         match self {
             Self::Success(_) => Ok(self),
             Self::Failure(output, program, shell_line) => {

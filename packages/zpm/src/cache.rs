@@ -154,15 +154,8 @@ impl DiskCache {
     }
 
     pub fn key_path(&self, locator: &Locator, ext: &str) -> Result<Path, Error> {
-        let serialized_key
-            = locator.to_file_string();
-
-        let mut key = sha2::Sha256::new();
-        key.update(serialized_key);
-        let key = key.finalize();
-
         let key_name
-            = format!("{}-{:064x}{}", locator.slug(), key, ext);
+            = format!("{}{}", locator.slug(), ext);
 
         let key_path = self.cache_path
             .with_join_str(&key_name);

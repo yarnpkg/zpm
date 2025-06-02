@@ -4,6 +4,7 @@ use bincode::{Decode, Encode};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{DefaultOnError, serde_as};
+use zpm_utils::ToFileString;
 
 use crate::{build, error::Error, fetchers::PackageData, primitives::Locator, system};
 
@@ -87,7 +88,7 @@ impl ContentFlags {
 
         let mut build_commands = UNPLUG_SCRIPTS.iter()
             .filter_map(|k| meta_manifest.scripts.get(*k))
-            .map(|s| build::Command::Script(s.clone()))
+            .map(|s| build::Command::Script {script: s.clone()})
             .collect::<Vec<_>>();
 
         let entries
@@ -98,17 +99,22 @@ impl ContentFlags {
                 = format!("node_modules/{}/binding.gyp", locator.ident.as_str());
     
             if entries.iter().any(|entry| entry.name == binding_gyp_name) {
-                build_commands.push(build::Command::Program("node-gyp".to_string(), vec!["rebuild".to_string()]));
+                build_commands.push(build::Command::Program {
+                    name: "node-gyp".to_string(),
+                    args: vec!["rebuild".to_string()],
+                });
             }
         }
 
         let prefer_extracted = meta_manifest.prefer_unplugged;
         let suggest_extracted = entries.iter().any(|entry| UNPLUG_EXT_REGEX.is_match(&entry.name));
 
-        Ok(ContentFlags {
+        let flags = ContentFlags {
             build_commands,
             prefer_extracted,
             suggest_extracted,
-        })
+        };
+
+        Ok(flags)
     }
 }

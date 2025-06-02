@@ -79,26 +79,59 @@ impl Reference {
         matches!(&self, Reference::Link(_) | Reference::Portal(_) | Reference::Tarball(_) | Reference::Folder(_) | Reference::Patch(_))
     }
 
-    pub fn physical_reference(&self) -> Reference {
-        match self {
-            Reference::Virtual(params) => params.inner.physical_reference(),
-            _ => self.clone(),
+    pub fn physical_reference(&self) -> &Reference {
+        if let Reference::Virtual(params) = self {
+            params.inner.physical_reference()
+        } else {
+            self
         }
     }
 
     pub fn slug(&self) -> String {
         match self {
-            Reference::Shorthand(params) => format!("npm-{}", params.version),
-            Reference::Git(_) => "git".to_string(),
-            Reference::Registry(params) => format!("npm-{}", params.version),
-            Reference::Tarball(_) => "file".to_string(),
-            Reference::Folder(_) => "file".to_string(),
-            Reference::Link(_) => "link".to_string(),
-            Reference::Patch(_) => "patch".to_string(),
-            Reference::Portal(_) => "portal".to_string(),
-            Reference::Url(_) => "url".to_string(),
-            Reference::Virtual(_) => "virtual".to_string(),
-            Reference::Workspace(_) => "workspace".to_string(),
+            Reference::Shorthand(params) => {
+                format!("npm-{}", params.version.to_file_string())
+            },
+
+            Reference::Git(_) => {
+                "git".to_string()
+            },
+
+            Reference::Registry(params) => {
+                format!("npm-{}", params.version.to_file_string())
+            },
+
+            Reference::Tarball(_) => {
+                "file".to_string()
+            },
+
+            Reference::Folder(_) => {
+                "file".to_string()
+            },
+
+            Reference::Link(_) => {
+                "link".to_string()
+            },
+
+            Reference::Patch(_) => {
+                "patch".to_string()
+            },
+
+            Reference::Portal(_) => {
+                "portal".to_string()
+            },
+
+            Reference::Url(_) => {
+                "url".to_string()
+            },
+
+            Reference::Virtual(_) => {
+                "virtual".to_string()
+            },
+
+            Reference::Workspace(_) => {
+                "workspace".to_string()
+            },
         }
     }
 }
@@ -106,17 +139,49 @@ impl Reference {
 impl ToFileString for Reference {
     fn to_file_string(&self) -> String {
         match self {
-            Reference::Shorthand(params) => format!("npm:{}", params.version.to_file_string()),
-            Reference::Git(params) => format!("git:{}", params.git.to_file_string()),
-            Reference::Registry(params) => format!("npm:{}@{}", params.ident, params.version.to_file_string()),
-            Reference::Tarball(params) => format!("file:{}", params.path),
-            Reference::Folder(params) => format!("file:{}", params.path),
-            Reference::Link(params) => format!("link:{}", params.path),
-            Reference::Patch(params) => format!("patch:{}#{}", params.inner.to_file_string(), params.path),
-            Reference::Portal(params) => format!("portal:{}", params.path),
-            Reference::Url(params) => params.url.to_string(),
-            Reference::Virtual(params) => format!("virtual:{}#{}", params.inner.to_file_string(), params.hash),
-            Reference::Workspace(params) => format!("workspace:{}", params.ident.to_file_string()),
+            Reference::Shorthand(params) => {
+                format!("npm:{}", params.version.to_file_string())
+            },
+
+            Reference::Git(params) => {
+                format!("git:{}", params.git.to_file_string())
+            },
+
+            Reference::Url(params) => {
+                params.url.to_file_string()
+            },
+
+            Reference::Registry(params) => {
+                format!("npm:{}@{}", params.ident.to_file_string(), params.version.to_file_string())
+            },
+
+            Reference::Tarball(params) => {
+                format!("file:{}", params.path.to_file_string())
+            },
+
+            Reference::Folder(params) => {
+                format!("file:{}", params.path.to_file_string())
+            },
+
+            Reference::Link(params) => {
+                format!("link:{}", params.path.to_file_string())
+            },
+
+            Reference::Patch(params) => {
+                format!("patch:{}#{}", params.inner.to_file_string(), params.path.to_file_string())
+            },
+
+            Reference::Portal(params) => {
+                format!("portal:{}", params.path.to_file_string())
+            },
+
+            Reference::Virtual(params) => {
+                format!("virtual:{}#{}", params.inner.to_file_string(), params.hash.to_file_string())
+            },
+
+            Reference::Workspace(params) => {
+                format!("workspace:{}", params.ident.to_file_string())
+            },
         }
     }
 }

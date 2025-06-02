@@ -36,7 +36,7 @@ impl Locator {
 
     pub fn physical_locator(&self) -> Locator {
         if let Reference::Virtual(params) = &self.reference {
-            Locator::new_bound(self.ident.clone(), params.inner.physical_reference(), self.parent.clone())
+            Locator::new_bound(self.ident.clone(), params.inner.physical_reference().clone(), self.parent.clone())
         } else {
             self.clone()
         }

@@ -1,6 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
-use reqwest::Client;
+use reqwest::{Client, Response};
 
 use crate::error::Error;
 
@@ -20,6 +20,16 @@ static HTTP_CLIENT: LazyLock<Result<Client, Error>> = LazyLock::new(|| {
 
 pub fn http_client() -> Result<Client, Error> {
     HTTP_CLIENT.clone()
+}
+
+pub async fn http_get(url: &str) -> Result<Response, Error> {
+    let client
+        = http_client()?;
+
+    let response = client.get(url).send().await?
+        .error_for_status()?;
+
+    Ok(response)
 }
 
 pub fn is_too_many_open_files(err: &dyn std::error::Error) -> bool {

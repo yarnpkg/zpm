@@ -1,5 +1,6 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, hash::Hash, marker::PhantomData, os::unix::fs::PermissionsExt};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, fs::Permissions, hash::Hash, marker::PhantomData, os::unix::fs::PermissionsExt};
 
+use sha2::Digest;
 use zpm_utils::Path;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -372,6 +373,26 @@ pub struct InstallState {
     pub optional_packages: BTreeSet<Locator>,
     pub disabled_locators: BTreeSet<Locator>,
     pub conditional_locators: BTreeSet<Locator>,
+}
+
+impl InstallState {
+    pub fn locator_tree_hash(&self, root: &Locator) -> String {
+        let mut hasher
+            = sha2::Sha256::new();
+
+        let mut seen
+            = HashSet::new();
+        let mut queue
+            = vec![root];
+
+        while let Some(locator) = queue.pop() {
+            if seen.insert(locator) {
+                hasher.update(locator.to_file_string())
+            }
+        }
+
+        format!("{:064x}", hasher.finalize())
+    }
 }
 
 #[derive(Clone, Default)]

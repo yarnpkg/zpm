@@ -14,6 +14,9 @@ process.env.YARNSW_DEFAULT = `local:${zpmBinaryPath}`;
 // find the zpm test binary. It needs to be a JS file.
 process.env.TEST_BINARY = import.meta.filename;
 
+// To disable tests that we don't want to run.
+process.env.TEST_MAJOR = `5`;
+
 process.exitCode = spawnSync(zpmSwitchBinaryPath, process.argv.slice(2), {
   stdio: `inherit`,
 }).status;

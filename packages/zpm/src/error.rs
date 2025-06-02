@@ -28,6 +28,9 @@ pub enum Error {
     #[error("Unsupported code path")]
     Unsupported,
 
+    #[error("Network error: {0}")]
+    HttpError(#[from] Arc<reqwest::Error>),
+
     #[error("{0}")]
     PathError(#[from] zpm_utils::PathError),
 
@@ -366,5 +369,11 @@ impl From<sonic_rs::Error> for Error {
 impl From<std::convert::Infallible> for Error {
     fn from(_: std::convert::Infallible) -> Self {
         unreachable!()
+    }
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(error: reqwest::Error) -> Self {
+        Arc::new(error).into()
     }
 }
