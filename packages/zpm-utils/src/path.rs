@@ -431,6 +431,11 @@ impl Path {
         Ok(self)
     }
 
+    pub fn fs_symlink(&self, target: &Path) -> Result<&Self, PathError> {
+        std::os::unix::fs::symlink(&target.path, &self.path)?;
+        Ok(self)
+    }
+
     pub fn without_ext(&self) -> Path {
         self.with_ext("")
     }

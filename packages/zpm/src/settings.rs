@@ -60,6 +60,17 @@ pub enum PnpFallbackMode {
     All,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum NodeLinker {
+    #[serde(rename = "pnp")]
+    Pnp,
+
+    #[serde(rename = "pnpm")]
+    #[serde(alias = "node-modules")]
+    Pnpm,
+}
+
 /**
  * Configuration settings obtained from the environment variables only. Those
  * variables are extracted whenever the program starts and are never updated.
@@ -133,6 +144,9 @@ pub struct ProjectConfig {
     #[default("cache".to_string())]
     pub local_cache_folder_name: StringField,
 
+    #[default(NodeLinker::Pnp)]
+    pub node_linker: EnumField<NodeLinker>,
+
     #[default("https://registry.npmjs.org".to_string())]
     pub npm_registry_server: StringField,
 
@@ -147,6 +161,9 @@ pub struct ProjectConfig {
 
     #[default("#!/usr/bin/env node".to_string())]
     pub pnp_shebang: StringField,
+
+    #[default("node_modules/.store".to_string())]
+    pub pnpm_store_folder: StringField,
 
     #[default(BTreeMap::new())]
     pub package_extensions: DictField<SemverDescriptor, PackageExtension>,

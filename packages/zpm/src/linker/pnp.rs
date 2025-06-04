@@ -1,106 +1,12 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
+use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt};
 
-use zpm_utils::{Path, PathError};
+use zpm_utils::Path;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Serialize, Serializer};
 use serde_with::serde_as;
 use zpm_utils::ToFileString;
 
-use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, install::Install, primitives::{range::PackageSelector, Descriptor, Ident, Locator, Reference}, project::Project, resolvers::Resolution, settings, system};
-
-#[derive(Debug, Default, Clone, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PackageMeta {
-    #[serde(default, skip_serializing_if = "zpm_utils::is_default")]
-    built: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "zpm_utils::is_default")]
-    unplugged: Option<bool>,
-}
-
-#[serde_as]
-#[derive(Debug, Default, Clone, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-struct TopLevelConfiguration {
-    #[serde(default)]
-    #[serde_as(as = "BTreeMap<_, _>")]
-    dependencies_meta: Vec<(PackageSelector, PackageMeta)>,
-}
-
-fn remove_nm(nm_path: Path) -> Result<(), Error> {
-    let entries = nm_path.fs_read_dir();
-
-    match entries {
-        Err(PathError::IoError {inner, ..}) if inner.kind() == std::io::ErrorKind::NotFound
-            => Ok(()),
-
-        Err(error)
-            => Err(error.into()),
-
-        Ok(entries) => {
-            let mut has_dot_entries = false;
-
-            for entry in entries.flatten() {
-                let path
-                    = Path::try_from(entry.path())?;
-        
-                let basename = path.basename()
-                    .unwrap();
-        
-                if basename.starts_with(".") && basename != ".bin" && path.fs_is_dir() {
-                    has_dot_entries = true;
-                    continue;
-                }
-        
-                path.fs_rm()
-                    .unwrap();
-            }
-        
-            if !has_dot_entries {
-                nm_path.fs_rm()?;
-            }
-        
-            Ok(())
-        },
-    }
-}
-
-fn extract_archive(project_root: &Path, locator: &Locator, package_data: &PackageData) -> Result<(Path, bool), Error> {
-    let extract_path = project_root
-        .with_join_str(".yarn/unplugged")
-        .with_join_str(locator.slug());
-
-    let package_subpath = package_data.package_subpath();
-    let package_directory = extract_path
-        .with_join(&package_subpath);
-    
-    let ready_path = extract_path
-        .with_join_str(".ready");
-
-    if !ready_path.fs_exists() && !matches!(package_data, &PackageData::MissingZip {..}) {
-        let package_bytes = match package_data {
-            PackageData::Zip {archive_path, ..} => archive_path.fs_read()?,
-            _ => panic!("Expected a zip archive"),
-        };
-
-        for entry in zpm_formats::zip::entries_from_zip(&package_bytes)? {
-            let target_path = extract_path
-                .with_join_str(&entry.name);
-
-            target_path
-                .fs_create_parent()?
-                .fs_write(&entry.data)?
-                .fs_set_permissions(Permissions::from_mode(entry.mode as u32))?;
-        }
-
-        ready_path
-            .fs_write(vec![])?;
-
-        Ok((package_directory, true))
-    } else {
-        Ok((package_directory, false))
-    }
-}
+use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, install::Install, linker, primitives::{Ident, Locator, Reference}, project::Project, settings};
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -219,59 +125,17 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
     Ok(())
 }
 
-fn populate_build_entry_dependencies(package_build_entries: &BTreeMap<Locator, usize>, locator_resolutions: &BTreeMap<Locator, Resolution>, descriptor_to_locator: &BTreeMap<Descriptor, Locator>) -> Result<BTreeMap<usize, BTreeSet<usize>>, Error> {
-    let mut package_build_dependencies = BTreeMap::new();
+pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Install) -> Result<BuildRequests, Error> {
+    let tree
+        = &install.install_state.resolution_tree;
 
-    for locator in package_build_entries.keys() {
-        let mut build_dependencies = BTreeSet::new();
+    let nm_path
+        = project.project_cwd.with_join_str("node_modules");
 
-        let mut queue = vec![locator.clone()];
-        let mut seen: BTreeSet<_> = BTreeSet::new();
+    linker::helpers::fs_remove_nm(nm_path)?;
 
-        seen.insert(locator.clone());
-
-        while let Some(locator) = queue.pop() {
-            let resolution = locator_resolutions.get(&locator)
-                .expect("Failed to find locator resolution");
-
-            for dependency in resolution.dependencies.values() {
-                let dependency_locator = descriptor_to_locator.get(dependency)
-                    .expect("Failed to find dependency locator");
-
-                if !seen.insert(dependency_locator.clone()) {
-                    continue;
-                }
-
-                if let Some(dependency_entry_idx) = package_build_entries.get(dependency_locator) {
-                    build_dependencies.insert(*dependency_entry_idx);
-                }
-
-                queue.push(dependency_locator.clone());
-            }
-        }
-
-        let entry_idx = package_build_entries.get(locator)
-            .expect("Failed to find build entry index");
-
-        package_build_dependencies.insert(*entry_idx, build_dependencies);
-    }
-
-    Ok(package_build_dependencies)
-}
-
-pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install) -> Result<BuildRequests, Error> {
-    let tree = &install.install_state.resolution_tree;
-    let nm_path = project.project_cwd.with_join_str("node_modules");
-
-    remove_nm(nm_path)?;
-
-    let dependencies_meta = project.manifest_path()
-        .if_exists()
-        .and_then(|path| path.fs_read_text().ok()).map(|data| sonic_rs::from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(selector, meta)| (selector.ident().clone(), (selector, meta)))
-        .into_group_map();
+    let dependencies_meta
+        = linker::helpers::TopLevelConfiguration::from_project(project);
 
     let mut package_registry_data: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
     let mut dependency_tree_roots = Vec::new();
@@ -327,64 +191,28 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
             _ => false,
         };
 
-        // The package meta is based on the top-level configuration extracted
-        // from the `dependenciesMeta` field.
-        //
-        let package_meta = dependencies_meta
-            .get(&locator.ident)
-            .and_then(|meta_list| {
-                meta_list.iter().find_map(|(selector, meta)| match selector {
-                    PackageSelector::Range(params) => params.range.check(&resolution.version).then_some(meta),
-                    PackageSelector::Ident(_) => Some(meta),
-                })
-            })
-            .cloned()
-            .unwrap_or_default();
-
-        // The package flags are based on the actual package content. The flags
-        // should always be the same for the same package, so we keep them in
-        // the install state so we don't have to recompute them at every install.
-        //
-        let package_flags = &install.lockfile.entries
-            .get(&locator.physical_locator())
-            .expect("Expected package flags to be set")
-            .flags;
-
-        // We don't take into account `is_compatible` here, as it may change
-        // depending on the system and we don't want the paths encoded in the
-        // .pnp.cjs file to change depending on the system.
-        let should_build_if_compatible
-            = package_flags.build_commands.len() > 0
-                && package_meta.built.unwrap_or(project.config.project.enable_scripts.value);
-
-        // Optional dependencies baked by zip archives are always extracted,
-        // as we have no way to know whether they would be extracted if we
-        // were to download them (this may change depending on the package's
-        // files).
-        let is_optional
-            = install.install_state.resolution_tree.optional_builds.contains(locator);
-
-        let is_baked_by_zip
-            = matches!(physical_package_data, PackageData::Zip {..} | PackageData::MissingZip {..});
-
-        let must_extract =
-            (is_optional && is_baked_by_zip) || package_meta.unplugged.or(package_flags.prefer_extracted)
-                .unwrap_or_else(|| should_build_if_compatible || package_flags.suggest_extracted);
-
-        // We don't need to run the build if the package was marked as
-        // incompatible with the current system (even if the package isn't
-        // marked as optional).
-        let is_compatible = resolution.requirements
-            .validate(&system::Description::from_current());
-
-        let must_build
-            = should_build_if_compatible && is_compatible;
+        let package_build_info = linker::helpers::get_package_internal_info(
+            project,
+            install,
+            &dependencies_meta,
+            &locator,
+            &resolution,
+            &physical_package_data,
+        );
 
         let mut is_physically_on_disk = true;
         let mut is_freshly_unplugged = false;
 
-        if must_extract {
-            (package_location_abs, is_freshly_unplugged) = extract_archive(&project.project_cwd, locator, physical_package_data)?;
+        if package_build_info.must_extract {
+            package_location_abs = project.project_cwd
+                .with_join_str(".yarn/unplugged")
+                .with_join_str(locator.slug())
+                .with_join(&physical_package_data.package_subpath());
+    
+            is_freshly_unplugged = linker::helpers::fs_extract_archive(
+                &package_location_abs,
+                physical_package_data,
+            )?;
         } else {
             is_physically_on_disk = false;
         }
@@ -422,7 +250,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
                 discard_from_lookup,
             });
 
-        if must_build {
+        if let Some(build_commands) = package_build_info.build_commands {
             let build_cwd = match is_physically_on_disk {
                 true => package_location_rel.clone(),
                 false => {
@@ -442,7 +270,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
             all_build_entries.push(build::BuildRequest {
                 cwd: build_cwd,
                 locator: locator.clone(),
-                commands: package_flags.build_commands.clone(),
+                commands: build_commands,
                 tree_hash: install.install_state.locator_tree_hash(locator),
                 allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
                 force_rebuild: is_freshly_unplugged,
@@ -474,9 +302,12 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         });
     }
 
-    let enable_top_level_fallback = project.config.project.pnp_fallback_mode.value != settings::PnpFallbackMode::None;
+    let enable_top_level_fallback
+        = project.config.project.pnp_fallback_mode.value != settings::PnpFallbackMode::None;
 
-    let mut fallback_exclusion_list: BTreeMap<Ident, BTreeSet<PnpReference>> = BTreeMap::new();
+    let mut fallback_exclusion_list: BTreeMap<Ident, BTreeSet<PnpReference>>
+        = BTreeMap::new();
+
     let fallback_pool = vec![];
 
     if project.config.project.pnp_fallback_mode.value == settings::PnpFallbackMode::DependenciesOnly {
@@ -517,7 +348,7 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
     project.pnp_loader_path()
         .fs_change(std::include_str!("pnp.loader.mjs"), Permissions::from_mode(0o644))?;
 
-    let package_build_dependencies = populate_build_entry_dependencies(
+    let package_build_dependencies = linker::helpers::populate_build_entry_dependencies(
         &package_build_entries,
         &tree.locator_resolutions,
         &tree.descriptor_to_locator,
@@ -528,4 +359,3 @@ pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install
         dependencies: package_build_dependencies?,
     })
 }
-
