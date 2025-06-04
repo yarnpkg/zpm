@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use zpm_utils::OkMissing;
 
 use crate::{build::{self, BuildRequests}, error::Error, fetchers::PackageData, install::Install, linker, project::Project};
 
@@ -76,103 +77,70 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
 
     // Second pass: create symlinks in node_modules directories
     for (locator, resolution) in &tree.locator_resolutions {
-        let physical_package_data = install.package_data.get(&locator.physical_locator())
-            .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator()));
+        // <empty path, if we assume the root workspace>
+        let package_location
+            = install.install_state.locations_by_package.get(locator)
+                .expect("Failed to find package location; it should have been registered a little earlier");
 
-        // Determine where this package lives
-        let package_location = if matches!(physical_package_data, PackageData::Local {..}) {
-            // Workspace packages live in their original location
-            physical_package_data.package_directory()
-        } else {
-            // Regular packages live in the store
-            &store_path
-                .with_join_str(&locator.slug())
-                .with_join_str("package")
-        };
+        // /path/to/project
+        let package_abs_path = project.project_cwd
+            .with_join(package_location);
 
-        // Create node_modules directory for this package
-        let package_nm_path = package_location.with_join_str("node_modules");
-        package_nm_path.fs_create_dir_all()?;
+        // /path/to/project/node_modules
+        let package_abs_nm_path = package_abs_path
+            .with_join_str("node_modules");
 
-        // Create symlinks for all dependencies
         for (dep_name, descriptor) in &resolution.dependencies {
             let dep_locator = tree.descriptor_to_locator.get(descriptor)
                 .expect("Failed to find dependency resolution");
-            
-            let dep_physical_package_data = install.package_data.get(&dep_locator.physical_locator())
-                .unwrap_or_else(|| panic!("Failed to find physical package data for {}", dep_locator.physical_locator()));
 
-            let dep_target_path = if matches!(dep_physical_package_data, PackageData::Local {..}) {
-                // Workspace dependency - link to workspace location
-                dep_physical_package_data.package_directory()
-            } else {
-                // Regular dependency - link to store location
-                &store_path
-                    .with_join_str(&dep_locator.slug())
-                    .with_join_str("package")
-            };
+            // node_modules/.store/@types-no-deps-npm-1.0.0-xyz/package
+            let dep_rel_location
+                = install.install_state.locations_by_package.get(dep_locator)
+                    .expect("Failed to find dependency location; it should have been registered a little earlier");
 
-            let link_path = package_nm_path.with_join_str(&dep_name.name());
-            
-            // Create symlink (remove existing one if present)
-            if link_path.fs_exists() {
-                link_path.fs_rm()?;
-            }
-            
-            // Create symlink - use relative path for portability
-            let relative_target = dep_target_path.relative_to(&package_nm_path);
-            link_path.fs_symlink(&relative_target)?;
-        }
-    }
+            // /path/to/project/node_modules/.store/@types-no-deps-npm-1.0.0-xyz/package
+            let dep_abs_path = project.project_cwd
+                .with_join(dep_rel_location);
 
-    // Create root node_modules with workspace dependencies
-    let root_nm_path = project.project_cwd.with_join_str("node_modules");
-    root_nm_path.fs_create_dir_all()?;
+            // /path/to/project/node_modules/@types/no-deps
+            let link_abs_path = package_abs_nm_path
+                .with_join_str(dep_name.as_str());
 
-    // Link workspace packages in root node_modules
-    for workspace in &project.workspaces {
-        if workspace.path != project.project_cwd {
-            let link_path = root_nm_path.with_join_str(&workspace.name.name());
-            if link_path.fs_exists() {
-                link_path.fs_rm()?;
-            }
-            let relative_target = workspace.path.relative_to(&root_nm_path);
-            link_path.fs_symlink(&relative_target)?;
-        }
-    }
+            // /path/to/project/node_modules/@types
+            let link_abs_dirname = link_abs_path
+                .dirname()
+                .expect("Failed to get directory name");
 
-    // Create symlinks in root node_modules for all root workspace dependencies
-    let root_workspace = &project.workspaces[0]; // First workspace is always the root
-    let root_locator = root_workspace.locator();
+            // ../.store/@types-no-deps-npm-1.0.0-xyz/package
+            let symlink_target = dep_abs_path
+                .relative_to(&link_abs_dirname);
     
-    if let Some(root_resolution) = tree.locator_resolutions.get(&root_locator) {
-        for (dep_name, descriptor) in &root_resolution.dependencies {
-            let dep_locator = tree.descriptor_to_locator.get(descriptor)
-                .expect("Failed to find dependency resolution");
-            
-            let dep_physical_package_data = install.package_data.get(&dep_locator.physical_locator())
-                .unwrap_or_else(|| panic!("Failed to find physical package data for {}", dep_locator.physical_locator()));
+            link_abs_path
+                .fs_rm_file()
+                .ok_missing()?
+                .unwrap_or(&link_abs_path)
+                .fs_create_parent()?
+                .fs_symlink(&symlink_target)?;
+        }
 
-            let dep_target_path = if matches!(dep_physical_package_data, PackageData::Local {..}) {
-                // Workspace dependency - link to workspace location
-                dep_physical_package_data.package_directory()
-            } else {
-                // Regular dependency - link to store location
-                &store_path
-                    .with_join_str(&dep_locator.slug())
-                    .with_join_str("package")
-            };
+        if !resolution.dependencies.contains_key(&locator.ident) {
+            let self_link_abs_path = package_abs_nm_path
+                .with_join_str(locator.ident.as_str());
 
-            let link_path = root_nm_path.with_join_str(&dep_name.name());
-            
-            // Create symlink (remove existing one if present)
-            if link_path.fs_exists() {
-                link_path.fs_rm()?;
-            }
-            
-            // Create symlink - use relative path for portability
-            let relative_target = dep_target_path.relative_to(&root_nm_path);
-            link_path.fs_symlink(&relative_target)?;
+            let self_link_abs_dirname = self_link_abs_path
+                .dirname()
+                .expect("Failed to get directory name");
+
+            let symlink_target = package_abs_path
+                .relative_to(&self_link_abs_dirname);
+
+            self_link_abs_path
+                .fs_rm_file()
+                .ok_missing()?
+                .unwrap_or(&self_link_abs_path)
+                .fs_create_parent()?
+                .fs_symlink(&symlink_target)?;
         }
     }
 
