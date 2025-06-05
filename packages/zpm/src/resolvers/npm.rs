@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt, marker::PhantomData, str::FromStr, sync::{
 use regex::Regex;
 use serde::{de::{self, DeserializeOwned, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
 
-use crate::{error::Error, http::http_get, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, npm, primitives::{range, reference, Descriptor, Ident, Locator}, resolvers::Resolution};
+use crate::{error::Error, http::http_get, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, npm, primitives::{range, reference, Descriptor, Ident, Locator, Reference}, resolvers::{workspace::{self, resolve_locator_ident}, Resolution}};
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
@@ -184,6 +184,10 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
 }
 
 pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistrySemverRange) -> Result<ResolutionResult, Error> {
+    if let Some(resolved) = workspace::resolve_ident(context, &descriptor.ident) {
+        return Ok(resolved);
+    }
+
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -216,6 +220,10 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
 }
 
 pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistryTagRange) -> Result<ResolutionResult, Error> {
+    if let Some(resolved) = workspace::resolve_ident(context, &descriptor.ident) {
+        return Ok(resolved);
+    }
+
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 

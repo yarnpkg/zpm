@@ -48,6 +48,7 @@ impl Remove {
         project.run_install(RunInstallOptions {
             check_resolutions: false,
             refresh_lockfile: false,
+            silent_or_error: false,
         }).await?;
 
         Ok(())

@@ -37,6 +37,7 @@ impl Install {
         project.run_install(RunInstallOptions {
             check_resolutions: self.check_resolutions,
             refresh_lockfile: self.refresh_lockfile,
+            ..Default::default()
         }).await?;
 
         Ok(())

@@ -31,7 +31,6 @@ impl Constraints {
 
         for loop_idx in 1..=max_loops {
             project
-                .import_install_state()?
                 .lazy_install().await?;
 
             let install_state

@@ -30,7 +30,6 @@ impl Run {
             = project::Project::new(None).await?;
 
         project
-            .import_install_state()?
             .lazy_install().await?;
 
         if self.top_level {

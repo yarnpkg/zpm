@@ -214,7 +214,7 @@ impl Add {
 
         let mut formatter
             = JsonFormatter::from(&manifest_content).unwrap();
-        
+
         for (descriptor, request) in &requests {
             if request.dev && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
                 return Err(Error::ConflictingOptions(format!("{} is already listed as a regular dependency of this workspace", descriptor.ident)));
@@ -261,7 +261,6 @@ impl Add {
             }
         }    
 
-        // Write the formatted result back
         let updated_content
             = formatter.to_string();
 
@@ -272,8 +271,7 @@ impl Add {
             = project::Project::new(None).await?;
 
         project.run_install(project::RunInstallOptions {
-            check_resolutions: false,
-            refresh_lockfile: false,
+            ..Default::default()
         }).await?;
 
         Ok(())

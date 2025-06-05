@@ -136,8 +136,7 @@ async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descriptor
 
     project
         .run_install(project::RunInstallOptions {
-            check_resolutions: false,
-            refresh_lockfile: false,
+            ..Default::default()
         }).await?;
 
     Ok(project)

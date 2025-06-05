@@ -14,9 +14,11 @@ pub const PNP_CJS_NAME: &str = ".pnp.cjs";
 pub const PNP_ESM_NAME: &str = ".pnp.loader.mjs";
 pub const PNP_DATA_NAME: &str = ".pnp.data.json";
 
+#[derive(Default)]
 pub struct RunInstallOptions {
     pub check_resolutions: bool,
     pub refresh_lockfile: bool,
+    pub silent_or_error: bool,
 }
 
 pub struct Project {
@@ -488,6 +490,11 @@ impl Project {
     }
 
     pub async fn lazy_install(&mut self) -> Result<(), Error> {
+        match self.import_install_state() {
+            Ok(_) | Err(Error::InstallStateNotFound) => (),
+            Err(e) => return Err(e),
+        };
+
         if let Some(install_state) = &self.install_state {
             if self.last_changed_at <= install_state.last_installed_at {
                 return Ok(());
@@ -497,12 +504,14 @@ impl Project {
         self.run_install(RunInstallOptions {
             check_resolutions: false,
             refresh_lockfile: false,
+            silent_or_error: true,
         }).await
     }
 
     pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<(), Error> {
         let report = StreamReport::new(StreamReportConfig {
             enable_timers: true,
+            silent_or_error: options.silent_or_error,
         });
 
         with_report_result(report, async {

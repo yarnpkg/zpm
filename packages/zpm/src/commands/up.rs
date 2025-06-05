@@ -108,8 +108,7 @@ impl Up {
             = project::Project::new(None).await?;
 
         project.run_install(RunInstallOptions {
-            check_resolutions: false,
-            refresh_lockfile: false,
+            ..Default::default()
         }).await?;
 
         Ok(())
