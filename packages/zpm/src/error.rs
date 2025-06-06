@@ -160,6 +160,15 @@ pub enum Error {
     #[error("An error occured while parsing the lockfile ({0})")]
     LockfileParseError(Arc<sonic_rs::Error>),
 
+    #[error("Can't perform this operation without a git root")]
+    NoGitRoot,
+
+    #[error("Can't perform this operation with zero base refs specified")]
+    NoBaseRefs,
+
+    #[error("No merge base could be found between any of HEAD and {args}", args = .0.join(", "))]
+    NoMergeBaseFound(Vec<String>),
+
     #[error("An error occured while parsing the lockfile ({0})")]
     LegacyLockfileParseError(Arc<serde_yaml::Error>),
 

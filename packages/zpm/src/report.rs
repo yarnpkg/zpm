@@ -155,7 +155,7 @@ impl Reporter {
     pub fn write_spinner<T: Write>(&mut self, writer: &mut T) {
         if let Some(spinner_idx) = self.spinner_idx {
             if !self.config.silent_or_error {
-                let chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".chars().collect::<Vec<_>>();
+                let chars = "◐◓◑◒".chars().collect::<Vec<_>>();
                 write!(writer, "{}", chars[spinner_idx]).unwrap();
 
                 self.spinner_idx = Some((spinner_idx + 1) % chars.len());

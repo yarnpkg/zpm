@@ -523,6 +523,14 @@ impl Path {
         other.as_str().starts_with(self.as_str()) || other == self
     }
 
+    pub fn forward_relative_to(&self, other: &Path) -> Option<Path> {
+        if other.contains(self) {
+            Some(self.relative_to(other))
+        } else {
+            None
+        }
+    }
+
     pub fn relative_to(&self, other: &Path) -> Path {
         assert!(self.is_absolute());
         assert!(other.is_absolute());

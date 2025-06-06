@@ -230,11 +230,23 @@ impl ScriptResult {
         }
     }
 
-    pub fn output(&self) -> &Output {
+    pub fn output(self) -> Output {
         match self {
             Self::Success(output) => output,
             Self::Failure(output, _, _) => output,
         }
+    }
+
+    pub fn stdout_text(self) -> Result<String, Error> {
+        let output
+            = self.output();
+
+        let text
+            = String::from_utf8(output.stdout)?
+                .trim()
+                .to_string();
+
+        Ok(text)
     }
 }
 
