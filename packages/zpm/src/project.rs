@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, io::ErrorKind, os::unix::fs::PermissionsExt, sync::Arc, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, fs::Permissions, io::ErrorKind, os::unix::fs::PermissionsExt, sync::Arc, time::UNIX_EPOCH};
 
 use zpm_utils::Path;
 use globset::GlobBuilder;
@@ -620,18 +620,6 @@ impl Workspace {
         let mut project_last_changed_at = self.last_changed_at;
 
         if let Some(patterns) = &self.manifest.workspaces {
-            let normalized_patterns = patterns.iter()
-                .map(|p| Path::try_from(p.as_str()))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let glob_patterns = normalized_patterns.into_iter()
-                .map(|p| GlobBuilder::new(p.as_str()).literal_separator(true).build())
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let pattern_matchers = glob_patterns.into_iter()
-                .map(|g| g.compile_matcher())
-                .collect::<Vec<_>>();
-
             let mut manifest_finder
                 = CachedManifestFinder::new(self.path.clone())?;
 
@@ -640,28 +628,72 @@ impl Workspace {
             let lookup_state
                 = manifest_finder.into_state();
 
-            let workspace_paths = lookup_state.cache.into_iter()
-                .filter(|(_, entry)| matches!(entry, SaveEntry::File(_, _)))
-                .filter(|(p, _)| {
-                    let candidate_workspace_rel_dir = p.dirname()
-                        .expect("Expected this path to have a parent directory, since it's supposed to be the relative path to a package.json file");
+            let mut workspace_queue = vec![
+                (Path::new(), patterns.clone()),
+            ];
 
-                    pattern_matchers.iter().any(|m| {
-                        m.is_match(candidate_workspace_rel_dir.as_str())
+            let mut processed_workspaces
+                = HashSet::new();
+
+            while let Some((base_path, current_patterns)) = workspace_queue.pop() {
+                let normalized_patterns = current_patterns.iter()
+                    .map(|p| Path::try_from(p.as_str()))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let glob_patterns = normalized_patterns.into_iter()
+                    .map(|p| {
+                        let pattern_path = base_path
+                            .with_join(&p);
+
+                        GlobBuilder::new(pattern_path.as_str())
+                            .literal_separator(true)
+                            .build()
                     })
-                })
-                .collect::<Vec<_>>();
+                    .collect::<Result<Vec<_>, _>>()?;
 
-            for (manifest_rel_path, save_entry) in workspace_paths {
-                if let SaveEntry::File(last_changed_at, manifest) = save_entry {
-                    workspaces.push(Workspace::from_info(&self.path, WorkspaceInfo {
-                        rel_path: manifest_rel_path.dirname().unwrap(),
-                        manifest,
-                        last_changed_at,
-                    })?);
+                let pattern_matchers = glob_patterns.into_iter()
+                    .map(|g| g.compile_matcher())
+                    .collect::<Vec<_>>();
 
-                    if last_changed_at > project_last_changed_at {
-                        project_last_changed_at = last_changed_at;
+                let workspace_paths = lookup_state.cache.iter()
+                    .filter(|(_, entry)| {
+                        matches!(entry, SaveEntry::File(_, _))
+                    })
+                    .filter(|(p, _)| {
+                        let candidate_workspace_rel_dir = p.dirname()
+                            .expect("Expected this path to have a parent directory, since it's supposed to be the relative path to a package.json file");
+
+                        pattern_matchers.iter().any(|m| {
+                            m.is_match(candidate_workspace_rel_dir.as_str())
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
+                for (manifest_rel_path, save_entry) in workspace_paths {
+                    if let SaveEntry::File(last_changed_at, manifest) = save_entry {
+                        let workspace_rel_path = manifest_rel_path.dirname().unwrap();
+                        
+                        // Skip if we've already processed this workspace
+                        if processed_workspaces.contains(&workspace_rel_path) {
+                            continue;
+                        }
+                        
+                        processed_workspaces.insert(workspace_rel_path.clone());
+
+                        workspaces.push(Workspace::from_info(&self.path, WorkspaceInfo {
+                            rel_path: workspace_rel_path.clone(),
+                            manifest: manifest.clone(),
+                            last_changed_at: *last_changed_at,
+                        })?);
+
+                        if *last_changed_at > project_last_changed_at {
+                            project_last_changed_at = *last_changed_at;
+                        }
+
+                        // If this workspace has its own workspaces field, add it to the queue
+                        if let Some(nested_patterns) = &manifest.workspaces {
+                            workspace_queue.push((workspace_rel_path, nested_patterns.clone()));
+                        }
                     }
                 }
             }
