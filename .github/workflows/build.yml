@@ -46,18 +46,18 @@ jobs:
           rustup target add ${{matrix.platform[0]}}
 
           cargo build --verbose --release --target=${{matrix.platform[0]}}
-          strip target/release/{yarn-bin,yarn}
+          strip target/${{matrix.platform[0]}}/release/{yarn-bin,yarn}
 
-          cp LICENSE.md target/release/
+          cp LICENSE.md target/${{matrix.platform[0]}}/release/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: yarn-${{matrix.platform[0]}}
           path: |
-            target/release/yarn-bin
-            target/release/yarn
-            target/release/LICENSE.md
+            target/${{matrix.platform[0]}}/release/yarn-bin
+            target/${{matrix.platform[0]}}/release/yarn
+            target/${{matrix.platform[0]}}/release/LICENSE.md
           retention-days: 7
 
   test-report:
