@@ -14,10 +14,10 @@ jobs:
     strategy:
       matrix:
         platform:
-          - [linux, ubuntu-latest]
-          - [darwin, macos-latest]
+          - [x86_64-unknown-linux-musl, ubuntu-latest]
+          - [aarch64-apple-darwin, macos-latest]
 
-    name: 'Building the binary for ${{matrix.platform[0]}}'
+    name: 'Building ${{matrix.platform[0]}}'
     runs-on: ${{matrix.platform[1]}}
 
     steps:
@@ -32,23 +32,21 @@ jobs:
       - name: Build
         run: |
           git_sha=$GITHUB_SHA
-          git_date=$(git show -s --format=%ad --date=format:'%Y%m%d' $GITHUB_SHA)
+          git_date=$(git show -s --format=%cd --date=format:'%Y%m%d' $GITHUB_SHA)
 
           zpm_version=$(cargo pkgid -p zpm | cut -d "#" -f2 | cut -d- -f1)
 
           export INFRA_VERSION=$zpm_version-git.${git_date}.hash-${git_sha}
 
-          cargo build --verbose --release
+          cargo build --verbose --release --target=${{matrix.platform[0]}}
           strip target/release/{yarn-bin,yarn}
 
           cp LICENSE.md target/release/
 
-          echo "INFRA_PLATFORM=$(./yarn.sh debug print-platform)" >> $GITHUB_ENV
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: yarn-${{env.INFRA_PLATFORM}}
+          name: yarn-${{matrix.platform[0]}}
           path: |
             target/release/yarn-bin
             target/release/yarn
@@ -119,7 +117,7 @@ jobs:
       - name: Download the binary
         uses: actions/download-artifact@v4
         with:
-          name: yarn-x86_64-unknown-linux-gnu
+          name: yarn-x86_64-unknown-linux-musl
   
       - name: Puts back the binaries
         run: |

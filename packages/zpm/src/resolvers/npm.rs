@@ -183,11 +183,24 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
         .into_resolution_result(context)
 }
 
-pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistrySemverRange) -> Result<ResolutionResult, Error> {
-    if let Some(resolved) = workspace::resolve_ident(context, &descriptor.ident) {
-        return Ok(resolved);
+pub async fn resolve_semver_or_workspace_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistrySemverRange) -> Result<ResolutionResult, Error> {
+    let project = context.project
+        .expect("The project is required for resolving a workspace package");
+
+    println!("project.config.project.enable_transparent_workspaces.value: {}", project.config.project.enable_transparent_workspaces.value);
+
+    if project.config.project.enable_transparent_workspaces.value {
+        if let Some(resolved) = workspace::resolve_ident(context, &descriptor.ident) {
+            if params.range.check(&resolved.resolution.version) {
+                return Ok(resolved);
+            }
+        }
     }
 
+    resolve_semver_descriptor(context, descriptor, params).await
+}
+
+pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistrySemverRange) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -220,11 +233,16 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
 }
 
 pub async fn resolve_tag_or_workspace_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistryTagRange) -> Result<ResolutionResult, Error> {
-    if let Some(resolved) = workspace::resolve_ident(context, &descriptor.ident) {
-        Ok(resolved)
-    } else {
-        resolve_tag_descriptor(context, descriptor, params).await
+    let project = context.project
+        .expect("The project is required for resolving a workspace package");
+
+    if project.config.project.enable_transparent_workspaces.value {
+        if let Some(resolved) = workspace::resolve_ident(context, &descriptor.ident) {
+            return Ok(resolved);
+        }
     }
+
+    resolve_tag_descriptor(context, descriptor, params).await
 }
 
 pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistryTagRange) -> Result<ResolutionResult, Error> {

@@ -46,7 +46,7 @@ case $platform in
     target=aarch64-apple-darwin
     ;;
 'Linux x86_64' | *)
-    target=x86_64-unknown-linux-gnu
+    target=x86_64-unknown-linux-musl
     ;;
 esac
 

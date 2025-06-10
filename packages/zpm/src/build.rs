@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use zpm_utils::ToFileString;
 
-use crate::{diff_finder::{DiffController, DiffFinder}, error::Error, hash::Blake2b80, primitives::Locator, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
+use crate::{diff_finder::{DiffController, DiffFinder}, error::Error, hash::Blake2b80, primitives::{Locator, Reference}, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
 
 #[derive(Clone, Debug, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
@@ -66,10 +66,17 @@ impl BuildRequest {
                 .with_join_str(".yarn/ignore/builds")
                 .with_join_str(format!("{}-{}", self.locator.slug(), self.tree_hash));
 
-            let mut artifact_finder
-                = DiffFinder::<ArtifactFinder>::new(cwd_abs, Default::default())?;
+            let supports_build_cache
+                = matches!(self.locator.reference, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_));
 
-            artifact_finder.rsync()?;
+            let mut artifact_finder
+                = supports_build_cache
+                    .then(|| DiffFinder::<ArtifactFinder>::new(cwd_abs, Default::default()))
+                    .transpose()?;
+
+            if let Some(artifact_finder) = &mut artifact_finder {
+                artifact_finder.rsync()?;
+            }
 
             for command in self.commands.iter() {
                 let script_result = match command {
@@ -87,16 +94,18 @@ impl BuildRequest {
                 }
             }
 
-            let (_has_changed, diff_list)
-                = artifact_finder.rsync()?;
+            if let Some(artifact_finder) = &mut artifact_finder {
+                let (_has_changed, diff_list)
+                    = artifact_finder.rsync()?;
 
-            build_cache_folder
-                .fs_rm()
-                .ok_missing()?;
+                build_cache_folder
+                    .fs_rm()
+                    .ok_missing()?;
 
-            build_cache_folder
-                .fs_create_parent()?
-                .fs_write_text(format!("{:#?}", diff_list))?;
+                build_cache_folder
+                    .fs_create_parent()?
+                    .fs_write_text(format!("{:#?}", diff_list))?;
+            }
 
             Ok(ScriptResult::new_success())
         }).await
@@ -260,7 +269,10 @@ impl<'a> BuildManager<'a> {
                 }
 
                 if let Some(hash) = &hash {
-                    if build_state.get(&req.cwd) == Some(hash) && !req.force_rebuild {
+                    let force_rebuild
+                        = req.force_rebuild || req.cwd.is_empty();
+
+                    if build_state.get(&req.cwd) == Some(hash) && !force_rebuild {
                         self.record(idx, Some(hash.to_string()), ScriptResult::new_success());
                         continue;
                     }

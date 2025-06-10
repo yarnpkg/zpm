@@ -130,7 +130,7 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
             => git::resolve_descriptor(&context, &descriptor, params).await,
 
         Range::RegistrySemver(params)
-            => npm::resolve_semver_descriptor(&context, &descriptor, params).await,
+            => npm::resolve_semver_or_workspace_descriptor(&context, &descriptor, params).await,
 
         Range::Link(params)
             => link::resolve_descriptor(&context, &descriptor, params),
