@@ -38,6 +38,8 @@ jobs:
 
           export INFRA_VERSION=$zpm_version-git.${git_date}.hash-${git_sha}
 
+          rustup target add ${{matrix.platform[0]}}
+
           cargo build --verbose --release --target=${{matrix.platform[0]}}
           strip target/release/{yarn-bin,yarn}
 
