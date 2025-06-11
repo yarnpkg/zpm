@@ -44,7 +44,7 @@ jobs:
           INFRA_VERSION=$zpm_version-git.${git_date}.hash-${git_sha}
 
           echo -e "INFRA_VERSION=$INFRA_VERSION" >> $GITHUB_ENV
-          echo -e "```\nINFRA_VERSION=$INFRA_VERSION\n```" >> $GITHUB_STEP_SUMMARY
+          echo -e '```\nINFRA_VERSION='"$INFRA_VERSION"'\n```' >> $GITHUB_STEP_SUMMARY
 
       - name: Build the binaries
         run: |
