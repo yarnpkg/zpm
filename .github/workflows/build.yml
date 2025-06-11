@@ -34,22 +34,28 @@ jobs:
         run: |
           sudo apt-get install -y musl-tools
 
-      - name: Build
+      - name: Compute the version
+        id: version
         run: |
           git_sha=$GITHUB_SHA
           git_date=$(git show -s --format=%cd --date=format:'%Y%m%d' $GITHUB_SHA)
 
           zpm_version=$(cargo pkgid -p zpm | cut -d "#" -f2 | cut -d- -f1)
+          INFRA_VERSION=$zpm_version-git.${git_date}.hash-${git_sha}
 
-          export INFRA_VERSION=$zpm_version-git.${git_date}.hash-${git_sha}
+          echo "INFRA_VERSION=$INFRA_VERSION" >> $GITHUB_ENV
+          echo "INFRA_VERSION=$INFRA_VERSION" >> $GITHUB_OUTPUT
 
+          echo "$INFRA_VERSION" > VERSION
+
+      - name: Build the binaries
+        run: |
           rustup target add ${{matrix.platform[0]}}
 
           cargo build --verbose --release --target=${{matrix.platform[0]}}
           strip target/${{matrix.platform[0]}}/release/{yarn-bin,yarn}
 
           cp LICENSE.md target/${{matrix.platform[0]}}/release/
-          echo "$INFRA_VERSION" > target/${{matrix.platform[0]}}/release/VERSION.md
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -59,8 +65,14 @@ jobs:
             target/${{matrix.platform[0]}}/release/yarn-bin
             target/${{matrix.platform[0]}}/release/yarn
             target/${{matrix.platform[0]}}/release/LICENSE.md
-            target/${{matrix.platform[0]}}/release/VERSION.md
           retention-days: 7
+
+      - name: Upload the version file
+        if: matrix.platform[0] == 'x86_64-unknown-linux-musl'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v${{steps.version.outputs.INFRA_VERSION}}
+          path: VERSION
 
   test-report:
     needs: build
