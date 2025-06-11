@@ -3204,6 +3204,7 @@ dependencies = [
  "tokio",
  "urlencoding",
  "wax",
+ "zpm-ci",
  "zpm-formats",
  "zpm-macros",
  "zpm-parsers",
@@ -3211,6 +3212,10 @@ dependencies = [
  "zpm-switch",
  "zpm-utils",
 ]
+
+[[package]]
+name = "zpm-ci"
+version = "0.1.0"
 
 [[package]]
 name = "zpm-formats"

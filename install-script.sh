@@ -61,12 +61,12 @@ tag=$1
 
 yarn_uri=https://repo.yarnpkg.com/tags/$tag/$target
 
-echo "This script will install or update $(colorize $Yarn "Yarn Switch"), a utility that lets you lock Yarn versions in your projects."
-echo "For more information, please take a look at our documentation at $(colorize $Url "https://yarnpkg.com")"
+echo "This script will install or update $(colorize "$Yarn" "Yarn Switch"), a utility that lets you lock Yarn versions in your projects."
+echo "For more information, please take a look at our documentation at $(colorize "$Url" "https://yarnpkg.com")"
 echo
 
 curl --fail --location --progress-bar --output "$archive" $yarn_uri ||
-    error "Failed to download Yarn from $(colorize $Url "$yarn_uri")"
+    error "Failed to download Yarn from $(colorize "$Url" "$yarn_uri")"
 
 unzip -q "$archive" -d "$tmp_dir"
 rm "$tmp_dir"/yarn-bin

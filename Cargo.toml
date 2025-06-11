@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "packages/zpm-ci",
     "packages/zpm-formats",
     "packages/zpm-macros",
     "packages/zpm-parsers",

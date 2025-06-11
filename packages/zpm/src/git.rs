@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, github, prepare::PrepareParams};
+use crate::{error::Error, github, prepare::PrepareParams, script::ScriptEnvironment};
 
 static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
 
@@ -427,29 +427,16 @@ async fn download_into(normalized_repo_url: &str, commit: &str, download_dir: &P
 }
 
 async fn git_clone_into(normalized_repo_url: &str, commit: &str, clone_dir: &Path) -> Result<(), Error> {
-    Command::new("git")
-        .envs(make_git_env())
-        .arg("clone")
-        .arg("-c")
-        .arg("core.autocrlf=false")
-        .arg(&normalized_repo_url)
-        .arg(clone_dir.to_string())
-        .output().await?
-        .status
-        .success()
-        .then_some(())
-        .ok_or_else(|| Error::RepositoryCloneFailed(normalized_repo_url.to_string()))?;
+    ScriptEnvironment::new()?
+        .with_env(make_git_env())
+        .run_exec("git", &["clone", "-c", "core.autocrlf=false", normalized_repo_url, clone_dir.as_str()]).await
+        .ok()?;
 
-    Command::new("git")
-        .envs(make_git_env())
-        .arg("checkout")
-        .arg(commit)
-        .current_dir(clone_dir.to_string())
-        .output().await?
-        .status
-        .success()
-        .then_some(())
-        .ok_or_else(|| Error::RepositoryCheckoutFailed(normalized_repo_url.to_string(), commit.to_string()))?;
+    ScriptEnvironment::new()?
+        .with_cwd(clone_dir.clone())
+        .with_env(make_git_env())
+        .run_exec("git", &["checkout", commit]).await
+        .ok()?;
 
     Ok(())
 }

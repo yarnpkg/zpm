@@ -308,6 +308,11 @@ impl ScriptEnvironment {
         current.push_str(value);
     }
 
+    pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
+        self.env.extend(env);
+        self
+    }
+
     pub fn with_env_variable(mut self, key: &str, value: &str) -> Self {
         self.env.insert(key.to_string(), value.to_string());
         self

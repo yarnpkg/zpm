@@ -1,9 +1,10 @@
-use zpm_utils::Path;
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use zpm_macros::yarn_config;
 use zpm_semver::RangeKind;
-use zpm_utils::{FromFileString, ToFileString, ToHumanString};
-use std::collections::BTreeMap;
+use zpm_utils::{FromFileString, Path, ToFileString, ToHumanString};
+
 use crate::{
     config::ConfigPaths, 
     config_fields::{BoolField, DictField, EnumField, GlobField, PathField, StringField, UintField, VecField},
@@ -88,6 +89,8 @@ pub struct EnvConfig {
 
 #[yarn_config]
 pub struct UserConfig {
+    #[default(|_| !zpm_ci::is_ci().is_some())]
+    pub enable_progress_bars: BoolField,
 }
 
 fn check_tsconfig(config_paths: &ConfigPaths) -> bool {
