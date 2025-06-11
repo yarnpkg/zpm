@@ -43,10 +43,8 @@ jobs:
           zpm_version=$(cargo pkgid -p zpm | cut -d "#" -f2 | cut -d- -f1)
           INFRA_VERSION=$zpm_version-git.${git_date}.hash-${git_sha}
 
-          echo "INFRA_VERSION=$INFRA_VERSION" >> $GITHUB_ENV
-          echo "INFRA_VERSION=$INFRA_VERSION" >> $GITHUB_OUTPUT
-
-          echo "$INFRA_VERSION" > VERSION
+          echo -e "INFRA_VERSION=$INFRA_VERSION" >> $GITHUB_ENV
+          echo -e "```\nINFRA_VERSION=$INFRA_VERSION\n```" >> $GITHUB_STEP_SUMMARY
 
       - name: Build the binaries
         run: |
@@ -66,13 +64,6 @@ jobs:
             target/${{matrix.platform[0]}}/release/yarn
             target/${{matrix.platform[0]}}/release/LICENSE.md
           retention-days: 7
-
-      - name: Upload the version file
-        if: matrix.platform[0] == 'x86_64-unknown-linux-musl'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v${{steps.version.outputs.INFRA_VERSION}}
-          path: VERSION
 
   test-report:
     needs: build
