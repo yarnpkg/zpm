@@ -49,6 +49,7 @@ jobs:
           strip target/${{matrix.platform[0]}}/release/{yarn-bin,yarn}
 
           cp LICENSE.md target/${{matrix.platform[0]}}/release/
+          echo "$INFRA_VERSION" > target/${{matrix.platform[0]}}/release/VERSION.md
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -58,6 +59,7 @@ jobs:
             target/${{matrix.platform[0]}}/release/yarn-bin
             target/${{matrix.platform[0]}}/release/yarn
             target/${{matrix.platform[0]}}/release/LICENSE.md
+            target/${{matrix.platform[0]}}/release/VERSION.md
           retention-days: 7
 
   test-report:
