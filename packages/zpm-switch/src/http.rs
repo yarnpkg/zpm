@@ -20,8 +20,18 @@ pub async fn fetch(url: &str) -> Result<Vec<u8>, Error> {
     let client
         = http_client()?;
 
+    let is_ci_header
+        = zpm_ci::is_ci()
+            .map_or_else(
+                || "n/a".to_string(),
+                |provider| serde_plain::to_string(&provider).unwrap()
+            );
+
     let request
-        = client.get(url).send().await?;
+        = client.get(url)
+            .header("User-Agent", "zpm-switch")
+            .header("X-Switch-CI", is_ci_header)
+            .send().await?;
 
     let status
         = request.status();

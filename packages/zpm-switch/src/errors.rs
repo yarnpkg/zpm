@@ -18,6 +18,9 @@ pub enum Error {
     IOError(#[from] Arc<std::io::Error>),
 
     #[error(transparent)]
+    Utf8Error(#[from] Arc<std::str::Utf8Error>),
+
+    #[error(transparent)]
     RequestError(#[from] Arc<reqwest::Error>),
 
     #[error("Unknown binary name: {0}")]
@@ -52,6 +55,12 @@ pub enum Error {
 
     #[error("This package manager cannot be used to interact on project configured for use with {0}")]
     UnsupportedProject(String),
+}
+
+impl From<std::str::Utf8Error> for Error {
+    fn from(value: std::str::Utf8Error) -> Self {
+        Error::Utf8Error(Arc::new(value))
+    }
 }
 
 impl From<reqwest::Error> for Error {

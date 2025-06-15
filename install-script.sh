@@ -35,7 +35,29 @@ error() {
 command -v unzip >/dev/null ||
     error 'The unzip command is required to install Yarn'
 
-if [[ $# -gt 1 ]]; then
+Install_Channel=stable
+Positional_Args=()
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --canary)
+      Install_Channel=canary
+      shift
+      ;;
+
+    -*|--*)
+      echo "Unknown option $1"
+      exit 1
+      ;;
+
+    *)
+      Positional_Args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ ${#Positional_Args[@]} -gt 1 ]]; then
     error 'Too many arguments, only one representing a specific tag to install is allowed. (e.g. "6.0.0")'
 fi
 
@@ -57,9 +79,8 @@ archive=$tmp_dir/yarn.zip
 rm -rf "$tmp_dir"
 mkdir -p "$tmp_dir"
 
-tag=$1
-
-yarn_uri=https://repo.yarnpkg.com/tags/$tag/$target
+yarn_version=${Positional_Args[0]:-$(curl --fail --location -s https://repo.yarnpkg.com/channels/default/$Install_Channel)}
+yarn_uri=https://repo.yarnpkg.com/releases/$yarn_version/$target
 
 echo "This script will install or update $(colorize "$Yarn" "Yarn Switch"), a utility that lets you lock Yarn versions in your projects."
 echo "For more information, please take a look at our documentation at $(colorize "$Url" "https://yarnpkg.com")"

@@ -3216,6 +3216,9 @@ dependencies = [
 [[package]]
 name = "zpm-ci"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "zpm-formats"
@@ -3283,10 +3286,12 @@ dependencies = [
  "regex",
  "reqwest",
  "serde",
+ "serde_plain",
  "serde_with",
  "sonic-rs",
  "thiserror 2.0.12",
  "tokio",
+ "zpm-ci",
  "zpm-formats",
  "zpm-macros",
  "zpm-semver",

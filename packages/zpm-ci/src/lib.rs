@@ -1,3 +1,6 @@
+use serde::Serialize;
+
+#[derive(Serialize)]
 pub enum Provider {
     GitHubActions,
     GitLab,

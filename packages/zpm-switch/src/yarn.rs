@@ -56,7 +56,7 @@ pub async fn get_default_yarn_version(release_line: Option<&str>) -> Result<Pack
 
 pub async fn resolve_range(range: &Range) -> Result<Version, Error> {
     let response
-        = fetch("https://repo.yarnpkg.com/tags").await?;
+        = fetch("https://repo.yarnpkg.com/releases").await?;
 
     let data: TagsPayload = sonic_rs::from_slice(&response)
         .unwrap();
@@ -71,18 +71,23 @@ pub async fn resolve_range(range: &Range) -> Result<Version, Error> {
 }
 
 pub async fn get_latest_stable_version(release_line: Option<&str>) -> Result<PackageManagerReference, Error> {
+    let release_line = release_line
+        .unwrap_or("default");
+
+    let channel_url
+        = format!("https://repo.yarnpkg.com/channels/{}/stable", release_line);
+
     let response
-        = fetch("https://repo.yarnpkg.com/tags").await?;
+        = fetch(&channel_url).await?;
 
-    let data: TagsPayload = sonic_rs::from_slice(&response)
-        .map_err(|_| Error::FailedToRetrieveLatestYarnTag)?;
+    let version_str
+        = std::str::from_utf8(&response)?
+            .trim();
 
-    let (_, release_line) = release_line
-        .map(|search_key| data.release_lines.iter().find(|(k, _)| k == &search_key))
-        .unwrap_or_else(|| data.release_lines.iter().max_by_key(|(_, release_line)| &release_line.stable))
-        .ok_or(Error::FailedToRetrieveLatestYarnTag)?;
+    let version
+        = Version::from_str(version_str)?;
 
-    Ok(VersionPackageManagerReference {version: release_line.stable.clone()}.into())
+    Ok(VersionPackageManagerReference {version}.into())
 }
 
 #[derive(Debug)]
