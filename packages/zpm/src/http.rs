@@ -1,4 +1,4 @@
-use std::sync::{Arc, LazyLock};
+use std::{sync::{Arc, LazyLock}, time::Duration};
 
 use reqwest::{Client, Response};
 
@@ -10,8 +10,26 @@ static HTTP_CLIENT: LazyLock<Result<Client, Error>> = LazyLock::new(|| {
     //     .collect::<Vec<_>>();
 
     let client = reqwest::Client::builder()
-    //    .resolve_to_addrs("registry.npmjs.org", &sock_addrs)
+        // .resolve_to_addrs("registry.npmjs.org", &sock_addrs)
+
+        // Connection pooling settings
+        .pool_max_idle_per_host(50)
+        .pool_idle_timeout(Duration::from_secs(60))
+
+        // Timeout settings
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+
+        // HTTP/2 settings (helps with connection reuse)
+        .http2_keep_alive_interval(Duration::from_secs(30))
+        .http2_keep_alive_timeout(Duration::from_secs(10))
+        .http2_keep_alive_while_idle(true)
+
+        // Enable connection keep-alive
+        .tcp_keepalive(Duration::from_secs(60))
+
         .use_rustls_tls()
+        .hickory_dns(true)
         .build()
         .map_err(|err| Error::DnsResolutionError(Arc::new(err)))?;
 

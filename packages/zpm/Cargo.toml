@@ -19,7 +19,7 @@ globset = "0.4.14"
 hex = "0.4.3"
 itertools = "0.13.0"
 rayon = "1.10.0"
-reqwest = { version = "0.12.5", default-features = false, features = ["gzip", "hickory-dns", "rustls-tls"] }
+reqwest = { version = "0.12.5", default-features = false, features = ["gzip", "http2", "hickory-dns", "rustls-tls"] }
 regex = "1.10.6"
 rstest = "0.22.0"
 serde_with = "3.9.0"

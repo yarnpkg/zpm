@@ -255,9 +255,9 @@ impl Reporter {
 
     fn write_line<T: Write>(&mut self, writer: &mut T, line: &str) {
         if let Some(buffered_lines) = &mut self.buffered_lines {
-            buffered_lines.push(line.to_string());
+            buffered_lines.push(format!("{}{}", self.prefix, line));
         } else {
-            writeln!(writer, "{}", line).unwrap();
+            writeln!(writer, "{}{}", self.prefix, line).unwrap();
         }
     }
 
