@@ -1,8 +1,9 @@
-use serde::{de, Deserialize};
+use serde::Deserialize;
 use serde_with::serde_as;
 use std::{collections::BTreeMap, str::FromStr};
+use zpm_macros::parse_enum;
 use zpm_semver::{Range, Version};
-use zpm_utils::{ExplicitPath, FromFileString, Path, RawPath};
+use zpm_utils::{impl_serialization_traits, ExplicitPath, FromFileString, Path, RawPath, ToFileString, ToHumanString};
 
 use crate::{errors::Error, http::fetch, manifest::{PackageManagerReference, VersionPackageManagerReference}};
 
@@ -51,10 +52,70 @@ pub async fn get_default_yarn_version(release_line: Option<&str>) -> Result<Pack
         return Ok(PackageManagerReference::from_file_string(&env)?);
     }
 
-    get_latest_stable_version(release_line).await
+    let version
+      = get_latest_stable_version(release_line).await?;
+
+    Ok(VersionPackageManagerReference {version}.into())
 }
 
-pub async fn resolve_range(range: &Range) -> Result<Version, Error> {
+#[parse_enum(or_else = |s| Err(Error::InvalidVersionSelector(s.to_string())))]
+#[derive(Debug)]
+#[derive_variants(Debug)]
+pub enum Selector {
+  #[pattern(spec = "(?<channel>stable|canary)")]
+  Channel {
+    channel: String,
+  },
+
+  #[pattern(spec = "(?<range>.*)")]
+  Range {
+    range: zpm_semver::Range,
+  },
+}
+
+impl ToFileString for Selector {
+  fn to_file_string(&self) -> String {
+    match self {
+      Selector::Channel(params) => {
+        params.channel.to_string()
+      },
+
+      Selector::Range(params) => {
+        params.range.to_string()
+      },
+    }
+  }
+}
+
+impl ToHumanString for Selector {
+  fn to_print_string(&self) -> String {
+    match self {
+      Selector::Channel(params) => {
+        params.channel.to_string()
+      },
+
+      Selector::Range(params) => {
+        params.range.to_print_string()
+      },
+    }
+  }
+}
+
+impl_serialization_traits!(Selector);
+
+pub async fn resolve_selector(selector: &Selector) -> Result<Version, Error> {
+  match selector {
+    Selector::Channel(params) => {
+      get_latest_stable_version(Some(params.channel.as_str())).await
+    },
+
+    Selector::Range(params) => {
+      resolve_semver_range(&params.range).await
+    },
+  }
+}
+
+pub async fn resolve_semver_range(range: &Range) -> Result<Version, Error> {
     let response
         = fetch("https://repo.yarnpkg.com/releases").await?;
 
@@ -70,7 +131,7 @@ pub async fn resolve_range(range: &Range) -> Result<Version, Error> {
     Ok(highest.clone())
 }
 
-pub async fn get_latest_stable_version(release_line: Option<&str>) -> Result<PackageManagerReference, Error> {
+pub async fn get_latest_stable_version(release_line: Option<&str>) -> Result<Version, Error> {
     let release_line = release_line
         .unwrap_or("default");
 
@@ -87,7 +148,7 @@ pub async fn get_latest_stable_version(release_line: Option<&str>) -> Result<Pac
     let version
         = Version::from_str(version_str)?;
 
-    Ok(VersionPackageManagerReference {version}.into())
+    Ok(version)
 }
 
 #[derive(Debug)]

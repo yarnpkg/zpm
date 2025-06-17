@@ -32,6 +32,9 @@ pub enum Error {
     #[error("Invalid packageManager string")]
     InvalidPackageManagerString,
 
+    #[error("Invalid version selector: {0}")]
+    InvalidVersionSelector(String),
+
     #[error("Failed to parse manifest: {0}")]
     FailedToParseManifest(Arc<sonic_rs::Error>),
 

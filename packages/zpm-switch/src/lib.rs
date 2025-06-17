@@ -15,8 +15,10 @@ pub use manifest::{
 
 pub use yarn::{
     BinMeta,
+    Selector,
     extract_bin_meta,
     get_default_yarn_version,
     get_latest_stable_version,
-    resolve_range,
+    resolve_semver_range,
+    resolve_selector,
 };

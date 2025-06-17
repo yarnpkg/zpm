@@ -11,7 +11,7 @@ use crate::{error::Error, manifest::helpers::read_manifest};
 #[cli::category("Configuration commands")]
 #[cli::description("Set the version of Yarn to use with the local project")]
 pub struct SetVersion {
-    version: zpm_semver::Range,
+    version: zpm_switch::Selector,
 }
 
 impl SetVersion {
@@ -31,7 +31,7 @@ impl SetVersion {
             = read_manifest(&manifest_path)?;
 
         let resolved_version
-            = zpm_switch::resolve_range(&self.version).await.unwrap();
+            = zpm_switch::resolve_selector(&self.version).await?;
 
         let reference: PackageManagerReference = VersionPackageManagerReference {
             version: resolved_version,
