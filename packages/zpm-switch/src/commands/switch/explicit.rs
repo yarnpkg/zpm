@@ -2,13 +2,13 @@ use std::process::{Command, ExitStatus, Stdio};
 
 use clipanion::cli;
 
-use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, manifest::{find_closest_package_manager, PackageManagerField, PackageManagerReference}};
+use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}, yarn::resolve_selector, yarn_enums::Selector};
 
 #[cli::command(proxy)]
 #[cli::path("switch")]
 #[derive(Debug)]
 pub struct ExplicitCommand {
-    package_manager: PackageManagerField,
+    selector: Selector,
     args: Vec<String>,
 }
 
@@ -47,6 +47,12 @@ impl ExplicitCommand {
             args.insert(0, cwd.to_string());
         }
 
-        ExplicitCommand::run(&self.package_manager.reference, &args).await
+        let version
+            = resolve_selector(&self.selector).await?;
+
+        let reference   
+            = VersionPackageManagerReference {version};
+
+        ExplicitCommand::run(&reference.into(), &args).await
     }
 }
