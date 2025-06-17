@@ -5,7 +5,7 @@ use zpm_macros::parse_enum;
 use zpm_semver::{Range, Version};
 use zpm_utils::{impl_serialization_traits, ExplicitPath, FromFileString, Path, RawPath, ToFileString, ToHumanString};
 
-use crate::{errors::Error, http::fetch, manifest::{PackageManagerReference, VersionPackageManagerReference}};
+use crate::{errors::Error, http::fetch, manifest::{PackageManagerReference, VersionPackageManagerReference}, yarn_enums::{ChannelSelector, Selector}};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,66 +47,25 @@ pub async fn fix_cwd(args: &mut Vec<String>) -> Result<(), Error> {
     Ok(())
 }
 
-pub async fn get_default_yarn_version(release_line: Option<&str>) -> Result<PackageManagerReference, Error> {
+pub async fn get_default_yarn_version(release_line: Option<crate::yarn_enums::ReleaseLine>) -> Result<PackageManagerReference, Error> {
     if let Ok(env) = std::env::var("YARNSW_DEFAULT") {
         return Ok(PackageManagerReference::from_file_string(&env)?);
     }
 
+    let channel_selector
+        = release_line.unwrap_or(crate::yarn_enums::ReleaseLine::Default)
+            .stable();
+
     let version
-      = get_latest_stable_version(release_line).await?;
+      = resolve_channel_selector(&channel_selector).await?;
 
     Ok(VersionPackageManagerReference {version}.into())
 }
 
-#[parse_enum(or_else = |s| Err(Error::InvalidVersionSelector(s.to_string())))]
-#[derive(Debug)]
-#[derive_variants(Debug)]
-pub enum Selector {
-  #[pattern(spec = "(?<channel>stable|canary)")]
-  Channel {
-    channel: String,
-  },
-
-  #[pattern(spec = "(?<range>.*)")]
-  Range {
-    range: zpm_semver::Range,
-  },
-}
-
-impl ToFileString for Selector {
-  fn to_file_string(&self) -> String {
-    match self {
-      Selector::Channel(params) => {
-        params.channel.to_string()
-      },
-
-      Selector::Range(params) => {
-        params.range.to_string()
-      },
-    }
-  }
-}
-
-impl ToHumanString for Selector {
-  fn to_print_string(&self) -> String {
-    match self {
-      Selector::Channel(params) => {
-        params.channel.to_string()
-      },
-
-      Selector::Range(params) => {
-        params.range.to_print_string()
-      },
-    }
-  }
-}
-
-impl_serialization_traits!(Selector);
-
 pub async fn resolve_selector(selector: &Selector) -> Result<Version, Error> {
   match selector {
     Selector::Channel(params) => {
-      get_latest_stable_version(Some(params.channel.as_str())).await
+      resolve_channel_selector(params).await
     },
 
     Selector::Range(params) => {
@@ -131,12 +90,17 @@ pub async fn resolve_semver_range(range: &Range) -> Result<Version, Error> {
     Ok(highest.clone())
 }
 
-pub async fn get_latest_stable_version(release_line: Option<&str>) -> Result<Version, Error> {
-    let release_line = release_line
-        .unwrap_or("default");
+pub async fn resolve_channel_selector(channel_selector: &ChannelSelector) -> Result<Version, Error> {
+    let release_line = channel_selector.release_line.as_ref()
+        .unwrap_or(&crate::yarn_enums::ReleaseLine::Classic)
+        .to_file_string();
+
+    let channel = channel_selector.channel.as_ref()
+        .unwrap_or(&crate::yarn_enums::Channel::Stable)
+        .to_file_string();
 
     let channel_url
-        = format!("https://repo.yarnpkg.com/channels/{}/stable", release_line);
+        = format!("https://repo.yarnpkg.com/channels/{}/{}", release_line, channel);
 
     let response
         = fetch(&channel_url).await?;

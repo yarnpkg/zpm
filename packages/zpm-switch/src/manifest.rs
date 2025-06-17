@@ -14,22 +14,20 @@ use zpm_semver::Version;
 #[derive_variants(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq)]
 enum BinaryName {
     #[pattern(spec = r"yarn")] 
-    Yarn {},
+    Yarn,
 }
 
 impl ToFileString for BinaryName {
     fn to_file_string(&self) -> String {
         match self {
-            BinaryName::Yarn(_) => "yarn".to_string(),
+            BinaryName::Yarn => "yarn".to_string(),
         }
     }
 }
 
 impl ToHumanString for BinaryName {
     fn to_print_string(&self) -> String {
-        match self {
-            BinaryName::Yarn(_) => "yarn".to_string(),
-        }
+        self.to_file_string()
     }
 }
 

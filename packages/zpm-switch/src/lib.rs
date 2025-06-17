@@ -1,6 +1,7 @@
 mod errors;
 mod http;
 mod manifest;
+mod yarn_enums;
 mod yarn;
 
 pub use errors::{
@@ -13,12 +14,17 @@ pub use manifest::{
     VersionPackageManagerReference,
 };
 
+pub use yarn_enums::{
+    Channel,
+    ReleaseLine,
+    Selector,
+};
+
 pub use yarn::{
     BinMeta,
-    Selector,
     extract_bin_meta,
     get_default_yarn_version,
-    get_latest_stable_version,
+    resolve_channel_selector,
     resolve_semver_range,
     resolve_selector,
 };

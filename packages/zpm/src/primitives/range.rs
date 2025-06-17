@@ -21,7 +21,7 @@ pub static EXPLICIT_PATH_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Range {
     #[pattern(spec = r"missing!")]
-    MissingPeerDependency {},
+    MissingPeerDependency,
 
     #[pattern(spec = r"(?<range>.*)")]
     AnonymousSemver {
@@ -187,8 +187,9 @@ impl ToFileString for Range {
             Range::WorkspacePath(params) => format!("workspace:{}", params.path),
             Range::WorkspaceIdent(params) => format!("workspace:{}", params.ident.to_file_string()),
             Range::Git(params) => params.git.to_file_string(),
-            Range::MissingPeerDependency(_) => "missing!".to_string(),
             Range::Virtual(params) => format!("virtual:{}#{}", params.inner.to_file_string(), params.hash.to_file_string()),
+
+            Range::MissingPeerDependency => "missing!".to_string(),
         }
     }
 }

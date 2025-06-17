@@ -157,10 +157,13 @@ async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams
         .with_join_str(".npmignore")
         .fs_append("/.yarn\n")?;
 
+    let channel_selector
+        = zpm_switch::ReleaseLine::Classic
+            .stable();
+
     let default_yarn
-        = zpm_switch::get_latest_stable_version(Some("classic"))
-            .await
-            .map_err(|_| Error::FailedToRetrieveLatestClassicVersion)?
+        = zpm_switch::resolve_channel_selector(&channel_selector)
+            .await?
             .to_file_string();
 
     ScriptEnvironment::new()?
@@ -207,8 +210,12 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
         lockfile_path.fs_write(b"")?;
     }
 
+    let channel_selector
+        = zpm_switch::ReleaseLine::Berry
+            .stable();
+
     let default_yarn
-        = zpm_switch::get_latest_stable_version(Some("berry"))
+        = zpm_switch::resolve_channel_selector(&channel_selector)
             .await?
             .to_file_string();
 

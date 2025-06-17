@@ -2,7 +2,7 @@ use std::process::ExitStatus;
 
 use clipanion::cli;
 
-use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, manifest::{find_closest_package_manager, validate_package_manager}, yarn::get_default_yarn_version};
+use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, manifest::{find_closest_package_manager, validate_package_manager}, yarn::get_default_yarn_version, yarn_enums::ReleaseLine};
 
 use super::switch::explicit::ExplicitCommand;
 
@@ -25,8 +25,13 @@ impl ProxyCommand {
         }
 
         let reference = match find_result.detected_package_manager {
-            Some(package_manager) => validate_package_manager(package_manager, "yarn"),
-            None => get_default_yarn_version(Some("classic")).await,
+            Some(package_manager) => {
+                validate_package_manager(package_manager, "yarn")
+            },
+
+            None => {
+                get_default_yarn_version(Some(ReleaseLine::Classic)).await
+            },
         }?;
 
         let mut args

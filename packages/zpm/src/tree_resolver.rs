@@ -227,7 +227,7 @@ impl TreeResolver {
                 }
 
                 let is_provided_by_parent = match &peer_descriptor {
-                    Some(descriptor) => !matches!(descriptor.range, Range::MissingPeerDependency(_)),
+                    Some(descriptor) => !matches!(descriptor.range, Range::MissingPeerDependency),
                     None => false,
                 };
 
@@ -246,7 +246,7 @@ impl TreeResolver {
 
                 let peer_descriptor = peer_descriptor.unwrap_or_else(|| Descriptor::new(
                     peer_ident.clone(),
-                    range::MissingPeerDependencyRange {}.into(),
+                    range::Range::MissingPeerDependency,
                 ));
 
                 self.resolution_tree.locator_resolutions
@@ -261,7 +261,7 @@ impl TreeResolver {
                         .insert(operation.virtualized_locator.clone());
                 }
 
-                if matches!(peer_descriptor.range, Range::MissingPeerDependency(_)) {
+                if matches!(peer_descriptor.range, Range::MissingPeerDependency) {
                     missing_peer_dependencies.insert(peer_ident.clone());
                 }
 

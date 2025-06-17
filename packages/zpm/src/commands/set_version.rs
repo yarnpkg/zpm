@@ -49,8 +49,6 @@ impl SetVersion {
         manifest_path
             .fs_change(serialized, Permissions::from_mode(0o644))?;
 
-        println!("{:#?}", manifest);
-
         println!("Saved into {}", manifest_path);
 
         Ok(())
