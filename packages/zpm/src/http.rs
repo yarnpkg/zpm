@@ -17,7 +17,7 @@ static HTTP_CLIENT: LazyLock<Result<Client, Error>> = LazyLock::new(|| {
         .resolve_to_addrs("registry.npmjs.org", &sock_addrs)
 
         // Connection pooling settings
-        .pool_max_idle_per_host(50)
+        .pool_max_idle_per_host(200)
         .pool_idle_timeout(Duration::from_secs(60))
 
         // Timeout settings

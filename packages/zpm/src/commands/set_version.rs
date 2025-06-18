@@ -1,10 +1,11 @@
 use std::{fs::Permissions, os::unix::fs::PermissionsExt};
 
 use clipanion::cli;
+use zpm_parsers::{JsonFormatter, JsonValue};
 use zpm_switch::{PackageManagerField, PackageManagerReference, VersionPackageManagerReference};
-use zpm_utils::Path;
+use zpm_utils::{Path, ToHumanString};
 
-use crate::{error::Error, manifest::helpers::read_manifest};
+use crate::error::Error;
 
 #[cli::command]
 #[cli::path("set", "version")]
@@ -27,29 +28,38 @@ impl SetVersion {
         let manifest_path = detected_root_path
             .with_join_str("package.json");
 
-        let mut manifest
-            = read_manifest(&manifest_path)?;
+        let manifest_content = manifest_path
+            .fs_read_text_prealloc()?;
+
+        let mut formatter
+            = JsonFormatter::from(&manifest_content).unwrap();
 
         let resolved_version
             = zpm_switch::resolve_selector(&self.version).await?;
 
         let reference: PackageManagerReference = VersionPackageManagerReference {
-            version: resolved_version,
+            version: resolved_version.clone(),
         }.into();
 
-        manifest.package_manager = Some(PackageManagerField {
+        let package_manager = PackageManagerField {
             name: "yarn".to_string(),
             reference,
             checksum: None,
-        });
+        };
 
-        let serialized
-            = sonic_rs::to_string_pretty(&manifest)?;
+        formatter.set(
+            &vec!["packageManager".to_string()].into(),
+            JsonValue::String(package_manager.to_string()),
+        ).unwrap();
+
+        let updated_content
+            = formatter.to_string();
 
         manifest_path
-            .fs_change(serialized, Permissions::from_mode(0o644))?;
+            .fs_change(&updated_content, Permissions::from_mode(0o644))?;
 
-        println!("Saved into {}", manifest_path);
+        println!("Switching to {}", resolved_version.to_print_string());
+        println!("Saved into {}", manifest_path.to_print_string());
 
         Ok(())
     }
