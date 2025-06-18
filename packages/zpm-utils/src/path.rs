@@ -373,19 +373,37 @@ impl Path {
     pub fn fs_expect<T: AsRef<[u8]>>(&self, data: T, permissions: std::fs::Permissions) -> Result<&Self, PathError> {
         let path_buf = self.to_path_buf();
 
-        let update_content = self.fs_read()
-            .ok_missing()
-            .map(|current| current.map(|current| current.ne(data.as_ref())).unwrap_or(true))?;
+        let current_content
+            = self.fs_read()
+                .ok_missing()?;
+
+        let update_content = current_content.as_ref()
+            .map(|current| current.ne(data.as_ref()))
+            .unwrap_or(true);
 
         if update_content {
-            return Err(PathError::Immutable(self.clone()));
+            if let Some(current_content) = current_content.as_ref() {
+                let expected_text
+                    = String::from_utf8_lossy(data.as_ref());
+                let current_text
+                    = String::from_utf8_lossy(&current_content);
+
+                let diff
+                    = similar::TextDiff::from_lines(&current_text, &expected_text)
+                        .unified_diff()
+                        .to_string();
+
+                return Err(PathError::ImmutableData(self.clone(), Some(diff)));
+            } else {
+                return Err(PathError::ImmutableData(self.clone(), None));
+            }
         }
 
         let update_permissions = update_content ||
             std::fs::metadata(&path_buf)?.permissions() != permissions;
 
         if update_permissions {
-            return Err(PathError::Immutable(self.clone()));
+            return Err(PathError::ImmutableMetadata(self.clone()));
         }
 
         Ok(self)

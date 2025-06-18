@@ -3,7 +3,7 @@ use std::{fs::Permissions, os::unix::fs::PermissionsExt};
 use clipanion::cli;
 use zpm_parsers::{JsonFormatter, JsonValue};
 use zpm_switch::{PackageManagerField, PackageManagerReference, VersionPackageManagerReference};
-use zpm_utils::{Path, ToHumanString};
+use zpm_utils::{Path, ToFileString, ToHumanString};
 
 use crate::error::Error;
 
@@ -49,7 +49,7 @@ impl SetVersion {
 
         formatter.set(
             &vec!["packageManager".to_string()].into(),
-            JsonValue::String(package_manager.to_string()),
+            JsonValue::String(package_manager.to_file_string()),
         ).unwrap();
 
         let updated_content

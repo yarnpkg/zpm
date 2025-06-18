@@ -414,10 +414,7 @@ impl Install {
             = async_section("Linking the project", link_future).await?;
 
         project.attach_install_state(self.install_state)?;
-
-        if self.lockfile_changed {
-            project.write_lockfile(&self.lockfile)?;
-        }
+        project.write_lockfile(&self.lockfile)?;
 
         if !build_requests.entries.is_empty() {
             let build_future
