@@ -1,12 +1,13 @@
 use std::{collections::{BTreeMap, BTreeSet, HashSet}, fs::Permissions, hash::Hash, marker::PhantomData, os::unix::fs::PermissionsExt};
 
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sha2::Digest;
 use zpm_utils::Path;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -529,6 +530,40 @@ impl<'a> InstallManager<'a> {
             }
         }
 
+        let missing_checksums = self.result.lockfile.entries.values()
+            .filter(|entry| {
+                let previous_entry
+                    = self.initial_lockfile.entries.get(&entry.resolution.locator);
+
+                let has_checksum
+                    = previous_entry.map_or(false, |s| s.checksum.is_some());
+
+                !has_checksum
+            })
+            .flat_map(|entry| {
+                let package_data = self.result.package_data.get(&entry.resolution.locator)
+                    .unwrap_or_else(|| panic!("Expected a matching package data to be found for any fetched locator; not found for {}.", entry.resolution.locator.to_file_string()));
+
+                let PackageData::Zip {archive_path, ..} = package_data else {
+                    return None;
+                };
+
+                Some((entry.resolution.locator.clone(), archive_path))
+            })
+            .collect::<Vec<_>>();
+
+        let late_checksums = missing_checksums.into_par_iter()
+            .map(|(locator, archive_path)| -> Result<_, Error> {
+                let archive_data = archive_path
+                    .fs_read_prealloc()?;
+
+                let checksum
+                    = Sha256::from_data(&archive_data);
+
+                Ok((locator, checksum))
+            })
+            .collect::<Result<BTreeMap<_, _>, Error>>()?;
+
         for entry in self.result.lockfile.entries.values_mut() {
             let package_data = self.result.package_data.get(&entry.resolution.locator)
                 .unwrap_or_else(|| panic!("Expected a matching package data to be found for any fetched locator; not found for {}.", entry.resolution.locator.to_file_string()));
@@ -537,12 +572,16 @@ impl<'a> InstallManager<'a> {
             let previous_checksum = previous_entry.and_then(|s| s.checksum.as_ref());
             let previous_flags = previous_entry.map(|s| &s.flags);
 
+            let checksum = package_data.checksum()
+                .or_else(|| previous_checksum.cloned())
+                .or_else(|| late_checksums.get(&entry.resolution.locator).cloned());
+
             let content_flags = match previous_flags {
                 Some(flags) => flags.clone(),
                 None => ContentFlags::extract(&entry.resolution.locator, &package_data)?,
             };
     
-            entry.checksum = package_data.checksum().or_else(|| previous_checksum.cloned());
+            entry.checksum = checksum;
             entry.flags = content_flags;
         }
 
