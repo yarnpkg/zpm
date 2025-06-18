@@ -378,14 +378,14 @@ impl Path {
             .map(|current| current.map(|current| current.ne(data.as_ref())).unwrap_or(true))?;
 
         if update_content {
-            return Err(PathError::Immutable);
+            return Err(PathError::Immutable(self.clone()));
         }
 
         let update_permissions = update_content ||
             std::fs::metadata(&path_buf)?.permissions() != permissions;
 
         if update_permissions {
-            return Err(PathError::Immutable);
+            return Err(PathError::Immutable(self.clone()));
         }
 
         Ok(self)

@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
+use crate::{Path, ToHumanString};
+
 pub fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
     if backtrace.status() == std::backtrace::BacktraceStatus::Captured {
         backtrace.to_string().trim_end().to_string()
@@ -12,8 +14,8 @@ pub fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
 
 #[derive(Error, Clone, Debug)]
 pub enum PathError {
-    #[error("Immutable paths cannot be modified")]
-    Immutable,
+    #[error("Immutable paths cannot be modified (when modifying {path})", path = .0.to_print_string())]
+    Immutable(Path),
 
     #[error("I/O error ({inner})\n\n{}", render_backtrace(backtrace))]
     IoError {
