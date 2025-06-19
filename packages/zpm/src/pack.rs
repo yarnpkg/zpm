@@ -374,7 +374,7 @@ pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) 
         glob_ignore.add(&Path::new(), pattern)?;
     }
 
-    let always_ignored = GlobBuilder::new("{.#*,.DS_Store,.gitignore,.npmignore,.pnp.*,.yarnrc,yarn.lock}")
+    let always_ignored = GlobBuilder::new("{.#*,.DS_Store,.gitignore,.npmignore,.pnp.*,.yarnrc,yarn.lock,*.tsbuildinfo}")
         .build()
         .expect("Failed to build glob")
         .compile_matcher();
