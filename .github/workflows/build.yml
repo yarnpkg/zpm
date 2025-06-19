@@ -65,97 +65,97 @@ jobs:
             target/${{matrix.platform[0]}}/release/LICENSE.md
           retention-days: 7
 
-  test-report:
-    needs: build
-    runs-on: ubuntu-latest
+  # test-report:
+  #   needs: build
+  #   runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout the repo
-        uses: actions/checkout@v4
+  #   steps:
+  #     - name: Checkout the repo
+  #       uses: actions/checkout@v4
 
-      - name: Download the binary
-        uses: actions/download-artifact@v4
-        with:
-          name: yarn-x86_64-unknown-linux-musl
+  #     - name: Download the binary
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: yarn-x86_64-unknown-linux-musl
 
-      - name: Puts back the binaries
-        run: |
-          mkdir -p target/release
-          mv {yarn-bin,yarn} target/release/
-          chmod +x target/release/{yarn-bin,yarn}
+  #     - name: Puts back the binaries
+  #       run: |
+  #         mkdir -p target/release
+  #         mv {yarn-bin,yarn} target/release/
+  #         chmod +x target/release/{yarn-bin,yarn}
 
-      - name: Clone the berry repo
-        uses: actions/checkout@v4
-        with:
-          repository: yarnpkg/berry
-          path: berry
+  #     - name: Clone the berry repo
+  #       uses: actions/checkout@v4
+  #       with:
+  #         repository: yarnpkg/berry
+  #         path: berry
 
-      - name: Install dependencies
-        run: ./yarn.sh install
+  #     - name: Install dependencies
+  #       run: ./yarn.sh install
   
-      - name: Generate the test report
-        run: |
-          export BERRY_DIR=$GITHUB_WORKSPACE/berry
-          ./yarn.sh berry test:integration --json --outputFile=$(pwd)/report.json || true
+  #     - name: Generate the test report
+  #       run: |
+  #         export BERRY_DIR=$GITHUB_WORKSPACE/berry
+  #         ./yarn.sh berry test:integration --json --outputFile=$(pwd)/report.json || true
 
-      - name: Upload test report
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-report
-          path: report.json
+  #     - name: Upload test report
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: test-report
+  #         path: report.json
 
-  publish:
-    needs: [build, test-report]
-    runs-on: ubuntu-latest
+  # publish:
+  #   needs: [build, test-report]
+  #   runs-on: ubuntu-latest
 
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
+  #   permissions:
+  #     contents: read
+  #     pages: write
+  #     id-token: write
 
-    environment:
-      name: github-pages
-      url: ${{steps.deployment.outputs.page_url}}
+  #   environment:
+  #     name: github-pages
+  #     url: ${{steps.deployment.outputs.page_url}}
 
-    steps:
-      - name: Checkout the repo
-        uses: actions/checkout@v4
+  #   steps:
+  #     - name: Checkout the repo
+  #       uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '22'
 
-      - name: Download the binary
-        uses: actions/download-artifact@v4
-        with:
-          name: yarn-x86_64-unknown-linux-musl
+  #     - name: Download the binary
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: yarn-x86_64-unknown-linux-musl
   
-      - name: Puts back the binaries
-        run: |
-          mkdir -p target/release
-          mv {yarn-bin,yarn} target/release/
-          chmod +x target/release/{yarn-bin,yarn}
+  #     - name: Puts back the binaries
+  #       run: |
+  #         mkdir -p target/release
+  #         mv {yarn-bin,yarn} target/release/
+  #         chmod +x target/release/{yarn-bin,yarn}
       
-      - name: Download the test report
-        uses: actions/download-artifact@v4
-        with:
-          name: test-report
+  #     - name: Download the test report
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: test-report
     
-      - name: Install dependencies
-        run: ./yarn.sh install
+  #     - name: Install dependencies
+  #       run: ./yarn.sh install
   
-      - name: Generate downloads page
-        run: ./yarn.sh build:site-artifacts
+  #     - name: Generate downloads page
+  #       run: ./yarn.sh build:site-artifacts
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
+  #     - name: Setup Pages
+  #       uses: actions/configure-pages@v4
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: packages/site-artifacts/dist
+  #     - name: Upload Pages artifact
+  #       uses: actions/upload-pages-artifact@v3
+  #       with:
+  #         path: packages/site-artifacts/dist
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4 
+  #     - name: Deploy to GitHub Pages
+  #       id: deployment
+  #       uses: actions/deploy-pages@v4 
