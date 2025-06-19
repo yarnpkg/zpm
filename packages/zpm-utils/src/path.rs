@@ -396,10 +396,10 @@ impl Path {
             let current_mode
                 = self.fs_metadata()?
                     .permissions()
-                    .mode();
+                    .mode() & 0o666;
 
             let expected_mode
-                = (current_mode & 0o666) | (if is_exec {0o111} else {0});
+                = current_mode | (if is_exec {0o111} else {0});
 
             if current_mode != expected_mode {
                 return Err(PathError::ImmutablePermissions {
@@ -431,10 +431,10 @@ impl Path {
             let current_mode
                 = self.fs_metadata()?
                     .permissions()
-                    .mode();
+                    .mode() & 0o666;
 
             let expected_mode
-                = (current_mode & 0o666) | (if is_exec {0o111} else {0});
+                = current_mode | (if is_exec {0o111} else {0});
 
             if current_mode != expected_mode {
                 let expected_permissions
