@@ -56,7 +56,7 @@ impl SetVersion {
             = formatter.to_string();
 
         manifest_path
-            .fs_change(&updated_content, Permissions::from_mode(0o644))?;
+            .fs_change(&updated_content, false)?;
 
         println!("Switching to {}", resolved_version.to_print_string());
         println!("Saved into {}", manifest_path.to_print_string());

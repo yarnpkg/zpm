@@ -441,7 +441,7 @@ impl Install {
         if ignore_path.fs_exists() {
             ignore_path
                 .with_join_str(".gitignore")
-                .fs_change("*", Permissions::from_mode(0o644))?;
+                .fs_change("*", false)?;
         }
 
         Ok(())

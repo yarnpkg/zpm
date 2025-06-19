@@ -102,7 +102,7 @@ impl Up {
                 = formatter.to_string();
 
             manifest_path
-                .fs_change(&updated_content, Permissions::from_mode(0o644))?;
+                .fs_change(&updated_content, false)?;
         }
 
         let mut project

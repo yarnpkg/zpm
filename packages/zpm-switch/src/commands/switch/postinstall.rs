@@ -138,7 +138,7 @@ fn insert_rc_line(rc_path: Path, line: String) {
     }
 
     let _ = rc_path
-        .fs_change(rc_content, Permissions::from_mode(0o644));
+        .fs_change(rc_content, false);
 
     println!("We updated the {} file for you; please restart your shell to apply the changes.", DataType::Path.colorize(rc_path.as_str()));
 }

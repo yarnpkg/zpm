@@ -26,7 +26,7 @@ pub fn entries_to_disk<'a>(entries: &[Entry<'a>], base: &Path) -> Result<(), Err
     for entry in entries {
         base.with_join_str(&entry.name)
             .fs_create_parent()?
-            .fs_change(&entry.data, PermissionsExt::from_mode(entry.mode))?;
+            .fs_change(&entry.data, entry.mode & 0o111 == 0o111)?;
     }
 
     Ok(())

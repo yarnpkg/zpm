@@ -384,7 +384,7 @@ impl<'a> BuildManager<'a> {
                     = sonic_rs::to_string(&self.build_state_out)?;
 
                 build_state_path
-                    .fs_change(build_state_text_out, Permissions::from_mode(0o644))?;
+                    .fs_change(build_state_text_out, false)?;
 
                 current_build_state_out = self.build_state_out.clone();
             }

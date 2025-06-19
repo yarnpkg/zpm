@@ -95,7 +95,7 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
     ].join("");
 
     project.pnp_path()
-        .fs_change(script, Permissions::from_mode(0o755))?;
+        .fs_change(script, true)?;
 
     Ok(())
 }
@@ -117,10 +117,10 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
     ].join("");
 
     project.pnp_path()
-        .fs_change(script, Permissions::from_mode(0o755))?;
+        .fs_change(script, true)?;
 
     project.pnp_data_path()
-        .fs_change(sonic_rs::to_string(&state).unwrap(), Permissions::from_mode(0o644))?;
+        .fs_change(sonic_rs::to_string(&state).unwrap(), false)?;
 
     Ok(())
 }
@@ -346,7 +346,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
     }
 
     project.pnp_loader_path()
-        .fs_change(std::include_str!("pnp.loader.mjs"), Permissions::from_mode(0o644))?;
+        .fs_change(std::include_str!("pnp.loader.mjs"), false)?;
 
     let package_build_dependencies = linker::helpers::populate_build_entry_dependencies(
         &package_build_entries,

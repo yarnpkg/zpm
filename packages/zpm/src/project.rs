@@ -1,7 +1,7 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, fs::Permissions, io::ErrorKind, os::unix::fs::PermissionsExt, sync::Arc, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, HashSet}, io::ErrorKind, time::UNIX_EPOCH};
 
-use zpm_utils::Path;
 use globset::GlobBuilder;
+use zpm_utils::Path;
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 use zpm_macros::track_time;
@@ -182,8 +182,7 @@ impl Project {
             return from_legacy_berry_lockfile(&src);
         }
 
-        sonic_rs::from_str(&src)
-            .map_err(|err| Error::LockfileParseError(Arc::new(err)))
+        Ok(sonic_rs::from_str(&src)?)
     }
 
     pub fn resolution_overrides(&self, ident: &Ident) -> Option<&Vec<(ResolutionSelector, Range)>> {
@@ -245,7 +244,7 @@ impl Project {
 
         link_info_path
             .fs_create_parent()?
-            .fs_change(contents, Permissions::from_mode(0o644))?;
+            .fs_change(contents, false)?;
 
         Ok(())
     }
@@ -255,13 +254,12 @@ impl Project {
             = self.project_cwd.with_join_str(LOCKFILE_NAME);
 
         let contents
-            = sonic_rs::to_string_pretty(lockfile)
-                .map_err(|err| Error::LockfileGenerationError(Arc::new(err)))?;
+            = sonic_rs::to_string_pretty(lockfile)?;
 
         if self.config.project.enable_immutable_installs.value {
-            lockfile_path.fs_expect(contents, Permissions::from_mode(0o644))?;
+            lockfile_path.fs_expect(contents, false)?;
         } else {
-            lockfile_path.fs_change(contents, Permissions::from_mode(0o644))?;
+            lockfile_path.fs_change(contents, false)?;
         }
 
         Ok(())

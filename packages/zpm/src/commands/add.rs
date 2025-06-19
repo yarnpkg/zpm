@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, fs::Permissions, os::unix::fs::PermissionsExt};
+use std::collections::{HashMap, HashSet};
 
 use clipanion::cli;
 use zpm_parsers::{JsonFormatter, JsonValue};
@@ -266,7 +266,7 @@ impl Add {
             = formatter.to_string();
 
         manifest_path
-            .fs_change(&updated_content, Permissions::from_mode(0o644))?;
+            .fs_change(&updated_content, false)?;
 
         let mut project
             = project::Project::new(None).await?;

@@ -370,7 +370,7 @@ impl Path {
         self.fs_append(text.as_ref())
     }
 
-    pub fn fs_expect<T: AsRef<[u8]>>(&self, expected_data: T, expected_permissions: std::fs::Permissions) -> Result<&Self, PathError> {
+    pub fn fs_expect<T: AsRef<[u8]>>(&self, expected_data: T, is_exec: bool) -> Result<&Self, PathError> {
         let current_content
             = self.fs_read()
                 .ok_missing()?;
@@ -389,22 +389,31 @@ impl Path {
             });
         }
 
-        let current_permissions
-            = self.fs_metadata()?
-                .permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
 
-        if current_permissions != expected_permissions {
-            return Err(PathError::ImmutablePermissions {
-                path: self.clone(),
-                current_permissions,
-                expected_permissions,
-            });
+            let current_mode
+                = self.fs_metadata()?
+                    .permissions()
+                    .mode();
+
+            let expected_mode
+                = current_mode & 0o666 | if is_exec {0o111} else {0};
+
+            if current_mode != expected_mode {
+                return Err(PathError::ImmutablePermissions {
+                    path: self.clone(),
+                    current_mode,
+                    expected_mode,
+                });
+            }
         }
 
         Ok(self)
     }
 
-    pub fn fs_change<T: AsRef<[u8]>>(&self, data: T, permissions: std::fs::Permissions) -> Result<&Self, PathError> {
+    pub fn fs_change<T: AsRef<[u8]>>(&self, data: T, is_exec: bool) -> Result<&Self, PathError> {
         let path_buf = self.to_path_buf();
 
         let update_content = self.fs_read()
@@ -415,11 +424,24 @@ impl Path {
             std::fs::write(&path_buf, data)?;
         }
 
-        let update_permissions = update_content ||
-            std::fs::metadata(&path_buf)?.permissions() != permissions;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
 
-        if update_permissions {
-            std::fs::set_permissions(&path_buf, permissions)?;
+            let current_mode
+                = self.fs_metadata()?
+                    .permissions()
+                    .mode();
+
+            let expected_mode
+                = current_mode & 0o666 | if is_exec {0o111} else {0};
+
+            if current_mode != expected_mode {
+                let expected_permissions
+                    = std::fs::Permissions::from_mode(expected_mode);
+
+                std::fs::set_permissions(&path_buf, expected_permissions)?;
+            }
         }
 
         Ok(self)
