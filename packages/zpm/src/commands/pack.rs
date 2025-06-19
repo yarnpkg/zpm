@@ -44,9 +44,7 @@ impl Pack {
         if prepack_script.is_some() || postpack_script.is_some() {
             if self.install_if_needed {
                 project.run_install(RunInstallOptions {
-                    check_resolutions: false,
-                    refresh_lockfile: false,
-                    silent_or_error: false,
+                    ..Default::default()
                 }).await?;
             } else {
                 project.import_install_state()?;

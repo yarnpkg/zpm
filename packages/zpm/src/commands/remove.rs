@@ -46,9 +46,7 @@ impl Remove {
             = Project::new(None).await?;
 
         project.run_install(RunInstallOptions {
-            check_resolutions: false,
-            refresh_lockfile: false,
-            silent_or_error: false,
+            ..Default::default()
         }).await?;
 
         Ok(())

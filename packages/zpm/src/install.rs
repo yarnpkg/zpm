@@ -14,6 +14,7 @@ use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Er
 pub struct InstallContext<'a> {
     pub package_cache: Option<&'a CompositeCache>,
     pub project: Option<&'a Project>,
+    pub check_checksums: bool,
     pub check_resolutions: bool,
     pub refresh_lockfile: bool,
 }
@@ -576,11 +577,40 @@ impl<'a> InstallManager<'a> {
                 .or_else(|| previous_checksum.cloned())
                 .or_else(|| late_checksums.get(&entry.resolution.locator).cloned());
 
+            if self.context.check_checksums {
+                if let Some(previous_checksum) = previous_checksum {
+                    if checksum.as_ref() != Some(previous_checksum) {
+                        if let PackageData::Zip {archive_path, ..} = package_data {
+                            if let Some(project) = &self.context.project {
+                                let quarantine_path = project.ignore_path()
+                                    .with_join_str("quarantine")
+                                    .with_join_str(entry.resolution.locator.slug())
+                                    .with_ext("zip");
+
+                                let data = archive_path
+                                    .fs_read_prealloc()?;
+
+                                quarantine_path
+                                    .fs_write(&data)?;
+
+                                if quarantine_path.fs_exists() {
+                                    return Err(Error::ChecksumMismatch(entry.resolution.locator.clone()));
+                                }
+                            }
+
+                            if checksum.as_ref() != Some(previous_checksum) {
+                                return Err(Error::ChecksumMismatch(entry.resolution.locator.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+
             let content_flags = match previous_flags {
                 Some(flags) => flags.clone(),
                 None => ContentFlags::extract(&entry.resolution.locator, &package_data)?,
             };
-    
+
             entry.checksum = checksum;
             entry.flags = content_flags;
         }

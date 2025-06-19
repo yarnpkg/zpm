@@ -16,6 +16,9 @@ pub struct Install {
     #[cli::option("--immutable-cache", default = false)]
     immutable_cache: bool,
 
+    #[cli::option("--check-checksums", default = false)]
+    check_checksums: bool,
+
     #[cli::option("--refresh-lockfile", default = false)]
     refresh_lockfile: bool,
 }
@@ -35,6 +38,7 @@ impl Install {
         }
 
         project.run_install(RunInstallOptions {
+            check_checksums: self.check_checksums,
             check_resolutions: self.check_resolutions,
             refresh_lockfile: self.refresh_lockfile,
             ..Default::default()

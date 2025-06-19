@@ -40,6 +40,9 @@ pub enum Error {
     #[error("Conflicting options: {0}")]
     ConflictingOptions(String),
 
+    #[error("Checksum mismatch for {0}")]
+    ChecksumMismatch(Locator),
+
     #[error("[YN0028] The lockfile would have been created by this install, which is explicitly forbidden.")]
     ImmutableLockfile,
 

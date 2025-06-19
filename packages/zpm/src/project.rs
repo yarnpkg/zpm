@@ -16,6 +16,7 @@ pub const PNP_DATA_NAME: &str = ".pnp.data.json";
 
 #[derive(Default)]
 pub struct RunInstallOptions {
+    pub check_checksums: bool,
     pub check_resolutions: bool,
     pub refresh_lockfile: bool,
     pub silent_or_error: bool,
@@ -502,6 +503,7 @@ impl Project {
         }
 
         self.run_install(RunInstallOptions {
+            check_checksums: false,
             check_resolutions: false,
             refresh_lockfile: false,
             silent_or_error: true,
