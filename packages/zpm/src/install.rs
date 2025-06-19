@@ -662,34 +662,36 @@ impl<'a> InstallManager<'a> {
     }
 }
 
-fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descriptor, resolution: &Resolution) -> () {
-    let possible_resolution_overrides = context.project
-        .and_then(|project| project.resolution_overrides(&descriptor.ident));
+fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descriptor, resolution: &Resolution, apply_overrides: bool) -> () {
+    if apply_overrides {
+        let possible_resolution_overrides = context.project
+            .and_then(|project| project.resolution_overrides(&descriptor.ident));
 
-    let resolution_override = possible_resolution_overrides
-        .and_then(|overrides| {
-            overrides.iter().find_map(|(rule, range)| {
-                rule.apply(&resolution.locator, &resolution.version, descriptor, range)
-            })
-        });
+        let resolution_override = possible_resolution_overrides
+            .and_then(|overrides| {
+                overrides.iter().find_map(|(rule, range)| {
+                    rule.apply(&resolution.locator, &resolution.version, descriptor, range)
+                })
+            });
 
-    if let Some(replacement_range) = resolution_override {
-        descriptor.range = replacement_range;
+        if let Some(replacement_range) = resolution_override {
+            descriptor.range = replacement_range;
 
-        if descriptor.range.must_bind() {
-            let root_workspace = context.project
-                .expect("The project is required to bind a parent to a descriptor")
-                .root_workspace();
-    
-            descriptor.parent = Some(root_workspace.locator());
+            if descriptor.range.must_bind() {
+                let root_workspace = context.project
+                    .expect("The project is required to bind a parent to a descriptor")
+                    .root_workspace();
+        
+                descriptor.parent = Some(root_workspace.locator());
+            }
+        } else if descriptor.range.must_bind() {
+            descriptor.parent = Some(resolution.locator.clone());
         }
-    } else if descriptor.range.must_bind() {
-        descriptor.parent = Some(resolution.locator.clone());
     }
 
     match &mut descriptor.range {
         Range::Patch(params) => {
-            normalize_resolution(context, &mut params.inner.as_mut().0, resolution);
+            normalize_resolution(context, &mut params.inner.as_mut().0, resolution, false);
         },
 
         Range::AnonymousSemver(params)
@@ -742,7 +744,7 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     // independently from any other.
     //
     for descriptor in dependencies.values_mut() {
-        normalize_resolution(context, descriptor, resolution);
+        normalize_resolution(context, descriptor, resolution, true);
     }
 
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
