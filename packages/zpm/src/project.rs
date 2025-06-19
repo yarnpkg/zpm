@@ -523,6 +523,7 @@ impl Project {
             let install_context = InstallContext::default()
                 .with_package_cache(Some(&package_cache))
                 .with_project(Some(self))
+                .set_check_checksums(options.check_checksums)
                 .set_refresh_lockfile(options.refresh_lockfile);
 
             InstallManager::new()

@@ -30,6 +30,11 @@ impl<'a> InstallContext<'a> {
         self
     }
 
+    pub fn set_check_checksums(mut self, check_checksums: bool) -> Self {
+        self.check_checksums = check_checksums;
+        self
+    }
+
     pub fn set_check_resolutions(mut self, check_resolutions: bool) -> Self {
         self.check_resolutions = check_resolutions;
         self
@@ -592,15 +597,9 @@ impl<'a> InstallManager<'a> {
 
                                 quarantine_path
                                     .fs_write(&data)?;
-
-                                if quarantine_path.fs_exists() {
-                                    return Err(Error::ChecksumMismatch(entry.resolution.locator.clone()));
-                                }
                             }
 
-                            if checksum.as_ref() != Some(previous_checksum) {
-                                return Err(Error::ChecksumMismatch(entry.resolution.locator.clone()));
-                            }
+                            return Err(Error::ChecksumMismatch(entry.resolution.locator.clone()));
                         }
                     }
                 }
