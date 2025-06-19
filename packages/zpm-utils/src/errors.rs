@@ -14,11 +14,18 @@ pub fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
 
 #[derive(Error, Clone, Debug)]
 pub enum PathError {
-    #[error("Immutable paths cannot be modified (when modifying {path})", path = .0.to_print_string())]
-    ImmutableMetadata(Path),
+    #[error("Immutable paths cannot be modified (when modifying {path}; current permissions: {current_permissions:?}, expected permissions: {expected_permissions:?})", path = path.to_print_string())]
+    ImmutablePermissions {
+        path: Path,
+        current_permissions: std::fs::Permissions,
+        expected_permissions: std::fs::Permissions,
+    },
 
-    #[error("Immutable paths cannot be modified (when modifying {path}); diff:\n{diff}", path = .0.to_print_string(), diff = .1.as_ref().map(|diff| diff.as_str()).unwrap_or(""))]
-    ImmutableData(Path, Option<String>),
+    #[error("Immutable paths cannot be modified (when modifying {path}); diff:\n{diff}", path = path.to_print_string(), diff = diff.as_ref().map(|diff| diff.as_str()).unwrap_or(""))]
+    ImmutableData {
+        path: Path,
+        diff: Option<String>,
+    },
 
     #[error("I/O error ({inner})\n\n{}", render_backtrace(backtrace))]
     IoError {

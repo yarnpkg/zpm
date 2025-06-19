@@ -27,3 +27,14 @@ impl<T> OkMissing<T, PathError> for Result<T, PathError> {
         }
     }
 }
+
+pub fn diff_data(current: &[u8], expected: &[u8]) -> String {
+    let current_text
+        = String::from_utf8_lossy(current);
+    let expected_text
+        = String::from_utf8_lossy(expected);
+
+    similar::TextDiff::from_lines(&current_text, &expected_text)
+        .unified_diff()
+        .to_string()
+}

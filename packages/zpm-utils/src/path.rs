@@ -2,7 +2,7 @@ use std::{io::{Read, Write}, os::unix::ffi::OsStrExt, str::FromStr};
 
 use bincode::{Decode, Encode};
 
-use crate::{impl_serialization_traits, path_resolve::resolve_path, FromFileString, PathError, OkMissing, PathIterator, ToFileString, ToHumanString};
+use crate::{diff_data, impl_serialization_traits, path_resolve::resolve_path, FromFileString, OkMissing, PathError, PathIterator, ToFileString, ToHumanString};
 
 #[derive(Debug)]
 pub struct ExplicitPath {
@@ -370,40 +370,35 @@ impl Path {
         self.fs_append(text.as_ref())
     }
 
-    pub fn fs_expect<T: AsRef<[u8]>>(&self, data: T, permissions: std::fs::Permissions) -> Result<&Self, PathError> {
-        let path_buf = self.to_path_buf();
-
+    pub fn fs_expect<T: AsRef<[u8]>>(&self, expected_data: T, expected_permissions: std::fs::Permissions) -> Result<&Self, PathError> {
         let current_content
             = self.fs_read()
                 .ok_missing()?;
 
         let update_content = current_content.as_ref()
-            .map(|current| current.ne(data.as_ref()))
+            .map(|current| current.ne(expected_data.as_ref()))
             .unwrap_or(true);
 
         if update_content {
-            if let Some(current_content) = current_content.as_ref() {
-                let expected_text
-                    = String::from_utf8_lossy(data.as_ref());
-                let current_text
-                    = String::from_utf8_lossy(&current_content);
+            let diff = current_content.as_ref()
+                .map(|current| diff_data(current, expected_data.as_ref()));
 
-                let diff
-                    = similar::TextDiff::from_lines(&current_text, &expected_text)
-                        .unified_diff()
-                        .to_string();
-
-                return Err(PathError::ImmutableData(self.clone(), Some(diff)));
-            } else {
-                return Err(PathError::ImmutableData(self.clone(), None));
-            }
+            return Err(PathError::ImmutableData {
+                path: self.clone(),
+                diff,
+            });
         }
 
-        let update_permissions = update_content ||
-            std::fs::metadata(&path_buf)?.permissions() != permissions;
+        let current_permissions
+            = self.fs_metadata()?
+                .permissions();
 
-        if update_permissions {
-            return Err(PathError::ImmutableMetadata(self.clone()));
+        if current_permissions != expected_permissions {
+            return Err(PathError::ImmutablePermissions {
+                path: self.clone(),
+                current_permissions,
+                expected_permissions,
+            });
         }
 
         Ok(self)
