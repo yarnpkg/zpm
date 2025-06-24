@@ -3,7 +3,6 @@ use std::process::ExitCode;
 use clipanion::{prelude::*, program, Environment};
 use zpm_macros::track_time;
 use zpm_switch::{extract_bin_meta, BinMeta};
-use zpm_utils::Path;
 
 mod debug;
 
@@ -66,24 +65,6 @@ pub fn run_default() -> ExitCode {
 
     if let Some(cwd) = cwd {
         cwd.sys_set_current_dir()
-            .expect("Failed to set current directory");
-    }
-
-    let current_cwd = Path::current_dir()
-        .expect("Failed to get current directory");
-
-    let canonicalized_cwd = current_cwd
-        .fn_canonicalize()
-        .expect("Failed to canonicalize current directory");
-
-    println!("Current directory: {}", current_cwd);
-    println!("Canonicalized directory: {}", canonicalized_cwd);
-
-    if current_cwd != canonicalized_cwd {
-        println!("Current directory is not canonicalized, setting to: {}", canonicalized_cwd);
-
-        canonicalized_cwd
-            .sys_set_current_dir()
             .expect("Failed to set current directory");
     }
 

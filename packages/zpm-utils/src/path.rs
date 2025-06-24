@@ -2,7 +2,7 @@ use std::{io::{Read, Write}, os::unix::ffi::OsStrExt, str::FromStr};
 
 use bincode::{Decode, Encode};
 
-use crate::{diff_data, impl_serialization_traits, path_resolve::resolve_path, FromFileString, OkMissing, PathError, PathIterator, ToFileString, ToHumanString};
+use crate::{diff_data, impl_serialization_traits, path_resolve::resolve_path, DataType, FromFileString, OkMissing, PathError, PathIterator, ToFileString, ToHumanString};
 
 #[derive(Debug)]
 pub struct ExplicitPath {
@@ -650,7 +650,23 @@ impl ToFileString for Path {
 
 impl ToHumanString for Path {
     fn to_print_string(&self) -> String {
-        self.path.clone()
+        let path_str
+            = self.path.as_str();
+
+        let home
+            = Path::home_dir()
+                .unwrap_or_default();
+
+        if let Some(home) = home {
+            if let Some(relative_path) = self.forward_relative_to(&home) {
+                let pretty_path
+                    = relative_path.to_file_string();
+
+                return DataType::Path.colorize(&format!("~/{}", pretty_path));
+            }
+        }
+
+        DataType::Path.colorize(&path_str)
     }
 }
 

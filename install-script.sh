@@ -98,4 +98,4 @@ mv "$tmp_dir" "$install_dir"
 
 echo
 
-"$install_dir"/yarn switch postinstall
+"$install_dir"/yarn switch postinstall -H "$HOME"

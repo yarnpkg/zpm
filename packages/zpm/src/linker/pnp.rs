@@ -132,7 +132,9 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
     let nm_path
         = project.project_cwd.with_join_str("node_modules");
 
-    linker::helpers::fs_remove_nm(nm_path)?;
+    if project.config.project.enable_local_cache_cleanup.value {
+        linker::helpers::fs_remove_nm(nm_path)?;
+    }
 
     let dependencies_meta
         = linker::helpers::TopLevelConfiguration::from_project(project);

@@ -129,6 +129,9 @@ pub struct ProjectConfig {
     #[default(true)]
     pub enable_global_cache: BoolField,
 
+    #[default(true)]
+    pub enable_local_cache_cleanup: BoolField,
+
     #[default(false)]
     pub enable_immutable_cache: BoolField,
 
