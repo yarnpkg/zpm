@@ -70,6 +70,10 @@ impl PostinstallCommand {
             return;
         }
 
+        if !profile_content.is_empty() && !profile_content.ends_with('\n') {
+            profile_content.push('\n');
+        }
+
         profile_content
             .push_str(&profile_line);
 
