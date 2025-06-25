@@ -5,7 +5,7 @@ use super::PackageData;
 pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::GitReference) -> Result<FetchResult, Error> {
     let pkg_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let repository_path
-            = git::clone_repository(&params.git.repo, &params.git.commit).await?;
+            = git::clone_repository(context, &params.git.repo, &params.git.commit).await?;
 
         let pack_tgz = prepare::prepare_project(
             locator,

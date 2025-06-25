@@ -88,7 +88,7 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
     }
 
     let type_idents
-        = query_algolia(&search_space).await?;
+        = query_algolia(&search_space, &project.http_client).await?;
 
     for (ident, _) in type_idents {
         let Some((descriptor, request)) = candidate_requests.remove(&ident) else {

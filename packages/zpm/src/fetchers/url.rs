@@ -1,13 +1,16 @@
 use std::sync::Arc;
 
-use crate::{error::Error, http::http_get, install::{FetchResult, InstallContext}, manifest::Manifest, primitives::{reference, Locator}, resolvers::Resolution};
+use crate::{error::Error, install::{FetchResult, InstallContext}, manifest::Manifest, primitives::{reference, Locator}, resolvers::Resolution};
 
 use super::PackageData;
 
 pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::UrlReference) -> Result<FetchResult, Error> {
+    let project = context.project
+        .expect("The project is required for fetching URL packages");
+
     let cached_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let response
-            = http_get(&params.url).await?;
+            = project.http_client.get(&params.url).await?;
 
         let archive = response.bytes().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;

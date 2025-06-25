@@ -6,7 +6,7 @@ use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 use zpm_macros::track_time;
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, diff_finder::SaveEntry, error::Error, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{bin::BinField, helpers::read_manifest_with_size, resolutions::ResolutionSelector, BinManifest, Manifest}, manifest_finder::CachedManifestFinder, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, report::{with_report_result, StreamReport, StreamReportConfig}, script::Binary};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, diff_finder::SaveEntry, error::Error, http::HttpClient, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{bin::BinField, helpers::read_manifest_with_size, resolutions::ResolutionSelector, BinManifest, Manifest}, manifest_finder::CachedManifestFinder, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, report::{with_report_result, StreamReport, StreamReportConfig}, script::Binary};
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
 pub const MANIFEST_NAME: &str = "package.json";
@@ -35,6 +35,7 @@ pub struct Project {
 
     pub last_changed_at: u128,
     pub install_state: Option<InstallState>,
+    pub http_client: std::sync::Arc<HttpClient>,
 }
 
 impl Project {
@@ -110,6 +111,9 @@ impl Project {
             workspaces_by_ident.insert(workspace.locator().ident.clone(), idx);
             workspaces_by_rel_path.insert(workspace.rel_path.clone(), idx);
         }
+        
+        let http_client
+            = HttpClient::new(&config)?;
 
         Ok(Project {
             shell_cwd: shell_cwd.relative_to(&project_cwd),
@@ -124,6 +128,7 @@ impl Project {
 
             last_changed_at,
             install_state: None,
+            http_client,
         })
     }
 

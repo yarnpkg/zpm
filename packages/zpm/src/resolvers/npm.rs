@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::{de::{self, DeserializeOwned, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, http::http_get, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, npm, primitives::{range, reference, Descriptor, Ident, Locator, Reference}, resolvers::{workspace::{self, resolve_locator_ident}, Resolution}};
+use crate::{error::Error, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, npm, primitives::{range, reference, Descriptor, Ident, Locator, Reference}, resolvers::{workspace::{self, resolve_locator_ident}, Resolution}};
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
@@ -210,7 +210,7 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
 
     let response
-        = http_get(&registry_url).await?;
+        = project.http_client.get(&registry_url).await?;
 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
@@ -255,7 +255,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
         = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
 
     let response
-        = http_get(&registry_url).await?;
+        = project.http_client.get(&registry_url).await?;
 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
@@ -295,7 +295,7 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
         = npm::registry_url_for_one_version(&project.config.registry_base_for(&params.ident), &params.ident, &params.version);
 
     let response
-        = http_get(&registry_url).await?;
+        = project.http_client.get(&registry_url).await?;
 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;

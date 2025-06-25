@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{error::Error, http::http_get, install::{FetchResult, InstallContext}, npm, primitives::{reference, Locator}};
+use crate::{error::Error, install::{FetchResult, InstallContext}, npm, primitives::{reference, Locator}};
 
 use super::PackageData;
 
@@ -52,7 +52,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let cached_blob = context.package_cache.unwrap().ensure_blob(locator.clone(), ".zip", || async {
         let response
-            = http_get(&registry_url).await?;
+            = project.http_client.get(&registry_url).await?;
 
         let archive = response.bytes().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;

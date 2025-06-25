@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use serde::{Deserialize, Serialize};
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, http::http_client, primitives::ident::Ident};
+use crate::{error::Error, http::HttpClient, primitives::ident::Ident};
 
 const ALGOLIA_URL: &str = "https://OFCNCOG2CU.algolia.net/1/indexes/*/objects";
 
@@ -42,10 +42,7 @@ struct AlgoliaTypes {
     definitely_typed: Option<Ident>,
 }
 
-pub async fn query_algolia(idents: &[Ident]) -> Result<HashMap<Ident, Ident>, Error> {
-    let client
-        = http_client()?;
-
+pub async fn query_algolia(idents: &[Ident], http_client: &Arc<HttpClient>) -> Result<HashMap<Ident, Ident>, Error> {
     let input_payload = AlgoliaInputPayload {
         requests: idents.iter().map(|ident| AlgoliaRequest {
             index_name: "npm-search".to_string(),
@@ -54,7 +51,7 @@ pub async fn query_algolia(idents: &[Ident]) -> Result<HashMap<Ident, Ident>, Er
         }).collect(),
     };
 
-    let response = client
+    let response = http_client.client()
         .post(ALGOLIA_URL)
         .header("x-algolia-application-id", "OFCNCOG2CU")
         .header("x-algolia-api-key", "e8e1bd300d860104bb8c58453ffa1eb4")

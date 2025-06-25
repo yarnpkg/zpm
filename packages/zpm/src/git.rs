@@ -7,7 +7,7 @@ use fancy_regex::Regex;
 use serde::{Deserialize, Serialize};
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, github, prepare::PrepareParams, primitives::{range::AnonymousSemverRange}, script::ScriptEnvironment};
+use crate::{error::Error, github, prepare::PrepareParams, primitives::{range::AnonymousSemverRange}, script::ScriptEnvironment, install::InstallContext};
 
 static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
 
@@ -492,11 +492,14 @@ fn make_git_env() -> BTreeMap<String, String> {
     env
 }
 
-pub async fn clone_repository(source: &GitSource, commit: &str) -> Result<Path, Error> {
+pub async fn clone_repository(context: &InstallContext<'_>, source: &GitSource, commit: &str) -> Result<Path, Error> {
+    let project = context.project
+        .expect("The project is required for cloning repositories");
+    
     let clone_dir
         = Path::temp_dir()?;
 
-    if download_into(&source, commit, &clone_dir).await?.is_some() {
+    if download_into(&source, commit, &clone_dir, &project.http_client).await?.is_some() {
         return Ok(clone_dir);
     }
 
@@ -504,8 +507,8 @@ pub async fn clone_repository(source: &GitSource, commit: &str) -> Result<Path, 
     Ok(clone_dir)
 }
 
-async fn download_into(source: &GitSource, commit: &str, download_dir: &Path) -> Result<Option<()>, Error> {
-    if github::download_into(source, commit, download_dir).await?.is_some() {
+async fn download_into(source: &GitSource, commit: &str, download_dir: &Path, http_client: &std::sync::Arc<crate::http::HttpClient>) -> Result<Option<()>, Error> {
+    if github::download_into(source, commit, download_dir, http_client).await?.is_some() {
         return Ok(Some(()));
     }
 

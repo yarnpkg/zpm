@@ -4,17 +4,17 @@ use zpm_utils::PathError;
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum Error {
-    #[error("Invalid zip file: {0}")]
-    InvalidZipFile(String),
-
-    #[error("{0}")]
+    #[error(transparent)]
     PathError(#[from] PathError),
 
-    #[error("I/O error: {0}")]
+    #[error(transparent)]
     Io(#[from] Arc<std::io::Error>),
 
-    #[error("Utf8 conversion error: {0}")]
+    #[error(transparent)]
     Utf8Conversion(#[from] std::str::Utf8Error),
+
+    #[error("Invalid zip file")]
+    InvalidZipFile(String),
 
     #[error("Invalid tar file path: {0}")]
     InvalidTarFilePath(String),

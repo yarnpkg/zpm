@@ -4,7 +4,7 @@ use regex::Regex;
 use reqwest::StatusCode;
 use zpm_utils::Path;
 
-use crate::{error::Error, git::GitSource, http::http_client};
+use crate::{error::Error, git::GitSource, http::HttpClient};
 
 static GITHUB_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new("^https://github.com/([^/#]+)/([^/#]+?)\\.git$").unwrap()
@@ -30,16 +30,13 @@ pub fn public_tarball_url(owner: &str, repository: &str, commit: &str) -> String
     format!("https://github.com/{}/{}/archive/{}.tar.gz", owner, repository, commit)
 }
 
-pub async fn download_into(source: &GitSource, commit: &str, download_dir: &Path) -> Result<Option<()>, Error> {
+pub async fn download_into(source: &GitSource, commit: &str, download_dir: &Path, http_client: &Arc<HttpClient>) -> Result<Option<()>, Error> {
     let GitSource::GitHub {owner, repository} = source else {
         return Ok(None);
     };
 
-    let client
-        = http_client()?;
-
     let response
-        = client.get(public_tarball_url(owner, &repository, commit)).send().await
+        = http_client.client().get(public_tarball_url(owner, &repository, commit)).send().await
             .and_then(|response| response.error_for_status());
 
     let data = match response {

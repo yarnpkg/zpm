@@ -7,7 +7,7 @@ use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -703,7 +703,7 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
         _ => {},
     };
 
-    if matches!(descriptor.ident.as_str(), "typescript") {
+    if has_builtin_patch(&descriptor.ident) {
         descriptor.range = range::PatchRange {
             inner: Box::new(UrlEncoded::new(descriptor.clone())),
             path: "<builtin>".to_string(),

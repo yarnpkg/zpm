@@ -91,6 +91,12 @@ pub struct EnvConfig {
 pub struct UserConfig {
     #[default(|_| !zpm_ci::is_ci().is_some())]
     pub enable_progress_bars: BoolField,
+
+    #[default(3)]
+    pub http_retry: UintField,
+
+    #[default(100)]
+    pub network_concurrency: UintField,
 }
 
 fn check_tsconfig(config_paths: &ConfigPaths) -> bool {

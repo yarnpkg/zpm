@@ -2,7 +2,7 @@ use std::io::Read;
 
 use zpm_formats::zip::ZipSupport;
 
-use crate::{error::Error, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, patch, primitives::{reference, Locator}, resolvers::Resolution};
+use crate::{error::Error, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, patch, primitives::{reference, Ident, Locator}, resolvers::Resolution};
 
 use super::PackageData;
 
@@ -11,6 +11,11 @@ const BUILTIN_PATCHES: &[(&str, &[u8])] = &[
     ("resolve", std::include_bytes!("../../patches/resolve.brotli.dat")),
     ("typescript", std::include_bytes!("../../patches/typescript.brotli.dat")),
 ];
+
+pub fn has_builtin_patch(ident: &Ident) -> bool {
+    BUILTIN_PATCHES.iter()
+        .any(|(name, _)| *name == ident.as_str())
+}
 
 pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::PatchReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     let project = context.project
