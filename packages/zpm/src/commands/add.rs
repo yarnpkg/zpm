@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use clipanion::cli;
 use zpm_parsers::{JsonFormatter, JsonValue};
 use zpm_semver::RangeKind;
-use zpm_utils::{FromFileString, ToFileString};
+use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 
 use crate::{algolia::query_algolia, error::Error, install::InstallContext, primitives::{loose_descriptor, range::AnonymousSemverRange, Descriptor, LooseDescriptor, PeerRange, Range}, project};
 
@@ -218,19 +218,19 @@ impl Add {
 
         for (descriptor, request) in &requests {
             if request.dev && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
-                return Err(Error::ConflictingOptions(format!("{} is already listed as a regular dependency of this workspace", descriptor.ident)));
+                return Err(Error::ConflictingOptions(format!("{} is already listed as a regular dependency of this workspace", descriptor.ident.to_print_string())));
             }
 
             if request.optional && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
-                return Err(Error::ConflictingOptions(format!("{} is already listed as an regular dependency of this workspace", descriptor.ident)));
+                return Err(Error::ConflictingOptions(format!("{} is already listed as an regular dependency of this workspace", descriptor.ident.to_print_string())));
             }
 
             if request.peer && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
-                return Err(Error::ConflictingOptions(format!("{} is already listed as a regular dependency of this workspace", descriptor.ident)));
+                return Err(Error::ConflictingOptions(format!("{} is already listed as a regular dependency of this workspace", descriptor.ident.to_print_string())));
             }
 
             if request.prod && active_workspace.manifest.remote.peer_dependencies.contains_key(&descriptor.ident) {
-                return Err(Error::ConflictingOptions(format!("{} is already listed as a peer dependency of this workspace", descriptor.ident)));
+                return Err(Error::ConflictingOptions(format!("{} is already listed as a peer dependency of this workspace", descriptor.ident.to_print_string())));
             }
 
             if request.dev {

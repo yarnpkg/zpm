@@ -1,6 +1,6 @@
-use std::{collections::{BTreeMap, BTreeSet}, env::var, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
+use std::{collections::{BTreeMap, BTreeSet}, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
 
-use zpm_utils::{to_shell_line, FromFileString, Path};
+use zpm_utils::{to_shell_line, FromFileString, Path, ToFileString};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -126,7 +126,7 @@ impl ScriptBinaries {
             .ok()
             .map(|path| Path::from_file_string(&path))
             .unwrap_or_else(|| Path::current_exe())?
-            .to_string();
+            .to_file_string();
 
         self.binaries.push(ScriptBinary {
             name: "run".to_string(),
@@ -164,12 +164,12 @@ impl ScriptBinaries {
                 self.binaries.push(ScriptBinary {
                     name: name.clone(),
                     argv0: "node".to_string(),
-                    args: vec![binary_path_abs.to_string()],
+                    args: vec![binary_path_abs.to_file_string()],
                 });
             } else {
                 self.binaries.push(ScriptBinary {
                     name: name.clone(),
-                    argv0: binary_path_abs.to_string(),
+                    argv0: binary_path_abs.to_file_string(),
                     args: vec![],
                 });
             }
@@ -335,15 +335,15 @@ impl ScriptEnvironment {
 
     pub fn with_project(mut self, project: &Project) -> Self {
         if let Some(pnp_path) = project.pnp_path().if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_file_string()));
         }
 
         if let Some(pnp_loader_path) = project.pnp_loader_path().if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_file_string()));
         }
 
-        self.env.insert("PROJECT_CWD".to_string(), project.project_cwd.to_string());
-        self.env.insert("INIT_CWD".to_string(), project.project_cwd.with_join(&project.shell_cwd).to_string());
+        self.env.insert("PROJECT_CWD".to_string(), project.project_cwd.to_file_string());
+        self.env.insert("INIT_CWD".to_string(), project.project_cwd.with_join(&project.shell_cwd).to_file_string());
 
         self
     }
@@ -371,9 +371,9 @@ impl ScriptEnvironment {
             .with_join(package_location_rel)
             .with_join_str("package.json");
         
-        self.env.insert("npm_package_name".to_string(), locator.ident.to_string());
-        self.env.insert("npm_package_version".to_string(), resolution.version.to_string());
-        self.env.insert("npm_package_json".to_string(), manifest_location_abs.to_string());
+        self.env.insert("npm_package_name".to_string(), locator.ident.to_file_string());
+        self.env.insert("npm_package_version".to_string(), resolution.version.to_file_string());
+        self.env.insert("npm_package_json".to_string(), manifest_location_abs.to_file_string());
 
         Ok(())
     }
@@ -474,12 +474,12 @@ impl ScriptEnvironment {
             .unwrap_or_default();
 
         let next_env_path = match env_path.is_empty() {
-            true => bin_dir.to_string(),
-            false => format!("{}:{}", bin_dir, env_path),
+            true => bin_dir.to_file_string(),
+            false => format!("{}:{}", bin_dir.to_file_string(), env_path),
         };
 
         cmd.env("PATH", next_env_path);
-        cmd.env("BERRY_BIN_FOLDER", bin_dir.to_string());
+        cmd.env("BERRY_BIN_FOLDER", bin_dir.to_file_string());
 
         cmd.args(&args);
 
@@ -524,14 +524,14 @@ impl ScriptEnvironment {
             BinaryKind::Node => {
                 let mut node_args = vec![];
 
-                node_args.push(binary.path.to_string());
+                node_args.push(binary.path.to_file_string());
                 node_args.extend(args.into_iter().map(|arg| arg.as_ref().to_string()));
 
                 self.run_exec("node", node_args).await
             },
 
             BinaryKind::Default => {
-                self.run_exec(&binary.path.to_string(), args).await
+                self.run_exec(&binary.path.to_file_string(), args).await
             },
         }
     }

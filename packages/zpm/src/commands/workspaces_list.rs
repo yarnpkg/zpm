@@ -1,7 +1,7 @@
 use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 
 use clipanion::cli;
-use zpm_utils::Path;
+use zpm_utils::{Path, ToFileString};
 
 use crate::{error::Error, git_utils, primitives::{Ident, Reference}, project::{self, Workspace}};
 
@@ -163,7 +163,7 @@ impl WorkspacesList {
             }
 
             let workspace_path_str
-                = workspace.rel_path.to_string();
+                = workspace.rel_path.to_file_string();
 
             let workspace_printed_path = match workspace_path_str.is_empty() {
                 true => ".",

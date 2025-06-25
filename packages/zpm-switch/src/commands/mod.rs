@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use clipanion::{prelude::*, program_async, Environment};
-use zpm_utils::Path;
+use zpm_utils::{Path, ToFileString};
 
 use crate::{cwd::set_fake_cwd, yarn::{extract_bin_meta, BinMeta}};
 
@@ -20,7 +20,7 @@ program_async!(SwitchExecCli, [
 pub async fn run_default() -> ExitCode {
     let self_path = Path::current_exe()
         .unwrap()
-        .to_string();
+        .to_file_string();
 
     std::env::set_var("YARNSW_EXEC_PATH", self_path);
 

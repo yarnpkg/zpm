@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use zpm_utils::OkMissing;
+use zpm_utils::{OkMissing, ToHumanString};
 
 use crate::{build::{self, BuildRequests}, error::Error, fetchers::PackageData, install::Install, linker, project::Project};
 
@@ -21,7 +21,7 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
     // First pass: copy all packages to store
     for (locator, resolution) in &tree.locator_resolutions {
         let physical_package_data = install.package_data.get(&locator.physical_locator())
-            .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator()));
+            .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator().to_print_string()));
 
         let package_location_abs = match &physical_package_data {
             PackageData::Local {..} => {
@@ -93,7 +93,7 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
             .with_join(package_location);
 
         let physical_package_data = install.package_data.get(&locator.physical_locator())
-            .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator()));
+            .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator().to_print_string()));
 
         // /path/to/project/node_modules
         // /path/to/project/node_modules/.store/@types-no-deps-npm-1.0.0-xyz/node_modules

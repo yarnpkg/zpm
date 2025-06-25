@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::process::Command;
 
 use clipanion::cli;
-use zpm_utils::{DataType, OkMissing, Path, ToFileString};
+use zpm_utils::{DataType, OkMissing, Path, ToFileString, ToHumanString};
 
 #[cli::command]
 #[cli::path("switch", "postinstall")]
@@ -80,13 +80,13 @@ impl PostinstallCommand {
         if profile_write_result.is_ok() {
             println!(
                 "We updated {} for you; please restart your shell or run {} to apply the changes.",
-                profile_path,
+                profile_path.to_print_string(),
                 DataType::Code.colorize("source ~/.profile")
             );
         } else {
             println!(
                 "Failed to write {}; manually append the following line:\n{}",
-                profile_path,
+                profile_path.to_print_string(),
                 DataType::Code.colorize(&profile_line)
             );
         }
@@ -103,7 +103,7 @@ impl PostinstallCommand {
         if env_write_result.is_err() {
             println!(
                 "Failed to write {}; manually append the following line to your shell configuration file:\n{}",
-                env_path,
+                env_path.to_print_string(),
                 DataType::Code.colorize(&env_path_line)
             );
 

@@ -1,6 +1,7 @@
 use std::process::ExitStatus;
 
 use clipanion::cli;
+use zpm_utils::ToFileString;
 
 use crate::{cwd::get_final_cwd, errors::Error, manifest::{find_closest_package_manager, validate_package_manager}, yarn::get_default_yarn_version};
 
@@ -22,7 +23,7 @@ impl InitCommand {
             = find_closest_package_manager(&lookup_path)?;
 
         if let Some(detected_root_path) = find_result.detected_root_path {
-            std::env::set_var("YARNSW_DETECTED_ROOT", detected_root_path.to_string());
+            std::env::set_var("YARNSW_DETECTED_ROOT", detected_root_path.to_file_string());
         }
 
         let reference = match find_result.detected_package_manager {

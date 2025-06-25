@@ -1,8 +1,8 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, fs::Permissions, hash::Hash, marker::PhantomData, os::unix::fs::PermissionsExt};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, hash::Hash, marker::PhantomData};
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sha2::Digest;
-use zpm_utils::Path;
+use zpm_utils::{Path, ToHumanString};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
@@ -359,7 +359,7 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
                     }
 
                     let entry = self.lockfile.entries.get(locator)
-                        .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator));
+                        .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator.to_print_string()));
 
                     return Some(InstallOpResult::Resolved(entry.resolution.clone().into_resolution_result(ctx)));
                 }

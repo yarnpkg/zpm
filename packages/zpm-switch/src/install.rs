@@ -1,9 +1,9 @@
-use std::{fs::Permissions, future::Future, os::unix::fs::PermissionsExt, process::Command};
+use std::{future::Future, process::Command};
 
 use blake2::{Blake2s256, Digest};
 use serde::Serialize;
 use zpm_formats::entries_to_disk;
-use zpm_utils::{get_system_string, FromFileString, Path};
+use zpm_utils::{get_system_string, FromFileString, Path, ToFileString};
 
 use crate::{errors::Error, http::fetch, manifest::VersionPackageManagerReference};
 
@@ -84,7 +84,7 @@ async fn install_node_js_from_url(url: &str) -> Result<Command, Error> {
     let mut command
         = Command::new("node");
 
-    command.arg(main_file_abs.to_string());
+    command.arg(main_file_abs.to_path_buf());
 
     Ok(command)
 }
@@ -114,14 +114,14 @@ async fn install_node_js_from_package(url: &str, main_file: Path) -> Result<Comm
     let mut command
         = Command::new("node");
 
-    command.arg(main_file_abs.to_string());
+    command.arg(main_file_abs.to_path_buf());
 
     Ok(command)
 }
 
 pub async fn install_package_manager(package_manager: &VersionPackageManagerReference) -> Result<Command, Error> {
     let version
-        = package_manager.version.to_string();
+        = package_manager.version.to_file_string();
     let platform
         = get_system_string();
 

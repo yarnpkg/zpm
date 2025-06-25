@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, fmt, marker::PhantomData, str::FromStr, sync::{
 
 use regex::Regex;
 use serde::{de::{self, DeserializeOwned, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
+use zpm_utils::ToFileString;
 
 use crate::{error::Error, http::http_get, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, npm, primitives::{range, reference, Descriptor, Ident, Locator, Reference}, resolvers::{workspace::{self, resolve_locator_ident}, Resolution}};
 
@@ -224,7 +225,7 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
             phantom: PhantomData::<RemoteManifestWithScripts>,
         },
     })?.ok_or_else(|| {
-        Error::NoCandidatesFound(params.range.to_string())
+        Error::NoCandidatesFound(descriptor.range.clone())
     })?;
 
     Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
@@ -277,10 +278,10 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     })?;
 
     let manifest = registry_data.versions.deserialize_map(FindField {
-        value: &version.to_string(),
+        value: &version.to_file_string(),
         phantom: PhantomData::<RemoteManifestWithScripts>,
     })?.ok_or_else(|| {
-        Error::NoCandidatesFound(version.to_string())
+        Error::NoCandidatesFound(descriptor.range.clone())
     })?;
 
     Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))

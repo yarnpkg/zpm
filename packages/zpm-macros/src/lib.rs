@@ -221,8 +221,10 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
 
             enum_variants_from_file_string.push(quote! {
                 #name_str => {
+                    use zpm_utils::ToFileString;
+
                     let parsed = #field_ty_path::from_file_string(&value)
-                        .map_err(|_| crate::error::Error::InvalidConfigValue(key.to_string(), value.to_string()))?;
+                        .map_err(|_| crate::error::Error::InvalidConfigValue(key.to_string(), value.to_file_string()))?;
 
                     Ok(#enum_sym::#field_ty_slug_sym(parsed))
                 },

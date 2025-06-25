@@ -1,6 +1,7 @@
 use std::process::{Command, ExitStatus, Stdio};
 
 use clipanion::cli;
+use zpm_utils::ToFileString;
 
 use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}, yarn::resolve_selector, yarn_enums::Selector};
 
@@ -36,7 +37,7 @@ impl ExplicitCommand {
             = find_closest_package_manager(&lookup_path)?;
 
         if let Some(detected_root_path) = find_result.detected_root_path {
-            std::env::set_var("YARNSW_DETECTED_ROOT", detected_root_path.to_string());
+            std::env::set_var("YARNSW_DETECTED_ROOT", detected_root_path.to_file_string());
         }
 
         let mut args
@@ -44,7 +45,7 @@ impl ExplicitCommand {
 
         // Don't forget to add back the cwd parameter that was removed earlier on!
         if let Some(cwd) = get_fake_cwd() {
-            args.insert(0, cwd.to_string());
+            args.insert(0, cwd.to_file_string());
         }
 
         let version

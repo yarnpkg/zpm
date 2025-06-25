@@ -184,7 +184,7 @@ impl ToFileString for Range {
             Range::Url(params) => params.url.clone(),
             Range::WorkspaceSemver(params) => format!("workspace:{}", params.range.to_file_string()),
             Range::WorkspaceMagic(params) => format!("workspace:{}", serde_plain::to_string(&params.magic).unwrap()),
-            Range::WorkspacePath(params) => format!("workspace:{}", params.path),
+            Range::WorkspacePath(params) => format!("workspace:{}", params.path.to_file_string()),
             Range::WorkspaceIdent(params) => format!("workspace:{}", params.ident.to_file_string()),
             Range::Git(params) => params.git.to_file_string(),
             Range::Virtual(params) => format!("virtual:{}#{}", params.inner.to_file_string(), params.hash.to_file_string()),
@@ -275,8 +275,8 @@ impl ToFileString for PeerRange {
         match self {
             PeerRange::Semver(params) => params.range.to_file_string(),
             PeerRange::WorkspaceSemver(params) => format!("workspace:{}", params.range.to_file_string()),
-            PeerRange::WorkspaceMagic(params) => format!("workspace:{}", params.magic),
-            PeerRange::WorkspacePath(params) => format!("workspace:{}", params.path),
+            PeerRange::WorkspaceMagic(params) => format!("workspace:{}", params.magic.to_file_string()),
+            PeerRange::WorkspacePath(params) => format!("workspace:{}", params.path.to_file_string()),
         }
     }
 }

@@ -91,11 +91,11 @@ impl Pack {
 
         if self.json {
             for path in pack_list {
-                println!("{}", sonic_rs::json!({ "location": path }));
+                sonic_rs::json!({"location": path}).to_string();
             }
         } else {
             for path in pack_list {
-                println!("{}", path);
+                path.to_file_string();
             }
         }
 
@@ -168,7 +168,7 @@ impl Pack {
             return Ok(workspace_abs_path.with_join_str("package.tgz"));
         };
 
-        let out_str = out.to_string();
+        let out_str = out.to_file_string();
 
         let out_str = out_str.replace("%s", package_name);
         let out_str = out_str.replace("%v", package_version);

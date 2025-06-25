@@ -1,6 +1,6 @@
 use std::{borrow::Cow, sync::LazyLock};
 
-use zpm_utils::Path;
+use zpm_utils::{Path, ToFileString};
 use regex::Regex;
 
 use crate::{error::Error, zip_iter::ZipIterator, zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, FileHeader, GeneralRecord}};
@@ -132,9 +132,11 @@ pub trait ZipSupport {
 
 impl ZipSupport for Path {
     fn fs_read_text_from_zip_buffer(&self, zip_data: &[u8]) -> Result<String, Error> {
-        let path_as_string = self.to_string();
+        let path_as_string
+            = self.to_file_string();
 
-        let entries = entries_from_zip(zip_data)?;
+        let entries
+            = entries_from_zip(zip_data)?;
 
         let entry = entries.iter()
             .find(|entry| entry.name == path_as_string)
@@ -144,7 +146,8 @@ impl ZipSupport for Path {
     }
 
     fn fs_read_text_with_zip(&self) -> Result<String, Error> {
-        let path_str = self.to_string();
+        let path_str
+            = self.to_file_string();
 
         if let Some(captures) = ZIP_REGEX.captures(&path_str) {
             let zip_path = captures.get(1).unwrap().as_str();

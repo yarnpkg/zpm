@@ -1,5 +1,5 @@
 use clipanion::cli;
-use zpm_utils::Path;
+use zpm_utils::{Path, ToFileString};
 
 use crate::{
   error::Error, 
@@ -94,7 +94,7 @@ impl Init {
       .fs_write_text(&format!("{}\n", manifest_json))?;
       
     let mut changed_paths = vec![
-      manifest_path.to_string(),
+      manifest_path.clone(),
     ];
       
     // Create README.md
@@ -107,7 +107,7 @@ impl Init {
         readme_path
           .fs_write_text(&readme_content)?;
           
-        changed_paths.push(readme_path.to_string());
+        changed_paths.push(readme_path.clone());
       }
     }
       
@@ -127,7 +127,7 @@ impl Init {
           .fs_write_text("")?;
           
         changed_paths.push(
-          lockfile_path.to_string(),
+          lockfile_path.clone(),
         );
       }
         
@@ -148,7 +148,7 @@ impl Init {
           .fs_write_text(&gitignore_content.join(""))?;
           
         changed_paths.push(
-          gitignore_path.to_string(),
+          gitignore_path.clone(),
         );
       }
         
@@ -167,7 +167,7 @@ impl Init {
           .fs_write_text(&gitattributes_content.join(""))?;
           
         changed_paths.push(
-          gitattributes_path.to_string(),
+          gitattributes_path.clone(),
         );
       }
         
@@ -191,7 +191,7 @@ impl Init {
           .fs_write_text(&editorconfig_content.join(""))?;
           
         changed_paths.push(
-          editorconfig_path.to_string(),
+          editorconfig_path.clone(),
         );
       }
         
@@ -209,10 +209,13 @@ impl Init {
         if init.is_ok() {
           // git add
           let mut add_args = vec!["add", "--"];
-          for path in &changed_paths {
-            add_args.push(path);
-          }
-            
+
+          let changed_path_strings = changed_paths.iter()
+            .map(|path| path.to_file_string())
+            .collect::<Vec<_>>();
+
+          add_args.extend(changed_path_strings.iter().map(|s| s.as_str()));
+
           ScriptEnvironment::new()?
             .run_exec("git", add_args)
             .await

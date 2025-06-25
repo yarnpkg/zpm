@@ -1,4 +1,5 @@
 use clipanion::cli;
+use zpm_utils::ToFileString;
 
 use crate::{error::Error, project};
 
@@ -36,7 +37,7 @@ impl Bin {
         let binary_path = project.project_cwd
             .with_join(&binary.path);
 
-        println!("{}", binary_path);
+        println!("{}", binary_path.to_file_string());
 
         Ok(())
     }

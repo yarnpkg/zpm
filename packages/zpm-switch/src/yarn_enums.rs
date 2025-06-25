@@ -122,7 +122,7 @@ impl ToFileString for Selector {
             },
     
             Selector::Range(RangeSelector {range}) => {
-                range.to_string()
+                range.to_file_string()
             },
         }
     }

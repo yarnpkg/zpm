@@ -1,7 +1,7 @@
 use std::{mem::take, sync::Arc};
 
 use bincode::{Decode, Encode};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use zpm_macros::parse_enum;
 use zpm_utils::{impl_serialization_traits, FromFileString, OkMissing, Path, ToFileString, ToHumanString};
 
@@ -52,10 +52,10 @@ impl ToFileString for PackageManagerReference {
     fn to_file_string(&self) -> String {
         match self {
             PackageManagerReference::Version(params)
-                => format!("{}", params.version),
+                => format!("{}", params.version.to_file_string()),
 
             PackageManagerReference::Local(params)
-                => format!("local:{}", params.path),
+                => format!("local:{}", params.path.to_file_string()),
         }
     }
 }
@@ -64,10 +64,10 @@ impl ToHumanString for PackageManagerReference {
     fn to_print_string(&self) -> String {
         match self {
             PackageManagerReference::Version(params)
-                => format!("{}", params.version),
+                => format!("{}", params.version.to_print_string()),
 
             PackageManagerReference::Local(params)
-                => format!("local:{}", params.path),
+                => format!("local:{}", params.path.to_print_string()),
         }
     }
 }

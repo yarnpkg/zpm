@@ -207,7 +207,7 @@ impl DiskCache {
 
             false => {
                 if self.immutable {
-                    return Err(Error::ImmutableCache(key.to_print_string()));
+                    return Err(Error::ImmutableCache(key));
                 }
 
                 let data = self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?;
@@ -251,7 +251,7 @@ impl DiskCache {
                 }
 
                 if self.immutable {
-                    return Err(Error::ImmutableCache(key.to_print_string()));
+                    return Err(Error::ImmutableCache(key));
                 }
 
                 let data = self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?;

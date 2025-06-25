@@ -339,7 +339,7 @@ impl Field<Path> for PathField {
 
 impl ToFileString for PathField {
     fn to_file_string(&self) -> String {
-        self.value.to_string()
+        self.value.to_file_string()
     }
 }
 
@@ -386,7 +386,7 @@ impl<'de> Deserialize<'de> for PathField {
 
 impl Serialize for PathField {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
-        self.value.to_string().serialize(serializer)
+        self.value.to_file_string().serialize(serializer)
     }
 }
 
@@ -460,10 +460,10 @@ impl<K: Serialize + Ord, V: Serialize> ToFileString for DictField<K, V> {
     }
 }
 
-impl<K: ToString + Ord, V: ToHumanString> ToHumanString for DictField<K, V> {
+impl<K: ToHumanString + Ord, V: ToHumanString> ToHumanString for DictField<K, V> {
     fn to_print_string(&self) -> String {
         let entries: Vec<String> = self.value.iter()
-            .map(|(k, v)| format!("{}: {}", k.to_string(), v.to_print_string()))
+            .map(|(k, v)| format!("{}: {}", k.to_print_string(), v.to_print_string()))
             .collect();
         format!("{{{}}}", entries.join(", "))
     }
@@ -731,12 +731,12 @@ mod tests {
         // Test FromFileString with absolute path
         let raw_absolute = "/absolute/path/to/file.txt";
         let path_field_absolute = PathField::from_file_string(raw_absolute).unwrap();
-        assert_eq!(path_field_absolute.value.to_string(), "/absolute/path/to/file.txt");
+        assert_eq!(path_field_absolute.value.to_file_string(), "/absolute/path/to/file.txt");
 
         // Test FromFileString with relative path
         let raw_relative = "relative/path/to/file.txt";
         let path_field_relative = PathField::from_file_string(raw_relative).unwrap();
-        assert_eq!(path_field_relative.value.to_string(), "/tmp/relative/path/to/file.txt");
+        assert_eq!(path_field_relative.value.to_file_string(), "/tmp/relative/path/to/file.txt");
 
         // Test ToFileString
         assert_eq!(path_field_absolute.to_file_string(), "/absolute/path/to/file.txt");
@@ -748,12 +748,12 @@ mod tests {
         // Test Deserialize with absolute path
         let json_str = "\"/absolute/path/to/file.txt\"";
         let deserialized: PathField = serde_json::from_str(json_str).unwrap();
-        assert_eq!(deserialized.value.to_string(), "/absolute/path/to/file.txt");
+        assert_eq!(deserialized.value.to_file_string(), "/absolute/path/to/file.txt");
 
         // Test Deserialize with relative path
         let json_str = "\"relative/path/to/file.txt\"";
         let deserialized: PathField = serde_json::from_str(json_str).unwrap();
-        assert_eq!(deserialized.value.to_string(), "/tmp/relative/path/to/file.txt");
+        assert_eq!(deserialized.value.to_file_string(), "/tmp/relative/path/to/file.txt");
     }
 
     #[test]

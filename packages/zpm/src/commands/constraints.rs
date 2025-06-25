@@ -183,21 +183,21 @@ fn display_report(project: &Project, output: &ConstraintsOutput) -> Result<(), E
             match error {
                 WorkspaceError::MissingField { field_path, expected } => {
                     workspace_node.children.push(tree::Node {
-                        label: format!("{cog} Missing field {}; expected {}", field_path, expected),
+                        label: format!("{cog} Missing field {}; expected {}", field_path.to_print_string(), expected),
                         children: vec![],
                     });
                 },
 
                 WorkspaceError::ExtraneousField { field_path, current_value } => {
                     workspace_node.children.push(tree::Node {
-                        label: format!("{cog} Extraneous field {} currently set to {}", field_path, current_value),
+                        label: format!("{cog} Extraneous field {} currently set to {}", field_path.to_print_string(), current_value),
                         children: vec![],
                     });
                 },
 
                 WorkspaceError::InvalidField { field_path, expected, current_value } => {
                     workspace_node.children.push(tree::Node {
-                        label: format!("{cog} Invalid field {}; expected {}, found {}", field_path, expected, current_value),
+                        label: format!("{cog} Invalid field {}; expected {}, found {}", field_path.to_print_string(), expected, current_value),
                         children: vec![],
                     });
                 },
@@ -223,7 +223,7 @@ fn display_report(project: &Project, output: &ConstraintsOutput) -> Result<(), E
                         .collect::<Vec<_>>();
 
                     workspace_node.children.push(tree::Node {
-                        label: format!("Conflict detected in constraint targeting {}; conflicting values are:", field_path),
+                        label: format!("Conflict detected in constraint targeting {}; conflicting values are:", field_path.to_print_string()),
                         children: options,
                     });
                 },

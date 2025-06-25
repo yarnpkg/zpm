@@ -25,11 +25,23 @@ impl FromFileString for String {
 
 impl ToFileString for String {
     fn to_file_string(&self) -> String {
-        self.clone()
+        self.as_str().to_file_string()
     }
 }
 
 impl ToHumanString for String {
+    fn to_print_string(&self) -> String {
+        self.as_str().to_print_string()
+    }
+}
+
+impl ToFileString for &str {
+    fn to_file_string(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl ToHumanString for &str {
     fn to_print_string(&self) -> String {
         self.to_file_string().truecolor(0, 153, 0).to_string()
     }
@@ -90,12 +102,6 @@ macro_rules! impl_serialization_traits_no_serde(($type:ty) => {
 
         fn try_from(value: &String) -> Result<Self, Self::Error> {
             Ok(Box::new(<$type as $crate::FromFileString>::from_file_string(value)?))
-        }
-    }
-
-    impl std::fmt::Display for $type {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}", <$type as $crate::ToHumanString>::to_print_string(self))
         }
     }
 });

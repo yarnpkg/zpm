@@ -1,6 +1,6 @@
 use std::{future::Future, sync::Arc};
 
-use zpm_utils::{Path, ToHumanString};
+use zpm_utils::{Path, ToFileString, ToHumanString};
 use tokio::task::JoinError;
 
 use crate::primitives::{Descriptor, Ident, Locator, Range};
@@ -40,19 +40,19 @@ pub enum Error {
     #[error("Conflicting options: {0}")]
     ConflictingOptions(String),
 
-    #[error("Checksum mismatch for {0}")]
+    #[error("Checksum mismatch for {}", .0.to_print_string())]
     ChecksumMismatch(Locator),
 
     #[error("[YN0028] The lockfile would have been created by this install, which is explicitly forbidden.")]
     ImmutableLockfile,
 
-    #[error("[YN0056] Cache entry required but missing for {0}.")]
-    ImmutableCache(String),
+    #[error("[YN0056] Cache entry required but missing for {0:?}.")]
+    ImmutableCache(Locator),
 
-    #[error("[YN0056] {0} appears to be unused and would be marked for deletion, but the cache is immutable")]
+    #[error("[YN0056] {} appears to be unused and would be marked for deletion, but the cache is immutable", .0.to_print_string())]
     ImmutableCacheCleanup(Path),
 
-    #[error("[YN0091] Cache path does not exist ({0}).")]
+    #[error("[YN0091] Cache path does not exist ({}).", .0.to_print_string())]
     MissingCacheFolder(Path),
 
     #[error("Algolia registry error")]
@@ -79,7 +79,7 @@ pub enum Error {
     #[error("Package manifest not found")]
     ManifestNotFound,
 
-    #[error("Package manifest failed to parse ({0})")]
+    #[error("Package manifest failed to parse ({})", .0.to_print_string())]
     ManifestParseError(Path),
 
     #[error("Invalid descriptor ({0})")]
@@ -100,11 +100,11 @@ pub enum Error {
     #[error("Tag not found ({0})")]
     TagNotFound(String),
 
-    #[error("Package not found ({0}, at {1})")]
-    PackageNotFound(Ident, String),
+    #[error("Package not found ({}, at {})", .0.to_print_string(), .1.to_print_string())]
+    PackageNotFound(Ident, Path),
 
-    #[error("No candidates found for {0:?}")]
-    NoCandidatesFound(String),
+    #[error("No candidates found for {}", .0.to_print_string())]
+    NoCandidatesFound(Range),
 
     #[error("I/O error ({inner})\n\n{}", render_backtrace(backtrace))]
     IoError {
@@ -208,7 +208,7 @@ pub enum Error {
     #[error("Missing package name")]
     MissingPackageName,
 
-    #[error("We don't know how to infer the package name with only the provided range ({0})")]
+    #[error("We don't know how to infer the package name with only the provided range ({})", .0.to_print_string())]
     UnsufficientLooseDescriptor(Range),
 
     #[error("Config key not found ({0})")]
@@ -220,10 +220,10 @@ pub enum Error {
     #[error("Package conversion error ({0})")]
     PackageConversionError(Arc<Box<dyn std::error::Error + Send + Sync>>),
 
-    #[error("Workspace not found ({0})")]
+    #[error("Workspace not found ({})", .0.to_print_string())]
     WorkspaceNotFound(Ident),
 
-    #[error("Workspace path not found ({0})")]
+    #[error("Workspace path not found ({})", .0.to_print_string())]
     WorkspacePathNotFound(Path),
 
     #[error("Install state file not found; please run an install operation first")]
@@ -268,7 +268,7 @@ pub enum Error {
     #[error("Child process failed ({0})")]
     ChildProcessFailed(String),
 
-    #[error("Child process failed ({0}); check {1} for details")]
+    #[error("Child process failed ({}); check {} for details", .0, .1.to_print_string())]
     ChildProcessFailedWithLog(String, Path),
 
     #[error("Failed to interpret as an utf8 string")]
@@ -307,8 +307,8 @@ pub enum Error {
     #[error("Missing target path")]
     MissingToPath,
 
-    #[error("Patched file not found ({0})")]
-    PatchedFileNotFound(String),
+    #[error("Patched file not found ({})", .0.to_print_string())]
+    PatchedFileNotFound(Path),
 
     #[error("Unmatched hunk")]
     UnmatchedHunk(usize),

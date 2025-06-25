@@ -2,6 +2,7 @@ use std::{borrow::Cow, collections::HashMap, sync::LazyLock};
 
 use itertools::Itertools;
 use regex::Regex;
+use zpm_utils::{Path, ToFileString};
 
 use crate::{Entry, Error};
 
@@ -220,8 +221,8 @@ fn clean_name(name: &str) -> Result<Option<String>, Error> {
         return Ok(None)
     }
 
-    let mut name = zpm_utils::Path::try_from(name)?
-        .to_string();
+    let mut name = Path::try_from(name)?
+        .to_file_string();
 
     if name.ends_with('/') {
         name.pop();

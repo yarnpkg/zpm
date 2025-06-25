@@ -6,6 +6,7 @@ use zpm_utils::Path;
 use globset::GlobBuilder;
 use globset::GlobMatcher;
 use regex::Regex;
+use zpm_utils::ToFileString;
 
 use crate::error::Error;
 use crate::manifest::helpers::read_manifest;
@@ -412,19 +413,19 @@ pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) 
 
     if let Some(exports) = &manifest.exports {
         for export_path in exports.paths() {
-            glob_ignore.add(&Path::new(), &format!("!/{}", export_path.path))?;
+            glob_ignore.add(&Path::new(), &format!("!/{}", export_path.path.to_file_string()))?;
         }
     }
 
     if let Some(imports) = &manifest.imports {
         for import_path in imports.paths() {
-            glob_ignore.add(&Path::new(), &format!("!/{}", import_path.path))?;
+            glob_ignore.add(&Path::new(), &format!("!/{}", import_path.path.to_file_string()))?;
         }
     }
 
     if let Some(browser) = &manifest.browser {
         for import_path in browser.paths() {
-            glob_ignore.add(&Path::new(), &format!("!/{}", import_path))?;
+            glob_ignore.add(&Path::new(), &format!("!/{}", import_path.to_file_string()))?;
         }
     }
 
@@ -434,7 +435,7 @@ pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) 
 
     if let Some(bin) = &manifest.bin {
         for path in bin.paths() {
-            glob_ignore.add(&Path::new(), &format!("!/{}", path))?;
+            glob_ignore.add(&Path::new(), &format!("!/{}", path.to_file_string()))?;
         }
     }
 

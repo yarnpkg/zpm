@@ -1,6 +1,7 @@
 use std::process::ExitStatus;
 
 use clipanion::cli;
+use zpm_utils::ToFileString;
 
 use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, manifest::{find_closest_package_manager, validate_package_manager}, yarn::get_default_yarn_version, yarn_enums::ReleaseLine};
 
@@ -21,7 +22,7 @@ impl ProxyCommand {
             = find_closest_package_manager(&lookup_path)?;
 
         if let Some(detected_root_path) = find_result.detected_root_path {
-            std::env::set_var("YARNSW_DETECTED_ROOT", detected_root_path.to_string());
+            std::env::set_var("YARNSW_DETECTED_ROOT", detected_root_path.to_file_string());
         }
 
         let reference = match find_result.detected_package_manager {
@@ -39,7 +40,7 @@ impl ProxyCommand {
 
         // Don't forget to add back the cwd parameter that was removed earlier on!
         if let Some(cwd) = get_fake_cwd() {
-            args.insert(0, cwd.to_string());
+            args.insert(0, cwd.to_file_string());
         }
 
         ExplicitCommand::run(&reference, &args).await

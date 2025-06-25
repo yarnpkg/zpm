@@ -1,7 +1,5 @@
 use std::fmt::{self, Display};
 
-use colored::{Color, Colorize};
-
 use crate::{DataType, ToHumanString};
 
 pub struct ColoredJsonValue(serde_json::Value);

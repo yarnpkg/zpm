@@ -1,6 +1,6 @@
 use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt};
 
-use zpm_utils::Path;
+use zpm_utils::{Path, ToHumanString};
 use itertools::Itertools;
 use serde::{Serialize, Serializer};
 use serde_with::serde_as;
@@ -147,7 +147,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
 
     for (locator, resolution) in &tree.locator_resolutions {
         let physical_package_data = install.package_data.get(&locator.physical_locator())
-            .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator()));
+            .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator().to_print_string()));
 
         let mut package_dependencies: BTreeMap<Ident, PnpDependencyTarget> = resolution.dependencies.iter().map(|(ident, descriptor)| {
             let dependency_resolution = tree.descriptor_to_locator.get(descriptor)
@@ -228,7 +228,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         }
 
         let mut package_location = package_location_rel
-            .to_string();
+            .to_file_string();
 
         if package_location.is_empty() {
             package_location = "./".to_string();

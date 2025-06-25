@@ -1,6 +1,6 @@
 use std::{borrow::Cow, os::unix::fs::PermissionsExt};
 
-use zpm_utils::Path;
+use zpm_utils::{Path, ToFileString};
 
 pub(crate) mod zip_structs;
 
@@ -81,7 +81,7 @@ pub fn entries_from_files<'a>(base: &Path, files: &[Path]) -> Result<Vec<Entry<'
         let mode = if is_exec { 0o755 } else { 0o644 };
 
         entries.push(Entry {
-            name: rel_path.to_string(),
+            name: rel_path.to_file_string(),
             mode,
             crc: 0,
             data: Cow::Owned(data),

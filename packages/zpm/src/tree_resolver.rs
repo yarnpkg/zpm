@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use bincode::{Decode, Encode};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use zpm_utils::ToHumanString;
 
 use crate::{primitives::{range, Descriptor, Ident, Locator, Range, Reference}, resolvers::Resolution};
 
@@ -134,7 +135,7 @@ impl TreeResolver {
                 .contains(&dependency_descriptor.ident);
 
             let dependency_locator = self.resolution_tree.descriptor_to_locator.get(dependency_descriptor)
-                .unwrap_or_else(|| panic!("Expected a locator to be found for {}", dependency_descriptor));
+                .unwrap_or_else(|| panic!("Expected a locator to be found for {}", dependency_descriptor.to_print_string()));
 
             let pkg = self.original_workspace_definitions.get(dependency_locator)
                 .or(self.resolution_tree.locator_resolutions.get(dependency_locator))

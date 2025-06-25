@@ -1,14 +1,13 @@
-use std::{clone, collections::BTreeMap, fmt::{self, Display, Formatter}, future::Future, sync::LazyLock};
+use std::{collections::BTreeMap, fmt::{self, Display, Formatter}, future::Future, sync::LazyLock};
 
 use zpm_utils::Path;
 use bincode::{Decode, Encode};
 use colored::Colorize;
 use fancy_regex::Regex;
 use serde::{Deserialize, Serialize};
-use tokio::process::Command;
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, github, prepare::PrepareParams, script::ScriptEnvironment};
+use crate::{error::Error, github, prepare::PrepareParams, primitives::{range::AnonymousSemverRange}, script::ScriptEnvironment};
 
 static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
 
@@ -136,7 +135,7 @@ impl Display for GitTreeish {
             GitTreeish::AnythingGoes(treeish) => write!(f, "{}", treeish),
             GitTreeish::Head(head) => write!(f, "head={}", head),
             GitTreeish::Commit(commit) => write!(f, "commit={}", commit),
-            GitTreeish::Semver(range) => write!(f, "semver={}", range),
+            GitTreeish::Semver(range) => write!(f, "semver={}", range.to_file_string()),
             GitTreeish::Tag(tag) => write!(f, "tag={}", tag),
         }
     }
@@ -173,7 +172,7 @@ impl ToFileString for GitRange {
             GitTreeish::AnythingGoes(treeish) => treeish.to_string(),
             GitTreeish::Head(head) => format!("head={}", head),
             GitTreeish::Commit(commit) => format!("commit={}", commit),
-            GitTreeish::Semver(range) => format!("semver={}", range),
+            GitTreeish::Semver(range) => format!("semver={}", range.to_file_string()),
             GitTreeish::Tag(tag) => format!("tag={}", tag),
         });
 
@@ -463,7 +462,9 @@ async fn resolve_git_treeish_stricter(repo: &GitSource, treeish: GitTreeish) -> 
             if let Some((k, _)) = candidates.first() {
                 Ok(k.to_string())
             } else {
-                Err(Error::NoCandidatesFound(tag.to_string()))
+                Err(Error::NoCandidatesFound(AnonymousSemverRange {
+                    range: tag,
+                }.into()))
             }
         }
 

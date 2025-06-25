@@ -1,6 +1,7 @@
 use std::{borrow::Cow, cmp, collections::BTreeMap};
 
 use zpm_formats::Entry;
+use zpm_utils::ToFileString;
 
 use crate::error::Error;
 
@@ -105,25 +106,25 @@ pub fn apply_patch<'a>(entries: Vec<Entry<'a>>, patch: &str, package_version: &z
                 let data = file_contents.as_bytes().to_vec();
 
                 let entry = Entry {
-                    name: path.to_string(),
+                    name: path.to_file_string(),
                     mode: *mode,
                     crc: 0,
                     data: Cow::Owned(data),
                 };
 
-                entry_map.insert(path.to_string(), entry);
+                entry_map.insert(path.to_file_string(), entry);
             },
 
             PatchFilePart::FileDeletion {path, ..} => {
                 entry_map
                     .remove(path.as_str())
-                    .ok_or_else(|| Error::PatchedFileNotFound(path.to_string()))?;
+                    .ok_or_else(|| Error::PatchedFileNotFound(path.clone()))?;
             },
 
             PatchFilePart::FileModeChange {path, new_mode, ..} => {
                 let entry = entry_map
                     .get_mut(path.as_str())
-                    .ok_or_else(|| Error::PatchedFileNotFound(path.to_string()))?;
+                    .ok_or_else(|| Error::PatchedFileNotFound(path.clone()))?;
 
                 entry.mode = *new_mode;
             },
@@ -131,15 +132,15 @@ pub fn apply_patch<'a>(entries: Vec<Entry<'a>>, patch: &str, package_version: &z
             PatchFilePart::FileRename {from, to, ..} => {
                 let entry = entry_map
                     .remove(from.as_str())
-                    .ok_or_else(|| Error::PatchedFileNotFound(from.to_string()))?;
+                    .ok_or_else(|| Error::PatchedFileNotFound(from.clone()))?;
 
-                entry_map.insert(to.to_string(), entry);
+                entry_map.insert(to.to_file_string(), entry);
             },
 
             PatchFilePart::FilePatch {path, hunks, ..} => {
                 let entry = entry_map
                     .get_mut(path.as_str())
-                    .ok_or_else(|| Error::PatchedFileNotFound(path.to_string()))?;
+                    .ok_or_else(|| Error::PatchedFileNotFound(path.clone()))?;
 
                 let mut file_lines = std::str::from_utf8(&entry.data)?
                     .split('\n')
