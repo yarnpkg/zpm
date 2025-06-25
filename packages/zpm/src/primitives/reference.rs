@@ -44,10 +44,11 @@ pub enum Reference {
         path: String,
     },
 
-    #[pattern(spec = r"patch:(?<inner>.*)#(?<path>.*)$")]
+    #[pattern(spec = r"patch:(?<inner>.*)#(?<path>.*)(?:&checksum=(?<checksum>[a-f0-9]*))?$")]
     Patch {
         inner: Box<UrlEncoded<Locator>>,
         path: String,
+        checksum: Option<Sha256>,
     },
 
     #[pattern(spec = r"virtual:(?<inner>.*)#(?<hash>[a-f0-9]*)$")]
@@ -177,7 +178,11 @@ impl ToFileString for Reference {
             },
 
             Reference::Patch(params) => {
-                format!("patch:{}#{}", params.inner.to_file_string(), params.path.to_file_string())
+                if let Some(checksum) = &params.checksum {
+                    format!("patch:{}#{}&checksum={}", params.inner.to_file_string(), params.path.to_file_string(), checksum.to_file_string())
+                } else {
+                    format!("patch:{}#{}", params.inner.to_file_string(), params.path.to_file_string())
+                }
             },
 
             Reference::Portal(params) => {

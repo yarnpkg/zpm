@@ -2,7 +2,7 @@ use std::io::Read;
 
 use zpm_formats::zip::ZipSupport;
 
-use crate::{error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, patch, primitives::{reference, Locator}, resolvers::Resolution};
+use crate::{error::Error, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, patch, primitives::{reference, Locator}, resolvers::Resolution};
 
 use super::PackageData;
 
@@ -20,6 +20,50 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         = dependencies[0].as_fetched();
     let original_data
         = dependencies[1].as_fetched();
+
+    let patch_content = match params.path.as_str() {
+        "<builtin>" => {
+            let compressed_patch = BUILTIN_PATCHES.iter()
+                .find(|(name, _)| name == &locator.ident.as_str())
+                .unwrap()
+                .1;
+
+            let mut decompressor
+                = brotli::Decompressor::new(compressed_patch, 4096);
+
+            let mut decompressed_bytes = Vec::new();
+            decompressor.read_to_end(&mut decompressed_bytes).unwrap();
+
+            let decompressed_string
+                = String::from_utf8(decompressed_bytes)?;
+
+            decompressed_string
+        },
+
+        path if path.starts_with("~/") => {
+            project.project_cwd
+                .with_join_str(&path[2..])
+                .fs_read_text_with_zip()?
+        },
+
+        path => {
+            parent_data.package_data.context_directory()
+                .with_join_str(path)
+                .fs_read_text_with_zip()?
+        },
+    };
+
+    let patch_checksum
+        = Sha256::from_string(&patch_content);
+
+    let reference = reference::PatchReference {
+        inner: params.inner.clone(),
+        path: params.path.clone(),
+        checksum: Some(patch_checksum),
+    }.into();
+
+    let locator
+        = Locator::new_bound(locator.ident.clone(), reference, locator.parent.clone());
 
     let cached_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let original_bytes = match &original_data.package_data {
@@ -44,38 +88,6 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
             PackageData::MissingZip {..} => {
                 return Err(Error::Unsupported);
-            },
-        };
-
-        let patch_content = match params.path.as_str() {
-            "<builtin>" => {
-                let compressed_patch = BUILTIN_PATCHES.iter()
-                    .find(|(name, _)| name == &locator.ident.as_str())
-                    .unwrap()
-                    .1;
-
-                let mut decompressor
-                    = brotli::Decompressor::new(compressed_patch, 4096);
-
-                let mut decompressed_bytes = Vec::new();
-                decompressor.read_to_end(&mut decompressed_bytes).unwrap();
-
-                let decompressed_string
-                    = String::from_utf8(decompressed_bytes)?;
-
-                decompressed_string
-            },
-
-            path if path.starts_with("~/") => {
-                project.project_cwd
-                    .with_join_str(&path[2..])
-                    .fs_read_text_with_zip()?
-            },
-
-            path => {
-                parent_data.package_data.context_directory()
-                    .with_join_str(path)
-                    .fs_read_text_with_zip()?
             },
         };
 

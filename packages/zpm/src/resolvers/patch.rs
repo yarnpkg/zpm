@@ -7,6 +7,7 @@ pub async fn resolve_descriptor(context: &InstallContext<'_>, descriptor: &Descr
     let reference = reference::PatchReference {
         inner: Box::new(UrlEncoded::new(inner_locator)),
         path: params.path.clone(),
+        checksum: None,
     };
 
     let locator = descriptor.resolve_with(reference.into());
