@@ -8,6 +8,7 @@ bytes = "1.7.1"
 crc32fast = "1.4.2"
 flate2 = "1.0.31"
 itertools = "0.13.0"
+pnp = { git = "ssh://git@github.com/yarnpkg/pnp-rs", branch = "mael/pub-vpath" }
 regex = "1.10.6"
 thiserror = "1.0.63"
 zpm-utils = { path = "../zpm-utils" }

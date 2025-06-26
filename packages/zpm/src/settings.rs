@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use zpm_macros::yarn_config;
@@ -179,4 +179,7 @@ pub struct ProjectConfig {
 
     #[default(BTreeMap::new())]
     pub package_extensions: DictField<SemverDescriptor, PackageExtension>,
+
+    #[default(Path::from_str(".yarn/__virtual__").unwrap())]
+    pub virtual_folder: PathField,
 }

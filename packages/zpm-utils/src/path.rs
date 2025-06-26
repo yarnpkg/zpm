@@ -1,4 +1,4 @@
-use std::{io::{Read, Write}, os::unix::ffi::OsStrExt, str::FromStr};
+use std::{io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}};
 
 use bincode::{Decode, Encode};
 
@@ -201,6 +201,10 @@ impl Path {
                 None
             }
         })
+    }
+
+    pub fn components<'a>(&'a self) -> Split<'a, char> {
+        self.path.split('/')
     }
 
     pub fn as_str<'a>(&'a self) -> &'a str {

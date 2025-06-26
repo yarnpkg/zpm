@@ -1,5 +1,6 @@
 use std::{borrow::Cow, sync::LazyLock};
 
+use pnp::fs::VPathInfo;
 use zpm_utils::{Path, ToFileString};
 use regex::Regex;
 
@@ -147,20 +148,34 @@ impl ZipSupport for Path {
 
     fn fs_read_text_with_zip(&self) -> Result<String, Error> {
         let path_str
-            = self.to_file_string();
+            = self.to_path_buf();
 
-        if let Some(captures) = ZIP_REGEX.captures(&path_str) {
-            let zip_path = captures.get(1).unwrap().as_str();
-            let subpath = captures.get(2).unwrap().as_str();
+        let parsed
+            = pnp::fs::vpath(&path_str)?;
 
-            let zip_data = std::fs::read(zip_path)?;
+        match parsed {
+            pnp::fs::VPath::Native(_) => {
+                Ok(self.fs_read_text_prealloc()?)
+            },
 
-            Path::try_from(subpath)?.fs_read_text_from_zip_buffer(&zip_data)
-        } else {
-            Ok(match VIRTUAL_REGEX.replace(&path_str, "/") {
-                Cow::Borrowed(_) => self.fs_read_text()?,
-                Cow::Owned(path_str) => Path::try_from(path_str)?.fs_read_text()?,
-            })
+            pnp::fs::VPath::Virtual(info) => {
+                let file_data
+                    = Path::try_from(info.physical_base_path()).unwrap()
+                        .fs_read_text_prealloc()?;
+
+                Ok(file_data)
+            },
+
+            pnp::fs::VPath::Zip(info) => {
+                let zip_data
+                    = Path::try_from(info.physical_base_path()).unwrap()
+                        .fs_read_prealloc()?;
+
+                let file_data = Path::try_from(info.zip_path)?
+                    .fs_read_text_from_zip_buffer(&zip_data)?;
+
+                Ok(file_data)
+            },
         }
     }
 }

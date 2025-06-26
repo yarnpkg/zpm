@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt};
+use std::collections::{BTreeMap, BTreeSet};
 
 use zpm_utils::{Path, ToHumanString};
 use itertools::Itertools;
@@ -7,6 +7,35 @@ use serde_with::serde_as;
 use zpm_utils::ToFileString;
 
 use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, install::Install, linker, primitives::{Ident, Locator, Reference}, project::Project, settings};
+
+fn make_virtual_path(base: &Path, component: &str, to: &Path) -> Path {
+    if base.basename() != Some("__virtual__") {
+        panic!("Assertion failed: Virtual folders must be named '__virtual__'");
+    }
+
+    let rel_to = to
+       .relative_to(base);
+
+    let components = rel_to
+        .components()
+        .collect::<Vec<_>>();
+
+    let mut components_iter
+        = components.iter();
+
+    let depth = components_iter
+        .peeking_take_while(|&c| *c == "..")
+        .count();
+
+    let final_components = &components[depth..];
+    let full_virtual_path = base
+        .with_join_str(component)
+        .with_join_str(&(depth - 1).to_string())
+        .with_join_str(final_components.join("/"));
+
+    full_virtual_path
+}
+
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -129,8 +158,11 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
     let tree
         = &install.install_state.resolution_tree;
 
-    let nm_path
-        = project.project_cwd.with_join_str("node_modules");
+    let nm_path = project.project_cwd
+        .with_join_str("node_modules");
+
+    let virtual_folder = project.project_cwd
+        .with_join(&project.config.project.virtual_folder.value);
 
     if project.config.project.enable_local_cache_cleanup.value {
         linker::helpers::fs_remove_nm(nm_path)?;
@@ -176,17 +208,19 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
 
         package_peers.sort();
 
-        let virtual_dir = match &locator.reference {
-            Reference::Virtual(params) => Path::try_from(format!("__virtual__/{}/0/", params.hash.to_file_string())).unwrap(),
-            _ => Path::new(),
-        };
-
         let rel_path = physical_package_data.package_directory()
             .relative_to(physical_package_data.data_root());
 
         let mut package_location_abs = physical_package_data.data_root()
-            .with_join(&virtual_dir)
             .with_join(&rel_path);
+
+        if let Reference::Virtual(params) = &locator.reference {
+            package_location_abs = make_virtual_path(
+                &virtual_folder,
+                &params.hash.to_file_string(),
+                &package_location_abs,
+            );
+        }
 
         let discard_from_lookup = match physical_package_data {
             PackageData::Local {discard_from_lookup, ..} => *discard_from_lookup,
