@@ -1517,7 +1517,7 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 [[package]]
 name = "pnp"
 version = "0.10.0"
-source = "git+ssh://git@github.com/yarnpkg/pnp-rs?branch=mael%2Fpub-vpath#f884db6635f3b6c6e91940e85ad037c6a548d037"
+source = "git+https://github.com/yarnpkg/pnp-rs.git?branch=mael%2Fpub-vpath#f884db6635f3b6c6e91940e85ad037c6a548d037"
 dependencies = [
  "byteorder",
  "clean-path",
