@@ -13,6 +13,7 @@ program_async!(SwitchExecCli, [
     switch::postinstall::PostinstallCommand,
     switch::explicit::ExplicitCommand,
     switch::version::VersionCommand,
+    switch::which::WhichCommand,
     proxy::ProxyCommand,
     init::InitCommand,
 ]);
