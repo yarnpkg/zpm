@@ -151,7 +151,7 @@ pub enum Error {
     #[error("Invalid file pattern ({0})")]
     InvalidFilePattern(String),
 
-    #[error("Remote registry error ({0})")]
+    #[error("Remote error ({0:?})")]
     RemoteRegistryError(Arc<reqwest::Error>),
 
     #[error("Internal serialization error")]
