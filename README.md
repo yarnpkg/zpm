@@ -26,7 +26,7 @@ cd zpm && ./yarn.sh berry test:integration
 ```
 
 > [!NOTE]
-> You can set the `BERRY_PATH` environment variable to a pre-existing clone of the `berry` repository to avoid cloning it again.
+> You can set the `BERRY_DIR` environment variable to a pre-existing clone of the `berry` repository to avoid cloning it again.
 
 ## Differences in architecture
 

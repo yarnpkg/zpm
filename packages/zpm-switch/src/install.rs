@@ -40,7 +40,7 @@ async fn cache<T: Serialize, R: Future<Output = Result<(), Error>>, F: FnOnce(Pa
             .fs_create_parent()?;
 
         temp_dir
-            .fs_rename(&cache_path)?;
+            .fs_move(&cache_path)?;
     }
 
     Ok(cache_path)
