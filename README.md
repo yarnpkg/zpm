@@ -77,7 +77,7 @@ To address that, I created three different traits:
 >
 > It'd be nice if we could have `format!`-like macros that use either trait depending on the context (`format_for_screen!` and `format_for_file!`), but I didn't find a clean way to do that.
 
-# Settings
+### Settings
 
 Settings are split into three categories: env settings, user settings, and project settings.
 
