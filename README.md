@@ -77,7 +77,7 @@ To address that, I created three different traits:
 >
 > It'd be nice if we could have `format!`-like macros that use either trait depending on the context (`format_for_screen!` and `format_for_file!`), but I didn't find a clean way to do that.
 
-### Settings
+# Settings
 
 Settings are split into three categories: env settings, user settings, and project settings.
 
@@ -89,7 +89,7 @@ Settings are split into three categories: env settings, user settings, and proje
 
 To make maintaining the settings easier (especially when dealing with default values, environment variables, etc), I created a `yarn_config` macro that's used to define the settings.
 
-### Enumerations
+### Enumerations
 
 I wrote a special macro to define enumerations. Its main features are:
 
@@ -100,8 +100,8 @@ I wrote a special macro to define enumerations. Its main features are:
 - Turn all variants into standalone structs.
   - For example, `enum Foo { Test { field: usize; } }` will be turned into `struct TestFoo { field: usize; }; enum Foo { Test(TestFoo) }`.
 
-> [!TODO]
-> I didn't find a way to handle the serialization of the enum variants yet, but it'd be really nice to have. Something where we'd use the pattern specs in the opposite way, to generate text rather than parse it?
+> [!NOTE]
+> TODO: I didn't find a way to handle the serialization of the enum variants yet, but it'd be really nice to have. Something where we'd use the pattern specs in the opposite way, to generate text rather than parse it?
 
 ### JSON lockfile
 
@@ -109,9 +109,13 @@ The Berry lockfile was written in Yaml. Since performances are a heavy focus of 
 
 Some improvements to the output format would be useful to decrease risks of conflicts when merging branches together, in particular by adding blank lines between each lockfile record, but we don't require Yaml for that.
 
-### Zip files
+### Zip files
 
 Since ZPM aims to download dependencies as they are needed when running scripts, less emphasis is put on zero-installs. As a result I didn't implement compression support when generating zip archives: all files are stored uncompressed.
+
+### Edit-in-place JSON/YAML
+
+I implemented some modules in `zpm_formats` to allow updating specific fields in JSON/YAML files without touching the surrounding fields and comments. It's very much a work in progress and I expect bugs to be present, or features to be missing.
 
 ### No plugins
 
