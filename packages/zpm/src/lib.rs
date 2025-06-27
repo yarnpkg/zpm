@@ -1,5 +1,7 @@
 #![deny(unused_crate_dependencies)]
 
+use env_logger as _;
+
 pub mod algolia;
 pub mod build;
 pub mod cache;
