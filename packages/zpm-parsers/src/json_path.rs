@@ -1,5 +1,5 @@
 use serde::{de, Deserialize, Deserializer};
-use zpm_utils::{impl_serialization_traits, impl_serialization_traits_no_serde, DataType, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{impl_serialization_traits_no_serde, DataType, FromFileString, ToFileString, ToHumanString};
 
 use crate::{json::escape_string, Error};
 
@@ -77,15 +77,15 @@ impl JsonPath {
     }
 }
 
-impl From<Vec<String>> for JsonPath {
-    fn from(segments: Vec<String>) -> Self {
-        Self::from_segments(segments)
+impl<const N: usize> From<[&str; N]> for JsonPath {
+    fn from(path: [&str; N]) -> Self {
+        Self::from_segments(path.iter().map(|s| s.to_string()).collect())
     }
 }
 
-impl From<Vec<&str>> for JsonPath {
-    fn from(segments: Vec<&str>) -> Self {
-        Self::from_segments(segments.into_iter().map(|s| s.to_string()).collect())
+impl From<Vec<String>> for JsonPath {
+    fn from(path: Vec<String>) -> Self {
+        Self::from_segments(path)
     }
 }
 

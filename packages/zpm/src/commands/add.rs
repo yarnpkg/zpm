@@ -5,7 +5,7 @@ use zpm_parsers::{JsonFormatter, JsonValue};
 use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 
-use crate::{algolia::query_algolia, error::Error, install::InstallContext, primitives::{loose_descriptor, range::AnonymousSemverRange, Descriptor, LooseDescriptor, PeerRange, Range}, project};
+use crate::{algolia::query_algolia, error::Error, install::InstallContext, primitives::{loose_descriptor, range::AnonymousSemverRange, Descriptor, LooseDescriptor, Range}, project};
 
 #[derive(Clone, Debug)]
 struct AddRequest {
@@ -214,7 +214,7 @@ impl Add {
             .fs_read_text_prealloc()?;
 
         let mut formatter
-            = JsonFormatter::from(&manifest_content).unwrap();
+            = JsonFormatter::from(&manifest_content)?;
 
         for (descriptor, request) in &requests {
             if request.dev && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
@@ -235,30 +235,30 @@ impl Add {
 
             if request.dev {
                 formatter.set(
-                    &vec!["devDependencies".to_string(), descriptor.ident.to_file_string()].into(), 
+                    vec!["devDependencies".to_string(), descriptor.ident.to_file_string()], 
                     JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                )?;
             }
 
             if request.optional {
                 formatter.set(
-                    &vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()].into(), 
+                    vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()], 
                     JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                )?;
             }
 
             if request.peer {
                 formatter.set(
-                    &vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()].into(), 
+                    vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()], 
                     JsonValue::String("*".to_string()),
-                ).unwrap();
+                )?;
             }
 
             if request.prod {
                 formatter.set(
-                    &vec!["dependencies".to_string(), descriptor.ident.to_file_string()].into(), 
+                    vec!["dependencies".to_string(), descriptor.ident.to_file_string()], 
                     JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                )?;
             }
         }    
 

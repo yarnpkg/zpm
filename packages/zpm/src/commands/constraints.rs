@@ -1,13 +1,11 @@
-use std::{collections::BTreeMap, fs::Permissions, os::unix::fs::PermissionsExt, process::ExitCode};
+use std::process::ExitCode;
 
 use clipanion::cli;
 use colored::Colorize;
-use convert_case::{Case, Casing};
-use serde::{Deserialize, Serialize};
-use zpm_utils::{DataType, FromFileString, Path, ToFileString, ToHumanString};
-use zpm_parsers::{JsonFormatter, JsonValue, JsonPath};
+use zpm_utils::{DataType, Path, ToFileString, ToHumanString};
+use zpm_parsers::JsonFormatter;
 
-use crate::{constraints::{structs::{ConstraintsContext, WorkspaceError, ConstraintsOutput, WorkspaceOperation}, to_constraints_package, to_constraints_workspace}, error::Error, install::InstallState, manifest::Manifest, primitives::{Ident, Locator, Reference}, project::{Project, Workspace}, resolvers::Resolution, script::ScriptEnvironment, settings::ProjectConfigType, ui::tree};
+use crate::{constraints::{structs::{ConstraintsContext, ConstraintsOutput, WorkspaceError, WorkspaceOperation}, to_constraints_package, to_constraints_workspace}, error::Error, project::Project, script::ScriptEnvironment, ui::tree};
 
 #[cli::command]
 #[cli::path("constraints")]
@@ -87,11 +85,11 @@ impl Constraints {
                 for operation in operations {
                     match operation {
                         WorkspaceOperation::Set { path, value } => {
-                            formatter.set(&path.clone().into(), value.clone().into()).unwrap();
+                            formatter.set(path.clone(), value.clone().into())?;
                         },
 
                         WorkspaceOperation::Unset { path } => {
-                            formatter.remove(&path.clone().into()).unwrap();
+                            formatter.remove(path.clone())?;
                         },
                     }
                 }

@@ -1,8 +1,8 @@
-use std::{fs::Permissions, os::unix::fs::PermissionsExt, process::ExitStatus};
+use std::{process::ExitStatus};
 
 use zpm_parsers::{JsonFormatter, JsonValue};
 use zpm_utils::{Path, ToFileString};
-use clipanion::{prelude::*, cli};
+use clipanion::cli;
 use zpm_semver::RangeKind;
 
 use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, Descriptor, LooseDescriptor}, project::{self, Project}, script::{Binary, ScriptEnvironment}};
@@ -118,13 +118,13 @@ async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descriptor
         .fs_read_text_prealloc()?;
 
     let mut formatter
-        = JsonFormatter::from(&manifest_content).unwrap();
+        = JsonFormatter::from(&manifest_content)?;
 
     for descriptor in descriptors.into_iter() {
         formatter.update(
-            &vec!["dependencies".to_string(), descriptor.ident.to_file_string()].into(), 
+            vec!["dependencies".to_string(), descriptor.ident.to_file_string()], 
             JsonValue::String(descriptor.range.to_file_string()),
-        ).unwrap();
+        )?;
     }
 
     let updated_content

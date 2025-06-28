@@ -244,49 +244,49 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
 
     if let Some(type_) = &manifest.publish_config.type_ {
         formatter.set(
-            &vec!["publishConfig".to_string(), "type".to_string()].into(),
+            ["type"],
             JsonValue::String(type_.clone()),
         )?;
     }
 
     if let Some(main) = &manifest.publish_config.main {
         formatter.set(
-            &vec!["main".to_string()].into(),
+            ["main"],
             JsonValue::String(main.clone()),
         )?;
     }
 
     if let Some(exports) = &manifest.publish_config.exports {
         formatter.set(
-            &vec!["exports".to_string()].into(),
+            ["exports"],
             JsonValue::from(&sonic_rs::to_value(exports)?),
         )?;
     }
 
     if let Some(imports) = &manifest.publish_config.imports {
         formatter.set(
-            &vec!["imports".to_string()].into(),
+            ["imports"],
             JsonValue::from(&sonic_rs::to_value(imports)?),
         )?;
     }
 
     if let Some(module) = &manifest.publish_config.module {
         formatter.set(
-            &vec!["module".to_string()].into(),
+            ["module"],
             JsonValue::String(module.clone()),
         )?;
     }
 
     if let Some(browser) = &manifest.publish_config.browser {
         formatter.set(
-            &vec!["browser".to_string()].into(),
+            ["browser"],
             JsonValue::from(&sonic_rs::to_value(browser)?),
         )?;
     }
 
     if let Some(bin) = &manifest.publish_config.bin {
         formatter.set(
-            &vec!["bin".to_string()].into(),
+            ["bin"],
             JsonValue::from(&sonic_rs::to_value(bin)?),
         )?;
     }
@@ -345,7 +345,7 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
             = new_descriptor_result?;
 
         formatter.set(
-            &vec![field_name.to_string(), new_descriptor.ident.to_file_string()].into(),
+            vec![field_name.to_string(), new_descriptor.ident.to_file_string()],
             JsonValue::String(new_descriptor.range.to_file_string()),
         )?;
     }
@@ -391,7 +391,7 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
             = new_descriptor_result?;
 
         formatter.set(
-            &vec!["peerDependencies".to_string(), new_descriptor.ident.to_file_string()].into(),
+            vec!["peerDependencies".to_string(), new_descriptor.ident.to_file_string()],
             JsonValue::String(new_descriptor.range.to_file_string())
         )?;
     }

@@ -77,24 +77,13 @@ impl Remove {
             .fs_read_text_prealloc()?;
 
         let mut formatter
-            = JsonFormatter::from(&manifest_content).unwrap();
+            = JsonFormatter::from(&manifest_content)?;
 
         for ident in removed_dependencies.iter() {
-            formatter.remove(
-                &vec!["dependencies".to_string(), ident.to_file_string()].into(), 
-            ).unwrap();
-
-            formatter.remove(
-                &vec!["optionalDependencies".to_string(), ident.to_file_string()].into(), 
-            ).unwrap();
-
-            formatter.remove(
-                &vec!["peerDependencies".to_string(), ident.to_file_string()].into(), 
-            ).unwrap();
-
-            formatter.remove(
-                &vec!["devDependencies".to_string(), ident.to_file_string()].into(), 
-            ).unwrap();
+            formatter.remove(vec!["dependencies".to_string(), ident.to_file_string()])?;
+            formatter.remove(vec!["optionalDependencies".to_string(), ident.to_file_string()])?;
+            formatter.remove(vec!["peerDependencies".to_string(), ident.to_file_string()])?;
+            formatter.remove(vec!["devDependencies".to_string(), ident.to_file_string()])?;
         }
 
         let updated_content

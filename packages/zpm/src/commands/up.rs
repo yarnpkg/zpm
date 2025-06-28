@@ -79,23 +79,23 @@ impl Up {
                 .fs_read_text_prealloc()?;
 
             let mut formatter
-                = JsonFormatter::from(&manifest_content).unwrap();
+                = JsonFormatter::from(&manifest_content)?;
 
             for descriptor in descriptors.iter() {
                 formatter.update(
-                    &vec!["dependencies".to_string(), descriptor.ident.to_file_string()].into(), 
+                    vec!["dependencies".to_string(), descriptor.ident.to_file_string()], 
                     JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                )?;
 
                 formatter.update(
-                    &vec!["devDependencies".to_string(), descriptor.ident.to_file_string()].into(), 
+                    vec!["devDependencies".to_string(), descriptor.ident.to_file_string()], 
                     JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                )?;
 
                 formatter.update(
-                    &vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()].into(), 
+                    vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()], 
                     JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                )?;
             }
 
             let updated_content
