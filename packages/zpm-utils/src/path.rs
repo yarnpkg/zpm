@@ -65,12 +65,12 @@ impl Path {
         let name = str.find("<>").map_or_else(|| str.to_string(), |index| {
             let before = &str[..index];
             let after = &str[index + 2..];
-    
+
             let nonce = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-    
+
             format!("{}{:032x}{}", before, nonce, after)
         });
 
@@ -460,6 +460,43 @@ impl Path {
         Ok(self)
     }
 
+    pub fn fs_copy_file(&self, new_path: &Path) -> Result<&Self, PathError> {
+        std::fs::copy(self.to_path_buf(), new_path.to_path_buf())?;
+        Ok(self)
+    }
+
+    pub fn fs_copy(&self, new_path: &Path) -> Result<&Self, PathError> {
+        match self.fs_is_dir() {
+            true => {
+                new_path.fs_create_dir_all()?;
+                for entry in self.fs_read_dir()? {
+                    let entry = entry?;
+                    let entry_path = Path::try_from(entry.path())?;
+
+                    let destination_path = new_path.with_join(&Path::try_from(entry.file_name())?);
+
+                    entry_path.fs_copy(&destination_path)?;
+                }
+            },
+            false => {
+                std::fs::copy(self.to_path_buf(), new_path.to_path_buf())?;
+            },
+        };
+
+        Ok(self)
+    }
+
+    pub fn fs_move(&self, new_path: &Path) -> Result<&Self, PathError> {
+        match std::fs::rename(self.to_path_buf(), new_path.to_path_buf()) {
+            Ok(_) => Ok(self),
+            Err(err) if err.kind() == std::io::ErrorKind::CrossesDevices => {
+                self.fs_copy(new_path)?;
+                self.fs_rm()
+            },
+            Err(err) => Err(err.into()),
+        }
+    }
+
     pub fn fs_rm_file(&self) -> Result<&Self, PathError> {
         std::fs::remove_file(self.to_path_buf())?;
         Ok(self)
@@ -622,11 +659,27 @@ impl Default for Path {
     }
 }
 
+impl TryFrom<std::ffi::OsString> for Path {
+    type Error = PathError;
+
+    fn try_from(value: std::ffi::OsString) -> Result<Self, Self::Error> {
+        Path::try_from(value.as_os_str())
+    }
+}
+
+impl TryFrom<&std::ffi::OsStr> for Path {
+    type Error = PathError;
+
+    fn try_from(value: &std::ffi::OsStr) -> Result<Self, Self::Error> {
+        Ok(Path::from_str(std::str::from_utf8(value.as_bytes())?)?)
+    }
+}
+
 impl TryFrom<std::path::PathBuf> for Path {
     type Error = PathError;
 
     fn try_from(value: std::path::PathBuf) -> Result<Self, Self::Error> {
-        Ok(Path::from_str(std::str::from_utf8(&value.as_os_str().as_bytes())?)?)
+        Path::try_from(value.as_os_str())
     }
 }
 
@@ -634,7 +687,7 @@ impl TryFrom<&std::path::Path> for Path {
     type Error = PathError;
 
     fn try_from(value: &std::path::Path) -> Result<Self, Self::Error> {
-        Ok(Path::from_str(std::str::from_utf8(value.as_os_str().as_bytes())?)?)
+        Path::try_from(value.as_os_str())
     }
 }
 
