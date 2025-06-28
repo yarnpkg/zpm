@@ -5,4 +5,10 @@ pub enum Error {
     
     #[error("Invalid syntax: {0}")]
     InvalidSyntax(String),
+
+    #[error("Invalid array access: {0}")]
+    InvalidArrayAccess(String),
+
+    #[error("Cannot navigate through primitive value")]
+    InvalidPrimitiveNavigation,
 }

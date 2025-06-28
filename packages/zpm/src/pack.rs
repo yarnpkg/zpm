@@ -12,10 +12,8 @@ use zpm_utils::ToFileString;
 
 use crate::error::Error;
 use crate::manifest::helpers::parse_manifest;
-use crate::manifest::helpers::read_manifest;
 use crate::manifest::Manifest;
 use crate::primitives::range::AnonymousSemverRange;
-use crate::primitives::range::SemverPeerRange;
 use crate::primitives::Descriptor;
 use crate::primitives::PeerRange;
 use crate::primitives::Range;
@@ -242,55 +240,55 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         = parse_manifest(&manifest_content)?;
 
     let mut formatter
-        = JsonFormatter::from(&manifest_content).unwrap();
+        = JsonFormatter::from(&manifest_content)?;
 
     if let Some(type_) = &manifest.publish_config.type_ {
         formatter.set(
             &vec!["publishConfig".to_string(), "type".to_string()].into(),
             JsonValue::String(type_.clone()),
-        ).unwrap();
+        )?;
     }
 
     if let Some(main) = &manifest.publish_config.main {
         formatter.set(
             &vec!["main".to_string()].into(),
             JsonValue::String(main.clone()),
-        ).unwrap();
+        )?;
     }
 
     if let Some(exports) = &manifest.publish_config.exports {
         formatter.set(
             &vec!["exports".to_string()].into(),
-            JsonValue::from(serde_json::to_value(exports).unwrap()),
-        ).unwrap();
+            JsonValue::from(&sonic_rs::to_value(exports)?),
+        )?;
     }
 
     if let Some(imports) = &manifest.publish_config.imports {
         formatter.set(
             &vec!["imports".to_string()].into(),
-            JsonValue::from(serde_json::to_value(imports).unwrap()),
-        ).unwrap();
+            JsonValue::from(&sonic_rs::to_value(imports)?),
+        )?;
     }
 
     if let Some(module) = &manifest.publish_config.module {
         formatter.set(
             &vec!["module".to_string()].into(),
             JsonValue::String(module.clone()),
-        ).unwrap();
+        )?;
     }
 
     if let Some(browser) = &manifest.publish_config.browser {
         formatter.set(
             &vec!["browser".to_string()].into(),
-            JsonValue::from(serde_json::to_value(browser).unwrap()),
-        ).unwrap();
+            JsonValue::from(&sonic_rs::to_value(browser)?),
+        )?;
     }
 
     if let Some(bin) = &manifest.publish_config.bin {
         formatter.set(
             &vec!["bin".to_string()].into(),
-            JsonValue::from(serde_json::to_value(bin).unwrap()),
-        ).unwrap();
+            JsonValue::from(&sonic_rs::to_value(bin)?),
+        )?;
     }
 
     let hard_dependencies = vec![
@@ -349,7 +347,7 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         formatter.set(
             &vec![field_name.to_string(), new_descriptor.ident.to_file_string()].into(),
             JsonValue::String(new_descriptor.range.to_file_string()),
-        ).unwrap();
+        )?;
     }
 
     let updated_peer_dependencies = manifest.remote.peer_dependencies.iter().filter_map(|(ident, peer_range)| {
@@ -388,7 +386,7 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         formatter.set(
             &vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()].into(),
             JsonValue::String(descriptor.range.to_file_string()),
-        ).unwrap();
+        )?;
     }
 
     Ok(formatter.to_string())

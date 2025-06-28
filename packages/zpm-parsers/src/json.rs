@@ -1,6 +1,6 @@
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::JsonPath;
+use crate::{error::Error, JsonPath};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
@@ -11,6 +11,36 @@ pub enum JsonValue {
     Array(Vec<JsonValue>),
     Object(Vec<(String, JsonValue)>), // Preserves insertion order
     Undefined, // Used to remove values
+}
+
+impl From<&sonic_rs::Value> for JsonValue {
+    fn from(value: &sonic_rs::Value) -> Self {
+        match value.as_ref() {
+            sonic_rs::ValueRef::Null => {
+                JsonValue::Null
+            },
+
+            sonic_rs::ValueRef::Bool(b) => {
+                JsonValue::Bool(b)
+            },
+
+            sonic_rs::ValueRef::Number(n) => {
+                JsonValue::Number(n.to_string())
+            },
+
+            sonic_rs::ValueRef::String(s) => {
+                JsonValue::String(s.to_string())
+            },
+
+            sonic_rs::ValueRef::Array(arr) => {
+                JsonValue::Array(arr.iter().map(From::from).collect())
+            },
+
+            sonic_rs::ValueRef::Object(obj) => {
+                JsonValue::Object(obj.iter().map(|(k, v)| (k.to_string(), From::from(v))).collect())
+            },
+        }
+    }
 }
 
 impl From<serde_json::Value> for JsonValue {
@@ -153,7 +183,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    fn read_string(&mut self) -> Result<String, String> {
+    fn read_string(&mut self) -> Result<String, Error> {
         // Assumes we're at the opening quote
         self.advance(); // Skip opening quote
         
@@ -178,7 +208,7 @@ impl<'a> Tokenizer<'a> {
                                 code_point.push(hex_char);
                                 self.advance();
                             } else {
-                                return Err("Incomplete Unicode escape".to_string());
+                                return Err(Error::InvalidSyntax("Incomplete Unicode escape".to_string()));
                             }
                         }
                         
@@ -186,15 +216,15 @@ impl<'a> Tokenizer<'a> {
                             if let Some(unicode_char) = char::from_u32(code) {
                                 result.push(unicode_char);
                             } else {
-                                return Err("Invalid Unicode code point".to_string());
+                                return Err(Error::InvalidSyntax("Invalid Unicode code point".to_string()));
                             }
                         } else {
-                            return Err("Invalid Unicode escape".to_string());
+                            return Err(Error::InvalidSyntax("Invalid Unicode escape".to_string()));
                         }
                         escaped = false;
                         continue;
                     }
-                    _ => return Err(format!("Invalid escape sequence: \\{}", ch)),
+                    _ => return Err(Error::InvalidSyntax(format!("Invalid escape sequence: \\{}", ch))),
                 }
                 escaped = false;
                 self.advance();
@@ -210,7 +240,7 @@ impl<'a> Tokenizer<'a> {
             }
         }
         
-        Err("Unterminated string".to_string())
+        Err(Error::InvalidSyntax("Unterminated string".to_string()))
     }
 
     fn read_number(&mut self) -> String {
@@ -286,7 +316,7 @@ impl<'a> Tokenizer<'a> {
         true
     }
 
-    fn next_token(&mut self) -> Result<Option<TokenWithSpan>, String> {
+    fn next_token(&mut self) -> Result<Option<TokenWithSpan>, Error> {
         let start = self.position;
         
         match self.current_char() {
@@ -296,64 +326,66 @@ impl<'a> Tokenizer<'a> {
                     '{' => {
                         self.advance();
                         Token::LeftBrace
-                    }
+                    },
+
                     '}' => {
                         self.advance();
                         Token::RightBrace
-                    }
+                    },
+
                     '[' => {
                         self.advance();
                         Token::LeftBracket
-                    }
+                    },
+
                     ']' => {
                         self.advance();
                         Token::RightBracket
-                    }
+                    },
+
                     ':' => {
                         self.advance();
                         Token::Colon
-                    }
+                    },
+
                     ',' => {
                         self.advance();
                         Token::Comma
-                    }
+                    },
+
                     '"' => {
                         let string_val = self.read_string()?;
                         Token::String(string_val)
-                    }
-                    't' => {
-                        if self.read_literal("true") {
-                            Token::Bool(true)
-                        } else {
-                            return Err("Invalid token starting with 't'".to_string());
-                        }
-                    }
-                    'f' => {
-                        if self.read_literal("false") {
-                            Token::Bool(false)
-                        } else {
-                            return Err("Invalid token starting with 'f'".to_string());
-                        }
-                    }
-                    'n' => {
-                        if self.read_literal("null") {
-                            Token::Null
-                        } else {
-                            return Err("Invalid token starting with 'n'".to_string());
-                        }
-                    }
+                    },
+
+                    't' if self.read_literal("true") => {
+                        Token::Bool(true)
+                    },
+
+                    'f' if self.read_literal("false") => {
+                        Token::Bool(false)
+                    },
+
+                    'n' if self.read_literal("null") => {
+                        Token::Null
+                    },
+
                     ch if ch.is_whitespace() => {
                         if let Some(ws) = self.skip_whitespace() {
                             Token::Whitespace(ws)
                         } else {
-                            return Err("Failed to read whitespace".to_string());
+                            return Err(Error::InvalidSyntax("Failed to read whitespace".to_string()));
                         }
-                    }
+                    },
+
                     '-' | '0'..='9' => {
                         let number_str = self.read_number();
                         Token::Number(number_str)
-                    }
-                    _ => return Err(format!("Unexpected character: {}", ch)),
+                    },
+
+                    _ => {
+                        return Err(Error::InvalidSyntax(format!("Unexpected character: {}", ch)))
+                    },
                 };
                 
                 Ok(Some(TokenWithSpan {
@@ -364,7 +396,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    fn tokenize(mut self) -> Result<Vec<TokenWithSpan>, String> {
+    fn tokenize(mut self) -> Result<Vec<TokenWithSpan>, Error> {
         let mut tokens = Vec::new();
         
         while let Some(token) = self.next_token()? {
@@ -414,7 +446,7 @@ impl Parser {
         ws
     }
 
-    fn expect_token(&mut self, expected: &Token) -> Result<TokenWithSpan, String> {
+    fn expect_token(&mut self, expected: &Token) -> Result<TokenWithSpan, Error> {
         self.consume_whitespace();
         
         if let Some(token) = self.current_token() {
@@ -423,14 +455,14 @@ impl Parser {
                 self.advance();
                 Ok(token)
             } else {
-                Err(format!("Expected {:?}, found {:?}", expected, token.token))
+                Err(Error::InvalidSyntax(format!("Expected {:?}, found {:?}", expected, token.token)))
             }
         } else {
-            Err("Unexpected end of input".to_string())
+            Err(Error::InvalidSyntax("Unexpected end of input".to_string()))
         }
     }
 
-    fn parse_value(&mut self) -> Result<FormattedNode, String> {
+    fn parse_value(&mut self) -> Result<FormattedNode, Error> {
         let leading_ws = self.consume_whitespace();
         
         if let Some(token) = self.current_token() {
@@ -478,7 +510,7 @@ impl Parser {
                 },
 
                 _ => {
-                    return Err(format!("Unexpected token: {:?}", token.token))
+                    return Err(Error::InvalidSyntax(format!("Unexpected token: {:?}", token.token)))
                 },
             };
             
@@ -503,11 +535,11 @@ impl Parser {
                 separator_ws: None,
             })
         } else {
-            Err("Expected value".to_string())
+            Err(Error::InvalidSyntax("Expected value".to_string()))
         }
     }
 
-    fn parse_object(&mut self) -> Result<(JsonValue, Span), String> {
+    fn parse_object(&mut self) -> Result<(JsonValue, Span), Error> {
         let mut entries = Vec::new();
         
         self.consume_whitespace();
@@ -559,22 +591,22 @@ impl Parser {
                             },
 
                             _ => {
-                                return Err("Expected ',' or '}'".to_string())
+                                return Err(Error::InvalidSyntax("Expected ',' or '}'".to_string()))
                             },
                         }
                     } else {
-                        return Err("Unexpected end of input".to_string());
+                        return Err(Error::InvalidSyntax("Unexpected end of input".to_string()));
                     }
                 } else {
-                    return Err("Expected string key".to_string());
+                    return Err(Error::InvalidSyntax("Expected string key".to_string()));
                 }
             } else {
-                return Err("Unexpected end of input in object".to_string());
+                return Err(Error::InvalidSyntax("Unexpected end of input in object".to_string()));
             }
         }
     }
 
-    fn parse_array(&mut self) -> Result<(JsonValue, Span), String> {
+    fn parse_array(&mut self) -> Result<(JsonValue, Span), Error> {
         let mut elements = Vec::new();
         
         self.consume_whitespace();
@@ -609,17 +641,17 @@ impl Parser {
                         return Ok((JsonValue::Array(elements), end_span));
                     },
 
-                    _ => {
-                        return Err("Expected ',' or ']'".to_string())
-                    },
-                }
-            } else {
-                return Err("Unexpected end of input".to_string());
-            }
+                                                _ => {
+                                return Err(Error::InvalidSyntax("Expected ',' or ']'".to_string()))
+                            },
+                        }
+                    } else {
+                        return Err(Error::InvalidSyntax("Unexpected end of input".to_string()));
+                    }
         }
     }
 
-    fn parse(&mut self) -> Result<FormattedNode, String> {
+    fn parse(&mut self) -> Result<FormattedNode, Error> {
         self.parse_value()
     }
 }
@@ -725,7 +757,7 @@ fn detect_format_preferences(tokens: &[TokenWithSpan], original: &str) -> Format
 }
 
 impl JsonFormatter {
-    pub fn from(input: &str) -> Result<Self, String> {
+    pub fn from(input: &str) -> Result<Self, Error> {
         let tokenizer
             = Tokenizer::new(input);
         let tokens
@@ -746,7 +778,7 @@ impl JsonFormatter {
         })
     }
 
-    pub fn set(&mut self, path: &JsonPath, value: JsonValue) -> Result<(), String> {
+    pub fn set(&mut self, path: &JsonPath, value: JsonValue) -> Result<(), Error> {
         if let Some(root) = &mut self.root {
             if path.is_empty() {
                 root.value = value;
@@ -758,7 +790,7 @@ impl JsonFormatter {
         Ok(())
     }
 
-    pub fn update(&mut self, path: &JsonPath, value: JsonValue) -> Result<(), String> {
+    pub fn update(&mut self, path: &JsonPath, value: JsonValue) -> Result<(), Error> {
         if let Some(root) = &mut self.root {
             if path.is_empty() {
                 // Replace the entire root
@@ -771,7 +803,7 @@ impl JsonFormatter {
         Ok(())
     }
 
-    pub fn remove(&mut self, path: &JsonPath) -> Result<(), String> {
+    pub fn remove(&mut self, path: &JsonPath) -> Result<(), Error> {
         self.set(path, JsonValue::Undefined)
     }
 
@@ -938,7 +970,7 @@ pub fn escape_string(s: &str) -> String {
 }
 
 // Move set_at_path outside of impl block as a standalone function
-fn set_at_path(current: &mut JsonValue, path: &[String], value: JsonValue, create_if_missing: bool) -> Result<bool, String> {
+fn set_at_path(current: &mut JsonValue, path: &[String], value: JsonValue, create_if_missing: bool) -> Result<bool, Error> {
     if path.is_empty() {
         *current = value;
         return Ok(false);
@@ -1019,7 +1051,7 @@ fn set_at_path(current: &mut JsonValue, path: &[String], value: JsonValue, creat
 
                 Ok(false)
             } else {
-                return Err(format!("Invalid array index: {}", key));
+                return Err(Error::InvalidArrayAccess(key.clone()));
             }
         },
 
@@ -1027,7 +1059,7 @@ fn set_at_path(current: &mut JsonValue, path: &[String], value: JsonValue, creat
             if remaining_path.is_empty() {
                 *current = value;
             } else {
-                return Err("Cannot navigate through primitive value".to_string());
+                return Err(Error::InvalidPrimitiveNavigation);
             }
 
             Ok(false)
