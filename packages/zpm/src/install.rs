@@ -570,13 +570,20 @@ impl<'a> InstallManager<'a> {
             })
             .collect::<Result<BTreeMap<_, _>, Error>>()?;
 
+        let are_metadata_up_to_date
+            = self.result.lockfile.metadata.version == self.initial_lockfile.metadata.version;
+
         for entry in self.result.lockfile.entries.values_mut() {
             let package_data = self.result.package_data.get(&entry.resolution.locator)
                 .unwrap_or_else(|| panic!("Expected a matching package data to be found for any fetched locator; not found for {}.", entry.resolution.locator.to_file_string()));
 
             let previous_entry = self.initial_lockfile.entries.get(&entry.resolution.locator);
             let previous_checksum = previous_entry.and_then(|s| s.checksum.as_ref());
-            let previous_flags = previous_entry.map(|s| &s.flags);
+            let mut previous_flags = previous_entry.map(|s| &s.flags);
+
+            if !are_metadata_up_to_date {
+                previous_flags = None;
+            }
 
             let checksum = package_data.checksum()
                 .or_else(|| previous_checksum.cloned())
