@@ -198,6 +198,11 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     let is_baked_by_zip
         = matches!(physical_package_data, PackageData::Zip {..} | PackageData::MissingZip {..});
 
+    if locator.ident.as_str() == "@datadog/swc-jest-compat" {
+        println!("package_meta: {:?}", package_meta);
+        println!("package_flags: {:?}", package_flags);
+    }
+
     let must_extract =
         (is_optional && is_baked_by_zip) || package_meta.unplugged.or(package_flags.prefer_extracted)
             .unwrap_or_else(|| should_build_if_compatible || package_flags.suggest_extracted);

@@ -3,9 +3,12 @@ use std::{borrow::Cow, io::Read};
 use crate::{zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, GeneralRecord}, Entry, Error};
 
 fn unpack_deflate(data: &[u8]) -> Result<Vec<u8>, Error> {
-    let mut decoder = flate2::read::DeflateDecoder::new(data);
+    let mut decoder
+        = flate2::read::DeflateDecoder::new(data);
 
-    let mut buffer = Vec::new();
+    let mut buffer
+        = Vec::new();
+
     decoder.read_to_end(&mut buffer)?;
 
     Ok(buffer)
