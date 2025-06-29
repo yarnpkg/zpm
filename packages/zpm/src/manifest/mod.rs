@@ -8,10 +8,10 @@ use bin::BinField;
 use bincode::{Decode, Encode};
 use exports::ExportsField;
 use imports::ImportsField;
-use resolutions::ResolutionSelector;
+use resolutions::ResolutionsField;
 use serde::{Deserialize, Serialize};
 
-use crate::{primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, PeerRange, Range}, system};
+use crate::{primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, PeerRange}, system};
 
 pub mod bin;
 pub mod browser;
@@ -171,8 +171,8 @@ pub struct Manifest {
     pub scripts: BTreeMap<String, String>,
 
     #[serde(default)]
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub resolutions: BTreeMap<ResolutionSelector, Range>,
+    #[serde(skip_serializing_if = "ResolutionsField::is_empty")]
+    pub resolutions: ResolutionsField,
 }
 
 impl Manifest {
