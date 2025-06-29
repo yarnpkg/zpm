@@ -31,7 +31,6 @@ pub struct Project {
     pub workspaces: Vec<Workspace>,
     pub workspaces_by_ident: BTreeMap<Ident, usize>,
     pub workspaces_by_rel_path: BTreeMap<Path, usize>,
-    pub resolution_overrides: BTreeMap<Ident, Vec<(ResolutionSelector, Range)>>,
 
     pub last_changed_at: u128,
     pub install_state: Option<InstallState>,
@@ -92,15 +91,6 @@ impl Project {
         let (mut workspaces, last_changed_at) = root_workspace
             .workspaces().await?;
 
-        let mut resolutions_overrides: BTreeMap<Ident, Vec<(ResolutionSelector, Range)>>
-            = BTreeMap::new();
-
-        for (resolution, range) in &root_workspace.manifest.resolutions {
-            resolutions_overrides.entry(resolution.target_ident().clone())
-               .or_default()
-               .push((resolution.clone(), range.clone()));
-        }
-
         // Add root workspace to the beginning
         workspaces.insert(0, root_workspace);
 
@@ -124,7 +114,6 @@ impl Project {
             workspaces,
             workspaces_by_ident,
             workspaces_by_rel_path,
-            resolution_overrides: resolutions_overrides,
 
             last_changed_at,
             install_state: None,
@@ -188,10 +177,6 @@ impl Project {
         }
 
         Ok(sonic_rs::from_str(&src)?)
-    }
-
-    pub fn resolution_overrides(&self, ident: &Ident) -> Option<&Vec<(ResolutionSelector, Range)>> {
-        self.resolution_overrides.get(ident)
     }
 
     #[track_time]

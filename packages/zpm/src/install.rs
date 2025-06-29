@@ -690,10 +690,14 @@ impl<'a> InstallManager<'a> {
 
 fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descriptor, resolution: &Resolution, apply_overrides: bool) -> () {
     if apply_overrides {
-        let possible_resolution_overrides = context.project
-            .and_then(|project| project.resolution_overrides(&descriptor.ident));
+        let candidate_resolutions = context.project
+            .expect("The project is required to normalize resolutions, as it may be impacted by the project's overrides")
+            .root_workspace()
+            .manifest
+            .resolutions
+            .get_by_ident(&descriptor.ident);
 
-        let resolution_override = possible_resolution_overrides
+        let resolution_override = candidate_resolutions
             .and_then(|overrides| {
                 overrides.iter().find_map(|(rule, range)| {
                     rule.apply(&resolution.locator, &resolution.version, descriptor, range)
