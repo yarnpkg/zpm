@@ -83,7 +83,6 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
         let original_entries = match &original_data.package_data {
             PackageData::Local {package_directory, ..} => {
-                println!("package_directory: {}", package_directory.to_print_string());
                 zpm_formats::entries_from_folder(package_directory)?
             },
 
@@ -114,14 +113,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             = sonic_rs::from_slice::<Manifest>(&package_json_entry.data)?;
 
         let package_version
-            = package_json_content.remote.version.clone();
-
-        if package_version.is_none() {
-            println!("Package version is missing for {}", locator.ident.as_str());
-        }
-
-        let package_version
-            = package_version.unwrap_or_default();
+            = package_json_content.remote.version.clone()
+                .unwrap_or_default();
 
         let patched_entries
             = patch::apply::apply_patch(original_entries, &patch_content, &package_version)?;
