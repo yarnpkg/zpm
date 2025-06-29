@@ -116,7 +116,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             = sonic_rs::from_slice::<Manifest>(&package_json_entry.data)?;
 
         let package_version
-            = package_json_content.remote.version.clone()
+            = package_json_content.remote.version
                 .unwrap_or_default();
 
         let patched_entries
