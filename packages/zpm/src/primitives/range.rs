@@ -112,8 +112,27 @@ pub enum Range {
 
 impl Range {
     pub fn must_bind(&self) -> bool {
-        // Keep this list in sync w/ Reference::must_bind
-        matches!(&self, Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Folder(_) | Range::Patch(_))
+        // Keep this implementation in sync w/ Reference::must_bind
+
+        if let Range::Patch(params) = self {
+            return params.inner.0.range.must_bind() || (params.path.as_str() != "<builtin>" && !params.path.as_str().starts_with("~/"));
+        }
+
+        matches!(&self, Range::Link(_) | Range::Portal(_) | Range::Tarball(_) | Range::Folder(_))
+    }
+
+    pub fn inner_descriptor(&self) -> Option<&Descriptor> {
+        // Keep this implementation in sync w/ Reference::inner_locator
+
+        match self {
+            Range::Patch(params) => {
+                Some(&params.inner.0)
+            },
+
+            _ => {
+                None
+            },
+        }
     }
 
     pub fn must_fetch_before_resolve(&self) -> bool {

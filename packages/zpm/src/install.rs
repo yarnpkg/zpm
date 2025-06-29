@@ -7,7 +7,7 @@ use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -114,15 +114,25 @@ pub enum InstallOpResult {
 impl InstallOpResult {
     pub fn into_resolved(self) -> ResolutionResult {
         match self {
-            InstallOpResult::Resolved(resolution) => resolution,
-            _ => panic!("Expected a resolved result"),
+            InstallOpResult::Resolved(resolution) => {
+                resolution
+            },
+
+            _ => {
+                panic!("Expected a resolved result; got {:?}", self)
+            },
         }
     }
 
     pub fn into_fetched(self) -> FetchResult {
         match self {
-            InstallOpResult::Fetched(fetch) => fetch,
-            _ => panic!("Expected a fetched result"),
+            InstallOpResult::Fetched(fetch) => {
+                fetch
+            },
+
+            _ => {
+                panic!("Expected a fetched result; got {:?}", self)
+            },
         }
     }
 
@@ -135,16 +145,29 @@ impl InstallOpResult {
 
     pub fn as_fetched(&self) -> &FetchResult {
         match self {
-            InstallOpResult::Fetched(fetch) => fetch,
-            _ => panic!("Expected a fetched result"),
+            InstallOpResult::Fetched(fetch) => {
+                fetch
+            },
+
+            _ => {
+                panic!("Expected a fetched result; got {:?}", self)
+            },
         }
     }
 
     pub fn as_resolved_locator(&self) -> &Locator {
         match self {
-            InstallOpResult::Resolved(params) => &params.resolution.locator,
-            InstallOpResult::Pinned(params) => &params.locator,
-            _ => panic!("Expected a resolved locator; got {:?}", self),
+            InstallOpResult::Resolved(params) => {
+                &params.resolution.locator
+            },
+
+            InstallOpResult::Pinned(params) => {
+                &params.locator
+            },
+
+            _ => {
+                panic!("Expected a resolved locator; got {:?}", self)
+            },
         }
     }
 }
@@ -227,8 +250,8 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                     resolved_it.next();
                 }
 
-                if let Reference::Patch(params) = &locator.reference {
-                    dependencies.push(InstallOp::Fetch {locator: params.inner.as_ref().0.clone()});
+                if let Some(inner_locator) = locator.reference.inner_locator().cloned() {
+                    dependencies.push(InstallOp::Fetch {locator: inner_locator});
                 }
             },
 
@@ -238,11 +261,7 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                     resolved_it.next();
                 }
 
-                if let Range::Patch(params) = &descriptor.range {
-                    assert!(descriptor.parent.is_some(), "Expected a parent to be set for a patch resolution");
-
-                    let mut inner_descriptor = params.inner.to_owned().0.clone();
-
+                if let Some(mut inner_descriptor) = descriptor.range.inner_descriptor().cloned() {
                     if inner_descriptor.range.must_bind() {
                         inner_descriptor.parent = descriptor.parent.clone();
                     }
@@ -262,8 +281,8 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                     dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone()});
                 }
 
-                if let Reference::Patch(params) = &locator.reference {
-                    dependencies.push(InstallOp::Fetch {locator: params.inner.to_owned().0.clone()});
+                if let Some(inner_locator) = locator.reference.inner_locator().cloned() {
+                    dependencies.push(InstallOp::Fetch {locator: inner_locator});
                 }
             },
         }
@@ -688,8 +707,10 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
                 let root_workspace = context.project
                     .expect("The project is required to bind a parent to a descriptor")
                     .root_workspace();
-        
+
                 descriptor.parent = Some(root_workspace.locator());
+            } else {
+                descriptor.parent = None;
             }
         } else if descriptor.range.must_bind() {
             descriptor.parent = Some(resolution.locator.clone());
@@ -701,11 +722,13 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
             normalize_resolution(context, &mut params.inner.as_mut().0, resolution, false);
         },
 
-        Range::AnonymousSemver(params)
-            => descriptor.range = range::RegistrySemverRange {ident: None, range: params.range.clone()}.into(),
+        Range::AnonymousSemver(params) => {
+            descriptor.range = range::RegistrySemverRange {ident: None, range: params.range.clone()}.into();
+        },
 
-        Range::AnonymousTag(params)
-            => descriptor.range = range::RegistryTagRange {ident: None, tag: params.tag.clone()}.into(),
+        Range::AnonymousTag(params) => {
+            descriptor.range = range::RegistryTagRange {ident: None, tag: params.tag.clone()}.into();
+        },
 
         _ => {},
     };
@@ -715,8 +738,6 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
             inner: Box::new(UrlEncoded::new(descriptor.clone())),
             path: "<builtin>".to_string(),
         }.into();
-
-        descriptor.parent = Some(resolution.locator.clone());
     }
 }
 

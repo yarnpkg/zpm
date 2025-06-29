@@ -81,8 +81,27 @@ pub enum Reference {
 
 impl Reference {
     pub fn must_bind(&self) -> bool {
-        // Keep this list in sync w/ Range::must_bind
-        matches!(&self, Reference::Link(_) | Reference::Portal(_) | Reference::Tarball(_) | Reference::Folder(_) | Reference::Patch(_))
+        // Keep this implementation in sync w/ Range::must_bind
+
+        if let Reference::Patch(params) = self {
+            return params.inner.0.reference.must_bind() || (params.path.as_str() != "<builtin>" && !params.path.as_str().starts_with("~/"));
+        }
+
+        matches!(&self, Reference::Link(_) | Reference::Portal(_) | Reference::Tarball(_) | Reference::Folder(_))
+    }
+
+    pub fn inner_locator(&self) -> Option<&Locator> {
+        // Keep this implementation in sync w/ Range::inner_descriptor
+
+        match self {
+            Reference::Patch(params) => {
+                Some(&params.inner.0)
+            },
+
+            _ => {
+                None
+            },
+        }
     }
 
     pub fn physical_reference(&self) -> &Reference {
