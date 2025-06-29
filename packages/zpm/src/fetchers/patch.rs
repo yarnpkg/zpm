@@ -25,6 +25,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let mut dependencies_it
         = dependencies.iter();
 
+    let parent_data = locator.reference.must_bind()
+        .then(|| dependencies_it.next().unwrap().as_fetched());
+
     let patch_content = match params.path.as_str() {
         "<builtin>" => {
             let compressed_patch = BUILTIN_PATCHES.iter()
@@ -52,7 +55,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
         path => {
             let parent_data
-                = dependencies_it.next().unwrap().as_fetched();
+                = parent_data.expect("Expected parent data to be fetched when the patchfile is relative to the parent package");
 
             parent_data.package_data.context_directory()
                 .with_join_str(path)
