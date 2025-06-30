@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, hash::Hash, marker::PhantomData};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, hash::Hash, marker::PhantomData, sync::LazyLock};
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sha2::Digest;
@@ -7,7 +7,7 @@ use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, SemverDescriptor}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, settings::PackageExtension, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -745,6 +745,20 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
     }
 }
 
+const BUILTIN_EXTENSIONS_JSON: &str = include_str!("../data/builtin-extensions.json");
+
+static BUILTIN_EXTENSIONS: LazyLock<BTreeMap<SemverDescriptor, PackageExtension>> = LazyLock::new(|| {
+    let extensions: Vec<(SemverDescriptor, PackageExtension)>
+        = serde_json::from_str(BUILTIN_EXTENSIONS_JSON)
+            .expect("Failed to parse builtin extensions JSON");
+
+    let extension_map = extensions
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+
+    extension_map
+});
+
 pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resolution) -> (BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>) {
     let project
         = context.project.expect("The project is required to normalize resolutions");
@@ -758,11 +772,31 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     for (descriptor, extension) in project.config.project.package_extensions.value.iter() {
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
             for (dependency, range) in extension.dependencies.iter() {
-                dependencies.insert(dependency.clone(), range.clone());
+                if !dependencies.contains_key(dependency) {
+                    dependencies.insert(dependency.clone(), range.clone());
+                }
             }
 
             for (peer_dependency, range) in extension.peer_dependencies.iter() {
-                peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                if !peer_dependencies.contains_key(peer_dependency) {
+                    peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                }
+            }
+        }
+    }
+
+    for (descriptor, extension) in BUILTIN_EXTENSIONS.iter() {
+        if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
+            for (dependency, range) in extension.dependencies.iter() {
+                if !dependencies.contains_key(dependency) {
+                    dependencies.insert(dependency.clone(), range.clone());
+                }
+            }
+
+            for (peer_dependency, range) in extension.peer_dependencies.iter() {
+                if !peer_dependencies.contains_key(peer_dependency) {
+                    peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                }
             }
         }
     }
