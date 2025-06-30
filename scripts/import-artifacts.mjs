@@ -41,28 +41,19 @@ runExit(class ImportArtifactsCommand extends Command {
 
   async processPatch(patchesDir, outputDir, name) {
     const sourcePath = path.join(patchesDir, `${name}.patch.ts`);
+    const source = await fs.readFile(sourcePath, 'utf8');
     
-    try {
-      const source = await fs.readFile(sourcePath, 'utf8');
+    const match = source.match(/brotliDecompressSync\((Buffer\.from\(.*?, `base64`\))\)/);
+    if (!match)
+      throw new Error(`Could not find brotli-compressed content in ${name}.patch.ts`);
       
-      const match = source.match(/brotliDecompressSync\((Buffer\.from\(.*?, `base64`\))\)/);
-      if (!match) {
-        throw new Error(`Could not find brotli-compressed content in ${name}.patch.ts`);
-      }
-      
-      const payload = match[1];
-      const buffer = eval(`(${payload})`);
-      
-      const outputPath = path.join(outputDir, `${name}.brotli.dat`);
-      await fs.writeFile(outputPath, buffer);
-      
-      console.log(`  ✓ ${name}`);
-    } catch (error) {
-      console.error(`  ✗ ${name}: ${error.message}`);
-      if (!this.all) {
-        throw error;
-      }
-    }
+    const payload = match[1];
+    const buffer = eval(`(${payload})`);
+    
+    const outputPath = path.join(outputDir, `${name}.brotli.dat`);
+    await fs.writeFile(outputPath, buffer);
+    
+    console.log(`  ✓ ${name}`);
   }
 
   async importPackageExtensions() {
