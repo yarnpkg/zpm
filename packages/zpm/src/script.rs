@@ -491,11 +491,11 @@ impl ScriptEnvironment {
 
         cmd.current_dir(self.cwd.to_path_buf());
 
+        cmd.envs(self.env.iter());
+
         for key in &self.deleted_env {
             cmd.env_remove(key);
         }
-
-        cmd.envs(self.env.iter());
 
         let bin_dir
             = self.install_binaries().unwrap();
