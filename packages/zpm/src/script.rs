@@ -359,13 +359,15 @@ impl ScriptEnvironment {
             return;
         };
 
-        let updated = CJS_LOADER_MATCHER.replace_all(&current, "");
-        let updated = ESM_LOADER_MATCHER.replace_all(&updated, "");
+        let updated = CJS_LOADER_MATCHER.replace_all(&current, " ");
+        let updated = ESM_LOADER_MATCHER.replace_all(&updated, " ");
+        let updated = updated.trim();
 
         if current != updated {
-            // When set to an empty string, some tools consider it as explicitly set
-            // to the empty value, and do not set their own value.
+            // When set to an empty string, some tools consider it as explicitly
+            // set to the empty value, and do not set their own value.
             if updated.is_empty() {
+                self.env.remove("NODE_OPTIONS");
                 self.deleted_env.insert("NODE_OPTIONS".to_string());
             } else {
                 self.env.insert("NODE_OPTIONS".to_string(), updated.to_string());
