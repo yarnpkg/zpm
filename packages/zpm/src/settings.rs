@@ -165,7 +165,7 @@ pub struct ProjectConfig {
     #[default(true)]
     pub pnp_enable_inlining: BoolField,
 
-    #[default(PnpFallbackMode::All)]
+    #[default(PnpFallbackMode::DependenciesOnly)]
     pub pnp_fallback_mode: EnumField<PnpFallbackMode>,
 
     #[default(vec![])]
