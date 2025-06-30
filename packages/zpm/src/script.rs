@@ -365,7 +365,7 @@ impl ScriptEnvironment {
         if current != updated {
             // When set to an empty string, some tools consider it as explicitly set
             // to the empty value, and do not set their own value.
-            if current.is_empty() {
+            if updated.is_empty() {
                 self.deleted_env.insert("NODE_OPTIONS".to_string());
             } else {
                 self.env.insert("NODE_OPTIONS".to_string(), updated.to_string());
