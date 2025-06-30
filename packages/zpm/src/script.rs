@@ -8,8 +8,8 @@ use zpm_macros::track_time;
 
 use crate::{error::Error, primitives::Locator, project::Project};
 
-// static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
-// static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
+static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
+static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
 static JS_EXTENSION: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
 
 fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &Vec<String>) -> Result<(), Error> {
@@ -335,6 +335,7 @@ impl ScriptEnvironment {
 
     pub fn with_project(mut self, project: &Project) -> Self {
         if let Some(pnp_path) = project.pnp_path().if_exists() {
+            self.remove_pnp_loader();
             self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_file_string()));
         }
 
@@ -346,6 +347,23 @@ impl ScriptEnvironment {
         self.env.insert("INIT_CWD".to_string(), project.project_cwd.with_join(&project.shell_cwd).to_file_string());
 
         self
+    }
+
+    fn remove_pnp_loader(&mut self) {
+        let current = self.env.get("NODE_OPTIONS")
+            .cloned()
+            .or_else(|| std::env::var("NODE_OPTIONS").ok());
+
+        let Some(current) = current else {
+            return;
+        };
+
+        let updated = CJS_LOADER_MATCHER.replace_all(&current, "");
+        let updated = ESM_LOADER_MATCHER.replace_all(&updated, "");
+
+        if current != updated {
+            self.env.insert("NODE_OPTIONS".to_string(), updated.to_string());
+        }
     }
 
     pub fn with_standard_binaries(mut self) -> Self {
