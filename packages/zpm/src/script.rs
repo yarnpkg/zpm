@@ -334,8 +334,9 @@ impl ScriptEnvironment {
     }
 
     pub fn with_project(mut self, project: &Project) -> Self {
+        self.remove_pnp_loader();
+
         if let Some(pnp_path) = project.pnp_path().if_exists() {
-            self.remove_pnp_loader();
             self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_file_string()));
         }
 
@@ -362,7 +363,13 @@ impl ScriptEnvironment {
         let updated = ESM_LOADER_MATCHER.replace_all(&updated, "");
 
         if current != updated {
-            self.env.insert("NODE_OPTIONS".to_string(), updated.to_string());
+            // When set to an empty string, some tools consider it as explicitly set
+            // to the empty value, and do not set their own value.
+            if current.is_empty() {
+                self.deleted_env.insert("NODE_OPTIONS".to_string());
+            } else {
+                self.env.insert("NODE_OPTIONS".to_string(), updated.to_string());
+            }
         }
     }
 
