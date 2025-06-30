@@ -4,6 +4,7 @@ use env_logger as _;
 
 pub mod algolia;
 pub mod build;
+pub mod builtin_extensions;
 pub mod cache;
 pub mod commands;
 pub mod constraints;

@@ -7,7 +7,7 @@ use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, builtin_extensions::iter_builtin_extensions, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -755,14 +755,34 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     let mut peer_dependencies
         = resolution.peer_dependencies.clone();
 
-    for (descriptor, extension) in project.config.project.package_extensions.value.iter() {
+    for (descriptor, extension) in iter_builtin_extensions() {
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
             for (dependency, range) in extension.dependencies.iter() {
-                dependencies.insert(dependency.clone(), range.clone());
+                if !dependencies.contains_key(dependency) {
+                    dependencies.insert(dependency.clone(), range.clone());
+                }
             }
 
             for (peer_dependency, range) in extension.peer_dependencies.iter() {
-                peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                if !peer_dependencies.contains_key(peer_dependency) {
+                    peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                }
+            }
+        }
+    }
+
+    for (descriptor, extension) in project.config.project.package_extensions.value.iter() {
+        if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
+            for (dependency, range) in extension.dependencies.iter() {
+                if !dependencies.contains_key(dependency) {
+                    dependencies.insert(dependency.clone(), range.clone());
+                }
+            }
+
+            for (peer_dependency, range) in extension.peer_dependencies.iter() {
+                if !peer_dependencies.contains_key(peer_dependency) {
+                    peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                }
             }
         }
     }
