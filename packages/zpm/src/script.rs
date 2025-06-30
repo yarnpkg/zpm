@@ -298,6 +298,8 @@ impl ScriptEnvironment {
     // }
 
     fn append_env(&mut self, key: &str, separator: char, value: &str) {
+        self.deleted_env.remove(key);
+
         let current = self.env.entry(key.to_string())
             .or_insert(std::env::var(key).unwrap_or_default());
 
@@ -309,17 +311,20 @@ impl ScriptEnvironment {
     }
 
     pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
+        env.keys().for_each(|key| { self.deleted_env.remove(key); });
         self.env.extend(env);
         self
     }
 
     pub fn with_env_variable(mut self, key: &str, value: &str) -> Self {
+        self.deleted_env.remove(key);
         self.env.insert(key.to_string(), value.to_string());
         self
     }
 
     pub fn delete_env_variable(mut self, key: &str) -> Self {
         self.deleted_env.insert(key.to_string());
+        self.env.insert(key.to_string(), "".to_string());
         self
     }
 
@@ -367,9 +372,10 @@ impl ScriptEnvironment {
             // When set to an empty string, some tools consider it as explicitly
             // set to the empty value, and do not set their own value.
             if updated.is_empty() {
-                self.env.remove("NODE_OPTIONS");
                 self.deleted_env.insert("NODE_OPTIONS".to_string());
+                self.env.insert("NODE_OPTIONS".to_string(), "".to_string());
             } else {
+                self.deleted_env.remove("NODE_OPTIONS");
                 self.env.insert("NODE_OPTIONS".to_string(), updated.to_string());
             }
         }
