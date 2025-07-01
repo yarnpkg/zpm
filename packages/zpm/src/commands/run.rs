@@ -47,7 +47,7 @@ impl Run {
                 .run_script(&script, &self.args)
                 .await
                 .into())
-        } else if let Err(Error::ScriptNotFound(_)) = maybe_script {
+        } else if matches!(maybe_script, Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_))) {
             let maybe_binary
                 = project.find_binary(&self.name);
 

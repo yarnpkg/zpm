@@ -28,6 +28,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let parent_data = locator.reference.must_bind()
         .then(|| dependencies_it.next().unwrap().as_fetched());
 
+    let mut is_builtin = false;
+
     let patch_content = match params.path.as_str() {
         "<builtin>" => {
             let compressed_patch = BUILTIN_PATCHES.iter()
@@ -43,6 +45,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
             let decompressed_string
                 = String::from_utf8(decompressed_bytes)?;
+
+            is_builtin = true;
 
             decompressed_string
         },
@@ -119,8 +123,16 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             = package_json_content.remote.version
                 .unwrap_or_default();
 
-        let patched_entries
-            = patch::apply::apply_patch(original_entries, &patch_content, &package_version)?;
+        let patched_entries = match is_builtin {
+            true => {
+                patch::apply::apply_patch(original_entries.clone(), &patch_content, &package_version)
+                    .unwrap_or(original_entries)
+            },
+
+            false => {
+                patch::apply::apply_patch(original_entries, &patch_content, &package_version)?
+            },
+        };
 
         Ok(zpm_formats::convert::convert_entries_to_zip(&locator.ident.nm_subdir(), patched_entries)?)
     }).await?;

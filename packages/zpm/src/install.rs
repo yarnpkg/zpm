@@ -719,6 +719,13 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
         } else if descriptor.range.must_bind() {
             descriptor.parent = Some(resolution.locator.clone());
         }
+
+        if has_builtin_patch(&descriptor.ident) {
+            descriptor.range = range::PatchRange {
+                inner: Box::new(UrlEncoded::new(descriptor.clone())),
+                path: "<builtin>".to_string(),
+            }.into();
+        }
     }
 
     match &mut descriptor.range {
@@ -736,13 +743,6 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
 
         _ => {},
     };
-
-    if has_builtin_patch(&descriptor.ident) {
-        descriptor.range = range::PatchRange {
-            inner: Box::new(UrlEncoded::new(descriptor.clone())),
-            path: "<builtin>".to_string(),
-        }.into();
-    }
 }
 
 const BUILTIN_EXTENSIONS_JSON: &str = include_str!("../data/builtin-extensions.json");
