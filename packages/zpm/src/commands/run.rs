@@ -36,7 +36,8 @@ impl Run {
             project.package_cwd = Path::new();
         }
 
-        let maybe_script = project.find_script(&self.name);
+        let maybe_script
+            = project.find_script(&self.name);
 
         if let Ok((locator, script)) = maybe_script {
             Ok(ScriptEnvironment::new()?
@@ -47,7 +48,8 @@ impl Run {
                 .await
                 .into())
         } else if let Err(Error::ScriptNotFound(_)) = maybe_script {
-            let maybe_binary = project.find_binary(&self.name);
+            let maybe_binary
+                = project.find_binary(&self.name);
 
             if let Ok(binary) = maybe_binary {
                 Ok(ScriptEnvironment::new()?
