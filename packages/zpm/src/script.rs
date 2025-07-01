@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
+use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
 
 use zpm_utils::{to_shell_line, FromFileString, Path, ToFileString};
 use itertools::Itertools;
@@ -262,8 +262,7 @@ impl From<ScriptResult> for ExitStatus {
 pub struct ScriptEnvironment {
     cwd: Path,
     binaries: ScriptBinaries,
-    env: BTreeMap<String, String>,
-    deleted_env: BTreeSet<String>,
+    env: BTreeMap<String, Option<String>>,
     shell_forwarding: bool,
     stdin: Option<String>,
 }
@@ -274,13 +273,12 @@ impl ScriptEnvironment {
             cwd: Path::current_dir().unwrap(),
             binaries: ScriptBinaries::new().with_standard()?,
             env: BTreeMap::new(),
-            deleted_env: BTreeSet::new(),
             shell_forwarding: false,
             stdin: None,
         };
 
         if let Ok(val) = std::env::var("YARNSW_DETECTED_ROOT") {
-            value.env.insert("YARNSW_DETECTED_ROOT".to_string(), val);
+            value.env.insert("YARNSW_DETECTED_ROOT".to_string(), Some(val));
         }
 
         Ok(value)
@@ -298,33 +296,37 @@ impl ScriptEnvironment {
     // }
 
     fn append_env(&mut self, key: &str, separator: char, value: &str) {
-        self.deleted_env.remove(key);
-
         let current = self.env.entry(key.to_string())
-            .or_insert(std::env::var(key).unwrap_or_default());
+            .or_insert_with(|| std::env::var(key).ok());
 
-        if !current.is_empty() {
-            current.push(separator)
+        match current {
+            Some(existing) => {
+                if !existing.is_empty() {
+                    existing.push(separator);
+                }
+                existing.push_str(value);
+            },
+
+            None => {
+                *current = Some(value.to_string());
+            },
         }
-
-        current.push_str(value);
     }
 
     pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
-        env.keys().for_each(|key| { self.deleted_env.remove(key); });
-        self.env.extend(env);
+        for (key, value) in env {
+            self.env.insert(key, Some(value));
+        }
         self
     }
 
     pub fn with_env_variable(mut self, key: &str, value: &str) -> Self {
-        self.deleted_env.remove(key);
-        self.env.insert(key.to_string(), value.to_string());
+        self.env.insert(key.to_string(), Some(value.to_string()));
         self
     }
 
     pub fn delete_env_variable(mut self, key: &str) -> Self {
-        self.deleted_env.insert(key.to_string());
-        self.env.insert(key.to_string(), "".to_string());
+        self.env.insert(key.to_string(), None);
         self
     }
 
@@ -349,15 +351,15 @@ impl ScriptEnvironment {
             self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_file_string()));
         }
 
-        self.env.insert("PROJECT_CWD".to_string(), project.project_cwd.to_file_string());
-        self.env.insert("INIT_CWD".to_string(), project.project_cwd.with_join(&project.shell_cwd).to_file_string());
+        self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
+        self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
 
         self
     }
 
     fn remove_pnp_loader(&mut self) {
         let current = self.env.get("NODE_OPTIONS")
-            .cloned()
+            .and_then(|opt| opt.clone())
             .or_else(|| std::env::var("NODE_OPTIONS").ok());
 
         let Some(current) = current else {
@@ -372,11 +374,9 @@ impl ScriptEnvironment {
             // When set to an empty string, some tools consider it as explicitly
             // set to the empty value, and do not set their own value.
             if updated.is_empty() {
-                self.deleted_env.insert("NODE_OPTIONS".to_string());
-                self.env.insert("NODE_OPTIONS".to_string(), "".to_string());
+                self.env.insert("NODE_OPTIONS".to_string(), None);
             } else {
-                self.deleted_env.remove("NODE_OPTIONS");
-                self.env.insert("NODE_OPTIONS".to_string(), updated.to_string());
+                self.env.insert("NODE_OPTIONS".to_string(), Some(updated.to_string()));
             }
         }
     }
@@ -404,9 +404,9 @@ impl ScriptEnvironment {
             .with_join(package_location_rel)
             .with_join_str("package.json");
         
-        self.env.insert("npm_package_name".to_string(), locator.ident.to_file_string());
-        self.env.insert("npm_package_version".to_string(), resolution.version.to_file_string());
-        self.env.insert("npm_package_json".to_string(), manifest_location_abs.to_file_string());
+        self.env.insert("npm_package_name".to_string(), Some(locator.ident.to_file_string()));
+        self.env.insert("npm_package_version".to_string(), Some(resolution.version.to_file_string()));
+        self.env.insert("npm_package_json".to_string(), Some(manifest_location_abs.to_file_string()));
 
         Ok(())
     }
@@ -491,18 +491,23 @@ impl ScriptEnvironment {
 
         cmd.current_dir(self.cwd.to_path_buf());
 
-        cmd.envs(self.env.iter());
+        for (key, value) in &self.env {
+            match value {
+                Some(val) => {
+                    cmd.env(key, val);
+                },
 
-        for key in &self.deleted_env {
-            cmd.env_remove(key);
+                None => {
+                    cmd.env_remove(key);
+                },
+            };
         }
 
         let bin_dir
             = self.install_binaries().unwrap();
 
-        let env_path = self.env.iter()
-            .find(|(key, _)| key == &"PATH")
-            .map(|(_, value)| value.to_string())
+        let env_path = self.env.get("PATH")
+            .and_then(|opt| opt.clone())
             .or_else(|| std::env::var("PATH").ok())
             .unwrap_or_default();
 
