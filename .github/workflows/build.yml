@@ -15,6 +15,7 @@ jobs:
       matrix:
         platform:
           - [x86_64-unknown-linux-musl, ubuntu-latest]
+          - [aarch64-unknown-linux-musl, ubuntu-latest]
           - [aarch64-apple-darwin, macos-latest]
 
     name: 'Building ${{matrix.platform[0]}}'
