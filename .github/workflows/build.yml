@@ -13,26 +13,35 @@ jobs:
   build:
     strategy:
       matrix:
-        platform:
-          - [x86_64-unknown-linux-musl, ubuntu-latest]
-          - [aarch64-apple-darwin, macos-latest]
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
 
-    name: 'Building ${{matrix.platform[0]}}'
-    runs-on: ${{matrix.platform[1]}}
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+
+          - target: aarch64-apple-darwin
+            os: macos-latest
+
+    name: 'Building ${{matrix.target}}'
+    runs-on: ${{matrix.os}}
 
     steps:
       - name: Checkout the repo
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install cross
+        uses: taiki-e/install-action@a27ef18d36cfa66b0af3a360104621793b41c036 # v2.54.3
+        with:
+          tool: cross
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+        with:
+          shared-key: release-${{matrix.target}}
 
-      - if: matrix.platform[0] == 'x86_64-unknown-linux-musl'
-        name: Install musl-gcc
-        run: |
-          sudo apt-get install -y musl-tools
+      - name: Add Rust Target
+        run: rustup target add ${{matrix.target}}
 
       - name: Compute the version
         id: version
@@ -48,21 +57,19 @@ jobs:
 
       - name: Build ${{steps.version.outputs.INFRA_VERSION}}
         run: |
-          rustup target add ${{matrix.platform[0]}}
+          export CARGO_PROFILE_RELEASE_STRIP=debuginfo
+          cross build --verbose --release --target=${{matrix.target}}
 
-          cargo build --verbose --release --target=${{matrix.platform[0]}}
-          strip target/${{matrix.platform[0]}}/release/{yarn-bin,yarn}
-
-          cp LICENSE.md target/${{matrix.platform[0]}}/release/
+          cp LICENSE.md target/${{matrix.target}}/release/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: yarn-${{matrix.platform[0]}}
+          name: yarn-${{matrix.target}}
           path: |
-            target/${{matrix.platform[0]}}/release/yarn-bin
-            target/${{matrix.platform[0]}}/release/yarn
-            target/${{matrix.platform[0]}}/release/LICENSE.md
+            target/${{matrix.target}}/release/yarn-bin
+            target/${{matrix.target}}/release/yarn
+            target/${{matrix.target}}/release/LICENSE.md
           retention-days: 7
 
   # test-report:
