@@ -507,13 +507,18 @@ impl ScriptEnvironment {
             = self.install_binaries().unwrap();
 
         let env_path = self.env.get("PATH")
-            .and_then(|opt| opt.clone())
-            .or_else(|| std::env::var("PATH").ok())
+            .cloned()
+            .unwrap_or_else(|| std::env::var("PATH").ok())
             .unwrap_or_default();
 
         let next_env_path = match env_path.is_empty() {
-            true => bin_dir.to_file_string(),
-            false => format!("{}:{}", bin_dir.to_file_string(), env_path),
+            true => {
+                bin_dir.to_file_string()
+            },
+
+            false => {
+                format!("{}:{}", bin_dir.to_file_string(), env_path)
+            },
         };
 
         cmd.env("PATH", next_env_path);
