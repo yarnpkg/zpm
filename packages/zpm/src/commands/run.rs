@@ -36,39 +36,40 @@ impl Run {
             project.package_cwd = Path::new();
         }
 
-        let maybe_binary
-            = project.find_binary(&self.name);
+        let maybe_script
+            = project.find_script(&self.name);
 
-        if let Ok(binary) = maybe_binary {
+        if let Ok((locator, script)) = maybe_script {
             Ok(ScriptEnvironment::new()?
                 .with_project(&project)
-                .with_package(&project, &project.active_package()?)?
+                .with_package(&project, &locator)?
                 .enable_shell_forwarding()
-                .run_binary(&binary, &self.args)
+                .run_script(&script, &self.args)
                 .await
                 .into())
-        } else if let Err(Error::BinaryNotFound(_)) = maybe_binary {
-            let maybe_script = project.find_script(&self.name);
+        } else if let Err(Error::ScriptNotFound(_)) = maybe_script {
+            let maybe_binary
+                = project.find_binary(&self.name);
 
-            if let Ok((locator, script)) = maybe_script {
+            if let Ok(binary) = maybe_binary {
                 Ok(ScriptEnvironment::new()?
                     .with_project(&project)
-                    .with_package(&project, &locator)?
+                    .with_package(&project, &project.active_package()?)?
                     .enable_shell_forwarding()
-                    .run_script(&script, &self.args)
+                    .run_binary(&binary, &self.args)
                     .await
                     .into())
-            } else if let Err(Error::ScriptNotFound(script)) = maybe_script {
+            } else if let Err(Error::BinaryNotFound(binary)) = maybe_binary {
                 if self.error_if_missing {
-                    return Err(Error::ScriptNotFound(script));
+                    return Err(Error::ScriptNotFound(self.name.clone()));
                 } else {
                     Ok(ExitStatus::from_raw(0))
                 }
             } else {
-                Err(maybe_script.unwrap_err())
+                Err(maybe_binary.unwrap_err())
             }
         } else {
-            Err(maybe_binary.unwrap_err())
+            Err(maybe_script.unwrap_err())
         }
     }
 }
