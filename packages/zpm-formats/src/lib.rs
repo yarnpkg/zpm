@@ -14,7 +14,7 @@ pub mod zip;
 
 pub use error::Error;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Entry<'a> {
     pub name: String,
     pub mode: u32,
