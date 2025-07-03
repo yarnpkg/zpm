@@ -625,8 +625,6 @@ impl<'a> InstallManager<'a> {
                 None => ContentFlags::extract(&entry.resolution.locator, &package_data)?,
             };
 
-            println!("content_flags: {:?}", content_flags);
-
             entry.checksum = checksum;
             entry.flags = content_flags;
         }

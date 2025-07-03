@@ -352,8 +352,6 @@ impl<'a> BuildManager<'a> {
         let build_state_in =
             sonic_rs::from_str::<BTreeMap<Path, String>>(&build_state_text_in)?;
 
-        println!("build_state_in: {:#?}", build_state_in);
-
         self.build_state_out = build_state_in.iter()
             .filter(|(p, _)| paths_to_build.contains(p))
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -392,8 +390,6 @@ impl<'a> BuildManager<'a> {
             if current_build_state_out != self.build_state_out {
                 let build_state_text_out
                     = sonic_rs::to_string(&self.build_state_out)?;
-
-                println!("build_state: {:#?}", self.build_state_out);
 
                 build_state_path
                     .fs_change(build_state_text_out, false)?;
