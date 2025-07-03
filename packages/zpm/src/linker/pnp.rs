@@ -315,8 +315,6 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         }
     }
 
-    println!("all_build_entries: {:#?}", all_build_entries);
-
     for workspace in project.workspaces.iter().sorted_by_cached_key(|w| w.descriptor()) {
         let locator = workspace.locator();
 
