@@ -236,10 +236,12 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
             &physical_package_data,
         );
 
-        let mut is_physically_on_disk = true;
+        let mut is_physically_on_disk = false;
         let mut is_freshly_unplugged = false;
 
-        if package_build_info.must_extract {
+        if locator.reference.is_disk_reference() {
+            is_physically_on_disk = true;
+        } else if package_build_info.must_extract {
             package_location_abs = project.project_cwd
                 .with_join_str(".yarn/unplugged")
                 .with_join_str(locator.slug())
@@ -249,8 +251,8 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
                 &package_location_abs,
                 physical_package_data,
             )?;
-        } else {
-            is_physically_on_disk = false;
+
+            is_physically_on_disk = true;
         }
 
         let package_location_rel = package_location_abs
@@ -307,7 +309,6 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
                 cwd: build_cwd,
                 locator: locator.clone(),
                 commands: build_commands,
-                tree_hash: install.install_state.locator_tree_hash(locator),
                 allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
                 force_rebuild: is_freshly_unplugged,
             });

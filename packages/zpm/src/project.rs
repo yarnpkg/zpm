@@ -6,7 +6,7 @@ use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 use zpm_macros::track_time;
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, diff_finder::SaveEntry, error::Error, http::HttpClient, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{bin::BinField, helpers::read_manifest_with_size, resolutions::ResolutionSelector, BinManifest, Manifest}, manifest_finder::CachedManifestFinder, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, report::{with_report_result, StreamReport, StreamReportConfig}, script::Binary};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, diff_finder::SaveEntry, error::Error, http::HttpClient, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{bin::BinField, helpers::read_manifest_with_size, BinManifest, Manifest}, manifest_finder::CachedManifestFinder, primitives::{range, reference, Descriptor, Ident, Locator, Reference}, report::{with_report_result, StreamReport, StreamReportConfig}, script::Binary};
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
 pub const MANIFEST_NAME: &str = "package.json";
@@ -612,7 +612,7 @@ impl Workspace {
 
         if let Some(patterns) = &self.manifest.workspaces {
             let mut manifest_finder
-                = CachedManifestFinder::new(self.path.clone())?;
+                = CachedManifestFinder::new(self.path.clone());
 
             manifest_finder.rsync()?;
 

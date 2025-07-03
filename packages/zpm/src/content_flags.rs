@@ -4,7 +4,7 @@ use bincode::{Decode, Encode};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{DefaultOnError, serde_as};
-use zpm_utils::ToFileString;
+use zpm_utils::Path;
 
 use crate::{build, error::Error, fetchers::PackageData, primitives::Locator, system};
 
@@ -74,16 +74,50 @@ struct Manifest {
 
 impl ContentFlags {
     pub fn extract(locator: &Locator, package_data: &PackageData) -> Result<Self, Error> {
-        let package_bytes = if let PackageData::Zip {archive_path, ..} = &package_data {
-            archive_path.fs_read()?
-        } else {
-            return Ok(Self::default());
-        };
+        match package_data {
+            PackageData::Local {package_directory, ..} => {
+                Self::extract_local(package_directory)
+            },
+
+            PackageData::Zip {archive_path, ..} => {
+                Self::extract_zip(locator, archive_path)
+            },
+
+            _ => {
+                Ok(Self::default())
+            },
+        }
+    }
+
+    fn extract_local(package_directory: &Path) -> Result<Self, Error> {
+        let manifest_path
+            = package_directory.with_join_str("package.json");
+        let manifest_bytes
+            = manifest_path.fs_read_prealloc()?;
+        let manifest
+            = sonic_rs::from_slice::<Manifest>(&manifest_bytes)?;
+
+        let build_commands
+            = UNPLUG_SCRIPTS.iter()
+                .filter_map(|k| manifest.scripts.get(*k))
+                .map(|s| build::Command::Script {script: s.to_string()})
+                .collect::<Vec<_>>();
+
+        Ok(ContentFlags {
+            build_commands,
+            prefer_extracted: Some(false),
+            suggest_extracted: false,
+        })
+    }
+
+    fn extract_zip(locator: &Locator, archive_path: &Path) -> Result<Self, Error> {
+        let package_bytes
+            = archive_path.fs_read()?;
 
         let first_entry = zpm_formats::zip::first_entry_from_zip(&package_bytes)
             .unwrap();
 
-        let meta_manifest = serde_json::from_slice::<Manifest>(&first_entry.data)
+        let meta_manifest = sonic_rs::from_slice::<Manifest>(&first_entry.data)
             .unwrap();
 
         let mut build_commands = UNPLUG_SCRIPTS.iter()
@@ -106,15 +140,15 @@ impl ContentFlags {
             }
         }
 
-        let prefer_extracted = meta_manifest.prefer_unplugged;
-        let suggest_extracted = entries.iter().any(|entry| UNPLUG_EXT_REGEX.is_match(&entry.name));
+        let prefer_extracted
+            = meta_manifest.prefer_unplugged;
+        let suggest_extracted
+            = entries.iter().any(|entry| UNPLUG_EXT_REGEX.is_match(&entry.name));
 
-        let flags = ContentFlags {
+        Ok(ContentFlags {
             build_commands,
             prefer_extracted,
             suggest_extracted,
-        };
-
-        Ok(flags)
+        })
     }
 }

@@ -2309,6 +2309,13 @@
         }
       }
     },
+    "husky@npm:^9.1.7": {
+      "checksum": "2f333356d2ca9b309148d8ff0e2280513ab3716af762a4da10faccb89e328897cb1d935e1359a4996768cad2710b4f789a9c87cc5724e91a06f7f0df8cf0ab5a",
+      "resolution": {
+        "resolution": "husky@npm:9.1.7",
+        "version": "9.1.7"
+      }
+    },
     "iconv-lite@npm:^0.6.2": {
       "checksum": "8158a65fe1a39e96328fa70351e0e5c9ecdd6e7128223daa1d5dc2096953d2ace7fb59f8a7de5563917f6b9dccadb6db702ed834702ababe23b1cae16fad1630",
       "resolution": {
@@ -3111,6 +3118,7 @@
           "@yarnpkg/types": "^4.0.1",
           "clipanion": "^4.0.0-rc.4",
           "esbuild": "^0.25.5",
+          "husky": "^9.1.7",
           "lodash": "^4.17.21",
           "typescript": "^5.8.3"
         }

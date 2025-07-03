@@ -20,4 +20,4 @@ export TEST_BINARY="${REPO_DIR}/yarn.sh"
 # To disable tests that we don't want to run.
 export TEST_MAJOR="5"
 
-$ZPM_SWITCH_BINARY_PATH "$@"
+"$ZPM_SWITCH_BINARY_PATH" "$@"

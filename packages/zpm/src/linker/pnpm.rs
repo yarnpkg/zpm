@@ -74,7 +74,6 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
                 cwd: package_location_rel,
                 locator: locator.clone(),
                 commands: build_commands,
-                tree_hash: install.install_state.locator_tree_hash(locator),
                 allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
                 force_rebuild: false, // TODO: track this properly for pnpm
             });
