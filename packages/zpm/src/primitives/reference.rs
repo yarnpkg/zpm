@@ -90,6 +90,10 @@ impl Reference {
         matches!(&self, Reference::Link(_) | Reference::Portal(_) | Reference::Tarball(_) | Reference::Folder(_))
     }
 
+    pub fn is_disk_reference(&self) -> bool {
+        matches!(&self, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_) | Reference::Portal(_))
+    }
+
     pub fn inner_locator(&self) -> Option<&Locator> {
         // Keep this implementation in sync w/ Range::inner_descriptor
 

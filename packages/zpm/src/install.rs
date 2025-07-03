@@ -1,7 +1,6 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, hash::Hash, marker::PhantomData, sync::LazyLock};
+use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sync::LazyLock};
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use sha2::Digest;
 use zpm_utils::{Path, ToHumanString};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -401,26 +400,6 @@ pub struct InstallState {
     pub conditional_locators: BTreeSet<Locator>,
 }
 
-impl InstallState {
-    pub fn locator_tree_hash(&self, root: &Locator) -> String {
-        let mut hasher
-            = sha2::Sha256::new();
-
-        let mut seen
-            = HashSet::new();
-        let mut queue
-            = vec![root];
-
-        while let Some(locator) = queue.pop() {
-            if seen.insert(locator) {
-                hasher.update(locator.to_file_string())
-            }
-        }
-
-        format!("{:064x}", hasher.finalize())
-    }
-}
-
 #[derive(Clone, Default)]
 pub struct Install {
     pub lockfile: Lockfile,
@@ -632,10 +611,21 @@ impl<'a> InstallManager<'a> {
                 }
             }
 
-            let content_flags = match previous_flags {
-                Some(flags) => flags.clone(),
+            let mut content_flags
+                = None;
+
+            if !entry.resolution.locator.reference.is_disk_reference() {
+                if let Some(previous_flags) = previous_flags {
+                    content_flags = Some(previous_flags.clone());
+                }
+            }
+
+            let content_flags = match content_flags {
+                Some(flags) => flags,
                 None => ContentFlags::extract(&entry.resolution.locator, &package_data)?,
             };
+
+            println!("content_flags: {:?}", content_flags);
 
             entry.checksum = checksum;
             entry.flags = content_flags;

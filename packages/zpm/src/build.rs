@@ -1,11 +1,10 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt};
+use std::collections::{BTreeMap, BTreeSet};
 
 use zpm_utils::{OkMissing, Path};
 use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
-use zpm_utils::ToFileString;
 
 use crate::{diff_finder::{DiffController, DiffFinder}, error::Error, hash::Blake2b80, primitives::{Locator, Reference}, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
 
@@ -44,14 +43,13 @@ impl DiffController for ArtifactFinder {
 pub struct BuildRequest {
     pub cwd: Path,
     pub locator: Locator,
-    pub tree_hash: String,
     pub commands: Vec<Command>,
     pub allowed_to_fail: bool,
     pub force_rebuild: bool,
 }
 
 impl BuildRequest {
-    pub async fn run(self, project: &Project) -> Result<ScriptResult, Error> {
+    pub async fn run(self, project: &Project, hash: Option<String>) -> Result<ScriptResult, Error> {
         let cwd_abs = project.project_cwd
             .with_join(&self.cwd);
 
@@ -62,20 +60,25 @@ impl BuildRequest {
             .with_cwd(cwd_abs.clone())
             .enable_shell_forwarding();
 
-        with_context_result(ReportContext::Locator(self.locator.clone()), async {
-            let build_cache_folder = project.project_cwd
-                .with_join_str(".yarn/ignore/builds")
-                .with_join_str(format!("{}-{}", self.locator.slug(), self.tree_hash));
+        let res = with_context_result(ReportContext::Locator(self.locator.clone()), async {
+            let build_cache_folder = match (self.locator.reference.is_disk_reference(), &hash) {
+                (false, Some(hash)) => {
+                    let build_cache_folder = project.project_cwd
+                        .with_join_str(".yarn/ignore/builds")
+                        .with_join_str(format!("{}-{}", self.locator.slug(), hash));
 
-            let supports_build_cache
-                = matches!(self.locator.reference, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_));
+                    Some(build_cache_folder)
+                },
+
+                _ => {
+                    None
+                },
+            };
 
             let mut artifact_finder
-                = supports_build_cache
-                    .then(|| DiffFinder::<ArtifactFinder>::new(cwd_abs, Default::default()))
-                    .transpose()?;
+                = DiffFinder::<ArtifactFinder>::new(cwd_abs, Default::default());
 
-            if let Some(artifact_finder) = &mut artifact_finder {
+            if build_cache_folder.is_some() {
                 artifact_finder.rsync()?;
             }
 
@@ -95,7 +98,7 @@ impl BuildRequest {
                 }
             }
 
-            if let Some(artifact_finder) = &mut artifact_finder {
+            if let Some(build_cache_folder) = build_cache_folder {
                 let (_has_changed, diff_list)
                     = artifact_finder.rsync()?;
 
@@ -109,7 +112,9 @@ impl BuildRequest {
             }
 
             Ok(ScriptResult::new_success())
-        }).await
+        }).await?;
+
+        Ok(res)
     }
 
     pub fn key(&self) -> (Locator, Path) {
@@ -262,28 +267,29 @@ impl<'a> BuildManager<'a> {
                 let req
                     = self.requests.entries[idx].clone();
 
-                let hash
-                    = self.get_hash(project, &req.locator);
+                let force_rebuild
+                    = req.force_rebuild;
 
-                if hash.is_none() {
-                    println!("Package {} was queued for build but is the root of a dependency cycle; it'll always be rebuilt", req.locator.to_file_string());
-                }
+                let tree_hash
+                    = self.get_hash(project, &req.locator)
+                        .cloned();
 
-                if let Some(hash) = &hash {
-                    let force_rebuild
-                        = req.force_rebuild || req.cwd.is_empty();
-
-                    if build_state.get(&req.cwd) == Some(hash) && !force_rebuild {
-                        self.record(idx, Some(hash.to_string()), ScriptResult::new_success());
-                        continue;
+                if !force_rebuild {
+                    if let Some(previous_hash) = build_state.get(&req.cwd) {
+                        if let Some(current_hash) = &tree_hash {
+                            if previous_hash == current_hash {
+                                self.record(idx, tree_hash, ScriptResult::new_success());
+                                continue;
+                            }
+                        }
                     }
                 }
 
                 self.build_state_out.remove(&req.cwd);
 
-                let future = req.run(project).map(move |res| {
-                    (idx, hash, res)
-                });
+                let future
+                    = req.run(project, tree_hash.clone())
+                        .map(move |res| (idx, tree_hash, res));
 
                 self.running.push(Box::pin(future));
             } else {
@@ -292,11 +298,12 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn get_hash(&mut self, project: &'a Project, locator: &Locator) -> Option<String> {
+    fn get_hash(&mut self, project: &'a Project, locator: &Locator) -> Option<&String> {
         let install_state = project.install_state.as_ref()
             .expect("Expected the install state to be present");
 
-        let acyclic_locators = self.find_acyclic_locators(project, locator);
+        let acyclic_locators
+            = self.find_acyclic_locators(project, locator);
 
         let locators_to_hash = acyclic_locators.iter()
             .filter(|l| !self.tree_hashes.contains_key(l))
@@ -321,12 +328,13 @@ impl<'a> BuildManager<'a> {
                 hasher.update(hash);
             }
 
-            let hash = format!("{:x}", hasher.finalize());
+            let hash
+                = format!("{:x}", hasher.finalize());
+
             self.tree_hashes.insert(locator.clone(), hash);
         }
 
         self.tree_hashes.get(locator)
-            .cloned()
     }
 
     pub async fn run(mut self, project: &'a mut Project) -> Result<Build, Error> {
@@ -343,6 +351,8 @@ impl<'a> BuildManager<'a> {
 
         let build_state_in =
             sonic_rs::from_str::<BTreeMap<Path, String>>(&build_state_text_in)?;
+
+        println!("build_state_in: {:#?}", build_state_in);
 
         self.build_state_out = build_state_in.iter()
             .filter(|(p, _)| paths_to_build.contains(p))
@@ -382,6 +392,8 @@ impl<'a> BuildManager<'a> {
             if current_build_state_out != self.build_state_out {
                 let build_state_text_out
                     = sonic_rs::to_string(&self.build_state_out)?;
+
+                println!("build_state: {:#?}", self.build_state_out);
 
                 build_state_path
                     .fs_change(build_state_text_out, false)?;

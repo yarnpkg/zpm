@@ -92,7 +92,7 @@ pub struct DiffFinder<TController: DiffController> {
 }
 
 impl<TController: DiffController> DiffFinder<TController> {
-    pub fn new(root_path: Path, mut save_state: SaveState<TController::Data>) -> Result<Self, Error> {
+    pub fn new(root_path: Path, mut save_state: SaveState<TController::Data>) -> Self {
         let roots = vec![
             Path::new(),
         ];
@@ -101,10 +101,10 @@ impl<TController: DiffController> DiffFinder<TController> {
             save_state = SaveState::new(roots);
         }
 
-        Ok(Self {
+        Self {
             root_path,
             save_state,
-        })
+        }
     }
 
     fn refresh_directory(&mut self, new_file_paths: &mut Vec<Path>, rel_path: &Path, current_time: u128) -> Result<(), Error> {

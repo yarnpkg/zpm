@@ -1,7 +1,5 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs::{DirEntry, FileType, Metadata}, io, time::UNIX_EPOCH};
+use std::{collections::BTreeSet, fs::{DirEntry, FileType, Metadata}};
 
-use bincode::{Decode, Encode};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use zpm_utils::Path;
 
 use crate::{diff_finder::{DiffController, DiffFinder, SaveState}, error::Error, manifest::{helpers::read_manifest_with_size, Manifest}};
@@ -31,7 +29,7 @@ pub struct CachedManifestFinder {
 }
 
 impl CachedManifestFinder {
-    pub fn new(root_path: Path) -> Result<Self, Error> {
+    pub fn new(root_path: Path) -> Self {
         let save_state_path = root_path
             .with_join_str(".yarn/ignore/manifests");
 
@@ -43,10 +41,10 @@ impl CachedManifestFinder {
             .and_then(|save_data| SaveState::from_slice(&save_data).ok())
             .unwrap_or_default();
 
-        Ok(Self {
-            diff_finder: DiffFinder::new(root_path, save_state)?,
+        Self {
+            diff_finder: DiffFinder::new(root_path, save_state),
             save_state_path,
-        })
+        }
     }
 
     fn save(&self) -> Result<(), Error> {
