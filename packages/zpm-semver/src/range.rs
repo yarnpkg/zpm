@@ -88,6 +88,15 @@ impl Range {
         extract::extract_tokens(&mut str.as_ref().chars().peekable())
     }
 
+    pub fn any() -> Range {
+        Range {
+            source: ">=0.0.0".to_string(),
+            tokens: vec![
+                Token::Operation(OperatorType::GreaterThanOrEqual, Version::new_from_components(0, 0, 0, Some(vec![]))),
+            ],
+        }
+    }
+
     pub fn caret(version: Version) -> Range {
         let upper_bound
             = version.next_major_rc();

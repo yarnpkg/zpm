@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, range, reference, Descriptor, Ident, Locator, PeerRange, Range, Reference}, system};
+use crate::{error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, range::{self, SemverPeerRange}, reference, Descriptor, Ident, Locator, PeerRange, Range, Reference}, system};
 
 pub mod folder;
 pub mod git;
@@ -48,6 +48,10 @@ pub struct Resolution {
 
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub optional_peer_dependencies: BTreeSet<Ident>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
     pub missing_peer_dependencies: BTreeSet<Ident>,
 }
 
@@ -62,12 +66,30 @@ impl Resolution {
         dependencies
             .extend(manifest.optional_dependencies);
 
+        let mut peer_dependencies
+            = manifest.peer_dependencies;
+
+        let mut optional_peer_dependencies
+            = BTreeSet::new();
+
+        for (ident, meta) in manifest.peer_dependencies_meta {
+            peer_dependencies.entry(ident.clone())
+                .or_insert(SemverPeerRange {
+                    range: zpm_semver::Range::any(),
+                }.into());
+
+            if meta.optional {
+                optional_peer_dependencies.insert(ident);
+            }
+        }
+
         Resolution {
             locator,
             version: manifest.version.unwrap_or_default(),
             dependencies,
-            peer_dependencies: manifest.peer_dependencies,
+            peer_dependencies,
             optional_dependencies,
+            optional_peer_dependencies,
             missing_peer_dependencies: BTreeSet::new(),
             requirements: manifest.requirements,
         }
