@@ -75,7 +75,7 @@ struct Manifest {
 impl ContentFlags {
     pub fn extract(locator: &Locator, package_data: &PackageData) -> Result<Self, Error> {
         match package_data {
-            PackageData::Local {package_directory, discard_from_lookup} if !discard_from_lookup => {
+            PackageData::Local {package_directory, is_synthetic_package} if !is_synthetic_package => {
                 Self::extract_local(package_directory)
             },
 

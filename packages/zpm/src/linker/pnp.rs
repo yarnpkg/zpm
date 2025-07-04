@@ -223,7 +223,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         }
 
         let discard_from_lookup = match physical_package_data {
-            PackageData::Local {discard_from_lookup, ..} => *discard_from_lookup,
+            PackageData::Local {is_synthetic_package, ..} => *is_synthetic_package,
             _ => false,
         };
 
