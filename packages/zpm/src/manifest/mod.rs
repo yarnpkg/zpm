@@ -32,6 +32,11 @@ pub struct BinManifest {
     pub bin: Option<BinField>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
+pub struct PeerDependenciesMeta {
+    pub optional: bool,
+}
+
 #[serde_as]
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Encode, Decode)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +58,10 @@ pub struct RemoteManifest {
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub peer_dependencies: BTreeMap<Ident, PeerRange>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub peer_dependencies_meta: BTreeMap<Ident, PeerDependenciesMeta>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]

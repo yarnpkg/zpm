@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use bincode::{Decode, Encode};
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::Error;
+use crate::{Error, VersionRc};
 
 use super::{extract, Version};
 
@@ -86,6 +86,16 @@ pub struct Range {
 impl Range {
     fn tokenize<P: AsRef<str>>(str: P) -> Option<Vec<Token>> {
         extract::extract_tokens(&mut str.as_ref().chars().peekable())
+    }
+
+    pub fn any() -> Range {
+        Range {
+            // TODO: Replace >=0.0.0-0 with "*" once "*" is implemented
+            source: ">=0.0.0-0".to_string(),
+            tokens: vec![
+                Token::Operation(OperatorType::GreaterThanOrEqual, Version::new_from_components(0, 0, 0, Some(vec![VersionRc::Number(0)]))),
+            ],
+        }
     }
 
     pub fn caret(version: Version) -> Range {
