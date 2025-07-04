@@ -64,7 +64,7 @@ impl Pack {
                 .with_project(&project)
                 .with_package(&project, &locator)?
                 .run_script(&script, &Vec::<&str>::new())
-                .await
+                .await?
                 .ok()?;
         }
 

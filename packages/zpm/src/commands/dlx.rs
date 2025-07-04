@@ -175,6 +175,6 @@ async fn run_binary(project: &Project, bin: Binary, args: Vec<String>, current_c
         .with_cwd(current_cwd)
         .enable_shell_forwarding()
         .run_binary(&bin, &args)
-        .await
+        .await?
         .into())
 }

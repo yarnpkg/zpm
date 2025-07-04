@@ -99,8 +99,8 @@ impl ContentFlags {
 
         let build_commands
             = UNPLUG_SCRIPTS.iter()
-                .filter_map(|k| manifest.scripts.get(*k))
-                .map(|s| build::Command::Script {script: s.to_string()})
+                .filter_map(|k| manifest.scripts.get(*k).map(|s| (k, s)))
+                .map(|(k, s)| build::Command::Script {event: Some(k.to_string()), script: s.to_string()})
                 .collect::<Vec<_>>();
 
         Ok(ContentFlags {
@@ -121,8 +121,8 @@ impl ContentFlags {
             .unwrap();
 
         let mut build_commands = UNPLUG_SCRIPTS.iter()
-            .filter_map(|k| meta_manifest.scripts.get(*k))
-            .map(|s| build::Command::Script {script: s.clone()})
+            .filter_map(|k| meta_manifest.scripts.get(*k).map(|s| (k, s)))
+            .map(|(k, s)| build::Command::Script {event: Some(k.to_string()), script: s.to_string()})
             .collect::<Vec<_>>();
 
         let entries

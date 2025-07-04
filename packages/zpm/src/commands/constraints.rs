@@ -59,7 +59,7 @@ impl Constraints {
                 .with_project(&project)
                 .with_stdin(Some(script))
                 .run_exec("node", &vec!["-"])
-                .await
+                .await?
                 .ok()?;
 
             let stdout

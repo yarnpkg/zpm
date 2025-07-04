@@ -391,7 +391,7 @@ impl Project {
 
             Some(BinField::Map(bins)) => bins
                 .into_iter()
-                .map(|(name, path)| (name, Binary::new(self, location.with_join(&path.path))))
+                .map(|(name, path)| (name.name().to_string(), Binary::new(self, location.with_join(&path.path))))
                 .collect(),
 
             None => BTreeMap::new(),

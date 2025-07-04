@@ -90,6 +90,10 @@ impl Reference {
         matches!(&self, Reference::Link(_) | Reference::Portal(_) | Reference::Tarball(_) | Reference::Folder(_))
     }
 
+    pub fn is_workspace_reference(&self) -> bool {
+        matches!(&self, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_))
+    }
+
     pub fn is_disk_reference(&self) -> bool {
         matches!(&self, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_) | Reference::Portal(_))
     }

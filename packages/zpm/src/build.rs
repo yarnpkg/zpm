@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use zpm_utils::{OkMissing, Path};
+use zpm_utils::{OkMissing, Path, ToFileString};
 use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
-use crate::{diff_finder::{DiffController, DiffFinder}, error::Error, hash::Blake2b80, primitives::{Locator, Reference}, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}, tree_resolver::ResolutionTree};
+use crate::{diff_finder::{DiffController, DiffFinder}, error::Error, hash::Blake2b80, primitives::Locator, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}};
 
 #[derive(Clone, Debug, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
@@ -17,6 +17,7 @@ pub enum Command {
     },
 
     Script {
+        event: Option<String>,
         script: String,
     },
 }
@@ -57,8 +58,7 @@ impl BuildRequest {
             .with_project(project)
             .with_package(project, &self.locator)?
             .with_env_variable("INIT_CWD", cwd_abs.as_str())
-            .with_cwd(cwd_abs.clone())
-            .enable_shell_forwarding();
+            .with_cwd(cwd_abs.clone());
 
         let res = with_context_result(ReportContext::Locator(self.locator.clone()), async {
             let build_cache_folder = match (self.locator.reference.is_disk_reference(), &hash) {
@@ -84,16 +84,29 @@ impl BuildRequest {
 
             for command in self.commands.iter() {
                 let script_result = match command {
-                    Command::Program {name, args} =>
-                        script_env.run_exec(name, args).await,
-                    Command::Script {script} =>
-                        script_env.run_script(script, Vec::<&str>::new()).await,
+                    Command::Program {name, args} => {
+                        script_env.run_exec(name, args).await?
+                    },
+
+                    Command::Script {event, script} => {
+                        if let Some(event) = event {
+                            script_env = script_env
+                                .with_env_variable("npm_lifecycle_event", event);
+                        }
+
+                        script_env.run_script(script, Vec::<&str>::new()).await?
+                    },
                 };
 
                 if !script_result.success() {
                     return match self.allowed_to_fail {
-                        true => Ok(ScriptResult::new_success()),
-                        false => Err(script_result.ok().unwrap_err()),
+                        true => {
+                            Ok(ScriptResult::new_success())
+                        },
+
+                        false => {
+                            Err(script_result.ok().unwrap_err())
+                        },
                     };
                 }
             }
@@ -165,78 +178,9 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn find_acyclic_locators(&self, project: &'a Project, root: &Locator) -> Vec<Locator> {
-        struct TraversalState<'a> {
-            resolution_tree: &'a ResolutionTree,
-            visited: BTreeMap<&'a Locator, VisitationState>,
-            in_cycle: BTreeSet<&'a Locator>,
-            result: Vec<&'a Locator>,
-            stack: Vec<&'a Locator>,
-        }
-
-        enum VisitationState {
-            Visiting,
-            Visited,
-        }
-        
-        fn dfs<'a>(
-            traversal_state: &mut TraversalState<'a>,
-            node: &'a Locator,
-        ) {
-            if let Some(visitation_state) = traversal_state.visited.get(node) {
-                match visitation_state {
-                    VisitationState::Visiting => {
-                        // Detected a cycle
-                        if let Some(pos) = traversal_state.stack.iter().position(|&n| n == node) {
-                            for &n in &traversal_state.stack[pos..] {
-                                traversal_state.in_cycle.insert(n);
-                            }
-                        }
-                    }
-                    VisitationState::Visited => (),
-                }
-            } else {
-                traversal_state.visited.insert(node, VisitationState::Visiting);
-                traversal_state.stack.push(node);
-        
-                let resolution = traversal_state.resolution_tree.locator_resolutions.get(node)
-                    .expect("Expected package to have a resolution");
-
-                for dependency in resolution.dependencies.values() {
-                    let dependency_locator = traversal_state.resolution_tree.descriptor_to_locator.get(dependency)
-                        .expect("Expected dependency to have a locator");
-
-                    dfs(traversal_state, dependency_locator);
-                }
-        
-                traversal_state.visited.insert(node, VisitationState::Visited);
-                traversal_state.stack.pop();
-        
-                if !traversal_state.in_cycle.contains(node) {
-                    traversal_state.result.push(node);
-                }
-            }
-        }
-
-        let install_state = project.install_state.as_ref()
-            .expect("Expected the install state to be present");
-
-        let mut state = TraversalState {
-            resolution_tree: &install_state.resolution_tree,
-            visited: BTreeMap::new(),
-            in_cycle: BTreeSet::new(),
-            result: Vec::new(),
-            stack: Vec::new(),
-        };
-    
-        dfs(&mut state, root);
-        state.result.into_iter()
-            .map(|l| (*l).clone())
-            .collect::<Vec<_>>()
-    }
-
     fn record(&mut self, idx: usize, hash: Option<String>, script_result: ScriptResult) {
-        let request = &self.requests.entries[idx];
+        let request
+            = &self.requests.entries[idx];
 
         if !script_result.success() {
             self.build_errors.insert(request.key());
@@ -271,8 +215,7 @@ impl<'a> BuildManager<'a> {
                     = req.force_rebuild;
 
                 let tree_hash
-                    = self.get_hash(project, &req.locator)
-                        .cloned();
+                    = Some(self.get_hash(project, &req.locator));
 
                 if !force_rebuild {
                     if let Some(previous_hash) = build_state.get(&req.cwd) {
@@ -298,43 +241,48 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn get_hash(&mut self, project: &'a Project, locator: &Locator) -> Option<&String> {
+    fn get_hash_impl(tree_hashes: &mut BTreeMap<Locator, String>, project: &'a Project, locator: &Locator) -> String {
+        let hash
+            = tree_hashes.get(locator);
+
+        if let Some(hash) = hash {
+            return hash.clone();
+        }
+
+        // To avoid the case where one dependency depends on itself somehow
+        tree_hashes.insert(locator.clone(), "<recursive>".to_string());
+
         let install_state = project.install_state.as_ref()
             .expect("Expected the install state to be present");
 
-        let acyclic_locators
-            = self.find_acyclic_locators(project, locator);
+        let resolution = install_state.resolution_tree.locator_resolutions.get(locator)
+            .expect("Expected package to have a resolution");
 
-        let locators_to_hash = acyclic_locators.iter()
-            .filter(|l| !self.tree_hashes.contains_key(l))
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut hasher
+            = Blake2b80::new();
 
-        for locator in locators_to_hash.iter() {
-            let mut hasher
-                = Blake2b80::new();
+        hasher.update(locator.to_file_string());
 
-            let resolution = install_state.resolution_tree.locator_resolutions.get(locator)
-                .expect("Expected package to have a resolution");
+        for dependency in resolution.dependencies.values() {
+            let dependency_locator = install_state.resolution_tree.descriptor_to_locator.get(dependency)
+                .expect("Expected dependency to have a locator");
 
-            for dependency in resolution.dependencies.values() {
-                let dependency_locator = install_state.resolution_tree.descriptor_to_locator.get(dependency)
-                    .expect("Expected dependency to have a locator");
+            let dependency_hash
+                = BuildManager::get_hash_impl(tree_hashes, project, dependency_locator);
 
-                let hash = self.tree_hashes.get(dependency_locator)
-                    .cloned()
-                    .unwrap_or_else(|| "".to_string());
-
-                hasher.update(hash);
-            }
-
-            let hash
-                = format!("{:x}", hasher.finalize());
-
-            self.tree_hashes.insert(locator.clone(), hash);
+            hasher.update(dependency_hash);
         }
 
-        self.tree_hashes.get(locator)
+        let hash
+            = format!("{:x}", hasher.finalize());
+
+        tree_hashes.insert(locator.clone(), hash.clone());
+
+        hash
+    }
+
+    fn get_hash(&mut self, project: &'a Project, locator: &Locator) -> String {
+        BuildManager::get_hash_impl(&mut self.tree_hashes, project, locator)
     }
 
     pub async fn run(mut self, project: &'a mut Project) -> Result<Build, Error> {
@@ -369,7 +317,8 @@ impl<'a> BuildManager<'a> {
 
         self.trigger(project, &build_state_in);
         
-        let mut current_build_state_out = self.build_state_out.clone();
+        let mut current_build_state_out
+            = self.build_state_out.clone();
 
         while let Some((idx, hash, result)) = self.running.next().await {
             let request

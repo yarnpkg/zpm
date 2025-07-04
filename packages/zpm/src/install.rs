@@ -579,7 +579,7 @@ impl<'a> InstallManager<'a> {
             let previous_checksum = previous_entry.and_then(|s| s.checksum.as_ref());
             let mut previous_flags = previous_entry.map(|s| &s.flags);
 
-            if !are_metadata_up_to_date {
+            if !are_metadata_up_to_date || entry.resolution.locator.reference.is_disk_reference() {
                 previous_flags = None;
             }
 
@@ -614,16 +614,14 @@ impl<'a> InstallManager<'a> {
             let mut content_flags
                 = None;
 
-            if !entry.resolution.locator.reference.is_disk_reference() {
-                if let Some(previous_flags) = previous_flags {
-                    content_flags = Some(previous_flags.clone());
-                }
+            if let Some(previous_flags) = previous_flags {
+                content_flags = Some(previous_flags.clone());
             }
 
-            let content_flags = match content_flags {
-                Some(flags) => flags,
-                None => ContentFlags::extract(&entry.resolution.locator, &package_data)?,
-            };
+            let content_flags = content_flags.map_or_else(
+                || ContentFlags::extract(&entry.resolution.locator, &package_data),
+                Ok,
+            )?;
 
             entry.checksum = checksum;
             entry.flags = content_flags;

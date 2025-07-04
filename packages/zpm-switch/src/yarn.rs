@@ -122,6 +122,12 @@ pub struct BinMeta {
     pub version: String,
 }
 
+pub fn get_bin_version() -> String {
+    option_env!("INFRA_VERSION")
+        .unwrap_or(env!("CARGO_PKG_VERSION"))
+        .to_string()
+}
+
 pub fn extract_bin_meta() -> BinMeta {
     let mut cwd = None;
 
@@ -139,9 +145,8 @@ pub fn extract_bin_meta() -> BinMeta {
         }
     }
 
-    let version = option_env!("INFRA_VERSION")
-        .unwrap_or(env!("CARGO_PKG_VERSION"))
-        .to_string();
+    let version
+        = get_bin_version();
 
     BinMeta {
         cwd,

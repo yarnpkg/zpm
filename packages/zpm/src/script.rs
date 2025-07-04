@@ -71,6 +71,15 @@ fn is_node_script(p: Path) -> bool {
     }
 }
 
+fn get_self_path() -> Result<Path, Error> {
+    let self_path = std::env::var("YARNSW_EXEC_PATH")
+        .ok()
+        .map(|path| Path::from_file_string(&path))
+        .unwrap_or_else(|| Path::current_exe())?;
+
+    Ok(self_path)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BinaryKind {
     Default,
@@ -100,8 +109,6 @@ impl Binary {
     }
 }
 
-// fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: Vec<&str>) -> Result<(), Error>
-
 #[derive(Hash)]
 pub struct ScriptBinary {
     pub name: String,
@@ -122,10 +129,7 @@ impl ScriptBinaries {
     }
 
     pub fn with_standard(mut self) -> Result<Self, Error> {
-        let self_path = std::env::var("YARNSW_EXEC_PATH")
-            .ok()
-            .map(|path| Path::from_file_string(&path))
-            .unwrap_or_else(|| Path::current_exe())?
+        let self_path = get_self_path()?
             .to_file_string();
 
         self.binaries.push(ScriptBinary {
@@ -208,15 +212,23 @@ impl ScriptResult {
 
     pub fn ok(self) -> Result<Self, Error> {
         match self {
-            Self::Success(_) => Ok(self),
+            Self::Success(_) => {
+                Ok(self)
+            },
+
             Self::Failure(output, program, shell_line) => {
                 if let Ok(temp_dir) = Path::temp_dir() {
                     let log_path = temp_dir
                         .with_join_str("error.log");
 
+                    let stdout
+                        = String::from_utf8_lossy(&output.stdout);
+                    let stderr
+                        = String::from_utf8_lossy(&output.stderr);
+
                     // open a fd and write stdout/err into it
                     let log_write = log_path
-                        .fs_write_text(format!("=== COMMAND ===\n\n{}\n\n=== STDOUT ===\n\n{}\n=== STDERR ===\n\n{}", shell_line, String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)));
+                        .fs_write_text(format!("=== COMMAND ===\n\n{}\n\n=== STDOUT ===\n\n{}\n=== STDERR ===\n\n{}", shell_line, stdout, stderr));
 
                     if log_write.is_ok() {
                         Err(Error::ChildProcessFailedWithLog(program, log_path))
@@ -280,6 +292,12 @@ impl ScriptEnvironment {
         if let Ok(val) = std::env::var("YARNSW_DETECTED_ROOT") {
             value.env.insert("YARNSW_DETECTED_ROOT".to_string(), Some(val));
         }
+
+        let self_path
+            = get_self_path()?;
+
+        value.env.insert("npm_execpath".to_string(), Some(self_path.to_file_string()));
+        value.env.insert("npm_config_user_agent".to_string(), Some(format!("yarn/{}", zpm_switch::get_bin_version())));
 
         Ok(value)
     }
@@ -481,7 +499,7 @@ impl ScriptEnvironment {
     }
 
     #[track_time]
-    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<str> {
+    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
         let mut cmd
             = Command::new(program);
 
@@ -504,7 +522,7 @@ impl ScriptEnvironment {
         }
 
         let bin_dir
-            = self.install_binaries().unwrap();
+            = self.install_binaries()?;
 
         let env_path = self.env.get("PATH")
             .cloned()
@@ -559,10 +577,10 @@ impl ScriptEnvironment {
             },
         };
 
-        ScriptResult::new(output, cmd.as_std())
+        Ok(ScriptResult::new(output, cmd.as_std()))
     }
 
-    pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<str> {
+    pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
         match binary.kind {
             BinaryKind::Node => {
                 let mut node_args = vec![];
@@ -579,7 +597,7 @@ impl ScriptEnvironment {
         }
     }
 
-    pub async fn run_script<I, S>(&mut self, script: &str, args: I) -> ScriptResult where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+    pub async fn run_script<I, S>(&mut self, script: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
         let mut bash_args = vec![];
 
         bash_args.push("-c".to_string());

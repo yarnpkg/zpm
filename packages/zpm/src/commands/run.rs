@@ -45,7 +45,7 @@ impl Run {
                 .with_package(&project, &locator)?
                 .enable_shell_forwarding()
                 .run_script(&script, &self.args)
-                .await
+                .await?
                 .into())
         } else if matches!(maybe_script, Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_))) {
             let maybe_binary
@@ -57,9 +57,9 @@ impl Run {
                     .with_package(&project, &project.active_package()?)?
                     .enable_shell_forwarding()
                     .run_binary(&binary, &self.args)
-                    .await
+                    .await?
                     .into())
-            } else if let Err(Error::BinaryNotFound(binary)) = maybe_binary {
+            } else if let Err(Error::BinaryNotFound(_)) = maybe_binary {
                 if self.error_if_missing {
                     return Err(Error::ScriptNotFound(self.name.clone()));
                 } else {

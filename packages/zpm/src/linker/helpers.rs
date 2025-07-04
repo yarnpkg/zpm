@@ -186,7 +186,7 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     // .pnp.cjs file to change depending on the system.
     let should_build_if_compatible
         = package_flags.build_commands.len() > 0
-            && package_meta.built.unwrap_or(project.config.project.enable_scripts.value);
+            && (locator.reference.is_workspace_reference() || package_meta.built.unwrap_or(project.config.project.enable_scripts.value));
 
     // Optional dependencies baked by zip archives are always extracted,
     // as we have no way to know whether they would be extracted if we

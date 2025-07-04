@@ -1343,6 +1343,7 @@
         "build_commands": [
           {
             "type": "Script",
+            "event": null,
             "script": "node ./scripts/install.js"
           }
         ]
@@ -2137,6 +2138,7 @@
         "build_commands": [
           {
             "type": "Script",
+            "event": null,
             "script": "node install.js"
           }
         ]
@@ -3122,6 +3124,9 @@
           "lodash": "^4.17.21",
           "typescript": "^5.8.3"
         }
+      },
+      "flags": {
+        "prefer_extracted": false
       }
     },
     "safer-buffer@npm:>= 2.1.2 < 3.0.0": {
@@ -3193,6 +3198,9 @@
           "tailwindcss": "^4.0.3",
           "vite": "^5.1.6"
         }
+      },
+      "flags": {
+        "prefer_extracted": false
       }
     },
     "slash@npm:^3.0.0": {
@@ -3550,6 +3558,9 @@
       "resolution": {
         "resolution": "zpm-constraints@workspace:zpm-constraints",
         "version": "0.0.0"
+      },
+      "flags": {
+        "prefer_extracted": false
       }
     }
   }

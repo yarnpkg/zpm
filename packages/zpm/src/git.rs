@@ -380,7 +380,7 @@ async fn ls_remote(repo: &GitSource) -> Result<BTreeMap<String, String>, Error> 
         let output = ScriptEnvironment::new()?
             .with_env(make_git_env())
             .run_exec("git", &["ls-remote", &url])
-            .await
+            .await?
             .ok()?
             .output();
 
@@ -519,7 +519,8 @@ async fn git_clone_into(source: &GitSource, commit: &str, clone_dir: &Path) -> R
     repeat_until_ok(source.to_urls(), |clone_url| async move {
         ScriptEnvironment::new()?
             .with_env(make_git_env())
-            .run_exec("git", &["clone", "-c", "core.autocrlf=false", &clone_url, clone_dir.as_str()]).await
+            .run_exec("git", &["clone", "-c", "core.autocrlf=false", &clone_url, clone_dir.as_str()])
+            .await?
             .ok()?;
 
         Ok::<(), Error>(())
@@ -528,7 +529,8 @@ async fn git_clone_into(source: &GitSource, commit: &str, clone_dir: &Path) -> R
     ScriptEnvironment::new()?
         .with_cwd(clone_dir.clone())
         .with_env(make_git_env())
-        .run_exec("git", &["checkout", commit]).await
+        .run_exec("git", &["checkout", commit])
+        .await?
         .ok()?;
 
     Ok(())

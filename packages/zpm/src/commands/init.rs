@@ -203,7 +203,7 @@ impl Init {
         // git init
         let init = ScriptEnvironment::new()?
           .run_exec("git", ["init"])
-          .await
+          .await?
           .ok();
 
         if init.is_ok() {
@@ -218,13 +218,13 @@ impl Init {
 
           ScriptEnvironment::new()?
             .run_exec("git", add_args)
-            .await
+            .await?
             .ok()?;
             
           // git commit
           ScriptEnvironment::new()?
             .run_exec("git", ["commit", "--allow-empty", "-m", "First commit"])
-            .await
+            .await?
             .ok()?;
         }
       }
