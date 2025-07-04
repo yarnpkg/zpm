@@ -50,7 +50,7 @@ pub struct BuildRequest {
 }
 
 impl BuildRequest {
-    pub async fn run(self, project: &Project, hash: Option<String>) -> Result<ScriptResult, Error> {
+    pub async fn run(self, project: &Project, hash: String) -> Result<ScriptResult, Error> {
         let cwd_abs = project.project_cwd
             .with_join(&self.cwd);
 
@@ -61,18 +61,14 @@ impl BuildRequest {
             .with_cwd(cwd_abs.clone());
 
         let res = with_context_result(ReportContext::Locator(self.locator.clone()), async {
-            let build_cache_folder = match (self.locator.reference.is_disk_reference(), &hash) {
-                (false, Some(hash)) => {
-                    let build_cache_folder = project.project_cwd
-                        .with_join_str(".yarn/ignore/builds")
-                        .with_join_str(format!("{}-{}", self.locator.slug(), hash));
+            let build_cache_folder = if self.locator.reference.is_disk_reference() {
+                None
+            } else {
+                let build_cache_folder = project.project_cwd
+                    .with_join_str(".yarn/ignore/builds")
+                    .with_join_str(format!("{}-{}", self.locator.slug(), hash));
 
-                    Some(build_cache_folder)
-                },
-
-                _ => {
-                    None
-                },
+                Some(build_cache_folder)
             };
 
             let mut artifact_finder
@@ -150,7 +146,7 @@ pub struct BuildManager<'a> {
     pub dependents: BTreeMap<usize, BTreeSet<usize>>,
     pub tree_hashes: BTreeMap<Locator, String>,
     pub queued: Vec<usize>,
-    pub running: FuturesUnordered<BoxFuture<'a, (usize, Option<String>, Result<ScriptResult, Error>)>>,
+    pub running: FuturesUnordered<BoxFuture<'a, (usize, String, Result<ScriptResult, Error>)>>,
     pub build_errors: BTreeSet<(Locator, Path)>,
     pub build_state_out: BTreeMap<Path, String>,
 }
@@ -178,16 +174,14 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn record(&mut self, idx: usize, hash: Option<String>, script_result: ScriptResult) {
+    fn record(&mut self, idx: usize, hash: String, script_result: ScriptResult) {
         let request
             = &self.requests.entries[idx];
 
         if !script_result.success() {
             self.build_errors.insert(request.key());
         } else {
-            if let Some(hash) = hash {
-                self.build_state_out.insert(request.cwd.clone(), hash);
-            }
+            self.build_state_out.insert(request.cwd.clone(), hash);
 
             if let Some(dependents) = self.dependents.get_mut(&idx) {
                 for &dependent_idx in dependents.iter() {
@@ -215,15 +209,13 @@ impl<'a> BuildManager<'a> {
                     = req.force_rebuild;
 
                 let tree_hash
-                    = Some(self.get_hash(project, &req.locator));
+                    = self.get_hash(project, &req.locator);
 
                 if !force_rebuild {
                     if let Some(previous_hash) = build_state.get(&req.cwd) {
-                        if let Some(current_hash) = &tree_hash {
-                            if previous_hash == current_hash {
-                                self.record(idx, tree_hash, ScriptResult::new_success());
-                                continue;
-                            }
+                        if previous_hash == &tree_hash {
+                            self.record(idx, tree_hash, ScriptResult::new_success());
+                            continue;
                         }
                     }
                 }
