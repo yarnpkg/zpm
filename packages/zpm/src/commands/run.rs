@@ -13,6 +13,9 @@ pub struct Run {
     #[cli::option("-T,--top-level", default = false)]
     top_level: bool,
 
+    #[cli::option("-B,--binaries-only", default = false)]
+    binaries_only: bool,
+
     #[cli::option("--error-if-missing", default = true)]
     error_if_missing: bool,
 
@@ -36,18 +39,7 @@ impl Run {
             project.package_cwd = Path::new();
         }
 
-        let maybe_script
-            = project.find_script(&self.name);
-
-        if let Ok((locator, script)) = maybe_script {
-            Ok(ScriptEnvironment::new()?
-                .with_project(&project)
-                .with_package(&project, &locator)?
-                .enable_shell_forwarding()
-                .run_script(&script, &self.args)
-                .await?
-                .into())
-        } else if matches!(maybe_script, Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_))) {
+        let execute_binary = async || {
             let maybe_binary
                 = project.find_binary(&self.name);
 
@@ -68,8 +60,26 @@ impl Run {
             } else {
                 Err(maybe_binary.unwrap_err())
             }
-        } else {
-            Err(maybe_script.unwrap_err())
+        };
+
+        if self.binaries_only {
+            return execute_binary().await;
+        }
+
+        match project.find_script(&self.name) {
+            Ok((locator, script)) => {
+                Ok(ScriptEnvironment::new()?
+                    .with_project(&project)
+                    .with_package(&project, &locator)?
+                    .enable_shell_forwarding()
+                    .run_script(&script, &self.args)
+                    .await?
+                    .into())
+            },
+
+            Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_)) => execute_binary().await,
+
+            Err(err) => Err(err),
         }
     }
 }
