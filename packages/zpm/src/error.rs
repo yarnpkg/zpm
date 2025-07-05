@@ -322,6 +322,9 @@ pub enum Error {
     #[error("Task timeout")]
     TaskTimeout,
 
+    #[error("Invalid install mode ({0})")]
+    InvalidInstallMode(String),
+
     #[error("Internal error: Join failed ({0})")]
     JoinFailed(#[from] Arc<JoinError>),
 
