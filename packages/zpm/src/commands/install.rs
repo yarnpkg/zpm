@@ -21,6 +21,9 @@ pub struct Install {
 
     #[cli::option("--refresh-lockfile", default = false)]
     refresh_lockfile: bool,
+
+    #[cli::option("--inline-builds", default = false)]
+    inline_builds: bool,
 }
 
 impl Install {
@@ -35,6 +38,10 @@ impl Install {
 
         if self.immutable_cache {
             project.config.project.enable_immutable_cache.value = true;
+        }
+
+        if self.inline_builds {
+            project.config.project.enable_inline_builds.value = true;
         }
 
         project.run_install(RunInstallOptions {

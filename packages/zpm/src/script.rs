@@ -353,6 +353,11 @@ impl ScriptEnvironment {
         self
     }
 
+    pub fn with_shell_forwarding(mut self, shell_forwarding: bool) -> Self {
+        self.shell_forwarding = shell_forwarding;
+        self
+    }
+
     pub fn with_stdin(mut self, stdin: Option<String>) -> Self {
         self.stdin = stdin;
         self
@@ -421,7 +426,7 @@ impl ScriptEnvironment {
         let manifest_location_abs = project.project_cwd
             .with_join(package_location_rel)
             .with_join_str("package.json");
-        
+
         self.env.insert("npm_package_name".to_string(), Some(locator.ident.to_file_string()));
         self.env.insert("npm_package_version".to_string(), Some(resolution.version.to_file_string()));
         self.env.insert("npm_package_json".to_string(), Some(manifest_location_abs.to_file_string()));
@@ -439,7 +444,7 @@ impl ScriptEnvironment {
 
         self.cwd = project.project_cwd
             .with_join(package_cwd_rel);
-    
+
         self.attach_package_variables(project, locator)?;
 
         let binaries
@@ -490,7 +495,7 @@ impl ScriptEnvironment {
             for binary in &self.binaries.binaries {
                 make_path_wrapper(&temp_dir, &binary.name, &binary.argv0, &binary.args)?;
             }
-    
+
             temp_dir
                 .fs_rename(&dir)?;
         }
@@ -555,7 +560,7 @@ impl ScriptEnvironment {
 
         let mut child
             = cmd.spawn().unwrap();
-        
+
         if let Some(stdin) = &self.stdin {
             if let Some(mut child_stdin) = child.stdin.take() {
                 use tokio::io::AsyncWriteExt;
