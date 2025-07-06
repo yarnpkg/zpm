@@ -39,7 +39,7 @@ impl Run {
             project.package_cwd = Path::new();
         }
 
-        let execute_binary = async || {
+        let execute_binary = async |error_script_not_found: bool| {
             let maybe_binary
                 = project.find_binary(&self.name);
 
@@ -51,9 +51,13 @@ impl Run {
                     .run_binary(&binary, &self.args)
                     .await?
                     .into())
-            } else if let Err(Error::BinaryNotFound(_)) = maybe_binary {
+            } else if let Err(Error::BinaryNotFound(name)) = maybe_binary {
                 if self.error_if_missing {
-                    return Err(Error::ScriptNotFound(self.name.clone()));
+                    Err(if error_script_not_found {
+                        Error::ScriptNotFound(name)
+                    } else {
+                        Error::BinaryNotFound(name)
+                    })
                 } else {
                     Ok(ExitStatus::from_raw(0))
                 }
@@ -63,7 +67,7 @@ impl Run {
         };
 
         if self.binaries_only {
-            return execute_binary().await;
+            return execute_binary(false).await;
         }
 
         match project.find_script(&self.name) {
@@ -77,7 +81,7 @@ impl Run {
                     .into())
             },
 
-            Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_)) => execute_binary().await,
+            Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_)) => execute_binary(true).await,
 
             Err(err) => Err(err),
         }
