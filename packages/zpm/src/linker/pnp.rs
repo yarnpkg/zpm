@@ -107,6 +107,25 @@ struct PnpState {
     dependency_tree_roots: Vec<PnpDependencyTreeRoot>,
 }
 
+fn serialize_string(s: &str) -> String {
+    let mut escaped
+        = String::with_capacity(s.len() * 110 / 100);
+
+    escaped.push('\'');
+
+    for c in s.chars() {
+        if matches!(c, '\'' | '\n' | '\\') {
+            escaped.push('\\');
+        }
+
+        escaped.push(c);
+    }
+
+    escaped.push('\'');
+
+    escaped
+}
+
 fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Error> {
     let script = vec![
         project.config.project.pnp_shebang.value.as_str(), "\n",
@@ -115,7 +134,7 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
         "\"use strict\";\n",
         "\n",
         "const RAW_RUNTIME_STATE =\n",
-        &sonic_rs::to_string(&sonic_rs::to_string(&state).unwrap()).unwrap(), ";\n",
+        &serialize_string(&sonic_rs::to_string_pretty(&state).unwrap()), ";\n",
         "\n",
         "function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n",
         "  return hydrateRuntimeState(JSON.parse(RAW_RUNTIME_STATE), {basePath: basePath || __dirname});\n",

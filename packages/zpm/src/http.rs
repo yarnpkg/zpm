@@ -11,16 +11,16 @@ pub struct HttpClient {
 
 impl HttpClient {
     pub fn new(config: &Config) -> Result<Arc<Self>, Error> {
-        let sock_addrs = format!("registry.npmjs.org:443").to_socket_addrs()
-            .map_err(|err| Error::DnsResolutionError(Arc::new(err)))?
-            .collect::<Vec<_>>();
+        // let sock_addrs = format!("registry.npmjs.org:443").to_socket_addrs()
+        //     .map_err(|err| Error::DnsResolutionError(Arc::new(err)))?
+        //     .collect::<Vec<_>>();
 
         let client = reqwest::Client::builder()
             // TODO: Can we avoid hardcoding the DNS resolution? If we don't I get
             // errors due to exhausting the amount of open files when running an
             // install with a lockfile but without cache. I suspect something is
             // not configured properly in the DNS resolver pool.
-            .resolve_to_addrs("registry.npmjs.org", &sock_addrs)
+            // .resolve_to_addrs("registry.npmjs.org", &sock_addrs)
 
             // Connection pooling settings
             .pool_max_idle_per_host(config.user.network_concurrency.value as usize)
