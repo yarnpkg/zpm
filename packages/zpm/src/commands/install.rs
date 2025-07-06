@@ -1,6 +1,6 @@
 use clipanion::cli;
 
-use crate::{error::Error, project::{self, RunInstallOptions}};
+use crate::{error::Error, project::{self, InstallMode, RunInstallOptions}};
 
 #[cli::command(default)]
 #[cli::path("install")]
@@ -21,6 +21,9 @@ pub struct Install {
 
     #[cli::option("--refresh-lockfile", default = false)]
     refresh_lockfile: bool,
+
+    #[cli::option("--mode")]
+    mode: Option<InstallMode>,
 }
 
 impl Install {
@@ -41,6 +44,7 @@ impl Install {
             check_checksums: self.check_checksums,
             check_resolutions: self.check_resolutions,
             refresh_lockfile: self.refresh_lockfile,
+            mode: self.mode,
             ..Default::default()
         }).await?;
 
