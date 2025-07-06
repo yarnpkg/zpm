@@ -121,8 +121,8 @@ async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descriptor
         = JsonFormatter::from(&manifest_content)?;
 
     for descriptor in descriptors.into_iter() {
-        formatter.update(
-            vec!["dependencies".to_string(), descriptor.ident.to_file_string()], 
+        formatter.set(
+            vec!["dependencies".to_string(), descriptor.ident.to_file_string()],
             JsonValue::String(descriptor.range.to_file_string()),
         )?;
     }

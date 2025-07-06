@@ -6,7 +6,7 @@ use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, SemverDescriptor}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, settings::PackageExtension, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, SemverDescriptor}, project::{InstallMode, Project}, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, settings::PackageExtension, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
 #[derive(Clone, Default)]
@@ -16,6 +16,7 @@ pub struct InstallContext<'a> {
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub refresh_lockfile: bool,
+    pub mode: Option<InstallMode>,
 }
 
 impl<'a> InstallContext<'a> {
@@ -41,6 +42,11 @@ impl<'a> InstallContext<'a> {
 
     pub fn set_refresh_lockfile(mut self, refresh_lockfile: bool) -> Self {
         self.refresh_lockfile = refresh_lockfile;
+        self
+    }
+
+    pub fn set_mode(mut self, mode: Option<InstallMode>) -> Self {
+        self.mode = mode;
         self
     }
 }
@@ -406,6 +412,7 @@ pub struct Install {
     pub lockfile_changed: bool,
     pub package_data: BTreeMap<Locator, PackageData>,
     pub install_state: InstallState,
+    pub skip_build: bool,
 }
 
 impl Install {
@@ -421,7 +428,7 @@ impl Install {
         project.attach_install_state(self.install_state)?;
         project.write_lockfile(&self.lockfile)?;
 
-        if !build_requests.entries.is_empty() {
+        if !self.skip_build && !build_requests.entries.is_empty() {
             let build_future
                 = build::BuildManager::new(build_requests).run(project);
 
@@ -633,6 +640,8 @@ impl<'a> InstallManager<'a> {
             .run();
 
         self.result.lockfile_changed = self.result.lockfile != self.initial_lockfile;
+
+        self.result.skip_build = self.context.mode == Some(InstallMode::SkipBuild);
 
         if let Some(cache) = &self.context.package_cache {
             cache.clean().await?;
