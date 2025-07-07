@@ -58,13 +58,17 @@ impl HttpClient {
                 = self.client.get(url).send().await;
 
             let is_failure = match &response {
-                Ok(response) => !response.status().is_success(),
+                Ok(response) => response.status().is_server_error() || matches!(response.status().as_u16(), 408 | 413 | 429),
                 Err(_) => true,
             };
 
             if is_failure && retry_count < self.http_retry {
                 retry_count += 1;
-                tokio::time::sleep(Duration::from_millis(100)).await;
+
+                let sleep_duration
+                    = 1000_u64 * 2_u64.pow(retry_count as u32);
+
+                tokio::time::sleep(Duration::from_millis(sleep_duration)).await;
                 continue;
             }
 
