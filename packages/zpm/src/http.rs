@@ -66,9 +66,11 @@ impl HttpClient {
                 retry_count += 1;
 
                 let sleep_duration
-                    = 1000_u64 * 2_u64.pow(retry_count as u32);
+                    = 2_u64.saturating_pow(retry_count as u32);
+                let bounded_sleep_duration
+                    = std::cmp::min(sleep_duration, 10);
 
-                tokio::time::sleep(Duration::from_millis(sleep_duration)).await;
+                tokio::time::sleep(Duration::from_secs(bounded_sleep_duration)).await;
                 continue;
             }
 
