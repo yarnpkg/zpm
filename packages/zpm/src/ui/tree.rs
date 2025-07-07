@@ -231,4 +231,68 @@ Root
 
         assert_eq!(node.to_string(), expected);
     }
+
+    #[test]
+    fn test_multiline_at_start() {
+        let node = Node {
+            label: "Root".to_string(),
+            children: vec![
+                Node {
+                    label: "Multi-line child\nSecond line\nThird line".to_string(),
+                    children: vec![],
+                },
+                Node {
+                    label: "Child 2".to_string(),
+                    children: vec![],
+                },
+                Node {
+                    label: "Child 3".to_string(),
+                    children: vec![],
+                },
+            ],
+        };
+
+        let expected = "\
+Root
+├─ Multi-line child
+│  Second line
+│  Third line
+├─ Child 2
+└─ Child 3
+";
+
+        assert_eq!(node.to_string(), expected);
+    }
+
+    #[test]
+    fn test_multiline_at_end() {
+        let node = Node {
+            label: "Root".to_string(),
+            children: vec![
+                Node {
+                    label: "Child 1".to_string(),
+                    children: vec![],
+                },
+                Node {
+                    label: "Child 2".to_string(),
+                    children: vec![],
+                },
+                Node {
+                    label: "Last child with\nmultiple lines\nof text".to_string(),
+                    children: vec![],
+                },
+            ],
+        };
+
+        let expected = "\
+Root
+├─ Child 1
+├─ Child 2
+└─ Last child with
+   multiple lines
+   of text
+";
+
+        assert_eq!(node.to_string(), expected);
+    }
 }
