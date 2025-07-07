@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use clipanion::cli;
 use colored::Colorize;
-use zpm_utils::{DataType, Path, ToFileString, ToHumanString};
+use zpm_utils::{DataType, OkMissing, Path, ToFileString, ToHumanString};
 use zpm_parsers::JsonFormatter;
 
 use crate::{constraints::{structs::{ConstraintsContext, ConstraintsOutput, WorkspaceError, WorkspaceOperation}, to_constraints_package, to_constraints_workspace}, error::Error, project::Project, script::ScriptEnvironment, ui::tree};
@@ -13,6 +13,9 @@ use crate::{constraints::{structs::{ConstraintsContext, ConstraintsOutput, Works
 pub struct Constraints {
     #[cli::option("-f,--fix", default = false)]
     fix: bool,
+
+    #[cli::option("--json", default = false)]
+    json: bool,
 }
 
 impl Constraints {
@@ -55,19 +58,29 @@ impl Constraints {
             let script
                 = generate_constraints_adapter(&config_path, &constraints_context, self.fix);
 
-            let output = ScriptEnvironment::new()?
+            let temp_dir
+                = Path::temp_dir()?;
+
+            let script_path = temp_dir
+                .with_join_str("script.js");
+            let result_path = temp_dir
+                .with_join_str("result.json");
+
+            script_path
+                .fs_write_text(&script)?;
+
+            ScriptEnvironment::new()?
                 .with_project(&project)
-                .with_stdin(Some(script))
-                .run_exec("node", &vec!["-"])
+                .enable_shell_forwarding()
+                .run_exec("node", &vec![script_path.to_file_string(), result_path.to_file_string()])
                 .await?
                 .ok()?;
 
-            let stdout
-                = &output.output()
-                    .stdout;
+            let result_content = result_path
+                .fs_read_prealloc()?;
 
             let output
-                = serde_json::from_slice::<ConstraintsOutput>(&stdout).unwrap();
+                = sonic_rs::from_slice::<ConstraintsOutput>(&result_content)?;
 
             for (workspace_rel_path, operations) in &output.all_workspace_operations {
                 // Read the current manifest
@@ -108,8 +121,14 @@ impl Constraints {
                 || loop_idx == max_loops;
 
             if should_break {
+                if self.json {
+                    println!("{}", String::from_utf8_lossy(&result_content));
+                }
+
                 if !output.all_workspace_errors.is_empty() {
-                    display_report(&project, &output)?;
+                    if !self.json {
+                        display_report(&project, &output)?;
+                    }
                     return Ok(ExitCode::FAILURE);
                 } else {
                     return Ok(ExitCode::SUCCESS);

@@ -1706,6 +1706,16 @@
         }
       }
     },
+    "@types/node@npm:^24.0.10": {
+      "checksum": "ecebd009fe4871f5b3f317b5f02f6952d61bdaf1c64da09eca7c69519564d4e973efbf871567cb73ff8e2e41000a12598a9a49d8f300bd1bd1a8b8178d1a374e",
+      "resolution": {
+        "resolution": "@types/node@npm:24.0.10",
+        "version": "24.0.10",
+        "dependencies": {
+          "undici-types": "~7.8.0"
+        }
+      }
+    },
     "@types/prop-types@npm:*": {
       "checksum": "03f7b370e706266038e638907bada1089d55f8d908b31505f745548118a4d5d900233047326064595f855c4eed0697e70f0a0c90fb1b6853750f0b07740de38c",
       "resolution": {
@@ -3428,6 +3438,13 @@
         "version": "6.21.0"
       }
     },
+    "undici-types@npm:~7.8.0": {
+      "checksum": "66e9891521cb3c93a19d390ad5c04ed8deb35badea354555a95268a5a64a74b6354c87fd05e4a195e79eee599ca83a6aca6093417807d6455c6dabad3b77b94b",
+      "resolution": {
+        "resolution": "undici-types@npm:7.8.0",
+        "version": "7.8.0"
+      }
+    },
     "unique-filename@npm:^4.0.0": {
       "checksum": "4535149b91d32d1c71c4c20cce9b55291fd14f4693172728dbb0102a1f8abc6a223f85b2a468632cf063a1ab5a3d01a49263a707afafbed23a5a97a1eff42032",
       "resolution": {
@@ -3557,7 +3574,14 @@
       "checksum": null,
       "resolution": {
         "resolution": "zpm-constraints@workspace:zpm-constraints",
-        "version": "0.0.0"
+        "version": "0.0.0",
+        "dependencies": {
+          "@types/lodash": "^4.17.17",
+          "@types/node": "^24.0.10",
+          "@yarnpkg/types": "^4.0.1",
+          "esbuild": "^0.25.5",
+          "lodash": "^4.17.21"
+        }
       },
       "flags": {
         "prefer_extracted": false

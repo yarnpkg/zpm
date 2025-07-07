@@ -12,8 +12,20 @@ impl Node {
         let mut result = String::new();
 
         if prefix.len() > 0 || self.label.len() > 0 {
-            result.push_str(&self.label);
+            let mut lines
+                = self.label.lines();
+
+            let first_line
+                = lines.next().unwrap_or("");
+
+            result.push_str(&first_line);
             result.push('\n');
+
+            for line in lines {
+                result.push_str(&prefix);
+                result.push_str(line);
+                result.push('\n');
+            }
         }
 
         let children_count = self.children.len();

@@ -1,7 +1,7 @@
 import {Yarn} from '@yarnpkg/types';
-import {get, set, unset} from 'lodash';
+import get from 'lodash/get';
 import {createRequire} from 'module';
-import {readFileSync} from 'fs';
+import {readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
 import * as constraintsUtils from './constraintsUtils';
@@ -28,8 +28,10 @@ type PerPathInfo = {
   values: Map<any, PerValueInfo>,
 };
 
-const manifestUpdates = new Map<string, Map<string, PerPathInfo>>();
-const userWorkspaceErrors = new Map<string, AnnotatedError[]>();
+const allWorkspaceActions = new Map<string, {
+  updates: Map<string, PerPathInfo>,
+  errors: AnnotatedError[],
+}>();
 
 const workspaceIndex = new constraintsUtils.Index<Yarn.Constraints.Workspace>([`cwd`, `ident`]);
 const dependencyIndex = new constraintsUtils.Index<Yarn.Constraints.Dependency>([`workspace`, `type`, `ident`]);
@@ -39,9 +41,12 @@ const createSetFn = (workspaceCwd: string) => (path: Array<string> | string, val
   const pathfieldPath = constraintsUtils.normalizePath(path);
   const key = pathfieldPath.join(`.`);
 
-  const workspaceUpdates = miscUtils.getMapWithDefault(manifestUpdates, workspaceCwd);
+  const workspaceActions = miscUtils.getFactoryWithDefault(allWorkspaceActions, workspaceCwd, () => ({
+    updates: new Map(),
+    errors: [],
+  }));
 
-  const pathUpdates = miscUtils.getFactoryWithDefault(workspaceUpdates, key, () => ({
+  const pathUpdates = miscUtils.getFactoryWithDefault(workspaceActions.updates, key, () => ({
     fieldPath: pathfieldPath,
     values: new Map(),
   }));
@@ -55,9 +60,23 @@ const createSetFn = (workspaceCwd: string) => (path: Array<string> | string, val
   }
 };
 
+const createErrorFn = (workspaceCwd: string) => (message: string) => {
+  const workspaceActions = miscUtils.getFactoryWithDefault(allWorkspaceActions, workspaceCwd, () => ({
+    updates: new Map(),
+    errors: [],
+  }));
+
+  workspaceActions.errors.push({
+    type: `userError`,
+    message,
+  });
+};
+
 declare const SERIALIZED_CONTEXT: string;
 declare const CONFIG_PATH: string;
 declare const FIX: boolean;
+
+const RESULT_PATH = process.argv[2];
 
 type InputDependency = {
   ident: string;
@@ -69,7 +88,7 @@ type InputDependency = {
 const input: {
   workspaces: Array<{
     cwd: string;
-    name: string;
+    ident: string;
     dependencies: Array<InputDependency>;
     peerDependencies: Array<InputDependency>;
     devDependencies: Array<InputDependency>;
@@ -90,13 +109,10 @@ const workspaceByCwd = new Map<string, Yarn.Constraints.Workspace>();
 
 for (const workspace of input.workspaces) {
   const setFn = createSetFn(workspace.cwd);
+  const errorFn = createErrorFn(workspace.cwd);
 
   const unsetFn = (path: Array<string> | string) => {
     return setFn(path, undefined, {caller: nodeUtils.getCaller()});
-  };
-
-  const errorFn = (message: string) => {
-    miscUtils.getArrayWithDefault(userWorkspaceErrors, workspace.cwd).push({type: `userError`, message});
   };
 
   const manifestPath = join(workspace.cwd, 'package.json');
@@ -105,7 +121,7 @@ for (const workspace of input.workspaces) {
 
   const hydratedWorkspace: Yarn.Constraints.Workspace = {
     cwd: workspace.cwd,
-    ident: workspace.name,
+    ident: workspace.ident,
     manifest: manifest,
     pkg: null as any,
     set: setFn,
@@ -140,6 +156,7 @@ for (const pkg of input.packages) {
 
 for (const workspace of input.workspaces) {
   const setFn = createSetFn(workspace.cwd);
+  const errorFn = createErrorFn(workspace.cwd);
 
   const hydratedWorkspace = workspaceByCwd.get(workspace.cwd);
   if (typeof hydratedWorkspace === 'undefined')
@@ -165,9 +182,7 @@ for (const workspace of input.workspaces) {
       delete: () => {
         setFn([dependency.dependencyType, dependency.ident], undefined, {caller: nodeUtils.getCaller()});
       },
-      error: message => {
-        miscUtils.getArrayWithDefault(userWorkspaceErrors, workspace.cwd).push({type: `userError`, message});
-      },
+      error: errorFn,
     };
 
     dependencyIndex.insert(hydratedDependency);
@@ -186,9 +201,7 @@ for (const workspace of input.workspaces) {
       delete: () => {
         setFn([`peerDependencies`, peerDependency.ident], undefined, {caller: nodeUtils.getCaller()});
       },
-      error: message => {
-        miscUtils.getArrayWithDefault(userWorkspaceErrors, workspace.cwd).push({type: `userError`, message});
-      },
+      error: errorFn,
     };
 
     dependencyIndex.insert(hydratedPeerDependency);
@@ -214,9 +227,7 @@ for (const workspace of input.workspaces) {
       delete: () => {
         setFn([`devDependencies`, devDependency.ident], undefined, {caller: nodeUtils.getCaller()});
       },
-      error: message => {
-        miscUtils.getArrayWithDefault(userWorkspaceErrors, workspace.cwd).push({type: `userError`, message});
-      },
+      error: errorFn,
     };
 
     dependencyIndex.insert(hydratedDevDependency);
@@ -260,13 +271,13 @@ function applyEngineReport(fix: boolean) {
   const allWorkspaceOperations = new Map<string, Array<Operation>>();
   const allWorkspaceErrors = new Map<string, Array<AnnotatedError>>();
 
-  for (const [workspaceCwd, workspaceUpdates] of manifestUpdates) {
+  for (const [workspaceCwd, workspaceActions] of allWorkspaceActions) {
     const manifest = workspaceByCwd.get(workspaceCwd)!.manifest;
 
-    const workspaceErrors = userWorkspaceErrors.get(workspaceCwd)?.slice() ?? [];
+    const workspaceErrors = workspaceActions.errors.slice();
     const workspaceOperations: Array<Operation> = [];
 
-    for (const {fieldPath, values} of workspaceUpdates.values()) {
+    for (const {fieldPath, values} of workspaceActions.updates.values()) {
       if (values.size > 1) {
         const valuesArray = [...values];
 
@@ -332,7 +343,7 @@ async function main() {
 
   const output = applyEngineReport(FIX);
 
-  console.log(JSON.stringify(output, null, 4));
+  writeFileSync(RESULT_PATH, JSON.stringify(output, null, 2));
 }
 
 main();
