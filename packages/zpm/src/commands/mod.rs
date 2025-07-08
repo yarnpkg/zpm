@@ -43,6 +43,7 @@ program!(YarnCli, [
     dlx::DlxWithPackages,
     dlx::Dlx,
     exec::Exec,
+    init::InitWithTemplate,
     init::Init,
     install::Install,
     set_version::SetVersion,

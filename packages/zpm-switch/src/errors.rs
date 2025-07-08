@@ -23,6 +23,9 @@ pub enum Error {
     #[error(transparent)]
     RequestError(#[from] Arc<reqwest::Error>),
 
+    #[error(transparent)]
+    JsonError(#[from] Arc<sonic_rs::Error>),
+
     #[error("Unknown binary name: {0}")]
     UnknownBinaryName(String),
 
@@ -75,5 +78,11 @@ impl From<reqwest::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
         Error::from(Arc::new(value))
+    }
+}
+
+impl From<sonic_rs::Error> for Error {
+    fn from(value: sonic_rs::Error) -> Self {
+        Error::JsonError(Arc::new(value))
     }
 }

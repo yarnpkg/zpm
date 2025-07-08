@@ -16,8 +16,22 @@ runExit(class ImportArtifactsCommand extends Command {
   });
 
   async execute() {
+    await this.importHooks();
     await this.importPatches();
     await this.importPackageExtensions();
+  }
+
+  async importHooks() {
+    const cjsSourcePath = path.join(this.berryFolder, 'packages/yarnpkg-pnp/sources/hook.js');
+    const cjsOutputPath = path.join(process.cwd(), 'packages/zpm/src/linker/pnp-cjs.brotli.dat');
+
+    const mjsSourcePath = path.join(this.berryFolder, 'packages/yarnpkg-pnp/sources/esm-loader/built-loader.js');
+    const mjsOutputPath = path.join(process.cwd(), 'packages/zpm/src/linker/pnp-mjs.brotli.dat');
+
+    await fs.writeFile(cjsOutputPath, await this.extractBrotli(cjsSourcePath));
+    await fs.writeFile(mjsOutputPath, await this.extractBrotli(mjsSourcePath));
+
+    console.log(`  ✓ PnP hooks`);
   }
 
   async importPatches() {
@@ -30,29 +44,22 @@ runExit(class ImportArtifactsCommand extends Command {
     // Process all patches
     const files = await fs.readdir(patchesDir);
     const patchFiles = files.filter(f => f.endsWith('.patch.ts'));
-    
+
     for (const file of patchFiles) {
       const name = file.replace('.patch.ts', '');
       await this.processPatch(patchesDir, outputDir, name);
     }
-    
+
     console.log(`Processed ${patchFiles.length} patches`);
   }
 
   async processPatch(patchesDir, outputDir, name) {
     const sourcePath = path.join(patchesDir, `${name}.patch.ts`);
-    const source = await fs.readFile(sourcePath, 'utf8');
-    
-    const match = source.match(/brotliDecompressSync\((Buffer\.from\(.*?, `base64`\))\)/);
-    if (!match)
-      throw new Error(`Could not find brotli-compressed content in ${name}.patch.ts`);
-      
-    const payload = match[1];
-    const buffer = eval(`(${payload})`);
-    
+    const buffer = await this.extractBrotli(sourcePath);
+
     const outputPath = path.join(outputDir, `${name}.brotli.dat`);
     await fs.writeFile(outputPath, buffer);
-    
+
     console.log(`  ✓ ${name}`);
   }
 
@@ -70,5 +77,18 @@ runExit(class ImportArtifactsCommand extends Command {
     await fs.writeFile(outputPath, serialized);
 
     console.log(`Imported ${Object.keys(entries).length} package extensions`);
+  }
+
+  async extractBrotli(sourcePath) {
+    const source = await fs.readFile(sourcePath, 'utf8');
+
+    const match = source.match(/brotliDecompressSync\((Buffer\.from\(.*?, ['`]base64['`]\))\)/);
+    if (!match)
+      throw new Error(`Could not find brotli-compressed content in ${sourcePath}`);
+
+    const payload = match[1];
+    const buffer = eval(`(${payload})`);
+
+    return buffer;
   }
 });

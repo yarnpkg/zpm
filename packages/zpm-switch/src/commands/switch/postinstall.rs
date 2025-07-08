@@ -2,7 +2,10 @@ use std::str::FromStr;
 use std::process::Command;
 
 use clipanion::cli;
-use zpm_utils::{DataType, OkMissing, Path, ToFileString, ToHumanString};
+use sonic_rs::JsonValueMutTrait;
+use zpm_utils::{DataType, FromFileString, Note, OkMissing, Path, ToFileString, ToHumanString};
+
+use crate::errors::Error;
 
 #[cli::command]
 #[cli::path("switch", "postinstall")]
@@ -150,14 +153,49 @@ impl PostinstallCommand {
             return;
         };
 
-        if path_output.contains("/.volta/tools/image/yarn/") {
+        let volta_yarn_path = path_output
+            .split(':')
+            .find(|entry| entry.contains("/tools/image/yarn/"));
+
+        if let Some(volta_yarn_path) = volta_yarn_path {
             println!();
-            println!(
-                "[Warning] Volta appears to be injecting paths that will shadow Yarn Switch shims in Node.js subprocesses."
-            );
-            println!(
-                "See https://github.com/volta-cli/volta/issues/2053 for more information."
-            );
+
+            Note::Warning(format!("
+                Volta appears to be injecting paths that shadow our own shims in Node.js subprocesses.
+                We're going to remove the yarn field from Volta's platform.json file to workaround this issue.
+                See {url} for more information.
+            ", url = DataType::Url.colorize("https://github.com/volta-cli/volta/issues/2053"))).print();
+
+            if let Err(err) = self.apply_volta_workaround(volta_yarn_path) {
+                println!("          Failed to apply workaround: {err}");
+            }
         }
+    }
+
+    fn apply_volta_workaround(&self, volta_yarn_path: &str) -> Result<(), Error> {
+        let volta_yarn_path
+            = Path::from_file_string(volta_yarn_path)?;
+
+        let volta_platform_path = volta_yarn_path
+            .with_join_str("../../../../user/platform.json");
+
+        let volta_platform_content = volta_platform_path
+            .fs_read_prealloc()?;
+
+        let mut volta_platform
+            = sonic_rs::from_slice::<sonic_rs::Value>(&volta_platform_content)?;
+
+        volta_platform
+            .as_object_mut()
+            .unwrap()
+            .remove(&"yarn");
+
+        let volta_platform_json
+            = sonic_rs::to_string_pretty(&volta_platform)?;
+
+        volta_platform_path
+            .fs_write_text(&volta_platform_json)?;
+
+        Ok(())
     }
 }
