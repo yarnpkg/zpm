@@ -95,6 +95,11 @@ pub enum Selector {
         channel: Option<Channel>,
     },
 
+    #[pattern(spec = "(?<version>.*)")]
+    Version {
+        version: zpm_semver::Version,
+    },
+
     #[pattern(spec = "(?<range>.*)")]
     Range {
         range: zpm_semver::Range,
@@ -120,14 +125,18 @@ impl ToFileString for Selector {
             Selector::Channel(ChannelSelector {release_line: Some(release_line), channel: Some(channel)}) => {
                 format!("{}-{}", release_line.to_file_string(), channel.to_file_string())
             },
-    
+
+            Selector::Version(VersionSelector {version}) => {
+                version.to_file_string()
+            },
+
             Selector::Range(RangeSelector {range}) => {
                 range.to_file_string()
             },
         }
     }
 }
-    
+
 impl ToHumanString for Selector {
     fn to_print_string(&self) -> String {
         self.to_file_string()

@@ -18,14 +18,14 @@ impl ExplicitCommand {
         let mut binary = match reference {
             PackageManagerReference::Version(params)
                 => install_package_manager(params).await?,
-    
+
             PackageManagerReference::Local(params)
                 => Command::new(params.path.to_path_buf()),
         };
 
         binary.stdout(Stdio::inherit());
         binary.args(args);
-    
+
         Ok(binary.status()?)
     }
 
@@ -51,7 +51,7 @@ impl ExplicitCommand {
         let version
             = resolve_selector(&self.selector).await?;
 
-        let reference   
+        let reference
             = VersionPackageManagerReference {version};
 
         ExplicitCommand::run(&reference.into(), &args).await

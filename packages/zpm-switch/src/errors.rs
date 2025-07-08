@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use reqwest::StatusCode;
-use zpm_utils::PathError;
+use zpm_utils::{PathError, ToHumanString};
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum Error {
@@ -46,6 +46,9 @@ pub enum Error {
 
     #[error("Failed to retrieve the latest tag from the Yarn registry")]
     FailedToRetrieveLatestYarnTag,
+
+    #[error("Failed to find a Yarn version matching {}", .0.to_print_string())]
+    FailedToResolveYarnRange(zpm_semver::Range),
 
     #[error("Missing home folder")]
     MissingHomeFolder,
