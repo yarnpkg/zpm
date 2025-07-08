@@ -140,7 +140,7 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
             .fs_read_text()
             .ok_missing()?;
 
-        if let Some(manifest) = manifest {
+        if let Some(manifest) = &manifest {
             let parsed_manifest: Manifest = sonic_rs::from_str(&manifest)
                 .map_err(|err| Error::FailedToParseManifest(Arc::new(err)))?;
 
