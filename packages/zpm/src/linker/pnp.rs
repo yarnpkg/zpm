@@ -164,7 +164,7 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
         "  const pnpDataFilepath = path.resolve(__dirname, '.pnp.data.json');\n",
         "  return hydrateRuntimeState(JSON.parse(fs.readFileSync(pnpDataFilepath, 'utf8')), {basePath: basePath || __dirname});\n",
         "}\n",
-        &misc::unpack_brotli_data(PNP_MJS_TEMPLATE)?,
+        &misc::unpack_brotli_data(PNP_CJS_TEMPLATE)?,
     ].join("");
 
     project.pnp_path()
