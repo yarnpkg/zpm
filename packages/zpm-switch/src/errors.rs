@@ -59,6 +59,9 @@ pub enum Error {
     #[error("Explicit paths must contain a slash character")]
     InvalidExplicitPathParameter,
 
+    #[error("Volta's platform.json file is invalid; expected an object")]
+    VoltaPlatformJsonInvalid,
+
     #[error("This package manager cannot be used to interact on project configured for use with {0}")]
     UnsupportedProject(String),
 }

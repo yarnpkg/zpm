@@ -3,7 +3,7 @@ use std::io::Read;
 use zpm_formats::zip::ZipSupport;
 use zpm_utils::ToHumanString;
 
-use crate::{error::Error, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, patch, primitives::{reference, Ident, Locator}, resolvers::Resolution};
+use crate::{error::Error, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, misc, patch, primitives::{reference, Ident, Locator}, resolvers::Resolution};
 
 use super::PackageData;
 
@@ -37,18 +37,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
                 .unwrap()
                 .1;
 
-            let mut decompressor
-                = brotli::Decompressor::new(compressed_patch, 4096);
-
-            let mut decompressed_bytes = Vec::new();
-            decompressor.read_to_end(&mut decompressed_bytes).unwrap();
-
-            let decompressed_string
-                = String::from_utf8(decompressed_bytes)?;
-
             is_builtin = true;
 
-            decompressed_string
+            misc::unpack_brotli_data(compressed_patch)?
         },
 
         path if path.starts_with("~/") => {

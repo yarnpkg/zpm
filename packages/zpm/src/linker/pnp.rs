@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, io::Read};
+use std::collections::{BTreeMap, BTreeSet};
 
 use zpm_utils::{Path, ToHumanString};
 use itertools::Itertools;
@@ -6,7 +6,7 @@ use serde::{Serialize, Serializer};
 use serde_with::serde_as;
 use zpm_utils::ToFileString;
 
-use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, install::Install, linker, primitives::{Ident, Locator, Reference}, project::Project, settings};
+use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, install::Install, linker, misc, primitives::{Ident, Locator, Reference}, project::Project, settings};
 
 const PNP_CJS_TEMPLATE: &[u8] = std::include_bytes!("pnp-cjs.brotli.dat");
 const PNP_MJS_TEMPLATE: &[u8] = std::include_bytes!("pnp-mjs.brotli.dat");
@@ -130,15 +130,6 @@ fn serialize_string(s: &str) -> String {
 }
 
 fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Error> {
-    let mut decompressor
-        = brotli::Decompressor::new(PNP_CJS_TEMPLATE, 4096);
-
-    let mut decompressed_bytes = Vec::new();
-    decompressor.read_to_end(&mut decompressed_bytes).unwrap();
-
-    let decompressed_string
-        = String::from_utf8(decompressed_bytes)?;
-
     let script = vec![
         project.config.project.pnp_shebang.value.as_str(), "\n",
         "/* eslint-disable */\n",
@@ -151,7 +142,7 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
         "function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n",
         "  return hydrateRuntimeState(JSON.parse(RAW_RUNTIME_STATE), {basePath: basePath || __dirname});\n",
         "}\n",
-        &decompressed_string,
+        &misc::unpack_brotli_data(PNP_CJS_TEMPLATE)?,
     ].join("");
 
     project.pnp_path()
@@ -161,15 +152,6 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
 }
 
 fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error> {
-    let mut decompressor
-        = brotli::Decompressor::new(PNP_CJS_TEMPLATE, 4096);
-
-    let mut decompressed_bytes = Vec::new();
-    decompressor.read_to_end(&mut decompressed_bytes).unwrap();
-
-    let decompressed_string
-        = String::from_utf8(decompressed_bytes)?;
-
     let script = vec![
         project.config.project.pnp_shebang.value.as_str(), "\n",
         "/* eslint-disable */\n",
@@ -182,7 +164,7 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
         "  const pnpDataFilepath = path.resolve(__dirname, '.pnp.data.json');\n",
         "  return hydrateRuntimeState(JSON.parse(fs.readFileSync(pnpDataFilepath, 'utf8')), {basePath: basePath || __dirname});\n",
         "}\n",
-        &decompressed_string,
+        &misc::unpack_brotli_data(PNP_MJS_TEMPLATE)?,
     ].join("");
 
     project.pnp_path()
@@ -422,17 +404,8 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         generate_split_setup(project, &state)?;
     }
 
-    let mut decompressor
-        = brotli::Decompressor::new(PNP_MJS_TEMPLATE, 4096);
-
-    let mut decompressed_bytes = Vec::new();
-    decompressor.read_to_end(&mut decompressed_bytes).unwrap();
-
-    let decompressed_string
-        = String::from_utf8(decompressed_bytes)?;
-
     project.pnp_loader_path()
-        .fs_change(&decompressed_string, false)?;
+        .fs_change(&misc::unpack_brotli_data(PNP_MJS_TEMPLATE)?, false)?;
 
     let package_build_dependencies = linker::helpers::populate_build_entry_dependencies(
         &package_build_entries,

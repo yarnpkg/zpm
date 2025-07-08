@@ -187,7 +187,7 @@ impl PostinstallCommand {
 
         volta_platform
             .as_object_mut()
-            .unwrap()
+            .ok_or(Error::VoltaPlatformJsonInvalid)?
             .remove(&"yarn");
 
         let volta_platform_json

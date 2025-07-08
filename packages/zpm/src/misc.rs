@@ -1,4 +1,6 @@
-use std::{collections::BTreeMap, sync::LazyLock, time::Instant};
+use std::{collections::BTreeMap, io::Read, sync::LazyLock, time::Instant};
+
+use crate::error::Error;
 
 pub fn convert_to_hashmap<U, T, F>(items: Vec<T>, mut key_fn: F) -> BTreeMap<U, Vec<T>> where U: Eq + Ord, F: FnMut(&T) -> U {
     let mut map: BTreeMap<U, Vec<T>> = BTreeMap::new();
@@ -9,6 +11,19 @@ pub fn convert_to_hashmap<U, T, F>(items: Vec<T>, mut key_fn: F) -> BTreeMap<U, 
     }
 
     map
+}
+
+pub fn unpack_brotli_data(data: &[u8]) -> Result<String, Error> {
+    let mut decompressor
+        = brotli::Decompressor::new(data, 1024 * 1024);
+
+    let mut decompressed_bytes = Vec::new();
+    decompressor.read_to_end(&mut decompressed_bytes).unwrap();
+
+    let decompressed_string
+        = String::from_utf8(decompressed_bytes)?;
+
+    Ok(decompressed_string)
 }
 
 pub static FIRST_TIME: LazyLock<Instant> = LazyLock::new(Instant::now);
