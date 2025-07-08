@@ -154,8 +154,6 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
                     detected_package_manager: Some(package_manager),
                 });
             }
-
-            last_package_folder = Some(take(&mut parent));
         }
 
         for root_file in ROOT_FILES {
@@ -168,6 +166,10 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
                     detected_package_manager: None,
                 });
             }
+        }
+
+        if manifest.is_some() {
+            last_package_folder = Some(take(&mut parent));
         }
     }
 
