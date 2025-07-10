@@ -1,6 +1,6 @@
 use clipanion::cli;
 use zpm_parsers::{JsonFormatter, JsonValue};
-use zpm_utils::{OkMissing, Path, ToFileString};
+use zpm_utils::{IoResultExt, Path, ToFileString};
 
 use crate::{
     commands::dlx, error::Error, install::InstallContext, manifest::Manifest, primitives::{loose_descriptor, Ident, LooseDescriptor}, project::{self, Project}, script::ScriptEnvironment

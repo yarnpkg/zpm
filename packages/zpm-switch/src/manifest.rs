@@ -3,7 +3,7 @@ use std::{mem::take, sync::Arc};
 use bincode::{Decode, Encode};
 use serde::Deserialize;
 use zpm_macros::parse_enum;
-use zpm_utils::{impl_serialization_traits, FromFileString, OkMissing, Path, ToFileString, ToHumanString};
+use zpm_utils::{impl_serialization_traits, FromFileString, IoResultExt, Path, ToFileString, ToHumanString};
 
 use crate::errors::Error;
 

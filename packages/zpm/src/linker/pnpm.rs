@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use zpm_utils::{OkMissing, ToHumanString};
+use zpm_utils::{IoResultExt, ToHumanString};
 
 use crate::{build::{self, BuildRequests}, error::Error, fetchers::PackageData, install::Install, linker, project::Project};
 
@@ -127,7 +127,7 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
             // ../.store/@types-no-deps-npm-1.0.0-xyz/package
             let symlink_target = dep_abs_path
                 .relative_to(&link_abs_dirname);
-    
+
             link_abs_path
                 .fs_rm_file()
                 .ok_missing()?

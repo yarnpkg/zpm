@@ -3,7 +3,7 @@ use std::{future::Future, process::Command};
 use blake2::{Blake2s256, Digest};
 use serde::Serialize;
 use zpm_formats::entries_to_disk;
-use zpm_utils::{get_system_string, FromFileString, Path, ToFileString};
+use zpm_utils::{get_system_string, FromFileString, IoResultExt, Path, ToFileString};
 
 use crate::{errors::Error, http::fetch, manifest::VersionPackageManagerReference};
 
@@ -40,7 +40,8 @@ async fn cache<T: Serialize, R: Future<Output = Result<(), Error>>, F: FnOnce(Pa
             .fs_create_parent()?;
 
         temp_dir
-            .fs_move(&cache_path)?;
+            .fs_move(&cache_path)
+            .ok_exists()?;
     }
 
     Ok(cache_path)

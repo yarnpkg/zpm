@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use zpm_utils::{OkMissing, Path, ToFileString, ToHumanString};
+use zpm_utils::{IoResultExt, Path, ToFileString, ToHumanString};
 use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -308,7 +308,7 @@ impl<'a> BuildManager<'a> {
         }
 
         self.trigger(project, &build_state_in);
-        
+
         let mut current_build_state_out
             = self.build_state_out.clone();
 

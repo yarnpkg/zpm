@@ -2,7 +2,7 @@ use std::{io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}};
 
 use bincode::{Decode, Encode};
 
-use crate::{diff_data, impl_serialization_traits, path_resolve::resolve_path, DataType, FromFileString, OkMissing, PathError, PathIterator, ToFileString, ToHumanString};
+use crate::{diff_data, impl_serialization_traits, path_resolve::resolve_path, DataType, FromFileString, IoResultExt, PathError, PathIterator, ToFileString, ToHumanString};
 
 #[derive(Debug)]
 pub struct ExplicitPath {

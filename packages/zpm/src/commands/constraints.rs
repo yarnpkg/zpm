@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use clipanion::cli;
 use colored::Colorize;
-use zpm_utils::{DataType, OkMissing, Path, ToFileString, ToHumanString};
+use zpm_utils::{DataType, IoResultExt, Path, ToFileString, ToHumanString};
 use zpm_parsers::JsonFormatter;
 
 use crate::{constraints::{structs::{ConstraintsContext, ConstraintsOutput, WorkspaceError, WorkspaceOperation}, to_constraints_package, to_constraints_workspace}, error::Error, project::Project, script::ScriptEnvironment, ui::tree};
@@ -87,13 +87,13 @@ impl Constraints {
                 let manifest_path = project.project_cwd
                     .with_join(workspace_rel_path)
                     .with_join_str("package.json");
-                
+
                 let manifest_content = manifest_path
                     .fs_read_text_prealloc()?;
 
                 let mut formatter
                     = JsonFormatter::from(&manifest_content).unwrap();
-                
+
                 // Apply each operation
                 for operation in operations {
                     match operation {
@@ -106,7 +106,7 @@ impl Constraints {
                         },
                     }
                 }
-                
+
                 // Write the formatted result back
                 let updated_content
                     = formatter.to_string();

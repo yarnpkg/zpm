@@ -1,4 +1,4 @@
-use zpm_utils::{OkMissing, Path};
+use zpm_utils::{IoResultExt, Path};
 
 use crate::error::Error;
 
