@@ -290,7 +290,7 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
 
         impl #struct_sym {
             pub fn set(&self, name: &str, value: #enum_sym) -> Result<(), crate::error::Error> {
-                use zpm_utils::OkMissing;
+                use zpm_utils::IoResultExt;
                 use convert_case::{Casing, Case};
 
                 let config_path = self.path.as_ref()

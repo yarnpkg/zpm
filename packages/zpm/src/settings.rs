@@ -6,7 +6,7 @@ use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, Path, ToFileString, ToHumanString};
 
 use crate::{
-    config::ConfigPaths, 
+    config::ConfigPaths,
     config_fields::{BoolField, DictField, EnumField, GlobField, PathField, StringField, UintField, VecField},
     primitives::{
         descriptor::{descriptor_map_deserializer, descriptor_map_serializer},
@@ -75,7 +75,7 @@ pub enum NodeLinker {
 /**
  * Configuration settings obtained from the environment variables only. Those
  * variables are extracted whenever the program starts and are never updated.
- * 
+ *
  * In general you only want to use this for one-off debugging settings.
  */
 #[yarn_config]
