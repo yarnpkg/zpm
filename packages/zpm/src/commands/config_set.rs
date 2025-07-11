@@ -8,6 +8,9 @@ use crate::{error::Error, project::Project, settings::{ProjectConfigType, UserCo
 #[cli::category("Configuration commands")]
 #[cli::description("Set a configuration value")]
 pub struct ConfigSet {
+    #[cli::option("-U,--user")]
+    user: bool,
+
     name: String,
     value: String,
 }
@@ -18,23 +21,19 @@ impl ConfigSet {
         let project
             = Project::new(None).await?;
 
-        let camel_case
-            = self.name.to_case(Case::Camel);
         let snake_case
             = self.name.to_case(Case::Snake);
 
-        if project.config.project.get(&snake_case).is_ok() {
-            let hydrated_value
-                = ProjectConfigType::from_file_string(&snake_case, &self.value)?;
-
-            project.config.project.set(&snake_case, hydrated_value)?;
-        } else if project.config.user.get(&snake_case).is_ok() {
+        if self.user {
             let hydrated_value
                 = UserConfigType::from_file_string(&snake_case, &self.value)?;
 
             project.config.user.set(&snake_case, hydrated_value)?;
         } else {
-            return Err(Error::ConfigKeyNotFound(camel_case));
+            let hydrated_value
+                = ProjectConfigType::from_file_string(&snake_case, &self.value)?;
+
+            project.config.project.set(&snake_case, hydrated_value)?;
         }
 
         Ok(())
