@@ -247,7 +247,7 @@ impl<T: FromFileString + for<'a> Deserialize<'a>> FromFileString for VecField<T>
         if raw.starts_with('[') {
             let value = sonic_rs::from_str::<Vec<T>>(raw)?;
 
-            Ok(Self {value})  
+            Ok(Self {value})
         } else {
             let value = T::from_file_string(raw)
                 .map_err(|_| serde::de::Error::custom("Failed to call FromFileString"))?;
@@ -469,8 +469,8 @@ impl<K: ToHumanString + Ord, V: ToHumanString> ToHumanString for DictField<K, V>
     }
 }
 
-impl<K: FromFileString + Ord, V: FromFileString + for<'a> Deserialize<'a>> FromFileString for DictField<K, V> 
-where 
+impl<K: FromFileString + Ord, V: FromFileString + for<'a> Deserialize<'a>> FromFileString for DictField<K, V>
+where
     K: for<'a> Deserialize<'a>,
     Error: From<<K as FromFileString>::Error> + From<<V as FromFileString>::Error>,
 {
@@ -488,12 +488,12 @@ where
             if parts.len() != 2 {
                 return Err(serde::de::Error::custom("Expected key:value format"));
             }
-            
+
             let key = K::from_file_string(parts[0])
                 .map_err(|_| serde::de::Error::custom("Failed to parse key"))?;
             let val = V::from_file_string(parts[1].trim())
                 .map_err(|_| serde::de::Error::custom("Failed to parse value"))?;
-            
+
             let mut map = BTreeMap::new();
             map.insert(key, val);
             Ok(Self {value: map, source: Default::default()})
@@ -501,8 +501,8 @@ where
     }
 }
 
-impl<'de, K, V> Deserialize<'de> for DictField<K, V> 
-where 
+impl<'de, K, V> Deserialize<'de> for DictField<K, V>
+where
     K: Deserialize<'de> + Ord,
     V: Deserialize<'de>,
 {
@@ -744,7 +744,7 @@ mod tests {
         // Test Serialize
         let serialized = serde_json::to_string(&path_field_absolute).unwrap();
         assert_eq!(serialized, "\"/absolute/path/to/file.txt\"");
-        
+
         // Test Deserialize with absolute path
         let json_str = "\"/absolute/path/to/file.txt\"";
         let deserialized: PathField = serde_json::from_str(json_str).unwrap();
@@ -800,7 +800,7 @@ mod tests {
         int_map.insert("count".to_string(), 42u64);
         int_map.insert("total".to_string(), 100u64);
         let int_dict_field = DictField::new(int_map);
-        
+
         let serialized = serde_json::to_string(&int_dict_field).unwrap();
         assert_eq!(serialized, "{\"count\":42,\"total\":100}");
     }

@@ -7,7 +7,7 @@ use crate::{error::Error, project::Project};
 #[cli::command]
 #[cli::path("config", "get")]
 #[cli::category("Configuration commands")]
-#[cli::description("Get a project configuration value")]
+#[cli::description("Get a configuration value")]
 pub struct ConfigGet {
     name: String,
 }
@@ -18,19 +18,18 @@ impl ConfigGet {
         let project
             = Project::new(None).await?;
 
-        let project_settings
-            = project.config.project.to_btree_map();
-
         let camel_key
             = self.name.to_case(Case::Camel);
         let snake_key
             = self.name.to_case(Case::Snake);
 
-        let value
-            = project_settings.get(&snake_key)
-                .ok_or_else(|| Error::ConfigKeyNotFound(camel_key))?;
-
-        println!("{}", value.to_print_string());
+        if let Ok(value) = project.config.project.get(&snake_key) {
+            println!("{}", value.to_print_string());
+        } else if let Ok(value) = project.config.user.get(&snake_key) {
+            println!("{}", value.to_print_string());
+        } else {
+            return Err(Error::ConfigKeyNotFound(camel_key));
+        }
 
         Ok(())
     }

@@ -125,6 +125,9 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
     // map.insert("enableAutoType".to_string(), ProjectSettingsType::BoolField(self.enable_auto_type.clone()))
     let mut extract_stmts = vec![];
 
+    // "enable_auto_type" => Ok(ProjectSettingsType::BoolField(self.enable_auto_type.clone()))
+    let mut read_setting_stmts = vec![];
+
     // "enable_auto_type" => Ok(ProjectSettingsType::BoolField(... parses `value` as a bool ...))
     let mut enum_variants_from_file_string = vec![];
 
@@ -229,6 +232,10 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                     Ok(#enum_sym::#field_ty_slug_sym(parsed))
                 },
             });
+
+            read_setting_stmts.push(quote! {
+                #name_str => Ok(#enum_sym::#field_ty_slug_sym(self.#primary_name_sym.clone())),
+            });
         }
 
         extract_stmts.push(quote! {
@@ -289,6 +296,14 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
         }
 
         impl #struct_sym {
+            pub fn get(&self, name: &str) -> Result<#enum_sym, crate::error::Error> {
+                match name {
+                    #(#read_setting_stmts)*
+
+                    _ => Err(crate::error::Error::ConfigKeyNotFound(name.to_string())),
+                }
+            }
+
             pub fn set(&self, name: &str, value: #enum_sym) -> Result<(), crate::error::Error> {
                 use zpm_utils::IoResultExt;
                 use convert_case::{Casing, Case};
