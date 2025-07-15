@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use std::{collections::BTreeMap, str::FromStr};
 use zpm_semver::{Range, Version};
-use zpm_utils::{ExplicitPath, FromFileString, Path, ToFileString};
+use zpm_utils::{ExplicitPath, FromFileString, Path, RawPath, ToFileString};
 
 use crate::{errors::Error, http::fetch, manifest::{PackageManagerReference, VersionPackageManagerReference}, yarn_enums::{ChannelSelector, Selector}};
 
@@ -111,6 +111,20 @@ pub fn extract_bin_meta() -> BinMeta {
     let mut args = std::env::args()
         .skip(1)
         .collect::<Vec<_>>();
+
+    if args.len() >= 2 && args[0] == "--cwd" {
+        let raw_path
+            = RawPath::from_str(&args[1]).unwrap();
+
+        cwd = Some(raw_path.path);
+        args.drain(..2);
+    } else if args.len() >= 1 && args[0].starts_with("--cwd=") {
+        let raw_path
+            = RawPath::from_str(&args[0][6..]).unwrap();
+
+        cwd = Some(raw_path.path);
+        args.remove(0);
+    }
 
     if let Some(first_arg) = args.first() {
         let explicit_path

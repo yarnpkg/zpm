@@ -6,7 +6,7 @@
 
 use std::sync::Mutex;
 
-use zpm_utils::{Path, PathError};
+use zpm_utils::{Path, PathError, ToFileString};
 
 static FAKE_CWD: Mutex<Option<Path>> = Mutex::new(None);
 
@@ -23,5 +23,12 @@ pub fn get_final_cwd() -> Result<Path, PathError> {
         Ok(cwd)
     } else {
         Path::current_dir()
+    }
+}
+
+pub fn restore_args(args: &mut Vec<String>) {
+    if let Some(cwd) = get_fake_cwd() {
+        // We add an explicit `--cwd` so that both implicit and explicit cwd arguments are correctly forwarded.
+        args.insert(0, format!("--cwd={}", cwd.to_file_string()));
     }
 }
