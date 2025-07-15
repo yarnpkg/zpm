@@ -105,6 +105,9 @@ pub fn get_bin_version() -> String {
         .to_string()
 }
 
+const CWD_FLAG: &str = "--cwd";
+const CWD_FLAG_EQUALS: &str = "--cwd=";
+
 pub fn extract_bin_meta() -> Result<BinMeta, PathError> {
     let mut cwd = None;
 
@@ -113,15 +116,15 @@ pub fn extract_bin_meta() -> Result<BinMeta, PathError> {
         .collect::<Vec<_>>();
 
     // TODO: Use clipanion to error on incorrect placement of `--cwd` argument.
-    if args.len() >= 2 && args[0] == "--cwd" {
+    if args.len() >= 2 && args[0] == CWD_FLAG {
         let raw_path
             = RawPath::from_str(&args[1])?;
 
         cwd = Some(raw_path.path);
         args.drain(..2);
-    } else if args.len() >= 1 && args[0].starts_with("--cwd=") {
+    } else if args.len() >= 1 && args[0].starts_with(CWD_FLAG_EQUALS) {
         let raw_path
-            = RawPath::from_str(&args[0][6..])?;
+            = RawPath::from_str(&args[0][CWD_FLAG_EQUALS.len()..])?;
 
         cwd = Some(raw_path.path);
         args.remove(0);
