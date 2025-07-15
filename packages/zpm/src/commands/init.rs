@@ -70,7 +70,7 @@ impl InitWithTemplate {
         let dlx_project
             = dlx::setup_project().await?;
         let dlx_project
-            = dlx::install_dependencies(&dlx_project.project_cwd, vec![template.clone()]).await?;
+            = dlx::install_dependencies(&dlx_project.project_cwd, vec![template.clone()], false).await?;
         let bin
             = dlx::find_binary(&dlx_project, template.ident.name(), true)?;
 
