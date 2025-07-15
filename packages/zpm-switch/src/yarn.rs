@@ -112,6 +112,7 @@ pub fn extract_bin_meta() -> BinMeta {
         .skip(1)
         .collect::<Vec<_>>();
 
+    // TODO: Use clipanion to error on incorrect placement of `--cwd` argument.
     if args.len() >= 2 && args[0] == "--cwd" {
         let raw_path
             = RawPath::from_str(&args[1]).unwrap();
