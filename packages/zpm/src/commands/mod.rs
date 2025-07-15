@@ -62,7 +62,7 @@ pub fn run_default() -> ExitCode {
         cwd,
         args,
         version,
-    } = extract_bin_meta().unwrap();
+    } = extract_bin_meta().expect("Failed to extract binary metadata");
 
     if let Some(cwd) = cwd {
         cwd.sys_set_current_dir()
