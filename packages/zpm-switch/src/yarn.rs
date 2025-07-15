@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use std::{collections::BTreeMap, str::FromStr};
 use zpm_semver::{Range, Version};
-use zpm_utils::{ExplicitPath, FromFileString, Path, RawPath, ToFileString};
+use zpm_utils::{ExplicitPath, FromFileString, Path, PathError, RawPath, ToFileString};
 
 use crate::{errors::Error, http::fetch, manifest::{PackageManagerReference, VersionPackageManagerReference}, yarn_enums::{ChannelSelector, Selector}};
 
@@ -105,7 +105,7 @@ pub fn get_bin_version() -> String {
         .to_string()
 }
 
-pub fn extract_bin_meta() -> BinMeta {
+pub fn extract_bin_meta() -> Result<BinMeta, PathError> {
     let mut cwd = None;
 
     let mut args = std::env::args()
@@ -115,13 +115,13 @@ pub fn extract_bin_meta() -> BinMeta {
     // TODO: Use clipanion to error on incorrect placement of `--cwd` argument.
     if args.len() >= 2 && args[0] == "--cwd" {
         let raw_path
-            = RawPath::from_str(&args[1]).unwrap();
+            = RawPath::from_str(&args[1])?;
 
         cwd = Some(raw_path.path);
         args.drain(..2);
     } else if args.len() >= 1 && args[0].starts_with("--cwd=") {
         let raw_path
-            = RawPath::from_str(&args[0][6..]).unwrap();
+            = RawPath::from_str(&args[0][6..])?;
 
         cwd = Some(raw_path.path);
         args.remove(0);
@@ -131,18 +131,24 @@ pub fn extract_bin_meta() -> BinMeta {
         let explicit_path
             = ExplicitPath::from_str(first_arg);
 
-        if let Ok(explicit_path) = explicit_path {
-            cwd = Some(explicit_path.raw_path.path);
-            args.remove(0);
+        match explicit_path {
+            Ok(explicit_path) => {
+                cwd = Some(explicit_path.raw_path.path);
+                args.remove(0);
+            },
+            Err(PathError::InvalidExplicitPathParameter(_)) => {
+                // This is not a valid explicit path, so we don't modify `cwd`.
+            },
+            Err(err) => return Err(err),
         }
     }
 
     let version
         = get_bin_version();
 
-    BinMeta {
+    Ok(BinMeta {
         cwd,
         args,
         version,
-    }
+    })
 }
