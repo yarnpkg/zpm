@@ -10,18 +10,25 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{steps.set-matrix.outputs.matrix}}
+    steps:
+      - id: set-matrix
+        run: |
+          if [ "${{github.event_name}}" == "pull_request" ]; then
+            # For PRs, only include Linux targets
+            echo 'matrix={"include":[{"target":"x86_64-unknown-linux-musl","os":"ubuntu-latest"},{"target":"aarch64-unknown-linux-musl","os":"ubuntu-latest"}]}' >> $GITHUB_OUTPUT
+          else
+            # For pushes to main, include all targets
+            echo 'matrix={"include":[{"target":"x86_64-unknown-linux-musl","os":"ubuntu-latest"},{"target":"aarch64-unknown-linux-musl","os":"ubuntu-latest"},{"target":"aarch64-apple-darwin","os":"macos-latest"}]}' >> $GITHUB_OUTPUT
+          fi
+
   build:
+    needs: matrix
     strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-
-          - target: aarch64-apple-darwin
-            os: macos-latest
+      matrix: ${{fromJson(needs.matrix.outputs.matrix)}}
 
     name: 'Building ${{matrix.target}}'
     runs-on: ${{matrix.os}}
@@ -99,7 +106,7 @@ jobs:
 
   #     - name: Install dependencies
   #       run: ./yarn.sh install
-  
+
   #     - name: Generate the test report
   #       run: |
   #         export BERRY_DIR=$GITHUB_WORKSPACE/berry
@@ -137,21 +144,21 @@ jobs:
   #       uses: actions/download-artifact@v4
   #       with:
   #         name: yarn-x86_64-unknown-linux-musl
-  
+
   #     - name: Puts back the binaries
   #       run: |
   #         mkdir -p target/release
   #         mv {yarn-bin,yarn} target/release/
   #         chmod +x target/release/{yarn-bin,yarn}
-      
+
   #     - name: Download the test report
   #       uses: actions/download-artifact@v4
   #       with:
   #         name: test-report
-    
+
   #     - name: Install dependencies
   #       run: ./yarn.sh install
-  
+
   #     - name: Generate downloads page
   #       run: ./yarn.sh build:site-artifacts
 
@@ -165,4 +172,4 @@ jobs:
 
   #     - name: Deploy to GitHub Pages
   #       id: deployment
-  #       uses: actions/deploy-pages@v4 
+  #       uses: actions/deploy-pages@v4

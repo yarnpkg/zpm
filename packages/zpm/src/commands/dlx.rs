@@ -12,6 +12,9 @@ use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor
 #[cli::category("Scripting commands")]
 #[cli::description("Install a temporary package and run it")]
 pub struct DlxWithPackages {
+    #[cli::option("-q,--quiet", default = false)]
+    quiet: bool,
+
     #[cli::option("-p,--package", min_len = 1)]
     packages: Vec<LooseDescriptor>,
 
@@ -42,7 +45,7 @@ impl DlxWithPackages {
             = LooseDescriptor::resolve_all(&install_context, &resolve_options, &self.packages).await?;
 
         let dlx_project
-            = install_dependencies(&dlx_project.project_cwd, descriptors).await?;
+            = install_dependencies(&dlx_project.project_cwd, descriptors, self.quiet).await?;
         let bin
             = find_binary(&dlx_project, self.name.as_str(), false)?;
 
@@ -56,6 +59,9 @@ impl DlxWithPackages {
 #[cli::command(proxy)]
 #[cli::path("dlx")]
 pub struct Dlx {
+    #[cli::option("-q,--quiet", default = false)]
+    quiet: bool,
+
     package: LooseDescriptor,
     args: Vec<String>,
 }
@@ -83,7 +89,7 @@ impl Dlx {
             = self.package.resolve(&install_context, &resolve_options).await?;
 
         let dlx_project
-            = install_dependencies(&dlx_project.project_cwd, vec![descriptor.clone()]).await?;
+            = install_dependencies(&dlx_project.project_cwd, vec![descriptor.clone()], self.quiet).await?;
         let bin
             = find_binary(&dlx_project, descriptor.ident.name(), true)?;
 
@@ -111,7 +117,7 @@ pub async fn setup_project() -> Result<Project, Error> {
     Ok(project)
 }
 
-pub async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descriptor>) -> Result<Project, Error> {
+pub async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descriptor>, quiet: bool) -> Result<Project, Error> {
     let manifest_path = workspace_path
         .with_join_str("package.json");
 
@@ -139,6 +145,7 @@ pub async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descri
 
     project
         .run_install(project::RunInstallOptions {
+            silent_or_error: quiet,
             ..Default::default()
         }).await?;
 
