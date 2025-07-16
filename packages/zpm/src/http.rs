@@ -1,11 +1,13 @@
 use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
 
-use reqwest::{Client, Response};
+use reqwest::{Client, Response, Url};
+use wax::Program;
 
-use crate::{config::Config, error::Error};
+use crate::{config::Config, config_fields::GlobField, error::Error};
 
 pub struct HttpClient {
     http_retry: usize,
+    unsafe_http_whitelist: Vec<GlobField>,
     client: Client,
 }
 
@@ -46,16 +48,28 @@ impl HttpClient {
 
         Ok(Arc::new(Self {
             http_retry: config.user.http_retry.value as usize,
+            unsafe_http_whitelist: config.project.unsafe_http_whitelist.value.clone(),
             client,
         }))
     }
 
-    pub async fn get(&self, url: &str) -> Result<Response, Error> {
+    pub async fn get(&self, url: impl AsRef<str>) -> Result<Response, Error> {
+        let url = url.as_ref();
+
+        let url = Url::parse(url)
+            .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
+
+        // TODO: Avoid recreating the glob matcher for every request.
+        // This requires the HttpClient to be generic over the lifetime of the Config.
+        if url.scheme() == "http" && !self.unsafe_http_whitelist.iter().any(|glob| glob.value.to_matcher().is_match(url.host_str().unwrap())) {
+            return Err(Error::UnsafeHttpError(url));
+        }
+
         let mut retry_count = 0;
 
         loop {
             let response
-                = self.client.get(url).send().await;
+                = self.client.get(url.clone()).send().await;
 
             let is_failure = match &response {
                 Ok(response) => response.status().is_server_error() || matches!(response.status().as_u16(), 408 | 413 | 429),
@@ -78,6 +92,7 @@ impl HttpClient {
         }
     }
 
+    // TODO: Don't expose the client directly, instead provide methods that ensure the configuration is respected.
     pub fn client(&self) -> &Client {
         &self.client
     }

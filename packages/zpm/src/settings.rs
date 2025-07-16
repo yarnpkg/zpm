@@ -180,6 +180,9 @@ pub struct ProjectConfig {
     #[default(BTreeMap::new())]
     pub package_extensions: DictField<SemverDescriptor, PackageExtension>,
 
+    #[default(vec![])]
+    pub unsafe_http_whitelist: VecField<GlobField>,
+
     #[default(Path::from_str(".yarn/__virtual__").unwrap())]
     pub virtual_folder: PathField,
 }

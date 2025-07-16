@@ -396,9 +396,12 @@ pub struct Glob {
 }
 
 impl Glob {
+    pub fn to_matcher(&self) -> wax::Glob {
+        wax::Glob::new(&self.pattern).unwrap()
+    }
+
     pub fn to_regex_string(&self) -> String {
-        wax::Glob::new(&self.pattern)
-            .unwrap()
+        self.to_matcher()
             .to_regex()
             .to_string()
     }
