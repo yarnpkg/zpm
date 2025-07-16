@@ -89,23 +89,23 @@ pub struct PerValueInfo {
 #[serde(rename_all_fields = "camelCase")]
 pub enum WorkspaceError {
     MissingField {
-        field_path: Path,
+        field_path: zpm_parsers::Path,
         expected: ColoredJsonValue,
     },
 
     ExtraneousField {
-        field_path: Path,
+        field_path: zpm_parsers::Path,
         current_value: ColoredJsonValue,
     },
 
     InvalidField {
-        field_path: Path,
+        field_path: zpm_parsers::Path,
         expected: ColoredJsonValue,
         current_value: ColoredJsonValue,
     },
 
     ConflictingValues {
-        field_path: Path,
+        field_path: zpm_parsers::Path,
         set_values: Vec<(ColoredJsonValue, PerValueInfo)>,
         unset_values: Option<PerValueInfo>,
     },
