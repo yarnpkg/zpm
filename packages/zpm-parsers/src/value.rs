@@ -76,6 +76,7 @@ impl Value {
                     }
                 }
 
+                serializer.push_str(&" ".repeat(indent));
                 serializer.push('}');
 
                 serializer
