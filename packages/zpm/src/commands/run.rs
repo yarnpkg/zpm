@@ -28,6 +28,9 @@ pub struct Run {
     #[cli::option("--inspect-brk")]
     inspect_brk: Option<Option<String>>,
 
+    #[cli::option("--inspect-wait")]
+    inspect_wait: Option<Option<String>>,
+
     #[cli::option("--require")]
     require: Option<String>,
 
@@ -66,6 +69,13 @@ impl Run {
                     node_args.push(match inspect_brk {
                         Some(address) => format!("--inspect-brk={}", address),
                         None => "--inspect-brk".to_owned(),
+                    });
+                }
+
+                if let Some(inspect_wait) = &self.inspect_wait {
+                    node_args.push(match inspect_wait {
+                        Some(address) => format!("--inspect-wait={}", address),
+                        None => "--inspect-wait".to_owned(),
                     });
                 }
 
