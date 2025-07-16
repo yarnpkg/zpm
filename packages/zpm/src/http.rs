@@ -30,11 +30,18 @@ impl<'a> HttpRequest<'a> {
     pub async fn send(self) -> Result<Response, reqwest::Error> {
         let mut retry_count = 0;
 
+        // If the request is not retriable, we should avoid cloning the builder.
+        if !self.retry {
+            return self.builder.send()
+                .await?
+                .error_for_status();
+        }
+
         loop {
             let response
                 = self.builder.try_clone().expect("builder should be clonable").send().await;
 
-            if self.retry && retry_count < self.client.http_retry {
+            if retry_count < self.client.http_retry {
                 let is_failure = match &response {
                     Ok(response) => response.status().is_server_error() || matches!(response.status().as_u16(), 408 | 413 | 429),
                     Err(_) => true,
