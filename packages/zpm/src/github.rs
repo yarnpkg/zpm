@@ -36,23 +36,19 @@ pub async fn download_into(source: &GitSource, commit: &str, download_dir: &Path
     };
 
     let response
-        = http_client.get(public_tarball_url(owner, &repository, commit)).await;
+        = http_client.get(public_tarball_url(owner, &repository, commit))?.send().await;
 
     let data = match response {
         Ok(response) => {
             response.bytes().await.map_err(|_| Error::ReplaceMe)?
         },
 
-        Err(Error::HttpError(err)) if err.status() == Some(StatusCode::NOT_FOUND) => {
+        Err(err) if err.status() == Some(StatusCode::NOT_FOUND) => {
             return Ok(None);
         },
 
-        Err(Error::HttpError(err)) => {
-            return Err(Error::RemoteRegistryError(err));
-        },
-
         Err(err) => {
-            return Err(err);
+            return Err(Error::RemoteRegistryError(Arc::new(err)));
         },
     };
 

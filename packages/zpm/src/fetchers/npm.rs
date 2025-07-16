@@ -52,7 +52,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let cached_blob = context.package_cache.unwrap().ensure_blob(locator.clone(), ".zip", || async {
         let response
-            = project.http_client.get(&registry_url).await?;
+            = project.http_client.get(&registry_url)?.send().await?;
 
         let archive = response.bytes().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;

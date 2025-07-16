@@ -51,13 +51,11 @@ pub async fn query_algolia(idents: &[Ident], http_client: &Arc<HttpClient>) -> R
         }).collect(),
     };
 
-    let response = http_client.client()
-        .post(ALGOLIA_URL)
+    let response = http_client.post(ALGOLIA_URL, sonic_rs::to_string(&input_payload).unwrap())?
         .header("x-algolia-application-id", "OFCNCOG2CU")
         .header("x-algolia-api-key", "e8e1bd300d860104bb8c58453ffa1eb4")
-        .body(sonic_rs::to_string(&input_payload).unwrap())
-        .send().await?
-        .error_for_status()?;
+        .send()
+        .await?;
 
     if response.status().as_u16() != 200 {
         return Ok(HashMap::new());

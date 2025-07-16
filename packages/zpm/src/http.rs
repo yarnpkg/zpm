@@ -1,14 +1,77 @@
 use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
 
-use reqwest::{Client, Response, Url};
+use reqwest::{header::{HeaderName, HeaderValue}, Body, Client, Method, RequestBuilder, Response, Url};
 use wax::Program;
 
 use crate::{config::Config, config_fields::GlobField, error::Error};
 
+#[derive(Debug)]
 pub struct HttpClient {
     http_retry: usize,
     unsafe_http_whitelist: Vec<GlobField>,
     client: Client,
+}
+
+#[derive(Debug)]
+pub struct HttpRequest<'a> {
+    client: &'a HttpClient,
+    builder: RequestBuilder,
+
+    retry: bool,
+}
+
+impl<'a> HttpRequest<'a> {
+    pub fn new(client: &'a HttpClient, url: Url, method: Method, retry: bool) -> Self {
+        let builder = client.client.request(method, url);
+
+        Self { builder, client, retry }
+    }
+
+    pub async fn send(self) -> Result<Response, reqwest::Error> {
+        let mut retry_count = 0;
+
+        loop {
+            let response
+                = self.builder.try_clone().expect("builder should be clonable").send().await;
+
+            if self.retry && retry_count < self.client.http_retry {
+                let is_failure = match &response {
+                    Ok(response) => response.status().is_server_error() || matches!(response.status().as_u16(), 408 | 413 | 429),
+                    Err(_) => true,
+                };
+
+                if is_failure {
+                    retry_count += 1;
+
+                    let sleep_duration
+                        = 2_u64.saturating_pow(retry_count as u32);
+                    let bounded_sleep_duration
+                        = std::cmp::min(sleep_duration, 10);
+
+                    tokio::time::sleep(Duration::from_secs(bounded_sleep_duration)).await;
+                    continue;
+                }
+            }
+
+            return response?.error_for_status();
+        }
+    }
+
+    pub fn header<K, V>(mut self, key: K, value: V) -> Self
+    where
+        HeaderName: TryFrom<K>,
+        <HeaderName as TryFrom<K>>::Error: Into<http::Error>,
+        HeaderValue: TryFrom<V>,
+        <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
+    {
+        self.builder = self.builder.header(key, value);
+        self
+    }
+
+    pub fn body(mut self, body: impl Into<Body>) -> Self {
+        self.builder = self.builder.body(body);
+        self
+    }
 }
 
 impl HttpClient {
@@ -53,7 +116,7 @@ impl HttpClient {
         }))
     }
 
-    pub async fn get(&self, url: impl AsRef<str>) -> Result<Response, Error> {
+    fn request(&self, url: impl AsRef<str>, method: Method, retry: bool) -> Result<HttpRequest, Error> {
         let url = url.as_ref();
 
         let url = Url::parse(url)
@@ -69,35 +132,15 @@ impl HttpClient {
             return Err(Error::UnsafeHttpError(url));
         }
 
-        let mut retry_count = 0;
-
-        loop {
-            let response
-                = self.client.get(url.clone()).send().await;
-
-            let is_failure = match &response {
-                Ok(response) => response.status().is_server_error() || matches!(response.status().as_u16(), 408 | 413 | 429),
-                Err(_) => true,
-            };
-
-            if is_failure && retry_count < self.http_retry {
-                retry_count += 1;
-
-                let sleep_duration
-                    = 2_u64.saturating_pow(retry_count as u32);
-                let bounded_sleep_duration
-                    = std::cmp::min(sleep_duration, 10);
-
-                tokio::time::sleep(Duration::from_secs(bounded_sleep_duration)).await;
-                continue;
-            }
-
-            return Ok(response?.error_for_status()?);
-        }
+        Ok(HttpRequest::new(self, url, method, retry))
     }
 
-    // TODO: Don't expose the client directly, instead provide methods that ensure the configuration is respected.
-    pub fn client(&self) -> &Client {
-        &self.client
+    pub fn get(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
+        self.request(url, Method::GET, true)
+    }
+
+    pub fn post(&self, url: impl AsRef<str>, body: impl Into<Body>) -> Result<HttpRequest, Error> {
+        self.request(url, Method::POST, false)
+            .map(|req| req.body(body))
     }
 }
