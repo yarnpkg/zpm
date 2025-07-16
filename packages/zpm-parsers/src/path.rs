@@ -195,15 +195,21 @@ impl FromFileString for Path {
                         // Numeric index
                         Some(numeric_char) if numeric_char.is_ascii_digit() => {
                             current_segment.push(numeric_char);
+                            let mut found_closing_bracket = false;
 
                             while let Some(ch) = chars.next() {
                                 if ch.is_ascii_digit() {
                                     current_segment.push(ch);
                                 } else if ch == ']' {
+                                    found_closing_bracket = true;
                                     break;
                                 } else {
-                                    return Err(Error::InvalidSyntax("Expected ']' after number".to_string()));
+                                    break;
                                 }
+                            }
+
+                            if !found_closing_bracket {
+                                return Err(Error::InvalidSyntax("Expected ']' after number".to_string()));
                             }
 
                             segments.push(current_segment);
@@ -260,7 +266,7 @@ impl ToFileString for Path {
 
                 PathSegment::String(segment) => {
                     result.push_str("[");
-                    result.push_str(segment);
+                    result.push_str(&escape_string(segment));
                     result.push_str("]");
                 },
             }
