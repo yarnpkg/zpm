@@ -397,7 +397,11 @@ pub struct Glob {
 
 impl Glob {
     pub fn to_matcher(&self) -> wax::Glob {
-        wax::Glob::new(&self.pattern).unwrap()
+        wax::Glob::new(&self.pattern)
+            // This should really be handled while parsing the glob.
+            // But unfortunately wax::Glob requires a lifetime parameter,
+            // so we can't use it directly in the Glob struct.
+            .expect("Invalid glob pattern")
     }
 
     pub fn to_regex_string(&self) -> String {
