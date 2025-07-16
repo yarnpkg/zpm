@@ -146,8 +146,7 @@ impl HttpClient {
         self.request(url, Method::GET, true)
     }
 
-    pub fn post(&self, url: impl AsRef<str>, body: impl Into<Body>) -> Result<HttpRequest, Error> {
+    pub fn post(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
         self.request(url, Method::POST, false)
-            .map(|req| req.body(body))
     }
 }
