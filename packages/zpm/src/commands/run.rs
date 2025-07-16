@@ -5,7 +5,7 @@ use clipanion::cli;
 
 use crate::{error::Error, project, script::ScriptEnvironment};
 
-#[cli::command(default, proxy)]
+#[cli::command(proxy)]
 #[cli::path("run")]
 #[cli::category("Scripting commands")]
 #[cli::description("Run a dependency binary or local script")]
