@@ -318,7 +318,7 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                 let updated_config
                     = zpm_parsers::yaml::Yaml::update_document_field(
                         &config_text,
-                        zpm_parsers::Path::from_file_string(&name.to_case(Case::Camel)).unwrap(),
+                        zpm_parsers::Path::from_file_string(&name.to_case(Case::Camel))?,
                         zpm_parsers::Value::String(value.to_file_string())
                     )?;
 

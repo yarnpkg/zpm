@@ -26,6 +26,10 @@ impl Formatter for YamlFormatter {
             },
 
             Value::Array(arr) => {
+                if arr.is_empty() {
+                    return "[]".to_string();
+                }
+
                 let mut serializer
                     = String::new();
 
