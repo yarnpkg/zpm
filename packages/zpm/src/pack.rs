@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use zpm_parsers::JsonFormatter;
-use zpm_parsers::JsonValue;
+use zpm_parsers::Value;
 use zpm_utils::Path;
 use globset::GlobBuilder;
 use globset::GlobMatcher;
@@ -245,49 +245,49 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
     if let Some(type_) = &manifest.publish_config.type_ {
         formatter.set(
             ["type"],
-            JsonValue::String(type_.clone()),
+            Value::String(type_.clone()),
         )?;
     }
 
     if let Some(main) = &manifest.publish_config.main {
         formatter.set(
             ["main"],
-            JsonValue::String(main.clone()),
+            Value::String(main.clone()),
         )?;
     }
 
     if let Some(exports) = &manifest.publish_config.exports {
         formatter.set(
             ["exports"],
-            JsonValue::from(&sonic_rs::to_value(exports)?),
+            Value::from(&sonic_rs::to_value(exports)?),
         )?;
     }
 
     if let Some(imports) = &manifest.publish_config.imports {
         formatter.set(
             ["imports"],
-            JsonValue::from(&sonic_rs::to_value(imports)?),
+            Value::from(&sonic_rs::to_value(imports)?),
         )?;
     }
 
     if let Some(module) = &manifest.publish_config.module {
         formatter.set(
             ["module"],
-            JsonValue::String(module.clone()),
+            Value::String(module.clone()),
         )?;
     }
 
     if let Some(browser) = &manifest.publish_config.browser {
         formatter.set(
             ["browser"],
-            JsonValue::from(&sonic_rs::to_value(browser)?),
+            Value::from(&sonic_rs::to_value(browser)?),
         )?;
     }
 
     if let Some(bin) = &manifest.publish_config.bin {
         formatter.set(
             ["bin"],
-            JsonValue::from(&sonic_rs::to_value(bin)?),
+            Value::from(&sonic_rs::to_value(bin)?),
         )?;
     }
 
@@ -305,34 +305,34 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
                         range: params.range.clone()
                     })))))
                 },
-    
+
                 Range::WorkspaceMagic(params) => {
                     let workspace
                         = project.workspace_by_ident(&descriptor.ident);
-    
+
                     Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), Range::AnonymousSemver(AnonymousSemverRange {
                         range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(params.magic),
                     })))))
                 },
-    
+
                 Range::WorkspaceIdent(params) => {
                     let workspace
                         = project.workspace_by_ident(&params.ident);
-                    
+
                     Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), Range::AnonymousSemver(AnonymousSemverRange {
                         range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
                     })))))
                 },
-    
+
                 Range::WorkspacePath(params) => {
                     let workspace
                         = project.workspace_by_rel_path(&params.path);
-    
+
                     Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), Range::AnonymousSemver(AnonymousSemverRange {
                         range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
                     })))))
                 },
-    
+
                 _ => {
                     None
                 },
@@ -346,7 +346,7 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
 
         formatter.set(
             vec![field_name.to_string(), new_descriptor.ident.to_file_string()],
-            JsonValue::String(new_descriptor.range.to_file_string()),
+            Value::String(new_descriptor.range.to_file_string()),
         )?;
     }
 
@@ -392,7 +392,7 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
 
         formatter.set(
             vec!["peerDependencies".to_string(), new_descriptor.ident.to_file_string()],
-            JsonValue::String(new_descriptor.range.to_file_string())
+            Value::String(new_descriptor.range.to_file_string())
         )?;
     }
 

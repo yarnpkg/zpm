@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, fs::Permissions, os::unix::fs::PermissionsExt};
 
 use clipanion::cli;
-use zpm_parsers::{JsonFormatter, JsonValue};
+use zpm_parsers::{JsonFormatter, Value};
 use zpm_semver::RangeKind;
 use zpm_utils::ToFileString;
 
@@ -83,18 +83,18 @@ impl Up {
 
             for descriptor in descriptors.iter() {
                 formatter.update(
-                    vec!["dependencies".to_string(), descriptor.ident.to_file_string()], 
-                    JsonValue::String(descriptor.range.to_file_string()),
+                    vec!["dependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
                 )?;
 
                 formatter.update(
-                    vec!["devDependencies".to_string(), descriptor.ident.to_file_string()], 
-                    JsonValue::String(descriptor.range.to_file_string()),
+                    vec!["devDependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
                 )?;
 
                 formatter.update(
-                    vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()], 
-                    JsonValue::String(descriptor.range.to_file_string()),
+                    vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
                 )?;
             }
 

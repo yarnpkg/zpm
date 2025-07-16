@@ -1,5 +1,5 @@
 use clipanion::cli;
-use zpm_parsers::{JsonFormatter, JsonValue};
+use zpm_parsers::{JsonFormatter, Value};
 use zpm_utils::{IoResultExt, Path, ToFileString};
 
 use crate::{
@@ -152,21 +152,21 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
 
         formatter.set(
             vec!["name".to_string()],
-            JsonValue::String(init_name.to_file_string()),
+            Value::String(init_name.to_file_string()),
         )?;
     }
 
     if let Some(version) = option_env!("INFRA_VERSION") {
         formatter.set(
             vec!["packageManager".to_string()],
-            JsonValue::String(format!("yarn@{version}")),
+            Value::String(format!("yarn@{version}")),
         )?;
     }
 
     if let Some(private) = params.private {
         let private_field = match private {
-            true => JsonValue::Bool(true),
-            false => JsonValue::Undefined,
+            true => Value::Bool(true),
+            false => Value::Undefined,
         };
 
         formatter.set(
@@ -187,8 +187,8 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
 
         formatter.set(
             vec!["workspaces".to_string()],
-            JsonValue::Array(vec![
-                JsonValue::String("packages/*".to_string()),
+            Value::Array(vec![
+                Value::String("packages/*".to_string()),
             ]),
         )?;
     }

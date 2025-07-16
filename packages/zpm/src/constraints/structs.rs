@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use zpm_parsers::JsonPath;
 use zpm_utils::{ColoredJsonValue, DataType, Path, ToFileString, ToHumanString};
 
 use crate::primitives::{Ident, Locator, Range};
@@ -90,23 +89,23 @@ pub struct PerValueInfo {
 #[serde(rename_all_fields = "camelCase")]
 pub enum WorkspaceError {
     MissingField {
-        field_path: JsonPath,
+        field_path: Path,
         expected: ColoredJsonValue,
     },
 
     ExtraneousField {
-        field_path: JsonPath,
+        field_path: Path,
         current_value: ColoredJsonValue,
     },
 
     InvalidField {
-        field_path: JsonPath,
+        field_path: Path,
         expected: ColoredJsonValue,
         current_value: ColoredJsonValue,
     },
 
     ConflictingValues {
-        field_path: JsonPath,
+        field_path: Path,
         set_values: Vec<(ColoredJsonValue, PerValueInfo)>,
         unset_values: Option<PerValueInfo>,
     },
