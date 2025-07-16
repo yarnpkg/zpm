@@ -22,6 +22,15 @@ pub struct Run {
     #[cli::option("--run-cwd")]
     run_cwd: Option<Path>,
 
+    #[cli::option("--inspect")]
+    inspect: Option<Option<String>>,
+
+    #[cli::option("--inspect-brk")]
+    inspect_brk: Option<Option<String>>,
+
+    #[cli::option("--require")]
+    require: Option<String>,
+
     name: String,
     args: Vec<String>,
 }
@@ -44,9 +53,30 @@ impl Run {
                 = project.find_binary(&self.name);
 
             if let Ok(binary) = maybe_binary {
+                let mut node_args = Vec::new();
+
+                if let Some(inspect) = &self.inspect {
+                    node_args.push(match inspect {
+                        Some(address) => format!("--inspect={}", address),
+                        None => "--inspect".to_owned(),
+                    });
+                }
+
+                if let Some(inspect_brk) = &self.inspect_brk {
+                    node_args.push(match inspect_brk {
+                        Some(address) => format!("--inspect-brk={}", address),
+                        None => "--inspect-brk".to_owned(),
+                    });
+                }
+
+                if let Some(require) = &self.require {
+                    node_args.push(format!("--require={}", require));
+                }
+
                 Ok(ScriptEnvironment::new()?
                     .with_project(&project)
                     .with_package(&project, &project.active_package()?)?
+                    .with_node_args(node_args)
                     .enable_shell_forwarding()
                     .run_binary(&binary, &self.args)
                     .await?

@@ -275,6 +275,7 @@ pub struct ScriptEnvironment {
     cwd: Path,
     binaries: ScriptBinaries,
     env: BTreeMap<String, Option<String>>,
+    node_args: Vec<String>,
     shell_forwarding: bool,
     stdin: Option<String>,
 }
@@ -285,6 +286,7 @@ impl ScriptEnvironment {
             cwd: Path::current_dir().unwrap(),
             binaries: ScriptBinaries::new().with_standard()?,
             env: BTreeMap::new(),
+            node_args: Vec::new(),
             shell_forwarding: false,
             stdin: None,
         };
@@ -345,6 +347,11 @@ impl ScriptEnvironment {
 
     pub fn delete_env_variable(mut self, key: &str) -> Self {
         self.env.insert(key.to_string(), None);
+        self
+    }
+
+    pub fn with_node_args(mut self, args: Vec<String>) -> Self {
+        self.node_args = args;
         self
     }
 
@@ -583,7 +590,7 @@ impl ScriptEnvironment {
     pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
         match binary.kind {
             BinaryKind::Node => {
-                let mut node_args = vec![];
+                let mut node_args = self.node_args.clone();
 
                 node_args.push(binary.path.to_file_string());
                 node_args.extend(args.into_iter().map(|arg| arg.as_ref().to_string()));
