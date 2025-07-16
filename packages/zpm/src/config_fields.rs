@@ -1,3 +1,4 @@
+use ouroboros::self_referencing;
 use zpm_utils::Path;
 use colored::Colorize;
 use serde::{de, Deserialize, Deserializer, Serialize};
@@ -390,22 +391,49 @@ impl Serialize for PathField {
     }
 }
 
-#[derive(Debug, Clone)]
+#[self_referencing]
+#[derive(Debug)]
+struct OwnedGlob {
+    raw: String,
+
+    #[borrows(raw)]
+    #[covariant]
+    pattern: wax::Glob<'this>,
+}
+
+#[derive(Debug)]
 pub struct Glob {
-    pub pattern: String,
+    inner: OwnedGlob,
+}
+
+impl Clone for Glob {
+    fn clone(&self) -> Self {
+        Self::parse(self.inner.borrow_raw().clone()).unwrap()
+    }
 }
 
 impl Glob {
-    pub fn to_matcher(&self) -> wax::Glob {
-        wax::Glob::new(&self.pattern)
-            // This should really be handled while parsing the glob.
-            // But unfortunately wax::Glob requires a lifetime parameter,
-            // so we can't use it directly in the Glob struct.
-            .expect("Invalid glob pattern")
+    pub fn parse(raw: impl Into<String>) -> Result<Self, Error> {
+        let raw = raw.into();
+
+        let pattern = OwnedGlobTryBuilder {
+            raw,
+            pattern_builder: |raw| wax::Glob::new(raw).map_err(|_| Error::InvalidGlob(raw.clone())),
+        }.try_build()?;
+
+        Ok(Glob { inner: pattern })
+    }
+
+    pub fn raw(&self) -> &str {
+        self.inner.borrow_raw()
+    }
+
+    pub fn matcher(&self) -> &wax::Glob {
+        self.inner.borrow_pattern()
     }
 
     pub fn to_regex_string(&self) -> String {
-        self.to_matcher()
+        self.matcher()
             .to_regex()
             .to_string()
     }
@@ -413,7 +441,7 @@ impl Glob {
 
 impl ToFileString for Glob {
     fn to_file_string(&self) -> String {
-        self.pattern.clone()
+        self.inner.borrow_raw().clone()
     }
 }
 
@@ -427,19 +455,20 @@ impl FromFileString for Glob {
     type Error = Error;
 
     fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
-        Ok(Glob {pattern: raw.to_string()})
+        Ok(Glob::parse(raw)?)
     }
 }
 
 impl<'de> Deserialize<'de> for Glob {
     fn deserialize<D>(deserializer: D) -> Result<Glob, D::Error> where D: Deserializer<'de> {
-        Ok(Glob { pattern: String::deserialize(deserializer)? })
+        Ok(Glob::parse(String::deserialize(deserializer)?)
+            .map_err(|err| de::Error::custom(err.to_string()))?)
     }
 }
 
 impl Serialize for Glob {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
-        self.pattern.serialize(serializer)
+        self.inner.borrow_raw().serialize(serializer)
     }
 }
 
@@ -601,7 +630,7 @@ mod tests {
         // Test FromFileString
         let raw = "*.rs";
         let glob_field = GlobField::from_file_string(raw).unwrap();
-        assert_eq!(glob_field.value.pattern, "*.rs");
+        assert_eq!(glob_field.value.raw(), "*.rs");
 
         // Test ToFileString
         assert_eq!(glob_field.to_file_string(), "*.rs");
@@ -610,7 +639,7 @@ mod tests {
         let serialized = serde_json::to_string(&glob_field).unwrap();
         assert_eq!(serialized, "\"*.rs\"");
         let deserialized: GlobField = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized.value.pattern, "*.rs");
+        assert_eq!(deserialized.value.raw(), "*.rs");
     }
 
     #[test]
@@ -618,7 +647,7 @@ mod tests {
         // Test FromFileString
         let raw = "*.txt";
         let glob = Glob::from_file_string(raw).unwrap();
-        assert_eq!(glob.pattern, "*.txt");
+        assert_eq!(glob.raw(), "*.txt");
 
         // Test ToFileString
         assert_eq!(glob.to_file_string(), "*.txt");
@@ -627,7 +656,7 @@ mod tests {
         let serialized = serde_json::to_string(&glob).unwrap();
         assert_eq!(serialized, "\"*.txt\"");
         let deserialized: Glob = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized.pattern, "*.txt");
+        assert_eq!(deserialized.raw(), "*.txt");
 
         // Test regex conversion - Check for a pattern that would be in a regex that matches "*.txt"
         let regex_str = glob.to_regex_string();

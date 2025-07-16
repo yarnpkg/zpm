@@ -118,6 +118,9 @@ pub enum Error {
     #[error("Time error: {0}")]
     TimeError(#[from] std::time::SystemTimeError),
 
+    #[error("Invalid glob pattern ({0})")]
+    InvalidGlob(String),
+
     #[error("Glob error")]
     GlobError(#[from] globset::Error),
 

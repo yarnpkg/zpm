@@ -129,12 +129,10 @@ impl HttpClient {
         let url = Url::parse(url)
             .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
 
-        // TODO: Avoid recreating the glob matchers for every request.
-        // This requires the HttpClient to be generic over the lifetime of the Config.
         if url.scheme() == "http"
             && !self.unsafe_http_whitelist
                 .iter()
-                .any(|glob| glob.value.to_matcher().is_match(url.host_str().expect("\"http:\" URL should have a host")))
+                .any(|glob| glob.value.matcher().is_match(url.host_str().expect("\"http:\" URL should have a host")))
         {
             return Err(Error::UnsafeHttpError(url));
         }
