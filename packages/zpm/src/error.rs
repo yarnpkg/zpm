@@ -55,7 +55,7 @@ pub enum Error {
     #[error("[YN0091] Cache path does not exist ({}).", .0.to_print_string())]
     MissingCacheFolder(Path),
 
-    #[error("[YN0081] Unsafe http requests must be explicitly whitelisted in your configuration ({}).", .0.host_str().unwrap())]
+    #[error("[YN0081] Unsafe http requests must be explicitly whitelisted in your configuration ({}).", .0.host_str().expect("\"http:\" URL should have a host"))]
     UnsafeHttpError(reqwest::Url),
 
     #[error("Algolia registry error")]

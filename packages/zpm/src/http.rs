@@ -61,7 +61,10 @@ impl HttpClient {
 
         // TODO: Avoid recreating the glob matcher for every request.
         // This requires the HttpClient to be generic over the lifetime of the Config.
-        if url.scheme() == "http" && !self.unsafe_http_whitelist.iter().any(|glob| glob.value.to_matcher().is_match(url.host_str().unwrap())) {
+        if url.scheme() == "http"
+            && !self.unsafe_http_whitelist
+                .iter()
+                .any(|glob| glob.value.to_matcher().is_match(url.host_str().expect("\"http:\" URL should have a host"))) {
             return Err(Error::UnsafeHttpError(url));
         }
 
