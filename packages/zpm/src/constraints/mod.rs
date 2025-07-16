@@ -1,5 +1,4 @@
 use structs::{ConstraintsDependency, ConstraintsPackage, ConstraintsWorkspace};
-use zpm_utils::ToFileString;
 
 use crate::{error::Error, install::InstallState, primitives::Reference, project::{Project, Workspace}, resolvers::Resolution};
 

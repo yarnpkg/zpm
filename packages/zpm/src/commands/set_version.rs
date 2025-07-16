@@ -1,5 +1,5 @@
 use clipanion::cli;
-use zpm_parsers::{JsonFormatter, JsonValue};
+use zpm_parsers::{JsonFormatter, Value};
 use zpm_switch::{PackageManagerField, PackageManagerReference, VersionPackageManagerReference};
 use zpm_utils::{Path, ToFileString, ToHumanString};
 
@@ -47,7 +47,7 @@ impl SetVersion {
 
         formatter.set(
             ["packageManager"],
-            JsonValue::String(package_manager.to_file_string()),
+            Value::String(package_manager.to_file_string()),
         )?;
 
         let updated_content

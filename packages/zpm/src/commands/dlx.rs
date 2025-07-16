@@ -1,6 +1,6 @@
 use std::{process::ExitStatus};
 
-use zpm_parsers::{JsonFormatter, JsonValue};
+use zpm_parsers::{JsonFormatter, Value};
 use zpm_utils::{Path, ToFileString};
 use clipanion::cli;
 use zpm_semver::RangeKind;
@@ -130,7 +130,7 @@ pub async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descri
     for descriptor in descriptors.into_iter() {
         formatter.set(
             vec!["dependencies".to_string(), descriptor.ident.to_file_string()],
-            JsonValue::String(descriptor.range.to_file_string()),
+            Value::String(descriptor.range.to_file_string()),
         )?;
     }
 

@@ -1,30 +1,31 @@
+use std::ops::{Index, Range, RangeFrom, RangeInclusive, RangeTo};
+
 use serde::{de, Deserialize, Deserializer};
 use zpm_utils::{impl_serialization_traits_no_serde, DataType, FromFileString, ToFileString, ToHumanString};
 
 use crate::{json::escape_string, Error};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct JsonPath {
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct Path {
     pub segments: Vec<String>,
 }
-
-enum JsonPathPart<'a> {
+enum PathSegment<'a> {
     Identifier(&'a str),
     String(&'a str),
     Number(&'a str),
 }
 
-impl<'a> JsonPathPart<'a> {
+impl<'a> PathSegment<'a> {
     fn as_str(&self) -> &str {
         match self {
-            JsonPathPart::Identifier(segment) => segment,
-            JsonPathPart::String(segment) => segment,
-            JsonPathPart::Number(segment) => segment,
+            PathSegment::Identifier(segment) => segment,
+            PathSegment::String(segment) => segment,
+            PathSegment::Number(segment) => segment,
         }
     }
 }
 
-impl JsonPath {
+impl Path {
     pub fn new() -> Self {
         Self {
             segments: Vec::new(),
@@ -43,10 +44,22 @@ impl JsonPath {
         self.segments.is_empty()
     }
 
-    fn to_parts<'a>(&'a self) -> Vec<JsonPathPart<'a>> {
+    pub fn len(&self) -> usize {
+        self.segments.len()
+    }
+
+    pub fn last(&self) -> Option<&String> {
+        self.segments.last()
+    }
+
+    pub fn push(&mut self, segment: String) {
+        self.segments.push(segment);
+    }
+
+    fn to_parts<'a>(&'a self) -> Vec<PathSegment<'a>> {
         let mut result
             = Vec::new();
-        
+
         for segment in self.segments.iter() {
             let is_valid_identifier = segment.chars().enumerate().all(|(idx, ch)| {
                 if idx == 0 {
@@ -57,7 +70,7 @@ impl JsonPath {
             });
 
             if is_valid_identifier {
-                result.push(JsonPathPart::Identifier(segment));
+                result.push(PathSegment::Identifier(segment));
                 continue;
             }
 
@@ -66,35 +79,75 @@ impl JsonPath {
             });
 
             if is_number {
-                result.push(JsonPathPart::Number(segment));
+                result.push(PathSegment::Number(segment));
                 continue;
             }
 
-            result.push(JsonPathPart::String(segment));
+            result.push(PathSegment::String(segment));
         }
 
         result
     }
 }
 
-impl<const N: usize> From<[&str; N]> for JsonPath {
+impl<const N: usize> From<[&str; N]> for Path {
     fn from(path: [&str; N]) -> Self {
         Self::from_segments(path.iter().map(|s| s.to_string()).collect())
     }
 }
 
-impl From<Vec<String>> for JsonPath {
+impl From<Vec<String>> for Path {
     fn from(path: Vec<String>) -> Self {
         Self::from_segments(path)
     }
 }
 
-impl FromFileString for JsonPath {
+impl Index<usize> for Path {
+    type Output = String;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.segments[index]
+    }
+}
+
+impl Index<Range<usize>> for Path {
+    type Output = [String];
+
+    fn index(&self, index: Range<usize>) -> &Self::Output {
+        &self.segments[index]
+    }
+}
+
+impl Index<RangeFrom<usize>> for Path {
+    type Output = [String];
+
+    fn index(&self, index: RangeFrom<usize>) -> &Self::Output {
+        &self.segments[index]
+    }
+}
+
+impl Index<RangeTo<usize>> for Path {
+    type Output = [String];
+
+    fn index(&self, index: RangeTo<usize>) -> &Self::Output {
+        &self.segments[index]
+    }
+}
+
+impl Index<RangeInclusive<usize>> for Path {
+    type Output = [String];
+
+    fn index(&self, index: RangeInclusive<usize>) -> &Self::Output {
+        &self.segments[index]
+    }
+}
+
+impl FromFileString for Path {
     type Error = Error;
 
     fn from_file_string(src: &str) -> Result<Self, Error> {
         let mut segments = Vec::new();
-        let mut chars = src.chars().peekable();
+        let mut chars = src.chars();
         let mut current_segment = String::new();
 
         while let Some(ch) = chars.next() {
@@ -113,12 +166,11 @@ impl FromFileString for JsonPath {
                     }
 
                     // Check if it's a string or number
-                    match chars.peek() {
-                        Some('"') | Some('\'') => {
-                            // String index
-                            let quote_char = chars.next().unwrap();
-                            let mut escaped = false;
-                            
+                    match chars.next() {
+                        Some(quote_char) if quote_char == '"' || quote_char == '\'' => {
+                            let mut escaped
+                                = false;
+
                             while let Some(ch) = chars.next() {
                                 if escaped {
                                     current_segment.push(ch);
@@ -132,34 +184,36 @@ impl FromFileString for JsonPath {
                                 }
                             }
 
-                            // Expect closing bracket
-                            match chars.next() {
-                                Some(']') => {
-                                    segments.push(current_segment);
-                                    current_segment = String::new();
-                                }
-                                _ => return Err(Error::InvalidSyntax("Expected ']' after quoted string".to_string())),
+                            if chars.next() != Some(']') {
+                                return Err(Error::InvalidSyntax("Expected ']' after quoted string".to_string()));
                             }
+
+                            segments.push(current_segment);
+                            current_segment = String::new();
                         },
 
-                        Some('0'..='9') => {
-                            // Numeric index
-                            while let Some(ch) = chars.peek() {
+                        // Numeric index
+                        Some(numeric_char) if numeric_char.is_ascii_digit() => {
+                            current_segment.push(numeric_char);
+                            let mut found_closing_bracket = false;
+
+                            while let Some(ch) = chars.next() {
                                 if ch.is_ascii_digit() {
-                                    current_segment.push(chars.next().unwrap());
+                                    current_segment.push(ch);
+                                } else if ch == ']' {
+                                    found_closing_bracket = true;
+                                    break;
                                 } else {
                                     break;
                                 }
                             }
 
-                            // Expect closing bracket
-                            match chars.next() {
-                                Some(']') => {
-                                    segments.push(current_segment);
-                                    current_segment = String::new();
-                                }
-                                _ => return Err(Error::InvalidSyntax("Expected ']' after number".to_string())),
+                            if !found_closing_bracket {
+                                return Err(Error::InvalidSyntax("Expected ']' after number".to_string()));
                             }
+
+                            segments.push(current_segment);
+                            current_segment = String::new();
                         },
 
                         _ => {
@@ -182,7 +236,7 @@ impl FromFileString for JsonPath {
     }
 }
 
-impl ToFileString for JsonPath {
+impl ToFileString for Path {
     fn to_file_string(&self) -> String {
         let parts
             = self.to_parts();
@@ -196,7 +250,7 @@ impl ToFileString for JsonPath {
 
         for part in parts {
             match part {
-                JsonPathPart::Identifier(segment) => {
+                PathSegment::Identifier(segment) => {
                     if !result.is_empty() {
                         result.push_str(".");
                     }
@@ -204,15 +258,15 @@ impl ToFileString for JsonPath {
                     result.push_str(segment);
                 },
 
-                JsonPathPart::Number(segment) => {
+                PathSegment::Number(segment) => {
                     result.push_str("[");
                     result.push_str(segment);
                     result.push_str("]");
                 },
 
-                JsonPathPart::String(segment) => {
+                PathSegment::String(segment) => {
                     result.push_str("[");
-                    result.push_str(segment);
+                    result.push_str(&escape_string(segment));
                     result.push_str("]");
                 },
             }
@@ -222,7 +276,7 @@ impl ToFileString for JsonPath {
     }
 }
 
-impl ToHumanString for JsonPath {
+impl ToHumanString for Path {
     fn to_print_string(&self) -> String {
         let parts
             = self.to_parts();
@@ -236,7 +290,7 @@ impl ToHumanString for JsonPath {
 
         for part in parts {
             match part {
-                JsonPathPart::Identifier(segment) => {
+                PathSegment::Identifier(segment) => {
                     if !result.is_empty() {
                         result.push_str(&DataType::Code.colorize("."));
                     }
@@ -244,13 +298,13 @@ impl ToHumanString for JsonPath {
                     result.push_str(segment);
                 },
 
-                JsonPathPart::Number(segment) => {
+                PathSegment::Number(segment) => {
                     result.push_str(&DataType::Code.colorize("["));
                     result.push_str(&DataType::Number.colorize(segment));
                     result.push_str(&DataType::Code.colorize("]"));
                 },
 
-                JsonPathPart::String(segment) => {
+                PathSegment::String(segment) => {
                     result.push_str(&DataType::Code.colorize("["));
                     result.push_str(&DataType::String.colorize(&escape_string(segment)));
                     result.push_str(&DataType::Code.colorize("]"));
@@ -262,7 +316,7 @@ impl ToHumanString for JsonPath {
     }
 }
 
-impl_serialization_traits_no_serde!(JsonPath);
+impl_serialization_traits_no_serde!(Path);
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -271,18 +325,18 @@ enum JsonPathDeserializer {
     Array(Vec<String>),
 }
 
-impl<'de> Deserialize<'de> for JsonPath {
+impl<'de> Deserialize<'de> for Path {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
         let deserialized
             = JsonPathDeserializer::deserialize(deserializer)?;
 
         match deserialized {
             JsonPathDeserializer::String(path) => {
-                Ok(JsonPath::from_file_string(&path).map_err(de::Error::custom)?)
+                Ok(Path::from_file_string(&path).map_err(de::Error::custom)?)
             },
 
             JsonPathDeserializer::Array(segments) => {
-                Ok(JsonPath::from_segments(segments))
+                Ok(Path::from_segments(segments))
             },
         }
     }

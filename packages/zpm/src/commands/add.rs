@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use clipanion::cli;
-use zpm_parsers::{JsonFormatter, JsonValue};
+use zpm_parsers::{JsonFormatter, Value};
 use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 
@@ -235,32 +235,32 @@ impl Add {
 
             if request.dev {
                 formatter.set(
-                    vec!["devDependencies".to_string(), descriptor.ident.to_file_string()], 
-                    JsonValue::String(descriptor.range.to_file_string()),
+                    vec!["devDependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
                 )?;
             }
 
             if request.optional {
                 formatter.set(
-                    vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()], 
-                    JsonValue::String(descriptor.range.to_file_string()),
+                    vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
                 )?;
             }
 
             if request.peer {
                 formatter.set(
-                    vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()], 
-                    JsonValue::String("*".to_string()),
+                    vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String("*".to_string()),
                 )?;
             }
 
             if request.prod {
                 formatter.set(
-                    vec!["dependencies".to_string(), descriptor.ident.to_file_string()], 
-                    JsonValue::String(descriptor.range.to_file_string()),
+                    vec!["dependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
                 )?;
             }
-        }    
+        }
 
         let updated_content
             = formatter.to_string();

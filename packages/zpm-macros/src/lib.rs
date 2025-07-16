@@ -316,10 +316,10 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                     .unwrap_or_default();
 
                 let updated_config
-                    = zpm_parsers::yaml::update_document_field(
+                    = zpm_parsers::yaml::Yaml::update_document_field(
                         &config_text,
-                        &name.to_case(Case::Camel),
-                        &zpm_parsers::yaml::escape_string(&value.to_file_string())
+                        zpm_parsers::Path::from_file_string(&name.to_case(Case::Camel))?,
+                        zpm_parsers::Value::String(value.to_file_string())
                     )?;
 
                 config_path
