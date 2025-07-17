@@ -275,7 +275,7 @@ impl Project {
     }
 
     pub fn package_cache(&self) -> Result<CompositeCache, Error> {
-        let global_cache_path = self.config.project.global_folder.value
+        let global_cache_path = self.config.user.global_folder.value
             .with_join_str("cache");
 
         let local_cache_path
