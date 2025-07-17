@@ -1,0 +1,75 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-tracker:
+    name: 'Running the test tracker'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{steps.deployment.outputs.page_url}}
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
+      - name: Install cross
+        uses: taiki-e/install-action@a27ef18d36cfa66b0af3a360104621793b41c036 # v2.54.3
+        with:
+          tool: cross
+
+      - name: Add Rust Target
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Build
+        run: |
+          cross build --verbose --release --target=x86_64-unknown-linux-musl
+
+      - name: Clone the berry repo
+        uses: actions/checkout@v4
+        with:
+          repository: yarnpkg/berry
+          path: berry
+
+      - name: Install dependencies
+        run: ./yarn.sh install
+
+      - name: Generate the test report
+        run: |
+          export BERRY_DIR=$GITHUB_WORKSPACE/berry
+          ./yarn.sh berry test:integration --json --outputFile=$(pwd)/report.json || true
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: report.json
+
+      - name: Generate downloads page
+        run: ./yarn.sh build:site-artifacts
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/site-artifacts/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
