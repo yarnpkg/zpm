@@ -193,7 +193,8 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                         // Discard the data from the deserializer
                         serde::de::IgnoredAny::deserialize(deserializer)?;
 
-                        Ok(#field_ty_path::from_file_string(&value).unwrap())
+                        #field_ty_path::from_file_string(&value)
+                            .map_err(|err| serde::de::Error::custom(err))
                     },
                     Err(_) => serde::Deserialize::deserialize(deserializer),
                 }
