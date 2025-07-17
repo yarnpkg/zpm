@@ -36,7 +36,10 @@ jobs:
       - name: Build
         run: |
           cross build --verbose --release --target=x86_64-unknown-linux-musl
-          cp -rf target/x86_64-unknown-linux-musl/release target/release
+
+      - name: Copy files
+        run: |
+          cp -rf target/x86_64-unknown-linux-musl/release target/
 
       - name: Clone the berry repo
         uses: actions/checkout@v4
