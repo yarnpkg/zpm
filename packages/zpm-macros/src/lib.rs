@@ -191,7 +191,7 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                 match #env_get {
                     Ok(value) => {
                         // Discard the data from the deserializer
-                        serde::de::IgnoredAny::deserialize(deserializer)?;
+                        let _ = serde::de::IgnoredAny::deserialize(deserializer)?;
 
                         #field_ty_path::from_file_string(&value)
                             .map_err(|err| serde::de::Error::custom(err))
