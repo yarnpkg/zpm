@@ -176,7 +176,7 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                     = format!("YARN_{}", setting_name)
                         .to_uppercase();
 
-                quote!{std::env::var(#env_name)}
+                quote!{std::env::var(#env_name).map(|value| (#env_name, value))}
             })
             .reduce(|a, b| {
                 quote!{#a.or_else(|_| #b)}
@@ -189,12 +189,12 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                 D: serde::Deserializer<'de>,
             {
                 match #env_get {
-                    Ok(value) => {
+                    Ok((env_name, value)) => {
                         // Discard the data from the deserializer
                         let _ = serde::de::IgnoredAny::deserialize(deserializer)?;
 
                         #field_ty_path::from_file_string(&value)
-                            .map_err(|err| serde::de::Error::custom(err))
+                            .map_err(|err| serde::de::Error::custom(format!("Failed to parse {}: {}", env_name, err)))
                     },
                     Err(_) => serde::Deserialize::deserialize(deserializer),
                 }
