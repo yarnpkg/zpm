@@ -648,24 +648,18 @@ impl Workspace {
                 = HashSet::new();
 
             while let Some((base_path, current_patterns)) = workspace_queue.pop() {
-                let normalized_patterns = current_patterns.iter()
-                    .map(|p| Path::try_from(p.as_str()))
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let glob_patterns = normalized_patterns.into_iter()
-                    .map(|p| {
-                        let pattern_path = base_path
-                            .with_join(&p);
-
-                        let pattern_str = pattern_path.as_str();
-
-                        let (pattern, is_positive) = if pattern_str.starts_with('!') {
-                            (&pattern_str[1..], false)
+                let glob_patterns = current_patterns.into_iter()
+                    .map(|pattern| {
+                        let (pattern, is_positive) = if pattern.starts_with('!') {
+                            (&pattern[1..], false)
                         } else {
-                            (pattern_str, true)
+                            (pattern.as_ref(), true)
                         };
 
-                        GlobBuilder::new(pattern)
+                        let pattern_path = base_path
+                            .with_join_str(pattern);
+
+                        GlobBuilder::new(pattern_path.as_str())
                                 .literal_separator(true)
                                 .build()
                                 .map(|glob| (glob, is_positive))
