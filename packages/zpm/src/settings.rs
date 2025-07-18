@@ -92,6 +92,9 @@ pub struct UserConfig {
     #[default(|_| !zpm_ci::is_ci().is_some())]
     pub enable_progress_bars: BoolField,
 
+    #[default(Path::home_dir().unwrap().unwrap().with_join_str(".yarn/zpm"))]
+    pub global_folder: PathField,
+
     #[default(3)]
     pub http_retry: UintField,
 
@@ -149,9 +152,6 @@ pub struct ProjectConfig {
 
     #[default(true)]
     pub enable_transparent_workspaces: BoolField,
-
-    #[default(Path::home_dir().unwrap().unwrap().with_join_str(".yarn/zpm"))]
-    pub global_folder: PathField,
 
     #[default("cache".to_string())]
     pub local_cache_folder_name: StringField,
