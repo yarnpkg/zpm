@@ -1,6 +1,6 @@
 use std::{collections::{BTreeMap, HashSet}, io::ErrorKind, time::UNIX_EPOCH};
 
-use globset::GlobBuilder;
+use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_utils::{impl_serialization_traits, Path, ToFileString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
@@ -657,15 +657,35 @@ impl Workspace {
                         let pattern_path = base_path
                             .with_join(&p);
 
-                        GlobBuilder::new(pattern_path.as_str())
-                            .literal_separator(true)
-                            .build()
+                        let pattern_str = pattern_path.as_str();
+
+                        let (pattern, is_positive) = if pattern_str.starts_with('!') {
+                            (&pattern_str[1..], false)
+                        } else {
+                            (pattern_str, true)
+                        };
+
+                        GlobBuilder::new(pattern)
+                                .literal_separator(true)
+                                .build()
+                                .map(|glob| (glob, is_positive))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let pattern_matchers = glob_patterns.into_iter()
-                    .map(|g| g.compile_matcher())
-                    .collect::<Vec<_>>();
+                let (positive_patterns, negative_patterns): (Vec<_>, Vec<_>) = glob_patterns.into_iter()
+                    .partition(|(_, is_positive)| *is_positive);
+
+                let mut positive_builder = GlobSetBuilder::new();
+                for (glob, _) in positive_patterns {
+                    positive_builder.add(glob);
+                }
+                let positive_glob_set = positive_builder.build()?;
+
+                let mut negative_builder = GlobSetBuilder::new();
+                for (glob, _) in negative_patterns {
+                    negative_builder.add(glob);
+                }
+                let negative_glob_set = negative_builder.build()?;
 
                 let workspace_paths = lookup_state.cache.iter()
                     .filter(|(_, entry)| {
@@ -675,9 +695,9 @@ impl Workspace {
                         let candidate_workspace_rel_dir = p.dirname()
                             .expect("Expected this path to have a parent directory, since it's supposed to be the relative path to a package.json file");
 
-                        pattern_matchers.iter().any(|m| {
-                            m.is_match(candidate_workspace_rel_dir.as_str())
-                        })
+                        let dir_str = candidate_workspace_rel_dir.as_str();
+
+                        positive_glob_set.is_match(dir_str) && !negative_glob_set.is_match(dir_str)
                     })
                     .collect::<Vec<_>>();
 
