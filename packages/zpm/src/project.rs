@@ -669,7 +669,8 @@ impl Workspace {
                 let (positive_patterns, negative_patterns): (Vec<_>, Vec<_>) = glob_patterns.into_iter()
                     .partition(|(_, is_positive)| *is_positive);
 
-                let mut positive_builder = GlobSetBuilder::new();
+                let mut positive_builder
+                    = GlobSetBuilder::new();
                 for (glob, _) in positive_patterns {
                     positive_builder.add(glob);
                 }
