@@ -697,6 +697,7 @@ impl Workspace {
 
                         let dir_str = candidate_workspace_rel_dir.as_str();
 
+                        // Important: If there are no positive patterns, nothing matches.
                         positive_glob_set.is_match(dir_str) && !negative_glob_set.is_match(dir_str)
                     })
                     .collect::<Vec<_>>();
