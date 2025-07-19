@@ -112,6 +112,21 @@ impl Run {
 
         match project.find_script(&self.name) {
             Ok((locator, script)) => {
+                if self.inspect.is_some() {
+                    return Err(Error::InvalidRunScriptOption("--inspect".to_owned()));
+                }
+                if self.inspect_brk.is_some() {
+                    return Err(Error::InvalidRunScriptOption("--inspect-brk".to_owned()));
+                }
+                if self.inspect_wait.is_some() {
+                    return Err(Error::InvalidRunScriptOption("--inspect-wait".to_owned()));
+                }
+
+                // TODO: Investigate whether --require should be forwarded to scripts via NODE_OPTIONS.
+                if self.require.is_some() {
+                    return Err(Error::InvalidRunScriptOption("--require".to_owned()));
+                }
+
                 Ok(ScriptEnvironment::new()?
                     .with_project(&project)
                     .with_package(&project, &locator)?

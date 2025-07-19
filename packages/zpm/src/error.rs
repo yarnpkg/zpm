@@ -334,6 +334,9 @@ pub enum Error {
     #[error("Failed to get detected root")]
     FailedToGetSwitchDetectedRoot,
 
+    #[error("The \"{0}\" option of the run command cannot be used when running scripts.")]
+    InvalidRunScriptOption(String),
+
     // Silent error; no particular message, just exit with an exit code 1
     #[error("")]
     SilentError,
