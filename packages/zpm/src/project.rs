@@ -651,14 +651,15 @@ impl Workspace {
                 let glob_patterns
                     = current_patterns.into_iter()
                         .map(|pattern| {
-                            let (pattern, is_positive) = if pattern.starts_with('!') {
-                                (&pattern[1..], false)
-                            } else {
-                                (pattern.as_ref(), true)
-                            };
+                            let (pattern, is_positive)
+                                = if pattern.starts_with('!') {
+                                    (&pattern[1..], false)
+                                } else {
+                                    (pattern.as_ref(), true)
+                                };
 
-                            let pattern_path = base_path
-                                .with_join_str(pattern);
+                            let pattern_path
+                                = base_path.with_join_str(pattern);
 
                             GlobBuilder::new(pattern_path.as_str())
                                     .literal_separator(true)
