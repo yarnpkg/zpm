@@ -1,7 +1,10 @@
 use crate::{error::Error, fetchers, git, install::{InstallContext, IntoResolutionResult, ResolutionResult}, primitives::{range, reference, Descriptor, Locator}};
 
 pub async fn resolve_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::GitRange) -> Result<ResolutionResult, Error> {
-    let commit = git::resolve_git_treeish(&params.git).await?;
+    let project = context.project
+        .expect("The project is required for resolving a git package");
+
+    let commit = git::resolve_git_treeish(&params.git, &project.http_client.config).await?;
 
     let git_reference = git::GitReference {
         repo: params.git.repo.clone(),

@@ -1,5 +1,7 @@
 use std::{collections::BTreeMap, fmt::{self, Display, Formatter}, future::Future, sync::LazyLock};
 
+use git_url_parse::GitUrl;
+use reqwest::Url;
 use zpm_utils::Path;
 use bincode::{Decode, Encode};
 use colored::Colorize;
@@ -7,7 +9,7 @@ use fancy_regex::Regex;
 use serde::{Deserialize, Serialize};
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, github, prepare::PrepareParams, primitives::{range::AnonymousSemverRange}, script::ScriptEnvironment, install::InstallContext};
+use crate::{error::Error, github, http::HttpConfig, install::InstallContext, prepare::PrepareParams, primitives::range::AnonymousSemverRange, script::ScriptEnvironment};
 
 static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
 
@@ -17,14 +19,14 @@ static GH_TARBALL_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^https?:\
 static GH_URL_SET: LazyLock<Vec<Regex>> = LazyLock::new(|| vec![
     Regex::new(r"^ssh:").unwrap(),
     Regex::new(r"^git(?:\+[^:]+)?:").unwrap(),
-  
+
     // `git+` is optional, `.git` is required
     Regex::new(r"^(?:git\+)?https?:[^#]+\/[^#]+(?:\.git)(?:#.*)?$").unwrap(),
-  
+
     Regex::new(r"^git@[^#]+\/[^#]+\.git(?:#.*)?$").unwrap(),
     // Also match git@github.com:user/repo format (with colon)
     Regex::new(r"^git@github\.com:[^/]+/[^/]+(?:\.git)?(?:#.*)?$").unwrap(),
-  
+
     Regex::new(r"^(?:github:|https:\/\/github\.com\/)?(?!\.{1,2}\/)([a-zA-Z._0-9-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z._0-9-]+?)(?:\.git)?(?:#.*)?$").unwrap(),
     // GitHub `/tarball/` URLs
     Regex::new(r"^https?:\/\/github\.com\/(?!\.{1,2}\/)([a-zA-Z0-9._-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z0-9._-]+?)\/tarball\/(.+)?$").unwrap(),
@@ -58,7 +60,7 @@ impl GitSource {
     pub fn from_url(url: &str) -> Self {
         // Normalize the URL first to handle various GitHub URL formats
         let normalized = normalize_git_url(url);
-        
+
         // Check if it's a GitHub URL
         if let Ok(Some(captures)) = GH_URL.captures(&normalized) {
             if let (Some(owner), Some(repo)) = (captures.get(1), captures.get(2)) {
@@ -68,7 +70,7 @@ impl GitSource {
                 };
             }
         }
-        
+
         // Check GitHub tarball URLs (on the original URL, not normalized)
         if let Ok(Some(captures)) = GH_TARBALL_URL.captures(url) {
             if let (Some(owner), Some(repo)) = (captures.get(1), captures.get(2)) {
@@ -78,11 +80,11 @@ impl GitSource {
                 };
             }
         }
-        
+
         // Otherwise, treat it as a generic URL
         GitSource::Url(url.to_string())
     }
-    
+
     /// Convert GitSource back to a URL string
     pub fn to_urls(&self) -> Vec<String> {
         match self {
@@ -375,8 +377,31 @@ async fn repeat_until_ok<I, T, E, A, F>(values: Vec<I>, f: F) -> Result<T, E>
     Err(last_error.unwrap())
 }
 
-async fn ls_remote(repo: &GitSource) -> Result<BTreeMap<String, String>, Error> {
+fn validate_repo_url(url: &str, config: &HttpConfig) -> Result<(), Error> {
+    let git_url = GitUrl::parse(url)
+        .map_err(|_| Error::InvalidGitUrl(url.to_owned()))?;
+
+    let Some(host) = git_url.host else {
+        return Ok(());
+    };
+
+    let url = format!("https://{}", host);
+
+    let url = Url::parse(&url)
+        .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
+
+    let url_settings = config.url_settings(&url);
+    if url_settings.enable_network == Some(false) {
+        return Err(Error::NetworkDisabledError(url));
+    }
+
+    Ok(())
+}
+
+async fn ls_remote(repo: &GitSource, config: &HttpConfig) -> Result<BTreeMap<String, String>, Error> {
     repeat_until_ok(repo.to_urls(), |url| async move {
+        validate_repo_url(&url, config)?;
+
         let output = ScriptEnvironment::new()?
             .with_env(make_git_env())
             .run_exec("git", &["ls-remote", &url])
@@ -399,14 +424,14 @@ async fn ls_remote(repo: &GitSource) -> Result<BTreeMap<String, String>, Error> 
     }).await
 }
 
-pub async fn resolve_git_treeish(git_range: &GitRange) -> Result<String, Error> {
+pub async fn resolve_git_treeish(git_range: &GitRange, config: &HttpConfig) -> Result<String, Error> {
     match &git_range.treeish {
         GitTreeish::AnythingGoes(treeish) => {
-            if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Commit(treeish.clone())).await {
+            if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Commit(treeish.clone()), config).await {
                 Ok(result)
-            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Tag(treeish.clone())).await {
+            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Tag(treeish.clone()), config).await {
                 Ok(result)
-            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Head(treeish.clone())).await {
+            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Head(treeish.clone()), config).await {
                 Ok(result)
             } else {
                 Err(Error::InvalidGitSpecifier)
@@ -414,13 +439,13 @@ pub async fn resolve_git_treeish(git_range: &GitRange) -> Result<String, Error> 
         },
 
         _ => {
-            resolve_git_treeish_stricter(&git_range.repo, git_range.treeish.clone()).await
+            resolve_git_treeish_stricter(&git_range.repo, git_range.treeish.clone(), config).await
         },
     }
 }
 
-async fn resolve_git_treeish_stricter(repo: &GitSource, treeish: GitTreeish) -> Result<String, Error> {
-    let refs = ls_remote(repo).await?;
+async fn resolve_git_treeish_stricter(repo: &GitSource, treeish: GitTreeish, config: &HttpConfig) -> Result<String, Error> {
+    let refs = ls_remote(repo, config).await?;
 
     match treeish {
         GitTreeish::AnythingGoes(_) => {
@@ -495,7 +520,7 @@ fn make_git_env() -> BTreeMap<String, String> {
 pub async fn clone_repository(context: &InstallContext<'_>, source: &GitSource, commit: &str) -> Result<Path, Error> {
     let project = context.project
         .expect("The project is required for cloning repositories");
-    
+
     let clone_dir
         = Path::temp_dir()?;
 
@@ -503,7 +528,7 @@ pub async fn clone_repository(context: &InstallContext<'_>, source: &GitSource, 
         return Ok(clone_dir);
     }
 
-    git_clone_into(source, commit, &clone_dir).await?;
+    git_clone_into(source, commit, &clone_dir, &project.http_client.config).await?;
     Ok(clone_dir)
 }
 
@@ -515,8 +540,10 @@ async fn download_into(source: &GitSource, commit: &str, download_dir: &Path, ht
     Ok(None)
 }
 
-async fn git_clone_into(source: &GitSource, commit: &str, clone_dir: &Path) -> Result<(), Error> {
+async fn git_clone_into(source: &GitSource, commit: &str, clone_dir: &Path, config: &HttpConfig) -> Result<(), Error> {
     repeat_until_ok(source.to_urls(), |clone_url| async move {
+        validate_repo_url(&clone_url, config)?;
+
         ScriptEnvironment::new()?
             .with_env(make_git_env())
             .run_exec("git", &["clone", "-c", "core.autocrlf=false", &clone_url, clone_dir.as_str()])

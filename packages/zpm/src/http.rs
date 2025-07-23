@@ -1,14 +1,50 @@
 use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
 
+use itertools::Itertools;
 use reqwest::{header::{HeaderName, HeaderValue}, Body, Client, Method, RequestBuilder, Response, Url};
 use wax::Program;
 
-use crate::{config::Config, config_fields::GlobField, error::Error};
+use crate::{config::Config, config_fields::{Glob, GlobField}, error::Error, settings::NetworkSettings};
+
+#[derive(Debug)]
+pub struct HttpConfig {
+    pub http_retry: usize,
+    pub unsafe_http_whitelist: Vec<GlobField>,
+
+    enable_network: bool,
+
+    network_settings: Vec<(Glob, NetworkSettings)>,
+}
+
+impl HttpConfig {
+    pub fn url_settings(&self, url: &Url) -> NetworkSettings {
+        let url_settings
+            = url.host_str()
+                .map(|host_str| {
+                    self.network_settings
+                        .iter()
+                        .fold(NetworkSettings::default(), |existing, (glob, settings)| {
+                            if glob.matcher().is_match(host_str) {
+                                NetworkSettings {
+                                    enable_network: existing.enable_network.or(settings.enable_network),
+                                }
+                            } else {
+                                existing
+                            }
+                        })
+                })
+                .unwrap_or_default();
+
+        NetworkSettings {
+            enable_network: url_settings.enable_network.or(Some(self.enable_network)),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct HttpClient {
-    http_retry: usize,
-    unsafe_http_whitelist: Vec<GlobField>,
+    pub config: HttpConfig,
+
     client: Client,
 }
 
@@ -41,7 +77,7 @@ impl<'a> HttpRequest<'a> {
             let response
                 = self.builder.try_clone().expect("builder should be clonable").send().await;
 
-            if retry_count < self.client.http_retry {
+            if retry_count < self.client.config.http_retry {
                 let is_failure = match &response {
                     Ok(response) => response.status().is_server_error() || matches!(response.status().as_u16(), 408 | 413 | 429),
                     Err(_) => true,
@@ -116,10 +152,23 @@ impl HttpClient {
             .build()
             .map_err(|err| Error::DnsResolutionError(Arc::new(err)))?;
 
-        Ok(Arc::new(Self {
+        let config = HttpConfig {
             http_retry: config.user.http_retry.value as usize,
             unsafe_http_whitelist: config.project.unsafe_http_whitelist.value.clone(),
+
+            enable_network: config.user.enable_network.value,
+
+            network_settings: config.user.network_settings.value
+                .clone()
+                .into_iter()
+                // Sort the config by key length to match on the most specific pattern.
+                .sorted_by_cached_key(|(glob, _)| -(glob.raw().len() as isize))
+                .collect(),
+        };
+
+        Ok(Arc::new(Self {
             client,
+            config,
         }))
     }
 
@@ -129,8 +178,13 @@ impl HttpClient {
         let url = Url::parse(url)
             .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
 
+        let url_settings = self.config.url_settings(&url);
+        if url_settings.enable_network == Some(false) {
+            return Err(Error::NetworkDisabledError(url));
+        }
+
         if url.scheme() == "http"
-            && !self.unsafe_http_whitelist
+            && !self.config.unsafe_http_whitelist
                 .iter()
                 .any(|glob| glob.value.matcher().is_match(url.host_str().expect("\"http:\" URL should have a host")))
         {

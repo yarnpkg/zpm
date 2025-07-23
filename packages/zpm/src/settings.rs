@@ -7,12 +7,39 @@ use zpm_utils::{FromFileString, Path, ToFileString, ToHumanString};
 
 use crate::{
     config::ConfigPaths,
-    config_fields::{BoolField, DictField, EnumField, GlobField, PathField, StringField, UintField, VecField},
+    config_fields::{BoolField, DictField, EnumField, Glob, GlobField, PathField, StringField, UintField, VecField},
     primitives::{
         descriptor::{descriptor_map_deserializer, descriptor_map_serializer},
         Descriptor, Ident, PeerRange, SemverDescriptor
     }
 };
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(default)]
+pub struct NetworkSettings {
+    pub enable_network: Option<bool>,
+}
+
+impl ToFileString for NetworkSettings {
+    fn to_file_string(&self) -> String {
+        sonic_rs::to_string(self).unwrap()
+    }
+}
+
+impl ToHumanString for NetworkSettings {
+    fn to_print_string(&self) -> String {
+        sonic_rs::to_string(self).unwrap()
+    }
+}
+
+impl FromFileString for NetworkSettings {
+    type Error = sonic_rs::Error;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        sonic_rs::from_str(s)
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,6 +116,9 @@ pub struct EnvConfig {
 
 #[yarn_config]
 pub struct UserConfig {
+    #[default(true)]
+    pub enable_network: BoolField,
+
     #[default(|_| !zpm_ci::is_ci().is_some())]
     pub enable_progress_bars: BoolField,
 
@@ -100,6 +130,9 @@ pub struct UserConfig {
 
     #[default(100)]
     pub network_concurrency: UintField,
+
+    #[default(BTreeMap::new())]
+    pub network_settings: DictField<Glob, NetworkSettings>,
 }
 
 fn check_tsconfig(config_paths: &ConfigPaths) -> bool {

@@ -401,7 +401,27 @@ struct OwnedGlob {
     pattern: wax::Glob<'this>,
 }
 
-#[derive(Debug)]
+impl PartialEq for OwnedGlob {
+    fn eq(&self, other: &Self) -> bool {
+        self.borrow_raw() == other.borrow_raw()
+    }
+}
+
+impl Eq for OwnedGlob {}
+
+impl PartialOrd for OwnedGlob {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.borrow_raw().partial_cmp(other.borrow_raw())
+    }
+}
+
+impl Ord for OwnedGlob {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.borrow_raw().cmp(other.borrow_raw())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Glob {
     inner: OwnedGlob,
 }
