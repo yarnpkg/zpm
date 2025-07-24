@@ -144,7 +144,7 @@ pub struct ProjectConfig {
     #[default(false)]
     pub enable_immutable_cache: BoolField,
 
-    #[default(false)]
+    #[default(|_| zpm_ci::is_ci().is_some())]
     pub enable_immutable_installs: BoolField,
 
     #[default(true)]
