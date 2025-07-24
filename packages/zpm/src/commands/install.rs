@@ -10,11 +10,11 @@ pub struct Install {
     #[cli::option("--check-resolutions", default = false)]
     check_resolutions: bool,
 
-    #[cli::option("--immutable", default = false)]
-    immutable: bool,
+    #[cli::option("--immutable")]
+    immutable: Option<bool>,
 
-    #[cli::option("--immutable-cache", default = false)]
-    immutable_cache: bool,
+    #[cli::option("--immutable-cache")]
+    immutable_cache: Option<bool>,
 
     #[cli::option("--check-checksums", default = false)]
     check_checksums: bool,
@@ -32,12 +32,12 @@ impl Install {
         let mut project
             = project::Project::new(None).await?;
 
-        if self.immutable {
-            project.config.project.enable_immutable_installs.value = true;
+        if let Some(immutable) = self.immutable {
+            project.config.project.enable_immutable_installs.value = immutable;
         }
 
-        if self.immutable_cache {
-            project.config.project.enable_immutable_cache.value = true;
+        if let Some(immutable_cache) = self.immutable_cache {
+            project.config.project.enable_immutable_cache.value = immutable_cache;
         }
 
         project.run_install(RunInstallOptions {
@@ -51,4 +51,3 @@ impl Install {
         Ok(())
     }
 }
-
