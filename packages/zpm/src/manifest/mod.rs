@@ -76,7 +76,7 @@ pub struct RemoteManifest {
 
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Encode, Decode, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")] 
+#[serde(rename_all = "camelCase")]
 pub struct PublishConfig {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,6 +110,14 @@ pub struct PublishConfig {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub executable_files: Option<Vec<Path>>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub types: Option<String>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typings: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Encode, Decode)]

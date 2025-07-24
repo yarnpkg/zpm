@@ -291,6 +291,20 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         )?;
     }
 
+    if let Some(types) = &manifest.publish_config.types {
+        formatter.set(
+            ["types"],
+            Value::from(&sonic_rs::to_value(types)?),
+        )?;
+    }
+
+    if let Some(typings) = &manifest.publish_config.typings {
+        formatter.set(
+            ["typings"],
+            Value::from(&sonic_rs::to_value(typings)?),
+        )?;
+    }
+
     let hard_dependencies = vec![
         ("dependencies", manifest.remote.dependencies.iter()),
         ("devDependencies", manifest.dev_dependencies.iter()),
