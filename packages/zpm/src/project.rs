@@ -501,7 +501,7 @@ impl Project {
     pub async fn lazy_install(&mut self) -> Result<(), Error> {
         match self.import_install_state() {
             Ok(_) => {},
-            Err(Error::InstallStateNotFound) | Err(Error::InvalidInstallState) => {
+            Err(Error::InstallStateNotFound | Error::InvalidInstallState) => {
                 // Don't use stale install states.
                 self.install_state = None;
             }
