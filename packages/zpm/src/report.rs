@@ -251,18 +251,19 @@ impl Reporter {
     }
 
     fn on_pop_section<T: Write>(&mut self, writer: &mut T) {
+        if self.level == 0 {
+            panic!("Cannot pop section when no sections are pushed");
+        }
+
         self.indent -= 1;
 
         self.spinner_idx = None;
 
-        if let Some(start_time) = self.start_time {
-            if let Ok(elapsed) = start_time.elapsed() {
-                self.write_line(writer, &format!("└ Completed in {}", pretty_duration::pretty_duration(&elapsed, None)), Severity::Info);
-                return;
-            }
+        if let Some(start_time) = self.start_time && let Ok(elapsed) = start_time.elapsed() {
+            self.write_line(writer, &format!("└ Completed in {}", pretty_duration::pretty_duration(&elapsed, None)), Severity::Info);
+        } else {
+            self.write_line(writer, "└ Completed", Severity::Info);
         }
-
-        self.write_line(writer, "└ Completed", Severity::Info);
 
         self.level -= 1;
     }
