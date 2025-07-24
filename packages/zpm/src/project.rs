@@ -211,7 +211,8 @@ impl Project {
             .fs_read()?;
 
         let (install_state, _): (InstallState, _)
-            = bincode::decode_from_slice(src.as_slice(), bincode::config::standard()).unwrap();
+            = bincode::decode_from_slice(src.as_slice(), bincode::config::standard())
+                .map_err(|_| Error::InvalidInstallState)?;
 
         self.install_state
             = Some(install_state);
@@ -499,7 +500,7 @@ impl Project {
 
     pub async fn lazy_install(&mut self) -> Result<(), Error> {
         match self.import_install_state() {
-            Ok(_) | Err(Error::InstallStateNotFound) => (),
+            Ok(_) | Err(Error::InstallStateNotFound) | Err(Error::InvalidInstallState) => (),
             Err(e) => return Err(e),
         };
 
