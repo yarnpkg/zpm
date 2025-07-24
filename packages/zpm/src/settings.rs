@@ -16,8 +16,9 @@ use crate::{
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[serde(default)]
 pub struct NetworkSettings {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_network: Option<bool>,
 }
 
