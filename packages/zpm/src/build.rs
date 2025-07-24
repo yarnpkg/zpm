@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use zpm_utils::{IoResultExt, Path, ToFileString, ToHumanString};
+use zpm_utils::{IoResultExt, Path, ToFileString};
 use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -131,6 +131,46 @@ impl BuildRequest {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct BuildState {
+    pub entries: BTreeMap<Locator, String>,
+}
+
+impl BuildState {
+    pub fn from_entries(entries: BTreeMap<Locator, String>) -> Self {
+        Self { entries }
+    }
+
+    pub async fn load(project: &Project) -> Self {
+        let build_state_path = project
+            .build_state_path();
+
+        let build_state_text = build_state_path
+            .fs_read_text_async()
+            .await
+            .unwrap_or_else(|_| "{}".to_string());
+
+        sonic_rs::from_str::<Self>(&build_state_text)
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self, project: &Project) -> Result<(), Error> {
+        let build_state_path = project
+            .build_state_path();
+
+        build_state_path
+            .fs_create_parent()?;
+
+        let build_state_text = sonic_rs::to_string(self)?;
+
+        build_state_path
+            .fs_change(build_state_text, false)?;
+
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct BuildRequests {
     pub entries: Vec<BuildRequest>,
@@ -148,7 +188,7 @@ pub struct BuildManager<'a> {
     pub queued: Vec<usize>,
     pub running: FuturesUnordered<BoxFuture<'a, (usize, String, Result<ScriptResult, Error>)>>,
     pub build_errors: BTreeSet<(Locator, Path)>,
-    pub build_state_out: BTreeMap<Path, String>,
+    pub build_state_out: BuildState,
 }
 
 impl<'a> BuildManager<'a> {
@@ -170,7 +210,7 @@ impl<'a> BuildManager<'a> {
             queued: Vec::new(),
             running: FuturesUnordered::new(),
             build_errors: BTreeSet::new(),
-            build_state_out: BTreeMap::new(),
+            build_state_out: BuildState::default(),
         }
     }
 
@@ -181,7 +221,7 @@ impl<'a> BuildManager<'a> {
         if !script_result.success() {
             self.build_errors.insert(request.key());
         } else {
-            self.build_state_out.insert(request.cwd.clone(), hash);
+            self.build_state_out.entries.insert(request.locator.clone(), hash);
 
             if let Some(dependents) = self.dependents.get_mut(&idx) {
                 for &dependent_idx in dependents.iter() {
@@ -199,7 +239,7 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn trigger(&mut self, project: &'a Project, build_state: &BTreeMap<Path, String>) {
+    fn trigger(&mut self, project: &'a Project, build_state: &BuildState) {
         while self.running.len() < 5 {
             if let Some(idx) = self.queued.pop() {
                 let req
@@ -212,7 +252,7 @@ impl<'a> BuildManager<'a> {
                     = self.get_hash(project, &req.locator);
 
                 if !force_rebuild {
-                    if let Some(previous_hash) = build_state.get(&req.cwd) {
+                    if let Some(previous_hash) = build_state.entries.get(&req.locator) {
                         if previous_hash == &tree_hash {
                             self.record(idx, tree_hash, ScriptResult::new_success());
                             continue;
@@ -220,7 +260,7 @@ impl<'a> BuildManager<'a> {
                     }
                 }
 
-                self.build_state_out.remove(&req.cwd);
+                self.build_state_out.entries.remove(&req.locator);
 
                 let future
                     = req.run(project, tree_hash.clone())
@@ -278,24 +318,19 @@ impl<'a> BuildManager<'a> {
     }
 
     pub async fn run(mut self, project: &'a mut Project) -> Result<Build, Error> {
-        let build_state_path = project
-            .build_state_path();
-
-        let build_state_text_in = build_state_path
-            .fs_read_text()
-            .unwrap_or_else(|_| "{}".to_string());
-
-        let paths_to_build = self.requests.entries.iter()
-            .map(|req| req.cwd.clone())
+        let locators_to_build = self.requests.entries.iter()
+            .map(|req| req.locator.clone())
             .collect::<BTreeSet<_>>();
 
         let build_state_in =
-            sonic_rs::from_str::<BTreeMap<Path, String>>(&build_state_text_in)?;
+            BuildState::load(&project).await;
 
-        self.build_state_out = build_state_in.iter()
-            .filter(|(p, _)| paths_to_build.contains(p))
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect::<BTreeMap<_, _>>();
+        self.build_state_out = BuildState::from_entries(
+            build_state_in.entries.iter()
+                .filter(|(l, _)| locators_to_build.contains(l))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        );
 
         for idx in 0..self.requests.entries.len() {
             if let Some(set) = self.requests.dependencies.get(&idx) {
@@ -329,11 +364,8 @@ impl<'a> BuildManager<'a> {
             self.trigger(project, &build_state_in);
 
             if current_build_state_out != self.build_state_out {
-                let build_state_text_out
-                    = sonic_rs::to_string(&self.build_state_out)?;
-
-                build_state_path
-                    .fs_change(build_state_text_out, false)?;
+                self.build_state_out
+                    .save(&project)?;
 
                 current_build_state_out = self.build_state_out.clone();
             }
