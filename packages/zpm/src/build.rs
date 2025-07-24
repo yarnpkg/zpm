@@ -149,7 +149,7 @@ impl BuildState {
         let build_state_text = build_state_path
             .fs_read_text_async()
             .await
-            .unwrap_or_else(|_| "{}".to_string());
+            .unwrap_or_else(|_| "{}".to_owned());
 
         sonic_rs::from_str::<Self>(&build_state_text)
             .unwrap_or_default()

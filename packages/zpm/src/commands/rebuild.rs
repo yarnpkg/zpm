@@ -16,7 +16,8 @@ impl Rebuild {
         let mut project
             = project::Project::new(None).await?;
 
-        let mut build_state = BuildState::load(&project).await;
+        let mut build_state
+            = BuildState::load(&project).await;
 
         if self.identifiers.is_empty() {
             build_state.entries.clear();
