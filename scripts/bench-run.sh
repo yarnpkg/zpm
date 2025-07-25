@@ -13,7 +13,7 @@ cd "$BENCH_DIR"
 bench() {
   SUBTEST_NAME=$1; shift
   echo "Testing $SUBTEST_NAME"
-  hyperfine ${HYPERFINE_OPTIONS:-} --export-json=bench-$SUBTEST_NAME.json --min-runs=10 --warmup=1 "$@"
+  hyperfine ${HYPERFINE_OPTIONS:-} --export-json=bench-$SUBTEST_NAME.json --min-runs=10 --warmup=1 --show-output "$@"
 }
 
 cp "$HERE_DIR"/benchmarks/"$TEST_NAME".json package.json
