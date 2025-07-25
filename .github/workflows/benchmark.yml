@@ -1,4 +1,11 @@
+name: 'Performance tests'
+
 on:
+  # TODO: revert
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   # schedule:
   # - cron: '0 2-23/4 * * *'
   workflow_dispatch:
@@ -12,7 +19,6 @@ on:
         required: false
         default: ''
 
-name: 'Performance tests'
 jobs:
   benchmark:
     strategy:
