@@ -1,11 +1,6 @@
 name: 'Performance tests'
 
 on:
-  # TODO: revert
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   # schedule:
   # - cron: '0 2-23/4 * * *'
   workflow_dispatch:
@@ -29,11 +24,11 @@ jobs:
           - [Gatsby, gatsby]
         packageManager:
           - zpm
-          # - classic
+          - classic
           - yarn
-          # - yarn-nm
-          # - yarn-pnpm
-          # - npm
+          - yarn-nm
+          - yarn-pnpm
+          - npm
           - pnpm
 
     name: 'Benchmarking ${{matrix.benchmark[0]}} w/ ${{matrix.packageManager}}'

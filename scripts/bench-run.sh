@@ -22,7 +22,7 @@ mkdir dummy-pkg
 echo '{"name": "dummy-pkg", "version": "0.0.0"}' > dummy-pkg/package.json
 
 touch a
-  if cp --reflink a b >& /dev/null; then
+if cp --reflink a b >& /dev/null; then
   echo "Reflinks are supported"
 else
   echo "Reflink aren't supported! Installs may be quite slower than necessary"
