@@ -40,6 +40,12 @@ setup-zpm() {
 setup-yarn2() {
   yarn set version berry
 
+  BINARY_PATH=$(yarn config get yarnPath)
+
+  export YARN_PATH="${BENCH_DIR}/yarn.cjs"
+
+  mv "$BINARY_PATH" "$YARN_PATH"
+
   >> "$BENCH_DIR/.yarnrc.yml" echo \
     "globalFolder: '${BENCH_DIR}/.yarn-global'"
   >> "$BENCH_DIR/.yarnrc.yml" echo \
