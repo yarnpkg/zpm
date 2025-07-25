@@ -13,7 +13,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             &params.git.prepare_params,
         ).await?;
 
-        Ok(zpm_formats::convert::convert_tar_gz_to_zip(&locator.ident.nm_subdir(), pack_tgz.into())?)
+        Ok(zpm_formats::convert::convert_tar_gz_to_zip_async(&locator.ident.nm_subdir(), pack_tgz.into()).await?)
     }).await?;
 
     let first_entry
