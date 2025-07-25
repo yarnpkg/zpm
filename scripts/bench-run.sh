@@ -84,7 +84,7 @@ case $PACKAGE_MANAGER in
       --prepare 'rm -rf .yarn .pnp.*' \
       "$ZPM_PATH install"
     bench install-ready \
-      --prepare 'yarn remove dummy-pkg || true' \
+      --prepare "$ZPM_PATH remove dummy-pkg || true" \
       "$ZPM_PATH add dummy-pkg@link:./dummy-pkg"
     ;;
   classic)

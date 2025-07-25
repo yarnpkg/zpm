@@ -22,8 +22,8 @@ jobs:
           - [Next.js, next]
           - [Gatsby, gatsby]
         packageManager:
-          - classic
           - zpm
+          - classic
           - yarn
           - yarn-nm
           - yarn-pnpm
