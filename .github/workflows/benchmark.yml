@@ -42,7 +42,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # Build the binaries for zpm
     - uses: ./.github/actions/prepare
+      if: ${{matrix.packageManager == 'zpm'}}
 
     - uses: actions/setup-node@v4
       with:
