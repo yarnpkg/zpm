@@ -40,14 +40,15 @@ setup-zpm() {
 setup-yarn2() {
   yarn set version berry
 
-  BINARY_PATH=$(yarn config get yarnPath)
+  OLD_PATH=$(yarn config get yarnPath)
+  NEW_PATH="${BENCH_DIR}/yarn.cjs"
 
-  export YARN_PATH="${BENCH_DIR}/yarn.cjs"
-
-  mv "$BINARY_PATH" "$YARN_PATH"
+  mv "$OLD_PATH" "$NEW_PATH"
 
   >> "$BENCH_DIR/.yarnrc.yml" echo \
     "globalFolder: '${BENCH_DIR}/.yarn-global'"
+  >> "$BENCH_DIR/.yarnrc.yml" echo \
+    "yarnPath: '$NEW_PATH'"
   >> "$BENCH_DIR/.yarnrc.yml" echo \
     "enableImmutableInstalls: false"
 }
