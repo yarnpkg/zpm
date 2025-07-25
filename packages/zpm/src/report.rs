@@ -1,9 +1,13 @@
 use std::{cell::RefCell, future::Future, io::{self, Write}, sync::{mpsc, LazyLock}, thread::JoinHandle, time::{Duration, SystemTime}};
 
+use colored::{Color, Colorize};
 use tokio::sync::RwLock;
+use zpm_switch::get_bin_version;
 use zpm_utils::{Path, ToHumanString};
 
 use crate::{config::Config, error::Error, primitives::{Descriptor, Locator}};
+
+const TOP_LEVEL_PREFIX: char = '·';
 
 pub static REPORT: LazyLock<RwLock<Option<StreamReport>>> = LazyLock::new(|| RwLock::new(None));
 
@@ -107,6 +111,7 @@ pub async fn with_context_result<F, R>(context: ReportContext, f: F) -> Result<R
 pub struct StreamReportConfig {
     pub enable_progress_bars: bool,
     pub enable_timers: bool,
+    pub include_version: bool,
     pub silent_or_error: bool,
 }
 
@@ -115,6 +120,7 @@ impl StreamReportConfig {
         Self {
             enable_progress_bars: config.user.enable_progress_bars.value,
             enable_timers: true,
+            include_version: false,
             silent_or_error: false,
         }
     }
@@ -136,7 +142,10 @@ pub enum ReportMessage {
 
 struct Reporter {
     config: StreamReportConfig,
-    prefix: String,
+
+    level: usize,
+    indent: usize,
+
     start_time: Option<SystemTime>,
     buffered_lines: Option<Vec<String>>,
     log_paths: Vec<Path>,
@@ -150,7 +159,8 @@ impl Reporter {
 
         Self {
             config,
-            prefix: String::new(),
+            level: 0,
+            indent: 0,
             start_time: None,
             buffered_lines,
             log_paths: Vec::new(),
@@ -223,13 +233,16 @@ impl Reporter {
             }
         }
 
-        self.write_line(writer, &message);
+        self.write_line(writer, message, severity);
     }
 
     fn on_push_section<T: Write>(&mut self, writer: &mut T, name: &str) {
-        self.write_line(writer, &format!("┌ {}", name));
+        self.level += 1;
 
-        self.prefix.push_str("│ ");
+        self.write_line(writer, &format!("┌ {}", name), Severity::Info);
+
+        self.indent += 1;
+
         self.spinner_idx = Some(0);
 
         if self.config.enable_timers {
@@ -238,26 +251,45 @@ impl Reporter {
     }
 
     fn on_pop_section<T: Write>(&mut self, writer: &mut T) {
-        self.prefix.pop();
-        self.prefix.pop();
+        if self.level == 0 {
+            panic!("Cannot pop section when no sections are pushed");
+        }
+
+        self.indent -= 1;
 
         self.spinner_idx = None;
 
-        if let Some(start_time) = self.start_time {
-            if let Ok(elapsed) = start_time.elapsed() {
-                self.write_line(writer, &format!("└ Completed in {}", pretty_duration::pretty_duration(&elapsed, None)));
-                return;
-            }
+        if let Some(start_time) = self.start_time && let Ok(elapsed) = start_time.elapsed() {
+            self.write_line(writer, &format!("└ Completed in {}", pretty_duration::pretty_duration(&elapsed, None)), Severity::Info);
+        } else {
+            self.write_line(writer, "└ Completed", Severity::Info);
         }
 
-        self.write_line(writer, "└ Completed");
+        self.level -= 1;
     }
 
-    fn write_line<T: Write>(&mut self, writer: &mut T, line: &str) {
-        if let Some(buffered_lines) = &mut self.buffered_lines {
-            buffered_lines.push(format!("{}{}", self.prefix, line));
+    fn format_indent(&self) -> String {
+        if self.level > 0 {
+            "│ ".repeat(self.indent)
         } else {
-            writeln!(writer, "{}{}", self.prefix, line).unwrap();
+            format!("{} ", TOP_LEVEL_PREFIX)
+        }
+    }
+
+    fn format_prefix(&self, caret_color: Color) -> String {
+        format!("{} {}", "➤".color(caret_color), self.format_indent())
+    }
+
+    fn write_line<T: Write>(&mut self, writer: &mut T, line: &str, severity: Severity) {
+        let prefix = self.format_prefix(match severity {
+            Severity::Info => Color::BrightBlue,
+            Severity::Error => Color::BrightRed,
+        });
+
+        if let Some(buffered_lines) = &mut self.buffered_lines {
+            buffered_lines.push(format!("{}{}", prefix, line));
+        } else {
+            writeln!(writer, "{}{}", prefix, line).unwrap();
         }
     }
 
@@ -295,6 +327,10 @@ impl StreamReport {
                 let mut stdout = io::stdout();
                 reporter.on_start(&mut stdout);
                 stdout.flush().unwrap();
+            }
+
+            if reporter.config.include_version {
+                reporter.write_line(&mut io::stdout(), &format!("Yarn {}", get_bin_version()).bold().to_string(), Severity::Info);
             }
 
             let mut idx = 0;

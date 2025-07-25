@@ -525,6 +525,7 @@ impl Project {
 
     pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<(), Error> {
         let report = StreamReport::new(StreamReportConfig {
+            include_version: true,
             silent_or_error: options.silent_or_error,
             ..StreamReportConfig::from_config(&self.config)
         });
