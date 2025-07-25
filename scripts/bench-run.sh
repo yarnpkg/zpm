@@ -38,7 +38,7 @@ setup-zpm() {
 }
 
 setup-yarn2() {
-  yarn set version berry
+  yarn set version berry --yarn-path
 
   OLD_PATH=$(yarn config get yarnPath)
   NEW_PATH="${BENCH_DIR}/yarn.cjs"
@@ -185,6 +185,6 @@ case $PACKAGE_MANAGER in
       'pnpm add dummy-pkg@link:./dummy-pkg'
     ;;
   *)
-    echo "Invalid package manager ${$1}"
-    return 1;;
+    echo "Invalid package manager ${PACKAGE_MANAGER}"
+    exit 1;;
 esac
