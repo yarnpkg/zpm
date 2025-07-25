@@ -29,11 +29,11 @@ jobs:
           - [Gatsby, gatsby]
         packageManager:
           - zpm
-          - classic
+          # - classic
           - yarn
-          - yarn-nm
-          - yarn-pnpm
-          - npm
+          # - yarn-nm
+          # - yarn-pnpm
+          # - npm
           - pnpm
 
     name: 'Benchmarking ${{matrix.benchmark[0]}} w/ ${{matrix.packageManager}}'
@@ -45,6 +45,8 @@ jobs:
     - uses: ./.github/actions/prepare
 
     - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
 
     - name: 'Install Hyperfine'
       run: |
