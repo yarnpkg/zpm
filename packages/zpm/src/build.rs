@@ -134,11 +134,11 @@ impl BuildRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct BuildState {
-    pub entries: BTreeMap<Locator, String>,
+    pub entries: BTreeMap<Locator, BTreeMap<Path, String>>,
 }
 
 impl BuildState {
-    pub fn from_entries(entries: BTreeMap<Locator, String>) -> Self {
+    pub fn from_entries(entries: BTreeMap<Locator, BTreeMap<Path, String>>) -> Self {
         Self { entries }
     }
 
@@ -221,7 +221,9 @@ impl<'a> BuildManager<'a> {
         if !script_result.success() {
             self.build_errors.insert(request.key());
         } else {
-            self.build_state_out.entries.insert(request.locator.clone(), hash);
+            self.build_state_out.entries.entry(request.locator.clone())
+                .or_insert_with(BTreeMap::new)
+                .insert(request.cwd.clone(), hash);
 
             if let Some(dependents) = self.dependents.get_mut(&idx) {
                 for &dependent_idx in dependents.iter() {
@@ -252,7 +254,7 @@ impl<'a> BuildManager<'a> {
                     = self.get_hash(project, &req.locator);
 
                 if !force_rebuild {
-                    if let Some(previous_hash) = build_state.entries.get(&req.locator) {
+                    if let Some(previous_hash) = build_state.entries.get(&req.locator).and_then(|e| e.get(&req.cwd)) {
                         if previous_hash == &tree_hash {
                             self.record(idx, tree_hash, ScriptResult::new_success());
                             continue;
