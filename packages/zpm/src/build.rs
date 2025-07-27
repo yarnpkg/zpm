@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use zpm_utils::{IoResultExt, Path, ToFileString};
 use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeMap, Deserialize, Serialize};
 use sha2::Digest;
 
 use crate::{diff_finder::{DiffController, DiffFinder}, error::Error, hash::Blake2b80, primitives::Locator, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}};
@@ -131,10 +131,24 @@ impl BuildRequest {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct BuildState {
     pub entries: BTreeMap<Locator, BTreeMap<Path, String>>,
+}
+
+impl Serialize for BuildState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = serializer.serialize_map(None)?;
+        for (locator, paths) in &self.entries {
+            if !paths.is_empty() {
+                map.serialize_entry(locator, paths)?;
+            }
+        }
+        map.end()
+    }
 }
 
 impl BuildState {
@@ -254,7 +268,7 @@ impl<'a> BuildManager<'a> {
                     = self.get_hash(project, &req.locator);
 
                 if !force_rebuild {
-                    if let Some(previous_hash) = build_state.entries.get(&req.locator).and_then(|e| e.get(&req.cwd)) {
+                    if let Some(previous_hash) = build_state.entries.get(&req.locator).and_then(|entries| entries.get(&req.cwd)) {
                         if previous_hash == &tree_hash {
                             self.record(idx, tree_hash, ScriptResult::new_success());
                             continue;
@@ -262,7 +276,8 @@ impl<'a> BuildManager<'a> {
                     }
                 }
 
-                self.build_state_out.entries.remove(&req.locator);
+                self.build_state_out.entries.get_mut(&req.locator)
+                    .and_then(|entries| entries.remove(&req.cwd));
 
                 let future
                     = req.run(project, tree_hash.clone())
