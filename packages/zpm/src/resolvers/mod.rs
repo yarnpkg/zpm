@@ -224,6 +224,9 @@ pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, depe
 
         Reference::WorkspacePath(params)
             => workspace::resolve_locator_path(&context, &locator, params),
+
+        Reference::Synthetic(_)
+            => Err(Error::Unsupported)?,
     }
 }
 

@@ -31,6 +31,7 @@ program!(YarnCli, [
     debug::check_range::CheckRange,
     debug::check_reference::CheckReference,
     debug::check_semver_version::CheckSemverVersion,
+    debug::print_hoisting::PrintHoisting,
     debug::print_platform::PrintPlatform,
 
     add::Add,

@@ -1,19 +1,49 @@
+use itertools::Either;
+
+#[derive(Clone)]
 pub struct Node {
     pub label: String,
     pub children: Vec<Node>,
 }
 
-impl Node {
-    pub fn to_string(&self) -> String {
-        self.to_string_with_prefix("".to_string())
+pub trait RenderTreeNode: Sized {
+    fn get_label(&self) -> String;
+    fn has_children(&self) -> bool;
+    fn get_children(&self) -> Vec<Either<Node, Self>>;
+}
+
+impl RenderTreeNode for Node {
+    fn get_label(&self) -> String {
+        self.label.clone()
     }
 
-    fn to_string_with_prefix(&self, prefix: String) -> String {
+    fn has_children(&self) -> bool {
+        !self.children.is_empty()
+    }
+
+    fn get_children(&self) -> Vec<Either<Node, Self>> {
+        self.children.clone().into_iter().map(Either::Left).collect()
+    }
+}
+
+pub struct TreeRenderer {
+    prefix: String,
+}
+
+impl TreeRenderer {
+    pub fn new() -> Self {
+        Self {prefix: "".to_string()}
+    }
+
+    pub fn render<T: RenderTreeNode>(&mut self, node: &T) -> String {
         let mut result = String::new();
 
-        if prefix.len() > 0 || self.label.len() > 0 {
+        let label
+            = node.get_label();
+
+        if self.prefix.len() > 0 || label.len() > 0 {
             let mut lines
-                = self.label.lines();
+                = label.lines();
 
             let first_line
                 = lines.next().unwrap_or("");
@@ -22,41 +52,66 @@ impl Node {
             result.push('\n');
 
             for line in lines {
-                result.push_str(&prefix);
+                result.push_str(&self.prefix);
                 result.push_str(line);
                 result.push('\n');
             }
         }
 
-        let children_count = self.children.len();
-        for (index, child) in self.children.iter().enumerate() {
-            let is_last = index == children_count - 1;
-            
-            // Choose the appropriate characters based on whether this is the last child
-            let (connector, next_prefix) = if is_last {
-                ("└─ ", prefix.clone() + "   ")
-            } else {
-                ("├─ ", prefix.clone() + "│  ")
-            };
+        if node.has_children() {
+            let children
+                = node.get_children();
 
-            // Check if we need to add a newline between children
-            if prefix.len() == 0 && index > 0 {
-                let prev_child_has_children = !self.children[index - 1].children.is_empty();
-                let current_child_has_children = !child.children.is_empty();
-                
-                if prev_child_has_children || current_child_has_children {
-                    // Add a newline with a vertical bar to maintain the tree structure
-                    result.push_str("│\n");
+            for (index, child) in children.iter().enumerate() {
+                let is_last = index == children.len() - 1;
+
+                // Choose the appropriate characters based on whether this is the last child
+                let (connector, mut next_prefix) = if is_last {
+                    ("└─ ", self.prefix.clone() + "   ")
+                } else {
+                    ("├─ ", self.prefix.clone() + "│  ")
+                };
+
+                // Check if we need to add a newline between children
+                if self.prefix.len() == 0 && index > 0 {
+                    let prev_child_has_children = match &children[index - 1] {
+                        Either::Left(node) => node.has_children(),
+                        Either::Right(node) => node.has_children(),
+                    };
+
+                    let current_child_has_children = match child {
+                        Either::Left(node) => node.has_children(),
+                        Either::Right(node) => node.has_children(),
+                    };
+
+                    if prev_child_has_children || current_child_has_children {
+                        // Add a newline with a vertical bar to maintain the tree structure
+                        result.push_str("│\n");
+                    }
                 }
-            }
 
-            // Add the connector and child representation
-            result.push_str(&prefix);
-            result.push_str(connector);
-            result.push_str(&child.to_string_with_prefix(next_prefix));
+                // Add the connector and child representation
+                result.push_str(&self.prefix);
+                result.push_str(connector);
+
+                std::mem::swap(&mut self.prefix, &mut next_prefix);
+
+                result.push_str(&match child {
+                    Either::Left(node) => self.render(node),
+                    Either::Right(node) => self.render(node),
+                });
+
+                std::mem::swap(&mut self.prefix, &mut next_prefix);
+            }
         }
 
         result
+    }
+}
+
+impl Node {
+    pub fn to_string(&self) -> String {
+        TreeRenderer::new().render(self)
     }
 }
 

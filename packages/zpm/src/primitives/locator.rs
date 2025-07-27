@@ -4,9 +4,10 @@ use bincode::{Decode, Encode};
 use colored::Colorize;
 use rstest::rstest;
 use sha2::Digest;
+use zpm_macros::parse_enum;
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, hash::Sha256};
+use crate::{error::Error, hash::Sha256, primitives::reference::{ShorthandReference, WorkspaceIdentReference}};
 
 use super::{reference::VirtualReference, Ident, Reference};
 

@@ -6,6 +6,9 @@ pub mod range;
 pub mod reference;
 pub mod semver_descriptor;
 
+#[cfg(test)]
+pub mod testing;
+
 pub use descriptor::Descriptor;
 pub use ident::Ident;
 pub use locator::Locator;

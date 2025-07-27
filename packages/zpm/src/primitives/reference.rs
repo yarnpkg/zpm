@@ -77,6 +77,11 @@ pub enum Reference {
     Url {
         url: String,
     },
+
+    #[no_pattern]
+    Synthetic {
+        nonce: usize,
+    },
 }
 
 impl Reference {
@@ -169,6 +174,10 @@ impl Reference {
             Reference::WorkspacePath(_) => {
                 "workspace".to_string()
             },
+
+            Reference::Synthetic(_) => {
+                "synthetic".to_string()
+            },
         }
     }
 }
@@ -230,13 +239,27 @@ impl ToFileString for Reference {
                     false => params.path.to_file_string(),
                 })
             },
+
+            Reference::Synthetic(params) => {
+                format!("synthetic:{}", params.nonce)
+            },
         }
     }
 }
 
 impl ToHumanString for Reference {
     fn to_print_string(&self) -> String {
-        DataType::Reference.colorize(&self.to_file_string())
+        let mut stringified
+            = self.to_file_string();
+
+        if let Reference::Virtual(_) = self {
+            let hash_idx
+                = stringified.find('#').unwrap_or(stringified.len());
+
+            stringified.truncate(hash_idx + 1 + 8);
+        }
+
+        DataType::Reference.colorize(&stringified)
     }
 }
 

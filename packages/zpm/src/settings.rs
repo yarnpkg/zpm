@@ -70,6 +70,9 @@ pub enum NodeLinker {
     #[serde(rename = "pnpm")]
     #[serde(alias = "node-modules")]
     Pnpm,
+
+    #[serde(rename = "nm")]
+    Nm,
 }
 
 /**
