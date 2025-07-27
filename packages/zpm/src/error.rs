@@ -235,6 +235,9 @@ pub enum Error {
     #[error("Install state file not found; please run an install operation first")]
     InstallStateNotFound,
 
+    #[error("Invalid install state; please run an install operation to fix it")]
+    InvalidInstallState,
+
     #[error("Couldn't find a package matching the current working directory")]
     ActivePackageNotFound,
 

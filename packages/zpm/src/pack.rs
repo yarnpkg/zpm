@@ -291,6 +291,20 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         )?;
     }
 
+    if let Some(types) = &manifest.publish_config.types {
+        formatter.set(
+            ["types"],
+            Value::String(types.clone()),
+        )?;
+    }
+
+    if let Some(typings) = &manifest.publish_config.typings {
+        formatter.set(
+            ["typings"],
+            Value::String(typings.clone()),
+        )?;
+    }
+
     let hard_dependencies = vec![
         ("dependencies", manifest.remote.dependencies.iter()),
         ("devDependencies", manifest.dev_dependencies.iter()),
@@ -502,6 +516,14 @@ pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) 
         for path in bin.paths() {
             glob_ignore.add(&Path::new(), &format!("!/{}", path.to_file_string()))?;
         }
+    }
+
+    if let Some(types) = &manifest.publish_config.types {
+        glob_ignore.add(&Path::new(), &format!("!/{}", types))?;
+    }
+
+    if let Some(typings) = &manifest.publish_config.typings {
+        glob_ignore.add(&Path::new(), &format!("!/{}", typings))?;
     }
 
     let final_list = pack_list

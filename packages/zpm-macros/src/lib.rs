@@ -211,34 +211,34 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
             })
             .collect::<Vec<_>>();
 
-        let default_attribute = if let Some(default) = default_value {
-            let default_func_name_sym = syn::Ident::new(&format!("{}_default_from_env", primary_name_sym), primary_name_sym.span());
-            let default_func_name_str = default_func_name_sym.to_string();
+        let default_func_name_sym = syn::Ident::new(&format!("{}_default_from_env", primary_name_sym), primary_name_sym.span());
+        let default_func_name_str = default_func_name_sym.to_string();
 
+        let default_expr = if let Some(default) = default_value {
             let default_expr = match &default {
                 Expr::Closure(_) => quote! {(#default)(crate::config::CONFIG_PATH.lock().unwrap().as_ref().unwrap())},
                 _ => quote! {#default},
             };
 
-            default_functions.push(quote! {
-                fn #default_func_name_sym() -> #field_ty {
-                    match #env_get {
-                        Ok((env_name, value)) => #field_ty_path::from_file_string(&value)
-                            .map_err(|err| format!("Failed to parse {}: {}", env_name, err))
-                            .unwrap(),
-                        Err(_) => #field_ty_path::new(#default_expr),
-                    }
-                }
-            });
-
-            quote! {#[serde(default = #default_func_name_str)]}
+            quote! {#field_ty_path::new(#default_expr)}
         } else {
-            quote! {#[serde(default)]}
+            quote! {Default::default()}
         };
+
+        default_functions.push(quote! {
+            fn #default_func_name_sym() -> #field_ty {
+                match #env_get {
+                    Ok((env_name, value)) => #field_ty_path::from_file_string(&value)
+                        .map_err(|err| format!("Failed to parse {}: {}", env_name, err))
+                        .unwrap(),
+                    Err(_) => #default_expr,
+                }
+            }
+        });
 
         new_fields.push(quote! {
             #[serde(deserialize_with = #env_func_name_str)]
-            #default_attribute
+            #[serde(default = #default_func_name_str)]
             #(#aliases)*
             pub #primary_name_sym: #field_ty,
         });
