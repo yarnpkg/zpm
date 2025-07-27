@@ -86,7 +86,7 @@ pub struct HoisterResult {
     pub name: HoisterName,
     pub ident_name: HoisterName,
     pub references: IndexSet<String>,
-    pub dependencies: Vec<Box<HoisterResult>>,
+    pub dependencies: Vec<HoisterResult>,
 }
 
 type HoisterLocator = String;
@@ -338,9 +338,6 @@ pub fn hoist(tree: HoisterTree, opts: Option<HoistOptions>) -> Result<HoisterRes
     if options.debug_level >= DebugLevel::Reasons {
         println!("{}", dump_dep_tree(&tree_copy));
     }
-
-    println!("tree_copy: {:#?}", tree_copy);
-    println!("shrinked: {:#?}", shrink_tree(&tree_copy));
 
     Ok(shrink_tree(&tree_copy))
 }
@@ -1663,7 +1660,7 @@ fn shrink_tree(tree: &HoisterWorkTree) -> HoisterResult {
             seen_nodes.shift_remove(&node_id);
         }
 
-        parent_node.dependencies.push(Box::new(result_node));
+        parent_node.dependencies.push(result_node);
     }
 
     let deps: Vec<_> = root_node.dependencies.values().cloned().collect();
