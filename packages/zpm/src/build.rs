@@ -58,6 +58,8 @@ impl BuildRequest {
             .with_project(project)
             .with_package(project, &self.locator)?
             .with_env_variable("INIT_CWD", cwd_abs.as_str())
+            // TODO: Use streams prefixed with STDOUT / STDERR just like in Yarn.
+            .with_shell_forwarding(project.config.project.enable_inline_builds.value)
             .with_cwd(cwd_abs.clone());
 
         let res = with_context_result(ReportContext::Locator(self.locator.clone()), async {

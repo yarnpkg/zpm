@@ -353,6 +353,11 @@ impl ScriptEnvironment {
         self
     }
 
+    pub fn with_shell_forwarding(mut self, shell_forwarding: bool) -> Self {
+        self.shell_forwarding = shell_forwarding;
+        self
+    }
+
     pub fn with_stdin(mut self, stdin: Option<String>) -> Self {
         self.stdin = stdin;
         self

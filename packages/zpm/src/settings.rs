@@ -147,6 +147,9 @@ pub struct ProjectConfig {
     #[default(false)]
     pub enable_immutable_installs: BoolField,
 
+    #[default(|_| zpm_ci::is_ci().is_some())]
+    pub enable_inline_builds: BoolField,
+
     #[default(true)]
     pub enable_scripts: BoolField,
 
