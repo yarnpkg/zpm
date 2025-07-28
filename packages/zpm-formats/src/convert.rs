@@ -41,6 +41,14 @@ pub fn convert_tar_gz_to_zip(prefix: &str, tar_gz_data: Bytes) -> Result<Vec<u8>
     convert_entries_to_zip(prefix, entries)
 }
 
+pub async fn convert_tar_gz_to_zip_async(prefix: &str, tar_gz_data: Bytes) -> Result<Vec<u8>, Error> {
+    let prefix = prefix.to_owned();
+
+    tokio::task::spawn_blocking(move || {
+        convert_tar_gz_to_zip(&prefix, tar_gz_data)
+    }).await.unwrap()
+}
+
 pub fn convert_folder_to_zip(prefix: &str, folder_path: &Path) -> Result<Vec<u8>, Error> {
     let entries = entries_from_folder(folder_path)?;
 

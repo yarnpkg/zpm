@@ -12,7 +12,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .with_join_str(&params.path);
 
     let cached_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
-        Ok(zpm_formats::convert::convert_tar_gz_to_zip(&locator.ident.nm_subdir(), Bytes::from(tarball_path.fs_read()?))?)
+        Ok(zpm_formats::convert::convert_tar_gz_to_zip_async(&locator.ident.nm_subdir(), Bytes::from(tarball_path.fs_read()?)).await?)
     }).await?;
 
     let first_entry
