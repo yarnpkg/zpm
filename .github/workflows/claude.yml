@@ -34,7 +34,9 @@ jobs:
             - Potential bugs or security issues
             - Architecture and design decisions
 
-            Provide specific, actionable feedback. Use inline comments for line-specific issues and include an overall summary when submitting the review.
+            Only comment on what the PR intends to do, based on the PR description and changeset.
+
+            Provide specific, actionable feedback. Use separate inline comments rather than a single out of context review.
             
             **Important**: Submit as "COMMENT" type so the review doesn't block the PR.
           allowed_tools: "mcp__github__create_pending_pull_request_review,mcp__github__add_pull_request_review_comment_to_pending_review,mcp__github__submit_pending_pull_request_review,mcp__github__get_pull_request_diff"
