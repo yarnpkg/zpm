@@ -51,42 +51,46 @@ impl Run {
             project.package_cwd = Path::new();
         }
 
+        let get_node_args = || {
+            let mut node_args = Vec::new();
+
+            if let Some(inspect) = &self.inspect {
+                node_args.push(match inspect {
+                    Some(address) => format!("--inspect={}", address),
+                    None => "--inspect".to_owned(),
+                });
+            }
+
+            if let Some(inspect_brk) = &self.inspect_brk {
+                node_args.push(match inspect_brk {
+                    Some(address) => format!("--inspect-brk={}", address),
+                    None => "--inspect-brk".to_owned(),
+                });
+            }
+
+            if let Some(inspect_wait) = &self.inspect_wait {
+                node_args.push(match inspect_wait {
+                    Some(address) => format!("--inspect-wait={}", address),
+                    None => "--inspect-wait".to_owned(),
+                });
+            }
+
+            if let Some(require) = &self.require {
+                node_args.push(format!("--require={}", require));
+            }
+
+            node_args
+        };
+
         let execute_binary = async |error_script_not_found: bool| {
             let maybe_binary
                 = project.find_binary(&self.name);
 
             if let Ok(binary) = maybe_binary {
-                let mut node_args = Vec::new();
-
-                if let Some(inspect) = &self.inspect {
-                    node_args.push(match inspect {
-                        Some(address) => format!("--inspect={}", address),
-                        None => "--inspect".to_owned(),
-                    });
-                }
-
-                if let Some(inspect_brk) = &self.inspect_brk {
-                    node_args.push(match inspect_brk {
-                        Some(address) => format!("--inspect-brk={}", address),
-                        None => "--inspect-brk".to_owned(),
-                    });
-                }
-
-                if let Some(inspect_wait) = &self.inspect_wait {
-                    node_args.push(match inspect_wait {
-                        Some(address) => format!("--inspect-wait={}", address),
-                        None => "--inspect-wait".to_owned(),
-                    });
-                }
-
-                if let Some(require) = &self.require {
-                    node_args.push(format!("--require={}", require));
-                }
-
                 Ok(ScriptEnvironment::new()?
                     .with_project(&project)
                     .with_package(&project, &project.active_package()?)?
-                    .with_node_args(node_args)
+                    .with_node_args(get_node_args())
                     .enable_shell_forwarding()
                     .run_binary(&binary, &self.args)
                     .await?
@@ -112,19 +116,11 @@ impl Run {
 
         match project.find_script(&self.name) {
             Ok((locator, script)) => {
-                if self.inspect.is_some() {
-                    return Err(Error::InvalidRunScriptOption("--inspect".to_owned()));
-                }
-                if self.inspect_brk.is_some() {
-                    return Err(Error::InvalidRunScriptOption("--inspect-brk".to_owned()));
-                }
-                if self.inspect_wait.is_some() {
-                    return Err(Error::InvalidRunScriptOption("--inspect-wait".to_owned()));
-                }
+                let node_args = get_node_args();
 
                 // TODO: Investigate whether --require should be forwarded to scripts via NODE_OPTIONS.
-                if self.require.is_some() {
-                    return Err(Error::InvalidRunScriptOption("--require".to_owned()));
+                if !node_args.is_empty() {
+                    return Err(Error::InvalidRunScriptOptions(node_args));
                 }
 
                 Ok(ScriptEnvironment::new()?
