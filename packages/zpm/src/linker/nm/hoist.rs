@@ -500,7 +500,6 @@ impl<'a> ui::tree::RenderTreeNode for TreeRenderer<'a> {
 pub struct Hoister<'a> {
     work_tree: &'a mut WorkTree,
     seen: Vec<bool>,
-    #[cfg(debug_assertions)]
     stack: Vec<usize>,
     has_changed: bool,
     print_logs: bool,
@@ -511,7 +510,6 @@ impl<'a> Hoister<'a> {
         Self {
             work_tree,
             seen: vec![],
-            #[cfg(debug_assertions)]
             stack: vec![],
             has_changed: false,
             print_logs: false,
@@ -524,7 +522,6 @@ impl<'a> Hoister<'a> {
 
     pub fn hoist(&mut self) {
         self.seen = vec![false; self.work_tree.nodes.len()];
-        #[cfg(debug_assertions)]
         self.stack.clear();
 
         self.has_changed = true;
@@ -535,7 +532,6 @@ impl<'a> Hoister<'a> {
         }
     }
 
-    #[cfg(debug_assertions)]
     fn print(&self, message: &str) {
         println!("{}{}", "  ".repeat(self.stack.len()), message);
     }
@@ -549,7 +545,6 @@ impl<'a> Hoister<'a> {
         }
 
         self.seen[node_idx] = true;
-        #[cfg(debug_assertions)]
         self.stack.push(node_idx);
 
         // We need to clone it to please the borrow checker.
@@ -868,7 +863,6 @@ impl<'a> Hoister<'a> {
         }
 
         self.seen[node_idx] = false;
-        #[cfg(debug_assertions)]
         self.stack.pop();
     }
 }
