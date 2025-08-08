@@ -836,10 +836,6 @@ impl<'a> Hoister<'a> {
             }
 
             for hoisted_dependency_to_remove in hoisted_dependencies_to_remove {
-                if !selected_hoist_candidates.contains_key(&hoisted_dependency_to_remove) {
-                    println!("Skipping removal of {:?} because it's not in the original parents {:#?}", hoisted_dependency_to_remove, selected_hoist_candidates);
-                }
-
                 for parent_locator in &selected_hoist_candidates[&hoisted_dependency_to_remove] {
                     self.work_tree.nodes[*parent_locator].children.remove(&hoisted_dependency_to_remove.ident);
                 }
