@@ -1,6 +1,6 @@
 use std::{future::Future, sync::Arc};
 
-use zpm_utils::{Path, ToFileString, ToHumanString};
+use zpm_utils::{Path, ToHumanString};
 use tokio::task::JoinError;
 
 use crate::primitives::{Descriptor, Ident, Locator, Range};
@@ -345,6 +345,9 @@ pub enum Error {
 
     #[error("Failed to get detected root")]
     FailedToGetSwitchDetectedRoot,
+
+    #[error("The following options of the run command cannot be used when running scripts: {}", .0.join(", "))]
+    InvalidRunScriptOptions(Vec<String>),
 
     // Silent error; no particular message, just exit with an exit code 1
     #[error("")]
