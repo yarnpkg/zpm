@@ -1,7 +1,4 @@
 use colored::{Color, Colorize};
-use serde::{Deserialize, Deserializer};
-
-use crate::{impl_serialization_traits_no_serde, FromFileString, ToFileString, ToHumanString};
 
 const STRING_COLOR: Color
     = Color::TrueColor { r: 50, g: 170, b: 80 };

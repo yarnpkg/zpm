@@ -10,13 +10,19 @@ use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 #[case("^1.2.3", "1.2.3", true)]
 #[case("^1.2.3", "1.2.10", true)]
 #[case("^1.2.3", "1.10.0", true)]
+#[case("^1.2.3", "1.10.0-rc", false)]
 #[case("^1.2.3", "2.0.0-rc", false)]
 #[case("^1.2.3", "2.0.0-0", false)]
 #[case("^1.2.3", "2.0.0", false)]
+#[case("^1.2.3", "2.0.0-0", false)]
+#[case("^1.2.3-rc.1", "1.2.3-rc.15", true)]
+#[case("^1.2.3-rc.1", "1.3.0-rc.15", false)]
+#[case("^1.2.3-rc.1", "2.0.0-rc.15", false)]
 
 #[case("~1.2.3", "1.2.0", false)]
 #[case("~1.2.3", "1.2.3", true)]
 #[case("~1.2.3", "1.2.10", true)]
+#[case("~1.2.3", "1.2.10-rc", false)]
 #[case("~1.2.3", "1.10.0", false)]
 #[case("~1.2.3", "2.0.0", false)]
 
@@ -25,6 +31,14 @@ use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 #[case(">1.2.3", "1.2.10", true)]
 #[case(">1.2.3", "1.10.0", true)]
 #[case(">1.2.3", "2.0.0", true)]
+
+#[case("^0.7.0", "0.7.45", true)]
+#[case("^0.7.0", "0.8.0", false)]
+#[case("^0.7.0", "0.7.3-rc", false)]
+
+#[case("^0.0.3", "0.0.3", true)]
+#[case("^0.0.3", "0.0.4", false)]
+#[case("^0.0.3", "0.0.4-rc", false)]
 
 #[case(">=1.2.3", "1.2.0", false)]
 #[case(">=1.2.3", "1.2.3", true)]
@@ -68,6 +82,22 @@ use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 #[case("1.2.X", "1.2.0", true)]
 fn test_range_check(#[case] range: Range, #[case] version: Version, #[case] expected: bool) {
     assert_eq!(range.check(version), expected);
+}
+
+#[rstest]
+#[case("^1.2.3", "1.10.0-rc", true)]
+#[case("^1.2.3", "2.0.0-rc", false)]
+
+#[case("~1.2.3", "1.2.10-rc", true)]
+#[case("~1.2.3", "1.3.0-rc", false)]
+#[case("~1.2.3", "2.0.0-rc", false)]
+
+#[case("^0.7.0", "0.7.3-rc", true)]
+#[case("^0.7.0", "0.8.0-rc", false)]
+
+#[case("^0.0.3", "0.0.4-rc", false)]
+fn test_range_check_ignore_rc(#[case] range: Range, #[case] version: Version, #[case] expected: bool) {
+    assert_eq!(range.check_ignore_rc(version), expected);
 }
 
 #[rstest]
