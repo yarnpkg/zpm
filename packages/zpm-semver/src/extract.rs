@@ -136,8 +136,9 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                 }
 
                 if let Some((version, _)) = extract_version(str) {
-                    let upper_bound = match version.major {
-                        0 => version.next_minor_rc(),
+                    let upper_bound = match (version.major, version.minor) {
+                        (0, 0) => version.next_patch_rc(),
+                        (0, _) => version.next_minor_rc(),
                         _ => version.next_major_rc(),
                     };
 

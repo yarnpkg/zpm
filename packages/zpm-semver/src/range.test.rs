@@ -36,6 +36,10 @@ use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 #[case("^0.7.0", "0.8.0", false)]
 #[case("^0.7.0", "0.7.3-rc", false)]
 
+#[case("^0.0.3", "0.0.3", true)]
+#[case("^0.0.3", "0.0.4", false)]
+#[case("^0.0.3", "0.0.4-rc", false)]
+
 #[case(">=1.2.3", "1.2.0", false)]
 #[case(">=1.2.3", "1.2.3", true)]
 #[case(">=1.2.3", "1.2.10", true)]
@@ -90,6 +94,8 @@ fn test_range_check(#[case] range: Range, #[case] version: Version, #[case] expe
 
 #[case("^0.7.0", "0.7.3-rc", true)]
 #[case("^0.7.0", "0.8.0-rc", false)]
+
+#[case("^0.0.3", "0.0.4-rc", false)]
 fn test_range_check_ignore_rc(#[case] range: Range, #[case] version: Version, #[case] expected: bool) {
     assert_eq!(range.check_ignore_rc(version), expected);
 }
