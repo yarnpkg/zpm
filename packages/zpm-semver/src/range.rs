@@ -76,10 +76,6 @@ pub enum Token {
     Operation(OperatorType, Version),
 }
 
-fn check_rc(version: &Version, operand: &Version, accept_rc: bool) -> bool {
-    accept_rc || operand.rc.is_some() || version.rc.is_none()
-}
-
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Range {
     pub source: String,
@@ -154,7 +150,29 @@ impl Range {
     pub fn check<P: Borrow<Version>>(&self, version: P) -> bool {
         let mut n = 0;
 
-        self.check_from(version.borrow(), &mut n, false)
+        let version
+            = version.borrow();
+
+        // https://docs.npmjs.com/cli/v6/using-npm/semver#prerelease-tags
+        //
+        // > a version has a prerelease tag (for example, 1.2.3-alpha.3) then it
+        // > will only be allowed to satisfy comparator sets if at least one
+        // > comparator with the same [major, minor, patch] tuple also has
+        // > a prerelease tag.
+        // >
+        // > For example, the range >1.2.3-alpha.3 would be allowed to match
+        // > the version 1.2.3-alpha.7, but it would not be satisfied by
+        // > 3.4.5-alpha.9, even though 3.4.5-alpha.9 is technically "greater
+        // > than" 1.2.3-alpha.3 according to the SemVer sort rules. The version
+        // > range only accepts prerelease tags on the 1.2.3 version. The
+        // > version 3.4.5 would satisfy the range, because it does not have a
+        // > prerelease flag, and 3.4.5 is greater than 1.2.3-alpha.7.
+        //
+        if version.rc.is_some() && !self.tokens.iter().any(|t| matches!(t, Token::Operation(_, operand) if operand.major == version.major && operand.minor == version.minor && operand.patch == version.patch && operand.rc.is_some())) {
+            return false;
+        }
+
+        self.check_from(version, &mut n, false)
     }
 
     pub fn check_ignore_rc<P: Borrow<Version>>(&self, version: P) -> bool {
@@ -187,11 +205,11 @@ impl Range {
             }
 
             Some(Token::Operation(OperatorType::GreaterThan, operand)) => {
-                version > operand && check_rc(version, operand, accept_rc)
+                version > operand
             }
 
             Some(Token::Operation(OperatorType::GreaterThanOrEqual, operand)) => {
-                version >= operand && check_rc(version, operand, accept_rc)
+                version >= operand
             }
 
             Some(Token::Operation(OperatorType::LessThan, operand)) => {

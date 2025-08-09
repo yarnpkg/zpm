@@ -14,6 +14,10 @@ use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 #[case("^1.2.3", "2.0.0-rc", false)]
 #[case("^1.2.3", "2.0.0-0", false)]
 #[case("^1.2.3", "2.0.0", false)]
+#[case("^1.2.3", "2.0.0-0", false)]
+#[case("^1.2.3-rc.1", "1.2.3-rc.15", true)]
+#[case("^1.2.3-rc.1", "1.3.0-rc.15", false)]
+#[case("^1.2.3-rc.1", "2.0.0-rc.15", false)]
 
 #[case("~1.2.3", "1.2.0", false)]
 #[case("~1.2.3", "1.2.3", true)]
