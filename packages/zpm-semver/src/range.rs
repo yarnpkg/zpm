@@ -76,6 +76,10 @@ pub enum Token {
     Operation(OperatorType, Version),
 }
 
+fn check_rc(version: &Version, operand: &Version, accept_rc: bool) -> bool {
+    accept_rc || operand.rc.is_some() || version.rc.is_none()
+}
+
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Range {
     pub source: String,
@@ -99,21 +103,17 @@ impl Range {
     }
 
     pub fn caret(version: Version) -> Range {
-        let upper_bound
-            = version.next_major_rc();
+        let upper_bound = match version.major {
+            0 => version.next_minor_rc(),
+            _ => version.next_major_rc(),
+        };
 
         Range {
             source: format!("^{}", version.to_file_string()),
             tokens: vec![
                 Token::Syntax(TokenType::SAnd),
-                Token::Operation(
-                    OperatorType::GreaterThanOrEqual,
-                    version,
-                ),
-                Token::Operation(
-                    OperatorType::LessThan,
-                    upper_bound,
-                ),
+                Token::Operation(OperatorType::GreaterThanOrEqual, version),
+                Token::Operation(OperatorType::LessThan, upper_bound),
             ],
         }
     }
@@ -126,14 +126,8 @@ impl Range {
             source: format!("~{}", version.to_file_string()),
             tokens: vec![
                 Token::Syntax(TokenType::SAnd),
-                Token::Operation(
-                    OperatorType::GreaterThanOrEqual,
-                    version,
-                ),
-                Token::Operation(
-                    OperatorType::LessThan,
-                    upper_bound,
-                ),
+                Token::Operation(OperatorType::GreaterThanOrEqual, version),
+                Token::Operation(OperatorType::LessThan, upper_bound),
             ],
         }
     }
@@ -160,24 +154,30 @@ impl Range {
     pub fn check<P: Borrow<Version>>(&self, version: P) -> bool {
         let mut n = 0;
 
-        self.check_from(version.borrow(), &mut n)
+        self.check_from(version.borrow(), &mut n, false)
     }
 
-    fn check_from(&self, version: &Version, n: &mut usize) -> bool {
+    pub fn check_ignore_rc<P: Borrow<Version>>(&self, version: P) -> bool {
+        let mut n = 0;
+
+        self.check_from(version.borrow(), &mut n, true)
+    }
+
+    fn check_from(&self, version: &Version, n: &mut usize, accept_rc: bool) -> bool {
         let token = self.tokens.get(*n);
         *n += 1;
 
         match token {
             Some(Token::Syntax(TokenType::SAnd)) | Some(Token::Syntax(TokenType::And)) => {
-                let left = self.check_from(version, n);
-                let right = self.check_from(version, n);
+                let left = self.check_from(version, n, accept_rc);
+                let right = self.check_from(version, n, accept_rc);
 
                 left && right
             }
 
             Some(Token::Syntax(TokenType::Or)) => {
-                let left = self.check_from(version, n);
-                let right = self.check_from(version, n);
+                let left = self.check_from(version, n, accept_rc);
+                let right = self.check_from(version, n, accept_rc);
 
                 left || right
             }
@@ -187,11 +187,11 @@ impl Range {
             }
 
             Some(Token::Operation(OperatorType::GreaterThan, operand)) => {
-                version > operand
+                version > operand && check_rc(version, operand, accept_rc)
             }
 
             Some(Token::Operation(OperatorType::GreaterThanOrEqual, operand)) => {
-                version >= operand
+                version >= operand && check_rc(version, operand, accept_rc)
             }
 
             Some(Token::Operation(OperatorType::LessThan, operand)) => {

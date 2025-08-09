@@ -136,7 +136,10 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                 }
 
                 if let Some((version, _)) = extract_version(str) {
-                    let next_major = version.next_major_rc();
+                    let upper_bound = match version.major {
+                        0 => version.next_minor_rc(),
+                        _ => version.next_major_rc(),
+                    };
 
                     Some(vec![
                         Token::Operation(
@@ -146,7 +149,7 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                         Token::Syntax(TokenType::SAnd),
                         Token::Operation(
                             OperatorType::LessThan,
-                            next_major,
+                            upper_bound,
                         ),
                     ])
                 } else {
@@ -162,7 +165,8 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                 }
 
                 if let Some((version, _)) = extract_version(str) {
-                    let next_minor = version.next_minor_rc();
+                    let next_minor
+                        = version.next_minor_rc();
 
                     Some(vec![
                         Token::Operation(
