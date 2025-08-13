@@ -1,14 +1,15 @@
 name: 'Performance tests'
 
 on:
-  # schedule:
-  # - cron: '0 2-23/4 * * *'
+  schedule:
+  # Every Monday and Friday at 2:00 AM UTC
+  - cron: '0 2 * * 1,5'
   workflow_dispatch:
     inputs:
-      # sendReport:
-      #   description: 'Whether to send the stats to the Datadog dashboards'
-      #   required: true
-      #   default: 'false'
+      sendReport:
+        description: 'Whether to send the stats to the Datadog dashboards'
+        required: true
+        default: 'false'
       hyperfineOptions:
         description: 'Options passed to Hyperfine'
         required: false
@@ -70,9 +71,9 @@ jobs:
       run: |
         bash scripts/bench-run.sh '${{matrix.packageManager}}' '${{matrix.benchmark[1]}}' "$BENCH_DIR"
 
-      # if [[ '${{github.event.inputs.sendReport}}' != 'false' ]]; then
-      #   yarn node scripts/submit-bench-data.js '${{matrix.packageManager}}' '${{matrix.benchmark[1]}}' "$BENCH_DIR"
-      # fi
+      if [[ '${{github.event.inputs.sendReport}}' != 'false' ]]; then
+        yarn node scripts/submit-bench-data.js '${{matrix.packageManager}}' '${{matrix.benchmark[1]}}' "$BENCH_DIR"
+      fi
       env:
-        # DD_API_KEY: ${{secrets.DD_API_KEY}}
+        DD_API_KEY: ${{secrets.DD_API_KEY}}
         HYPERFINE_OPTIONS: ${{github.event.inputs.hyperfineOptions}}
