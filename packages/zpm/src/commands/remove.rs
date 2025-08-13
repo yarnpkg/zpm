@@ -1,11 +1,11 @@
-use std::{collections::HashSet, fs::Permissions, os::unix::fs::PermissionsExt};
+use std::collections::HashSet;
 
 use clipanion::cli;
 use wax::{Glob, Program};
 use zpm_parsers::JsonFormatter;
 use zpm_utils::ToFileString;
 
-use crate::{config::Config, error::Error, primitives::Ident, project::{Project, RunInstallOptions, Workspace}};
+use crate::{config::Config, error::Error, primitives::Ident, project::{InstallMode, Project, RunInstallOptions, Workspace}};
 
 #[cli::command]
 #[cli::path("remove")]
@@ -14,6 +14,11 @@ use crate::{config::Config, error::Error, primitives::Ident, project::{Project, 
 pub struct Remove {
     #[cli::option("-A,--all", default = false)]
     all: bool,
+
+    #[cli::option("--mode")]
+    mode: Option<InstallMode>,
+
+    // ---
 
     identifiers: Vec<Ident>,
 }
@@ -46,6 +51,7 @@ impl Remove {
             = Project::new(None).await?;
 
         project.run_install(RunInstallOptions {
+            mode: self.mode,
             ..Default::default()
         }).await?;
 

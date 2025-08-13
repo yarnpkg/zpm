@@ -5,7 +5,7 @@ use zpm_parsers::{JsonFormatter, Value};
 use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 
-use crate::{algolia::query_algolia, error::Error, install::InstallContext, primitives::{loose_descriptor, range::AnonymousSemverRange, Descriptor, LooseDescriptor, Range}, project};
+use crate::{algolia::query_algolia, error::Error, install::InstallContext, primitives::{loose_descriptor, range::AnonymousSemverRange, Descriptor, LooseDescriptor, Range}, project::{self, InstallMode}};
 
 #[derive(Clone, Debug)]
 struct AddRequest {
@@ -131,6 +131,11 @@ pub struct Add {
 
     #[cli::option("--prefer-dev", default = false)]
     prefer_dev: bool,
+
+    // ---
+
+    #[cli::option("--mode")]
+    mode: Option<InstallMode>,
 
     // ---
 
@@ -272,6 +277,7 @@ impl Add {
             = project::Project::new(None).await?;
 
         project.run_install(project::RunInstallOptions {
+            mode: self.mode,
             ..Default::default()
         }).await?;
 
