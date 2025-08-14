@@ -29,7 +29,7 @@ pub async fn run_default() -> ExitCode {
         cwd,
         args,
         version,
-    } = extract_bin_meta();
+    } = extract_bin_meta().expect("Failed to extract binary metadata");
 
     if let Some(cwd) = cwd {
         set_fake_cwd(cwd);

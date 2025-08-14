@@ -2,9 +2,10 @@ use std::process::ExitCode;
 
 use clipanion::{prelude::*, program, Environment};
 use zpm_macros::track_time;
-use zpm_switch::{extract_bin_meta, BinMeta};
+use zpm_switch::{extract_bin_meta, get_bin_version, BinMeta};
 
 mod debug;
+mod entries;
 
 mod add;
 mod bin;
@@ -35,6 +36,9 @@ program!(YarnCli, [
     debug::print_hoisting::PrintHoisting,
     debug::print_platform::PrintPlatform,
 
+    entries::cwd::Cwd,
+    entries::run::Run,
+
     add::Add,
     bin::BinList,
     bin::Bin,
@@ -61,23 +65,12 @@ program!(YarnCli, [
 
 #[track_time]
 pub fn run_default() -> ExitCode {
-    let BinMeta {
-        cwd,
-        args,
-        version,
-    } = extract_bin_meta();
-
-    if let Some(cwd) = cwd {
-        cwd.sys_set_current_dir()
-            .expect("Failed to set current directory");
-    }
-
     let env
         = Environment::default()
             .with_program_name("Yarn Package Manager".to_string())
             .with_binary_name("yarn".to_string())
-            .with_version(version)
-            .with_argv(args);
+            .with_version(get_bin_version())
+            .with_argv(std::env::args().skip(1).collect());
 
     YarnCli::run(env)
 }

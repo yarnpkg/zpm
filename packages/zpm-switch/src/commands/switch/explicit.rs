@@ -3,7 +3,7 @@ use std::process::{Command, ExitStatus, Stdio};
 use clipanion::cli;
 use zpm_utils::ToFileString;
 
-use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}, yarn::resolve_selector, yarn_enums::Selector};
+use crate::{cwd::{get_final_cwd, restore_args}, errors::Error, install::install_package_manager, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}, yarn::resolve_selector, yarn_enums::Selector};
 
 #[cli::command(proxy)]
 #[cli::path("switch")]
@@ -44,9 +44,7 @@ impl ExplicitCommand {
             = self.args.clone();
 
         // Don't forget to add back the cwd parameter that was removed earlier on!
-        if let Some(cwd) = get_fake_cwd() {
-            args.insert(0, cwd.to_file_string());
-        }
+        restore_args(&mut args);
 
         let version
             = resolve_selector(&self.selector).await?;
