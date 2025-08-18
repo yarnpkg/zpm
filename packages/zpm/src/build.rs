@@ -1,12 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use zpm_utils::{IoResultExt, Path, ToFileString};
+use zpm_utils::{IoResultExt, Path};
 use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
-use serde::{ser::SerializeMap, Deserialize, Serialize};
-use sha2::Digest;
+use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize};
 
-use crate::{diff_finder::{DiffController, DiffFinder}, error::Error, hash::Blake2b80, primitives::Locator, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}};
+use crate::{algos, diff_finder::{DiffController, DiffFinder}, error::Error, hash::{CollectHash, Sha256}, primitives::Locator, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}};
 
 #[derive(Clone, Debug, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
@@ -50,7 +49,7 @@ pub struct BuildRequest {
 }
 
 impl BuildRequest {
-    pub async fn run(self, project: &Project, hash: String) -> Result<ScriptResult, Error> {
+    pub async fn run(self, project: &Project, hash: Sha256) -> Result<ScriptResult, Error> {
         let cwd_abs = project.project_cwd
             .with_join(&self.cwd);
 
@@ -66,7 +65,7 @@ impl BuildRequest {
             } else {
                 let build_cache_folder = project.project_cwd
                     .with_join_str(".yarn/ignore/builds")
-                    .with_join_str(format!("{}-{}", self.locator.slug(), hash));
+                    .with_join_str(format!("{}-{}", self.locator.slug(), hash.short()));
 
                 Some(build_cache_folder)
             };
@@ -131,28 +130,39 @@ impl BuildRequest {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildState {
-    pub entries: BTreeMap<Locator, BTreeMap<Path, String>>,
+    pub entries: BTreeMap<Locator, BTreeMap<Path, Sha256>>,
+}
+
+impl<'de> Deserialize<'de> for BuildState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        let map
+            = BTreeMap::deserialize(deserializer)?;
+
+        Ok(Self {
+            entries: map,
+        })
+    }
 }
 
 impl Serialize for BuildState {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut map = serializer.serialize_map(None)?;
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+        let mut map
+            = serializer.serialize_map(None)?;
+
         for (locator, paths) in &self.entries {
             if !paths.is_empty() {
                 map.serialize_entry(locator, paths)?;
             }
         }
+
         map.end()
     }
 }
 
 impl BuildState {
-    pub fn from_entries(entries: BTreeMap<Locator, BTreeMap<Path, String>>) -> Self {
+    pub fn from_entries(entries: BTreeMap<Locator, BTreeMap<Path, Sha256>>) -> Self {
         Self { entries }
     }
 
@@ -166,7 +176,7 @@ impl BuildState {
             .unwrap_or_else(|_| "{}".to_owned());
 
         sonic_rs::from_str::<Self>(&build_state_text)
-            .unwrap_or_default()
+            .expect("Failed to parse the build state")
     }
 
     pub fn save(&self, project: &Project) -> Result<(), Error> {
@@ -176,7 +186,8 @@ impl BuildState {
         build_state_path
             .fs_create_parent()?;
 
-        let build_state_text = sonic_rs::to_string(self)?;
+        let build_state_text
+            = sonic_rs::to_string(self)?;
 
         build_state_path
             .fs_change(build_state_text, false)?;
@@ -198,29 +209,50 @@ pub struct Build {
 pub struct BuildManager<'a> {
     pub requests: BuildRequests,
     pub dependents: BTreeMap<usize, BTreeSet<usize>>,
-    pub tree_hashes: BTreeMap<Locator, String>,
+    pub tree_hashes: BTreeMap<Locator, Sha256>,
     pub queued: Vec<usize>,
-    pub running: FuturesUnordered<BoxFuture<'a, (usize, String, Result<ScriptResult, Error>)>>,
+    pub running: FuturesUnordered<BoxFuture<'a, (usize, Sha256, Result<ScriptResult, Error>)>>,
     pub build_errors: BTreeSet<(Locator, Path)>,
     pub build_state_out: BuildState,
 }
 
 impl<'a> BuildManager<'a> {
     pub fn new(requests: BuildRequests) -> Self {
-        let mut dependents = BTreeMap::new();
+        let mut dependents
+            = BTreeMap::new();
+        let mut tree_hashes: BTreeMap<Locator, Sha256>
+            = BTreeMap::new();
 
-        for (idx, set) in requests.dependencies.iter() {
-            for &dep_idx in set.iter() {
-                dependents.entry(dep_idx)
-                    .or_insert_with(BTreeSet::new)
-                    .insert(*idx);
+        let sccs
+            = algos::scc_tarjan_pearce(&requests.dependencies);
+
+        for scc in sccs {
+            let dependencies = scc.iter()
+                .flat_map(|&idx| requests.dependencies.get(&idx).unwrap().iter())
+                .filter(|&dep_idx| !scc.contains(dep_idx))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+
+            let hash = dependencies.iter()
+                .map(|&idx| tree_hashes.get(&requests.entries[idx].locator).unwrap())
+                .map(|hash| hash.clone())
+                .collect_hash();
+
+            for &idx in scc.iter() {
+                for &dependency in dependencies.iter() {
+                    dependents.entry(dependency)
+                        .or_insert_with(BTreeSet::new)
+                        .insert(idx);
+                }
+
+                tree_hashes.insert(requests.entries[idx].locator.clone(), hash.clone());
             }
         }
 
         Self {
             requests,
             dependents,
-            tree_hashes: BTreeMap::new(),
+            tree_hashes,
             queued: Vec::new(),
             running: FuturesUnordered::new(),
             build_errors: BTreeSet::new(),
@@ -228,7 +260,7 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn record(&mut self, idx: usize, hash: String, script_result: ScriptResult) {
+    fn record(&mut self, idx: usize, hash: Sha256, script_result: ScriptResult) {
         let request
             = &self.requests.entries[idx];
 
@@ -265,14 +297,18 @@ impl<'a> BuildManager<'a> {
                     = req.force_rebuild;
 
                 let tree_hash
-                    = self.get_hash(project, &req.locator);
+                    = self.tree_hashes.get(&req.locator)
+                        .expect("Expected this package to have a tree hash, since it's listed as a dependent")
+                        .clone();
 
                 if !force_rebuild {
-                    if let Some(previous_hash) = build_state.entries.get(&req.locator).and_then(|entries| entries.get(&req.cwd)) {
-                        if previous_hash == &tree_hash {
-                            self.record(idx, tree_hash, ScriptResult::new_success());
-                            continue;
-                        }
+                    let existing_hash = build_state.entries
+                        .get(&req.locator)
+                        .and_then(|entries| entries.get(&req.cwd));
+
+                    if existing_hash == Some(&tree_hash) {
+                        self.record(idx, tree_hash.clone(), ScriptResult::new_success());
+                        continue;
                     }
                 }
 
@@ -288,50 +324,6 @@ impl<'a> BuildManager<'a> {
                 break;
             }
         }
-    }
-
-    fn get_hash_impl(tree_hashes: &mut BTreeMap<Locator, String>, project: &'a Project, locator: &Locator) -> String {
-        let hash
-            = tree_hashes.get(locator);
-
-        if let Some(hash) = hash {
-            return hash.clone();
-        }
-
-        // To avoid the case where one dependency depends on itself somehow
-        tree_hashes.insert(locator.clone(), "<recursive>".to_string());
-
-        let install_state = project.install_state.as_ref()
-            .expect("Expected the install state to be present");
-
-        let resolution = install_state.resolution_tree.locator_resolutions.get(locator)
-            .expect("Expected package to have a resolution");
-
-        let mut hasher
-            = Blake2b80::new();
-
-        hasher.update(locator.to_file_string());
-
-        for dependency in resolution.dependencies.values() {
-            let dependency_locator = install_state.resolution_tree.descriptor_to_locator.get(dependency)
-                .expect("Expected dependency to have a locator");
-
-            let dependency_hash
-                = BuildManager::get_hash_impl(tree_hashes, project, dependency_locator);
-
-            hasher.update(dependency_hash);
-        }
-
-        let hash
-            = format!("{:x}", hasher.finalize());
-
-        tree_hashes.insert(locator.clone(), hash.clone());
-
-        hash
-    }
-
-    fn get_hash(&mut self, project: &'a Project, locator: &Locator) -> String {
-        BuildManager::get_hash_impl(&mut self.tree_hashes, project, locator)
     }
 
     pub async fn run(mut self, project: &'a mut Project) -> Result<Build, Error> {

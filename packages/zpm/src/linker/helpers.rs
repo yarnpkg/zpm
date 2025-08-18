@@ -54,23 +54,23 @@ pub fn fs_remove_nm(nm_path: Path) -> Result<(), Error> {
             for entry in entries.flatten() {
                 let path
                     = Path::try_from(entry.path())?;
-        
+
                 let basename = path.basename()
                     .unwrap();
-        
+
                 if basename.starts_with(".") && basename != ".bin" && path.fs_is_dir() {
                     has_dot_entries = true;
                     continue;
                 }
-        
+
                 path.fs_rm()
                     .unwrap();
             }
-        
+
             if !has_dot_entries {
                 nm_path.fs_rm()?;
             }
-        
+
             Ok(())
         },
     }
@@ -114,13 +114,17 @@ pub fn fs_extract_archive(destination: &Path, package_data: &PackageData) -> Res
 }
 
 pub fn populate_build_entry_dependencies(package_build_entries: &BTreeMap<Locator, usize>, locator_resolutions: &BTreeMap<Locator, Resolution>, descriptor_to_locator: &BTreeMap<Descriptor, Locator>) -> Result<BTreeMap<usize, BTreeSet<usize>>, Error> {
-    let mut package_build_dependencies = BTreeMap::new();
+    let mut package_build_dependencies
+        = BTreeMap::new();
 
     for locator in package_build_entries.keys() {
-        let mut build_dependencies = BTreeSet::new();
+        let mut build_dependencies
+            = BTreeSet::new();
 
-        let mut queue = vec![locator.clone()];
-        let mut seen: BTreeSet<_> = BTreeSet::new();
+        let mut queue
+            = vec![locator.clone()];
+        let mut seen
+            = BTreeSet::new();
 
         seen.insert(locator.clone());
 

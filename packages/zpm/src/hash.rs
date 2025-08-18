@@ -34,6 +34,23 @@ impl Sha256 {
     }
 }
 
+pub trait CollectHash {
+    fn collect_hash(self) -> Sha256;
+}
+
+impl<I: Iterator<Item = Sha256>> CollectHash for I {
+    fn collect_hash(self) -> Sha256 {
+        let mut hasher
+            = Blake2b80::new();
+
+        for hash in self {
+            hasher.update(hash.state.as_slice());
+        }
+
+        Sha256 {state: hasher.finalize().to_vec()}
+    }
+}
+
 impl FromFileString for Sha256 {
     type Error = Error;
 
