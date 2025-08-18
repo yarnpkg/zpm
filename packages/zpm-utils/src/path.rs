@@ -98,6 +98,10 @@ impl Path {
         }
     }
 
+    pub fn temp_root_dir() -> Result<Path, PathError> {
+        Path::try_from(std::env::temp_dir())
+    }
+
     pub fn temp_dir() -> Result<Path, PathError> {
         Self::temp_dir_pattern("temp-<>")
     }

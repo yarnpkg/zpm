@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, str::FromStr};
+use std::{collections::BTreeMap, io::IsTerminal, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use zpm_macros::yarn_config;
@@ -123,7 +123,7 @@ pub struct UserConfig {
     #[default(true)]
     pub enable_network: BoolField,
 
-    #[default(|_| !zpm_ci::is_ci().is_some())]
+    #[default(|_| !zpm_ci::is_ci().is_some() && std::io::stdout().is_terminal())]
     pub enable_progress_bars: BoolField,
 
     #[default(Path::home_dir().unwrap().unwrap().with_join_str(".yarn/zpm"))]

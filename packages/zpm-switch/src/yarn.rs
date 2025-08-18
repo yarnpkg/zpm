@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use serde_with::serde_as;
-use std::{collections::BTreeMap, str::FromStr};
+use std::{collections::BTreeMap, fmt::Debug, str::FromStr, time::SystemTime};
 use zpm_semver::{Range, Version};
 use zpm_utils::{ExplicitPath, FromFileString, Path, ToFileString};
 
@@ -76,6 +76,20 @@ pub async fn resolve_channel_selector(channel_selector: &ChannelSelector) -> Res
         .unwrap_or(&crate::yarn_enums::Channel::Stable)
         .to_file_string();
 
+    let today
+        = chrono::Utc::now();
+
+    let channel_path
+        = Path::temp_root_dir()?
+            .with_join_str(&format!("yswitch-{}-{}-{}", release_line, channel, today.format("%Y%m%d")));
+
+    if let Ok(version_str) = channel_path.fs_read_text_async().await {
+        let version
+            = Version::from_str(&version_str)?;
+
+        return Ok(version);
+    }
+
     let channel_url
         = format!("https://repo.yarnpkg.com/channels/{}/{}", release_line, channel);
 
@@ -88,6 +102,9 @@ pub async fn resolve_channel_selector(channel_selector: &ChannelSelector) -> Res
 
     let version
         = Version::from_str(version_str)?;
+
+    channel_path
+        .fs_write_text(&version_str)?;
 
     Ok(version)
 }
@@ -117,7 +134,7 @@ pub fn extract_bin_meta() -> BinMeta {
             = ExplicitPath::from_str(first_arg);
 
         if let Ok(explicit_path) = explicit_path {
-            cwd = Some(explicit_path.raw_path.path);
+            cwd = Some(Path::current_dir().unwrap().with_join(&explicit_path.raw_path.path));
             args.remove(0);
         }
     }
