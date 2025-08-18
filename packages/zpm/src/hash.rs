@@ -38,7 +38,7 @@ pub trait CollectHash {
     fn collect_hash(self) -> Sha256;
 }
 
-impl<I: Iterator<Item = Sha256>> CollectHash for I {
+impl<'a, I: Iterator<Item = &'a Sha256>> CollectHash for I {
     fn collect_hash(self) -> Sha256 {
         let mut hasher
             = Blake2b80::new();

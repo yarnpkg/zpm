@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use zpm_utils::{IoResultExt, Path};
+use zpm_utils::{IoResultExt, Path, ToFileString};
 use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize};
@@ -220,8 +220,6 @@ impl<'a> BuildManager<'a> {
     pub fn new(requests: BuildRequests) -> Self {
         let mut dependents
             = BTreeMap::new();
-        let mut tree_hashes: BTreeMap<Locator, Sha256>
-            = BTreeMap::new();
 
         let sccs
             = algos::scc_tarjan_pearce(&requests.dependencies);
@@ -233,26 +231,19 @@ impl<'a> BuildManager<'a> {
                 .cloned()
                 .collect::<BTreeSet<_>>();
 
-            let hash = dependencies.iter()
-                .map(|&idx| tree_hashes.get(&requests.entries[idx].locator).unwrap())
-                .map(|hash| hash.clone())
-                .collect_hash();
-
             for &idx in scc.iter() {
                 for &dependency in dependencies.iter() {
                     dependents.entry(dependency)
                         .or_insert_with(BTreeSet::new)
                         .insert(idx);
                 }
-
-                tree_hashes.insert(requests.entries[idx].locator.clone(), hash.clone());
             }
         }
 
         Self {
             requests,
             dependents,
-            tree_hashes,
+            tree_hashes: BTreeMap::new(),
             queued: Vec::new(),
             running: FuturesUnordered::new(),
             build_errors: BTreeSet::new(),
@@ -297,9 +288,7 @@ impl<'a> BuildManager<'a> {
                     = req.force_rebuild;
 
                 let tree_hash
-                    = self.tree_hashes.get(&req.locator)
-                        .expect("Expected this package to have a tree hash, since it's listed as a dependent")
-                        .clone();
+                    = self.get_hash(project, &req.locator);
 
                 if !force_rebuild {
                     let existing_hash = build_state.entries
@@ -324,6 +313,44 @@ impl<'a> BuildManager<'a> {
                 break;
             }
         }
+    }
+
+    fn get_hash_impl<'b>(tree_hashes: &'b mut BTreeMap<Locator, Sha256>, project: &'a Project, locator: &Locator) -> Sha256 {
+        let hash
+            = tree_hashes.get(locator);
+
+        if let Some(hash) = hash {
+            return hash.clone();
+        }
+
+        // To avoid the case where one dependency depends on itself somehow
+        tree_hashes.insert(locator.clone(), Sha256::from_string(&"<recursive>"));
+
+        let install_state = project.install_state.as_ref()
+            .expect("Expected the install state to be present");
+
+        let resolution = install_state.resolution_tree.locator_resolutions.get(locator)
+            .expect("Expected package to have a resolution");
+
+        let self_hash
+            = Sha256::from_string(&locator.to_file_string());
+
+        let hashes = resolution.dependencies.values()
+            .map(|descriptor| &install_state.resolution_tree.descriptor_to_locator[descriptor])
+            .map(|dependency| BuildManager::get_hash_impl(tree_hashes, project, dependency))
+            .chain(Some(self_hash))
+            .collect::<Vec<_>>();
+
+        let hash = hashes.iter()
+            .collect_hash();
+
+        tree_hashes.insert(locator.clone(), hash.clone());
+
+        hash
+    }
+
+    fn get_hash(&mut self, project: &'a Project, locator: &Locator) -> Sha256 {
+        BuildManager::get_hash_impl(&mut self.tree_hashes, project, locator)
     }
 
     pub async fn run(mut self, project: &'a mut Project) -> Result<Build, Error> {
