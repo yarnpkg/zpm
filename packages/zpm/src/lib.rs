@@ -3,6 +3,7 @@
 use env_logger as _;
 
 pub mod algolia;
+pub mod algos;
 pub mod build;
 pub mod cache;
 pub mod commands;
