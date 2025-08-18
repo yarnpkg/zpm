@@ -514,8 +514,6 @@ impl Project {
             }
         }
 
-        println!("Running install");
-
         self.run_install(RunInstallOptions {
             check_checksums: false,
             check_resolutions: false,
