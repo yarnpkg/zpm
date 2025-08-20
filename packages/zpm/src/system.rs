@@ -1,5 +1,13 @@
+<<<<<<< Updated upstream
+=======
+use std::{str::FromStr, sync::LazyLock};
+
+>>>>>>> Stashed changes
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
+use zpm_utils::Path;
+
+const LDD_PATH: &str = "/usr/bin/ldd";
 
 #[cfg(target_arch = "x86_64")]
 const ARCH: &str = "x64";
@@ -25,6 +33,25 @@ const LIBC: Option<&str> = Some("musl");
 #[cfg(target_env = "")]
 const LIBC: Option<&str> = None;
 
+fn detect_libc() -> Option<&'static str> {
+    let ldd_contents
+        = Path::from_str(LDD_PATH).unwrap()
+            .fs_read_text_prealloc()
+            .ok();
+
+    if let Some(ldd_contents) = ldd_contents {
+        if ldd_contents.contains("GLIBC") || ldd_contents.contains("GNU libc") || ldd_contents.contains("GNU C Library") {
+            return Some("glibc");
+        }
+
+        if ldd_contents.contains("musl") {
+            return Some("musl");
+        }
+    }
+
+    LIBC
+}
+
 #[derive(Debug)]
 pub struct Description {
     arch: Option<(String, String)>,
@@ -37,7 +64,7 @@ impl Description {
         Self {
             arch: Some((ARCH.to_string(), format!("!{}", ARCH))),
             os: Some((OS.to_string(), format!("!{}", OS))),
-            libc: LIBC.map(|s| (s.to_string(), format!("!{}", s))),
+            libc: detect_libc().map(|s| (s.to_string(), format!("!{}", s))),
         }
     }
 }
