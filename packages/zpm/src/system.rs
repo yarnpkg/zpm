@@ -1,3 +1,5 @@
+use std::sync::{LazyLock, OnceLock};
+
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
@@ -32,7 +34,15 @@ pub struct Description {
     libc: Option<(String, String)>,
 }
 
+static CURRENT_DESCRIPTION: LazyLock<Description> = LazyLock::new(|| {
+    Description::from_current()
+});
+
 impl Description {
+    pub fn current() -> &'static Self {
+        &*CURRENT_DESCRIPTION
+    }
+
     pub fn from_current() -> Self {
         Self {
             arch: Some((ARCH.to_string(), format!("!{}", ARCH))),

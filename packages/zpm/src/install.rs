@@ -9,14 +9,29 @@ use zpm_utils::{FromFileString, ToFileString};
 use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, SemverDescriptor}, project::{InstallMode, Project}, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, settings::PackageExtension, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct InstallContext<'a> {
     pub package_cache: Option<&'a CompositeCache>,
     pub project: Option<&'a Project>,
+    pub system_description: &'a system::Description,
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub refresh_lockfile: bool,
     pub mode: Option<InstallMode>,
+}
+
+impl<'a> Default for InstallContext<'a> {
+    fn default() -> Self {
+        Self {
+            package_cache: None,
+            project: None,
+            system_description: system::Description::current(),
+            check_checksums: false,
+            check_resolutions: false,
+            refresh_lockfile: false,
+            mode: None,
+        }
+    }
 }
 
 impl<'a> InstallContext<'a> {
@@ -178,7 +193,7 @@ impl InstallOpResult {
 }
 
 impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
-    fn graph_follow_ups(&self, _ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
+    fn graph_follow_ups(&self, ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
         match self {
             InstallOpResult::Validated => {
                 vec![]
@@ -193,6 +208,7 @@ impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
             InstallOpResult::Resolved(ResolutionResult {resolution, ..}) => {
                 let mut follow_ups = vec![InstallOp::Fetch {
                     locator: resolution.locator.clone(),
+                    is_mock_request: !resolution.requirements.validate(ctx.system_description),
                 }];
 
                 let transitive_dependencies = resolution.dependencies
@@ -231,6 +247,7 @@ enum InstallOp<'a> {
 
     Fetch {
         locator: Locator,
+        is_mock_request: bool,
     },
 }
 
@@ -251,18 +268,18 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
 
             InstallOp::Refresh {locator} => {
                 if let Some(parent) = &locator.parent {
-                    dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone()});
+                    dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone(), is_mock_request: false});
                     resolved_it.next();
                 }
 
                 if let Some(inner_locator) = locator.reference.inner_locator().cloned() {
-                    dependencies.push(InstallOp::Fetch {locator: inner_locator});
+                    dependencies.push(InstallOp::Fetch {locator: inner_locator, is_mock_request: false});
                 }
             },
 
             InstallOp::Resolve {descriptor} => {
                 if let Some(parent) = &descriptor.parent {
-                    dependencies.push(InstallOp::Fetch {locator: parent.clone()});
+                    dependencies.push(InstallOp::Fetch {locator: parent.clone(), is_mock_request: false});
                     resolved_it.next();
                 }
 
@@ -276,18 +293,18 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
 
                     if let Some(result) = patch_resolution {
                         let patch_resolved_locator = result.as_resolved_locator();
-                        dependencies.push(InstallOp::Fetch {locator: patch_resolved_locator.clone()});
+                        dependencies.push(InstallOp::Fetch {locator: patch_resolved_locator.clone(), is_mock_request: false});
                     }
                 }
             },
 
-            InstallOp::Fetch {locator} => {
+            InstallOp::Fetch {locator, ..} => {
                 if let Some(parent) = &locator.parent {
-                    dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone()});
+                    dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone(), is_mock_request: false});
                 }
 
                 if let Some(inner_locator) = locator.reference.inner_locator().cloned() {
-                    dependencies.push(InstallOp::Fetch {locator: inner_locator});
+                    dependencies.push(InstallOp::Fetch {locator: inner_locator, is_mock_request: false});
                 }
             },
         }
@@ -339,8 +356,8 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                 }).await
             },
 
-            InstallOp::Fetch {locator} => {
-                let dependencies = match try_fetch_locator_sync(context.clone(), &locator, false, dependencies)? {
+            InstallOp::Fetch {locator, is_mock_request} => {
+                let dependencies = match try_fetch_locator_sync(context.clone(), &locator, is_mock_request, dependencies)? {
                     SyncFetchAttempt::Success(result) => return Ok(InstallOpResult::Fetched(result)),
                     SyncFetchAttempt::Failure(dependencies) => dependencies,
                 };
@@ -348,7 +365,7 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                 with_context_result(ReportContext::Locator(locator.clone()), async {
                     let future = tokio::time::timeout(
                         timeout,
-                        fetch_locator(context.clone(), &locator.clone(), false, dependencies)
+                        fetch_locator(context.clone(), &locator.clone(), is_mock_request, dependencies)
                     ).await.map_err(|_| Error::TaskTimeout)?;
 
                     Ok(InstallOpResult::Fetched(future?))
