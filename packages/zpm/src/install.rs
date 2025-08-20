@@ -26,8 +26,8 @@ impl<'a> Default for InstallContext<'a> {
             package_cache: None,
             project: None,
             system_description: system::Description::current(),
-            check_checksums: true,
-            check_resolutions: true,
+            check_checksums: false,
+            check_resolutions: false,
             refresh_lockfile: false,
             mode: None,
         }
