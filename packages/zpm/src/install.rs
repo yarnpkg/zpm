@@ -357,7 +357,7 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
             },
 
             InstallOp::Fetch {locator, is_mock_request} => {
-                let dependencies = match try_fetch_locator_sync(context.clone(), &locator, false, dependencies)? {
+                let dependencies = match try_fetch_locator_sync(context.clone(), &locator, is_mock_request, dependencies)? {
                     SyncFetchAttempt::Success(result) => return Ok(InstallOpResult::Fetched(result)),
                     SyncFetchAttempt::Failure(dependencies) => dependencies,
                 };
