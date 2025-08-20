@@ -100,7 +100,7 @@ impl Reference {
     }
 
     pub fn is_disk_reference(&self) -> bool {
-        matches!(&self, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_) | Reference::Portal(_))
+        matches!(&self, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_) | Reference::Portal(_) | Reference::Link(_))
     }
 
     pub fn inner_locator(&self) -> Option<&Locator> {
