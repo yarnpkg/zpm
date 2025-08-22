@@ -40,14 +40,15 @@ impl PostinstallCommand {
 
         self.write_env(&env_path, &bin_dir);
 
-        if let Some(profile_file) = self.get_profile_file() {
-            let profile_path = home
-                .with_join(&profile_file);
+        if !self.check_github_path(&bin_dir) {
+            if let Some(profile_file) = self.get_profile_file() {
+                let profile_path = home
+                    .with_join(&profile_file);
 
-            self.write_profile(&profile_path, &env_path);
+                self.write_profile(&profile_path, &env_path);
+            }
         }
 
-        self.check_github_path(&bin_dir);
         self.check_volta_interference();
     }
 
@@ -82,17 +83,16 @@ impl PostinstallCommand {
             .and_then(|_| profile_path.fs_write_text(&profile_content));
 
         if profile_write_result.is_ok() {
-            println!(
-                "We updated {} for you; please restart your shell or run {} to apply the changes.",
-                profile_path.to_print_string(),
-                DataType::Code.colorize("source ~/.profile")
-            );
+            Note::Info(format!("
+                We updated {} for you.
+                Please restart your shell or run {} to apply the changes.
+            ", profile_path.to_print_string(), DataType::Code.colorize("source ~/.profile"))).print();
         } else {
-            println!(
-                "Failed to write {}; manually append the following line:\n{}",
-                profile_path.to_print_string(),
-                DataType::Code.colorize(&profile_line)
-            );
+            Note::Warning(format!("
+                We failed to write {}.
+                You will need to manually append the following line to your shell configuration file:
+                {}
+            ", profile_path.to_print_string(), DataType::Code.colorize(&profile_line))).print();
         }
     }
 
@@ -136,9 +136,9 @@ impl PostinstallCommand {
         }
     }
 
-    fn check_github_path(&self, bin_dir: &Path) {
+    fn check_github_path(&self, bin_dir: &Path) -> bool {
         let Ok(github_path) = std::env::var("GITHUB_PATH") else {
-            return;
+            return false;
         };
 
         let github_path_file
@@ -154,13 +154,19 @@ impl PostinstallCommand {
                 {}
             ", DataType::Code.colorize(&format!("echo \"{}\" >> $GITHUB_PATH", bin_dir.to_file_string())))).print();
 
-            return;
+            // Even if we failed to write the bin directory into the GITHUB_PATH file,
+            // we still return true since we detected that the user is running this
+            // command from within a GitHub Action and it wouldn't make sense to try
+            // and add the bin directory into the shell profiles.
+            return true;
         }
 
         Note::Info(format!("
             You seem to be running this command from within a GitHub Action.
             We automatically added the bin directory to your GITHUB_PATH file.
         ")).print();
+
+        return true;
     }
 
     fn check_volta_interference(&self) {
