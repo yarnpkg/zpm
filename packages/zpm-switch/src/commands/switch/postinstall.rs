@@ -84,15 +84,15 @@ impl PostinstallCommand {
 
         if profile_write_result.is_ok() {
             Note::Info(format!("
-                We updated {} for you.
+                We updated your shell configuration file for you.
                 Please restart your shell or run {} to apply the changes.
-            ", profile_path.to_print_string(), DataType::Code.colorize("source ~/.profile"))).print();
+            ", DataType::Code.colorize(&format!("source {}", profile_path.to_home_string())))).print();
         } else {
             Note::Warning(format!("
-                We failed to write {}.
-                You will need to manually append the following line to your shell configuration file:
+                We failed to update your shell configuration file.
+                You will need to manually append the following line to your shell configuration file (perhaps {}?):
                 {}
-            ", profile_path.to_print_string(), DataType::Code.colorize(&profile_line))).print();
+            ", profile_path.to_home_string(), DataType::Code.colorize(&profile_line))).print();
         }
     }
 
@@ -105,11 +105,11 @@ impl PostinstallCommand {
             .and_then(|_| env_path.fs_write_text(&env_path_line));
 
         if env_write_result.is_err() {
-            println!(
-                "Failed to write {}; manually append the following line to your shell configuration file:\n{}",
-                env_path.to_print_string(),
-                DataType::Code.colorize(&env_path_line)
-            );
+            Note::Warning(format!("
+                We failed to update the Yarn Switch environment file.
+                You will need to manually append the following line to your shell configuration file:
+                {}
+            ", DataType::Code.colorize(&env_path_line))).print();
 
             return;
         }
@@ -152,7 +152,7 @@ impl PostinstallCommand {
                 We failed to add the bin directory into your GITHUB_PATH.
                 You will need to manually add a similar command to your workflow:
                 {}
-            ", DataType::Code.colorize(&format!("echo \"{}\" >> $GITHUB_PATH", bin_dir.to_file_string())))).print();
+            ", DataType::Code.colorize(&format!("echo \"{}\" >> $GITHUB_PATH", bin_dir.to_home_string())))).print();
 
             // Even if we failed to write the bin directory into the GITHUB_PATH file,
             // we still return true since we detected that the user is running this
@@ -192,8 +192,6 @@ impl PostinstallCommand {
             .find(|entry| entry.contains("/tools/image/yarn/"));
 
         if let Some(volta_yarn_path) = volta_yarn_path {
-            println!();
-
             Note::Warning(format!("
                 Volta appears to be injecting paths that shadow our own shims in Node.js subprocesses.
                 We're going to remove the yarn field from Volta's platform.json file to workaround this issue.

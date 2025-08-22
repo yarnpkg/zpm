@@ -239,6 +239,23 @@ impl Path {
         self.path.starts_with("../") || self.path == ".."
     }
 
+    pub fn to_home_string(&self) -> String {
+        let home
+            = Path::home_dir()
+                .unwrap_or_default();
+
+        if let Some(home) = home {
+            if let Some(relative_path) = self.forward_relative_to(&home) {
+                let pretty_path
+                    = relative_path.to_file_string();
+
+                return format!("~/{}", pretty_path);
+            }
+        }
+
+        self.to_file_string()
+    }
+
     pub fn sys_set_current_dir(&self) -> Result<(), PathError> {
         std::env::set_current_dir(&self.path)?;
         Ok(())
@@ -711,23 +728,7 @@ impl ToFileString for Path {
 
 impl ToHumanString for Path {
     fn to_print_string(&self) -> String {
-        let path_str
-            = self.path.as_str();
-
-        let home
-            = Path::home_dir()
-                .unwrap_or_default();
-
-        if let Some(home) = home {
-            if let Some(relative_path) = self.forward_relative_to(&home) {
-                let pretty_path
-                    = relative_path.to_file_string();
-
-                return DataType::Path.colorize(&format!("~/{}", pretty_path));
-            }
-        }
-
-        DataType::Path.colorize(&path_str)
+        DataType::Path.colorize(&self.to_home_string())
     }
 }
 
