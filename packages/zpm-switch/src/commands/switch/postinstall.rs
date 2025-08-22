@@ -47,6 +47,7 @@ impl PostinstallCommand {
             self.write_profile(&profile_path, &env_path);
         }
 
+        self.check_github_path(&bin_dir);
         self.check_volta_interference();
     }
 
@@ -133,6 +134,33 @@ impl PostinstallCommand {
             "fish" => Some(Path::from_str(".config/fish/config.fish").unwrap()),
             _ => None,
         }
+    }
+
+    fn check_github_path(&self, bin_dir: &Path) {
+        let Ok(github_path) = std::env::var("GITHUB_PATH") else {
+            return;
+        };
+
+        let github_path_file
+            = Path::from_str(&github_path).unwrap();
+
+        let github_path_file_write_result = github_path_file
+            .fs_append_text(format!("{}\n", bin_dir.to_file_string()));
+
+        if github_path_file_write_result.is_err() {
+            Note::Warning(format!("
+                We failed to add the bin directory into your GITHUB_PATH.
+                You will need to manually add a similar command to your workflow:
+                {}
+            ", DataType::Code.colorize(&format!("echo \"{}\" >> $GITHUB_PATH", bin_dir.to_file_string())))).print();
+
+            return;
+        }
+
+        Note::Info(format!("
+            You seem to be running this command from within a GitHub Action.
+            We automatically added the bin directory to your GITHUB_PATH file.
+        ")).print();
     }
 
     fn check_volta_interference(&self) {
