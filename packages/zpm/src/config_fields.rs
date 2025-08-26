@@ -1,3 +1,4 @@
+use ouroboros::self_referencing;
 use zpm_utils::Path;
 use colored::Colorize;
 use serde::{de, Deserialize, Deserializer, Serialize};
@@ -247,7 +248,7 @@ impl<T: FromFileString + for<'a> Deserialize<'a>> FromFileString for VecField<T>
         if raw.starts_with('[') {
             let value = sonic_rs::from_str::<Vec<T>>(raw)?;
 
-            Ok(Self {value})  
+            Ok(Self {value})
         } else {
             let value = T::from_file_string(raw)
                 .map_err(|_| serde::de::Error::custom("Failed to call FromFileString"))?;
@@ -390,15 +391,69 @@ impl Serialize for PathField {
     }
 }
 
-#[derive(Debug, Clone)]
+#[self_referencing]
+#[derive(Debug)]
+struct OwnedGlob {
+    raw: String,
+
+    #[borrows(raw)]
+    #[covariant]
+    pattern: wax::Glob<'this>,
+}
+
+impl PartialEq for OwnedGlob {
+    fn eq(&self, other: &Self) -> bool {
+        self.borrow_raw() == other.borrow_raw()
+    }
+}
+
+impl Eq for OwnedGlob {}
+
+impl PartialOrd for OwnedGlob {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.borrow_raw().partial_cmp(other.borrow_raw())
+    }
+}
+
+impl Ord for OwnedGlob {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.borrow_raw().cmp(other.borrow_raw())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Glob {
-    pub pattern: String,
+    inner: OwnedGlob,
+}
+
+impl Clone for Glob {
+    fn clone(&self) -> Self {
+        Self::parse(self.inner.borrow_raw().clone()).unwrap()
+    }
 }
 
 impl Glob {
+    pub fn parse(raw: impl Into<String>) -> Result<Self, Error> {
+        let raw = raw.into();
+
+        let pattern = OwnedGlobTryBuilder {
+            raw,
+            pattern_builder: |raw| wax::Glob::new(raw).map_err(|_| Error::InvalidGlob(raw.clone())),
+        }.try_build()?;
+
+        Ok(Glob { inner: pattern })
+    }
+
+    pub fn raw(&self) -> &str {
+        self.inner.borrow_raw()
+    }
+
+    pub fn matcher(&self) -> &wax::Glob {
+        self.inner.borrow_pattern()
+    }
+
     pub fn to_regex_string(&self) -> String {
-        wax::Glob::new(&self.pattern)
-            .unwrap()
+        self.matcher()
             .to_regex()
             .to_string()
     }
@@ -406,7 +461,7 @@ impl Glob {
 
 impl ToFileString for Glob {
     fn to_file_string(&self) -> String {
-        self.pattern.clone()
+        self.inner.borrow_raw().clone()
     }
 }
 
@@ -420,19 +475,20 @@ impl FromFileString for Glob {
     type Error = Error;
 
     fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
-        Ok(Glob {pattern: raw.to_string()})
+        Ok(Glob::parse(raw)?)
     }
 }
 
 impl<'de> Deserialize<'de> for Glob {
     fn deserialize<D>(deserializer: D) -> Result<Glob, D::Error> where D: Deserializer<'de> {
-        Ok(Glob { pattern: String::deserialize(deserializer)? })
+        Ok(Glob::parse(String::deserialize(deserializer)?)
+            .map_err(|err| de::Error::custom(err.to_string()))?)
     }
 }
 
 impl Serialize for Glob {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
-        self.pattern.serialize(serializer)
+        self.inner.borrow_raw().serialize(serializer)
     }
 }
 
@@ -469,8 +525,8 @@ impl<K: ToHumanString + Ord, V: ToHumanString> ToHumanString for DictField<K, V>
     }
 }
 
-impl<K: FromFileString + Ord, V: FromFileString + for<'a> Deserialize<'a>> FromFileString for DictField<K, V> 
-where 
+impl<K: FromFileString + Ord, V: FromFileString + for<'a> Deserialize<'a>> FromFileString for DictField<K, V>
+where
     K: for<'a> Deserialize<'a>,
     Error: From<<K as FromFileString>::Error> + From<<V as FromFileString>::Error>,
 {
@@ -488,12 +544,12 @@ where
             if parts.len() != 2 {
                 return Err(serde::de::Error::custom("Expected key:value format"));
             }
-            
+
             let key = K::from_file_string(parts[0])
                 .map_err(|_| serde::de::Error::custom("Failed to parse key"))?;
             let val = V::from_file_string(parts[1].trim())
                 .map_err(|_| serde::de::Error::custom("Failed to parse value"))?;
-            
+
             let mut map = BTreeMap::new();
             map.insert(key, val);
             Ok(Self {value: map, source: Default::default()})
@@ -501,8 +557,8 @@ where
     }
 }
 
-impl<'de, K, V> Deserialize<'de> for DictField<K, V> 
-where 
+impl<'de, K, V> Deserialize<'de> for DictField<K, V>
+where
     K: Deserialize<'de> + Ord,
     V: Deserialize<'de>,
 {
@@ -594,7 +650,7 @@ mod tests {
         // Test FromFileString
         let raw = "*.rs";
         let glob_field = GlobField::from_file_string(raw).unwrap();
-        assert_eq!(glob_field.value.pattern, "*.rs");
+        assert_eq!(glob_field.value.raw(), "*.rs");
 
         // Test ToFileString
         assert_eq!(glob_field.to_file_string(), "*.rs");
@@ -603,7 +659,7 @@ mod tests {
         let serialized = serde_json::to_string(&glob_field).unwrap();
         assert_eq!(serialized, "\"*.rs\"");
         let deserialized: GlobField = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized.value.pattern, "*.rs");
+        assert_eq!(deserialized.value.raw(), "*.rs");
     }
 
     #[test]
@@ -611,7 +667,7 @@ mod tests {
         // Test FromFileString
         let raw = "*.txt";
         let glob = Glob::from_file_string(raw).unwrap();
-        assert_eq!(glob.pattern, "*.txt");
+        assert_eq!(glob.raw(), "*.txt");
 
         // Test ToFileString
         assert_eq!(glob.to_file_string(), "*.txt");
@@ -620,7 +676,7 @@ mod tests {
         let serialized = serde_json::to_string(&glob).unwrap();
         assert_eq!(serialized, "\"*.txt\"");
         let deserialized: Glob = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized.pattern, "*.txt");
+        assert_eq!(deserialized.raw(), "*.txt");
 
         // Test regex conversion - Check for a pattern that would be in a regex that matches "*.txt"
         let regex_str = glob.to_regex_string();
@@ -744,7 +800,7 @@ mod tests {
         // Test Serialize
         let serialized = serde_json::to_string(&path_field_absolute).unwrap();
         assert_eq!(serialized, "\"/absolute/path/to/file.txt\"");
-        
+
         // Test Deserialize with absolute path
         let json_str = "\"/absolute/path/to/file.txt\"";
         let deserialized: PathField = serde_json::from_str(json_str).unwrap();
@@ -800,7 +856,7 @@ mod tests {
         int_map.insert("count".to_string(), 42u64);
         int_map.insert("total".to_string(), 100u64);
         let int_dict_field = DictField::new(int_map);
-        
+
         let serialized = serde_json::to_string(&int_dict_field).unwrap();
         assert_eq!(serialized, "{\"count\":42,\"total\":100}");
     }

@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use bincode::{Decode, Encode};
 use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
 
-use crate::Error;
+use crate::{Error, VersionRc};
 
 use super::{extract, Version};
 
@@ -88,22 +88,29 @@ impl Range {
         extract::extract_tokens(&mut str.as_ref().chars().peekable())
     }
 
+    pub fn any() -> Range {
+        Range {
+            // TODO: Replace >=0.0.0-0 with "*" once "*" is implemented
+            source: ">=0.0.0-0".to_string(),
+            tokens: vec![
+                Token::Operation(OperatorType::GreaterThanOrEqual, Version::new_from_components(0, 0, 0, Some(vec![VersionRc::Number(0)]))),
+            ],
+        }
+    }
+
     pub fn caret(version: Version) -> Range {
-        let upper_bound
-            = version.next_major_rc();
+        let upper_bound = match (version.major, version.minor) {
+            (0, 0) => version.next_patch_rc(),
+            (0, _) => version.next_minor_rc(),
+            _ => version.next_major_rc(),
+        };
 
         Range {
             source: format!("^{}", version.to_file_string()),
             tokens: vec![
                 Token::Syntax(TokenType::SAnd),
-                Token::Operation(
-                    OperatorType::GreaterThanOrEqual,
-                    version,
-                ),
-                Token::Operation(
-                    OperatorType::LessThan,
-                    upper_bound,
-                ),
+                Token::Operation(OperatorType::GreaterThanOrEqual, version),
+                Token::Operation(OperatorType::LessThan, upper_bound),
             ],
         }
     }
@@ -116,14 +123,8 @@ impl Range {
             source: format!("~{}", version.to_file_string()),
             tokens: vec![
                 Token::Syntax(TokenType::SAnd),
-                Token::Operation(
-                    OperatorType::GreaterThanOrEqual,
-                    version,
-                ),
-                Token::Operation(
-                    OperatorType::LessThan,
-                    upper_bound,
-                ),
+                Token::Operation(OperatorType::GreaterThanOrEqual, version),
+                Token::Operation(OperatorType::LessThan, upper_bound),
             ],
         }
     }
@@ -150,24 +151,52 @@ impl Range {
     pub fn check<P: Borrow<Version>>(&self, version: P) -> bool {
         let mut n = 0;
 
-        self.check_from(version.borrow(), &mut n)
+        let version
+            = version.borrow();
+
+        // https://docs.npmjs.com/cli/v6/using-npm/semver#prerelease-tags
+        //
+        // > a version has a prerelease tag (for example, 1.2.3-alpha.3) then it
+        // > will only be allowed to satisfy comparator sets if at least one
+        // > comparator with the same [major, minor, patch] tuple also has
+        // > a prerelease tag.
+        // >
+        // > For example, the range >1.2.3-alpha.3 would be allowed to match
+        // > the version 1.2.3-alpha.7, but it would not be satisfied by
+        // > 3.4.5-alpha.9, even though 3.4.5-alpha.9 is technically "greater
+        // > than" 1.2.3-alpha.3 according to the SemVer sort rules. The version
+        // > range only accepts prerelease tags on the 1.2.3 version. The
+        // > version 3.4.5 would satisfy the range, because it does not have a
+        // > prerelease flag, and 3.4.5 is greater than 1.2.3-alpha.7.
+        //
+        if version.rc.is_some() && !self.tokens.iter().any(|t| matches!(t, Token::Operation(_, operand) if operand.major == version.major && operand.minor == version.minor && operand.patch == version.patch && operand.rc.is_some())) {
+            return false;
+        }
+
+        self.check_from(version, &mut n, false)
     }
 
-    fn check_from(&self, version: &Version, n: &mut usize) -> bool {
+    pub fn check_ignore_rc<P: Borrow<Version>>(&self, version: P) -> bool {
+        let mut n = 0;
+
+        self.check_from(version.borrow(), &mut n, true)
+    }
+
+    fn check_from(&self, version: &Version, n: &mut usize, accept_rc: bool) -> bool {
         let token = self.tokens.get(*n);
         *n += 1;
 
         match token {
             Some(Token::Syntax(TokenType::SAnd)) | Some(Token::Syntax(TokenType::And)) => {
-                let left = self.check_from(version, n);
-                let right = self.check_from(version, n);
+                let left = self.check_from(version, n, accept_rc);
+                let right = self.check_from(version, n, accept_rc);
 
                 left && right
             }
 
             Some(Token::Syntax(TokenType::Or)) => {
-                let left = self.check_from(version, n);
-                let right = self.check_from(version, n);
+                let left = self.check_from(version, n, accept_rc);
+                let right = self.check_from(version, n, accept_rc);
 
                 left || right
             }

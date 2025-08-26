@@ -2,7 +2,7 @@ use std::{io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}};
 
 use bincode::{Decode, Encode};
 
-use crate::{diff_data, impl_serialization_traits, path_resolve::resolve_path, DataType, FromFileString, OkMissing, PathError, PathIterator, ToFileString, ToHumanString};
+use crate::{diff_data, impl_serialization_traits, path_resolve::resolve_path, DataType, FromFileString, IoResultExt, PathError, PathIterator, ToFileString, ToHumanString};
 
 #[derive(Debug)]
 pub struct ExplicitPath {
@@ -96,6 +96,10 @@ impl Path {
                 },
             }
         }
+    }
+
+    pub fn temp_root_dir() -> Result<Path, PathError> {
+        Path::try_from(std::env::temp_dir())
     }
 
     pub fn temp_dir() -> Result<Path, PathError> {
@@ -233,6 +237,23 @@ impl Path {
 
     pub fn is_extern(&self) -> bool {
         self.path.starts_with("../") || self.path == ".."
+    }
+
+    pub fn to_home_string(&self) -> String {
+        let home
+            = Path::home_dir()
+                .unwrap_or_default();
+
+        if let Some(home) = home {
+            if let Some(relative_path) = self.forward_relative_to(&home) {
+                let pretty_path
+                    = relative_path.to_file_string();
+
+                return format!("~/{}", pretty_path);
+            }
+        }
+
+        self.to_file_string()
     }
 
     pub fn sys_set_current_dir(&self) -> Result<(), PathError> {
@@ -707,23 +728,7 @@ impl ToFileString for Path {
 
 impl ToHumanString for Path {
     fn to_print_string(&self) -> String {
-        let path_str
-            = self.path.as_str();
-
-        let home
-            = Path::home_dir()
-                .unwrap_or_default();
-
-        if let Some(home) = home {
-            if let Some(relative_path) = self.forward_relative_to(&home) {
-                let pretty_path
-                    = relative_path.to_file_string();
-
-                return DataType::Path.colorize(&format!("~/{}", pretty_path));
-            }
-        }
-
-        DataType::Path.colorize(&path_str)
+        DataType::Path.colorize(&self.to_home_string())
     }
 }
 

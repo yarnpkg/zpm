@@ -1,6 +1,7 @@
 mod colors;
 mod errors;
 mod misc;
+mod notes;
 mod path;
 mod path_iterators;
 mod path_resolve;
@@ -12,6 +13,7 @@ mod system;
 pub use crate::colors::*;
 pub use crate::errors::*;
 pub use crate::misc::*;
+pub use crate::notes::*;
 pub use crate::path_iterators::*;
 pub use crate::path::*;
 pub use crate::process::*;

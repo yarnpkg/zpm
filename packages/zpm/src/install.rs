@@ -1,22 +1,37 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, hash::Hash, marker::PhantomData};
+use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sync::LazyLock};
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use sha2::Digest;
 use zpm_utils::{Path, ToHumanString};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, Reference}, project::Project, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, SemverDescriptor}, project::{InstallMode, Project}, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, settings::PackageExtension, system, tree_resolver::{ResolutionTree, TreeResolver}};
 
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct InstallContext<'a> {
     pub package_cache: Option<&'a CompositeCache>,
     pub project: Option<&'a Project>,
+    pub system_description: &'a system::Description,
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub refresh_lockfile: bool,
+    pub mode: Option<InstallMode>,
+}
+
+impl<'a> Default for InstallContext<'a> {
+    fn default() -> Self {
+        Self {
+            package_cache: None,
+            project: None,
+            system_description: system::Description::current(),
+            check_checksums: false,
+            check_resolutions: false,
+            refresh_lockfile: false,
+            mode: None,
+        }
+    }
 }
 
 impl<'a> InstallContext<'a> {
@@ -42,6 +57,11 @@ impl<'a> InstallContext<'a> {
 
     pub fn set_refresh_lockfile(mut self, refresh_lockfile: bool) -> Self {
         self.refresh_lockfile = refresh_lockfile;
+        self
+    }
+
+    pub fn set_mode(mut self, mode: Option<InstallMode>) -> Self {
+        self.mode = mode;
         self
     }
 }
@@ -114,15 +134,25 @@ pub enum InstallOpResult {
 impl InstallOpResult {
     pub fn into_resolved(self) -> ResolutionResult {
         match self {
-            InstallOpResult::Resolved(resolution) => resolution,
-            _ => panic!("Expected a resolved result"),
+            InstallOpResult::Resolved(resolution) => {
+                resolution
+            },
+
+            _ => {
+                panic!("Expected a resolved result; got {:?}", self)
+            },
         }
     }
 
     pub fn into_fetched(self) -> FetchResult {
         match self {
-            InstallOpResult::Fetched(fetch) => fetch,
-            _ => panic!("Expected a fetched result"),
+            InstallOpResult::Fetched(fetch) => {
+                fetch
+            },
+
+            _ => {
+                panic!("Expected a fetched result; got {:?}", self)
+            },
         }
     }
 
@@ -135,22 +165,35 @@ impl InstallOpResult {
 
     pub fn as_fetched(&self) -> &FetchResult {
         match self {
-            InstallOpResult::Fetched(fetch) => fetch,
-            _ => panic!("Expected a fetched result"),
+            InstallOpResult::Fetched(fetch) => {
+                fetch
+            },
+
+            _ => {
+                panic!("Expected a fetched result; got {:?}", self)
+            },
         }
     }
 
     pub fn as_resolved_locator(&self) -> &Locator {
         match self {
-            InstallOpResult::Resolved(params) => &params.resolution.locator,
-            InstallOpResult::Pinned(params) => &params.locator,
-            _ => panic!("Expected a resolved locator; got {:?}", self),
+            InstallOpResult::Resolved(params) => {
+                &params.resolution.locator
+            },
+
+            InstallOpResult::Pinned(params) => {
+                &params.locator
+            },
+
+            _ => {
+                panic!("Expected a resolved locator; got {:?}", self)
+            },
         }
     }
 }
 
 impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
-    fn graph_follow_ups(&self, _ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
+    fn graph_follow_ups(&self, ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
         match self {
             InstallOpResult::Validated => {
                 vec![]
@@ -165,6 +208,7 @@ impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
             InstallOpResult::Resolved(ResolutionResult {resolution, ..}) => {
                 let mut follow_ups = vec![InstallOp::Fetch {
                     locator: resolution.locator.clone(),
+                    is_mock_request: !resolution.requirements.validate(ctx.system_description),
                 }];
 
                 let transitive_dependencies = resolution.dependencies
@@ -203,6 +247,7 @@ enum InstallOp<'a> {
 
     Fetch {
         locator: Locator,
+        is_mock_request: bool,
     },
 }
 
@@ -223,26 +268,22 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
 
             InstallOp::Refresh {locator} => {
                 if let Some(parent) = &locator.parent {
-                    dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone()});
+                    dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone(), is_mock_request: false});
                     resolved_it.next();
                 }
 
-                if let Reference::Patch(params) = &locator.reference {
-                    dependencies.push(InstallOp::Fetch {locator: params.inner.as_ref().0.clone()});
+                if let Some(inner_locator) = locator.reference.inner_locator().cloned() {
+                    dependencies.push(InstallOp::Fetch {locator: inner_locator, is_mock_request: false});
                 }
             },
 
             InstallOp::Resolve {descriptor} => {
                 if let Some(parent) = &descriptor.parent {
-                    dependencies.push(InstallOp::Fetch {locator: parent.clone()});
+                    dependencies.push(InstallOp::Fetch {locator: parent.clone(), is_mock_request: false});
                     resolved_it.next();
                 }
 
-                if let Range::Patch(params) = &descriptor.range {
-                    assert!(descriptor.parent.is_some(), "Expected a parent to be set for a patch resolution");
-
-                    let mut inner_descriptor = params.inner.to_owned().0.clone();
-
+                if let Some(mut inner_descriptor) = descriptor.range.inner_descriptor().cloned() {
                     if inner_descriptor.range.must_bind() {
                         inner_descriptor.parent = descriptor.parent.clone();
                     }
@@ -252,18 +293,18 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
 
                     if let Some(result) = patch_resolution {
                         let patch_resolved_locator = result.as_resolved_locator();
-                        dependencies.push(InstallOp::Fetch {locator: patch_resolved_locator.clone()});
+                        dependencies.push(InstallOp::Fetch {locator: patch_resolved_locator.clone(), is_mock_request: false});
                     }
                 }
             },
 
-            InstallOp::Fetch {locator} => {
+            InstallOp::Fetch {locator, ..} => {
                 if let Some(parent) = &locator.parent {
-                    dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone()});
+                    dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone(), is_mock_request: false});
                 }
 
-                if let Reference::Patch(params) = &locator.reference {
-                    dependencies.push(InstallOp::Fetch {locator: params.inner.to_owned().0.clone()});
+                if let Some(inner_locator) = locator.reference.inner_locator().cloned() {
+                    dependencies.push(InstallOp::Fetch {locator: inner_locator, is_mock_request: false});
                 }
             },
         }
@@ -315,8 +356,8 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                 }).await
             },
 
-            InstallOp::Fetch {locator} => {
-                let dependencies = match try_fetch_locator_sync(context.clone(), &locator, false, dependencies)? {
+            InstallOp::Fetch {locator, is_mock_request} => {
+                let dependencies = match try_fetch_locator_sync(context.clone(), &locator, is_mock_request, dependencies)? {
                     SyncFetchAttempt::Success(result) => return Ok(InstallOpResult::Fetched(result)),
                     SyncFetchAttempt::Failure(dependencies) => dependencies,
                 };
@@ -324,7 +365,7 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                 with_context_result(ReportContext::Locator(locator.clone()), async {
                     let future = tokio::time::timeout(
                         timeout,
-                        fetch_locator(context.clone(), &locator.clone(), false, dependencies)
+                        fetch_locator(context.clone(), &locator.clone(), is_mock_request, dependencies)
                     ).await.map_err(|_| Error::TaskTimeout)?;
 
                     Ok(InstallOpResult::Fetched(future?))
@@ -382,32 +423,13 @@ pub struct InstallState {
     pub conditional_locators: BTreeSet<Locator>,
 }
 
-impl InstallState {
-    pub fn locator_tree_hash(&self, root: &Locator) -> String {
-        let mut hasher
-            = sha2::Sha256::new();
-
-        let mut seen
-            = HashSet::new();
-        let mut queue
-            = vec![root];
-
-        while let Some(locator) = queue.pop() {
-            if seen.insert(locator) {
-                hasher.update(locator.to_file_string())
-            }
-        }
-
-        format!("{:064x}", hasher.finalize())
-    }
-}
-
 #[derive(Clone, Default)]
 pub struct Install {
     pub lockfile: Lockfile,
     pub lockfile_changed: bool,
     pub package_data: BTreeMap<Locator, PackageData>,
     pub install_state: InstallState,
+    pub skip_build: bool,
 }
 
 impl Install {
@@ -423,7 +445,7 @@ impl Install {
         project.attach_install_state(self.install_state)?;
         project.write_lockfile(&self.lockfile)?;
 
-        if !build_requests.entries.is_empty() {
+        if !self.skip_build && !build_requests.entries.is_empty() {
             let build_future
                 = build::BuildManager::new(build_requests).run(project);
 
@@ -570,13 +592,20 @@ impl<'a> InstallManager<'a> {
             })
             .collect::<Result<BTreeMap<_, _>, Error>>()?;
 
+        let are_metadata_up_to_date
+            = self.result.lockfile.metadata.version == self.initial_lockfile.metadata.version;
+
         for entry in self.result.lockfile.entries.values_mut() {
             let package_data = self.result.package_data.get(&entry.resolution.locator)
                 .unwrap_or_else(|| panic!("Expected a matching package data to be found for any fetched locator; not found for {}.", entry.resolution.locator.to_file_string()));
 
             let previous_entry = self.initial_lockfile.entries.get(&entry.resolution.locator);
             let previous_checksum = previous_entry.and_then(|s| s.checksum.as_ref());
-            let previous_flags = previous_entry.map(|s| &s.flags);
+            let mut previous_flags = previous_entry.map(|s| &s.flags);
+
+            if !are_metadata_up_to_date || entry.resolution.locator.reference.is_disk_reference() {
+                previous_flags = None;
+            }
 
             let checksum = package_data.checksum()
                 .or_else(|| previous_checksum.cloned())
@@ -606,10 +635,17 @@ impl<'a> InstallManager<'a> {
                 }
             }
 
-            let content_flags = match previous_flags {
-                Some(flags) => flags.clone(),
-                None => ContentFlags::extract(&entry.resolution.locator, &package_data)?,
-            };
+            let mut content_flags
+                = None;
+
+            if let Some(previous_flags) = previous_flags {
+                content_flags = Some(previous_flags.clone());
+            }
+
+            let content_flags = content_flags.map_or_else(
+                || ContentFlags::extract(&entry.resolution.locator, &package_data),
+                Ok,
+            )?;
 
             entry.checksum = checksum;
             entry.flags = content_flags;
@@ -621,6 +657,8 @@ impl<'a> InstallManager<'a> {
             .run();
 
         self.result.lockfile_changed = self.result.lockfile != self.initial_lockfile;
+
+        self.result.skip_build = self.context.mode == Some(InstallMode::SkipBuild);
 
         if let Some(cache) = &self.context.package_cache {
             cache.clean().await?;
@@ -664,10 +702,14 @@ impl<'a> InstallManager<'a> {
 
 fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descriptor, resolution: &Resolution, apply_overrides: bool) -> () {
     if apply_overrides {
-        let possible_resolution_overrides = context.project
-            .and_then(|project| project.resolution_overrides(&descriptor.ident));
+        let candidate_resolutions = context.project
+            .expect("The project is required to normalize resolutions, as it may be impacted by the project's overrides")
+            .root_workspace()
+            .manifest
+            .resolutions
+            .get_by_ident(&descriptor.ident);
 
-        let resolution_override = possible_resolution_overrides
+        let resolution_override = candidate_resolutions
             .and_then(|overrides| {
                 overrides.iter().find_map(|(rule, range)| {
                     rule.apply(&resolution.locator, &resolution.version, descriptor, range)
@@ -681,11 +723,20 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
                 let root_workspace = context.project
                     .expect("The project is required to bind a parent to a descriptor")
                     .root_workspace();
-        
+
                 descriptor.parent = Some(root_workspace.locator());
+            } else {
+                descriptor.parent = None;
             }
         } else if descriptor.range.must_bind() {
             descriptor.parent = Some(resolution.locator.clone());
+        }
+
+        if has_builtin_patch(&descriptor.ident) {
+            descriptor.range = range::PatchRange {
+                inner: Box::new(UrlEncoded::new(descriptor.clone())),
+                path: "<builtin>".to_string(),
+            }.into();
         }
     }
 
@@ -694,24 +745,31 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
             normalize_resolution(context, &mut params.inner.as_mut().0, resolution, false);
         },
 
-        Range::AnonymousSemver(params)
-            => descriptor.range = range::RegistrySemverRange {ident: None, range: params.range.clone()}.into(),
+        Range::AnonymousSemver(params) => {
+            descriptor.range = range::RegistrySemverRange {ident: None, range: params.range.clone()}.into();
+        },
 
-        Range::AnonymousTag(params)
-            => descriptor.range = range::RegistryTagRange {ident: None, tag: params.tag.clone()}.into(),
+        Range::AnonymousTag(params) => {
+            descriptor.range = range::RegistryTagRange {ident: None, tag: params.tag.clone()}.into();
+        },
 
         _ => {},
     };
-
-    if has_builtin_patch(&descriptor.ident) {
-        descriptor.range = range::PatchRange {
-            inner: Box::new(UrlEncoded::new(descriptor.clone())),
-            path: "<builtin>".to_string(),
-        }.into();
-
-        descriptor.parent = Some(resolution.locator.clone());
-    }
 }
+
+const BUILTIN_EXTENSIONS_JSON: &str = include_str!("../data/builtin-extensions.json");
+
+static BUILTIN_EXTENSIONS: LazyLock<BTreeMap<SemverDescriptor, PackageExtension>> = LazyLock::new(|| {
+    let extensions: Vec<(SemverDescriptor, PackageExtension)>
+        = serde_json::from_str(BUILTIN_EXTENSIONS_JSON)
+            .expect("Failed to parse builtin extensions JSON");
+
+    let extension_map = extensions
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+
+    extension_map
+});
 
 pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resolution) -> (BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>) {
     let project
@@ -726,11 +784,31 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     for (descriptor, extension) in project.config.project.package_extensions.value.iter() {
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
             for (dependency, range) in extension.dependencies.iter() {
-                dependencies.insert(dependency.clone(), range.clone());
+                if !dependencies.contains_key(dependency) {
+                    dependencies.insert(dependency.clone(), range.clone());
+                }
             }
 
             for (peer_dependency, range) in extension.peer_dependencies.iter() {
-                peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                if !peer_dependencies.contains_key(peer_dependency) {
+                    peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                }
+            }
+        }
+    }
+
+    for (descriptor, extension) in BUILTIN_EXTENSIONS.iter() {
+        if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
+            for (dependency, range) in extension.dependencies.iter() {
+                if !dependencies.contains_key(dependency) {
+                    dependencies.insert(dependency.clone(), range.clone());
+                }
+            }
+
+            for (peer_dependency, range) in extension.peer_dependencies.iter() {
+                if !peer_dependencies.contains_key(peer_dependency) {
+                    peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                }
             }
         }
     }

@@ -24,7 +24,7 @@ pub async fn get_commit_title(root: &Path, hash: &str) -> Result<String, Error> 
     let title = ScriptEnvironment::new()?
         .with_cwd(root.clone())
         .run_exec("git", ["show", "--quiet", "--pretty=format:%s", hash])
-        .await
+        .await?
         .ok()?
         .stdout_text()?;
 
@@ -39,7 +39,7 @@ pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error
         let code = ScriptEnvironment::new()?
             .with_cwd(root.clone())
             .run_exec("git", ["merge-base", candidate, "HEAD"])
-            .await;
+            .await?;
 
         if code.success() {
             ancestor_bases.push(candidate);
@@ -61,7 +61,7 @@ pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error
     let merge_base = ScriptEnvironment::new()?
         .with_cwd(root.clone())
         .run_exec("git", merge_base_args)
-        .await
+        .await?
         .ok()?
         .stdout_text()?;
 
@@ -72,7 +72,7 @@ pub async fn fetch_changed_files(root: &Path, base: &str) -> Result<BTreeSet<Pat
     let local_stdout = ScriptEnvironment::new()?
         .with_cwd(root.clone())
         .run_exec("git", ["diff", "--name-only", base])
-        .await
+        .await?
         .ok()?
         .stdout_text()?
         .lines()
@@ -82,7 +82,7 @@ pub async fn fetch_changed_files(root: &Path, base: &str) -> Result<BTreeSet<Pat
     let untracked_stdout = ScriptEnvironment::new()?
         .with_cwd(root.clone())
         .run_exec("git", ["ls-files", "--others", "--exclude-standard"])
-        .await
+        .await?
         .ok()?
         .stdout_text()?
         .lines()

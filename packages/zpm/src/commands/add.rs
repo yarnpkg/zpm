@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use clipanion::cli;
-use zpm_parsers::{JsonFormatter, JsonValue};
+use zpm_parsers::{JsonFormatter, Value};
 use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 
-use crate::{algolia::query_algolia, error::Error, install::InstallContext, primitives::{loose_descriptor, range::AnonymousSemverRange, Descriptor, LooseDescriptor, PeerRange, Range}, project};
+use crate::{algolia::query_algolia, error::Error, install::InstallContext, primitives::{loose_descriptor, range::AnonymousSemverRange, Descriptor, LooseDescriptor, Range}, project::{self, InstallMode}};
 
 #[derive(Clone, Debug)]
 struct AddRequest {
@@ -134,6 +134,11 @@ pub struct Add {
 
     // ---
 
+    #[cli::option("--mode")]
+    mode: Option<InstallMode>,
+
+    // ---
+
     descriptors: Vec<LooseDescriptor>,
 }
 
@@ -214,7 +219,7 @@ impl Add {
             .fs_read_text_prealloc()?;
 
         let mut formatter
-            = JsonFormatter::from(&manifest_content).unwrap();
+            = JsonFormatter::from(&manifest_content)?;
 
         for (descriptor, request) in &requests {
             if request.dev && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
@@ -235,32 +240,32 @@ impl Add {
 
             if request.dev {
                 formatter.set(
-                    &vec!["devDependencies".to_string(), descriptor.ident.to_file_string()].into(), 
-                    JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                    vec!["devDependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
+                )?;
             }
 
             if request.optional {
                 formatter.set(
-                    &vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()].into(), 
-                    JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                    vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
+                )?;
             }
 
             if request.peer {
                 formatter.set(
-                    &vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()].into(), 
-                    JsonValue::String("*".to_string()),
-                ).unwrap();
+                    vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String("*".to_string()),
+                )?;
             }
 
             if request.prod {
                 formatter.set(
-                    &vec!["dependencies".to_string(), descriptor.ident.to_file_string()].into(), 
-                    JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                    vec!["dependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
+                )?;
             }
-        }    
+        }
 
         let updated_content
             = formatter.to_string();
@@ -272,6 +277,7 @@ impl Add {
             = project::Project::new(None).await?;
 
         project.run_install(project::RunInstallOptions {
+            mode: self.mode,
             ..Default::default()
         }).await?;
 

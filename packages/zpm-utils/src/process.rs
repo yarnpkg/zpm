@@ -29,5 +29,5 @@ pub fn to_shell_line(cmd: &Command) -> Result<String, QuoteError> {
     }
 
     // Glue it together
-    Ok(parts.join(" "))
+    Ok(format!("({})", parts.join(" ")))
 }

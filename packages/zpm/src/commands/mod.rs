@@ -19,6 +19,7 @@ mod init;
 mod install;
 mod node;
 mod pack;
+mod rebuild;
 mod remove;
 mod run;
 mod set_version;
@@ -32,6 +33,7 @@ program!(YarnCli, [
     debug::check_range::CheckRange,
     debug::check_reference::CheckReference,
     debug::check_semver_version::CheckSemverVersion,
+    debug::print_hoisting::PrintHoisting,
     debug::print_platform::PrintPlatform,
 
     add::Add,
@@ -45,11 +47,13 @@ program!(YarnCli, [
     dlx::Dlx,
     exec::Exec,
     info::Info,
+    init::InitWithTemplate,
     init::Init,
     install::Install,
     set_version::SetVersion,
     node::Node,
     pack::Pack,
+    rebuild::Rebuild,
     remove::Remove,
     run::Run,
     up::Up,

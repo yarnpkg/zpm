@@ -26,7 +26,8 @@ pub enum PackageData {
         /** Directory that contains the package.json file */
         package_directory: Path,
 
-        discard_from_lookup: bool,
+        /** Whether the package is a synthetic package, ie an arbitrary folder that is used as a package */
+        is_synthetic_package: bool,
     },
 
     MissingZip {

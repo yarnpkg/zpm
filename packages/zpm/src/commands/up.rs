@@ -1,11 +1,11 @@
-use std::{collections::BTreeSet, fs::Permissions, os::unix::fs::PermissionsExt};
+use std::collections::BTreeSet;
 
 use clipanion::cli;
-use zpm_parsers::{JsonFormatter, JsonValue};
+use zpm_parsers::{JsonFormatter, Value};
 use zpm_semver::RangeKind;
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, Ident, LooseDescriptor}, project::{self, RunInstallOptions, Workspace}};
+use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, Ident, LooseDescriptor}, project::{self, InstallMode, RunInstallOptions, Workspace}};
 
 #[cli::command]
 #[cli::path("up")]
@@ -23,6 +23,11 @@ pub struct Up {
 
     #[cli::option("-C,--caret", default = false)]
     caret: bool,
+
+    // ---
+
+    #[cli::option("--mode")]
+    mode: Option<InstallMode>,
 
     // ---
 
@@ -79,23 +84,23 @@ impl Up {
                 .fs_read_text_prealloc()?;
 
             let mut formatter
-                = JsonFormatter::from(&manifest_content).unwrap();
+                = JsonFormatter::from(&manifest_content)?;
 
             for descriptor in descriptors.iter() {
                 formatter.update(
-                    &vec!["dependencies".to_string(), descriptor.ident.to_file_string()].into(), 
-                    JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                    vec!["dependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
+                )?;
 
                 formatter.update(
-                    &vec!["devDependencies".to_string(), descriptor.ident.to_file_string()].into(), 
-                    JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                    vec!["devDependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
+                )?;
 
                 formatter.update(
-                    &vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()].into(), 
-                    JsonValue::String(descriptor.range.to_file_string()),
-                ).unwrap();
+                    vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()],
+                    Value::String(descriptor.range.to_file_string()),
+                )?;
             }
 
             let updated_content
@@ -109,6 +114,7 @@ impl Up {
             = project::Project::new(None).await?;
 
         project.run_install(RunInstallOptions {
+            mode: self.mode,
             ..Default::default()
         }).await?;
 

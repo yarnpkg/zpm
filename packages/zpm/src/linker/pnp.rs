@@ -6,7 +6,10 @@ use serde::{Serialize, Serializer};
 use serde_with::serde_as;
 use zpm_utils::ToFileString;
 
-use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, install::Install, linker, primitives::{Ident, Locator, Reference}, project::Project, settings};
+use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, install::Install, linker, misc, primitives::{Ident, Locator, Reference}, project::Project, settings};
+
+const PNP_CJS_TEMPLATE: &[u8] = std::include_bytes!("pnp-cjs.brotli.dat");
+const PNP_MJS_TEMPLATE: &[u8] = std::include_bytes!("pnp-mjs.brotli.dat");
 
 fn make_virtual_path(base: &Path, component: &str, to: &Path) -> Path {
     if base.basename() != Some("__virtual__") {
@@ -107,6 +110,25 @@ struct PnpState {
     dependency_tree_roots: Vec<PnpDependencyTreeRoot>,
 }
 
+fn serialize_string(s: &str) -> String {
+    let mut escaped
+        = String::with_capacity(s.len() * 110 / 100);
+
+    escaped.push('\'');
+
+    for c in s.chars() {
+        if matches!(c, '\'' | '\n' | '\\') {
+            escaped.push('\\');
+        }
+
+        escaped.push(c);
+    }
+
+    escaped.push('\'');
+
+    escaped
+}
+
 fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Error> {
     let script = vec![
         project.config.project.pnp_shebang.value.as_str(), "\n",
@@ -115,12 +137,12 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
         "\"use strict\";\n",
         "\n",
         "const RAW_RUNTIME_STATE =\n",
-        &sonic_rs::to_string(&sonic_rs::to_string(&state).unwrap()).unwrap(), ";\n",
+        &serialize_string(&sonic_rs::to_string_pretty(&state).unwrap()), ";\n",
         "\n",
         "function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n",
         "  return hydrateRuntimeState(JSON.parse(RAW_RUNTIME_STATE), {basePath: basePath || __dirname});\n",
         "}\n",
-        std::include_str!("pnp.tpl.cjs"),
+        &misc::unpack_brotli_data(PNP_CJS_TEMPLATE)?,
     ].join("");
 
     project.pnp_path()
@@ -142,7 +164,7 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
         "  const pnpDataFilepath = path.resolve(__dirname, '.pnp.data.json');\n",
         "  return hydrateRuntimeState(JSON.parse(fs.readFileSync(pnpDataFilepath, 'utf8')), {basePath: basePath || __dirname});\n",
         "}\n",
-        std::include_str!("pnp.tpl.cjs"),
+        &misc::unpack_brotli_data(PNP_CJS_TEMPLATE)?,
     ].join("");
 
     project.pnp_path()
@@ -223,7 +245,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         }
 
         let discard_from_lookup = match physical_package_data {
-            PackageData::Local {discard_from_lookup, ..} => *discard_from_lookup,
+            PackageData::Local {is_synthetic_package, ..} => *is_synthetic_package,
             _ => false,
         };
 
@@ -236,21 +258,23 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
             &physical_package_data,
         );
 
-        let mut is_physically_on_disk = true;
+        let mut is_physically_on_disk = false;
         let mut is_freshly_unplugged = false;
 
-        if package_build_info.must_extract {
+        if locator.reference.is_disk_reference() {
+            is_physically_on_disk = true;
+        } else if package_build_info.must_extract {
             package_location_abs = project.project_cwd
                 .with_join_str(".yarn/unplugged")
                 .with_join_str(locator.slug())
                 .with_join(&physical_package_data.package_subpath());
-    
+
             is_freshly_unplugged = linker::helpers::fs_extract_archive(
                 &package_location_abs,
                 physical_package_data,
             )?;
-        } else {
-            is_physically_on_disk = false;
+
+            is_physically_on_disk = true;
         }
 
         let package_location_rel = package_location_abs
@@ -307,7 +331,6 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
                 cwd: build_cwd,
                 locator: locator.clone(),
                 commands: build_commands,
-                tree_hash: install.install_state.locator_tree_hash(locator),
                 allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
                 force_rebuild: is_freshly_unplugged,
             });
@@ -382,7 +405,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
     }
 
     project.pnp_loader_path()
-        .fs_change(std::include_str!("pnp.loader.mjs"), false)?;
+        .fs_change(&misc::unpack_brotli_data(PNP_MJS_TEMPLATE)?, false)?;
 
     let package_build_dependencies = linker::helpers::populate_build_entry_dependencies(
         &package_build_entries,

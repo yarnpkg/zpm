@@ -12,5 +12,9 @@
   },
   "scripts": {
     "berry": "cd ${BERRY_DIR:-~/berry} && yarn"
+  },
+  "dependencies": {
+    "clipanion": "^4.0.0-rc.4",
+    "husky": "^9.1.7"
   }
 }

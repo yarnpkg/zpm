@@ -23,6 +23,7 @@ pub use yarn_enums::{
 pub use yarn::{
     BinMeta,
     extract_bin_meta,
+    get_bin_version,
     get_default_yarn_version,
     resolve_channel_selector,
     resolve_semver_range,

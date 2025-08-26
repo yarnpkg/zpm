@@ -13,7 +13,7 @@ pub fn fetch_locator(_context: &InstallContext, _locator: &Locator, params: &ref
         resolution: None,
         package_data: PackageData::Local {
             package_directory,
-            discard_from_lookup: false,
+            is_synthetic_package: false,
         },
     })
 }

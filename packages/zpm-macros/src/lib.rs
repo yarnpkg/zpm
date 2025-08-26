@@ -118,12 +118,16 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
         });
     };
 
+    let mut env_functions = vec![];
     let mut default_functions = vec![];
     let mut new_fields = vec![];
     let mut enum_variants = HashMap::new();
 
     // map.insert("enableAutoType".to_string(), ProjectSettingsType::BoolField(self.enable_auto_type.clone()))
     let mut extract_stmts = vec![];
+
+    // "enable_auto_type" => Ok(ProjectSettingsType::BoolField(self.enable_auto_type.clone()))
+    let mut read_setting_stmts = vec![];
 
     // "enable_auto_type" => Ok(ProjectSettingsType::BoolField(... parses `value` as a bool ...))
     let mut enum_variants_from_file_string = vec![];
@@ -163,58 +167,81 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
             }
         }
 
-        if let Some(default) = default_value {
-            let default_func_name_sym = syn::Ident::new(&format!("{}_default_from_env", primary_name_sym), primary_name_sym.span());
-            let default_func_name_str = default_func_name_sym.to_string();
+        let env_func_name_sym = syn::Ident::new(&format!("{}_from_env", primary_name_sym), primary_name_sym.span());
+        let env_func_name_str = env_func_name_sym.to_string();
 
-            let env_get = all_names_sym.iter()
-                .map(|setting_name| {
-                    let env_name
-                        = format!("YARN_{}", setting_name)
-                            .to_uppercase();
+        let env_get = all_names_sym.iter()
+            .map(|setting_name| {
+                let env_name
+                    = format!("YARN_{}", setting_name)
+                        .to_uppercase();
 
-                    quote!{std::env::var(#env_name)}
-                })
-                .reduce(|a, b| {
-                    quote!{#a.or_else(|_| #b)}
-                })
-                .unwrap();
+                quote!{std::env::var(#env_name).map(|value| (#env_name, value))}
+            })
+            .reduce(|a, b| {
+                quote!{#a.or_else(|_| #b)}
+            })
+            .unwrap();
 
+        env_functions.push(quote! {
+            fn #env_func_name_sym<'de, D>(deserializer: D) -> Result<#field_ty, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                match #env_get {
+                    Ok((env_name, value)) => {
+                        // Discard the data from the deserializer
+                        let _ = serde::de::IgnoredAny::deserialize(deserializer)?;
+
+                        #field_ty_path::from_file_string(&value)
+                            .map_err(|err| serde::de::Error::custom(format!("Failed to parse {}: {}", env_name, err)))
+                    },
+                    Err(_) => serde::Deserialize::deserialize(deserializer),
+                }
+            }
+        });
+
+        let aliases = &all_names_sym.iter()
+            .skip(1)
+            .map(|alias_sym| {
+                let alias_str_cc = alias_sym.to_string()
+                    .to_case(Case::Camel);
+
+                quote! {#[serde(alias = #alias_str_cc)]}
+            })
+            .collect::<Vec<_>>();
+
+        let default_func_name_sym = syn::Ident::new(&format!("{}_default_from_env", primary_name_sym), primary_name_sym.span());
+        let default_func_name_str = default_func_name_sym.to_string();
+
+        let default_expr = if let Some(default) = default_value {
             let default_expr = match &default {
                 Expr::Closure(_) => quote! {(#default)(crate::config::CONFIG_PATH.lock().unwrap().as_ref().unwrap())},
                 _ => quote! {#default},
             };
 
-            default_functions.push(quote! {
-                fn #default_func_name_sym() -> #field_ty {
-                    match #env_get {
-                        Ok(value) => #field_ty_path::from_file_string(&value).unwrap(),
-                        Err(_) => #field_ty_path::new(#default_expr),
-                    }
-                }
-            });
-
-            let aliases = &all_names_sym.iter()
-                .skip(1)
-                .map(|alias_sym| {
-                    let alias_str_cc = alias_sym.to_string()
-                        .to_case(Case::Camel);
-
-                    quote! {#[serde(alias = #alias_str_cc)]}
-                })
-                .collect::<Vec<_>>();
-
-            new_fields.push(quote! {
-                #[serde(default = #default_func_name_str)]
-                #(#aliases)*
-                pub #primary_name_sym: #field_ty,
-            });
+            quote! {#field_ty_path::new(#default_expr)}
         } else {
-            new_fields.push(quote! {
-                #[serde(default)]
-                pub #primary_name_sym: #field_ty,
-            });
-        }
+            quote! {Default::default()}
+        };
+
+        default_functions.push(quote! {
+            fn #default_func_name_sym() -> #field_ty {
+                match #env_get {
+                    Ok((env_name, value)) => #field_ty_path::from_file_string(&value)
+                        .map_err(|err| format!("Failed to parse {}: {}", env_name, err))
+                        .unwrap(),
+                    Err(_) => #default_expr,
+                }
+            }
+        });
+
+        new_fields.push(quote! {
+            #[serde(deserialize_with = #env_func_name_str)]
+            #[serde(default = #default_func_name_str)]
+            #(#aliases)*
+            pub #primary_name_sym: #field_ty,
+        });
 
         for name_sym in &all_names_sym {
             let name_str = name_sym.to_string();
@@ -228,6 +255,10 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
 
                     Ok(#enum_sym::#field_ty_slug_sym(parsed))
                 },
+            });
+
+            read_setting_stmts.push(quote! {
+                #name_str => Ok(#enum_sym::#field_ty_slug_sym(self.#primary_name_sym.clone())),
             });
         }
 
@@ -255,6 +286,7 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
         });
 
     let expanded = quote! {
+        #(#env_functions)*
         #(#default_functions)*
 
         #[derive(Clone, Debug, serde::Deserialize)]
@@ -289,8 +321,16 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
         }
 
         impl #struct_sym {
+            pub fn get(&self, name: &str) -> Result<#enum_sym, crate::error::Error> {
+                match name {
+                    #(#read_setting_stmts)*
+
+                    _ => Err(crate::error::Error::ConfigKeyNotFound(name.to_string())),
+                }
+            }
+
             pub fn set(&self, name: &str, value: #enum_sym) -> Result<(), crate::error::Error> {
-                use zpm_utils::OkMissing;
+                use zpm_utils::IoResultExt;
                 use convert_case::{Casing, Case};
 
                 let config_path = self.path.as_ref()
@@ -301,10 +341,10 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                     .unwrap_or_default();
 
                 let updated_config
-                    = zpm_parsers::yaml::update_document_field(
+                    = zpm_parsers::yaml::Yaml::update_document_field(
                         &config_text,
-                        &name.to_case(Case::Camel),
-                        &zpm_parsers::yaml::escape_string(&value.to_file_string())
+                        zpm_parsers::Path::from_file_string(&name.to_case(Case::Camel))?,
+                        zpm_parsers::Value::String(value.to_file_string())
                     )?;
 
                 config_path

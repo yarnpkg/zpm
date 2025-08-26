@@ -51,7 +51,7 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
 
                 for field in enum_fields.named.iter() {
                     let field_name = field.ident.as_ref().unwrap().to_string();
-                    let field_type = field.ty.clone();  
+                    let field_type = field.ty.clone();
 
                     fields.insert(field_name, field_type);
                 }
@@ -118,7 +118,7 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
             let mut pattern_info = Pattern {
                 pattern: None,
             };
-    
+
             let _ = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("spec") {
                     pattern_info.pattern = helpers::extract_literal(&meta).ok();
@@ -207,7 +207,7 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
         impl zpm_utils::FromFileString for #name {
             type Error = Error;
 
-            fn from_file_string(src: &str) -> Result<Self, Error> {
+            fn from_file_string(src: &str) -> Result<Self, Self::Error> {
                 #(#deserialization_arms)*
                 #(#arms)*
             }

@@ -1,0 +1,31 @@
+runs:
+  using: composite
+  steps:
+    #region Build the binaries
+    - uses: actions/cache@v4
+      id: cache-build
+      with:
+        path: |
+          target/release/yarn-bin
+          target/release/yarn
+        key: cli-binaries-${{ github.sha }}
+
+    - name: Get target triple
+      if: steps.cache-build.outputs.cache-hit != 'true'
+      id: target-triple
+      run: 'echo "targetTriple=$(rustc -vV | sed -n ''s|host: ||p'')" >> $GITHUB_OUTPUT'
+      shell: bash
+
+    - name: Rust Cache
+      if: steps.cache-build.outputs.cache-hit != 'true'
+      uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+      with:
+        shared-key: release-${{ steps.target-triple.outputs.targetTriple }}
+
+    - name: 'Build the binaries'
+      if: steps.cache-build.outputs.cache-hit != 'true'
+      run: |
+        export CARGO_PROFILE_RELEASE_STRIP=debuginfo
+        cargo build --release --bin yarn-bin --bin yarn
+      shell: bash
+    #endregion

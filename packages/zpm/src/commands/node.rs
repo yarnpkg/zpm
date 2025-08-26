@@ -22,7 +22,7 @@ impl Node {
             .with_project(&project)
             .enable_shell_forwarding()
             .run_exec("node", &self.args)
-            .await
+            .await?
             .into())
     }
 }

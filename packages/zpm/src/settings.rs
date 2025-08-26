@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, str::FromStr};
+use std::{collections::BTreeMap, io::IsTerminal, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use zpm_macros::yarn_config;
@@ -6,13 +6,41 @@ use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, Path, ToFileString, ToHumanString};
 
 use crate::{
-    config::ConfigPaths, 
-    config_fields::{BoolField, DictField, EnumField, GlobField, PathField, StringField, UintField, VecField},
+    config::ConfigPaths,
+    config_fields::{BoolField, DictField, EnumField, Glob, GlobField, PathField, StringField, UintField, VecField},
     primitives::{
         descriptor::{descriptor_map_deserializer, descriptor_map_serializer},
         Descriptor, Ident, PeerRange, SemverDescriptor
     }
 };
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSettings {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_network: Option<bool>,
+}
+
+impl ToFileString for NetworkSettings {
+    fn to_file_string(&self) -> String {
+        sonic_rs::to_string(self).unwrap()
+    }
+}
+
+impl ToHumanString for NetworkSettings {
+    fn to_print_string(&self) -> String {
+        sonic_rs::to_string(self).unwrap()
+    }
+}
+
+impl FromFileString for NetworkSettings {
+    type Error = sonic_rs::Error;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        sonic_rs::from_str(s)
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,12 +98,15 @@ pub enum NodeLinker {
     #[serde(rename = "pnpm")]
     #[serde(alias = "node-modules")]
     Pnpm,
+
+    #[serde(rename = "nm")]
+    Nm,
 }
 
 /**
  * Configuration settings obtained from the environment variables only. Those
  * variables are extracted whenever the program starts and are never updated.
- * 
+ *
  * In general you only want to use this for one-off debugging settings.
  */
 #[yarn_config]
@@ -89,14 +120,23 @@ pub struct EnvConfig {
 
 #[yarn_config]
 pub struct UserConfig {
-    #[default(|_| !zpm_ci::is_ci().is_some())]
+    #[default(true)]
+    pub enable_network: BoolField,
+
+    #[default(|_| !zpm_ci::is_ci().is_some() && std::io::stdout().is_terminal())]
     pub enable_progress_bars: BoolField,
+
+    #[default(Path::home_dir().unwrap().unwrap().with_join_str(".yarn/zpm"))]
+    pub global_folder: PathField,
 
     #[default(3)]
     pub http_retry: UintField,
 
     #[default(100)]
     pub network_concurrency: UintField,
+
+    #[default(BTreeMap::new())]
+    pub network_settings: DictField<Glob, NetworkSettings>,
 }
 
 fn check_tsconfig(config_paths: &ConfigPaths) -> bool {
@@ -150,9 +190,6 @@ pub struct ProjectConfig {
     #[default(true)]
     pub enable_transparent_workspaces: BoolField,
 
-    #[default(Path::home_dir().unwrap().unwrap().with_join_str(".yarn/zpm"))]
-    pub global_folder: PathField,
-
     #[default("cache".to_string())]
     pub local_cache_folder_name: StringField,
 
@@ -165,7 +202,7 @@ pub struct ProjectConfig {
     #[default(true)]
     pub pnp_enable_inlining: BoolField,
 
-    #[default(PnpFallbackMode::All)]
+    #[default(PnpFallbackMode::DependenciesOnly)]
     pub pnp_fallback_mode: EnumField<PnpFallbackMode>,
 
     #[default(vec![])]
@@ -179,6 +216,9 @@ pub struct ProjectConfig {
 
     #[default(BTreeMap::new())]
     pub package_extensions: DictField<SemverDescriptor, PackageExtension>,
+
+    #[default(vec![])]
+    pub unsafe_http_whitelist: VecField<GlobField>,
 
     #[default(Path::from_str(".yarn/__virtual__").unwrap())]
     pub virtual_folder: PathField,

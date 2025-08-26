@@ -36,8 +36,7 @@ pub async fn download_into(source: &GitSource, commit: &str, download_dir: &Path
     };
 
     let response
-        = http_client.client().get(public_tarball_url(owner, &repository, commit)).send().await
-            .and_then(|response| response.error_for_status());
+        = http_client.get(public_tarball_url(owner, &repository, commit))?.send().await;
 
     let data = match response {
         Ok(response) => {

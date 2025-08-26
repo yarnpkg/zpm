@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::LazyLock};
+use std::sync::LazyLock;
 
 use pnp::fs::VPathInfo;
 use zpm_utils::{Path, ToFileString};

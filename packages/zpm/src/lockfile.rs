@@ -249,6 +249,7 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
                 dependencies: Default::default(),
                 peer_dependencies: Default::default(),
                 optional_dependencies: Default::default(),
+                optional_peer_dependencies: Default::default(),
                 missing_peer_dependencies: Default::default(),
             },
             flags: Default::default(),

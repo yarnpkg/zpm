@@ -1,6 +1,6 @@
 use std::{future::Future, sync::Arc};
 
-use zpm_utils::{Path, ToFileString, ToHumanString};
+use zpm_utils::{Path, ToHumanString};
 use tokio::task::JoinError;
 
 use crate::primitives::{Descriptor, Ident, Locator, Range};
@@ -54,6 +54,12 @@ pub enum Error {
 
     #[error("[YN0091] Cache path does not exist ({}).", .0.to_print_string())]
     MissingCacheFolder(Path),
+
+    #[error("[YN0080] Request to '{0}' has been blocked because of your configuration settings.")]
+    NetworkDisabledError(reqwest::Url),
+
+    #[error("[YN0081] Unsafe http requests must be explicitly whitelisted in your configuration ({}).", .0.host_str().expect("\"http:\" URL should have a host"))]
+    UnsafeHttpError(reqwest::Url),
 
     #[error("Algolia registry error")]
     AlgoliaRegistryError(Arc<reqwest::Error>),
@@ -114,6 +120,9 @@ pub enum Error {
 
     #[error("Time error: {0}")]
     TimeError(#[from] std::time::SystemTimeError),
+
+    #[error("Invalid glob pattern ({0})")]
+    InvalidGlob(String),
 
     #[error("Glob error")]
     GlobError(#[from] globset::Error),
@@ -229,6 +238,9 @@ pub enum Error {
     #[error("Install state file not found; please run an install operation first")]
     InstallStateNotFound,
 
+    #[error("Invalid install state; please run an install operation to fix it")]
+    InvalidInstallState,
+
     #[error("Couldn't find a package matching the current working directory")]
     ActivePackageNotFound,
 
@@ -261,6 +273,9 @@ pub enum Error {
 
     #[error("Invalid pack pattern ({0})")]
     InvalidPackPattern(String),
+
+    #[error("Invalid url ({0})")]
+    InvalidUrl(String),
 
     #[error("Invalid git url ({0})")]
     InvalidGitUrl(String),
@@ -322,6 +337,9 @@ pub enum Error {
     #[error("Task timeout")]
     TaskTimeout,
 
+    #[error("Invalid install mode ({0})")]
+    InvalidInstallMode(String),
+
     #[error("Internal error: Join failed ({0})")]
     JoinFailed(#[from] Arc<JoinError>),
 
@@ -330,6 +348,9 @@ pub enum Error {
 
     #[error("Failed to get detected root")]
     FailedToGetSwitchDetectedRoot,
+
+    #[error("The following options of the run command cannot be used when running scripts: {}", .0.join(", "))]
+    InvalidRunScriptOptions(Vec<String>),
 
     // Silent error; no particular message, just exit with an exit code 1
     #[error("")]

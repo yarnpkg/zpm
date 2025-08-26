@@ -10,12 +10,12 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let cached_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let response
-            = project.http_client.get(&params.url).await?;
+            = project.http_client.get(&params.url)?.send().await?;
 
         let archive = response.bytes().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
-        Ok(zpm_formats::convert::convert_tar_gz_to_zip(&locator.ident.nm_subdir(), archive)?)
+        Ok(zpm_formats::convert::convert_tar_gz_to_zip_async(&locator.ident.nm_subdir(), archive).await?)
     }).await?;
 
     let first_entry

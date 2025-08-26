@@ -4,7 +4,7 @@ use clipanion::cli;
 #[cli::path("switch")]
 #[derive(Debug)]
 pub struct VersionCommand {
-    #[cli::option("--version")]
+    #[cli::option("-v,--version")]
     version: bool,
 }
 

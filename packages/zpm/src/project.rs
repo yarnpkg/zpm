@@ -1,12 +1,12 @@
 use std::{collections::{BTreeMap, HashSet}, io::ErrorKind, time::UNIX_EPOCH};
 
-use globset::GlobBuilder;
-use zpm_utils::Path;
+use globset::{GlobBuilder, GlobSetBuilder};
+use zpm_utils::{impl_serialization_traits, Path, ToFileString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
-use zpm_macros::track_time;
+use zpm_macros::{parse_enum, track_time};
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, diff_finder::SaveEntry, error::Error, http::HttpClient, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{bin::BinField, helpers::read_manifest_with_size, resolutions::ResolutionSelector, BinManifest, Manifest}, manifest_finder::CachedManifestFinder, primitives::{range, reference, Descriptor, Ident, Locator, Range, Reference}, report::{with_report_result, StreamReport, StreamReportConfig}, script::Binary};
+use crate::{cache::{CompositeCache, DiskCache}, config::Config, diff_finder::SaveEntry, error::Error, http::HttpClient, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{bin::BinField, helpers::read_manifest_with_size, BinManifest, Manifest}, manifest_finder::CachedManifestFinder, primitives::{range, reference, Descriptor, Ident, Locator, Reference}, report::{with_report_result, StreamReport, StreamReportConfig}, script::Binary};
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
 pub const MANIFEST_NAME: &str = "package.json";
@@ -14,12 +14,31 @@ pub const PNP_CJS_NAME: &str = ".pnp.cjs";
 pub const PNP_ESM_NAME: &str = ".pnp.loader.mjs";
 pub const PNP_DATA_NAME: &str = ".pnp.data.json";
 
+#[parse_enum(or_else = |s| Err(Error::InvalidInstallMode(s.to_string())))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallMode {
+    /// Don't run the build scripts.
+    #[pattern(spec = "skip-build")]
+    SkipBuild,
+}
+
+impl ToFileString for InstallMode {
+    fn to_file_string(&self) -> String {
+        match self {
+            InstallMode::SkipBuild => "skip-build".to_string(),
+        }
+    }
+}
+
+impl_serialization_traits!(InstallMode);
+
 #[derive(Default)]
 pub struct RunInstallOptions {
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub refresh_lockfile: bool,
     pub silent_or_error: bool,
+    pub mode: Option<InstallMode>,
 }
 
 pub struct Project {
@@ -31,7 +50,6 @@ pub struct Project {
     pub workspaces: Vec<Workspace>,
     pub workspaces_by_ident: BTreeMap<Ident, usize>,
     pub workspaces_by_rel_path: BTreeMap<Path, usize>,
-    pub resolution_overrides: BTreeMap<Ident, Vec<(ResolutionSelector, Range)>>,
 
     pub last_changed_at: u128,
     pub install_state: Option<InstallState>,
@@ -50,7 +68,7 @@ impl Project {
             if lock_p.fs_exists() {
                 return Ok((p.clone(), closest_pkg.unwrap_or(p)));
             }
-        
+
             let pkg_p = p.with_join_str(MANIFEST_NAME);
             if pkg_p.fs_exists() {
                 farthest_pkg = Some(p.clone());
@@ -59,14 +77,14 @@ impl Project {
                     closest_pkg = Some(p.clone());
                 }
             }
-    
+
             if let Some(dirname) = p.dirname() {
                 p = dirname;
             } else {
                 break
             }
         }
-    
+
         let farthest_pkg = farthest_pkg
             .ok_or(Error::ProjectNotFound(start))?;
 
@@ -92,15 +110,6 @@ impl Project {
         let (mut workspaces, last_changed_at) = root_workspace
             .workspaces().await?;
 
-        let mut resolutions_overrides: BTreeMap<Ident, Vec<(ResolutionSelector, Range)>>
-            = BTreeMap::new();
-
-        for (resolution, range) in &root_workspace.manifest.resolutions {
-            resolutions_overrides.entry(resolution.target_ident().clone())
-               .or_default()
-               .push((resolution.clone(), range.clone()));
-        }
-
         // Add root workspace to the beginning
         workspaces.insert(0, root_workspace);
 
@@ -111,7 +120,7 @@ impl Project {
             workspaces_by_ident.insert(workspace.locator().ident.clone(), idx);
             workspaces_by_rel_path.insert(workspace.rel_path.clone(), idx);
         }
-        
+
         let http_client
             = HttpClient::new(&config)?;
 
@@ -124,7 +133,6 @@ impl Project {
             workspaces,
             workspaces_by_ident,
             workspaces_by_rel_path,
-            resolution_overrides: resolutions_overrides,
 
             last_changed_at,
             install_state: None,
@@ -190,10 +198,6 @@ impl Project {
         Ok(sonic_rs::from_str(&src)?)
     }
 
-    pub fn resolution_overrides(&self, ident: &Ident) -> Option<&Vec<(ResolutionSelector, Range)>> {
-        self.resolution_overrides.get(ident)
-    }
-
     #[track_time]
     pub fn import_install_state(&mut self) -> Result<&mut Self, Error> {
         let install_state_path
@@ -207,7 +211,8 @@ impl Project {
             .fs_read()?;
 
         let (install_state, _): (InstallState, _)
-            = bincode::decode_from_slice(src.as_slice(), bincode::config::standard()).unwrap();
+            = bincode::decode_from_slice(src.as_slice(), bincode::config::standard())
+                .map_err(|_| Error::InvalidInstallState)?;
 
         self.install_state
             = Some(install_state);
@@ -271,7 +276,7 @@ impl Project {
     }
 
     pub fn package_cache(&self) -> Result<CompositeCache, Error> {
-        let global_cache_path = self.config.project.global_folder.value
+        let global_cache_path = self.config.user.global_folder.value
             .with_join_str("cache");
 
         let local_cache_path
@@ -406,7 +411,7 @@ impl Project {
 
             Some(BinField::Map(bins)) => bins
                 .into_iter()
-                .map(|(name, path)| (name, Binary::new(self, location.with_join(&path.path))))
+                .map(|(name, path)| (name.name().to_string(), Binary::new(self, location.with_join(&path.path))))
                 .collect(),
 
             None => BTreeMap::new(),
@@ -495,7 +500,11 @@ impl Project {
 
     pub async fn lazy_install(&mut self) -> Result<(), Error> {
         match self.import_install_state() {
-            Ok(_) | Err(Error::InstallStateNotFound) => (),
+            Ok(_) => {},
+            Err(Error::InstallStateNotFound | Error::InvalidInstallState) => {
+                // Don't use stale install states.
+                self.install_state = None;
+            }
             Err(e) => return Err(e),
         };
 
@@ -510,11 +519,13 @@ impl Project {
             check_resolutions: false,
             refresh_lockfile: false,
             silent_or_error: true,
+            mode: None,
         }).await
     }
 
     pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<(), Error> {
         let report = StreamReport::new(StreamReportConfig {
+            include_version: true,
             silent_or_error: options.silent_or_error,
             ..StreamReportConfig::from_config(&self.config)
         });
@@ -527,7 +538,8 @@ impl Project {
                 .with_package_cache(Some(&package_cache))
                 .with_project(Some(self))
                 .set_check_checksums(options.check_checksums)
-                .set_refresh_lockfile(options.refresh_lockfile);
+                .set_refresh_lockfile(options.refresh_lockfile)
+                .set_mode(options.mode);
 
             InstallManager::new()
                 .with_context(install_context)
@@ -627,7 +639,7 @@ impl Workspace {
 
         if let Some(patterns) = &self.manifest.workspaces {
             let mut manifest_finder
-                = CachedManifestFinder::new(self.path.clone())?;
+                = CachedManifestFinder::new(self.path.clone());
 
             manifest_finder.rsync()?;
 
@@ -642,48 +654,71 @@ impl Workspace {
                 = HashSet::new();
 
             while let Some((base_path, current_patterns)) = workspace_queue.pop() {
-                let normalized_patterns = current_patterns.iter()
-                    .map(|p| Path::try_from(p.as_str()))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let glob_patterns
+                    = current_patterns.into_iter()
+                        .map(|pattern| {
+                            let (pattern, is_positive)
+                                = if pattern.starts_with('!') {
+                                    (&pattern[1..], false)
+                                } else {
+                                    (pattern.as_ref(), true)
+                                };
 
-                let glob_patterns = normalized_patterns.into_iter()
-                    .map(|p| {
-                        let pattern_path = base_path
-                            .with_join(&p);
+                            let pattern_path
+                                = base_path.with_join_str(pattern);
 
-                        GlobBuilder::new(pattern_path.as_str())
-                            .literal_separator(true)
-                            .build()
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let pattern_matchers = glob_patterns.into_iter()
-                    .map(|g| g.compile_matcher())
-                    .collect::<Vec<_>>();
-
-                let workspace_paths = lookup_state.cache.iter()
-                    .filter(|(_, entry)| {
-                        matches!(entry, SaveEntry::File(_, _))
-                    })
-                    .filter(|(p, _)| {
-                        let candidate_workspace_rel_dir = p.dirname()
-                            .expect("Expected this path to have a parent directory, since it's supposed to be the relative path to a package.json file");
-
-                        pattern_matchers.iter().any(|m| {
-                            m.is_match(candidate_workspace_rel_dir.as_str())
+                            GlobBuilder::new(pattern_path.as_str())
+                                    .literal_separator(true)
+                                    .build()
+                                    .map(|glob| (glob, is_positive))
                         })
-                    })
-                    .collect::<Vec<_>>();
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                let (positive_patterns, negative_patterns): (Vec<_>, Vec<_>)
+                    = glob_patterns.into_iter()
+                        .partition(|(_, is_positive)| *is_positive);
+
+                let mut positive_builder
+                    = GlobSetBuilder::new();
+                for (glob, _) in positive_patterns {
+                    positive_builder.add(glob);
+                }
+                let positive_glob_set
+                    = positive_builder.build()?;
+
+                let mut negative_builder
+                    = GlobSetBuilder::new();
+                for (glob, _) in negative_patterns {
+                    negative_builder.add(glob);
+                }
+                let negative_glob_set
+                    = negative_builder.build()?;
+
+                let workspace_paths
+                    = lookup_state.cache.iter()
+                        .filter(|(_, entry)| {
+                            matches!(entry, SaveEntry::File(_, _))
+                        })
+                        .filter(|(p, _)| {
+                            let candidate_workspace_rel_dir = p.dirname()
+                                .expect("Expected this path to have a parent directory, since it's supposed to be the relative path to a package.json file");
+
+                            let dir_str = candidate_workspace_rel_dir.as_str();
+
+                            // Important: If there are no positive patterns, nothing matches.
+                            positive_glob_set.is_match(dir_str) && !negative_glob_set.is_match(dir_str)
+                        })
+                        .collect::<Vec<_>>();
 
                 for (manifest_rel_path, save_entry) in workspace_paths {
                     if let SaveEntry::File(last_changed_at, manifest) = save_entry {
                         let workspace_rel_path = manifest_rel_path.dirname().unwrap();
-                        
+
                         // Skip if we've already processed this workspace
                         if processed_workspaces.contains(&workspace_rel_path) {
                             continue;
                         }
-                        
+
                         processed_workspaces.insert(workspace_rel_path.clone());
 
                         workspaces.push(Workspace::from_info(&self.path, WorkspaceInfo {

@@ -3,7 +3,7 @@ use std::{mem::take, sync::Arc};
 use bincode::{Decode, Encode};
 use serde::Deserialize;
 use zpm_macros::parse_enum;
-use zpm_utils::{impl_serialization_traits, FromFileString, OkMissing, Path, ToFileString, ToHumanString};
+use zpm_utils::{impl_serialization_traits, FromFileString, IoResultExt, Path, ToFileString, ToHumanString};
 
 use crate::errors::Error;
 
@@ -13,7 +13,7 @@ use zpm_semver::Version;
 #[derive(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq)]
 #[derive_variants(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq)]
 enum BinaryName {
-    #[pattern(spec = r"yarn")] 
+    #[pattern(spec = r"yarn")]
     Yarn,
 }
 
@@ -140,7 +140,7 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
             .fs_read_text()
             .ok_missing()?;
 
-        if let Some(manifest) = manifest {
+        if let Some(manifest) = &manifest {
             let parsed_manifest: Manifest = sonic_rs::from_str(&manifest)
                 .map_err(|err| Error::FailedToParseManifest(Arc::new(err)))?;
 
@@ -168,7 +168,9 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
             }
         }
 
-        last_package_folder = Some(take(&mut parent));
+        if manifest.is_some() {
+            last_package_folder = Some(take(&mut parent));
+        }
     }
 
     Ok(FindResult {

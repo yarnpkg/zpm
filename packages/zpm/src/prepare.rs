@@ -82,7 +82,7 @@ async fn prepare_npm_project(folder_path: &Path, params: &PrepareParams) -> Resu
         let version_result = ScriptEnvironment::new()?
             .with_cwd(folder_path.clone())
             .run_exec("npm", vec!["--version"])
-            .await
+            .await?
             .ok()?;
 
         let version_stdout
@@ -112,7 +112,7 @@ async fn prepare_npm_project(folder_path: &Path, params: &PrepareParams) -> Resu
         // lockfiles that are up-to-date. Hopefully npm won't decide
         // to change the versions randomly.
         .run_exec("npm", vec!["install", "--legacy-peer-deps"])
-        .await
+        .await?
         .ok()?;
 
     let pack_args = match &params.workspace {
@@ -123,7 +123,7 @@ async fn prepare_npm_project(folder_path: &Path, params: &PrepareParams) -> Resu
     let pack_result = ScriptEnvironment::new()?
         .with_cwd(folder_path.clone())
         .run_exec("npm", pack_args)
-        .await
+        .await?
         .ok()?;
 
     let stdout
@@ -174,7 +174,7 @@ async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams
         .delete_env_variable("NODE_ENV")
 
         .run_exec("yarn", vec!["install"])
-        .await
+        .await?
         .ok()?;
 
     let pack_path = folder_path
@@ -189,7 +189,7 @@ async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams
         .with_cwd(folder_path.clone())
         .with_env_variable("YARNSW_DEFAULT", &default_yarn)
         .run_exec("yarn", pack_args)
-        .await
+        .await?
         .ok()?;
 
     let pack_tgz
@@ -239,7 +239,7 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
         .with_env_variable("YARNSW_DEFAULT", &default_yarn)
 
         .run_exec("yarn", pack_args)
-        .await
+        .await?
         .ok()?;
 
     let pack_tgz = pack_path
@@ -252,13 +252,13 @@ async fn prepare_pnpm_project(folder_path: &Path, _params: &PrepareParams) -> Re
     ScriptEnvironment::new()?
         .with_cwd(folder_path.clone())
         .run_exec("pnpm", vec!["install"])
-        .await
+        .await?
         .ok()?;
 
     let pack_result = ScriptEnvironment::new()?
         .with_cwd(folder_path.clone())
         .run_exec("pnpm", vec!["pack"])
-        .await
+        .await?
         .ok()?;
 
     let pack_file
@@ -300,7 +300,7 @@ async fn prepare_yarn_zpm_project(folder_path: &Path, params: &PrepareParams) ->
         .with_env_variable("YARNSW_DEFAULT", &format!("local:{}", current_exe.to_file_string()))
 
         .run_exec("yarn", pack_args)
-        .await
+        .await?
         .ok()?;
 
     let pack_tgz = archive_path

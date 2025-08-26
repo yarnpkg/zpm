@@ -24,6 +24,7 @@ pub fn resolve_locator(ctx: &InstallContext<'_>, locator: &Locator, _params: &re
         dependencies: BTreeMap::new(),
         peer_dependencies: BTreeMap::new(),
         optional_dependencies: BTreeSet::new(),
+        optional_peer_dependencies: BTreeSet::new(),
         missing_peer_dependencies: BTreeSet::new(),
         requirements: system::Requirements::default(),
     };

@@ -1,8 +1,9 @@
 use std::io::Read;
 
 use zpm_formats::zip::ZipSupport;
+use zpm_utils::ToHumanString;
 
-use crate::{error::Error, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, patch, primitives::{reference, Ident, Locator}, resolvers::Resolution};
+use crate::{error::Error, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, misc, patch, primitives::{reference, Ident, Locator}, resolvers::Resolution};
 
 use super::PackageData;
 
@@ -21,10 +22,13 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let project = context.project
         .expect("The project is required to fetch a patch package");
 
-    let parent_data
-        = dependencies[0].as_fetched();
-    let original_data
-        = dependencies[1].as_fetched();
+    let mut dependencies_it
+        = dependencies.iter();
+
+    let parent_data = locator.reference.must_bind()
+        .then(|| dependencies_it.next().unwrap().as_fetched());
+
+    let mut is_builtin = false;
 
     let patch_content = match params.path.as_str() {
         "<builtin>" => {
@@ -33,16 +37,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
                 .unwrap()
                 .1;
 
-            let mut decompressor
-                = brotli::Decompressor::new(compressed_patch, 4096);
+            is_builtin = true;
 
-            let mut decompressed_bytes = Vec::new();
-            decompressor.read_to_end(&mut decompressed_bytes).unwrap();
-
-            let decompressed_string
-                = String::from_utf8(decompressed_bytes)?;
-
-            decompressed_string
+            misc::unpack_brotli_data(compressed_patch)?
         },
 
         path if path.starts_with("~/") => {
@@ -52,6 +49,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         },
 
         path => {
+            let parent_data
+                = parent_data.expect("Expected parent data to be fetched when the patchfile is relative to the parent package");
+
             parent_data.package_data.context_directory()
                 .with_join_str(path)
                 .fs_read_text_with_zip()?
@@ -69,6 +69,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let locator
         = Locator::new_bound(locator.ident.clone(), reference, locator.parent.clone());
+
+    let original_data
+        = dependencies_it.next().unwrap().as_fetched();
 
     let cached_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let original_bytes = match &original_data.package_data {
@@ -107,8 +110,20 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         let package_json_content
             = sonic_rs::from_slice::<Manifest>(&package_json_entry.data)?;
 
-        let patched_entries
-            = patch::apply::apply_patch(original_entries, &patch_content, package_json_content.remote.version.as_ref().unwrap())?;
+        let package_version
+            = package_json_content.remote.version
+                .unwrap_or_default();
+
+        let patched_entries = match is_builtin {
+            true => {
+                patch::apply::apply_patch(original_entries.clone(), &patch_content, &package_version)
+                    .unwrap_or(original_entries)
+            },
+
+            false => {
+                patch::apply::apply_patch(original_entries, &patch_content, &package_version)?
+            },
+        };
 
         Ok(zpm_formats::convert::convert_entries_to_zip(&locator.ident.nm_subdir(), patched_entries)?)
     }).await?;

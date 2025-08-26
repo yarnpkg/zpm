@@ -4,7 +4,7 @@ use zpm_utils::Path;
 use clipanion::cli;
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, pack::{pack_list, pack_manifest}, primitives::Locator, project::{self, Project, RunInstallOptions, Workspace}, script::ScriptEnvironment};
+use crate::{error::Error, manifest::helpers::parse_manifest, pack::{pack_list, pack_manifest}, primitives::Locator, project::{self, Project, RunInstallOptions, Workspace}, script::ScriptEnvironment};
 
 #[cli::command(proxy)]
 #[cli::path("pack")]
@@ -64,7 +64,7 @@ impl Pack {
                 .with_project(&project)
                 .with_package(&project, &locator)?
                 .run_script(&script, &Vec::<&str>::new())
-                .await
+                .await?
                 .ok()?;
         }
 
@@ -83,11 +83,14 @@ impl Pack {
     }
 
     async fn dry_run(&self, project: &Project, active_workspace: &Workspace) -> Result<(), Error> {
-        let manifest
+        let pack_manifest_content
             = pack_manifest(project, active_workspace)?;
 
+        let pack_manifest
+            = parse_manifest(&pack_manifest_content)?;
+
         let pack_list
-            = pack_list(&project, active_workspace, &manifest)?;
+            = pack_list(&project, active_workspace, &pack_manifest)?;
 
         if self.json {
             for path in pack_list {
@@ -103,23 +106,26 @@ impl Pack {
     }
 
     async fn gen_archive(&self, project: &Project, active_workspace: &Workspace) -> Result<(), Error> {
-        let manifest
+        let pack_manifest_content
             = pack_manifest(project, active_workspace)?;
 
+        let pack_manifest
+            = parse_manifest(&pack_manifest_content)?;
+
         let pack_list
-            = pack_list(&project, active_workspace, &manifest)?;
+            = pack_list(&project, active_workspace, &pack_manifest)?;
 
         let mut entries
             = zpm_formats::entries_from_files(&active_workspace.path, &pack_list)?;
 
         let mut executable_files
-            = manifest.publish_config.executable_files
+            = pack_manifest.publish_config.executable_files
                 .clone()
                 .unwrap_or_default()
                 .into_iter()
                 .collect::<BTreeSet<_>>();
 
-        if let Some(bin) = &manifest.bin {
+        if let Some(bin) = &pack_manifest.bin {
             executable_files.extend(bin.paths().cloned());
         }
 
@@ -136,7 +142,7 @@ impl Pack {
             .find(|entry| entry.name == "package.json");
 
         if let Some(manifest_entry) = manifest_entry {
-            manifest_entry.data = sonic_rs::to_string_pretty(&manifest).unwrap().into_bytes().into();
+            manifest_entry.data = pack_manifest_content.into_bytes().into();
         }
 
         let entries
@@ -147,12 +153,12 @@ impl Pack {
 
         
         let package_name
-            = manifest.name.map_or_else(
+            = pack_manifest.name.map_or_else(
                 || "package".to_string(),
                 |name| name.slug());
 
         let package_version
-            = manifest.remote.version.as_ref().map_or_else(
+            = pack_manifest.remote.version.as_ref().map_or_else(
                 || "0.0.0".to_string(),
                 |v| v.to_file_string());
 

@@ -11,7 +11,7 @@ pub fn fetch_locator_ident(context: &InstallContext, _locator: &Locator, params:
 
     Ok(FetchResult::new(PackageData::Local {
         package_directory: workspace.path.clone(),
-        discard_from_lookup: false,
+        is_synthetic_package: false,
     }))
 }
 
@@ -24,6 +24,6 @@ pub fn fetch_locator_path(context: &InstallContext, _locator: &Locator, params: 
 
     Ok(FetchResult::new(PackageData::Local {
         package_directory: workspace.path.clone(),
-        discard_from_lookup: false,
+        is_synthetic_package: false,
     }))
 }

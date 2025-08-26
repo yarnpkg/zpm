@@ -1,8 +1,8 @@
-use std::{fs::Permissions, os::unix::fs::PermissionsExt, process::ExitStatus};
+use std::{process::ExitStatus};
 
-use zpm_parsers::{JsonFormatter, JsonValue};
+use zpm_parsers::{JsonFormatter, Value};
 use zpm_utils::{Path, ToFileString};
-use clipanion::{prelude::*, cli};
+use clipanion::cli;
 use zpm_semver::RangeKind;
 
 use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, Descriptor, LooseDescriptor}, project::{self, Project}, script::{Binary, ScriptEnvironment}};
@@ -12,6 +12,9 @@ use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor
 #[cli::category("Scripting commands")]
 #[cli::description("Install a temporary package and run it")]
 pub struct DlxWithPackages {
+    #[cli::option("-q,--quiet", default = false)]
+    quiet: bool,
+
     #[cli::option("-p,--package", min_len = 1)]
     packages: Vec<LooseDescriptor>,
 
@@ -22,18 +25,18 @@ pub struct DlxWithPackages {
 impl DlxWithPackages {
     #[tokio::main()]
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let (project, current_cwd)
+        let dlx_project
             = setup_project().await?;
 
         let package_cache
-            = project.package_cache()?;
+            = dlx_project.package_cache()?;
 
         let install_context = InstallContext::default()
             .with_package_cache(Some(&package_cache))
-            .with_project(Some(&project));
+            .with_project(Some(&dlx_project));
 
         let resolve_options = loose_descriptor::ResolveOptions {
-            active_workspace_ident: project.active_workspace()?.name.clone(),
+            active_workspace_ident: dlx_project.active_workspace()?.name.clone(),
             range_kind: RangeKind::Exact,
             resolve_tags: true,
         };
@@ -41,19 +44,24 @@ impl DlxWithPackages {
         let descriptors
             = LooseDescriptor::resolve_all(&install_context, &resolve_options, &self.packages).await?;
 
-        let project
-            = install_dependencies(&project.project_cwd, descriptors).await?;
-
+        let dlx_project
+            = install_dependencies(&dlx_project.project_cwd, descriptors, self.quiet).await?;
         let bin
-            = find_binary(&project, self.name.as_str(), false)?;
+            = find_binary(&dlx_project, self.name.as_str(), false)?;
 
-        run_binary(&project, bin, self.args.clone(), current_cwd).await
+        let current_cwd
+            = Path::current_dir()?;
+
+        run_binary(&dlx_project, bin, self.args.clone(), current_cwd).await
     }
 }
 
 #[cli::command(proxy)]
 #[cli::path("dlx")]
 pub struct Dlx {
+    #[cli::option("-q,--quiet", default = false)]
+    quiet: bool,
+
     package: LooseDescriptor,
     args: Vec<String>,
 }
@@ -61,18 +69,18 @@ pub struct Dlx {
 impl Dlx {
     #[tokio::main()]
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let (project, current_cwd)
+        let dlx_project
             = setup_project().await?;
 
         let package_cache
-            = project.package_cache()?;
+            = dlx_project.package_cache()?;
 
         let install_context = InstallContext::default()
             .with_package_cache(Some(&package_cache))
-            .with_project(Some(&project));
+            .with_project(Some(&dlx_project));
 
         let resolve_options = loose_descriptor::ResolveOptions {
-            active_workspace_ident: project.active_workspace()?.name.clone(),
+            active_workspace_ident: dlx_project.active_workspace()?.name.clone(),
             range_kind: RangeKind::Exact,
             resolve_tags: true,
         };
@@ -80,17 +88,19 @@ impl Dlx {
         let descriptor
             = self.package.resolve(&install_context, &resolve_options).await?;
 
-        let project
-            = install_dependencies(&project.project_cwd, vec![descriptor.clone()]).await?;
-
+        let dlx_project
+            = install_dependencies(&dlx_project.project_cwd, vec![descriptor.clone()], self.quiet).await?;
         let bin
-            = find_binary(&project, descriptor.ident.name(), true)?;
+            = find_binary(&dlx_project, descriptor.ident.name(), true)?;
 
-        run_binary(&project, bin, self.args.clone(), current_cwd).await
+        let run_cwd
+            = Path::current_dir()?;
+
+        run_binary(&dlx_project, bin, self.args.clone(), run_cwd).await
     }
 }
 
-async fn setup_project() -> Result<(Project, Path), Error> {
+pub async fn setup_project() -> Result<Project, Error> {
     let temp_dir
         = Path::temp_dir_pattern("dlx-<>")?;
 
@@ -98,19 +108,16 @@ async fn setup_project() -> Result<(Project, Path), Error> {
         .fs_write_text("{}\n")?;
     temp_dir.with_join_str("yarn.lock")
         .fs_write_text("{}\n")?;
-
-    let current_cwd
-        = Path::current_dir()?;
-
-    std::env::set_current_dir(temp_dir.to_path_buf())?;
+    temp_dir.with_join_str(".yarnrc.yml")
+        .fs_write_text("enableGlobalCache: false\n")?;
 
     let project
-        = project::Project::new(None).await?;
+        = project::Project::new(Some(temp_dir)).await?;
 
-    Ok((project, current_cwd))
+    Ok(project)
 }
 
-async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descriptor>) -> Result<Project, Error> {
+pub async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descriptor>, quiet: bool) -> Result<Project, Error> {
     let manifest_path = workspace_path
         .with_join_str("package.json");
 
@@ -118,13 +125,13 @@ async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descriptor
         .fs_read_text_prealloc()?;
 
     let mut formatter
-        = JsonFormatter::from(&manifest_content).unwrap();
+        = JsonFormatter::from(&manifest_content)?;
 
     for descriptor in descriptors.into_iter() {
-        formatter.update(
-            &vec!["dependencies".to_string(), descriptor.ident.to_file_string()].into(), 
-            JsonValue::String(descriptor.range.to_file_string()),
-        ).unwrap();
+        formatter.set(
+            vec!["dependencies".to_string(), descriptor.ident.to_file_string()],
+            Value::String(descriptor.range.to_file_string()),
+        )?;
     }
 
     let updated_content
@@ -134,17 +141,18 @@ async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descriptor
         .fs_change(&updated_content, false)?;
 
     let mut project
-        = project::Project::new(None).await?;
+        = project::Project::new(Some(workspace_path.clone())).await?;
 
     project
         .run_install(project::RunInstallOptions {
+            silent_or_error: quiet,
             ..Default::default()
         }).await?;
 
     Ok(project)
 }
 
-fn find_binary(project: &Project, preferred_name: &str, fallback: bool) -> Result<Binary, Error> {
+pub fn find_binary(project: &Project, preferred_name: &str, fallback: bool) -> Result<Binary, Error> {
     let root_workspace
         = project.root_workspace();
 
@@ -168,13 +176,13 @@ fn find_binary(project: &Project, preferred_name: &str, fallback: bool) -> Resul
     }
 }
 
-async fn run_binary(project: &Project, bin: Binary, args: Vec<String>, current_cwd: Path) -> Result<ExitStatus, Error> {
+pub async fn run_binary(project: &Project, bin: Binary, args: Vec<String>, current_cwd: Path) -> Result<ExitStatus, Error> {
     Ok(ScriptEnvironment::new()?
         .with_project(&project)
-        .with_package(&project, &project.active_package()?)?
+        .with_package(&project, &project.root_workspace().locator())?
         .with_cwd(current_cwd)
         .enable_shell_forwarding()
         .run_binary(&bin, &args)
-        .await
+        .await?
         .into())
 }

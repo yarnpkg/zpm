@@ -1,7 +1,5 @@
-use std::{fs::Permissions, os::unix::fs::PermissionsExt};
-
 use clipanion::cli;
-use zpm_parsers::{JsonFormatter, JsonValue};
+use zpm_parsers::{JsonFormatter, Value};
 use zpm_switch::{PackageManagerField, PackageManagerReference, VersionPackageManagerReference};
 use zpm_utils::{Path, ToFileString, ToHumanString};
 
@@ -32,7 +30,7 @@ impl SetVersion {
             .fs_read_text_prealloc()?;
 
         let mut formatter
-            = JsonFormatter::from(&manifest_content).unwrap();
+            = JsonFormatter::from(&manifest_content)?;
 
         let resolved_version
             = zpm_switch::resolve_selector(&self.version).await?;
@@ -48,9 +46,9 @@ impl SetVersion {
         };
 
         formatter.set(
-            &vec!["packageManager".to_string()].into(),
-            JsonValue::String(package_manager.to_file_string()),
-        ).unwrap();
+            ["packageManager"],
+            Value::String(package_manager.to_file_string()),
+        )?;
 
         let updated_content
             = formatter.to_string();

@@ -1,7 +1,4 @@
 use colored::{Color, Colorize};
-use serde::{Deserialize, Deserializer};
-
-use crate::{impl_serialization_traits_no_serde, FromFileString, ToFileString, ToHumanString};
 
 const STRING_COLOR: Color
     = Color::TrueColor { r: 50, g: 170, b: 80 };
@@ -19,10 +16,10 @@ const CODE_COLOR: Color
     = Color::TrueColor { r: 135, g: 175, b: 255 };
 
 const PATH_COLOR: Color
-    = Color::TrueColor { r: 215, g: 95, b: 215 };
+    = Color::TrueColor { r: 215, g: 130, b: 215 };
 
 const URL_COLOR: Color
-    = Color::TrueColor { r: 215, g: 95, b: 215 };
+    = Color::TrueColor { r: 215, g: 130, b: 215 };
 
 const REFERENCE_COLOR: Color
     = Color::TrueColor { r: 135, g: 175, b: 255 };

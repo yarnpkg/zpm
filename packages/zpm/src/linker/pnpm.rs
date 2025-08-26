@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use zpm_utils::{OkMissing, ToHumanString};
+use zpm_utils::{IoResultExt, ToHumanString};
 
 use crate::{build::{self, BuildRequests}, error::Error, fetchers::PackageData, install::Install, linker, project::Project};
 
@@ -74,7 +74,6 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
                 cwd: package_location_rel,
                 locator: locator.clone(),
                 commands: build_commands,
-                tree_hash: install.install_state.locator_tree_hash(locator),
                 allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
                 force_rebuild: false, // TODO: track this properly for pnpm
             });
@@ -128,7 +127,7 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
             // ../.store/@types-no-deps-npm-1.0.0-xyz/package
             let symlink_target = dep_abs_path
                 .relative_to(&link_abs_dirname);
-    
+
             link_abs_path
                 .fs_rm_file()
                 .ok_missing()?

@@ -27,3 +27,4 @@ zpm-semver = { version = "0.1.0", path = "../zpm-semver" }
 zpm-utils = { version = "0.1.0", path = "../zpm-utils" }
 assert_cmd = "2.0.17"
 predicates = "3.1.3"
+chrono = "0.4.41"
