@@ -18,8 +18,8 @@ jobs:
       id-token: write
 
     environment:
-      name: github-pages
-      url: ${{steps.deployment.outputs.page_url}}
+      name: test-reports
+      url: "https://iteratum.ai/examples/jest-ui/?url=https%3A%2F%2Frepo.yarnpkg.com%2Fbuilds%2Fzpm%2Fcommits%${{github.sha}}%2Ftests"
 
     steps:
       - name: Checkout the repo
@@ -60,18 +60,3 @@ jobs:
         with:
           name: test-report
           path: report.json
-
-      - name: Generate downloads page
-        run: ./yarn.sh build:site-artifacts
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: packages/site-artifacts/dist
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
