@@ -12,6 +12,36 @@ use syn::{parse_macro_input, DeriveInput, Expr, Ident, ImplItem, ImplItemFn, Typ
 mod helpers;
 mod parse_enum;
 
+#[proc_macro_derive(FromToSerialize)]
+pub fn from_to_serialize(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let struct_sym = &input.ident;
+
+    let expanded = quote! {
+        impl zpm_utils::FromFileString for #struct_sym {
+            type Error = sonic_rs::Error;
+
+            fn from_file_string(value: &str) -> Result<Self, Self::Error> {
+                Ok(sonic_rs::from_str(value)?)
+            }
+        }
+
+        impl zpm_utils::ToFileString for #struct_sym {
+            fn to_file_string(&self) -> String {
+                sonic_rs::to_string(self).unwrap()
+            }
+        }
+
+        impl zpm_utils::ToHumanString for #struct_sym {
+            fn to_print_string(&self) -> String {
+                sonic_rs::to_string(self).unwrap()
+            }
+        }
+    };
+
+    expanded.into()
+}
+
 #[proc_macro_attribute]
 pub fn parse_enum(args_tokens: proc_macro::TokenStream, input_tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut args = ParseEnumArgs::default();
@@ -340,10 +370,21 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                     .ok_missing()?
                     .unwrap_or_default();
 
+                let path
+                    = zpm_parsers::Path::from_file_string(&name)?;
+
+                let cc_segments
+                    = path.segments.iter()
+                        .map(|segment| segment.to_case(Case::Camel))
+                        .collect::<Vec<_>>();
+
+                let cc_path
+                    = zpm_parsers::Path::from_segments(cc_segments);
+
                 let updated_config
                     = zpm_parsers::yaml::Yaml::update_document_field(
                         &config_text,
-                        zpm_parsers::Path::from_file_string(&name.to_case(Case::Camel))?,
+                        cc_path,
                         zpm_parsers::Value::String(value.to_file_string())
                     )?;
 

@@ -5,6 +5,7 @@ use zpm_macros::track_time;
 use zpm_switch::{extract_bin_meta, BinMeta};
 
 mod debug;
+mod npm;
 
 mod add;
 mod bin;
@@ -50,6 +51,7 @@ program!(YarnCli, [
     install::Install,
     set_version::SetVersion,
     node::Node,
+    npm::login::Login,
     pack::Pack,
     rebuild::Rebuild,
     remove::Remove,

@@ -20,6 +20,7 @@ pub mod git_utils;
 pub mod git;
 pub mod graph;
 pub mod hash;
+pub mod http_npm;
 pub mod http;
 pub mod install;
 pub mod linker;

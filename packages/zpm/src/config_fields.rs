@@ -14,7 +14,7 @@ pub trait Field<T> {
     fn value(&self) -> &T;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StringLikeField<T> {
     pub value: T,
     pub source: SettingSource,
@@ -61,6 +61,50 @@ impl<T: Serialize> Serialize for StringLikeField<T> {
 impl<'de, T> Deserialize<'de> for StringLikeField<T> where T: Deserialize<'de> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
         Ok(Self {value: T::deserialize(deserializer)?, source: Default::default()})
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct OptionalStringField {
+    pub value: Option<String>,
+    pub source: SettingSource,
+}
+
+impl OptionalStringField {
+    pub fn new(value: Option<String>) -> Self {
+        Self {value, source: Default::default()}
+    }
+}
+
+impl FromFileString for OptionalStringField {
+    type Error = Error;
+
+    fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
+        Ok(Self {value: Some(raw.to_string()), source: Default::default()})
+    }
+}
+
+impl ToFileString for OptionalStringField {
+    fn to_file_string(&self) -> String {
+        self.value.as_ref().unwrap_or(&"".to_string()).to_string()
+    }
+}
+
+impl ToHumanString for OptionalStringField {
+    fn to_print_string(&self) -> String {
+        self.value.as_ref().unwrap_or(&"".to_string()).to_string()
+    }
+}
+
+impl<'de> Deserialize<'de> for OptionalStringField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        Ok(Self {value: Option::<String>::deserialize(deserializer)?, source: Default::default()})
+    }
+}
+
+impl Serialize for OptionalStringField {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+        self.value.serialize(serializer)
     }
 }
 

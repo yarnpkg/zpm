@@ -64,6 +64,9 @@ pub enum Error {
     #[error("Algolia registry error")]
     AlgoliaRegistryError(Arc<reqwest::Error>),
 
+    #[error("Authentication error: {0}")]
+    AuthenticationError(String),
+
     #[error("Failed to change the current working directory")]
     FailedToChangeCwd,
 

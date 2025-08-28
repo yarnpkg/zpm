@@ -1,20 +1,20 @@
 use std::{collections::BTreeMap, io::IsTerminal, str::FromStr};
 
 use serde::{Deserialize, Serialize};
-use zpm_macros::yarn_config;
+use zpm_macros::{FromToSerialize, yarn_config};
 use zpm_semver::RangeKind;
-use zpm_utils::{FromFileString, Path, ToFileString, ToHumanString};
+use zpm_utils::{FromFileString, Path, ToFileString};
 
 use crate::{
-    config::ConfigPaths,
-    config_fields::{BoolField, DictField, EnumField, Glob, GlobField, PathField, StringField, UintField, VecField},
+    config::{ConfigPaths, Password},
+    config_fields::{BoolField, DictField, EnumField, Glob, GlobField, OptionalStringField, PathField, StringField, UintField, VecField},
     primitives::{
         descriptor::{descriptor_map_deserializer, descriptor_map_serializer},
         Descriptor, Ident, PeerRange, SemverDescriptor
     }
 };
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, FromToSerialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkSettings {
     #[serde(default)]
@@ -22,27 +22,47 @@ pub struct NetworkSettings {
     pub enable_network: Option<bool>,
 }
 
-impl ToFileString for NetworkSettings {
-    fn to_file_string(&self) -> String {
-        sonic_rs::to_string(self).unwrap()
-    }
+#[derive(Clone, Debug, Default, Deserialize, Serialize, FromToSerialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NpmRegistrySettings {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub npm_always_auth: Option<bool>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub npm_auth_ident: Option<Password>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub npm_auth_token: Option<Password>,
 }
 
-impl ToHumanString for NetworkSettings {
-    fn to_print_string(&self) -> String {
-        sonic_rs::to_string(self).unwrap()
-    }
+#[derive(Clone, Debug, Deserialize, Serialize, FromToSerialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NpmScopeSettings {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub npm_registry_server: Option<String>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub npm_publish_registry: Option<String>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub npm_always_auth: Option<bool>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub npm_auth_ident: Option<Password>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub npm_auth_token: Option<Password>,
 }
 
-impl FromFileString for NetworkSettings {
-    type Error = sonic_rs::Error;
-
-    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        sonic_rs::from_str(s)
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, FromToSerialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageExtension {
     #[serde(default)]
@@ -54,26 +74,6 @@ pub struct PackageExtension {
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub peer_dependencies: BTreeMap<Ident, PeerRange>,
-}
-
-impl ToFileString for PackageExtension {
-    fn to_file_string(&self) -> String {
-        sonic_rs::to_string(self).unwrap()
-    }
-}
-
-impl ToHumanString for PackageExtension {
-    fn to_print_string(&self) -> String {
-        sonic_rs::to_string(self).unwrap()
-    }
-}
-
-impl FromFileString for PackageExtension {
-    type Error = sonic_rs::Error;
-
-    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        sonic_rs::from_str(s)
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -196,8 +196,17 @@ pub struct ProjectConfig {
     #[default(NodeLinker::Pnp)]
     pub node_linker: EnumField<NodeLinker>,
 
+    #[default(None)]
+    pub npm_publish_registry: OptionalStringField,
+
+    #[default(BTreeMap::new())]
+    pub npm_registries: DictField<String, NpmRegistrySettings>,
+
     #[default("https://registry.npmjs.org".to_string())]
     pub npm_registry_server: StringField,
+
+    #[default(BTreeMap::new())]
+    pub npm_scopes: DictField<String, NpmScopeSettings>,
 
     #[default(true)]
     pub pnp_enable_inlining: BoolField,

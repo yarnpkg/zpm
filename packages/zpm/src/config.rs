@@ -1,9 +1,37 @@
 use std::sync::{LazyLock, Mutex};
 
-use zpm_utils::Path;
-use serde::Deserialize;
+use zpm_utils::{FromFileString, Path, ToFileString, ToHumanString};
+use serde::{Deserialize, Serialize};
 
 use crate::{error::Error, primitives::Ident, settings::{EnvConfig, ProjectConfig, UserConfig}};
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct Password {
+    value: String,
+}
+
+impl FromFileString for Password {
+    type Error = Error;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        Ok(Password {
+            value: s.to_string(),
+        })
+    }
+}
+
+impl ToFileString for Password {
+    fn to_file_string(&self) -> String {
+        self.value.clone()
+    }
+}
+
+impl ToHumanString for Password {
+    fn to_print_string(&self) -> String {
+        "[hidden]".to_string()
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct ConfigPaths {
@@ -14,7 +42,7 @@ pub struct ConfigPaths {
 
 pub static CONFIG_PATH: LazyLock<Mutex<Option<ConfigPaths>>> = LazyLock::new(|| Mutex::new(None));
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SettingSource {
     #[default]
     Unknown,
@@ -46,7 +74,6 @@ impl Config {
     }
 
     pub fn new(project_cwd: Option<Path>, package_cwd: Option<Path>) -> Result<Self, Error> {
-        #[allow(deprecated)]
         let user_yarnrc_path = Path::home_dir()?
             .map(|dir| dir.with_join_str(".yarnrc.yml"));
 

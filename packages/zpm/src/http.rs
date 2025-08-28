@@ -203,20 +203,42 @@ pub struct HttpClient {
     client: Client,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct HttpRequestParams {
+    pub retry: bool,
+    pub strict: bool,
+}
+
+impl Default for HttpRequestParams {
+    fn default() -> Self {
+        Self {
+            retry: false,
+            strict: true,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct HttpRequest<'a> {
     client: &'a HttpClient,
     builder: RequestBuilder,
-
-    retry: bool,
+    params: HttpRequestParams,
 }
 
 impl<'a> HttpRequest<'a> {
-    pub fn new(client: &'a HttpClient, url: Url, method: Method, retry: bool) -> Self {
+    pub fn new(client: &'a HttpClient, url: Url, method: Method, params: HttpRequestParams) -> Self {
         let builder
             = client.client.request(method, url);
 
-        Self { builder, client, retry }
+        Self { builder, client, params }
+    }
+
+    pub fn ack_response(response: Response, params: HttpRequestParams) -> Result<Response, reqwest::Error> {
+        if params.strict {
+            Ok(response.error_for_status()?)
+        } else {
+            Ok(response)
+        }
     }
 
     pub async fn send(self) -> Result<Response, reqwest::Error> {
@@ -224,10 +246,8 @@ impl<'a> HttpRequest<'a> {
             = 0;
 
         // If the request is not retriable, we should avoid cloning the builder.
-        if !self.retry {
-            return self.builder.send()
-                .await?
-                .error_for_status();
+        if !self.params.retry {
+            return Self::ack_response(self.builder.send().await?, self.params);
         }
 
         loop {
@@ -253,7 +273,7 @@ impl<'a> HttpRequest<'a> {
                 }
             }
 
-            return response?.error_for_status();
+            return Self::ack_response(response?, self.params);
         }
     }
 
@@ -271,6 +291,14 @@ impl<'a> HttpRequest<'a> {
     pub fn body(mut self, body: impl Into<Body>) -> Self {
         self.builder = self.builder.body(body);
         self
+    }
+
+    pub fn try_clone(&self) -> Option<Self> {
+        self.builder.try_clone().map(|builder| Self {
+            client: self.client,
+            builder,
+            params: self.params,
+        })
     }
 }
 
@@ -319,33 +347,53 @@ impl HttpClient {
         }))
     }
 
-    fn request(&self, url: impl AsRef<str>, method: Method, retry: bool) -> Result<HttpRequest, Error> {
-        let url = url.as_ref();
+    pub fn request(&self, url: impl AsRef<str>, method: Method, params: HttpRequestParams) -> Result<HttpRequest, Error> {
+        let url
+            = url.as_ref();
 
-        let url = Url::parse(url)
-            .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
+        let url
+            = Url::parse(url.as_ref())
+                .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
 
-        let url_settings = self.config.url_settings(&url);
+        let url_settings
+            = self.config.url_settings(&url);
+
         if url_settings.enable_network == Some(false) {
             return Err(Error::NetworkDisabledError(url));
         }
 
-        if url.scheme() == "http"
-            && !self.config.unsafe_http_whitelist
-                .iter()
-                .any(|glob| glob.value.matcher().is_match(url.host_str().expect("\"http:\" URL should have a host")))
-        {
-            return Err(Error::UnsafeHttpError(url));
+        if url.scheme() == "http" {
+            let is_explicitly_allowed
+                = self.config.unsafe_http_whitelist
+                    .iter()
+                    .any(|glob| glob.value.matcher().is_match(url.host_str().expect("\"http:\" URL should have a host")));
+
+            if !is_explicitly_allowed {
+                return Err(Error::UnsafeHttpError(url));
+            }
         }
 
-        Ok(HttpRequest::new(self, url, method, retry))
+        Ok(HttpRequest::new(self, url, method, params))
     }
 
     pub fn get(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
-        self.request(url, Method::GET, true)
+        self.request(url, Method::GET, HttpRequestParams {
+            retry: true,
+            ..Default::default()
+        })
     }
 
     pub fn post(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
-        self.request(url, Method::POST, false)
+        self.request(url, Method::POST, HttpRequestParams {
+            retry: false,
+            ..Default::default()
+        })
+    }
+
+    pub fn put(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
+        self.request(url, Method::PUT, HttpRequestParams {
+            retry: false,
+            ..Default::default()
+        })
     }
 }
