@@ -5,7 +5,7 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 use std::collections::BTreeMap;
 
-use crate::{config::{SettingSource, CONFIG_PATH}, error::Error};
+use crate::{config::{Password, SettingSource, CONFIG_PATH}, error::Error};
 
 pub type StringField = StringLikeField<String>;
 pub type GlobField = StringLikeField<Glob>;
@@ -103,6 +103,50 @@ impl<'de> Deserialize<'de> for OptionalStringField {
 }
 
 impl Serialize for OptionalStringField {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+        self.value.serialize(serializer)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct OptionalPasswordField {
+    pub value: Option<Password>,
+    pub source: SettingSource,
+}
+
+impl OptionalPasswordField {
+    pub fn new(value: Option<Password>) -> Self {
+        Self {value, source: Default::default()}
+    }
+}
+
+impl FromFileString for OptionalPasswordField {
+    type Error = Error;
+
+    fn from_file_string(raw: &str) -> Result<Self, Self::Error> {
+        Ok(Self {value: Some(Password {value: raw.to_string()}), source: Default::default()})
+    }
+}
+
+impl ToFileString for OptionalPasswordField {
+    fn to_file_string(&self) -> String {
+        self.value.as_ref().unwrap_or(&Password {value: "".to_string()}).value.clone()
+    }
+}
+
+impl ToHumanString for OptionalPasswordField {
+    fn to_print_string(&self) -> String {
+        self.value.as_ref().unwrap_or(&Password {value: "".to_string()}).value.clone()
+    }
+}
+
+impl<'de> Deserialize<'de> for OptionalPasswordField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        Ok(Self {value: Option::<Password>::deserialize(deserializer)?, source: Default::default()})
+    }
+}
+
+impl Serialize for OptionalPasswordField {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
         self.value.serialize(serializer)
     }

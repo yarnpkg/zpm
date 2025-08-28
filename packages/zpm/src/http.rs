@@ -1,6 +1,7 @@
 use std::{collections::HashMap, net::SocketAddr, sync::{Arc, OnceLock}, time::Duration};
 
 use hickory_resolver::{config::LookupIpStrategy, TokioResolver};
+use http::HeaderMap;
 use itertools::Itertools;
 use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Client, Method, RequestBuilder, Response, Url};
 use tokio::sync::{Mutex, broadcast};
@@ -203,42 +204,35 @@ pub struct HttpClient {
     client: Client,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct HttpRequestParams {
-    pub retry: bool,
-    pub strict: bool,
-}
-
-impl Default for HttpRequestParams {
-    fn default() -> Self {
-        Self {
-            retry: false,
-            strict: true,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct HttpRequest<'a> {
     client: &'a HttpClient,
     builder: RequestBuilder,
-    params: HttpRequestParams,
+    enable_retry: bool,
+    enable_status_check: bool,
 }
 
 impl<'a> HttpRequest<'a> {
-    pub fn new(client: &'a HttpClient, url: Url, method: Method, params: HttpRequestParams) -> Self {
+    pub fn new(client: &'a HttpClient, url: Url, method: Method) -> Self {
         let builder
-            = client.client.request(method, url);
+            = client.client.request(method.clone(), url);
 
-        Self { builder, client, params }
+        Self {
+            builder,
+            client,
+            enable_retry: method == Method::GET,
+            enable_status_check: true,
+        }
     }
 
-    pub fn ack_response(response: Response, params: HttpRequestParams) -> Result<Response, reqwest::Error> {
-        if params.strict {
-            Ok(response.error_for_status()?)
-        } else {
-            Ok(response)
-        }
+    pub fn enable_retry(mut self, enable_retry: bool) -> Self {
+        self.enable_retry = enable_retry;
+        self
+    }
+
+    pub fn enable_status_check(mut self, enable_status_check: bool) -> Self {
+        self.enable_status_check = enable_status_check;
+        self
     }
 
     pub async fn send(self) -> Result<Response, reqwest::Error> {
@@ -246,8 +240,15 @@ impl<'a> HttpRequest<'a> {
             = 0;
 
         // If the request is not retriable, we should avoid cloning the builder.
-        if !self.params.retry {
-            return Self::ack_response(self.builder.send().await?, self.params);
+        if !self.enable_retry {
+            let response
+                = self.builder.send().await?;
+
+            if self.enable_status_check {
+                return Ok(response.error_for_status()?);
+            } else {
+                return Ok(response);
+            }
         }
 
         loop {
@@ -273,18 +274,30 @@ impl<'a> HttpRequest<'a> {
                 }
             }
 
-            return Self::ack_response(response?, self.params);
+            return if self.enable_status_check {
+                response?.error_for_status()
+            } else {
+                response
+            };
         }
     }
 
-    pub fn header<K, V>(mut self, key: K, value: V) -> Self
+    pub fn headers(&self) -> HeaderMap {
+        // TODO: This is filthy
+        self.builder.try_clone().unwrap().build().unwrap().headers().clone()
+    }
+
+    pub fn header<K, V>(mut self, key: K, value: Option<V>) -> Self
     where
         HeaderName: TryFrom<K>,
         <HeaderName as TryFrom<K>>::Error: Into<http::Error>,
         HeaderValue: TryFrom<V>,
         <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
     {
-        self.builder = self.builder.header(key, value);
+        if let Some(value) = value {
+            self.builder = self.builder.header(key, value);
+        }
+
         self
     }
 
@@ -297,7 +310,8 @@ impl<'a> HttpRequest<'a> {
         self.builder.try_clone().map(|builder| Self {
             client: self.client,
             builder,
-            params: self.params,
+            enable_retry: self.enable_retry,
+            enable_status_check: self.enable_status_check,
         })
     }
 }
@@ -347,7 +361,7 @@ impl HttpClient {
         }))
     }
 
-    pub fn request(&self, url: impl AsRef<str>, method: Method, params: HttpRequestParams) -> Result<HttpRequest, Error> {
+    pub fn request(&self, url: impl AsRef<str>, method: Method) -> Result<HttpRequest, Error> {
         let url
             = url.as_ref();
 
@@ -373,27 +387,18 @@ impl HttpClient {
             }
         }
 
-        Ok(HttpRequest::new(self, url, method, params))
+        Ok(HttpRequest::new(self, url, method))
     }
 
     pub fn get(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
-        self.request(url, Method::GET, HttpRequestParams {
-            retry: true,
-            ..Default::default()
-        })
+        self.request(url, Method::GET)
     }
 
     pub fn post(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
-        self.request(url, Method::POST, HttpRequestParams {
-            retry: false,
-            ..Default::default()
-        })
+        self.request(url, Method::POST)
     }
 
     pub fn put(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
-        self.request(url, Method::PUT, HttpRequestParams {
-            retry: false,
-            ..Default::default()
-        })
+        self.request(url, Method::PUT)
     }
 }

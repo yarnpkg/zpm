@@ -7,7 +7,7 @@ use zpm_utils::{FromFileString, Path, ToFileString};
 
 use crate::{
     config::{ConfigPaths, Password},
-    config_fields::{BoolField, DictField, EnumField, Glob, GlobField, OptionalStringField, PathField, StringField, UintField, VecField},
+    config_fields::{BoolField, DictField, EnumField, Glob, GlobField, OptionalPasswordField, OptionalStringField, PathField, StringField, UintField, VecField},
     primitives::{
         descriptor::{descriptor_map_deserializer, descriptor_map_serializer},
         Descriptor, Ident, PeerRange, SemverDescriptor
@@ -195,6 +195,15 @@ pub struct ProjectConfig {
 
     #[default(NodeLinker::Pnp)]
     pub node_linker: EnumField<NodeLinker>,
+
+    #[default(false)]
+    pub npm_always_auth: BoolField,
+
+    #[default(None)]
+    pub npm_auth_ident: OptionalPasswordField,
+
+    #[default(None)]
+    pub npm_auth_token: OptionalPasswordField,
 
     #[default(None)]
     pub npm_publish_registry: OptionalStringField,

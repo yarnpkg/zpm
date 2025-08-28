@@ -8,7 +8,7 @@ use crate::{error::Error, primitives::Ident, settings::{EnvConfig, ProjectConfig
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(transparent)]
 pub struct Password {
-    value: String,
+    pub value: String,
 }
 
 impl FromFileString for Password {
