@@ -160,6 +160,13 @@ impl Login {
     }
 
     async fn get_credentials(&self, is_token: bool) -> Result<Credentials, Error> {
+        if std::env::var("YARN_IS_TEST_ENV").is_ok() {
+            return Ok(Credentials {
+                username: std::env::var("YARN_INJECT_NPM_USER").unwrap_or_default(),
+                password: std::env::var("YARN_INJECT_NPM_PASSWORD").unwrap_or_default(),
+            });
+        }
+
         let mut report_guard
             = current_report().await;
 
@@ -357,6 +364,19 @@ async fn render_otp_notice(response: &Response) {
     }
 }
 
+async fn query_otp() -> Result<String, Error> {
+    if std::env::var("YARN_IS_TEST_ENV").is_ok() {
+        return Ok(std::env::var("YARN_INJECT_NPM_2FA_TOKEN").unwrap_or_default());
+    }
+
+    let otp = current_report().await.as_mut()
+        .map(|report| report.prompt(PromptType::Input("One-time password".to_string())))
+        .unwrap()
+        .await;
+
+    Ok(otp)
+}
+
 async fn send_with_otp(request: HttpRequest<'_>) -> Result<Response, Error> {
     let mut response
         = request.try_clone()
@@ -367,15 +387,10 @@ async fn send_with_otp(request: HttpRequest<'_>) -> Result<Response, Error> {
     if is_otp_error(&response) {
         render_otp_notice(&response).await;
 
-        let otp = current_report().await.as_mut()
-            .map(|report| report.prompt(PromptType::Input("One-time password".to_string())))
-            .unwrap()
-            .await;
-
         response = request
             .try_clone()
             .expect("Failed to clone request")
-            .header("npm-otp", otp)
+            .header("npm-otp", query_otp().await?)
             .send()
             .await?;
     }
