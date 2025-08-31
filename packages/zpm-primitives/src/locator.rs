@@ -1,15 +1,30 @@
 use std::{hash::Hash, sync::Arc};
 
 use bincode::{Decode, Encode};
-use colored::Colorize;
 use rstest::rstest;
-use sha2::Digest;
-use zpm_macros::parse_enum;
-use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, Hash64, ToFileString, ToHumanString};
 
-use crate::{error::Error, hash::Sha256, primitives::reference::{ShorthandReference, WorkspaceIdentReference}};
+use crate::{IdentError, ReferenceError};
 
 use super::{reference::VirtualReference, Ident, Reference};
+
+#[derive(thiserror::Error, Clone, Debug)]
+pub enum LocatorError {
+    #[error("Invalid locator: {0}")]
+    SyntaxError(String),
+
+    #[error(transparent)]
+    FromUtf8Error(#[from] std::string::FromUtf8Error),
+
+    #[error(transparent)]
+    IdentError(#[from] IdentError),
+
+    #[error(transparent)]
+    ReferenceError(#[from] ReferenceError),
+
+    #[error(transparent)]
+    ParentError(#[from] Arc<LocatorError>),
+}
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Locator {
@@ -48,7 +63,7 @@ impl Locator {
 
         let reference = Reference::Virtual(VirtualReference {
             inner: Box::new(self.reference.clone()),
-            hash: Sha256::from_string(&serialized),
+            hash: Hash64::from_string(&serialized),
         });
 
         Locator {
@@ -59,37 +74,35 @@ impl Locator {
     }
 
     pub fn slug(&self) -> String {
-        let mut key = sha2::Sha256::new();
-        key.update(self.to_file_string());
-        let key = key.finalize();
+        let key
+            = Hash64::from_string(&self.to_file_string());
 
-        format!("{}-{}-{:064x}", self.ident.slug(), self.reference.slug(), key)
+        format!("{}-{}-{}", self.ident.slug(), self.reference.slug(), key.to_file_string())
     }
 }
 
 impl FromFileString for Locator {
-    type Error = Error;
+    type Error = LocatorError;
 
     fn from_file_string(src: &str) -> Result<Self, Self::Error> {
-        let at_split = if src.starts_with('@') {
-            src[1..src.len()].find('@').map(|x| x + 1)
-        } else {
-            src.find('@')
-        };
+        let at_split = src.strip_suffix('@')
+            .map_or_else(|| src.find('@'), |rest| rest.find('@').map(|x| x + 1))
+            .ok_or(LocatorError::SyntaxError(src.to_string()))?;
 
-        let at_split = at_split
-            .ok_or(Error::InvalidDescriptor(src.to_string()))?;
+        let parent_marker
+            = "::parent=";
+        let parent_split
+            = src.find(parent_marker);
 
-        let parent_marker = "::parent=";
-        let parent_split = src.find(parent_marker);
+        let ident
+            = Ident::from_file_string(&src[..at_split])?;
+        let reference
+            = Reference::from_file_string(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
 
-        let ident = Ident::from_file_string(&src[..at_split])?;
-        let reference = Reference::from_file_string(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
-
-        let parent = match parent_split {
-            Some(idx) => Some(Arc::new(Locator::from_file_string(&src[idx + parent_marker.len()..])?)),
-            None => None,
-        };
+        let parent = parent_split
+            .map(|idx| Locator::from_file_string(&src[idx + parent_marker.len()..]))
+            .transpose()?
+            .map(Arc::new);
 
         Ok(Locator::new_bound(ident, reference, parent))
     }
@@ -121,7 +134,7 @@ impl ToHumanString for Locator {
 
         let mut final_str = String::new();
         final_str.push_str(&serialized_ident);
-        final_str.push_str(&"@".truecolor(135, 175, 255).to_string());
+        final_str.push_str(&DataType::Custom(135, 175, 255).colorize("@"));
         final_str.push_str(&serialized_reference);
 
         if let Some(parent) = &self.parent {
@@ -133,7 +146,8 @@ impl ToHumanString for Locator {
     }
 }
 
-impl_serialization_traits!(Locator);
+impl_file_string_from_str!(Locator);
+impl_file_string_serialization!(Locator);
 
 #[rstest]
 #[case("foo@npm:1.0.0")]

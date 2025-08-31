@@ -1,6 +1,7 @@
 use std::{collections::{BTreeMap, HashSet}, io::ErrorKind, time::UNIX_EPOCH};
 
 use globset::{GlobBuilder, GlobSetBuilder};
+use zpm_config::Configuration;
 use zpm_utils::{impl_serialization_traits, Path, ToFileString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
@@ -46,7 +47,7 @@ pub struct Project {
     pub package_cwd: Path,
     pub shell_cwd: Path,
 
-    pub config: Config,
+    pub config: Configuration,
     pub workspaces: Vec<Workspace>,
     pub workspaces_by_ident: BTreeMap<Ident, usize>,
     pub workspaces_by_rel_path: BTreeMap<Path, usize>,

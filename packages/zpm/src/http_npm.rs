@@ -142,6 +142,17 @@ pub fn get_authorization(config: &ProjectConfig, registry: &str, ident: Option<&
     None
 }
 
+pub async fn get(params: &NpmHttpParams<'_>) -> Result<Response, Error> {
+    let url
+        = format!("{}{}", params.registry, params.path);
+
+    let request
+        = params.http_client.get(url)?
+            .header("authorization", params.authorization);
+
+    Ok(request.send().await?)
+}
+
 pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {
     let url
         = format!("{}{}", params.registry, params.path);

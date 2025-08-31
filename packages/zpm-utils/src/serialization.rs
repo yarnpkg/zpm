@@ -1,4 +1,11 @@
 use colored::Colorize;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum SerializationError {
+    #[error("Invalid value: {0}")]
+    InvalidValue(String),
+}
 
 pub trait FromFileString {
     type Error;
@@ -13,6 +20,58 @@ pub trait ToFileString {
 
 pub trait ToHumanString {
     fn to_print_string(&self) -> String;
+}
+
+impl<T: FromFileString> FromFileString for Box<T> {
+    type Error = <T as FromFileString>::Error;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        Ok(Box::new(T::from_file_string(s)?))
+    }
+}
+
+impl<T: ToFileString> ToFileString for Box<T> {
+    fn to_file_string(&self) -> String {
+        self.as_ref().to_file_string()
+    }
+}
+
+impl<T: ToHumanString> ToHumanString for Box<T> {
+    fn to_print_string(&self) -> String {
+        self.as_ref().to_print_string()
+    }
+}
+
+impl FromFileString for bool {
+    type Error = SerializationError;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "true" | "1" => {
+                Ok(true)
+            },
+
+            "false" | "0" => {
+                Ok(false)
+            },
+
+            _ => {
+                Err(SerializationError::InvalidValue(s.to_string()))
+            },
+        }
+    }
+}
+
+impl ToFileString for bool {
+    fn to_file_string(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl ToHumanString for bool {
+    fn to_print_string(&self) -> String {
+        self.to_file_string().truecolor(0, 153, 0).to_string()
+    }
 }
 
 impl FromFileString for String {
@@ -47,8 +106,16 @@ impl ToHumanString for &str {
     }
 }
 
+impl<T: FromFileString> FromFileString for Option<T> {
+    type Error = <T as FromFileString>::Error;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        Ok(Some(T::from_file_string(s)?))
+    }
+}
+
 #[macro_export]
-macro_rules! impl_serialization_traits_no_serde(($type:ty) => {
+macro_rules! impl_file_string_from_str(($type:ty) => {
     impl std::str::FromStr for $type {
         type Err = <$type as $crate::FromFileString>::Error;
 
@@ -107,9 +174,7 @@ macro_rules! impl_serialization_traits_no_serde(($type:ty) => {
 });
 
 #[macro_export]
-macro_rules! impl_serialization_traits(($type:ty) => {
-    $crate::impl_serialization_traits_no_serde!($type);
-
+macro_rules! impl_file_string_serialization(($type:ty) => {
     impl serde::Serialize for $type {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
             serializer.serialize_str(&self.to_file_string())

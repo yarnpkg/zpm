@@ -1,0 +1,13 @@
+[package]
+name = "zpm-git"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bincode = { version = "2.0.0-rc.3" }
+fancy-regex = "0.13.0"
+serde = { version = "1.0.207", features = ["derive"] }
+thiserror = "1.0.63"
+urlencoding = "2.1.3"
+zpm-semver = { path = "../zpm-semver" }
+zpm-utils = { path = "../zpm-utils" }

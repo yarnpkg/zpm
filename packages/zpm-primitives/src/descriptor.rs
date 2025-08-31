@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::Hash;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use bincode::{Decode, Encode};
@@ -10,13 +9,30 @@ use rstest::rstest;
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::Deserializer;
-use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, Hash64, ToFileString, ToHumanString};
 
-use crate::hash::Sha256;
-use crate::error::Error;
+use crate::{IdentError, LocatorError, RangeError};
 
-use super::range::{AnonymousSemverRange, VirtualRange};
+use super::range::VirtualRange;
 use super::{reference, Ident, Locator, Range, Reference};
+
+#[derive(thiserror::Error, Clone, Debug)]
+pub enum DescriptorError {
+    #[error("Invalid descriptor: {0}")]
+    SyntaxError(String),
+
+    #[error(transparent)]
+    FromUtf8Error(#[from] std::string::FromUtf8Error),
+
+    #[error(transparent)]
+    IdentError(#[from] IdentError),
+
+    #[error(transparent)]
+    RangeError(#[from] RangeError),
+
+    #[error(transparent)]
+    ParentError(#[from] LocatorError),
+}
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Descriptor {
@@ -34,14 +50,10 @@ impl Descriptor {
         }
     }
 
-    pub fn new_semver(ident: Ident, range_str: &str) -> Result<Descriptor, Error> {
-        let range = Range::AnonymousSemver(AnonymousSemverRange {
-            range: zpm_semver::Range::from_str(range_str)?,
-        });
-
+    pub fn new_semver(ident: Ident, range_str: &str) -> Result<Descriptor, DescriptorError> {
         Ok(Descriptor {
             ident,
-            range,
+            range: Range::new_semver(range_str)?,
             parent: None,
         })
     }
@@ -76,7 +88,7 @@ impl Descriptor {
 
         let range = Range::Virtual(VirtualRange {
             inner: Box::new(self.range.clone()),
-            hash: Sha256::from_string(&serialized),
+            hash: Hash64::from_string(&serialized),
         });
 
         Descriptor {
@@ -128,17 +140,17 @@ pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<BTreeMap<I
             while let Some((key, value)) = access.next_entry::<&str, &str>()? {
                 let parent_marker = "::parent=";
                 let parent_split = value.find(parent_marker);
-            
-                let ident = Ident::from_str(key)
+
+                let ident = Ident::from_file_string(key)
                     .map_err(serde::de::Error::custom)?;
                 let range = Range::from_file_string(&value[..parent_split.map_or(value.len(), |idx| idx)])
                     .map_err(serde::de::Error::custom)?;
-        
+
                 let parent = parent_split
                     .map(|idx| Locator::from_file_string(&value[idx + parent_marker.len()..]))
                     .transpose()
                     .map_err(serde::de::Error::custom)?;
-        
+
                 let descriptor
                     = Descriptor::new_bound(ident.clone(), range, parent);
 
@@ -153,28 +165,26 @@ pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<BTreeMap<I
 }
 
 impl FromFileString for Descriptor {
-    type Error = Error;
+    type Error = DescriptorError;
 
-    fn from_file_string(src: &str) -> Result<Self, Error> {
-        let at_split = if src.starts_with('@') {
-            src[1..src.len()].find('@').map(|x| x + 1)
-        } else {
-            src.find('@')
-        };
+    fn from_file_string(src: &str) -> Result<Self, DescriptorError> {
+        let at_split = src.strip_suffix('@')
+            .map_or_else(|| src.find('@'), |rest| rest.find('@').map(|x| x + 1))
+            .ok_or(DescriptorError::SyntaxError(src.to_string()))?;
 
-        let at_split = at_split
-            .ok_or(Error::InvalidDescriptor(src.to_string()))?;
+        let parent_marker
+            = "::parent=";
+        let parent_split
+            = src.find(parent_marker);
 
-        let parent_marker = "::parent=";
-        let parent_split = src.find(parent_marker);
-    
-        let ident = Ident::from_file_string(&src[..at_split])?;
-        let range = Range::from_file_string(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
+        let ident
+            = Ident::from_file_string(&src[..at_split])?;
+        let range
+            = Range::from_file_string(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
 
-        let parent = match parent_split {
-            Some(idx) => Some(Locator::from_file_string(&src[idx + parent_marker.len()..])?),
-            None => None,
-        };
+        let parent = parent_split
+            .map(|idx| Locator::from_file_string(&src[idx + parent_marker.len()..]))
+            .transpose()?;
 
         Ok(Descriptor::new_bound(ident, range, parent))
     }
@@ -213,7 +223,8 @@ impl ToHumanString for Descriptor {
     }
 }
 
-impl_serialization_traits!(Descriptor);
+impl_file_string_from_str!(Descriptor);
+impl_file_string_serialization!(Descriptor);
 
 #[rstest]
 #[case("foo@npm:1.0.0")]

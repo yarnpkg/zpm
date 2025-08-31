@@ -1,10 +1,13 @@
 use std::{hash::Hash, sync::LazyLock};
 
 use bincode::{Decode, Encode};
-use colored::Colorize;
-use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{DataType, FromFileString, ToFileString, ToHumanString};
 
-use crate::error::Error;
+#[derive(thiserror::Error, Clone, Debug)]
+pub enum IdentError {
+    #[error("Invalid ident: {0}")]
+    SyntaxError(String),
+}
 
 #[derive(Clone, Debug, Default, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Ident(String);
@@ -35,10 +38,10 @@ impl Ident {
     }
 
     pub fn type_ident(&self) -> Ident {
-        match self.scope() {
-            Some(scope) => Ident::new(format!("@types/{}__{}", &scope[1..], self.name())),
-            None => Ident::new(format!("@types/{}", self.name())),
-        }
+        Ident::new(self.scope().map_or_else(
+            || format!("@types/{}", self.name()),
+            |scope| format!("@types/{}__{}", &scope[1..], self.name())
+        ))
     }
 }
 
@@ -53,11 +56,11 @@ static IDENT_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
 });
 
 impl FromFileString for Ident {
-    type Error = Error;
+    type Error = IdentError;
 
     fn from_file_string(src: &str) -> Result<Self, Self::Error> {
         if !IDENT_REGEX.is_match(src) {
-            return Err(Error::InvalidIdent(src.to_string()));
+            return Err(IdentError::SyntaxError(src.to_string()));
         }
 
         Ok(Ident::new(src))
@@ -72,8 +75,6 @@ impl ToFileString for Ident {
 
 impl ToHumanString for Ident {
     fn to_print_string(&self) -> String {
-        self.as_str().truecolor(215, 135, 95).to_string()
+        DataType::Custom(215, 135, 95).colorize(&self.as_str())
     }
 }
-
-impl_serialization_traits!(Ident);

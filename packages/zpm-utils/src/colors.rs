@@ -33,6 +33,7 @@ pub enum DataType {
     Path,
     Url,
     Reference,
+    Custom(u8, u8, u8),
 }
 
 impl DataType {
@@ -46,6 +47,7 @@ impl DataType {
             DataType::Path => PATH_COLOR,
             DataType::Url => URL_COLOR,
             DataType::Reference => REFERENCE_COLOR,
+            DataType::Custom(r, g, b) => Color::TrueColor {r: *r, g: *g, b: *b},
         }
     }
 

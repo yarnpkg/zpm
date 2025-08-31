@@ -1,5 +1,6 @@
 mod colors;
 mod errors;
+mod hash;
 mod misc;
 mod notes;
 mod path;
@@ -9,9 +10,11 @@ mod process;
 mod serialization_builtins;
 mod serialization;
 mod system;
+mod url;
 
 pub use crate::colors::*;
 pub use crate::errors::*;
+pub use crate::hash::*;
 pub use crate::misc::*;
 pub use crate::notes::*;
 pub use crate::path_iterators::*;
@@ -20,3 +23,4 @@ pub use crate::process::*;
 pub use crate::serialization_builtins::*;
 pub use crate::serialization::*;
 pub use crate::system::*;
+pub use crate::url::*;

@@ -42,6 +42,381 @@ pub fn from_to_serialize(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     expanded.into()
 }
 
+// Turn X<Y> into X::<Y>
+fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
+    let input = quote!{#input};
+    let mut iter = input.into_iter().peekable();
+
+    let mut result = proc_macro2::TokenStream::new();
+
+    if let Some(first) = iter.next() {
+        result.append(first);
+
+        if let Some(proc_macro2::TokenTree::Punct(punct)) = iter.peek() {
+            if punct.as_char() == '<' {
+                result.append_all(quote! {::});
+            }
+        }
+    }
+
+    for token in iter {
+        result.append(token);
+    }
+
+    result
+}
+#[proc_macro_attribute]
+pub fn parse_enum(args_tokens: proc_macro::TokenStream, input_tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut args = ParseEnumArgs::default();
+
+    let args_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("or_else") {
+            args.or_else = Some(meta.value()?.parse()?);
+            Ok(())
+        } else {
+            Err(meta.error("unsupported tea property"))
+        }
+    });
+
+    parse_macro_input!(args_tokens with args_parser);
+
+    let ast = parse_macro_input!(input_tokens as DeriveInput);
+
+    parse_enum::parse_enum(args, ast)
+        .unwrap_or_else(|err| err.to_compile_error().into())
+}
+
+// Turn X<Y> into X::<Y>
+fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
+    let input = quote!{#input};
+    let mut iter = input.into_iter().peekable();
+
+    let mut result = proc_macro2::TokenStream::new();
+
+    if let Some(first) = iter.next() {
+        result.append(first);
+
+        if let Some(proc_macro2::TokenTree::Punct(punct)) = iter.peek() {
+            if punct.as_char() == '<' {
+                result.append_all(quote! {::});
+            }
+        }
+    }
+
+    for token in iter {
+        result.append(token);
+    }
+
+    result
+}
+#[proc_macro_attribute]
+pub fn parse_enum(args_tokens: proc_macro::TokenStream, input_tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut args = ParseEnumArgs::default();
+
+    let args_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("or_else") {
+            args.or_else = Some(meta.value()?.parse()?);
+            Ok(())
+        } else {
+            Err(meta.error("unsupported tea property"))
+        }
+    });
+
+    parse_macro_input!(args_tokens with args_parser);
+
+    let ast = parse_macro_input!(input_tokens as DeriveInput);
+
+    parse_enum::parse_enum(args, ast)
+        .unwrap_or_else(|err| err.to_compile_error().into())
+}
+
+// Turn X<Y> into X::<Y>
+fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
+    let input = quote!{#input};
+    let mut iter = input.into_iter().peekable();
+
+    let mut result = proc_macro2::TokenStream::new();
+
+    if let Some(first) = iter.next() {
+        result.append(first);
+
+        if let Some(proc_macro2::TokenTree::Punct(punct)) = iter.peek() {
+            if punct.as_char() == '<' {
+                result.append_all(quote! {::});
+            }
+        }
+    }
+
+    for token in iter {
+        result.append(token);
+    }
+
+    result
+}
+#[proc_macro_attribute]
+pub fn parse_enum(args_tokens: proc_macro::TokenStream, input_tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut args = ParseEnumArgs::default();
+
+    let args_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("or_else") {
+            args.or_else = Some(meta.value()?.parse()?);
+            Ok(())
+        } else {
+            Err(meta.error("unsupported tea property"))
+        }
+    });
+
+    parse_macro_input!(args_tokens with args_parser);
+
+    let ast = parse_macro_input!(input_tokens as DeriveInput);
+
+    parse_enum::parse_enum(args, ast)
+        .unwrap_or_else(|err| err.to_compile_error().into())
+}
+
+// Turn X<Y> into X::<Y>
+fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
+    let input = quote!{#input};
+    let mut iter = input.into_iter().peekable();
+
+    let mut result = proc_macro2::TokenStream::new();
+
+    if let Some(first) = iter.next() {
+        result.append(first);
+
+        if let Some(proc_macro2::TokenTree::Punct(punct)) = iter.peek() {
+            if punct.as_char() == '<' {
+                result.append_all(quote! {::});
+            }
+        }
+    }
+
+    for token in iter {
+        result.append(token);
+    }
+
+    result
+}
+#[proc_macro_attribute]
+pub fn parse_enum(args_tokens: proc_macro::TokenStream, input_tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut args = ParseEnumArgs::default();
+
+    let args_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("or_else") {
+            args.or_else = Some(meta.value()?.parse()?);
+            Ok(())
+        } else {
+            Err(meta.error("unsupported tea property"))
+        }
+    });
+
+    parse_macro_input!(args_tokens with args_parser);
+
+    let ast = parse_macro_input!(input_tokens as DeriveInput);
+
+    parse_enum::parse_enum(args, ast)
+        .unwrap_or_else(|err| err.to_compile_error().into())
+}
+
+// Turn X<Y> into X::<Y>
+fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
+    let input = quote!{#input};
+    let mut iter = input.into_iter().peekable();
+
+    let mut result = proc_macro2::TokenStream::new();
+
+    if let Some(first) = iter.next() {
+        result.append(first);
+
+        if let Some(proc_macro2::TokenTree::Punct(punct)) = iter.peek() {
+            if punct.as_char() == '<' {
+                result.append_all(quote! {::});
+            }
+        }
+    }
+
+    for token in iter {
+        result.append(token);
+    }
+
+    result
+}
+#[proc_macro_attribute]
+pub fn parse_enum(args_tokens: proc_macro::TokenStream, input_tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut args = ParseEnumArgs::default();
+
+    let args_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("or_else") {
+            args.or_else = Some(meta.value()?.parse()?);
+            Ok(())
+        } else {
+            Err(meta.error("unsupported tea property"))
+        }
+    });
+
+    parse_macro_input!(args_tokens with args_parser);
+
+    let ast = parse_macro_input!(input_tokens as DeriveInput);
+
+    parse_enum::parse_enum(args, ast)
+        .unwrap_or_else(|err| err.to_compile_error().into())
+}
+
+// Turn X<Y> into X::<Y>
+fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
+    let input = quote!{#input};
+    let mut iter = input.into_iter().peekable();
+
+    let mut result = proc_macro2::TokenStream::new();
+
+    if let Some(first) = iter.next() {
+        result.append(first);
+
+        if let Some(proc_macro2::TokenTree::Punct(punct)) = iter.peek() {
+            if punct.as_char() == '<' {
+                result.append_all(quote! {::});
+            }
+        }
+    }
+
+    for token in iter {
+        result.append(token);
+    }
+
+    result
+}
+#[proc_macro_attribute]
+pub fn parse_enum(args_tokens: proc_macro::TokenStream, input_tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut args = ParseEnumArgs::default();
+
+    let args_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("or_else") {
+            args.or_else = Some(meta.value()?.parse()?);
+            Ok(())
+        } else {
+            Err(meta.error("unsupported tea property"))
+        }
+    });
+
+    parse_macro_input!(args_tokens with args_parser);
+
+    let ast = parse_macro_input!(input_tokens as DeriveInput);
+
+    parse_enum::parse_enum(args, ast)
+        .unwrap_or_else(|err| err.to_compile_error().into())
+}
+
+// Turn X<Y> into X::<Y>
+fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
+    let input = quote!{#input};
+    let mut iter = input.into_iter().peekable();
+
+    let mut result = proc_macro2::TokenStream::new();
+
+    if let Some(first) = iter.next() {
+        result.append(first);
+
+        if let Some(proc_macro2::TokenTree::Punct(punct)) = iter.peek() {
+            if punct.as_char() == '<' {
+                result.append_all(quote! {::});
+            }
+        }
+    }
+
+    for token in iter {
+        result.append(token);
+    }
+
+    result
+}
+#[proc_macro_attribute]
+pub fn parse_enum(args_tokens: proc_macro::TokenStream, input_tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut args = ParseEnumArgs::default();
+
+    let args_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("or_else") {
+            args.or_else = Some(meta.value()?.parse()?);
+            Ok(())
+        } else {
+            Err(meta.error("unsupported tea property"))
+        }
+    });
+
+    parse_macro_input!(args_tokens with args_parser);
+
+    let ast = parse_macro_input!(input_tokens as DeriveInput);
+
+    parse_enum::parse_enum(args, ast)
+        .unwrap_or_else(|err| err.to_compile_error().into())
+}
+
+// Turn X<Y> into X::<Y>
+fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
+    let input = quote!{#input};
+    let mut iter = input.into_iter().peekable();
+
+    let mut result = proc_macro2::TokenStream::new();
+
+    if let Some(first) = iter.next() {
+        result.append(first);
+
+        if let Some(proc_macro2::TokenTree::Punct(punct)) = iter.peek() {
+            if punct.as_char() == '<' {
+                result.append_all(quote! {::});
+            }
+        }
+    }
+
+    for token in iter {
+        result.append(token);
+    }
+
+    result
+}
+#[proc_macro_attribute]
+pub fn parse_enum(args_tokens: proc_macro::TokenStream, input_tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut args = ParseEnumArgs::default();
+
+    let args_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("or_else") {
+            args.or_else = Some(meta.value()?.parse()?);
+            Ok(())
+        } else {
+            Err(meta.error("unsupported tea property"))
+        }
+    });
+
+    parse_macro_input!(args_tokens with args_parser);
+
+    let ast = parse_macro_input!(input_tokens as DeriveInput);
+
+    parse_enum::parse_enum(args, ast)
+        .unwrap_or_else(|err| err.to_compile_error().into())
+}
+
+// Turn X<Y> into X::<Y>
+fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
+    let input = quote!{#input};
+    let mut iter = input.into_iter().peekable();
+
+    let mut result = proc_macro2::TokenStream::new();
+
+    if let Some(first) = iter.next() {
+        result.append(first);
+
+        if let Some(proc_macro2::TokenTree::Punct(punct)) = iter.peek() {
+            if punct.as_char() == '<' {
+                result.append_all(quote! {::});
+            }
+        }
+    }
+
+    for token in iter {
+        result.append(token);
+    }
+
+    result
+}
 #[proc_macro_attribute]
 pub fn parse_enum(args_tokens: proc_macro::TokenStream, input_tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut args = ParseEnumArgs::default();

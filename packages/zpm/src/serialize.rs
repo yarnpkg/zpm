@@ -251,38 +251,5 @@ pub trait Serialized {
     fn serialized(&self) -> Result<String, fmt::Error>;
 }
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct UrlEncoded<T>(pub T);
-
-impl<T> UrlEncoded<T> {
-    pub fn new(value: T) -> UrlEncoded<T> {
-        UrlEncoded(value)
-    }
-}
-
-impl<T: FromFileString<Error = Error>> FromFileString for UrlEncoded<T> {
-    type Error = Error;
-
-    fn from_file_string(value: &str) -> Result<Self, Error> {
-        let url_decoded
-            = urlencoding::decode(value).unwrap();
-
-        Ok(UrlEncoded(T::from_file_string(url_decoded.as_ref())?))
-    }
-}
-
-impl<T: ToFileString> ToFileString for UrlEncoded<T> {
-    fn to_file_string(&self) -> String {
-        urlencoding::encode(&self.0.to_file_string()).to_string()
-    }
-}
-
-impl<T: ToHumanString> ToHumanString for UrlEncoded<T> {
-    fn to_print_string(&self) -> String {
-        self.0.to_print_string()
-    }
-}
-
 impl_serialization_traits!(UrlEncoded<Descriptor>);
 impl_serialization_traits!(UrlEncoded<Locator>);
-

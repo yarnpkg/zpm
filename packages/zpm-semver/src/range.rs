@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use bincode::{Decode, Encode};
-use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
 use crate::{Error, VersionRc};
 
@@ -50,7 +50,8 @@ impl ToHumanString for RangeKind {
     }
 }
 
-impl_serialization_traits!(RangeKind);
+impl_file_string_from_str!(RangeKind);
+impl_file_string_serialization!(RangeKind);
 
 #[derive(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TokenType {
@@ -311,4 +312,5 @@ impl ToHumanString for Range {
     }
 }
 
-impl_serialization_traits!(Range);
+impl_file_string_from_str!(Range);
+impl_file_string_serialization!(Range);

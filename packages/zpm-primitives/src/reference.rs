@@ -1,15 +1,18 @@
 use std::hash::Hash;
 
 use bincode::{Decode, Encode};
-use colored::Colorize;
-use zpm_macros::parse_enum;
-use zpm_utils::{impl_serialization_traits, DataType, Path, ToFileString, ToHumanString};
-
-use crate::{error::Error, git, hash::Sha256, serialize::UrlEncoded};
+use zpm_macro_enum::zpm_enum;
+use zpm_utils::{impl_file_string_serialization, DataType, Hash64, Path, ToFileString, ToHumanString, UrlEncoded};
 
 use super::{Ident, Locator};
 
-#[parse_enum(or_else = |s| Err(Error::InvalidReference(s.to_string())))]
+#[derive(thiserror::Error, Clone, Debug)]
+pub enum ReferenceError {
+    #[error("Invalid reference: {0}")]
+    SyntaxError(String),
+}
+
+#[zpm_enum(error = ReferenceError, or_else = |s| Err(ReferenceError::SyntaxError(s.to_string())))]
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Reference {
@@ -48,13 +51,13 @@ pub enum Reference {
     Patch {
         inner: Box<UrlEncoded<Locator>>,
         path: String,
-        checksum: Option<Sha256>,
+        checksum: Option<Hash64>,
     },
 
     #[pattern(spec = r"virtual:(?<inner>.*)#(?<hash>[a-f0-9]*)$")]
     Virtual {
         inner: Box<Reference>,
-        hash: Sha256,
+        hash: Hash64,
     },
 
     #[pattern(spec = r"workspace:(?<ident>.*)")]
@@ -70,7 +73,7 @@ pub enum Reference {
     #[pattern(spec = r"git:(?<git>.*)")]
     #[pattern(spec = r"(?<git>https?://.*\.git#.*)")]
     Git {
-        git: git::GitReference,
+        git: zpm_git::GitReference,
     },
 
     #[pattern(spec = r"(?<url>https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
@@ -263,4 +266,4 @@ impl ToHumanString for Reference {
     }
 }
 
-impl_serialization_traits!(Reference);
+impl_file_string_serialization!(Reference);

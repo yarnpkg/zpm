@@ -36,6 +36,9 @@ program!(YarnCli, [
     debug::print_hoisting::PrintHoisting,
     debug::print_platform::PrintPlatform,
 
+    npm::login::Login,
+    npm::whoami::Whoami,
+
     add::Add,
     bin::BinList,
     bin::Bin,
@@ -51,7 +54,6 @@ program!(YarnCli, [
     install::Install,
     set_version::SetVersion,
     node::Node,
-    npm::login::Login,
     pack::Pack,
     rebuild::Rebuild,
     remove::Remove,

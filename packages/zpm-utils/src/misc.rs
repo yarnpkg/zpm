@@ -1,7 +1,31 @@
+use std::convert::Infallible;
+
 use crate::PathError;
 
 pub fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
+}
+
+/// Unwrapping an infallible result into its success value.
+pub trait UnwrapInfallible {
+    /// Type of the `Ok` variant of the result.
+    type Ok;
+
+    /// Unwraps a result, returning the content of an `Ok`.
+    ///
+    /// Unlike `Result::unwrap`, this method is known to never panic
+    /// on the result types it is implemented for. Therefore, it can be used
+    /// instead of `unwrap` as a maintainability safeguard that will fail
+    /// to compile if the error type of the `Result` is later changed
+    /// to an error that can actually occur.
+    fn unwrap_infallible(self) -> Self::Ok;
+}
+
+impl<T> UnwrapInfallible for Result<T, Infallible> {
+    type Ok = T;
+    fn unwrap_infallible(self) -> T {
+        self.unwrap_or_else(|never| match never {})
+    }
 }
 
 pub trait IoResultExt<T, E> {

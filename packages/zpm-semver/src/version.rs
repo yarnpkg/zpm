@@ -1,5 +1,5 @@
 use bincode::{Decode, Encode};
-use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
 use crate::{extract::extract_version, range::RangeKind, Error, Range};
 
@@ -247,4 +247,5 @@ impl ToHumanString for Version {
     }
 }
 
-impl_serialization_traits!(Version);
+impl_file_string_from_str!(Version);
+impl_file_string_serialization!(Version);

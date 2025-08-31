@@ -2,12 +2,12 @@ use core::panic;
 use std::collections::{BTreeMap, BTreeSet};
 
 use quote::quote;
-use syn::{spanned::Spanned, Data, DeriveInput, Expr, Fields, Meta};
-
-use crate::helpers;
+use syn::{spanned::Spanned, Data, DeriveInput, Expr, Fields, Meta, Type};
+use zpm_macro_helpers::{extract_literal, extract_type_from_option};
 
 #[derive(Default)]
 pub struct ParseEnumArgs {
+    pub error: Option<Type>,
     pub or_else: Option<Expr>,
 }
 
@@ -23,37 +23,57 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
         .collect::<Vec<_>>();
 
     for derive_variant_attr in derive_variants_attrs.iter_mut() {
-        let mut derive_list = derive_variant_attr.meta.require_list()?.clone();
+        let mut derive_list
+            = derive_variant_attr.meta.require_list()?.clone();
+
         derive_list.path = syn::Path::from(syn::Ident::new("derive", derive_list.path.span()));
         derive_variant_attr.meta = Meta::List(derive_list);
     }
 
-    let name = &ast.ident;
-    let data = match &ast.data {
-        Data::Enum(data) => data,
-        _ => panic!("Parsed can only be derived for enums"),
+    let name
+        = &ast.ident;
+
+    let error
+        = args.error.unwrap_or(syn::Type::Path(syn::TypePath {
+            qself: None,
+            path: syn::Path::from(syn::Ident::new("Error", proc_macro2::Span::call_site())),
+        }));
+
+    let Data::Enum(data) = &ast.data else {
+        panic!("Parsed can only be derived for enums");
     };
 
-    let mut arms = Vec::new();
+    let mut arms
+        = Vec::new();
 
-    let mut generated_structs = Vec::new();
-    let mut generated_variants = Vec::new();
-    let mut deserialization_arms = Vec::new();
+    let mut generated_structs
+        = Vec::new();
+    let mut generated_variants
+        = Vec::new();
+    let mut deserialization_arms
+        = Vec::new();
 
     for variant in &data.variants {
-        let variant_ident = &variant.ident;
+        let variant_ident
+            = &variant.ident;
 
         // 1. Extracting the fields from the enum variant. We only support named fields (ie `Foo { a: i32, b: i32 }`, not `Foo(i32, i32)`)
 
         let fields = match &variant.fields {
             Fields::Named(enum_fields) => {
-                let mut fields = BTreeMap::new();
+                let mut fields
+                    = BTreeMap::new();
 
                 for field in enum_fields.named.iter() {
-                    let field_name = field.ident.as_ref().unwrap().to_string();
-                    let field_type = field.ty.clone();
+                    let field_name
+                        = field.ident.as_ref().unwrap().to_string();
+                    let field_type
+                        = field.ty.clone();
 
-                    fields.insert(field_name, field_type);
+                    fields.insert(
+                        field_name,
+                        field_type,
+                    );
                 }
 
                 Some(fields)
@@ -66,7 +86,8 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
 
         // 2. Generate a struct with the specified fields
 
-        let struct_ident = syn::Ident::new(&format!("{}{}", variant.ident, name), proc_macro2::Span::call_site());
+        let struct_ident
+            = syn::Ident::new(&format!("{}{}", variant.ident, name), proc_macro2::Span::call_site());
 
         if let Some(fields) = &fields {
             let struct_members = fields.iter().map(|(name, ty)| {
@@ -121,7 +142,7 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
 
             let _ = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("spec") {
-                    pattern_info.pattern = helpers::extract_literal(&meta).ok();
+                    pattern_info.pattern = extract_literal(&meta).ok();
                 }
                 Ok(())
             });
@@ -141,23 +162,28 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
                 .map_err(|_| syn::Error::new(attr.span(), "Named capture groups are required"))?;
 
             let variant_factory = if capture_names.len() > 0 {
-                let fields = fields.as_ref().unwrap();
+                let fields
+                    = fields.as_ref().unwrap();
 
                 let (captured_fields, missing_fields): (Vec<_>, Vec<_>) = fields.iter()
                     .partition(|(name, _)| capture_names.contains(name.as_str()));
 
                 let field_creators = captured_fields.iter().map(|(name, ty)| {
-                    let field_ident = syn::Ident::new(name, proc_macro2::Span::call_site());
-                    let is_option_type = helpers::extract_type_from_option(ty);
+                    let field_ident
+                        = syn::Ident::new(name, proc_macro2::Span::call_site());
+                    let is_option_type
+                        = extract_type_from_option(ty);
 
                     match is_option_type {
-                        Some(_) => quote!{#field_ident: captures.name(#name).map(|x| x.as_str().try_into().map_err(|_| ())).transpose()?},
-                        None => quote!{#field_ident: captures.name(#name).unwrap().as_str().try_into().map_err(|_| ())?},
+                        Some(_) => quote!{#field_ident: captures.name(#name).map(|x| zpm_utils::FromFileString::from_file_string(x.as_str()).map_err(|_| ())).transpose()?},
+                        None => quote!{#field_ident: zpm_utils::FromFileString::from_file_string(captures.name(#name).unwrap().as_str()).map_err(|_| ())?},
                     }
                 });
 
                 let missing_field_creators = missing_fields.iter().map(|(name, _)| {
-                    let field_ident = syn::Ident::new(name, proc_macro2::Span::call_site());
+                    let field_ident
+                        = syn::Ident::new(name, proc_macro2::Span::call_site());
+
                     quote!{#field_ident: Default::default()}
                 });
 
@@ -205,7 +231,7 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
         }
 
         impl zpm_utils::FromFileString for #name {
-            type Error = Error;
+            type Error = #error;
 
             fn from_file_string(src: &str) -> Result<Self, Self::Error> {
                 #(#deserialization_arms)*
