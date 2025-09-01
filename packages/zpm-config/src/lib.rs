@@ -128,8 +128,12 @@ impl<'de, T: FromFileString + Deserialize<'de>> Deserialize<'de> for Interpolate
     }
 }
 
-trait MergeSettings where Self: Sized {
+trait MergeSettings: Sized {
     type Intermediate;
+
+    fn from_env_string(
+        value: &str,
+    ) -> Result<Self, HydrateError>;
 
     fn hydrate(
         &self,
@@ -153,6 +157,10 @@ trait MergeSettings where Self: Sized {
 
 impl<K: Ord + FromFileString + ToStringComplete, T: MergeSettings> MergeSettings for BTreeMap<K, T> {
     type Intermediate = BTreeMap<K, T::Intermediate>;
+
+    fn from_env_string(_value: &str) -> Result<Self, HydrateError> {
+        unimplemented!("Configuration maps cannot be returned directly just yet");
+    }
 
     fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
         let Some(key_str) = path.first() else {
@@ -230,9 +238,13 @@ impl<K: Ord + FromFileString + ToStringComplete, T: MergeSettings> MergeSettings
 impl<T: MergeSettings> MergeSettings for Vec<T> {
     type Intermediate = Vec<T::Intermediate>;
 
+    fn from_env_string(_value: &str) -> Result<Self, HydrateError> {
+        unimplemented!("Configuration lists cannot be returned directly just yet");
+    }
+
     fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
         let Some(key_str) = path.first() else {
-            unimplemented!("Configuration maps cannot be returned directly just yet");
+            unimplemented!("Configuration lists cannot be returned directly just yet");
         };
 
         let Ok(key) = usize::from_file_string(key_str) else {
@@ -262,7 +274,7 @@ impl<T: MergeSettings> MergeSettings for Vec<T> {
         self[key].get(&path[1..])
     }
 
-    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, _prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
+    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
         let mut result
             = Vec::new();
 
@@ -290,12 +302,40 @@ impl<T: MergeSettings> MergeSettings for Vec<T> {
             }));
         }
 
+        if let Some(prefix) = prefix {
+            if let Some(value) = context.env.get(prefix) {
+                let items = value
+                    .split(',')
+                    .map(|s| s.trim());
+
+                for item_str in items {
+                    let value
+                        = T::from_env_string(item_str)
+                            .map_err(|e| HydrateError::InvalidValue(e.to_string()))
+                                .unwrap();
+
+                    result.push(value);
+                }
+            }
+        }
+
         result
     }
 }
 
 impl MergeSettings for Setting<Path> {
     type Intermediate = Interpolated<Path>;
+
+    fn from_env_string(value: &str) -> Result<Self, HydrateError> {
+        let value
+            = Path::from_file_string(value)
+                .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
+
+        Ok(Self {
+            value,
+            source: Source::Environment,
+        })
+    }
 
     fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
         if let Some(key) = path.first() {
@@ -375,6 +415,17 @@ macro_rules! merge_settings_impl {
         impl MergeSettings for Setting<$type> {
             type Intermediate = Interpolated<$type>;
 
+            fn from_env_string(value: &str) -> Result<Self, HydrateError> {
+                let value
+                    = <$type as FromFileString>::from_file_string(value)
+                        .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
+
+                Ok(Self {
+                    value,
+                    source: Source::Environment,
+                })
+            }
+
             fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
                 if let Some(key) = path.first() {
                     return Err(HydrateError::KeyNotFound(key.to_string()));
@@ -428,6 +479,17 @@ macro_rules! merge_settings_impl {
 
         impl MergeSettings for Setting<Option<$type>> {
             type Intermediate = Option<Interpolated<$type>>;
+
+            fn from_env_string(value: &str) -> Result<Self, HydrateError> {
+                let value
+                    = <Option<$type> as FromFileString>::from_file_string(value)
+                        .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
+
+                Ok(Self {
+                    value,
+                    source: Source::Environment,
+                })
+            }
 
             fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
                 if let Some(key) = path.first() {

@@ -301,6 +301,10 @@ impl Generator {
             writeln!(writer, "impl MergeSettings for {name} {{").unwrap();
             writeln!(writer, "    type Intermediate = intermediate::{name};").unwrap();
             writeln!(writer).unwrap();
+            writeln!(writer, "    fn from_env_string(value: &str) -> Result<Self, HydrateError> {{").unwrap();
+            writeln!(writer, "        unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
+            writeln!(writer, "    }}").unwrap();
+            writeln!(writer).unwrap();
             writeln!(writer, "    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {{").unwrap();
             writeln!(writer, "        let Some(key_str) = path.first() else {{").unwrap();
             writeln!(writer, "            unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
