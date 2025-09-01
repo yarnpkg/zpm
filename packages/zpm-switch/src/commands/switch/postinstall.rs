@@ -20,17 +20,17 @@ impl ShellProfile {
         }
     }
 
-    pub fn to_env_path_line(&self, bin_dir: &Path) -> String {
+    pub fn to_env_path_lines(&self, bin_dir: &Path) -> String {
         match self {
-            ShellProfile::Posix(_) => format!("export PATH=\"{}:$PATH\"\n", bin_dir.to_home_string()),
-            ShellProfile::Fish(_) => format!("set -x PATH \"{}:$PATH\"\n", bin_dir.to_home_string()),
+            ShellProfile::Posix(_) => format!("export PATH=\"{}:$PATH\"\n", bin_dir.to_file_string()),
+            ShellProfile::Fish(_) => format!("set -x PATH \"{}:$PATH\"", bin_dir.to_file_string()),
         }
     }
 
     pub fn to_source_line(&self, env_path: &Path) -> String {
         match self {
-            ShellProfile::Posix(_) => format!("source \"{}\"\n", env_path.to_home_string()),
-            ShellProfile::Fish(_) => format!("source \"{}\"\n", env_path.to_home_string()),
+            ShellProfile::Posix(_) => format!("source \"{}\"", env_path.to_file_string()),
+            ShellProfile::Fish(_) => format!("source \"{}\"", env_path.to_file_string()),
         }
     }
 }
@@ -100,7 +100,7 @@ impl PostinstallCommand {
             = profile_content.unwrap_or_default();
 
         let profile_line
-            = format!("source \"{}\"\n", env_path.to_file_string());
+            = format!("{}\n", profile.to_source_line(env_path));
 
         if profile_content.contains(&profile_line) {
             return;
@@ -110,6 +110,12 @@ impl PostinstallCommand {
             profile_content.push('\n');
         }
 
+        if !profile_content.is_empty() {
+            profile_content.push('\n');
+        }
+
+        profile_content
+            .push_str("# Added by Yarn Switch\n");
         profile_content
             .push_str(&profile_line);
 
@@ -136,19 +142,19 @@ impl PostinstallCommand {
 }
 
     fn write_env(&self, env_path: &Path, bin_dir: &Path, profile: &ShellProfile) {
-        let env_path_line
-            = profile.to_env_path_line(bin_dir);
+        let env_path_lines
+            = profile.to_env_path_lines(bin_dir);
 
         let env_write_result = env_path
             .fs_create_parent()
-            .and_then(|_| env_path.fs_write_text(&env_path_line));
+            .and_then(|_| env_path.fs_write_text(&env_path_lines));
 
         if env_write_result.is_err() {
             Note::Warning(format!("
                 We failed to update the Yarn Switch environment file.
                 You will need to manually append the following line to your shell configuration file:
                 {}
-            ", DataType::Code.colorize(&env_path_line))).print();
+            ", DataType::Code.colorize(&env_path_lines))).print();
 
             return;
         }
