@@ -1,5 +1,6 @@
 use serde::{de, Deserialize, Deserializer};
-use zpm_primitives::Descriptor;
+use zpm_primitives::{Descriptor, PeerRange};
+use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, Path};
 use std::{collections::BTreeMap, fmt::Display, ops::Deref};
 
@@ -10,7 +11,7 @@ pub struct Context {
     pub package_cwd: Option<Path>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub enum Source {
     #[default]
     Default,
@@ -19,7 +20,7 @@ pub enum Source {
     Environment,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Setting<T> {
     pub value: T,
     pub source: Source,
@@ -345,22 +346,61 @@ macro_rules! merge_settings {
 
 include!(concat!(env!("OUT_DIR"), "/schema.rs"));
 
-pub fn merge(context: &Context, user_config: Option<&str>, project_config: Option<&str>) -> Configuration {
-    let intermediate_user_config
-        = user_config.map(|config| sonic_rs::from_str::<intermediate::Configuration>(config).unwrap())
-            .map_or(Partial::Missing, Partial::Value);
+pub struct Configuration {
+    pub settings: Settings,
+    pub user_config_path: Option<Path>,
+    pub project_config_path: Option<Path>,
+}
 
-    let intermediate_project_config
-        = project_config.map(|config| sonic_rs::from_str::<intermediate::Configuration>(config).unwrap())
-            .map_or(Partial::Missing, Partial::Value);
+#[derive(thiserror::Error, Debug)]
+pub enum ConfigurationError {
+    #[error(transparent)]
+    PathError(#[from] zpm_utils::PathError),
 
-    Configuration::merge(
+    #[error(transparent)]
+    SerdeError(#[from] serde_yaml::Error),
+}
+
+pub fn merge(context: &Context, user_config: Option<&str>, project_config: Option<&str>) -> Result<Configuration, ConfigurationError> {
+    let user_config_path = user_config
+        .map(|config| Path::from_file_string(config))
+        .transpose()?
+        .map(|path| path.with_join_str(".yarnrc.yml"));
+
+    let project_config_path = project_config
+        .map(|config| Path::from_file_string(config))
+        .transpose()?
+        .map(|path| path.with_join_str(".yarnrc.yml"));
+
+    let intermediate_user_config= user_config_path
+        .as_ref()
+        .map(|path| path.fs_read_text())
+        .transpose()?
+        .map(|content| serde_yaml::from_str::<intermediate::Settings>(&content))
+        .transpose()?
+        .map_or(Partial::Missing, Partial::Value);
+
+    let intermediate_project_config = project_config_path
+        .as_ref()
+        .map(|path| path.fs_read_text())
+        .transpose()?
+        .map(|content| serde_yaml::from_str::<intermediate::Settings>(&content))
+        .transpose()?
+        .map_or(Partial::Missing, Partial::Value);
+
+    let settings = Settings::merge(
         &context,
         Some("YARN"),
         intermediate_user_config,
         intermediate_project_config,
         || panic!("No configuration found")
-    )
+    );
+
+    Ok(Configuration {
+        settings,
+        user_config_path,
+        project_config_path,
+    })
 }
 
 pub mod fns;
@@ -379,4 +419,5 @@ merge_settings!(Descriptor, |s: &str| FromFileString::from_file_string(s).unwrap
 merge_settings!(Glob, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(NodeLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(PeerRange, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(RangeKind, |s: &str| FromFileString::from_file_string(s).unwrap());

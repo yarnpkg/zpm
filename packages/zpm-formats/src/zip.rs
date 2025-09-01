@@ -1,8 +1,5 @@
-use std::sync::LazyLock;
-
 use pnp::fs::VPathInfo;
 use zpm_utils::{Path, ToFileString};
-use regex::Regex;
 
 use crate::{error::Error, zip_iter::ZipIterator, zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, FileHeader, GeneralRecord}};
 
@@ -122,9 +119,6 @@ fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, offset: 
     // File name
     target.extend_from_slice(entry.name.as_bytes());
 }
-
-static VIRTUAL_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/__virtual__/[^/]+/0/").unwrap());
-static ZIP_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(.*\.zip)/(?:__virtual__/[^/]+/0/)?(.*)").unwrap());
 
 pub trait ZipSupport {
     fn fs_read_text_from_zip_buffer(&self, buf: &[u8]) -> Result<String, Error>;

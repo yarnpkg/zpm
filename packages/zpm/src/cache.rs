@@ -15,7 +15,7 @@ use crate::error::Error;
 use crate::hash::Sha256;
 use crate::primitives::locator::Locator;
 
-#[parse_enum]
+#[zpm_enum]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[derive_variants(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CacheEntry {
@@ -242,7 +242,7 @@ impl DiskCache {
                         checksum: None,
                     },
                     data,
-                }    
+                }
             },
 
             Err(err) => {

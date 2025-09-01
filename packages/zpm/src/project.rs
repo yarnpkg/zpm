@@ -2,12 +2,25 @@ use std::{collections::{BTreeMap, HashSet}, io::ErrorKind, time::UNIX_EPOCH};
 
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::Configuration;
-use zpm_utils::{impl_serialization_traits, Path, ToFileString};
+use zpm_macro_enum::zpm_enum;
+use zpm_primitives::{Descriptor, Ident, Locator, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
-use zpm_macros::{parse_enum, track_time};
 
-use crate::{cache::{CompositeCache, DiskCache}, config::Config, diff_finder::SaveEntry, error::Error, http::HttpClient, install::{InstallContext, InstallManager, InstallState}, lockfile::{from_legacy_berry_lockfile, Lockfile}, manifest::{bin::BinField, helpers::read_manifest_with_size, BinManifest, Manifest}, manifest_finder::CachedManifestFinder, primitives::{range, reference, Descriptor, Ident, Locator, Reference}, report::{with_report_result, StreamReport, StreamReportConfig}, script::Binary};
+use crate::{
+    cache::{CompositeCache, DiskCache},
+    config::Config,
+    diff_finder::SaveEntry,
+    error::Error,
+    http::HttpClient,
+    install::{InstallContext, InstallManager, InstallState},
+    lockfile::{from_legacy_berry_lockfile, Lockfile},
+    manifest::{bin::BinField, helpers::read_manifest_with_size, BinManifest, Manifest},
+    manifest_finder::CachedManifestFinder,
+    report::{with_report_result, StreamReport, StreamReportConfig},
+    script::Binary,
+};
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
 pub const MANIFEST_NAME: &str = "package.json";
@@ -15,7 +28,7 @@ pub const PNP_CJS_NAME: &str = ".pnp.cjs";
 pub const PNP_ESM_NAME: &str = ".pnp.loader.mjs";
 pub const PNP_DATA_NAME: &str = ".pnp.data.json";
 
-#[parse_enum(or_else = |s| Err(Error::InvalidInstallMode(s.to_string())))]
+#[zpm_enum(or_else = |s| Err(Error::InvalidInstallMode(s.to_string())))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallMode {
     /// Don't run the build scripts.
@@ -31,7 +44,8 @@ impl ToFileString for InstallMode {
     }
 }
 
-impl_serialization_traits!(InstallMode);
+impl_file_string_from_str!(InstallMode);
+impl_file_string_serialization!(InstallMode);
 
 #[derive(Default)]
 pub struct RunInstallOptions {
@@ -114,8 +128,10 @@ impl Project {
         // Add root workspace to the beginning
         workspaces.insert(0, root_workspace);
 
-        let mut workspaces_by_ident = BTreeMap::new();
-        let mut workspaces_by_rel_path = BTreeMap::new();
+        let mut workspaces_by_ident
+            = BTreeMap::new();
+        let mut workspaces_by_rel_path
+            = BTreeMap::new();
 
         for (idx, workspace) in workspaces.iter().enumerate() {
             workspaces_by_ident.insert(workspace.locator().ident.clone(), idx);
@@ -199,7 +215,6 @@ impl Project {
         Ok(sonic_rs::from_str(&src)?)
     }
 
-    #[track_time]
     pub fn import_install_state(&mut self) -> Result<&mut Self, Error> {
         let install_state_path
             = self.install_state_path();
@@ -267,7 +282,7 @@ impl Project {
         let contents
             = sonic_rs::to_string_pretty(lockfile)?;
 
-        if self.config.project.enable_immutable_installs.value {
+        if self.config.settings.enable_immutable_installs.value {
             lockfile_path.fs_expect(contents, false)?;
         } else {
             lockfile_path.fs_change(contents, false)?;
@@ -277,18 +292,18 @@ impl Project {
     }
 
     pub fn package_cache(&self) -> Result<CompositeCache, Error> {
-        let global_cache_path = self.config.user.global_folder.value
+        let global_cache_path = self.config.settings.global_folder.value
             .with_join_str("cache");
 
         let local_cache_path
             = self.project_cwd
                 .with_join_str(".yarn")
-                .with_join_str(&self.config.project.local_cache_folder_name.value);
+                .with_join_str(&self.config.settings.local_cache_folder_name.value);
 
         global_cache_path.fs_create_dir_all()?;
 
-        if !self.config.project.enable_global_cache.value {
-            if !self.config.project.enable_immutable_cache.value {
+        if !self.config.settings.enable_global_cache.value {
+            if !self.config.settings.enable_immutable_cache.value {
                 local_cache_path.fs_create_dir_all()?;
             } else if !local_cache_path.fs_exists() {
                 return Err(Error::MissingCacheFolder(local_cache_path));
@@ -296,10 +311,10 @@ impl Project {
         }
 
         let global_cache
-            = Some(DiskCache::new(global_cache_path, self.config.project.enable_immutable_cache.value));
+            = Some(DiskCache::new(global_cache_path, self.config.settings.enable_immutable_cache.value));
 
-        let local_cache = (!self.config.project.enable_global_cache.value)
-            .then(|| DiskCache::new(local_cache_path, self.config.project.enable_immutable_cache.value));
+        let local_cache = (!self.config.settings.enable_global_cache.value)
+            .then(|| DiskCache::new(local_cache_path, self.config.settings.enable_immutable_cache.value));
 
         Ok(CompositeCache {
             global_cache,
@@ -355,13 +370,15 @@ impl Project {
     }
 
     pub fn active_workspace(&self) -> Result<&Workspace, Error> {
-        let idx = self.active_workspace_idx()?;
+        let idx
+            = self.active_workspace_idx()?;
 
         Ok(&self.workspaces[idx])
     }
 
     pub fn active_workspace_mut(&mut self) -> Result<&mut Workspace, Error> {
-        let idx = self.active_workspace_idx()?;
+        let idx
+            = self.active_workspace_idx()?;
 
         Ok(&mut self.workspaces[idx])
     }
@@ -419,7 +436,6 @@ impl Project {
         })
     }
 
-    #[track_time]
     pub fn package_visible_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
@@ -427,7 +443,8 @@ impl Project {
         let resolution = install_state.resolution_tree.locator_resolutions.get(locator)
             .expect("Expected active package to have a resolution tree");
 
-        let mut all_bins = BTreeMap::new();
+        let mut all_bins
+            = BTreeMap::new();
 
         for descriptor in resolution.dependencies.values() {
             let locator = install_state.resolution_tree.descriptor_to_locator.get(descriptor)
@@ -502,11 +519,15 @@ impl Project {
     pub async fn lazy_install(&mut self) -> Result<(), Error> {
         match self.import_install_state() {
             Ok(_) => {},
+
             Err(Error::InstallStateNotFound | Error::InvalidInstallState) => {
                 // Don't use stale install states.
                 self.install_state = None;
             }
-            Err(e) => return Err(e),
+
+            Err(e) => {
+                return Err(e);
+            },
         };
 
         if let Some(install_state) = &self.install_state {
@@ -617,19 +638,19 @@ impl Workspace {
     }
 
     pub fn descriptor(&self) -> Descriptor {
-        Descriptor::new(self.name.clone(), range::WorkspaceMagicRange {
+        Descriptor::new(self.name.clone(), WorkspaceMagicRange {
             magic: zpm_semver::RangeKind::Caret,
         }.into())
     }
 
     pub fn locator(&self) -> Locator {
-        Locator::new(self.name.clone(), reference::WorkspaceIdentReference {
+        Locator::new(self.name.clone(), WorkspaceIdentReference {
             ident: self.name.clone(),
         }.into())
     }
 
     pub fn locator_path(&self) -> Locator {
-        Locator::new(self.name.clone(), reference::WorkspacePathReference {
+        Locator::new(self.name.clone(), WorkspacePathReference {
             path: self.rel_path.clone(),
         }.into())
     }

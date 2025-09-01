@@ -258,6 +258,7 @@ impl Generator {
 
         for (name, fields) in &self.structs {
             writeln!(writer).unwrap();
+            writeln!(writer, "#[derive(Debug)]").unwrap();
             writeln!(writer, "pub struct {name} {{").unwrap();
 
             for field in fields {

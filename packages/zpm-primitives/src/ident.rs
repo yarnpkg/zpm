@@ -1,7 +1,7 @@
 use std::{hash::Hash, sync::LazyLock};
 
 use bincode::{Decode, Encode};
-use zpm_utils::{DataType, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum IdentError {
@@ -78,3 +78,6 @@ impl ToHumanString for Ident {
         DataType::Custom(215, 135, 95).colorize(&self.as_str())
     }
 }
+
+impl_file_string_from_str!(Ident);
+impl_file_string_serialization!(Ident);

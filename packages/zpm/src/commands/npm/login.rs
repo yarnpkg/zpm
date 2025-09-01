@@ -1,6 +1,6 @@
 use clipanion::cli;
 use serde::{Deserialize, Serialize};
-use zpm_utils::DataType;
+use zpm_utils::{DataType, QueryString};
 
 use crate::{
     error::Error,
@@ -57,7 +57,7 @@ impl Login {
             = Project::new(None).await?;
 
         let registry
-            = get_registry(&project.config.project, self.scope.as_deref(), self.publish)?
+            = get_registry(&project.config, self.scope.as_deref(), self.publish)?
                 .to_string();
 
         let report = StreamReport::new(StreamReportConfig {
@@ -86,7 +86,7 @@ impl Login {
                 &credentials.password,
             ).await?;
 
-            let Some(config_path) = project.config.user.path else {
+            let Some(config_path) = project.config.user_config_path else {
                 return Err(Error::AuthenticationError("Failed to get user config path".to_string()));
             };
 
@@ -116,7 +116,7 @@ impl Login {
 
     async fn register_or_login(&self, http_client: &HttpClient, registry: &str, username: &str, password: &str) -> Result<String, Error> {
         let user_id
-            = format!("org.couchdb.user:{}", urlencoding::encode(username));
+            = format!("org.couchdb.user:{}", QueryString::encode(username));
         let user_url
             = format!("/-/user/{}", user_id);
 

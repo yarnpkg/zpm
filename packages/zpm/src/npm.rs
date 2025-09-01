@@ -1,7 +1,6 @@
+use zpm_primitives::Ident;
 use zpm_semver::Version;
 use zpm_utils::ToFileString;
-
-use crate::primitives::Ident;
 
 pub fn registry_url_for_all_versions(registry_base: &str, ident: &Ident) -> String {
     let mut url = String::new();

@@ -3,9 +3,15 @@ use std::sync::LazyLock;
 use regex::{Captures, Regex};
 use reqwest::Response;
 use serde::Deserialize;
+use zpm_config::Configuration;
+use zpm_primitives::Ident;
 use zpm_utils::DataType;
 
-use crate::{error::Error, http::{HttpClient, HttpRequest}, primitives::Ident, report::{current_report, PromptType}, settings::ProjectConfig};
+use crate::{
+    error::Error,
+    http::{HttpClient, HttpRequest},
+    report::{current_report, PromptType},
+};
 
 pub struct NpmHttpParams<'a> {
     pub http_client: &'a HttpClient,
@@ -27,18 +33,18 @@ macro_rules! scope_registry_setting {
             if let Some(ident) = &$ident {
                 if let Some(scope) = ident.scope() {
                     let scope_settings
-                        = $config.npm_scopes.value.get(scope);
+                        = $config.settings.npm_scopes.get(scope);
 
                     if let Some(scope_settings) = scope_settings {
-                        if let Some(value) = &scope_settings.$field {
+                        if let Some(value) = scope_settings.$field.value.as_ref() {
                             return Some(value);
                         }
                     }
                 }
             }
 
-            if let Some(registry_settings) = $config.npm_registries.value.get($registry) {
-                if let Some(value) = &registry_settings.$field {
+            if let Some(registry_settings) = $config.settings.npm_registries.get($registry) {
+                if let Some(value) = registry_settings.$field.value.as_ref() {
                     return Some(value);
                 }
             }
@@ -48,15 +54,15 @@ macro_rules! scope_registry_setting {
     }
 }
 
-fn get_registry_raw<'a>(config: &'a ProjectConfig, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
+fn get_registry_raw<'a>(config: &'a Configuration, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
     if let Some(scope) = scope {
         let scope_settings
-            = config.npm_scopes.value.get(scope);
+            = config.settings.npm_scopes.get(scope);
 
         if let Some(scope_settings) = scope_settings {
             if publish {
                 let npm_publish_registry
-                    = scope_settings.npm_publish_registry.as_ref().map(|s| s.as_str());
+                    = scope_settings.npm_publish_registry.value.as_ref().map(|s| s.as_str());
 
                 if let Some(registry) = npm_publish_registry {
                     return Ok(registry);
@@ -64,7 +70,7 @@ fn get_registry_raw<'a>(config: &'a ProjectConfig, scope: Option<&str>, publish:
             }
 
             let npm_registry_server
-                = scope_settings.npm_registry_server.as_ref().map(|s| s.as_str());
+                = scope_settings.npm_registry_server.value.as_ref().map(|s| s.as_str());
 
             if let Some(registry) = npm_registry_server {
                 return Ok(registry);
@@ -74,7 +80,7 @@ fn get_registry_raw<'a>(config: &'a ProjectConfig, scope: Option<&str>, publish:
 
     if publish {
         let publish_registry
-            = config.npm_publish_registry.value.as_ref().map(|s| s.as_str());
+            = config.settings.npm_publish_registry.value.as_ref().map(|s| s.as_str());
 
         if let Some(registry) = publish_registry {
             return Ok(registry);
@@ -82,12 +88,12 @@ fn get_registry_raw<'a>(config: &'a ProjectConfig, scope: Option<&str>, publish:
     }
 
     let registry_server
-        = config.npm_registry_server.value.as_str();
+        = config.settings.npm_registry_server.value.as_str();
 
     Ok(registry_server)
 }
 
-pub fn get_registry<'a>(config: &'a ProjectConfig, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
+pub fn get_registry<'a>(config: &'a Configuration, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
     let registry
         = get_registry_raw(config, scope, publish)?;
 
@@ -95,10 +101,11 @@ pub fn get_registry<'a>(config: &'a ProjectConfig, scope: Option<&str>, publish:
 }
 
 
-pub fn should_authenticate(config: &ProjectConfig, registry: &str, ident: Option<&Ident>, auth_mode: AuthorizationMode) -> bool {
+pub fn should_authenticate(config: &Configuration, registry: &str, ident: Option<&Ident>, auth_mode: AuthorizationMode) -> bool {
     match auth_mode {
         AuthorizationMode::RespectConfiguration => {
-            *scope_registry_setting!(config, registry, ident, npm_always_auth).unwrap_or(&config.npm_always_auth.value)
+            *scope_registry_setting!(config, registry, ident, npm_always_auth)
+                .unwrap_or(&config.settings.npm_always_auth.value)
         },
 
         AuthorizationMode::AlwaysAuthenticate | AuthorizationMode::BestEffort => {
@@ -111,7 +118,7 @@ pub fn should_authenticate(config: &ProjectConfig, registry: &str, ident: Option
     }
 }
 
-pub fn get_authorization(config: &ProjectConfig, registry: &str, ident: Option<&Ident>, auth_mode: AuthorizationMode) -> Option<String> {
+pub fn get_authorization(config: &Configuration, registry: &str, ident: Option<&Ident>, auth_mode: AuthorizationMode) -> Option<String> {
     let should_authenticate
         = should_authenticate(config, registry, ident, auth_mode);
 
@@ -121,21 +128,21 @@ pub fn get_authorization(config: &ProjectConfig, registry: &str, ident: Option<&
 
     let auth_token
         = scope_registry_setting!(config, registry, ident, npm_auth_token)
-            .or_else(|| config.npm_auth_token.value.as_ref());
+            .or_else(|| config.settings.npm_auth_token.value.as_ref());
 
     if let Some(auth_token) = auth_token {
-        return Some(format!("Bearer {}", auth_token.value));
+        return Some(format!("Bearer {}", auth_token));
     }
 
     let auth_ident
         = scope_registry_setting!(config, registry, ident, npm_auth_ident)
-            .or_else(|| config.npm_auth_ident.value.as_ref());
+            .or_else(|| config.settings.npm_auth_ident.value.as_ref());
 
     if let Some(auth_ident) = auth_ident {
-        if auth_ident.value.contains(':') {
-            return Some(format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, auth_ident.value.as_bytes())));
+        if auth_ident.contains(':') {
+            return Some(format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, auth_ident.as_bytes())));
         } else {
-            return Some(format!("Basic {}", auth_ident.value));
+            return Some(format!("Basic {}", auth_ident));
         }
     }
 

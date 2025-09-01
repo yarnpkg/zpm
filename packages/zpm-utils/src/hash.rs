@@ -2,9 +2,8 @@ use std::hash::Hash;
 
 use bincode::{Decode, Encode};
 use blake2::{Blake2b, Digest, digest::consts::U64};
-use colored::Colorize;
 
-use crate::{DataType, FromFileString, ToFileString, ToHumanString};
+use crate::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
 
 pub type Blake2b80 = Blake2b<U64>;
 
@@ -69,3 +68,6 @@ impl ToHumanString for Hash64 {
         DataType::Custom(135, 175, 255).colorize(&self.to_file_string())
     }
 }
+
+impl_file_string_from_str!(Hash64);
+impl_file_string_serialization!(Hash64);

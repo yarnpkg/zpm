@@ -1,9 +1,12 @@
 use clipanion::cli;
-use serde::{Deserialize, Serialize};
-use zpm_utils::{DataType, FromFileString};
+use serde::Deserialize;
+use zpm_primitives::Ident;
+use zpm_utils::FromFileString;
 
 use crate::{
-    error::Error, http::HttpClient, http_npm::{self, get_authorization, get_registry, AuthorizationMode, NpmHttpParams}, primitives::Ident, project::Project, report::{current_report, with_report_result, PromptType, StreamReport, StreamReportConfig}
+    error::Error,
+    http_npm::{self, get_authorization, get_registry, AuthorizationMode, NpmHttpParams},
+    project::Project,
 };
 
 #[cli::command]
@@ -27,14 +30,14 @@ impl Whoami {
             = Project::new(None).await?;
 
         let registry
-            = get_registry(&project.config.project, self.scope.as_deref(), self.publish)?
+            = get_registry(&project.config, self.scope.as_deref(), self.publish)?
                 .to_string();
 
         let ident
             = self.scope.as_ref().map(|s| Ident::from_file_string(format!("@{}/*", s).as_str()).unwrap());
 
         let authorization
-            = get_authorization(&project.config.project, &registry, ident.as_ref(), AuthorizationMode::AlwaysAuthenticate);
+            = get_authorization(&project.config, &registry, ident.as_ref(), AuthorizationMode::AlwaysAuthenticate);
 
         let response = http_npm::get(&NpmHttpParams {
             http_client: &project.http_client,

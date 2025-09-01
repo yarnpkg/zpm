@@ -86,32 +86,6 @@ impl<'de> Deserialize<'de> for Glob {
 }
 
 #[derive(Debug)]
-pub enum RangeKind {
-    Caret,
-    Tilde,
-    Exact,
-}
-
-impl<'de> Deserialize<'de> for RangeKind {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
-        Self::from_file_string(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
-    }
-}
-
-impl FromFileString for RangeKind {
-    type Error = String;
-
-    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        match s {
-            "^" => Ok(RangeKind::Caret),
-            "~" => Ok(RangeKind::Tilde),
-            "=" => Ok(RangeKind::Exact),
-            _ => Err(format!("Invalid range kind: {}", s)),
-        }
-    }
-}
-
-#[derive(Debug)]
 pub enum NodeLinker {
     Pnp,
     Pnpm,

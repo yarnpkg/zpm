@@ -3,13 +3,19 @@ use std::{collections::BTreeMap, fmt::{self, Debug}, hash::Hash, marker::Phantom
 use bincode::{Decode, Encode};
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
-use zpm_utils::ToFileString;
+use zpm_primitives::{Descriptor, Locator};
+use zpm_utils::{Hash64, ToFileString};
 
-use crate::{config::ENV_CONFIG, content_flags::ContentFlags, error::Error, hash::Sha256, primitives::{Descriptor, Locator}, resolvers::Resolution};
+use crate::{
+    config::ENV_CONFIG,
+    content_flags::ContentFlags,
+    error::Error,
+    resolvers::Resolution,
+};
 
 #[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockfileEntry {
-    pub checksum: Option<Sha256>,
+    pub checksum: Option<Hash64>,
     pub resolution: Resolution,
 
     #[serde(default, skip_serializing_if = "zpm_utils::is_default")]

@@ -3,9 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use bincode::{Decode, Encode};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference};
 use zpm_utils::ToHumanString;
 
-use crate::{primitives::{range, Descriptor, Ident, Locator, Range, Reference}, resolvers::Resolution};
+use crate::{
+    resolvers::Resolution,
+};
 
 #[derive(Clone, Debug, Default, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolutionTree {
@@ -247,7 +250,7 @@ impl TreeResolver {
 
                 let peer_descriptor = peer_descriptor.unwrap_or_else(|| Descriptor::new(
                     peer_ident.clone(),
-                    range::Range::MissingPeerDependency,
+                    Range::MissingPeerDependency,
                 ));
 
                 self.resolution_tree.locator_resolutions
@@ -391,7 +394,7 @@ impl TreeResolver {
 
             let final_resolution = self.resolution_tree.descriptor_to_locator.get(&final_descriptor).cloned()
                 .expect("Expected the final resolution to be present");
-            
+
             self.peer_dependency_dependents
                 .entry(final_resolution.clone()).or_default()
                 .insert(parent_locator.clone());

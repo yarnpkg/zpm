@@ -4,15 +4,17 @@ version = "6.0.0-alpha.0"
 edition = "2024"
 
 [dependencies]
-castaway = "0.2.4"
 convert_case = "0.8.0"
 ouroboros = "0.18.5"
+serde_yaml = "0.9.34"
 serde = { version = "1.0.207", features = ["derive"] }
 shellexpand = "3.1.1"
 sonic-rs = "0.5.1"
 thiserror = "2.0.16"
 wax = { git = "https://github.com/arcanis/wax.git" }
+zpm-ci = { path = "../zpm-ci" }
 zpm-primitives = { path = "../zpm-primitives" }
+zpm-semver = { path = "../zpm-semver" }
 zpm-utils = { path = "../zpm-utils" }
 
 [build-dependencies]

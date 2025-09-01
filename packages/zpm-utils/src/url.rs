@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, string::FromUtf8Error};
+use std::{borrow::Cow, collections::BTreeMap, string::FromUtf8Error};
 
 use bincode::{Decode, Encode};
 use urlencoding::decode;
@@ -14,6 +14,12 @@ pub enum QueryStringValue {
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct QueryString {
     pub fields: BTreeMap<String, QueryStringValue>,
+}
+
+impl QueryString {
+    pub fn encode(value: &'_ str) -> Cow<'_, str> {
+        urlencoding::encode(value)
+    }
 }
 
 impl FromFileString for QueryString {

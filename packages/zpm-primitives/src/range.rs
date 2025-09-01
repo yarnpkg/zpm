@@ -3,7 +3,7 @@ use std::{hash::Hash, str::FromStr, sync::LazyLock};
 use bincode::{Decode, Encode};
 use regex::Regex;
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{impl_file_string_serialization, DataType, Hash64, Path, ToFileString, ToHumanString, UrlEncoded};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, Hash64, Path, ToFileString, ToHumanString, UrlEncoded};
 
 use crate::{PeerRange, SemverPeerRange};
 
@@ -261,4 +261,5 @@ impl ToHumanString for Range {
     }
 }
 
+impl_file_string_from_str!(Range);
 impl_file_string_serialization!(Range);

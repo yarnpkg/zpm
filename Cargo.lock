@@ -314,15 +314,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
-name = "castaway"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dec551ab6e7578819132c713a93c022a05d60159dc86e7a7050223577484c55a"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "cc"
 version = "1.2.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4016,8 +4007,10 @@ dependencies = [
  "zpm-ci",
  "zpm-config",
  "zpm-formats",
+ "zpm-macro-enum",
  "zpm-macros",
  "zpm-parsers",
+ "zpm-primitives",
  "zpm-semver",
  "zpm-switch",
  "zpm-utils",
@@ -4034,16 +4027,18 @@ dependencies = [
 name = "zpm-config"
 version = "6.0.0-alpha.0"
 dependencies = [
- "castaway",
  "convert_case 0.8.0",
  "ouroboros",
  "serde",
  "serde_with",
+ "serde_yaml",
  "shellexpand",
  "sonic-rs",
  "thiserror 2.0.16",
  "wax",
+ "zpm-ci",
  "zpm-primitives",
+ "zpm-semver",
  "zpm-utils",
 ]
 
@@ -4173,6 +4168,7 @@ dependencies = [
  "tokio",
  "zpm-ci",
  "zpm-formats",
+ "zpm-macro-enum",
  "zpm-macros",
  "zpm-semver",
  "zpm-utils",

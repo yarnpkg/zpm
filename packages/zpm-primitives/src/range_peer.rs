@@ -2,7 +2,7 @@ use std::convert::Infallible;
 
 use bincode::{Decode, Encode};
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{DataType, Path, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, Path, ToFileString, ToHumanString};
 
 use crate::{AnonymousSemverRange, Range, WorkspaceMagicRange, WorkspacePathRange, WorkspaceSemverRange};
 
@@ -114,3 +114,6 @@ impl ToHumanString for PeerRange {
         DataType::Custom(0, 175, 175).colorize(&self.to_file_string())
     }
 }
+
+impl_file_string_from_str!(PeerRange);
+impl_file_string_serialization!(PeerRange);

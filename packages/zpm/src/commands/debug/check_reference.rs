@@ -1,23 +1,22 @@
 use clipanion::cli;
-use zpm_utils::{FromFileString, ToFileString};
+use zpm_primitives::Reference;
+use zpm_utils::ToFileString;
 
-use crate::{error::Error, primitives::Reference};
+use crate::error::Error;
 
 #[cli::command(proxy)]
 #[cli::path("debug", "check-reference")]
 pub struct CheckReference {
-    reference: String,
+    reference: Reference,
 }
 
 impl CheckReference {
     pub fn execute(&self) -> Result<(), Error> {
-        let reference
-            = Reference::from_file_string(&self.reference)?;
         let stringified
-            = reference.to_file_string();
+            = self.reference.to_file_string();
 
         println!("{}", stringified);
-        println!("{:#?}", reference);
+        println!("{:#?}", self.reference);
 
         Ok(())
     }

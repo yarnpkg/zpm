@@ -6,8 +6,13 @@ use itertools::Itertools;
 use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Client, Method, RequestBuilder, Response, Url};
 use tokio::sync::{Mutex, broadcast};
 use wax::Program;
+use zpm_config::NetworkSettings;
 
-use crate::{config::Config, config_fields::{Glob, GlobField}, error::Error, settings::NetworkSettings};
+use crate::{
+    config::Config,
+    config_fields::{Glob, GlobField},
+    error::Error,
+};
 
 #[derive(Debug)]
 pub struct HttpConfig {
@@ -20,27 +25,20 @@ pub struct HttpConfig {
 }
 
 impl HttpConfig {
-    pub fn url_settings(&self, url: &Url) -> NetworkSettings {
-        let url_settings
-            = url.host_str()
-                .map(|host_str| {
-                    self.network_settings
-                        .iter()
-                        .fold(NetworkSettings::default(), |existing, (glob, settings)| {
-                            if glob.matcher().is_match(host_str) {
-                                NetworkSettings {
-                                    enable_network: existing.enable_network.or(settings.enable_network),
-                                }
-                            } else {
-                                existing
-                            }
-                        })
-                })
-                .unwrap_or_default();
+    pub fn is_network_enabled(&self, url: &Url) -> bool {
+        let Some(host_str) = url.host_str() else {
+            return false;
+        };
 
-        NetworkSettings {
-            enable_network: url_settings.enable_network.or(Some(self.enable_network)),
+        for (glob, settings) in &self.network_settings {
+            if let Some(enable_network) = settings.enable_network.value {
+                if glob.matcher().is_match(host_str) {
+                    return enable_network;
+                }
+            }
         }
+
+        self.enable_network
     }
 }
 
@@ -369,10 +367,7 @@ impl HttpClient {
             = Url::parse(url.as_ref())
                 .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
 
-        let url_settings
-            = self.config.url_settings(&url);
-
-        if url_settings.enable_network == Some(false) {
+        if !self.config.is_network_enabled(&url) {
             return Err(Error::NetworkDisabledError(url));
         }
 

@@ -1,23 +1,22 @@
 use clipanion::cli;
-use zpm_utils::{FromFileString, ToFileString};
+use zpm_primitives::Ident;
+use zpm_utils::ToFileString;
 
-use crate::{error::Error, primitives::Ident};
+use crate::error::Error;
 
 #[cli::command(proxy)]
 #[cli::path("debug", "check-ident")]
 pub struct CheckIdent {
-    ident: String,
+    ident: Ident,
 }
 
 impl CheckIdent {
     pub fn execute(&self) -> Result<(), Error> {
-        let ident
-            = Ident::from_file_string(&self.ident)?;
         let stringified
-            = ident.to_file_string();
+            = self.ident.to_file_string();
 
         println!("{}", stringified);
-        println!("{:#?}", ident);
+        println!("{:#?}", self.ident);
 
         Ok(())
     }

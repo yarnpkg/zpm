@@ -15,7 +15,7 @@ pub fn i(name: &str) -> Ident {
 }
 
 pub fn l(name: &str) -> Locator {
-    #[parse_enum]
+    #[zpm_enum]
     enum NamePattern {
         #[pattern(spec = r"(?<ident>.*)@(?<version>[0-9]+)")]
         Locator {

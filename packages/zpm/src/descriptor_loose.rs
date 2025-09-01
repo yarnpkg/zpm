@@ -1,23 +1,15 @@
 use std::collections::BTreeSet;
 
-use zpm_utils::Path;
 use bincode::{Decode, Encode};
-use colored::Colorize;
-use futures::future::BoxFuture;
-use futures::FutureExt;
+use futures::{future::BoxFuture, FutureExt};
 use wax::{Glob, Program};
-use zpm_formats::{tar, tar_iter, iter_ext::IterExt};
-use zpm_macros::parse_enum;
+use zpm_formats::{iter_ext::IterExt, tar, tar_iter};
+use zpm_macro_enum::zpm_enum;
+use zpm_primitives::{AnonymousSemverRange, AnonymousTagRange, Descriptor, FolderRange, Ident, Range, RegistrySemverRange, RegistryTagRange, TarballRange, WorkspaceMagicRange};
 use zpm_semver::RangeKind;
-use zpm_utils::{impl_serialization_traits, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString, ToHumanString};
 
-use crate::error::Error;
-use crate::install::InstallContext;
-use crate::manifest::helpers::{parse_manifest_from_bytes, read_manifest};
-use crate::resolvers;
-
-use super::range::{AnonymousSemverRange, AnonymousTagRange, FolderRange, RegistrySemverRange, RegistryTagRange, TarballRange, WorkspaceMagicRange};
-use super::{Ident, Range, Descriptor};
+use crate::{error::Error, install::InstallContext, manifest::helpers::{parse_manifest_from_bytes, read_manifest}, resolvers};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ResolveOptions {
@@ -141,9 +133,9 @@ impl LooseDescriptor {
 
                 let descriptor = Descriptor::new(
                     ident,
-                    Range::Tarball(TarballRange {
+                    TarballRange {
                         path: params.path.clone(),
-                    }),
+                    }.into(),
                 );
 
                 Ok(descriptor)
@@ -155,7 +147,6 @@ impl LooseDescriptor {
 
                 let manifest_path = path
                     .with_join_str("package.json");
-
                 let manifest
                     = read_manifest(&manifest_path)?;
 
@@ -164,9 +155,9 @@ impl LooseDescriptor {
 
                 let descriptor = Descriptor::new(
                     ident,
-                    Range::Folder(FolderRange {
+                    FolderRange {
                         path: params.path.clone(),
-                    }),
+                    }.into(),
                 );
 
                 Ok(descriptor)
@@ -179,10 +170,10 @@ impl LooseDescriptor {
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::AnonymousSemver(AnonymousSemverRange {range}), ..}}) => {
                 let descriptor = Descriptor::new(
                     ident.clone(),
-                    Range::RegistrySemver(RegistrySemverRange {
+                    RegistrySemverRange {
                         ident: None,
                         range: range.clone(),
-                    }),
+                    }.into(),
                 );
 
                 let Range::RegistrySemver(range_params) = &descriptor.range else {
@@ -192,9 +183,9 @@ impl LooseDescriptor {
                 let Some(range_kind) = range_params.range.kind() else {
                     return Ok(Descriptor::new(
                         ident.clone(),
-                        Range::AnonymousSemver(AnonymousSemverRange {
+                        AnonymousSemverRange {
                             range: range.clone(),
-                        }),
+                        }.into(),
                     ));
                 };
 
@@ -206,9 +197,9 @@ impl LooseDescriptor {
 
                 Ok(Descriptor::new(
                     ident.clone(),
-                    Range::AnonymousSemver(AnonymousSemverRange {
+                    AnonymousSemverRange {
                         range,
-                    }),
+                    }.into(),
                 ))
             }
 
@@ -216,18 +207,18 @@ impl LooseDescriptor {
                 if !options.resolve_tags {
                     return Ok(Descriptor::new(
                         ident.clone(),
-                        Range::AnonymousTag(AnonymousTagRange {
+                        AnonymousTagRange {
                             tag: tag.clone(),
-                        }),
+                        }.into(),
                     ));
                 }
 
                 let descriptor = Descriptor::new(
                     ident.clone(),
-                    Range::RegistryTag(RegistryTagRange {
+                    RegistryTagRange {
                         ident: None,
                         tag: tag.clone(),
-                    }),
+                    }.into(),
                 );
 
                 let Range::RegistryTag(range_params) = &descriptor.range else {
@@ -242,10 +233,10 @@ impl LooseDescriptor {
 
                 let descriptor = Descriptor::new(
                     ident.clone(),
-                    Range::RegistrySemver(RegistrySemverRange {
+                    RegistrySemverRange {
                         ident: None,
                         range: range.clone(),
-                    }),
+                    }.into(),
                 );
 
                 let Range::RegistrySemver(range_params) = &descriptor.range else {
@@ -292,22 +283,20 @@ impl LooseDescriptor {
                     .expect("Project is required for resolving loose identifiers");
 
                 if ident != &options.active_workspace_ident && project.workspace_by_ident(&ident).is_ok() {
-                    let range = Range::WorkspaceMagic(WorkspaceMagicRange {
-                        magic: options.range_kind,
-                    });
-
                     return Ok(Descriptor::new(
                         ident.clone(),
-                        range,
+                        WorkspaceMagicRange {
+                            magic: options.range_kind,
+                        }.into(),
                     ));
                 }
 
                 let descriptor = Descriptor::new(
                     ident.clone(),
-                    Range::RegistryTag(RegistryTagRange {
+                    RegistryTagRange {
                         ident: None,
                         tag: "latest".to_string(),
-                    }),
+                    }.into(),
                 );
 
                 let Range::RegistryTag(range_params) = &descriptor.range else {
@@ -342,17 +331,38 @@ impl Default for LooseDescriptor {
 impl ToFileString for LooseDescriptor {
     fn to_file_string(&self) -> String {
         match self {
-            LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor}) => descriptor.to_file_string(),
-            LooseDescriptor::Ident(IdentLooseDescriptor {ident}) => ident.to_file_string(),
-            LooseDescriptor::Range(RangeLooseDescriptor {range}) => range.to_file_string(),
+            LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor}) => {
+                descriptor.to_file_string()
+            },
+
+            LooseDescriptor::Ident(IdentLooseDescriptor {ident}) => {
+                ident.to_file_string()
+            },
+
+            LooseDescriptor::Range(RangeLooseDescriptor {range}) => {
+                range.to_file_string()
+            },
         }
     }
 }
 
 impl ToHumanString for LooseDescriptor {
     fn to_print_string(&self) -> String {
-        self.to_file_string().truecolor(0, 175, 175).to_string()
+        match self {
+            LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor}) => {
+                descriptor.to_print_string()
+            },
+
+            LooseDescriptor::Ident(IdentLooseDescriptor {ident}) => {
+                ident.to_print_string()
+            },
+
+            LooseDescriptor::Range(RangeLooseDescriptor {range}) => {
+                range.to_print_string()
+            },
+        }
     }
 }
 
-impl_serialization_traits!(LooseDescriptor);
+impl_file_string_from_str!(LooseDescriptor);
+impl_file_string_serialization!(LooseDescriptor);

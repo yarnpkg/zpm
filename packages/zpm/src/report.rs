@@ -3,10 +3,12 @@ use std::{cell::RefCell, future::Future, io::{self, Write}, sync::{mpsc, LazyLoc
 use colored::{Color, Colorize};
 use dialoguer::{Input, Password};
 use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
+use zpm_config::Configuration;
+use zpm_primitives::{Descriptor, Locator};
 use zpm_switch::get_bin_version;
 use zpm_utils::{Path, ToHumanString};
 
-use crate::{config::Config, error::Error, primitives::{Descriptor, Locator}};
+use crate::error::Error;
 
 const TOP_LEVEL_PREFIX: char = '·';
 
@@ -115,9 +117,9 @@ pub struct StreamReportConfig {
 }
 
 impl StreamReportConfig {
-    pub fn from_config(config: &Config) -> Self {
+    pub fn from_config(config: &Configuration) -> Self {
         Self {
-            enable_progress_bars: config.user.enable_progress_bars.value,
+            enable_progress_bars: config.settings.enable_progress_bars.value,
             enable_timers: true,
             include_version: false,
             silent_or_error: false,

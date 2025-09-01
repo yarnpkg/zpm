@@ -2,7 +2,7 @@ use std::hash::Hash;
 
 use bincode::{Decode, Encode};
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{impl_file_string_serialization, DataType, Hash64, Path, ToFileString, ToHumanString, UrlEncoded};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, Hash64, Path, ToFileString, ToHumanString, UrlEncoded};
 
 use super::{Ident, Locator};
 
@@ -266,4 +266,5 @@ impl ToHumanString for Reference {
     }
 }
 
+impl_file_string_from_str!(Reference);
 impl_file_string_serialization!(Reference);
