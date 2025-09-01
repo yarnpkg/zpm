@@ -90,8 +90,93 @@ impl<'a> YamlParser<'a> {
         }
     }
 
+    fn skip_char(&mut self, c: u8) -> bool {
+        if self.offset < self.input.len() && self.input[self.offset] == c {
+            self.offset += 1;
+            self.column += 1;
+
+            true
+        } else {
+            false
+        }
+    }
+
+    fn parse_quoted_key(&mut self, quote_char: u8) -> Result<Option<String>, Error> {
+        let mut key
+            = vec![];
+
+        let mut escaped
+            = false;
+
+        while self.offset < self.input.len() {
+            let mut is_escape
+                = false;
+
+            match self.input[self.offset] {
+                b'\n' => {
+                    self.offset += 1;
+                    self.column += 1;
+                    self.lines += 1;
+
+                    return Ok(None);
+                },
+
+                c if escaped => {
+                    self.offset += 1;
+                    self.column += 1;
+
+                    key.push(c);
+                },
+
+                b'\\' => {
+                    self.offset += 1;
+                    self.column += 1;
+
+                    is_escape = true;
+                },
+
+                c if c == quote_char => {
+                    self.offset += 1;
+                    self.column += 1;
+
+                    self.skip_whitespace();
+
+                    if self.skip_char(b':') {
+                        return Ok(Some(String::from_utf8(key)?));
+                    } else {
+                        return Ok(None);
+                    }
+                },
+
+                c => {
+                    self.offset += 1;
+                    self.column += 1;
+
+                    key.push(c);
+                },
+            }
+
+            escaped = is_escape;
+        }
+
+        Ok(None)
+    }
+
     fn parse_key(&mut self) -> Result<Option<String>, Error> {
-        let key_start = self.offset;
+        if self.offset < self.input.len() {
+            let quote_char
+                = self.input[self.offset];
+
+            if quote_char == b'"' || quote_char == b'\'' {
+                self.offset += 1;
+                self.column += 1;
+
+                return self.parse_quoted_key(quote_char);
+            }
+        }
+
+        let key_start
+            = self.offset;
 
         while self.offset < self.input.len() {
             match self.input[self.offset] {
@@ -358,6 +443,36 @@ mod tests {
                 node: Node {
                     offset: 0,
                     size: 11,
+                    indent: 0,
+                    column: 0,
+                    lines: 0,
+                },
+            },
+        ]);
+    }
+
+    #[test]
+    fn test_keys_containing_colons() {
+        let fields = YamlParser::new("\"foo:bar\": value\n".as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(fields, vec![
+            Field {
+                path: Path::from_segments(vec!["foo:bar".to_string()]),
+                node: Node {
+                    offset: 11,
+                    size: 5,
+                    indent: 0,
+                    column: 11,
+                    lines: 0,
+                },
+            },
+            Field {
+                path: Path::new(),
+                node: Node {
+                    offset: 0,
+                    size: 16,
                     indent: 0,
                     column: 0,
                     lines: 0,

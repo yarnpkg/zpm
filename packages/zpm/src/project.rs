@@ -106,6 +106,9 @@ impl Project {
     }
 
     pub async fn new(cwd: Option<Path>) -> Result<Project, Error> {
+        let user_cwd
+            = Path::home_dir()?;
+
         let shell_cwd = cwd
             .map(Ok)
             .unwrap_or_else(|| Path::current_dir())?;
@@ -116,8 +119,8 @@ impl Project {
         let config = Configuration::load(
             &ConfigurationContext {
                 env: std::env::vars().collect(),
-                user_cwd: Some(project_cwd.clone()),
-                project_cwd: Some(package_cwd.clone()),
+                user_cwd: user_cwd.clone(),
+                project_cwd: Some(project_cwd.clone()),
                 package_cwd: Some(package_cwd.clone()),
             },
         ).unwrap();
