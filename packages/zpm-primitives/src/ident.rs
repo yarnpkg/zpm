@@ -5,7 +5,7 @@ use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataT
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum IdentError {
-    #[error("Invalid ident: {0}")]
+    #[error("Invalixd ident: {0}")]
     SyntaxError(String),
 }
 

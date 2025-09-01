@@ -85,9 +85,9 @@ impl FromFileString for Locator {
     type Error = LocatorError;
 
     fn from_file_string(src: &str) -> Result<Self, Self::Error> {
-        let at_split = src.strip_suffix('@')
+        let at_split = src.strip_prefix('@')
             .map_or_else(|| src.find('@'), |rest| rest.find('@').map(|x| x + 1))
-            .ok_or(LocatorError::SyntaxError(src.to_string()))?;
+            .ok_or_else(|| LocatorError::SyntaxError(src.to_string()))?;
 
         let parent_marker
             = "::parent=";

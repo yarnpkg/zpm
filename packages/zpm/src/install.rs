@@ -801,7 +801,7 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
             for (dependency, range) in extension.dependencies.iter() {
                 if !dependencies.contains_key(dependency) {
-                    dependencies.insert(dependency.clone(), range.value.clone());
+                    dependencies.insert(dependency.clone(), Descriptor::new_bound(dependency.clone(), range.value.clone(), None));
                 }
             }
 
@@ -817,7 +817,7 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
             for (dependency, range) in extension.dependencies.iter() {
                 if !dependencies.contains_key(dependency) {
-                    dependencies.insert(dependency.clone(), range.value.clone());
+                    dependencies.insert(dependency.clone(), Descriptor::new_bound(dependency.clone(), range.value.clone(), None));
                 }
             }
 

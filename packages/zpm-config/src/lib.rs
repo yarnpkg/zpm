@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc};
 
 use serde::{de, Deserialize, Deserializer};
-use zpm_primitives::{Descriptor, PeerRange};
+use zpm_primitives::{Descriptor, Locator, PeerRange, Range, Reference};
 use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, Glob, Path, ToStringComplete};
 
@@ -613,7 +613,10 @@ merge_settings!(usize, |s: &str| s.parse().unwrap());
 
 merge_settings!(Descriptor, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(Glob, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(Locator, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(NodeLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(PeerRange, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(RangeKind, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(Range, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(Reference, |s: &str| FromFileString::from_file_string(s).unwrap());

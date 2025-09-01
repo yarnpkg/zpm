@@ -168,9 +168,9 @@ impl FromFileString for Descriptor {
     type Error = DescriptorError;
 
     fn from_file_string(src: &str) -> Result<Self, DescriptorError> {
-        let at_split = src.strip_suffix('@')
+        let at_split = src.strip_prefix('@')
             .map_or_else(|| src.find('@'), |rest| rest.find('@').map(|x| x + 1))
-            .ok_or(DescriptorError::SyntaxError(src.to_string()))?;
+            .ok_or_else(|| DescriptorError::SyntaxError(src.to_string()))?;
 
         let parent_marker
             = "::parent=";

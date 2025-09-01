@@ -216,7 +216,7 @@
               "type": "zpm_primitives::Ident"
             },
             "additionalProperties": {
-              "type": "zpm_primitives::Descriptor"
+              "type": "zpm_primitives::Range"
             }
           },
           "peerDependencies": {

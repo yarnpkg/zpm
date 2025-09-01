@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashSet}, io::ErrorKind, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, HashSet}, io::ErrorKind, sync::Arc, time::UNIX_EPOCH};
 
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext};
@@ -215,7 +215,11 @@ impl Project {
             return from_legacy_berry_lockfile(&src);
         }
 
-        Ok(sonic_rs::from_str(&src)?)
+        let lockfile
+            = sonic_rs::from_str::<Lockfile>(&src)
+                .map_err(|e| Error::LockfileParseError(Arc::new(e)))?;
+
+        Ok(lockfile)
     }
 
     pub fn import_install_state(&mut self) -> Result<&mut Self, Error> {

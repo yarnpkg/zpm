@@ -1,7 +1,6 @@
 use std::process::ExitCode;
 
 use clipanion::{prelude::*, program, Environment};
-use zpm_macros::track_time;
 use zpm_switch::{extract_bin_meta, BinMeta};
 
 mod debug;
@@ -30,6 +29,7 @@ mod workspace;
 program!(YarnCli, [
     debug::check_descriptor::CheckDescriptor,
     debug::check_ident::CheckIdent,
+    debug::check_locator::CheckLocator,
     debug::check_range::CheckRange,
     debug::check_reference::CheckReference,
     debug::check_semver_version::CheckSemverVersion,

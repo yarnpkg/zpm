@@ -289,7 +289,7 @@ impl Generator {
                 let type_
                     = &field.type_;
 
-                if field.type_.nullable {
+                if field.type_.nullable || matches!(field.type_.kind, InternalTypeKind::Map(_, _) | InternalTypeKind::Array(_)) {
                     writeln!(writer, "    #[serde(default)]").unwrap();
                 }
 

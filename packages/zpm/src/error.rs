@@ -180,7 +180,7 @@ pub enum Error {
     #[error("An error occured while reading the lockfile from disk")]
     LockfileReadError(Arc<std::io::Error>),
 
-    #[error("An error occured while parsing the lockfile ({0})")]
+    #[error("An error occured while parsing the lockfile: {0}")]
     LockfileParseError(Arc<sonic_rs::Error>),
 
     #[error("Can't perform this operation without a git root")]
