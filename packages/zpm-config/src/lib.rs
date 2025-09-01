@@ -5,6 +5,7 @@ use zpm_primitives::{Descriptor, PeerRange};
 use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, Glob, Path, ToStringComplete};
 
+#[derive(Debug, Clone)]
 pub struct ConfigurationContext {
     pub env: BTreeMap<String, String>,
     pub user_cwd: Option<Path>,
