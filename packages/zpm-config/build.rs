@@ -301,6 +301,46 @@ impl Generator {
             writeln!(writer, "impl MergeSettings for {name} {{").unwrap();
             writeln!(writer, "    type Intermediate = intermediate::{name};").unwrap();
             writeln!(writer).unwrap();
+            writeln!(writer, "    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {{").unwrap();
+            writeln!(writer, "        let Some(key_str) = path.first() else {{").unwrap();
+            writeln!(writer, "            unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
+            writeln!(writer, "        }};").unwrap();
+            writeln!(writer, "").unwrap();
+            writeln!(writer, "        match *key_str {{").unwrap();
+
+            for field in fields {
+                let name = &field.name;
+
+                let lc_snake_name
+                    = name.to_case(Case::Snake);
+
+                writeln!(writer, "            \"{name}\" => MergeSettings::hydrate(&self.{lc_snake_name}, &path[1..], value_str),").unwrap();
+            }
+
+            writeln!(writer, "            _ => Err(HydrateError::KeyNotFound(key_str.to_string())),").unwrap();
+            writeln!(writer, "        }}").unwrap();
+            writeln!(writer, "    }}").unwrap();
+            writeln!(writer).unwrap();
+            writeln!(writer, "    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {{").unwrap();
+            writeln!(writer, "        let Some(key_str) = path.first() else {{").unwrap();
+            writeln!(writer, "            unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
+            writeln!(writer, "        }};").unwrap();
+            writeln!(writer, "").unwrap();
+            writeln!(writer, "        match *key_str {{").unwrap();
+
+            for field in fields {
+                let name = &field.name;
+
+                let lc_snake_name
+                    = name.to_case(Case::Snake);
+
+                writeln!(writer, "            \"{name}\" => MergeSettings::get(&self.{lc_snake_name}, &path[1..]),").unwrap();
+            }
+
+            writeln!(writer, "            _ => Err(GetError::KeyNotFound(key_str.to_string())),").unwrap();
+            writeln!(writer, "        }}").unwrap();
+            writeln!(writer, "    }}").unwrap();
+            writeln!(writer).unwrap();
             writeln!(writer, "    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {{").unwrap();
             writeln!(writer, "        let user = user.unwrap_or_default();").unwrap();
             writeln!(writer, "        let project = project.unwrap_or_default();").unwrap();

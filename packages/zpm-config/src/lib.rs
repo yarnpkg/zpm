@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, fmt::Display, ops::Deref};
+use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc};
 
 use serde::{de, Deserialize, Deserializer};
 use zpm_primitives::{Descriptor, PeerRange};
 use zpm_semver::RangeKind;
-use zpm_utils::{FromFileString, Glob, Path, ToFileString};
+use zpm_utils::{FromFileString, Glob, Path, ToStringComplete};
 
 pub struct ConfigurationContext {
     pub env: BTreeMap<String, String>,
@@ -127,8 +127,19 @@ impl<'de, T: FromFileString + Deserialize<'de>> Deserialize<'de> for Interpolate
     }
 }
 
-trait MergeSettings {
+trait MergeSettings where Self: Sized {
     type Intermediate;
+
+    fn hydrate(
+        &self,
+        path: &[&str],
+        value_str: &str,
+    ) -> Result<Box<dyn ToStringComplete>, HydrateError>;
+
+    fn get(
+        &self,
+        path: &[&str],
+    ) -> Result<ConfigurationEntry, GetError>;
 
     fn merge<F: Fn() -> Self>(
         context: &ConfigurationContext,
@@ -139,8 +150,40 @@ trait MergeSettings {
     ) -> Self;
 }
 
-impl<K: Ord + ToFileString, T: MergeSettings> MergeSettings for BTreeMap<K, T> {
+impl<K: Ord + FromFileString + ToStringComplete, T: MergeSettings> MergeSettings for BTreeMap<K, T> {
     type Intermediate = BTreeMap<K, T::Intermediate>;
+
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+        let Some(key_str) = path.first() else {
+            unimplemented!("Configuration maps cannot be returned directly just yet");
+        };
+
+        let Ok(key) = K::from_file_string(key_str) else {
+            return Err(HydrateError::InvalidKey(key_str.to_string()));
+        };
+
+        let Some(entry) = self.get(&key) else {
+            return Err(HydrateError::KeyNotFound(key_str.to_string()));
+        };
+
+        entry.hydrate(&path[1..], value_str)
+    }
+
+    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+        let Some(key_str) = path.first() else {
+            unimplemented!("Configuration maps cannot be returned directly just yet");
+        };
+
+        let Ok(key) = K::from_file_string(key_str) else {
+            return Err(GetError::InvalidKey(key_str.to_string()));
+        };
+
+        let Some(entry) = self.get(&key) else {
+            return Err(GetError::KeyNotFound(key_str.to_string()));
+        };
+
+        entry.get(&path[1..])
+    }
 
     fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
         let mut join
@@ -186,6 +229,38 @@ impl<K: Ord + ToFileString, T: MergeSettings> MergeSettings for BTreeMap<K, T> {
 impl<T: MergeSettings> MergeSettings for Vec<T> {
     type Intermediate = Vec<T::Intermediate>;
 
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+        let Some(key_str) = path.first() else {
+            unimplemented!("Configuration maps cannot be returned directly just yet");
+        };
+
+        let Ok(key) = usize::from_file_string(key_str) else {
+            return Err(HydrateError::InvalidKey(key_str.to_string()));
+        };
+
+        if key >= self.len() {
+            return Err(HydrateError::KeyNotFound(key_str.to_string()));
+        };
+
+        self[key].hydrate(&path[1..], value_str)
+    }
+
+    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+        let Some(key_str) = path.first() else {
+            unimplemented!("Configuration maps cannot be returned directly just yet");
+        };
+
+        let Ok(key) = usize::from_file_string(key_str) else {
+            return Err(GetError::InvalidKey(key_str.to_string()));
+        };
+
+        if key >= self.len() {
+            return Err(GetError::KeyNotFound(key_str.to_string()));
+        };
+
+        self[key].get(&path[1..])
+    }
+
     fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, _prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
         let mut result
             = Vec::new();
@@ -220,6 +295,29 @@ impl<T: MergeSettings> MergeSettings for Vec<T> {
 
 impl MergeSettings for Setting<Path> {
     type Intermediate = Interpolated<Path>;
+
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+        if let Some(key) = path.first() {
+            return Err(HydrateError::KeyNotFound(key.to_string()));
+        }
+
+        let value
+            = Path::from_file_string(value_str)
+                .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
+
+        Ok(Box::new(value))
+    }
+
+    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+        if let Some(key) = path.first() {
+            return Err(GetError::KeyNotFound(key.to_string()));
+        }
+
+        Ok(ConfigurationEntry {
+            value: Box::new(self.value.clone()),
+            source: self.source,
+        })
+    }
 
     fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
         if let Some(key) = prefix {
@@ -276,6 +374,29 @@ macro_rules! merge_settings_impl {
         impl MergeSettings for Setting<$type> {
             type Intermediate = Interpolated<$type>;
 
+            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+                if let Some(key) = path.first() {
+                    return Err(HydrateError::KeyNotFound(key.to_string()));
+                }
+
+                let value
+                    = <$type as FromFileString>::from_file_string(value_str)
+                        .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
+
+                Ok(Box::new(value))
+            }
+
+            fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+                if let Some(key) = path.first() {
+                    return Err(GetError::KeyNotFound(key.to_string()));
+                }
+
+                Ok(ConfigurationEntry {
+                    value: Box::new(self.value.clone()),
+                    source: self.source,
+                })
+            }
+
             fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, key: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
                 if let Some(key) = key {
                     if let Some(value) = context.env.get(key) {
@@ -306,6 +427,29 @@ macro_rules! merge_settings_impl {
 
         impl MergeSettings for Setting<Option<$type>> {
             type Intermediate = Option<Interpolated<$type>>;
+
+            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+                if let Some(key) = path.first() {
+                    return Err(HydrateError::KeyNotFound(key.to_string()));
+                }
+
+                let value
+                    = <Option<$type> as FromFileString>::from_file_string(value_str)
+                        .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
+
+                Ok(Box::new(value))
+            }
+
+            fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+                if !path.is_empty() {
+                    return Err(GetError::KeyNotFound(path.join(".").to_string()));
+                }
+
+                Ok(ConfigurationEntry {
+                    value: Box::new(self.value.clone()),
+                    source: self.source,
+                })
+            }
 
             fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
                 if let Partial::Value(user) = user {
@@ -360,16 +504,56 @@ pub struct Configuration {
     pub project_config_path: Option<Path>,
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum ConfigurationError {
     #[error(transparent)]
     PathError(#[from] zpm_utils::PathError),
 
     #[error(transparent)]
-    SerdeError(#[from] serde_yaml::Error),
+    SerdeError(#[from] Arc<serde_yaml::Error>),
+}
+
+impl From<serde_yaml::Error> for ConfigurationError {
+    fn from(error: serde_yaml::Error) -> Self {
+        ConfigurationError::SerdeError(Arc::new(error))
+    }
+}
+
+pub struct ConfigurationEntry {
+    pub value: Box<dyn ToStringComplete>,
+    pub source: Source,
+}
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum GetError {
+    #[error("Configuration key not found ({0})")]
+    KeyNotFound(String),
+
+    #[error("Invalid configuration key ({0})")]
+    InvalidKey(String),
+}
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum HydrateError {
+    #[error("Configuration key not found ({0})")]
+    KeyNotFound(String),
+
+    #[error("Invalid configuration key ({0})")]
+    InvalidKey(String),
+
+    #[error("Invalid configuration value ({0})")]
+    InvalidValue(String),
 }
 
 impl Configuration {
+    pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+        self.settings.hydrate(path, value_str)
+    }
+
+    pub fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+        self.settings.get(path)
+    }
+
     pub fn load(context: &ConfigurationContext) -> Result<Configuration, ConfigurationError> {
         let user_config_path = context.user_cwd
             .as_ref()

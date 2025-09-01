@@ -1,5 +1,5 @@
 use serde::{Deserialize, Deserializer};
-use zpm_utils::FromFileString;
+use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeLinker {
@@ -27,6 +27,27 @@ impl FromFileString for NodeLinker {
     }
 }
 
+impl ToFileString for NodeLinker {
+    fn to_file_string(&self) -> String {
+        match self {
+            NodeLinker::Pnp
+                => "pnp".to_string(),
+
+            NodeLinker::Pnpm
+                => "pnpm".to_string(),
+
+            NodeLinker::NodeModules
+                => "node-modules".to_string(),
+        }
+    }
+}
+
+impl ToHumanString for NodeLinker {
+    fn to_print_string(&self) -> String {
+        self.to_file_string()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PnpFallbackMode {
     None,
@@ -50,5 +71,21 @@ impl FromFileString for PnpFallbackMode {
             "all" => Ok(Self::All),
             _ => Err(format!("Invalid PnP fallback mode: {}", s)),
         }
+    }
+}
+
+impl ToFileString for PnpFallbackMode {
+    fn to_file_string(&self) -> String {
+        match self {
+            PnpFallbackMode::None => "none".to_string(),
+            PnpFallbackMode::DependenciesOnly => "dependencies-only".to_string(),
+            PnpFallbackMode::All => "all".to_string(),
+        }
+    }
+}
+
+impl ToHumanString for PnpFallbackMode {
+    fn to_print_string(&self) -> String {
+        self.to_file_string()
     }
 }

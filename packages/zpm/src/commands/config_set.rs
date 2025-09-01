@@ -1,7 +1,9 @@
 use clipanion::cli;
-use convert_case::{Case, Casing};
 
-use crate::{error::Error, project::Project, settings::{ProjectConfigType, UserConfigType}};
+use crate::{
+    error::Error,
+    project::Project,
+};
 
 #[cli::command]
 #[cli::path("config", "set")]
@@ -11,7 +13,7 @@ pub struct ConfigSet {
     #[cli::option("-U,--user")]
     user: bool,
 
-    name: String,
+    name: zpm_parsers::path::Path,
     value: String,
 }
 
@@ -21,20 +23,14 @@ impl ConfigSet {
         let project
             = Project::new(None).await?;
 
-        let snake_case
-            = self.name.to_case(Case::Snake);
+        let segments
+            = self.name.segments()
+                .iter()
+                .map(|v| v.as_str())
+                .collect::<Vec<_>>();
 
-        if self.user {
-            let hydrated_value
-                = UserConfigType::from_file_string(&snake_case, &self.value)?;
-
-            project.config.user.set(&snake_case, hydrated_value)?;
-        } else {
-            let hydrated_value
-                = ProjectConfigType::from_file_string(&snake_case, &self.value)?;
-
-            project.config.project.set(&snake_case, hydrated_value)?;
-        }
+        let value
+            = project.config.hydrate(&segments, &self.value)?;
 
         Ok(())
     }

@@ -24,6 +24,12 @@ pub trait ToHumanString {
     fn to_print_string(&self) -> String;
 }
 
+pub trait ToStringComplete: ToFileString + ToHumanString {
+}
+
+impl<T: ToFileString + ToHumanString> ToStringComplete for T {
+}
+
 impl<T: FromFileString> FromFileString for Box<T> {
     type Error = <T as FromFileString>::Error;
 
@@ -132,7 +138,23 @@ impl<T: FromFileString> FromFileString for Option<T> {
     type Error = <T as FromFileString>::Error;
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        if s == "null" {
+            return Ok(None);
+        }
+
         Ok(Some(T::from_file_string(s)?))
+    }
+}
+
+impl<T: ToFileString> ToFileString for Option<T> {
+    fn to_file_string(&self) -> String {
+        "null".to_string()
+    }
+}
+
+impl<T: ToFileString> ToHumanString for Option<T> {
+    fn to_print_string(&self) -> String {
+        self.to_file_string()
     }
 }
 
