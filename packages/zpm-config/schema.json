@@ -9,7 +9,7 @@
     "defaultSemverRangePrefix": {
       "type": "zpm_semver::RangeKind",
       "description": "The default semver range prefix to use for dependencies",
-      "default": "Caret"
+      "default": "caret"
     },
     "enableAutoTypes": {
       "type": "boolean",
@@ -180,7 +180,7 @@
     "pnpFallbackMode": {
       "type": "crate::PnpFallbackMode",
       "description": "The fallback mode to use for PnP",
-      "default": "DependenciesOnly"
+      "default": "dependencies-only"
     },
     "pnpIgnorePatterns": {
       "type": "array",
