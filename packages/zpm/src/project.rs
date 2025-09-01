@@ -1,7 +1,7 @@
 use std::{collections::{BTreeMap, HashSet}, io::ErrorKind, time::UNIX_EPOCH};
 
 use globset::{GlobBuilder, GlobSetBuilder};
-use zpm_config::Configuration;
+use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::{Descriptor, Ident, Locator, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString};
@@ -10,7 +10,6 @@ use zpm_formats::zip::ZipSupport;
 
 use crate::{
     cache::{CompositeCache, DiskCache},
-    config::Config,
     diff_finder::SaveEntry,
     error::Error,
     http::HttpClient,
@@ -114,10 +113,14 @@ impl Project {
         let (project_cwd, package_cwd)
             = Project::find_closest_project(shell_cwd.clone())?;
 
-        let config = Config::new(
-            Some(project_cwd.clone()),
-            Some(package_cwd.clone()),
-        )?;
+        let config = Configuration::load(
+            &ConfigurationContext {
+                env: std::env::vars().collect(),
+                user_cwd: Some(project_cwd.clone()),
+                project_cwd: Some(package_cwd.clone()),
+                package_cwd: Some(package_cwd.clone()),
+            },
+        ).unwrap();
 
         let root_workspace
             = Workspace::from_root_path(&project_cwd)?;

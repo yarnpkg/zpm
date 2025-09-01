@@ -2,7 +2,7 @@ use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sy
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
-use zpm_primitives::{Descriptor, Ident, Locator, PatchRange, PeerRange, Range, RegistrySemverRange, RegistryTagRange};
+use zpm_primitives::{Descriptor, Ident, Locator, PatchRange, PeerRange, Range, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange};
 use zpm_utils::{Hash64, Path, ToHumanString, UrlEncoded};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -797,17 +797,17 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     let mut peer_dependencies
         = resolution.peer_dependencies.clone();
 
-    for (descriptor, extension) in project.config.settings.package_extensions.value.iter() {
+    for (descriptor, extension) in project.config.settings.package_extensions.iter() {
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
             for (dependency, range) in extension.dependencies.iter() {
                 if !dependencies.contains_key(dependency) {
-                    dependencies.insert(dependency.clone(), range.clone());
+                    dependencies.insert(dependency.clone(), range.value.clone());
                 }
             }
 
             for (peer_dependency, range) in extension.peer_dependencies.iter() {
                 if !peer_dependencies.contains_key(peer_dependency) {
-                    peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                    peer_dependencies.insert(peer_dependency.clone(), range.value.clone());
                 }
             }
         }
@@ -817,13 +817,13 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
             for (dependency, range) in extension.dependencies.iter() {
                 if !dependencies.contains_key(dependency) {
-                    dependencies.insert(dependency.clone(), range.clone());
+                    dependencies.insert(dependency.clone(), range.value.clone());
                 }
             }
 
             for (peer_dependency, range) in extension.peer_dependencies.iter() {
                 if !peer_dependencies.contains_key(peer_dependency) {
-                    peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                    peer_dependencies.insert(peer_dependency.clone(), range.value.clone());
                 }
             }
         }
@@ -843,7 +843,7 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
 
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
         peer_dependencies.entry(name.type_ident())
-            .or_insert(range::SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}.into());
+            .or_insert(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}.into());
     }
 
     (dependencies, peer_dependencies)

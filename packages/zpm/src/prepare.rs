@@ -1,20 +1,14 @@
 use std::str::FromStr;
 
 use itertools::Itertools;
+use zpm_git::PrepareParams;
 use zpm_primitives::Locator;
 use zpm_utils::{Path, ToFileString};
-use bincode::{Decode, Encode};
 
 use crate::{
     error::Error,
     script::ScriptEnvironment,
 };
-
-#[derive(Clone, Default, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PrepareParams {
-    pub cwd: Option<String>,
-    pub workspace: Option<String>,
-}
 
 #[derive(Debug)]
 enum PackageManager {

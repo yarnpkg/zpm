@@ -79,6 +79,9 @@
     "networkSettings": {
       "type": "object",
       "description": "Configuration specific to each network setting",
+      "additionalKeys": {
+        "type": "zpm_utils::Glob"
+      },
       "additionalProperties": {
         "type": "object",
         "title": "NetworkSettings",
@@ -183,7 +186,7 @@
       "type": "array",
       "description": "The patterns to ignore when using PnP",
       "items": {
-        "type": "crate::Glob"
+        "type": "zpm_utils::Glob"
       }
     },
     "pnpShebang": {
@@ -192,13 +195,16 @@
       "default": "#!/usr/bin/env node"
     },
     "pnpmStoreFolder": {
-      "type": "zpm_utils::Path",
+      "type": "string",
       "description": "The folder to use for the Pnpm store",
       "default": "node_modules/.store"
     },
     "packageExtensions": {
       "type": "object",
       "description": "Configuration specific to each package extension",
+      "additionalKeys": {
+        "type": "zpm_primitives::SemverDescriptor"
+      },
       "additionalProperties": {
         "type": "object",
         "title": "PackageExtension",
@@ -206,6 +212,9 @@
           "dependencies": {
             "type": "object",
             "description": "The dependencies to add to the package extension",
+            "additionalKeys": {
+              "type": "zpm_primitives::Ident"
+            },
             "additionalProperties": {
               "type": "zpm_primitives::Descriptor"
             }
@@ -213,6 +222,9 @@
           "peerDependencies": {
             "type": "object",
             "description": "The peer dependencies to add to the package extension",
+            "additionalKeys": {
+              "type": "zpm_primitives::Ident"
+            },
             "additionalProperties": {
               "type": "zpm_primitives::PeerRange"
             }
@@ -224,7 +236,7 @@
       "type": "array",
       "description": "The patterns to whitelist when using unsafe HTTP",
       "items": {
-        "type": "crate::Glob"
+        "type": "zpm_utils::Glob"
       }
     },
     "virtualFolder": {

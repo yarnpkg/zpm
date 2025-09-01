@@ -10,7 +10,7 @@ mod treeish;
 
 pub use crate::{
     error::Error,
-    range::GitRange,
+    range::{GitRange, PrepareParams},
     reference::GitReference,
     source::GitSource,
     treeish::GitTreeish,

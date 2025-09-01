@@ -1,63 +1,38 @@
-use std::{collections::BTreeMap, fmt::{self, Display, Formatter}, future::Future, sync::LazyLock};
+use std::{collections::BTreeMap, sync::LazyLock};
 
 use git_url_parse::GitUrl;
 use reqwest::Url;
-use zpm_utils::Path;
-use bincode::{Decode, Encode};
-use colored::Colorize;
+use zpm_git::{GitRange, GitSource, GitTreeish};
+use zpm_primitives::AnonymousSemverRange;
+use zpm_utils::{repeat_until_ok, Path};
 use fancy_regex::Regex;
-use serde::{Deserialize, Serialize};
-use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::FromFileString;
 
-use crate::{error::Error, github, http::HttpConfig, install::InstallContext, prepare::PrepareParams, primitives::range::AnonymousSemverRange, script::ScriptEnvironment};
+use crate::{
+    error::Error,
+    github,
+    http::HttpConfig,
+    install::InstallContext,
+    script::ScriptEnvironment,
+};
 
 static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
 
-
-
-
-impl_serialization_traits!(GitReference);
-
-
-// Iterate over the values of the parameter; return the first result that succeeds, or the last error.
-async fn repeat_until_ok<I, T, E, A, F>(values: Vec<I>, f: F) -> Result<T, E>
-    where A: Future<Output = Result<T, E>>, F: Fn(I) -> A,
-{
-    let mut last_error = None;
-
-    for value in values {
-        let result
-            = f(value).await;
-
-        match result {
-            Ok(value) => {
-                return Ok(value);
-            },
-
-            Err(error) => {
-                last_error = Some(error);
-            },
-        }
-    }
-
-    Err(last_error.unwrap())
-}
-
 fn validate_repo_url(url: &str, config: &HttpConfig) -> Result<(), Error> {
-    let git_url = GitUrl::parse(url)
-        .map_err(|_| Error::InvalidGitUrl(url.to_owned()))?;
+    let git_url
+        = GitUrl::parse(url)
+            .map_err(|_| Error::InvalidGitUrl(url.to_owned()))?;
 
     let Some(host) = git_url.host else {
         return Ok(());
     };
 
-    let url = format!("https://{}", host);
-
+    let url
+        = format!("https://{}", host);
     let url = Url::parse(&url)
         .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
 
-    let url_settings = config.url_settings(&url);
-    if url_settings.enable_network == Some(false) {
+    if !config.is_network_enabled(&url) {
         return Err(Error::NetworkDisabledError(url));
     }
 

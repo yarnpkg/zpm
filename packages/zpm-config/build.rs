@@ -19,7 +19,7 @@ enum Type {
 enum InternalTypeKind {
     Native(String),
     Array(Box<InternalType>),
-    Map(Box<InternalType>),
+    Map(Box<InternalType>, Box<InternalType>),
     Struct(String),
 }
 
@@ -33,11 +33,20 @@ impl InternalType {
         Self {kind, nullable}
     }
 
+    fn to_raw_type_string(&self) -> String {
+        match &self.kind {
+            InternalTypeKind::Native(name) => name.clone(),
+            InternalTypeKind::Array(inner) => format!("Vec<{}>", inner.to_raw_type_string()),
+            InternalTypeKind::Map(key, values) => format!("BTreeMap<{}, {}>", key.to_raw_type_string(), values.to_raw_type_string()),
+            InternalTypeKind::Struct(name) => name.clone(),
+        }
+    }
+
     fn to_intermediate_type_string(&self) -> String {
         let kind = match &self.kind {
             InternalTypeKind::Native(name) => name,
             InternalTypeKind::Array(inner) => &format!("Vec<{}>", inner.to_intermediate_type_string()),
-            InternalTypeKind::Map(inner) => &format!("BTreeMap<String, {}>", inner.to_intermediate_type_string()),
+            InternalTypeKind::Map(key, values) => &format!("BTreeMap<{}, {}>", key.to_raw_type_string(), values.to_intermediate_type_string()),
             InternalTypeKind::Struct(name) => &name,
         };
 
@@ -58,7 +67,7 @@ impl InternalType {
         let kind = match &self.kind {
             InternalTypeKind::Native(name) => &name,
             InternalTypeKind::Array(inner) => &format!("Vec<{}>", inner.to_type_string()),
-            InternalTypeKind::Map(inner) => &format!("BTreeMap<String, {}>", inner.to_type_string()),
+            InternalTypeKind::Map(key, values) => &format!("BTreeMap<{}, {}>", key.to_raw_type_string(), values.to_type_string()),
             InternalTypeKind::Struct(name) => &name,
         };
 
@@ -94,6 +103,7 @@ struct Field {
     title: Option<String>,
     default: Option<Expression>,
     properties: Option<BTreeMap<String, Field>>,
+    additional_keys: Option<Box<Field>>,
     additional_properties: Option<Box<Field>>,
     items: Option<Box<Field>>,
 }
@@ -142,7 +152,11 @@ impl Field {
             }
         }
 
-        if let InternalTypeKind::Map(_) = &type_.kind {
+        if let InternalTypeKind::Map(_, _) = &type_.kind {
+            if let Some(additional_key) = &self.additional_keys {
+                additional_key.send_to(generator);
+            }
+
             if let Some(additional_property) = &self.additional_properties {
                 additional_property.send_to(generator);
             }
@@ -184,7 +198,15 @@ impl Field {
 
             Type::Object => match (self.properties.as_ref(), self.additional_properties.as_ref()) {
                 (None, Some(additional_properties)) => {
-                    InternalType::new(InternalTypeKind::Map(Box::new(additional_properties.get_type())), is_nullable)
+                    let additional_key_type = self.additional_keys.as_ref().map_or_else(
+                        || InternalType::new(InternalTypeKind::Native("String".to_string()), false),
+                        |additional_keys| additional_keys.get_type(),
+                    );
+
+                    InternalType::new(InternalTypeKind::Map(
+                        Box::new(additional_key_type),
+                        Box::new(additional_properties.get_type())
+                    ), is_nullable)
                 },
 
                 (Some(_), None) => {
@@ -258,7 +280,7 @@ impl Generator {
 
         for (name, fields) in &self.structs {
             writeln!(writer).unwrap();
-            writeln!(writer, "#[derive(Debug)]").unwrap();
+            writeln!(writer, "#[derive(Debug, Clone, Deserialize)]").unwrap();
             writeln!(writer, "pub struct {name} {{").unwrap();
 
             for field in fields {
@@ -266,6 +288,10 @@ impl Generator {
                     = field.name.to_case(Case::Snake);
                 let type_
                     = &field.type_;
+
+                if field.type_.nullable {
+                    writeln!(writer, "    #[serde(default)]").unwrap();
+                }
 
                 writeln!(writer, "    pub {lc_snake_name}: {},", type_.to_type_string()).unwrap();
             }
@@ -275,7 +301,7 @@ impl Generator {
             writeln!(writer, "impl MergeSettings for {name} {{").unwrap();
             writeln!(writer, "    type Intermediate = intermediate::{name};").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "    fn merge<F: FnOnce() -> Self>(context: &Context, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {{").unwrap();
+            writeln!(writer, "    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {{").unwrap();
             writeln!(writer, "        let user = user.unwrap_or_default();").unwrap();
             writeln!(writer, "        let project = project.unwrap_or_default();").unwrap();
             writeln!(writer).unwrap();

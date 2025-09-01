@@ -1,10 +1,17 @@
 use std::sync::Arc;
 
-use crate::{error::Error, install::{FetchResult, InstallContext}, manifest::Manifest, primitives::{reference, Locator}, resolvers::Resolution};
+use zpm_primitives::{Locator, UrlReference};
+
+use crate::{
+    error::Error,
+    install::{FetchResult, InstallContext},
+    manifest::Manifest,
+    resolvers::Resolution,
+};
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::UrlReference) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &UrlReference) -> Result<FetchResult, Error> {
     let project = context.project
         .expect("The project is required for fetching URL packages");
 

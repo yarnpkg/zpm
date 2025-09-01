@@ -6,38 +6,6 @@ use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataT
 
 use crate::{AnonymousSemverRange, Range, WorkspaceMagicRange, WorkspacePathRange, WorkspaceSemverRange};
 
-// #[zpm_enum(or_else = |s| Err(Error::InvalidIdentOrLocator(s.to_string())))]
-// #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-// #[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-// pub enum PackageSelector {
-//     #[pattern(spec = "(?<ident>@?[^@]+)")]
-//     Ident {
-//         ident: Ident,
-//     },
-
-//     #[pattern(spec = "(?<ident>@?[^@]+)@(?<range>.*)")]
-//     Range {
-//         ident: Ident,
-//         range: zpm_semver::Range,
-//     },
-// }
-
-// impl PackageSelector {
-//     pub fn ident(&self) -> &Ident {
-//         match self {
-//             PackageSelector::Ident(params) => &params.ident,
-//             PackageSelector::Range(params) => &params.ident,
-//         }
-//     }
-// }
-
-// impl<'de> Deserialize<'de> for PackageSelector {
-//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
-//         let s = String::deserialize(deserializer)?;
-//         PackageSelector::from_file_string(&s).map_err(serde::de::Error::custom)
-//     }
-// }
-
 type Error = Infallible;
 
 #[zpm_enum(or_else = |_| Ok(PeerRange::Semver(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()})))]

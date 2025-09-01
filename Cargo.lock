@@ -4007,6 +4007,7 @@ dependencies = [
  "zpm-ci",
  "zpm-config",
  "zpm-formats",
+ "zpm-git",
  "zpm-macro-enum",
  "zpm-macros",
  "zpm-parsers",
@@ -4028,14 +4029,12 @@ name = "zpm-config"
 version = "6.0.0-alpha.0"
 dependencies = [
  "convert_case 0.8.0",
- "ouroboros",
  "serde",
  "serde_with",
  "serde_yaml",
  "shellexpand",
  "sonic-rs",
  "thiserror 2.0.16",
- "wax",
  "zpm-ci",
  "zpm-primitives",
  "zpm-semver",
@@ -4185,6 +4184,7 @@ dependencies = [
  "colored 3.0.0",
  "hex",
  "napi",
+ "ouroboros",
  "path-slash",
  "radix_trie",
  "serde",
@@ -4196,4 +4196,5 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "urlencoding",
+ "wax",
 ]

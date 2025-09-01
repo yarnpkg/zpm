@@ -1,9 +1,12 @@
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Deserializer};
-use zpm_macros::parse_enum;
-use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
+use zpm_macro_enum::zpm_enum;
+use zpm_primitives::{Descriptor, Ident, Locator, Range};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, primitives::{Descriptor, Ident, Locator, Range}};
+use crate::{
+    error::Error,
+};
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidResolution(s.to_string())))]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode)]
@@ -119,7 +122,8 @@ impl ToHumanString for ResolutionSelector {
     }
 }
 
-impl_serialization_traits!(ResolutionSelector);
+impl_file_string_from_str!(ResolutionSelector);
+impl_file_string_serialization!(ResolutionSelector);
 
 use serde::{ser::SerializeMap, Serialize, Serializer};
 use serde::de::{self, Visitor, MapAccess};

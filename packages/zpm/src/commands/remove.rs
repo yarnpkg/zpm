@@ -2,10 +2,15 @@ use std::collections::HashSet;
 
 use clipanion::cli;
 use wax::{Glob, Program};
+use zpm_config::Configuration;
 use zpm_parsers::JsonFormatter;
+use zpm_primitives::Ident;
 use zpm_utils::ToFileString;
 
-use crate::{config::Config, error::Error, primitives::Ident, project::{InstallMode, Project, RunInstallOptions, Workspace}};
+use crate::{
+    error::Error,
+    project::{InstallMode, Project, RunInstallOptions, Workspace},
+};
 
 #[cli::command]
 #[cli::path("remove")]
@@ -58,7 +63,7 @@ impl Remove {
         Ok(())
     }
 
-    fn remove_dependencies_from_manifest(&self, config: &Config, workspace: &Workspace, ident_globs: &[Glob]) -> Result<(), Error> {
+    fn remove_dependencies_from_manifest(&self, config: &Configuration, workspace: &Workspace, ident_globs: &[Glob]) -> Result<(), Error> {
         let all_dependencies = workspace.manifest.remote.dependencies.keys()
             .chain(workspace.manifest.remote.optional_dependencies.keys())
             .chain(workspace.manifest.remote.peer_dependencies.keys())
@@ -70,7 +75,7 @@ impl Remove {
             .cloned()
             .collect::<Vec<_>>();
 
-        if config.project.enable_auto_types.value {
+        if config.settings.enable_auto_types.value {
             removed_dependencies = removed_dependencies.into_iter()
                 .flat_map(|ident| vec![ident.type_ident(), ident])
                 .collect::<Vec<_>>();

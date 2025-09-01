@@ -509,7 +509,6 @@ impl ScriptEnvironment {
         Ok(dir)
     }
 
-    #[track_time]
     pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
         let mut cmd
             = Command::new(program);

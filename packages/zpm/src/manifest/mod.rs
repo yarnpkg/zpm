@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use browser::BrowserField;
 use serde_with::{serde_as, DefaultOnError};
+use zpm_primitives::{Descriptor, Ident, PeerRange, descriptor_map_deserializer, descriptor_map_serializer};
 use zpm_switch::PackageManagerField;
 use zpm_utils::Path;
 use bin::BinField;
@@ -11,7 +12,9 @@ use imports::ImportsField;
 use resolutions::ResolutionsField;
 use serde::{Deserialize, Serialize};
 
-use crate::{primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, Descriptor, Ident, PeerRange}, system};
+use crate::{
+    system,
+};
 
 pub mod bin;
 pub mod browser;

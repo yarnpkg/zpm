@@ -1,9 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use itertools::{Either, Itertools};
+use zpm_primitives::{Ident, Locator};
 use zpm_utils::ToHumanString;
 
-use crate::{algos, install::InstallState, primitives::{Ident, Locator}, project::Project, ui};
+use crate::{
+    algos,
+    install::InstallState,
+    project::Project,
+    ui,
+};
 
 #[derive(Debug, Clone)]
 pub struct InputNode {
@@ -35,7 +41,7 @@ impl InputTree {
 
     #[cfg(test)]
     pub fn from_test_tree(spec: BTreeMap<Locator, Vec<Locator>>) -> Self {
-        use crate::primitives::testing::l;
+        use zpm_primitives::testing::l;
 
         let mut node_map
             = BTreeMap::new();
@@ -717,7 +723,7 @@ impl<'a> Hoister<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{primitives::testing::{i, l}, dependency_map};
+    use zpm_primitives::{testing::{i, l}, dependency_map};
 
     use super::*;
 

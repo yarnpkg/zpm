@@ -4,15 +4,21 @@ use zpm_utils::{IoResultExt, ToHumanString};
 use crate::{build::{self, BuildRequests}, error::Error, fetchers::PackageData, install::Install, linker, project::Project};
 
 pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut Install) -> Result<BuildRequests, Error> {
-    let tree = &install.install_state.resolution_tree;
-    let nm_path = project.project_cwd.with_join_str("node_modules");
-    let store_path = project.project_cwd.with_join_str(&project.config.project.pnpm_store_folder.value);
+    let tree
+        = &install.install_state.resolution_tree;
+
+    let nm_path = project.project_cwd
+        .with_join_str("node_modules");
+    let store_path = project.project_cwd
+        .with_join_str(&project.config.settings.pnpm_store_folder.value);
 
     // Remove existing node_modules
     linker::helpers::fs_remove_nm(nm_path)?;
 
-    let mut all_build_entries = Vec::new();
-    let mut package_build_entries = BTreeMap::new();
+    let mut all_build_entries
+        = Vec::new();
+    let mut package_build_entries
+        = BTreeMap::new();
 
     // Get dependencies meta from package.json
     let dependencies_meta
@@ -20,7 +26,8 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
 
     // First pass: copy all packages to store
     for (locator, resolution) in &tree.locator_resolutions {
-        let physical_package_data = install.package_data.get(&locator.physical_locator())
+        let physical_package_data = install.package_data
+            .get(&locator.physical_locator())
             .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator().to_print_string()));
 
         let package_location_abs = match &physical_package_data {
@@ -103,13 +110,14 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
         };
 
         for (dep_name, descriptor) in &resolution.dependencies {
-            let dep_locator = tree.descriptor_to_locator.get(descriptor)
+            let dep_locator = tree.descriptor_to_locator
+                .get(descriptor)
                 .expect("Failed to find dependency resolution");
 
             // node_modules/.store/@types-no-deps-npm-1.0.0-xyz/package
-            let dep_rel_location
-                = install.install_state.locations_by_package.get(dep_locator)
-                    .expect("Failed to find dependency location; it should have been registered a little earlier");
+            let dep_rel_location = install.install_state.locations_by_package
+                .get(dep_locator)
+                .expect("Failed to find dependency location; it should have been registered a little earlier");
 
             // /path/to/project/node_modules/.store/@types-no-deps-npm-1.0.0-xyz/package
             let dep_abs_path = project.project_cwd

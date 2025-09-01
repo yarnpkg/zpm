@@ -1,11 +1,18 @@
 use std::{process::ExitStatus};
 
 use zpm_parsers::{JsonFormatter, Value};
+use zpm_primitives::Descriptor;
 use zpm_utils::{Path, ToFileString};
 use clipanion::cli;
 use zpm_semver::RangeKind;
 
-use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, Descriptor, LooseDescriptor}, project::{self, Project}, script::{Binary, ScriptEnvironment}};
+use crate::{
+    descriptor_loose::{self, LooseDescriptor},
+    error::Error,
+    install::InstallContext,
+    project::{Project, RunInstallOptions},
+    script::{Binary, ScriptEnvironment},
+};
 
 #[cli::command(proxy)]
 #[cli::path("dlx")]
@@ -35,7 +42,7 @@ impl DlxWithPackages {
             .with_package_cache(Some(&package_cache))
             .with_project(Some(&dlx_project));
 
-        let resolve_options = loose_descriptor::ResolveOptions {
+        let resolve_options = descriptor_loose::ResolveOptions {
             active_workspace_ident: dlx_project.active_workspace()?.name.clone(),
             range_kind: RangeKind::Exact,
             resolve_tags: true,
@@ -79,7 +86,7 @@ impl Dlx {
             .with_package_cache(Some(&package_cache))
             .with_project(Some(&dlx_project));
 
-        let resolve_options = loose_descriptor::ResolveOptions {
+        let resolve_options = descriptor_loose::ResolveOptions {
             active_workspace_ident: dlx_project.active_workspace()?.name.clone(),
             range_kind: RangeKind::Exact,
             resolve_tags: true,
@@ -112,7 +119,7 @@ pub async fn setup_project() -> Result<Project, Error> {
         .fs_write_text("enableGlobalCache: false\n")?;
 
     let project
-        = project::Project::new(Some(temp_dir)).await?;
+        = Project::new(Some(temp_dir)).await?;
 
     Ok(project)
 }
@@ -141,10 +148,10 @@ pub async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descri
         .fs_change(&updated_content, false)?;
 
     let mut project
-        = project::Project::new(Some(workspace_path.clone())).await?;
+        = Project::new(Some(workspace_path.clone())).await?;
 
     project
-        .run_install(project::RunInstallOptions {
+        .run_install(RunInstallOptions {
             silent_or_error: quiet,
             ..Default::default()
         }).await?;

@@ -4,9 +4,15 @@ use bincode::{Decode, Encode};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{DefaultOnError, serde_as};
+use zpm_primitives::Locator;
 use zpm_utils::Path;
 
-use crate::{build, error::Error, fetchers::PackageData, primitives::Locator, system};
+use crate::{
+    build,
+    error::Error,
+    fetchers::PackageData,
+    system,
+};
 
 static UNPLUG_SCRIPTS: &[&str] = &["preinstall", "install", "postinstall"];
 
@@ -17,7 +23,7 @@ static UNPLUG_EXT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 /**
  * The package metadata struct contains various fields that instruct the
  * package manager (the linker, mostly) about the content of the package.
- * 
+ *
  * We compute this struct the first time the package is fetched and store it
  * inside the install state so we can avoid having to recompute it every time,
  * which would otherwise require to parse the zip archives every time.
@@ -131,7 +137,7 @@ impl ContentFlags {
         if build_commands.is_empty() {
             let binding_gyp_name
                 = format!("node_modules/{}/binding.gyp", locator.ident.as_str());
-    
+
             if entries.iter().any(|entry| entry.name == binding_gyp_name) {
                 build_commands.push(build::Command::Program {
                     name: "node-gyp".to_string(),

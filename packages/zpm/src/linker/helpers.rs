@@ -1,11 +1,20 @@
 use std::{collections::{BTreeMap, BTreeSet, HashMap}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
 
+use zpm_primitives::{Descriptor, FilterDescriptor, Ident, Locator};
 use zpm_utils::{Path, PathError};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::{build, error::Error, fetchers::PackageData, install::Install, primitives::{range::PackageSelector, Descriptor, Ident, Locator}, project::Project, resolvers::Resolution, system};
+use crate::{
+    build,
+    error::Error,
+    fetchers::PackageData,
+    install::Install,
+    project::Project,
+    resolvers::Resolution,
+    system,
+};
 
 #[derive(Debug, Default, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,17 +32,17 @@ pub struct PackageMeta {
 pub struct TopLevelConfiguration {
     #[serde(default)]
     #[serde_as(as = "BTreeMap<_, _>")]
-    dependencies_meta: Vec<(PackageSelector, PackageMeta)>,
+    dependencies_meta: Vec<(FilterDescriptor, PackageMeta)>,
 }
 
 impl TopLevelConfiguration {
-    pub fn from_project(project: &Project) -> HashMap<Ident, Vec<(PackageSelector, PackageMeta)>> {
+    pub fn from_project(project: &Project) -> HashMap<Ident, Vec<(FilterDescriptor, PackageMeta)>> {
         project.manifest_path()
             .if_exists()
             .and_then(|path| path.fs_read_text().ok()).map(|data| sonic_rs::from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta)
             .unwrap_or_default()
             .into_iter()
-            .map(|(selector, meta)| (selector.ident().clone(), (selector, meta)))
+            .map(|(filter, meta)| (filter.ident().clone(), (filter, meta)))
             .into_group_map()
     }
 }
@@ -161,7 +170,7 @@ pub struct PackageBuildInfo {
     pub build_commands: Option<Vec<build::Command>>,
 }
 
-pub fn get_package_internal_info(project: &Project, install: &Install, dependencies_meta: &HashMap<Ident, Vec<(PackageSelector, PackageMeta)>>, locator: &Locator, resolution: &Resolution, physical_package_data: &PackageData) -> PackageBuildInfo {
+pub fn get_package_internal_info(project: &Project, install: &Install, dependencies_meta: &HashMap<Ident, Vec<(FilterDescriptor, PackageMeta)>>, locator: &Locator, resolution: &Resolution, physical_package_data: &PackageData) -> PackageBuildInfo {
     // The package meta is based on the top-level configuration extracted
     // from the `dependenciesMeta` field.
     //
@@ -169,8 +178,8 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
         .get(&locator.ident)
         .and_then(|meta_list| {
             meta_list.iter().find_map(|(selector, meta)| match selector {
-                PackageSelector::Range(params) => params.range.check(&resolution.version).then_some(meta),
-                PackageSelector::Ident(_) => Some(meta),
+                FilterDescriptor::Range(params) => params.range.check(&resolution.version).then_some(meta),
+                FilterDescriptor::Ident(_) => Some(meta),
             })
         })
         .cloned()
@@ -190,7 +199,7 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     // .pnp.cjs file to change depending on the system.
     let should_build_if_compatible
         = package_flags.build_commands.len() > 0
-            && (locator.reference.is_workspace_reference() || package_meta.built.unwrap_or(project.config.project.enable_scripts.value));
+            && (locator.reference.is_workspace_reference() || package_meta.built.unwrap_or(project.config.settings.enable_scripts.value));
 
     // Optional dependencies baked by zip archives are always extracted,
     // as we have no way to know whether they would be extracted if we

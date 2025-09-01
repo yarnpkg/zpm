@@ -39,6 +39,7 @@ wax = { git = "https://github.com/arcanis/wax.git" }
 zpm-ci = { path = "../zpm-ci" }
 zpm-config = { path = "../zpm-config" }
 zpm-formats = { path = "../zpm-formats" }
+zpm-git = { path = "../zpm-git" }
 zpm-macro-enum = { path = "../zpm-macro-enum" }
 zpm-macros = { path = "../zpm-macros" }
 zpm-parsers = { path = "../zpm-parsers" }

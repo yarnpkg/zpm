@@ -1,3 +1,7 @@
+pub mod testing;
+
+mod descriptor_filter;
+mod descriptor_semver;
 mod descriptor;
 mod error;
 mod range_peer;
@@ -6,6 +10,8 @@ mod reference;
 mod ident;
 mod locator;
 
+pub use descriptor_filter::*;
+pub use descriptor_semver::*;
 pub use descriptor::*;
 pub use error::*;
 pub use range_peer::*;

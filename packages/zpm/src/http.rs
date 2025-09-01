@@ -6,18 +6,17 @@ use itertools::Itertools;
 use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Client, Method, RequestBuilder, Response, Url};
 use tokio::sync::{Mutex, broadcast};
 use wax::Program;
-use zpm_config::NetworkSettings;
+use zpm_config::{Configuration, NetworkSettings, Setting};
+use zpm_utils::Glob;
 
 use crate::{
-    config::Config,
-    config_fields::{Glob, GlobField},
     error::Error,
 };
 
 #[derive(Debug)]
 pub struct HttpConfig {
     pub http_retry: usize,
-    pub unsafe_http_whitelist: Vec<GlobField>,
+    pub unsafe_http_whitelist: Vec<Setting<Glob>>,
 
     enable_network: bool,
 
@@ -315,10 +314,10 @@ impl<'a> HttpRequest<'a> {
 }
 
 impl HttpClient {
-    pub fn new(config: &Config) -> Result<Arc<Self>, Error> {
+    pub fn new(config: &Configuration) -> Result<Arc<Self>, Error> {
         let client = reqwest::Client::builder()
             // Connection pooling settings
-            .pool_max_idle_per_host(config.user.network_concurrency.value as usize)
+            .pool_max_idle_per_host(config.settings.network_concurrency.value)
             .pool_idle_timeout(Duration::from_secs(30))
 
             // Timeout settings
@@ -340,13 +339,12 @@ impl HttpClient {
             .map_err(|err| Error::DnsResolutionError(Arc::new(err)))?;
 
         let config = HttpConfig {
-            http_retry: config.user.http_retry.value as usize,
-            unsafe_http_whitelist: config.project.unsafe_http_whitelist.value.clone(),
+            http_retry: config.settings.http_retry.value,
+            unsafe_http_whitelist: config.settings.unsafe_http_whitelist.clone(),
 
-            enable_network: config.user.enable_network.value,
+            enable_network: config.settings.enable_network.value,
 
-            network_settings: config.user.network_settings.value
-                .clone()
+            network_settings: config.settings.network_settings.clone()
                 .into_iter()
                 // Sort the config by key length to match on the most specific pattern.
                 .sorted_by_cached_key(|(glob, _)| -(glob.raw().len() as isize))

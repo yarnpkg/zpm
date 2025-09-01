@@ -1,8 +1,9 @@
 use bincode::{Decode, Encode};
 use colored::Colorize;
-use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
-use crate::error::Error;
+use crate::{DescriptorError, RangeError};
+
 use super::Ident;
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -21,20 +22,19 @@ impl SemverDescriptor {
 }
 
 impl FromFileString for SemverDescriptor {
-    type Error = Error;
+    type Error = DescriptorError;
 
-    fn from_file_string(src: &str) -> Result<Self, Error> {
-        let at_split = if src.starts_with('@') {
-            src[1..src.len()].find('@').map(|x| x + 1)
-        } else {
-            src.find('@')
-        };
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
+        let at_split = src.strip_suffix('@')
+            .map_or_else(|| src.find('@'), |rest| rest.find('@').map(|x| x + 1))
+            .ok_or(DescriptorError::SyntaxError(src.to_string()))?;
 
-        let at_split = at_split
-            .ok_or(Error::InvalidDescriptor(src.to_string()))?;
+        let ident
+            = Ident::from_file_string(&src[..at_split])?;
 
-        let ident = Ident::from_file_string(&src[..at_split])?;
-        let range = zpm_semver::Range::from_file_string(&src[at_split + 1..])?;
+        let range
+            = zpm_semver::Range::from_file_string(&src[at_split + 1..])
+                .map_err(|err| -> RangeError {err.into()})?;
 
         Ok(SemverDescriptor::new(ident, range))
     }
@@ -56,4 +56,5 @@ impl ToHumanString for SemverDescriptor {
     }
 }
 
-impl_serialization_traits!(SemverDescriptor);
+impl_file_string_from_str!(SemverDescriptor);
+impl_file_string_serialization!(SemverDescriptor);

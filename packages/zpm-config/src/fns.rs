@@ -1,6 +1,6 @@
-use crate::Context;
+use crate::ConfigurationContext;
 
-pub fn check_tsconfig(context: &Context) -> bool {
+pub fn check_tsconfig(context: &ConfigurationContext) -> bool {
     if let Some(project_cwd) = &context.project_cwd {
         let root_has_tsconfig = project_cwd
             .with_join_str("tsconfig.json")

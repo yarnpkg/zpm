@@ -1,9 +1,17 @@
-use crate::{error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::RemoteManifest, primitives::{reference, Locator}, resolvers::Resolution};
+use zpm_primitives::{FolderReference, Locator};
+
+use crate::{
+    error::Error,
+    install::{FetchResult, InstallContext, InstallOpResult},
+    manifest::RemoteManifest,
+    resolvers::Resolution,
+};
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::FolderReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
-    let parent_data = dependencies[0].as_fetched();
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &FolderReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+    let parent_data
+        = dependencies[0].as_fetched();
 
     let context_directory = parent_data.package_data
         .context_directory()

@@ -8,7 +8,7 @@ use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 
 use crate::{
     algolia::query_algolia,
-    descriptor_loose::LooseDescriptor,
+    descriptor_loose::{self, LooseDescriptor},
     error::Error,
     install::InstallContext,
     project::{self, InstallMode}
@@ -22,7 +22,7 @@ struct AddRequest {
     optional: bool,
 }
 
-async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_options: &loose_descriptor::ResolveOptions, requests: Vec<(Descriptor, AddRequest)>) -> Result<Vec<(Descriptor, AddRequest)>, Error> {
+async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_options: &descriptor_loose::ResolveOptions, requests: Vec<(Descriptor, AddRequest)>) -> Result<Vec<(Descriptor, AddRequest)>, Error> {
     let project = install_context.project
         .expect("Project not found");
 
@@ -164,10 +164,10 @@ impl Add {
         } else if self.caret {
             RangeKind::Caret
         } else {
-            project.config.project.default_semver_range_prefix.value
+            project.config.settings.default_semver_range_prefix.value
         };
 
-        let resolve_options = loose_descriptor::ResolveOptions {
+        let resolve_options = descriptor_loose::ResolveOptions {
             active_workspace_ident: project.active_workspace()?.name.clone(),
             range_kind,
             resolve_tags: !self.fixed,

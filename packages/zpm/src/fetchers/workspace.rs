@@ -1,8 +1,13 @@
-use crate::{error::Error, install::{FetchResult, InstallContext}, primitives::{reference, Locator}};
+use zpm_primitives::{Locator, WorkspaceIdentReference, WorkspacePathReference};
+
+use crate::{
+    error::Error,
+    install::{FetchResult, InstallContext},
+};
 
 use super::PackageData;
 
-pub fn fetch_locator_ident(context: &InstallContext, _locator: &Locator, params: &reference::WorkspaceIdentReference) -> Result<FetchResult, Error> {
+pub fn fetch_locator_ident(context: &InstallContext, _locator: &Locator, params: &WorkspaceIdentReference) -> Result<FetchResult, Error> {
     let project = context.project
         .expect("The project is required for fetching a workspace package");
 
@@ -15,7 +20,7 @@ pub fn fetch_locator_ident(context: &InstallContext, _locator: &Locator, params:
     }))
 }
 
-pub fn fetch_locator_path(context: &InstallContext, _locator: &Locator, params: &reference::WorkspacePathReference) -> Result<FetchResult, Error> {
+pub fn fetch_locator_path(context: &InstallContext, _locator: &Locator, params: &WorkspacePathReference) -> Result<FetchResult, Error> {
     let project = context.project
         .expect("The project is required for fetching a workspace package");
 

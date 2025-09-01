@@ -1,26 +1,28 @@
+use std::{collections::BTreeMap, fmt::Display, ops::Deref};
+
 use serde::{de, Deserialize, Deserializer};
 use zpm_primitives::{Descriptor, PeerRange};
 use zpm_semver::RangeKind;
-use zpm_utils::{FromFileString, Path};
-use std::{collections::BTreeMap, fmt::Display, ops::Deref};
+use zpm_utils::{FromFileString, Glob, Path, ToFileString};
 
-pub struct Context {
+pub struct ConfigurationContext {
     pub env: BTreeMap<String, String>,
     pub user_cwd: Option<Path>,
     pub project_cwd: Option<Path>,
     pub package_cwd: Option<Path>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum Source {
     #[default]
     Default,
     User,
     Project,
     Environment,
+    Cli,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Setting<T> {
     pub value: T,
     pub source: Source,
@@ -29,6 +31,12 @@ pub struct Setting<T> {
 impl<T> Setting<T> {
     pub fn new(value: T, source: Source) -> Self {
         Self {value, source}
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Setting<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {value: T::deserialize(deserializer)?, source: Source::Default})
     }
 }
 
@@ -123,7 +131,7 @@ trait MergeSettings {
     type Intermediate;
 
     fn merge<F: Fn() -> Self>(
-        context: &Context,
+        context: &ConfigurationContext,
         prefix: Option<&str>,
         user: Partial<Self::Intermediate>,
         project: Partial<Self::Intermediate>,
@@ -131,10 +139,10 @@ trait MergeSettings {
     ) -> Self;
 }
 
-impl<T: MergeSettings> MergeSettings for BTreeMap<String, T> {
-    type Intermediate = BTreeMap<String, T::Intermediate>;
+impl<K: Ord + ToFileString, T: MergeSettings> MergeSettings for BTreeMap<K, T> {
+    type Intermediate = BTreeMap<K, T::Intermediate>;
 
-    fn merge<F: FnOnce() -> Self>(context: &Context, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
+    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
         let mut join
             = BTreeMap::new();
 
@@ -158,7 +166,7 @@ impl<T: MergeSettings> MergeSettings for BTreeMap<String, T> {
 
         for (k, (user_value, project_value)) in join {
             let next_prefix
-                = prefix.map(|p| format!("{}_{}", p, k));
+                = prefix.map(|p| format!("{}_{}", p, k.to_file_string()));
 
             let hydrated_item = T::merge(
                 context,
@@ -178,7 +186,7 @@ impl<T: MergeSettings> MergeSettings for BTreeMap<String, T> {
 impl<T: MergeSettings> MergeSettings for Vec<T> {
     type Intermediate = Vec<T::Intermediate>;
 
-    fn merge<F: FnOnce() -> Self>(context: &Context, _prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
+    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, _prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
         let mut result
             = Vec::new();
 
@@ -213,7 +221,7 @@ impl<T: MergeSettings> MergeSettings for Vec<T> {
 impl MergeSettings for Setting<Path> {
     type Intermediate = Interpolated<Path>;
 
-    fn merge<F: FnOnce() -> Self>(context: &Context, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
+    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
         if let Some(key) = prefix {
             if let Some(value) = context.env.get(key) {
                 let mut path
@@ -268,7 +276,7 @@ macro_rules! merge_settings_impl {
         impl MergeSettings for Setting<$type> {
             type Intermediate = Interpolated<$type>;
 
-            fn merge<F: FnOnce() -> Self>(context: &Context, key: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
+            fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, key: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
                 if let Some(key) = key {
                     if let Some(value) = context.env.get(key) {
                         return Self {
@@ -299,7 +307,7 @@ macro_rules! merge_settings_impl {
         impl MergeSettings for Setting<Option<$type>> {
             type Intermediate = Option<Interpolated<$type>>;
 
-            fn merge<F: FnOnce() -> Self>(context: &Context, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
+            fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
                 if let Partial::Value(user) = user {
                     let inner = user.map(|user| {
                         Setting::<$type>::merge(
@@ -361,49 +369,52 @@ pub enum ConfigurationError {
     SerdeError(#[from] serde_yaml::Error),
 }
 
-pub fn merge(context: &Context, user_config: Option<&str>, project_config: Option<&str>) -> Result<Configuration, ConfigurationError> {
-    let user_config_path = user_config
-        .map(|config| Path::from_file_string(config))
-        .transpose()?
-        .map(|path| path.with_join_str(".yarnrc.yml"));
+impl Configuration {
+    pub fn load(context: &ConfigurationContext) -> Result<Configuration, ConfigurationError> {
+        let user_config_path = context.user_cwd
+            .as_ref()
+            .map(|path| path.with_join_str(".yarnrc.yml"));
 
-    let project_config_path = project_config
-        .map(|config| Path::from_file_string(config))
-        .transpose()?
-        .map(|path| path.with_join_str(".yarnrc.yml"));
+        let project_config_path = context.project_cwd
+            .as_ref()
+            .map(|path| path.with_join_str(".yarnrc.yml"));
 
-    let intermediate_user_config= user_config_path
-        .as_ref()
-        .map(|path| path.fs_read_text())
-        .transpose()?
-        .map(|content| serde_yaml::from_str::<intermediate::Settings>(&content))
-        .transpose()?
-        .map_or(Partial::Missing, Partial::Value);
+        let intermediate_user_config= user_config_path
+            .as_ref()
+            .map(|path| path.fs_read_text())
+            .transpose()?
+            .map(|content| serde_yaml::from_str::<intermediate::Settings>(&content))
+            .transpose()?
+            .map_or(Partial::Missing, Partial::Value);
 
-    let intermediate_project_config = project_config_path
-        .as_ref()
-        .map(|path| path.fs_read_text())
-        .transpose()?
-        .map(|content| serde_yaml::from_str::<intermediate::Settings>(&content))
-        .transpose()?
-        .map_or(Partial::Missing, Partial::Value);
+        let intermediate_project_config = project_config_path
+            .as_ref()
+            .map(|path| path.fs_read_text())
+            .transpose()?
+            .map(|content| serde_yaml::from_str::<intermediate::Settings>(&content))
+            .transpose()?
+            .map_or(Partial::Missing, Partial::Value);
 
-    let settings = Settings::merge(
-        &context,
-        Some("YARN"),
-        intermediate_user_config,
-        intermediate_project_config,
-        || panic!("No configuration found")
-    );
+        let settings = Settings::merge(
+            &context,
+            Some("YARN"),
+            intermediate_user_config,
+            intermediate_project_config,
+            || panic!("No configuration found")
+        );
 
-    Ok(Configuration {
-        settings,
-        user_config_path,
-        project_config_path,
-    })
+        Ok(Configuration {
+            settings,
+            user_config_path,
+            project_config_path,
+        })
+    }
 }
 
-pub mod fns;
+mod exts;
+pub use exts::*;
+
+mod fns;
 pub use fns::*;
 
 mod types;

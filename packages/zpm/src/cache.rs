@@ -4,16 +4,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::collections::HashSet;
 use std::sync::Mutex;
-use zpm_utils::{Path, ToFileString};
+use zpm_macro_enum::zpm_enum;
+use zpm_primitives::Locator;
+use zpm_utils::{Hash64, Path};
 use bincode;
 use futures::Future;
-use sha2::Digest;
-use zpm_macros::parse_enum;
-use zpm_utils::ToHumanString;
 
-use crate::error::Error;
-use crate::hash::Sha256;
-use crate::primitives::locator::Locator;
+use crate::{
+    error::Error,
+};
 
 #[zpm_enum]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -22,7 +21,7 @@ pub enum CacheEntry {
     #[no_pattern]
     Info {
         path: Path,
-        checksum: Option<Sha256>,
+        checksum: Option<Hash64>,
     },
 
     #[no_pattern]
@@ -213,7 +212,8 @@ impl DiskCache {
                 let data = self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?;
 
                 tokio::task::spawn_blocking(move || {
-                    let checksum = Sha256::from_data(&data);
+                    let checksum
+                        = Hash64::from_data(&data);
 
                     InfoCacheEntry {
                         path: key_path,
@@ -257,7 +257,8 @@ impl DiskCache {
                 let data = self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?;
 
                 tokio::task::spawn(async move {
-                    let checksum = Sha256::from_data(&data);
+                    let checksum
+                        = Hash64::from_data(&data);
 
                     DataCacheEntry {
                         info: InfoCacheEntry {

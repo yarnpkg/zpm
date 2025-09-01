@@ -1,9 +1,15 @@
-use crate::{error::Error, install::{FetchResult, InstallContext, InstallOpResult}, primitives::{reference, Locator}};
+use zpm_primitives::{Locator, PortalReference};
+
+use crate::{
+    error::Error,
+    install::{FetchResult, InstallContext, InstallOpResult},
+};
 
 use super::PackageData;
 
-pub fn fetch_locator(_context: &InstallContext, _locator: &Locator, params: &reference::PortalReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
-    let parent_data = dependencies[0].as_fetched();
+pub fn fetch_locator(_context: &InstallContext, _locator: &Locator, params: &PortalReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+    let parent_data
+        = dependencies[0].as_fetched();
 
     let package_directory = parent_data.package_data
         .context_directory()

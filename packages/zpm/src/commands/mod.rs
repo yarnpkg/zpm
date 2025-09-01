@@ -63,7 +63,6 @@ program!(YarnCli, [
     workspace::Workspace,
 ]);
 
-#[track_time]
 pub fn run_default() -> ExitCode {
     let BinMeta {
         cwd,

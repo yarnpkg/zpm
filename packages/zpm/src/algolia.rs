@@ -1,9 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
+use zpm_primitives::Ident;
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, http::HttpClient, primitives::ident::Ident};
+use crate::{error::Error, http::HttpClient};
 
 const ALGOLIA_URL: &str = "https://OFCNCOG2CU.algolia.net/1/indexes/*/objects";
 

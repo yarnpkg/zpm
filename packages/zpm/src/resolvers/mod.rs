@@ -2,8 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
+use zpm_primitives::{Descriptor, Ident, Locator, PeerRange, Range, Reference, RegistryReference, SemverPeerRange, WorkspaceIdentRange, descriptor_map_serializer, descriptor_map_deserializer};
 
-use crate::{error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, primitives::{descriptor::{descriptor_map_deserializer, descriptor_map_serializer}, range::{self, SemverPeerRange}, reference, Descriptor, Ident, Locator, PeerRange, Range, Reference}, system};
+use crate::{
+    error::Error,
+    install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
+    manifest::RemoteManifest,
+    system,
+};
 
 pub mod folder;
 pub mod git;
@@ -127,10 +133,10 @@ pub fn try_resolve_descriptor_sync(context: InstallContext<'_>, descriptor: Desc
             => Ok(SyncResolutionAttempt::Success(portal::resolve_descriptor(&context, &descriptor, params, dependencies)?)),
 
         Range::WorkspaceMagic(_)
-            => Ok(SyncResolutionAttempt::Success(workspace::resolve_name_descriptor(&context, &descriptor, &range::WorkspaceIdentRange {ident: descriptor.ident.clone()})?)),
+            => Ok(SyncResolutionAttempt::Success(workspace::resolve_name_descriptor(&context, &descriptor, &WorkspaceIdentRange {ident: descriptor.ident.clone()})?)),
 
         Range::WorkspaceSemver(_)
-            => Ok(SyncResolutionAttempt::Success(workspace::resolve_name_descriptor(&context, &descriptor, &range::WorkspaceIdentRange {ident: descriptor.ident.clone()})?)),
+            => Ok(SyncResolutionAttempt::Success(workspace::resolve_name_descriptor(&context, &descriptor, &WorkspaceIdentRange {ident: descriptor.ident.clone()})?)),
 
         Range::WorkspacePath(params)
             => Ok(SyncResolutionAttempt::Success(workspace::resolve_path_descriptor(&context, &descriptor, params)?)),
@@ -175,10 +181,10 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
             => npm::resolve_tag_or_workspace_descriptor(&context, &descriptor, params).await,
 
         Range::WorkspaceMagic(_)
-            => workspace::resolve_name_descriptor(&context, &descriptor, &range::WorkspaceIdentRange {ident: descriptor.ident.clone()}),
+            => workspace::resolve_name_descriptor(&context, &descriptor, &WorkspaceIdentRange {ident: descriptor.ident.clone()}),
 
         Range::WorkspaceSemver(_)
-            => workspace::resolve_name_descriptor(&context, &descriptor, &range::WorkspaceIdentRange {ident: descriptor.ident.clone()}),
+            => workspace::resolve_name_descriptor(&context, &descriptor, &WorkspaceIdentRange {ident: descriptor.ident.clone()}),
 
         Range::WorkspacePath(params)
             => workspace::resolve_path_descriptor(&context, &descriptor, params),
@@ -211,7 +217,7 @@ pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, depe
             => patch::resolve_locator(&context, &locator, params, dependencies).await,
 
         Reference::Shorthand(params)
-            => npm::resolve_locator(&context, &locator, &reference::RegistryReference {ident: locator.ident.clone(), version: params.version.clone()}).await,
+            => npm::resolve_locator(&context, &locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone()}).await,
 
         Reference::Registry(params)
             => npm::resolve_locator(&context, &locator, params).await,
@@ -231,11 +237,8 @@ pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, depe
 }
 
 pub async fn validate_resolution(context: InstallContext<'_>, descriptor: Descriptor, locator: Locator, dependencies: Vec<InstallOpResult>) -> Result<(), Error> {
-    let success = match &descriptor.range {
-        _ => {
-            resolve_descriptor(context, descriptor.clone(), dependencies).await?.resolution.locator == locator
-        }
-    };
+    let success
+        = resolve_descriptor(context, descriptor.clone(), dependencies).await?.resolution.locator == locator;
 
     if !success {
         return Err(Error::BadResolution(descriptor, locator));

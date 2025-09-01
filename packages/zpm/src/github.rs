@@ -2,9 +2,13 @@ use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
 use reqwest::StatusCode;
+use zpm_git::GitSource;
 use zpm_utils::Path;
 
-use crate::{error::Error, git::GitSource, http::HttpClient};
+use crate::{
+    error::Error,
+    http::HttpClient,
+};
 
 static GITHUB_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new("^https://github.com/([^/#]+)/([^/#]+?)\\.git$").unwrap()

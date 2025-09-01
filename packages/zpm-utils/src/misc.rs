@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, future::Future};
 
 use crate::PathError;
 
@@ -78,4 +78,28 @@ pub fn diff_data(current: &[u8], expected: &[u8]) -> String {
     similar::TextDiff::from_lines(&current_text, &expected_text)
         .unified_diff()
         .to_string()
+}
+
+// Iterate over the values of the parameter; return the first result that succeeds, or the last error.
+pub async fn repeat_until_ok<I, T, E, A, F>(values: Vec<I>, f: F) -> Result<T, E>
+    where A: Future<Output = Result<T, E>>, F: Fn(I) -> A,
+{
+    let mut last_error = None;
+
+    for value in values {
+        let result
+            = f(value).await;
+
+        match result {
+            Ok(value) => {
+                return Ok(value);
+            },
+
+            Err(error) => {
+                last_error = Some(error);
+            },
+        }
+    }
+
+    Err(last_error.unwrap())
 }

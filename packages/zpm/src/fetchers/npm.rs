@@ -1,10 +1,17 @@
 use std::sync::Arc;
 
-use crate::{error::Error, install::{FetchResult, InstallContext}, npm, primitives::{reference, Locator}};
+use zpm_config::ConfigExt;
+use zpm_primitives::{Locator, RegistryReference};
+
+use crate::{
+    error::Error,
+    install::{FetchResult, InstallContext},
+    npm,
+};
 
 use super::PackageData;
 
-fn get_mock_fetch_result(context: &InstallContext, locator: &Locator, params: &reference::RegistryReference) -> Result<FetchResult, Error> {
+fn get_mock_fetch_result(context: &InstallContext, locator: &Locator, params: &RegistryReference) -> Result<FetchResult, Error> {
     let archive_path = context.package_cache.unwrap()
         .key_path(locator, ".zip")?;
 
@@ -18,7 +25,7 @@ fn get_mock_fetch_result(context: &InstallContext, locator: &Locator, params: &r
     }))
 }
 
-pub fn try_fetch_locator_sync(context: &InstallContext, locator: &Locator, params: &reference::RegistryReference, is_mock_request: bool) -> Result<Option<FetchResult>, Error> {
+pub fn try_fetch_locator_sync(context: &InstallContext, locator: &Locator, params: &RegistryReference, is_mock_request: bool) -> Result<Option<FetchResult>, Error> {
     if is_mock_request {
         return Ok(Some(get_mock_fetch_result(context, locator, params)?));
     }
@@ -39,7 +46,7 @@ pub fn try_fetch_locator_sync(context: &InstallContext, locator: &Locator, param
     }))
 }
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::RegistryReference, is_mock_request: bool) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &RegistryReference, is_mock_request: bool) -> Result<FetchResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 

@@ -1,12 +1,22 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use zpm_config::PnpFallbackMode;
+use zpm_primitives::{Ident, Locator, Reference};
 use zpm_utils::{Path, ToHumanString};
 use itertools::Itertools;
 use serde::{Serialize, Serializer};
 use serde_with::serde_as;
 use zpm_utils::ToFileString;
 
-use crate::{build::{self, BuildRequests}, error::Error, fetchers::{PackageData, PackageLinking}, install::Install, linker, misc, primitives::{Ident, Locator, Reference}, project::Project, settings};
+use crate::{
+    build::{self, BuildRequests},
+    error::Error,
+    fetchers::{PackageData, PackageLinking},
+    install::Install,
+    linker,
+    misc,
+    project::Project,
+};
 
 const PNP_CJS_TEMPLATE: &[u8] = std::include_bytes!("pnp-cjs.brotli.dat");
 const PNP_MJS_TEMPLATE: &[u8] = std::include_bytes!("pnp-mjs.brotli.dat");
@@ -131,7 +141,7 @@ fn serialize_string(s: &str) -> String {
 
 fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Error> {
     let script = vec![
-        project.config.project.pnp_shebang.value.as_str(), "\n",
+        project.config.settings.pnp_shebang.value.as_str(), "\n",
         "/* eslint-disable */\n",
         "// @ts-nocheck\n",
         "\"use strict\";\n",
@@ -153,7 +163,7 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
 
 fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error> {
     let script = vec![
-        project.config.project.pnp_shebang.value.as_str(), "\n",
+        project.config.settings.pnp_shebang.value.as_str(), "\n",
         "/* eslint-disable */\n",
         "// @ts-nocheck\n",
         "\"use strict\";\n",
@@ -184,20 +194,24 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         .with_join_str("node_modules");
 
     let virtual_folder = project.project_cwd
-        .with_join(&project.config.project.virtual_folder.value);
+        .with_join(&project.config.settings.virtual_folder.value);
 
-    if project.config.project.enable_local_cache_cleanup.value {
+    if project.config.settings.enable_local_cache_cleanup.value {
         linker::helpers::fs_remove_nm(nm_path)?;
     }
 
     let dependencies_meta
         = linker::helpers::TopLevelConfiguration::from_project(project);
 
-    let mut package_registry_data: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
-    let mut dependency_tree_roots = Vec::new();
+    let mut package_registry_data: BTreeMap<_, BTreeMap<_, _>>
+        = BTreeMap::new();
+    let mut dependency_tree_roots
+        = Vec::new();
 
-    let mut all_build_entries = Vec::new();
-    let mut package_build_entries = BTreeMap::new();
+    let mut all_build_entries
+        = Vec::new();
+    let mut package_build_entries
+        = BTreeMap::new();
 
     for (locator, resolution) in &tree.locator_resolutions {
         let physical_package_data = install.package_data.get(&locator.physical_locator())
@@ -362,14 +376,14 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
     }
 
     let enable_top_level_fallback
-        = project.config.project.pnp_fallback_mode.value != settings::PnpFallbackMode::None;
+        = project.config.settings.pnp_fallback_mode.value != PnpFallbackMode::None;
 
     let mut fallback_exclusion_list: BTreeMap<Ident, BTreeSet<PnpReference>>
         = BTreeMap::new();
 
     let fallback_pool = vec![];
 
-    if project.config.project.pnp_fallback_mode.value == settings::PnpFallbackMode::DependenciesOnly {
+    if project.config.settings.pnp_fallback_mode.value == PnpFallbackMode::DependenciesOnly {
         for locator in tree.locator_resolutions.keys() {
             if let Reference::WorkspaceIdent(_) = locator.physical_locator().reference {
                 fallback_exclusion_list.entry(locator.ident.clone())
@@ -379,7 +393,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         }
     }
 
-    let ignore_pattern_data = project.config.project.pnp_ignore_patterns.value
+    let ignore_pattern_data = project.config.settings.pnp_ignore_patterns
         .iter()
         .map(|pattern| pattern.value.to_regex_string())
         .collect::<Vec<String>>();
@@ -398,7 +412,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         dependency_tree_roots,
     };
 
-    if project.config.project.pnp_enable_inlining.value {
+    if project.config.settings.pnp_enable_inlining.value {
         generate_inline_files(project, &state)?;
     } else {
         generate_split_setup(project, &state)?;
