@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc};
 use serde::{de, Deserialize, Deserializer};
 use zpm_primitives::{Descriptor, Locator, PeerRange, Range, Reference};
 use zpm_semver::RangeKind;
-use zpm_utils::{FromFileString, Glob, Path, ToStringComplete};
+use zpm_utils::{FromFileString, Glob, IoResultExt, Path, ToStringComplete};
 
 #[derive(Debug, Clone)]
 pub struct ConfigurationContext {
@@ -564,21 +564,32 @@ impl Configuration {
             .as_ref()
             .map(|path| path.with_join_str(".yarnrc.yml"));
 
-        let intermediate_user_config= user_config_path
-            .as_ref()
-            .map(|path| path.fs_read_text())
-            .transpose()?
-            .map(|content| serde_yaml::from_str::<intermediate::Settings>(&content))
-            .transpose()?
-            .map_or(Partial::Missing, Partial::Value);
+        let mut intermediate_user_config
+            = Partial::Missing;
+        let mut intermediate_project_config
+            = Partial::Missing;
 
-        let intermediate_project_config = project_config_path
-            .as_ref()
-            .map(|path| path.fs_read_text())
-            .transpose()?
-            .map(|content| serde_yaml::from_str::<intermediate::Settings>(&content))
-            .transpose()?
-            .map_or(Partial::Missing, Partial::Value);
+        if let Some(user_config_path) = user_config_path.as_ref() {
+            let user_config_text
+                = user_config_path
+                    .fs_read_text()
+                    .ok_missing()?;
+
+            if let Some(user_config_text) = user_config_text {
+                intermediate_user_config = Partial::Value(serde_yaml::from_str::<intermediate::Settings>(&user_config_text)?);
+            }
+        }
+
+        if let Some(project_config_path) = project_config_path.as_ref() {
+            let project_config_text
+                = project_config_path
+                    .fs_read_text()
+                    .ok_missing()?;
+
+            if let Some(project_config_text) = project_config_text {
+                intermediate_project_config = Partial::Value(serde_yaml::from_str::<intermediate::Settings>(&project_config_text)?);
+            }
+        }
 
         let settings = Settings::merge(
             &context,
