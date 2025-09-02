@@ -7,6 +7,34 @@ use zpm_utils::{DataType, FromFileString, Note, IoResultExt, Path, ToFileString}
 
 use crate::errors::Error;
 
+pub enum ShellProfile {
+    Posix(Path),
+    Fish(Path),
+}
+
+impl ShellProfile {
+    pub fn as_path(&self) -> &Path {
+        match self {
+            ShellProfile::Posix(path) => path,
+            ShellProfile::Fish(path) => path,
+        }
+    }
+
+    pub fn to_env_path_lines(&self, bin_dir: &Path) -> String {
+        match self {
+            ShellProfile::Posix(_) => format!("export PATH=\"{}:$PATH\"\n", bin_dir.to_file_string()),
+            ShellProfile::Fish(_) => format!("set -x PATH \"{}:$PATH\"", bin_dir.to_file_string()),
+        }
+    }
+
+    pub fn to_source_line(&self, env_path: &Path) -> String {
+        match self {
+            ShellProfile::Posix(_) => format!("source \"{}\"", env_path.to_file_string()),
+            ShellProfile::Fish(_) => format!("source \"{}\"", env_path.to_file_string()),
+        }
+    }
+}
+
 #[cli::command]
 #[cli::path("switch", "postinstall")]
 #[derive(Debug)]
@@ -38,21 +66,28 @@ impl PostinstallCommand {
         let env_path = home
             .with_join_str(".yarn/switch/env");
 
-        self.write_env(&env_path, &bin_dir);
+        let fallback_profile
+            = ShellProfile::Posix(home.with_join_str(".bashrc"));
 
         if !self.check_github_path(&bin_dir) {
-            if let Some(profile_file) = self.get_profile_file() {
-                let profile_path = home
-                    .with_join(&profile_file);
-
-                self.write_profile(&profile_path, &env_path);
+            if let Some(profile) = self.get_profile(&home) {
+                self.write_env(&env_path, &bin_dir, &profile);
+                self.write_profile(&profile, &env_path);
+            } else {
+                self.write_env(&env_path, &bin_dir, &fallback_profile);
+                self.report_profile_write_error(&fallback_profile, &env_path);
             }
+        } else {
+            self.write_env(&env_path, &bin_dir, &ShellProfile::Posix(home.with_join_str(".bashrc")));
         }
 
         self.check_volta_interference();
     }
 
-    fn write_profile(&self, profile_path: &Path, env_path: &Path) {
+    fn write_profile(&self, profile: &ShellProfile, env_path: &Path) {
+        let profile_path = profile
+            .as_path();
+
         let profile_content = profile_path
             .fs_read_text_prealloc()
             .ok_missing();
@@ -65,7 +100,7 @@ impl PostinstallCommand {
             = profile_content.unwrap_or_default();
 
         let profile_line
-            = format!(". \"{}\"\n", env_path.to_file_string());
+            = format!("{}\n", profile.to_source_line(env_path));
 
         if profile_content.contains(&profile_line) {
             return;
@@ -75,6 +110,12 @@ impl PostinstallCommand {
             profile_content.push('\n');
         }
 
+        if !profile_content.is_empty() {
+            profile_content.push('\n');
+        }
+
+        profile_content
+            .push_str("# Added by Yarn Switch\n");
         profile_content
             .push_str(&profile_line);
 
@@ -86,36 +127,40 @@ impl PostinstallCommand {
             Note::Info(format!("
                 We updated your shell configuration file for you.
                 Please restart your shell or run {} to apply the changes.
-            ", DataType::Code.colorize(&format!("source {}", profile_path.to_home_string())))).print();
+            ", DataType::Code.colorize(&profile.to_source_line(env_path)))).print();
         } else {
-            Note::Warning(format!("
-                We failed to update your shell configuration file.
-                You will need to manually append the following line to your shell configuration file (perhaps {}?):
-                {}
-            ", profile_path.to_home_string(), DataType::Code.colorize(&profile_line))).print();
+            self.report_profile_write_error(profile, env_path);
         }
     }
 
-    fn write_env(&self, env_path: &Path, bin_dir: &Path) {
-        let env_path_line
-            = format!("export PATH=\"{}:$PATH\"\n", bin_dir.to_file_string());
+    fn report_profile_write_error(&self, profile: &ShellProfile, env_path: &Path) {
+        Note::Warning(format!("
+            We failed to update your shell configuration file.
+            You will need to manually append the following line to your shell configuration file (perhaps {}?):
+            {}
+        ", profile.as_path().to_print_string(), DataType::Code.colorize(&profile.to_source_line(env_path)))).print();
+}
+
+    fn write_env(&self, env_path: &Path, bin_dir: &Path, profile: &ShellProfile) {
+        let env_path_lines
+            = profile.to_env_path_lines(bin_dir);
 
         let env_write_result = env_path
             .fs_create_parent()
-            .and_then(|_| env_path.fs_write_text(&env_path_line));
+            .and_then(|_| env_path.fs_write_text(&env_path_lines));
 
         if env_write_result.is_err() {
             Note::Warning(format!("
                 We failed to update the Yarn Switch environment file.
                 You will need to manually append the following line to your shell configuration file:
                 {}
-            ", DataType::Code.colorize(&env_path_line))).print();
+            ", DataType::Code.colorize(&env_path_lines))).print();
 
             return;
         }
     }
 
-    fn get_profile_file(&self) -> Option<Path> {
+    fn get_profile(&self, home: &Path) -> Option<ShellProfile> {
         let Ok(shell) = std::env::var("SHELL") else {
             return None;
         };
@@ -129,9 +174,9 @@ impl PostinstallCommand {
         };
 
         match shell_name {
-            "bash" => Some(Path::from_str(".profile").unwrap()),
-            "zsh" => Some(Path::from_str(".zprofile").unwrap()),
-            "fish" => Some(Path::from_str(".config/fish/config.fish").unwrap()),
+            "bash" => Some(ShellProfile::Posix(home.with_join_str(".bashrc"))),
+            "zsh" => Some(ShellProfile::Posix(home.with_join_str(".zshrc"))),
+            "fish" => Some(ShellProfile::Fish(home.with_join_str(".config/fish/config.fish"))),
             _ => None,
         }
     }
