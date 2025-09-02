@@ -1,6 +1,6 @@
 use std::ops::{Index, Range, RangeFrom, RangeInclusive, RangeTo};
 
-use serde::{de, Deserialize, Deserializer, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
 
 use crate::{json::escape_string, Error};
@@ -320,4 +320,33 @@ impl ToHumanString for Path {
 }
 
 impl_file_string_from_str!(Path);
-impl_file_string_serialization!(Path);
+
+impl Serialize for Path {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        serializer.serialize_str(&self.to_file_string())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum JsonPathDeserializer {
+    String(String),
+    Array(Vec<String>),
+}
+
+impl<'de> Deserialize<'de> for Path {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        let deserialized
+            = JsonPathDeserializer::deserialize(deserializer)?;
+
+        match deserialized {
+            JsonPathDeserializer::String(path) => {
+                Ok(Path::from_file_string(&path).map_err(de::Error::custom)?)
+            },
+
+            JsonPathDeserializer::Array(segments) => {
+                Ok(Path::from_segments(segments))
+            },
+        }
+    }
+}
