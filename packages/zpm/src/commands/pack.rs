@@ -1,10 +1,17 @@
 use std::collections::BTreeSet;
 
+use zpm_primitives::Locator;
 use zpm_utils::Path;
 use clipanion::cli;
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, manifest::helpers::parse_manifest, pack::{pack_list, pack_manifest}, primitives::Locator, project::{self, Project, RunInstallOptions, Workspace}, script::ScriptEnvironment};
+use crate::{
+    error::Error,
+    manifest::helpers::parse_manifest,
+    pack::{pack_list, pack_manifest},
+    project::{Project, RunInstallOptions, Workspace},
+    script::ScriptEnvironment,
+};
 
 #[cli::command(proxy)]
 #[cli::path("pack")]
@@ -28,7 +35,7 @@ impl Pack {
     #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
-            = project::Project::new(None).await?;
+            = Project::new(None).await?;
 
         let active_workspace
             = project.active_workspace()?;
@@ -151,7 +158,7 @@ impl Pack {
         let packed_file
             = zpm_formats::tar::craft_tgz(&entries)?;
 
-        
+
         let package_name
             = pack_manifest.name.map_or_else(
                 || "package".to_string(),

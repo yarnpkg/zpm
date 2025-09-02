@@ -1,9 +1,9 @@
-use zpm_macros::parse_enum;
-use zpm_utils::{impl_serialization_traits, ToFileString, ToHumanString};
+use zpm_macro_enum::zpm_enum;
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, ToFileString, ToHumanString};
 
 use crate::errors::Error;
 
-#[parse_enum(or_else = |s| Err(Error::InvalidVersionSelector(s.to_string())))]
+#[zpm_enum(or_else = |s| Err(Error::InvalidVersionSelector(s.to_string())))]
 #[derive(Debug)]
 #[derive_variants(Debug)]
 pub enum Channel {
@@ -29,9 +29,10 @@ impl ToHumanString for Channel {
     }
 }
 
-impl_serialization_traits!(Channel);
+impl_file_string_from_str!(Channel);
+impl_file_string_serialization!(Channel);
 
-#[parse_enum(or_else = |s| Err(Error::InvalidVersionSelector(s.to_string())))]
+#[zpm_enum(or_else = |s| Err(Error::InvalidVersionSelector(s.to_string())))]
 #[derive(Debug, Copy, Clone)]
 #[derive_variants(Debug, Copy, Clone)]
 pub enum ReleaseLine {
@@ -81,9 +82,10 @@ impl ToHumanString for ReleaseLine {
     }
 }
 
-impl_serialization_traits!(ReleaseLine);
+impl_file_string_from_str!(ReleaseLine);
+impl_file_string_serialization!(ReleaseLine);
 
-#[parse_enum(or_else = |s| Err(Error::InvalidVersionSelector(s.to_string())))]
+#[zpm_enum(or_else = |s| Err(Error::InvalidVersionSelector(s.to_string())))]
 #[derive(Debug)]
 #[derive_variants(Debug)]
 pub enum Selector {
@@ -143,4 +145,5 @@ impl ToHumanString for Selector {
     }
 }
 
-impl_serialization_traits!(Selector);
+impl_file_string_from_str!(Selector);
+impl_file_string_serialization!(Selector);

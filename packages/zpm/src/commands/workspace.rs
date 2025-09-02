@@ -1,9 +1,13 @@
 use std::{path::PathBuf, process::ExitCode};
 
+use zpm_primitives::Ident;
 use zpm_utils::Path;
 use clipanion::{cli, prelude::Cli};
 
-use crate::{error::Error, primitives::Ident, project};
+use crate::{
+    error::Error,
+    project::Project,
+};
 
 use super::YarnCli;
 
@@ -29,7 +33,7 @@ impl Workspace {
     #[tokio::main()]
     async fn get_cwd(&self) -> Result<Path, Error> {
         let project
-            = project::Project::new(None).await?;
+            = Project::new(None).await?;
 
         let workspace
             = project.workspace_by_ident(&self.workspace)?;

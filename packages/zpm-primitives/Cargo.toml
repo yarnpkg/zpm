@@ -1,0 +1,17 @@
+[package]
+name = "zpm-primitives"
+version = "6.0.0-alpha.0"
+edition = "2024"
+
+[dependencies]
+bincode = {version = "2.0.0-rc.3", features = ["serde"] }
+colored = "3.0.0"
+regex = "1.10.6"
+serde_plain = "1.0.2"
+serde = { version = "1.0.207", features = ["derive"] }
+thiserror = "1.0.63"
+zpm-git = { path = "../zpm-git" }
+zpm-macro-enum = { path = "../zpm-macro-enum" }
+zpm-semver = { path = "../zpm-semver" }
+zpm-utils = { path = "../zpm-utils" }
+rstest = "0.26.1"

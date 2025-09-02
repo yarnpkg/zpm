@@ -1,7 +1,11 @@
-use zpm_utils::Path;
+use zpm_primitives::{Locator, Reference, RegistryReference};
+use zpm_utils::{Hash64, Path};
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, primitives::{reference, Locator, Reference}};
+use crate::{
+    error::Error,
+    install::{FetchResult, InstallContext, InstallOpResult},
+};
 
 pub mod folder;
 pub mod git;
@@ -46,7 +50,7 @@ pub enum PackageData {
         archive_path: Path,
 
         /** Checksum of the archive; only present when the archive was newly cached */
-        checksum: Option<Sha256>,
+        checksum: Option<Hash64>,
 
         /** Directory from which relative links from link:/file:/portal: dependencies will be resolved */
         context_directory: Path,
@@ -89,7 +93,7 @@ impl PackageData {
             .relative_to(self.data_root())
     }
 
-    pub fn checksum(&self) -> Option<Sha256> {
+    pub fn checksum(&self) -> Option<Hash64> {
         match self {
             PackageData::Local {..} => None,
             PackageData::MissingZip {..} => None,
@@ -114,7 +118,7 @@ pub enum SyncFetchAttempt {
 pub fn try_fetch_locator_sync(context: InstallContext, locator: &Locator, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<SyncFetchAttempt, Error> {
     match &locator.reference {
         Reference::Shorthand(params)
-            => match npm::try_fetch_locator_sync(&context, locator, &reference::RegistryReference {ident: locator.ident.clone(), version: params.version.clone()}, is_mock_request)? {
+            => match npm::try_fetch_locator_sync(&context, locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone()}, is_mock_request)? {
                 Some(fetch_result) => Ok(SyncFetchAttempt::Success(fetch_result)),
                 None => Ok(SyncFetchAttempt::Failure(dependencies)),
             },
@@ -165,7 +169,7 @@ pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, i
             => patch::fetch_locator(&context, locator, params, dependencies).await,
 
         Reference::Shorthand(params)
-            => npm::fetch_locator(&context, locator, &reference::RegistryReference {ident: locator.ident.clone(), version: params.version.clone()}, is_mock_request).await,
+            => npm::fetch_locator(&context, locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone()}, is_mock_request).await,
 
         Reference::Registry(params)
             => npm::fetch_locator(&context, locator, params, is_mock_request).await,

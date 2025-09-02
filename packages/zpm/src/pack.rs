@@ -4,21 +4,23 @@ use std::sync::LazyLock;
 
 use zpm_parsers::JsonFormatter;
 use zpm_parsers::Value;
+use zpm_primitives::AnonymousSemverRange;
+use zpm_primitives::Descriptor;
+use zpm_primitives::PeerRange;
+use zpm_primitives::Range;
 use zpm_utils::Path;
 use globset::GlobBuilder;
 use globset::GlobMatcher;
 use regex::Regex;
 use zpm_utils::ToFileString;
 
-use crate::error::Error;
-use crate::manifest::helpers::parse_manifest;
-use crate::manifest::Manifest;
-use crate::primitives::range::AnonymousSemverRange;
-use crate::primitives::Descriptor;
-use crate::primitives::PeerRange;
-use crate::primitives::Range;
-use crate::project::Project;
-use crate::project::Workspace;
+use crate::{
+    error::Error,
+    manifest::helpers::parse_manifest,
+    manifest::Manifest,
+    project::Project,
+    project::Workspace,
+};
 
 #[derive(Default)]
 struct IgnoreFiles {
@@ -315,36 +317,36 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         iter.filter_map(move |(ident, descriptor)| {
             match &descriptor.range {
                 Range::WorkspaceSemver(params) => {
-                    Some((field_name, Ok(Descriptor::new(ident.clone(), Range::AnonymousSemver(AnonymousSemverRange {
+                    Some((field_name, Ok(Descriptor::new(ident.clone(), AnonymousSemverRange {
                         range: params.range.clone()
-                    })))))
+                    }.into()))))
                 },
 
                 Range::WorkspaceMagic(params) => {
                     let workspace
                         = project.workspace_by_ident(&descriptor.ident);
 
-                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), Range::AnonymousSemver(AnonymousSemverRange {
+                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), AnonymousSemverRange {
                         range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(params.magic),
-                    })))))
+                    }.into()))))
                 },
 
                 Range::WorkspaceIdent(params) => {
                     let workspace
                         = project.workspace_by_ident(&params.ident);
 
-                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), Range::AnonymousSemver(AnonymousSemverRange {
+                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), AnonymousSemverRange {
                         range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
-                    })))))
+                    }.into()))))
                 },
 
                 Range::WorkspacePath(params) => {
                     let workspace
                         = project.workspace_by_rel_path(&params.path);
 
-                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), Range::AnonymousSemver(AnonymousSemverRange {
+                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), AnonymousSemverRange {
                         range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
-                    })))))
+                    }.into()))))
                 },
 
                 _ => {
@@ -371,9 +373,9 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
                     = project.workspace_by_ident(ident);
 
                 Some(workspace.and_then(move |workspace| {
-                    Ok(Descriptor::new(ident.clone(), Range::AnonymousSemver(AnonymousSemverRange {
+                    Ok(Descriptor::new(ident.clone(), AnonymousSemverRange {
                         range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(params.magic),
-                    })))
+                    }.into()))
                 }))
             },
 
@@ -382,16 +384,16 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
                     = project.workspace_by_rel_path(&params.path);
 
                 Some(workspace.and_then(move |workspace| {
-                    Ok(Descriptor::new(ident.clone(), Range::AnonymousSemver(AnonymousSemverRange {
+                    Ok(Descriptor::new(ident.clone(), AnonymousSemverRange {
                         range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
-                    })))
+                    }.into()))
                 }))
             },
 
             PeerRange::WorkspaceSemver(params) => {
-                Some(Ok(Descriptor::new(ident.clone(), Range::AnonymousSemver(AnonymousSemverRange {
+                Some(Ok(Descriptor::new(ident.clone(), AnonymousSemverRange {
                     range: params.range.clone(),
-                }))))
+                }.into())))
             },
 
             _ => {

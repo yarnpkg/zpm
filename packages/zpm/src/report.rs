@@ -1,11 +1,14 @@
 use std::{cell::RefCell, future::Future, io::{self, Write}, sync::{mpsc, LazyLock}, thread::JoinHandle, time::{Duration, SystemTime}};
 
 use colored::{Color, Colorize};
-use tokio::sync::RwLock;
+use dialoguer::{Input, Password};
+use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
+use zpm_config::Configuration;
+use zpm_primitives::{Descriptor, Locator};
 use zpm_switch::get_bin_version;
 use zpm_utils::{Path, ToHumanString};
 
-use crate::{config::Config, error::Error, primitives::{Descriptor, Locator}};
+use crate::error::Error;
 
 const TOP_LEVEL_PREFIX: char = '·';
 
@@ -15,23 +18,21 @@ pub async fn set_current_report(report: StreamReport) {
     REPORT.write().await.replace(report);
 }
 
-pub async fn current_report<F: FnOnce(&mut StreamReport) -> ()>(f: F) -> () {
-    if let Some(report) = REPORT.write().await.as_mut() {
-        f(report);
-    };
+pub async fn current_report() -> RwLockWriteGuard<'static, Option<StreamReport>> {
+    REPORT.write().await
 }
 
 pub async fn async_section<F: Future>(name: &str, f: F) -> F::Output {
-    current_report(|r| {
+    current_report().await.as_mut().map(|r| {
         r.push_section(name.to_string());
-    }).await;
+    });
 
     let res
         = f.await;
 
-    current_report(|r| {
+    current_report().await.as_mut().map(|r| {
         r.pop_section();
-    }).await;
+    });
 
     res
 }
@@ -40,9 +41,9 @@ pub async fn error_handler<T, F: Future<Output = Result<(), Error>>>(f: F) -> ()
     let res = f.await;
 
     if let Err(e) = &res {
-        current_report(|r| {
+        current_report().await.as_mut().map(|r| {
             r.error(e.clone());
-        }).await;
+        });
     }
 
     ()
@@ -78,9 +79,9 @@ pub async fn with_report_result<F, R>(report: StreamReport, f: F) -> Result<R, E
             = f.await;
 
         if let Err(e) = &res {
-            current_report(|r| {
+            current_report().await.as_mut().map(|r| {
                 r.error(e.clone());
-            }).await;
+            });
 
             return Err(Error::SilentError);
         }
@@ -98,9 +99,9 @@ pub async fn with_context_result<F, R>(context: ReportContext, f: F) -> Result<R
         let res = f.await;
 
         if let Err(e) = &res {
-            current_report(|r| {
+            current_report().await.as_mut().map(|r| {
                 r.error(e.clone());
-            }).await;
+            });
         }
 
         res
@@ -116,9 +117,9 @@ pub struct StreamReportConfig {
 }
 
 impl StreamReportConfig {
-    pub fn from_config(config: &Config) -> Self {
+    pub fn from_config(config: &Configuration) -> Self {
         Self {
-            enable_progress_bars: config.user.enable_progress_bars.value,
+            enable_progress_bars: config.settings.enable_progress_bars.value,
             enable_timers: true,
             include_version: false,
             silent_or_error: false,
@@ -133,11 +134,24 @@ pub enum Severity {
 }
 
 #[derive(Debug)]
+pub enum PromptType {
+    Input(String),
+    Password(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LastMessageType {
+    Prompt,
+    Line,
+}
+
+#[derive(Debug)]
 pub enum ReportMessage {
     Line(Severity, String),
     LogFile(Path),
     PushSection(String),
     PopSection,
+    Prompt(PromptType),
 }
 
 struct Reporter {
@@ -146,14 +160,16 @@ struct Reporter {
     level: usize,
     indent: usize,
 
+    last_message_type: Option<LastMessageType>,
     start_time: Option<SystemTime>,
     buffered_lines: Option<Vec<String>>,
     log_paths: Vec<Path>,
     spinner_idx: Option<usize>,
+    prompt_tx: mpsc::Sender<String>,
 }
 
 impl Reporter {
-    pub fn new(config: StreamReportConfig) -> Self {
+    pub fn new(config: StreamReportConfig, prompt_tx: mpsc::Sender<String>) -> Self {
         let buffered_lines
             = config.silent_or_error.then_some(Vec::new());
 
@@ -161,10 +177,12 @@ impl Reporter {
             config,
             level: 0,
             indent: 0,
+            last_message_type: None,
             start_time: None,
             buffered_lines,
             log_paths: Vec::new(),
             spinner_idx: None,
+            prompt_tx,
         }
     }
 
@@ -203,6 +221,10 @@ impl Reporter {
 
             ReportMessage::PopSection => {
                 self.on_pop_section(writer);
+            },
+
+            ReportMessage::Prompt(prompt) => {
+                self.on_prompt(writer, prompt);
             },
         }
     }
@@ -250,6 +272,46 @@ impl Reporter {
         }
     }
 
+    fn format_prompt(&self, prompt: &str) -> String {
+        format!("{} {}", "?".color(Color::TrueColor {r: 47, g: 186, b: 135}), prompt.bold())
+    }
+
+    fn on_prompt<T: Write>(&mut self, writer: &mut T, prompt: PromptType) {
+        if let Some(last_message_type) = self.last_message_type {
+            if last_message_type == LastMessageType::Line {
+                writeln!(writer, "").unwrap();
+            }
+        }
+
+        self.last_message_type = Some(LastMessageType::Prompt);
+
+        match prompt {
+            PromptType::Input(prompt) => {
+                let label
+                    = self.format_prompt(&prompt);
+
+                let input = Input::<String>::new()
+                    .with_prompt(label)
+                    .interact_text()
+                    .unwrap();
+
+                self.prompt_tx.send(input).unwrap();
+            },
+
+            PromptType::Password(prompt) => {
+                let label
+                    = self.format_prompt(&prompt);
+
+                let password = Password::new()
+                    .with_prompt(label)
+                    .interact()
+                    .unwrap();
+
+                self.prompt_tx.send(password).unwrap();
+            },
+        }
+    }
+
     fn on_pop_section<T: Write>(&mut self, writer: &mut T) {
         if self.level == 0 {
             panic!("Cannot pop section when no sections are pushed");
@@ -281,6 +343,14 @@ impl Reporter {
     }
 
     fn write_line<T: Write>(&mut self, writer: &mut T, line: &str, severity: Severity) {
+        if let Some(last_message_type) = self.last_message_type {
+            if last_message_type == LastMessageType::Prompt {
+                writeln!(writer, "").unwrap();
+            }
+        }
+
+        self.last_message_type = Some(LastMessageType::Line);
+
         let prefix = self.format_prefix(match severity {
             Severity::Info => Color::BrightBlue,
             Severity::Error => Color::BrightRed,
@@ -308,17 +378,20 @@ pub struct StreamReport {
     handle: JoinHandle<()>,
     break_request_tx: mpsc::Sender<bool>,
     msg_queue_tx: mpsc::Sender<ReportMessage>,
+    prompt_rx: Mutex<mpsc::Receiver<String>>,
 }
 
 impl StreamReport {
     pub fn new(config: StreamReportConfig) -> Self {
-        let mut reporter
-            = Reporter::new(config);
-
         let (break_request_tx, break_request_rx)
             = mpsc::channel::<bool>();
         let (msg_queue_tx, msg_queue_rx)
             = mpsc::channel::<ReportMessage>();
+        let (prompt_tx, prompt_rx)
+            = mpsc::channel::<String>();
+
+        let mut reporter
+            = Reporter::new(config, prompt_tx);
 
         let handle = std::thread::spawn(move || {
             let chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".chars().collect::<Vec<_>>();
@@ -344,7 +417,8 @@ impl StreamReport {
 
                 idx = (idx + 1) % chars.len();
 
-                let mut stdout = io::stdout();
+                let mut stdout
+                    = io::stdout();
 
                 reporter.clear_spinner(&mut stdout);
 
@@ -366,6 +440,7 @@ impl StreamReport {
             handle,
             break_request_tx,
             msg_queue_tx,
+            prompt_rx: Mutex::new(prompt_rx),
         }
     }
 
@@ -423,6 +498,17 @@ impl StreamReport {
         if should_wake_up {
             self.break_request_tx.send(false).unwrap();
         }
+    }
+
+    pub async fn prompt(&self, prompt: PromptType) -> String {
+        self.report(ReportMessage::Prompt(prompt));
+
+        let prompt_rx
+            = self.prompt_rx.lock().await;
+
+        prompt_rx
+            .recv()
+            .unwrap()
     }
 
     pub fn close(self) {

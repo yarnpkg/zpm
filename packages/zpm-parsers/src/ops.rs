@@ -370,6 +370,19 @@ mod tests {
     }
 
     #[test]
+    fn apply_to_document_escaped_key() {
+        assert_eq!(UpdateSet {
+            updates: vec![
+                Update {
+                    offset: 8,
+                    size: 5,
+                    data: "foo".to_string(),
+                },
+            ],
+        }.apply_to_document("\"test\": value\n"), "\"test\": foo\n");
+    }
+
+    #[test]
     fn apply_to_document_multiple_updates() {
         assert_eq!(UpdateSet {
             updates: vec![

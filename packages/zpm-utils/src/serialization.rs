@@ -1,4 +1,13 @@
 use colored::Colorize;
+use thiserror::Error;
+
+use crate::DataType;
+
+#[derive(Error, Debug)]
+pub enum SerializationError {
+    #[error("Invalid value: {0}")]
+    InvalidValue(String),
+}
 
 pub trait FromFileString {
     type Error;
@@ -13,6 +22,84 @@ pub trait ToFileString {
 
 pub trait ToHumanString {
     fn to_print_string(&self) -> String;
+}
+
+pub trait ToStringComplete: ToFileString + ToHumanString {
+}
+
+impl<T: ToFileString + ToHumanString> ToStringComplete for T {
+}
+
+impl<T: FromFileString> FromFileString for Box<T> {
+    type Error = <T as FromFileString>::Error;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        Ok(Box::new(T::from_file_string(s)?))
+    }
+}
+
+impl<T: ToFileString> ToFileString for Box<T> {
+    fn to_file_string(&self) -> String {
+        self.as_ref().to_file_string()
+    }
+}
+
+impl<T: ToHumanString> ToHumanString for Box<T> {
+    fn to_print_string(&self) -> String {
+        self.as_ref().to_print_string()
+    }
+}
+
+impl FromFileString for bool {
+    type Error = SerializationError;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "true" | "1" => {
+                Ok(true)
+            },
+
+            "false" | "0" => {
+                Ok(false)
+            },
+
+            _ => {
+                Err(SerializationError::InvalidValue(s.to_string()))
+            },
+        }
+    }
+}
+
+impl ToFileString for bool {
+    fn to_file_string(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl ToHumanString for bool {
+    fn to_print_string(&self) -> String {
+        DataType::Boolean.colorize(&self.to_file_string())
+    }
+}
+
+impl FromFileString for usize {
+    type Error = std::num::ParseIntError;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl ToFileString for usize {
+    fn to_file_string(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl ToHumanString for usize {
+    fn to_print_string(&self) -> String {
+        DataType::Number.colorize(&self.to_file_string())
+    }
 }
 
 impl FromFileString for String {
@@ -31,7 +118,7 @@ impl ToFileString for String {
 
 impl ToHumanString for String {
     fn to_print_string(&self) -> String {
-        self.as_str().to_print_string()
+        DataType::String.colorize(&self.to_file_string())
     }
 }
 
@@ -47,8 +134,42 @@ impl ToHumanString for &str {
     }
 }
 
+impl<T: FromFileString> FromFileString for Option<T> {
+    type Error = <T as FromFileString>::Error;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        if s == "null" {
+            return Ok(None);
+        }
+
+        Ok(Some(T::from_file_string(s)?))
+    }
+}
+
+impl<T: ToFileString> ToFileString for Option<T> {
+    fn to_file_string(&self) -> String {
+        "null".to_string()
+    }
+}
+
+impl<T: ToFileString> ToHumanString for Option<T> {
+    fn to_print_string(&self) -> String {
+        self.to_file_string()
+    }
+}
+
+/**
+ * This macro implements the `FromStr` and similar traits for a type that
+ * implements `FromFileString`. Ideally we wouldn't use that, as the zpm
+ * code is supposed to use FromFileString.
+ *
+ * In some cases we need to interact with third-party libraries that rely
+ * on FromStr (for example Clipanion, since relying on FromFileString
+ * wouldn't make sense there), in which case the relevant types must be
+ * annotated.
+ */
 #[macro_export]
-macro_rules! impl_serialization_traits_no_serde(($type:ty) => {
+macro_rules! impl_file_string_from_str(($type:ty) => {
     impl std::str::FromStr for $type {
         type Err = <$type as $crate::FromFileString>::Error;
 
@@ -107,9 +228,7 @@ macro_rules! impl_serialization_traits_no_serde(($type:ty) => {
 });
 
 #[macro_export]
-macro_rules! impl_serialization_traits(($type:ty) => {
-    $crate::impl_serialization_traits_no_serde!($type);
-
+macro_rules! impl_file_string_serialization(($type:ty) => {
     impl serde::Serialize for $type {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
             serializer.serialize_str(&self.to_file_string())

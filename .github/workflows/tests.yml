@@ -3,6 +3,7 @@ name: Tests
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,8 +19,8 @@ jobs:
       id-token: write
 
     environment:
-      name: github-pages
-      url: ${{steps.deployment.outputs.page_url}}
+      name: test-reports
+      url: "https://iteratum.ai/examples/jest-ui/?url=https%3A%2F%2Frepo.yarnpkg.com%2Fbuilds%2Fzpm%2Fcommits%2F${{github.sha}}%2Ftests"
 
     steps:
       - name: Checkout the repo
@@ -29,6 +30,9 @@ jobs:
         uses: taiki-e/install-action@a27ef18d36cfa66b0af3a360104621793b41c036 # v2.54.3
         with:
           tool: cross
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
 
       - name: Add Rust Target
         run: rustup target add x86_64-unknown-linux-musl
@@ -60,18 +64,3 @@ jobs:
         with:
           name: test-report
           path: report.json
-
-      - name: Generate downloads page
-        run: ./yarn.sh build:site-artifacts
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: packages/site-artifacts/dist
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4

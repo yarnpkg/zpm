@@ -1,11 +1,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use zpm_utils::{IoResultExt, Path, ToFileString};
+use zpm_primitives::Locator;
+use zpm_utils::{CollectHash, Hash64, IoResultExt, Path, ToFileString};
 use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize};
 
-use crate::{algos, diff_finder::{DiffController, DiffFinder}, error::Error, hash::{CollectHash, Sha256}, primitives::Locator, project::Project, report::{with_context_result, ReportContext}, script::{ScriptEnvironment, ScriptResult}};
+use crate::{
+    algos,
+    diff_finder::{DiffController, DiffFinder},
+    error::Error,
+    project::Project,
+    report::{with_context_result, ReportContext},
+    script::{ScriptEnvironment, ScriptResult},
+};
 
 #[derive(Clone, Debug, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
@@ -49,7 +57,7 @@ pub struct BuildRequest {
 }
 
 impl BuildRequest {
-    pub async fn run(self, project: &Project, hash: Sha256) -> Result<ScriptResult, Error> {
+    pub async fn run(self, project: &Project, hash: Hash64) -> Result<ScriptResult, Error> {
         let cwd_abs = project.project_cwd
             .with_join(&self.cwd);
 
@@ -132,7 +140,7 @@ impl BuildRequest {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildState {
-    pub entries: BTreeMap<Locator, BTreeMap<Path, Sha256>>,
+    pub entries: BTreeMap<Locator, BTreeMap<Path, Hash64>>,
 }
 
 impl<'de> Deserialize<'de> for BuildState {
@@ -162,7 +170,7 @@ impl Serialize for BuildState {
 }
 
 impl BuildState {
-    pub fn from_entries(entries: BTreeMap<Locator, BTreeMap<Path, Sha256>>) -> Self {
+    pub fn from_entries(entries: BTreeMap<Locator, BTreeMap<Path, Hash64>>) -> Self {
         Self { entries }
     }
 
@@ -209,9 +217,9 @@ pub struct Build {
 pub struct BuildManager<'a> {
     pub requests: BuildRequests,
     pub dependents: BTreeMap<usize, BTreeSet<usize>>,
-    pub tree_hashes: BTreeMap<Locator, Sha256>,
+    pub tree_hashes: BTreeMap<Locator, Hash64>,
     pub queued: Vec<usize>,
-    pub running: FuturesUnordered<BoxFuture<'a, (usize, Sha256, Result<ScriptResult, Error>)>>,
+    pub running: FuturesUnordered<BoxFuture<'a, (usize, Hash64, Result<ScriptResult, Error>)>>,
     pub build_errors: BTreeSet<(Locator, Path)>,
     pub build_state_out: BuildState,
 }
@@ -251,7 +259,7 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn record(&mut self, idx: usize, hash: Sha256, script_result: ScriptResult) {
+    fn record(&mut self, idx: usize, hash: Hash64, script_result: ScriptResult) {
         let request
             = &self.requests.entries[idx];
 
@@ -315,7 +323,7 @@ impl<'a> BuildManager<'a> {
         }
     }
 
-    fn get_hash_impl<'b>(tree_hashes: &'b mut BTreeMap<Locator, Sha256>, project: &'a Project, locator: &Locator) -> Sha256 {
+    fn get_hash_impl<'b>(tree_hashes: &'b mut BTreeMap<Locator, Hash64>, project: &'a Project, locator: &Locator) -> Hash64 {
         let hash
             = tree_hashes.get(locator);
 
@@ -324,7 +332,7 @@ impl<'a> BuildManager<'a> {
         }
 
         // To avoid the case where one dependency depends on itself somehow
-        tree_hashes.insert(locator.clone(), Sha256::from_string(&"<recursive>"));
+        tree_hashes.insert(locator.clone(), Hash64::from_string(&"<recursive>"));
 
         let install_state = project.install_state.as_ref()
             .expect("Expected the install state to be present");
@@ -333,7 +341,7 @@ impl<'a> BuildManager<'a> {
             .expect("Expected package to have a resolution");
 
         let self_hash
-            = Sha256::from_string(&locator.to_file_string());
+            = Hash64::from_string(&locator.to_file_string());
 
         let hashes = resolution.dependencies.values()
             .map(|descriptor| &install_state.resolution_tree.descriptor_to_locator[descriptor])
@@ -349,7 +357,7 @@ impl<'a> BuildManager<'a> {
         hash
     }
 
-    fn get_hash(&mut self, project: &'a Project, locator: &Locator) -> Sha256 {
+    fn get_hash(&mut self, project: &'a Project, locator: &Locator) -> Hash64 {
         BuildManager::get_hash_impl(&mut self.tree_hashes, project, locator)
     }
 

@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use serde_with::serde_as;
-use std::{collections::BTreeMap, fmt::Debug, str::FromStr, time::SystemTime};
+use std::{collections::BTreeMap, fmt::Debug, str::FromStr};
 use zpm_semver::{Range, Version};
 use zpm_utils::{ExplicitPath, FromFileString, Path, ToFileString};
 
@@ -9,7 +9,6 @@ use crate::{errors::Error, http::fetch, manifest::{PackageManagerReference, Vers
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReleaseLine {
-    stable: Version,
     tags: Vec<Version>,
 }
 
@@ -30,7 +29,7 @@ pub async fn get_default_yarn_version(release_line: Option<crate::yarn_enums::Re
             .stable();
 
     let version
-      = resolve_channel_selector(&channel_selector).await?;
+        = resolve_channel_selector(&channel_selector).await?;
 
     Ok(VersionPackageManagerReference {version}.into())
 }
@@ -38,15 +37,15 @@ pub async fn get_default_yarn_version(release_line: Option<crate::yarn_enums::Re
 pub async fn resolve_selector(selector: &Selector) -> Result<Version, Error> {
   match selector {
     Selector::Channel(params) => {
-      resolve_channel_selector(params).await
+        resolve_channel_selector(params).await
     },
 
     Selector::Version(params) => {
-      Ok(params.version.clone())
+        Ok(params.version.clone())
     },
 
     Selector::Range(params) => {
-      resolve_semver_range(&params.range).await
+        resolve_semver_range(&params.range).await
     },
   }
 }

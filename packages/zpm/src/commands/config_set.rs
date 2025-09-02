@@ -1,17 +1,21 @@
 use clipanion::cli;
-use convert_case::{Case, Casing};
+use zpm_parsers::yaml::Yaml;
+use zpm_utils::IoResultExt;
 
-use crate::{error::Error, project::Project, settings::{ProjectConfigType, UserConfigType}};
+use crate::{
+    error::Error,
+    project::Project,
+};
 
 #[cli::command]
 #[cli::path("config", "set")]
 #[cli::category("Configuration commands")]
 #[cli::description("Set a configuration value")]
 pub struct ConfigSet {
-    #[cli::option("-U,--user")]
+    #[cli::option("-U,--user", default = false)]
     user: bool,
 
-    name: String,
+    name: zpm_parsers::Path,
     value: String,
 }
 
@@ -21,20 +25,36 @@ impl ConfigSet {
         let project
             = Project::new(None).await?;
 
-        let snake_case
-            = self.name.to_case(Case::Snake);
+        let segments
+            = self.name.segments()
+                .iter()
+                .map(|v| v.as_str())
+                .collect::<Vec<_>>();
 
-        if self.user {
-            let hydrated_value
-                = UserConfigType::from_file_string(&snake_case, &self.value)?;
+        let value
+            = project.config.hydrate(&segments, &self.value)?;
 
-            project.config.user.set(&snake_case, hydrated_value)?;
-        } else {
-            let hydrated_value
-                = ProjectConfigType::from_file_string(&snake_case, &self.value)?;
+        let document_path = match self.user {
+            true => project.config.user_config_path.as_ref().unwrap(),
+            false => project.config.project_config_path.as_ref().unwrap(),
+        };
 
-            project.config.project.set(&snake_case, hydrated_value)?;
-        }
+        let document = document_path
+            .fs_read_text()
+            .ok_missing()?
+            .unwrap_or_default();
+
+        let updated_document = Yaml::update_document_field(
+            &document,
+            self.name.clone(),
+            // TODO: It shouldn't always be a string; we should improve `hydrate` to return
+            // a zpm_parsers::Value instead of a Box<dyn ToStringComplete>, but that would
+            // require some hefty changes.
+            zpm_parsers::Value::String(value.to_file_string()),
+        )?;
+
+        document_path
+            .fs_change(&updated_document, false)?;
 
         Ok(())
     }

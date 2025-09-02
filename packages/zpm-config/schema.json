@@ -1,0 +1,248 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Settings",
+  "propertyAliases": {
+    "enableAutoTypes": ["tsEnableAutoTypes"]
+  },
+  "properties": {
+    "defaultSemverRangePrefix": {
+      "type": "zpm_semver::RangeKind",
+      "description": "The default semver range prefix to use for dependencies",
+      "default": "caret"
+    },
+    "enableAutoTypes": {
+      "type": "boolean",
+      "description": "Whether to automatically add @types/ packages to the dependencies",
+      "default": "crate::check_tsconfig(context)"
+    },
+    "enableGlobalCache": {
+      "type": "boolean",
+      "description": "Whether to keep the packages in a global cache rather than inside the project",
+      "default": true
+    },
+    "enableLocalCacheCleanup": {
+      "type": "boolean",
+      "description": "Whether to remove unused packages from the local cache after each install",
+      "default": true
+    },
+    "enableImmutableCache": {
+      "type": "boolean",
+      "description": "Whether to report errors when a package would be added or removed from the cache",
+      "default": false
+    },
+    "enableImmutableInstalls": {
+      "type": "boolean",
+      "description": "Whether to report errors when a package would be added or removed from the cache",
+      "default": false
+    },
+    "enableNetwork": {
+      "type": "boolean",
+      "description": "Whether to allow Yarn to perform network queries or not",
+      "default": true
+    },
+    "enableProgressBars": {
+      "type": "boolean",
+      "description": "Whether to show progress bars in the output",
+      "default": "!zpm_ci::is_ci().is_some() && std::io::IsTerminal::is_terminal(&std::io::stdout())"
+    },
+    "enableScripts": {
+      "type": "boolean",
+      "description": "Whether to run postinstall scripts",
+      "default": true
+    },
+    "enableTransparentWorkspaces": {
+      "type": "boolean",
+      "description": "Whether to allow workspaces to depend on other workspaces through classic semver ranges",
+      "default": true
+    },
+    "globalFolder": {
+      "type": "zpm_utils::Path",
+      "description": "The folder where the global cache will be stored",
+      "default": "Path::home_dir().unwrap().unwrap().with_join_str(\".yarn/zpm\")"
+    },
+    "httpRetry": {
+      "type": "usize",
+      "description": "The number of times to retry a network request",
+      "default": 3
+    },
+    "localCacheFolderName": {
+      "type": "string",
+      "description": "The name of the folder where the local cache will be stored inside the .yarn folder",
+      "default": "cache"
+    },
+    "networkConcurrency": {
+      "type": "usize",
+      "description": "The number of concurrent network requests Yarn can perform",
+      "default": 100
+    },
+    "networkSettings": {
+      "type": "object",
+      "description": "Configuration specific to each network setting",
+      "additionalKeys": {
+        "type": "zpm_utils::Glob"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "title": "NetworkSettings",
+        "properties": {
+          "enableNetwork": {
+            "type": ["boolean", "null"],
+            "description": "Whether to allow network access for this specific glob"
+          }
+        }
+      }
+    },
+    "nodeLinker": {
+      "type": "crate::NodeLinker",
+      "description": "The linker to use for node_modules",
+      "default": "pnp"
+    },
+    "npmAlwaysAuth": {
+      "type": "boolean",
+      "description": "Whether to always send authentication headers when querying the npm registry",
+      "default": false
+    },
+    "npmAuthIdent": {
+      "type": ["string", "null"],
+      "description": "The username to use for authentication when querying the npm registry"
+    },
+    "npmAuthToken": {
+      "type": ["string", "null"],
+      "description": "The token to use for authentication when querying the npm registry"
+    },
+    "npmPublishRegistry": {
+      "type": ["string", "null"],
+      "description": "The URL of the npm registry server to use for publishing"
+    },
+    "npmRegistries": {
+      "type": "object",
+      "description": "Configuration specific to each npm registry",
+      "additionalProperties": {
+        "type": "object",
+        "title": "NpmRegistry",
+        "properties": {
+          "npmAlwaysAuth": {
+            "type": ["boolean", "null"],
+            "description": "Whether to always send authentication headers when querying the npm registry"
+          },
+          "npmAuthIdent": {
+            "type": ["string", "null"],
+            "description": "The username to use for authentication when querying the npm registry"
+          },
+          "npmAuthToken": {
+            "type": ["string", "null"],
+            "description": "The token to use for authentication when querying the npm registry"
+          }
+        }
+      }
+    },
+    "npmRegistryServer": {
+      "type": "string",
+      "description": "The URL of the default npm registry server",
+      "default": "https://registry.npmjs.org"
+    },
+    "npmScopes": {
+      "type": "object",
+      "description": "Configuration specific to each npm scope",
+      "additionalProperties": {
+        "type": "object",
+        "title": "NpmScope",
+        "properties": {
+          "npmRegistryServer": {
+            "type": ["string", "null"],
+            "description": "The URL of the npm registry server to use for this scope"
+          },
+          "npmPublishRegistry": {
+            "type": ["string", "null"],
+            "description": "The URL of the npm registry server to use for this scope when publishing packages"
+          },
+          "npmAlwaysAuth": {
+            "type": ["boolean", "null"],
+            "description": "Whether to always send authentication headers when querying the npm registry"
+          },
+          "npmAuthIdent": {
+            "type": ["string", "null"],
+            "description": "The username to use for authentication when querying the npm registry"
+          },
+          "npmAuthToken": {
+            "type": ["string", "null"],
+            "description": "The token to use for authentication when querying the npm registry"
+          }
+        }
+      }
+    },
+    "pnpEnableInlining": {
+      "type": "boolean",
+      "description": "Whether to inline the PnP dependency tree in the generated .pnp.cjs file",
+      "default": true
+    },
+    "pnpFallbackMode": {
+      "type": "crate::PnpFallbackMode",
+      "description": "The fallback mode to use for PnP",
+      "default": "dependencies-only"
+    },
+    "pnpIgnorePatterns": {
+      "type": "array",
+      "description": "The patterns to ignore when using PnP",
+      "items": {
+        "type": "zpm_utils::Glob"
+      }
+    },
+    "pnpShebang": {
+      "type": "string",
+      "description": "The shebang to use for the generated .pnp.cjs file",
+      "default": "#!/usr/bin/env node"
+    },
+    "pnpmStoreFolder": {
+      "type": "string",
+      "description": "The folder to use for the Pnpm store",
+      "default": "node_modules/.store"
+    },
+    "packageExtensions": {
+      "type": "object",
+      "description": "Configuration specific to each package extension",
+      "additionalKeys": {
+        "type": "zpm_primitives::SemverDescriptor"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "title": "PackageExtension",
+        "properties": {
+          "dependencies": {
+            "type": "object",
+            "description": "The dependencies to add to the package extension",
+            "additionalKeys": {
+              "type": "zpm_primitives::Ident"
+            },
+            "additionalProperties": {
+              "type": "zpm_primitives::Range"
+            }
+          },
+          "peerDependencies": {
+            "type": "object",
+            "description": "The peer dependencies to add to the package extension",
+            "additionalKeys": {
+              "type": "zpm_primitives::Ident"
+            },
+            "additionalProperties": {
+              "type": "zpm_primitives::PeerRange"
+            }
+          }
+        }
+      }
+    },
+    "unsafeHttpWhitelist": {
+      "type": "array",
+      "description": "The patterns to whitelist when using unsafe HTTP",
+      "items": {
+        "type": "zpm_utils::Glob"
+      }
+    },
+    "virtualFolder": {
+      "type": "zpm_utils::Path",
+      "description": "The folder to use for the virtual folder",
+      "default": ".yarn/__virtual__"
+    }
+  }
+}

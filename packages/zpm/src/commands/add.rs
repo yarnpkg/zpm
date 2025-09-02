@@ -2,10 +2,17 @@ use std::collections::{HashMap, HashSet};
 
 use clipanion::cli;
 use zpm_parsers::{JsonFormatter, Value};
+use zpm_primitives::{AnonymousSemverRange, Descriptor};
 use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 
-use crate::{algolia::query_algolia, error::Error, install::InstallContext, primitives::{loose_descriptor, range::AnonymousSemverRange, Descriptor, LooseDescriptor, Range}, project::{self, InstallMode}};
+use crate::{
+    algolia::query_algolia,
+    descriptor_loose::{self, LooseDescriptor},
+    error::Error,
+    install::InstallContext,
+    project::{self, InstallMode}
+};
 
 #[derive(Clone, Debug)]
 struct AddRequest {
@@ -15,11 +22,11 @@ struct AddRequest {
     optional: bool,
 }
 
-async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_options: &loose_descriptor::ResolveOptions, requests: Vec<(Descriptor, AddRequest)>) -> Result<Vec<(Descriptor, AddRequest)>, Error> {
+async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_options: &descriptor_loose::ResolveOptions, requests: Vec<(Descriptor, AddRequest)>) -> Result<Vec<(Descriptor, AddRequest)>, Error> {
     let project = install_context.project
         .expect("Project not found");
 
-    if !project.config.project.enable_auto_types.value {
+    if !project.config.settings.enable_auto_types.value {
         return Ok(requests);
     }
 
@@ -76,11 +83,11 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
 
         let type_descriptor = Descriptor::new(
             descriptor.ident.type_ident(),
-            Range::AnonymousSemver(AnonymousSemverRange {
+            AnonymousSemverRange {
                 // TODO: We don't use `caret` here to match the Yarn Berry testsuite; we
                 // should clean that up once we can afford to update the tests.
                 range: zpm_semver::Range::from_file_string(&format!("^{}", range_min.major)).unwrap(),
-            }),
+            }.into(),
         );
 
         search_space.push(descriptor.ident.clone());
@@ -157,10 +164,10 @@ impl Add {
         } else if self.caret {
             RangeKind::Caret
         } else {
-            project.config.project.default_semver_range_prefix.value
+            project.config.settings.default_semver_range_prefix.value
         };
 
-        let resolve_options = loose_descriptor::ResolveOptions {
+        let resolve_options = descriptor_loose::ResolveOptions {
             active_workspace_ident: project.active_workspace()?.name.clone(),
             range_kind,
             resolve_tags: !self.fixed,

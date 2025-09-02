@@ -1,6 +1,4 @@
 use clipanion::cli;
-use convert_case::{Case, Casing};
-use zpm_utils::ToHumanString;
 
 use crate::{error::Error, project::Project};
 
@@ -9,7 +7,7 @@ use crate::{error::Error, project::Project};
 #[cli::category("Configuration commands")]
 #[cli::description("Get a configuration value")]
 pub struct ConfigGet {
-    name: String,
+    name: zpm_parsers::path::Path,
 }
 
 impl ConfigGet {
@@ -18,18 +16,16 @@ impl ConfigGet {
         let project
             = Project::new(None).await?;
 
-        let camel_key
-            = self.name.to_case(Case::Camel);
-        let snake_key
-            = self.name.to_case(Case::Snake);
+        let segments
+            = self.name.segments()
+                .iter()
+                .map(|v| v.as_str())
+                .collect::<Vec<_>>();
 
-        if let Ok(value) = project.config.project.get(&snake_key) {
-            println!("{}", value.to_print_string());
-        } else if let Ok(value) = project.config.user.get(&snake_key) {
-            println!("{}", value.to_print_string());
-        } else {
-            return Err(Error::ConfigKeyNotFound(camel_key));
-        }
+        let entry
+            = project.config.get(&segments)?;
+
+        println!("{}", entry.value.to_print_string());
 
         Ok(())
     }

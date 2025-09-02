@@ -1,9 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
+use zpm_primitives::Ident;
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, http::HttpClient, primitives::ident::Ident};
+use crate::{error::Error, http::HttpClient};
 
 const ALGOLIA_URL: &str = "https://OFCNCOG2CU.algolia.net/1/indexes/*/objects";
 
@@ -53,8 +54,8 @@ pub async fn query_algolia(idents: &[Ident], http_client: &Arc<HttpClient>) -> R
 
     let response = http_client.post(ALGOLIA_URL)?
         .body(sonic_rs::to_string(&input_payload).unwrap())
-        .header("x-algolia-application-id", "OFCNCOG2CU")
-        .header("x-algolia-api-key", "e8e1bd300d860104bb8c58453ffa1eb4")
+        .header("x-algolia-application-id", Some("OFCNCOG2CU"))
+        .header("x-algolia-api-key", Some("e8e1bd300d860104bb8c58453ffa1eb4"))
         .send()
         .await?;
 

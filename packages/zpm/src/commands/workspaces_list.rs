@@ -1,9 +1,14 @@
 use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 
 use clipanion::cli;
+use zpm_primitives::{Ident, Reference};
 use zpm_utils::{Path, ToFileString};
 
-use crate::{error::Error, git_utils, primitives::{Ident, Reference}, project::{self, Workspace}};
+use crate::{
+    error::Error,
+    git_utils,
+    project::{Project, Workspace},
+};
 
 #[cli::command]
 #[cli::path("workspaces", "list")]
@@ -27,7 +32,7 @@ pub struct WorkspacesList {
 }
 
 impl WorkspacesList {
-    fn get_all_list<'a>(&self, project: &'a project::Project) -> Vec<&'a Workspace> {
+    fn get_all_list<'a>(&self, project: &'a Project) -> Vec<&'a Workspace> {
         let workspaces
             = project.workspaces.iter()
                 .collect();
@@ -35,7 +40,7 @@ impl WorkspacesList {
         workspaces
     }
 
-    async fn get_since_list<'a>(&self, project: &'a project::Project, merge_base: Option<&str>) -> Result<Vec<&'a Workspace>, Error> {
+    async fn get_since_list<'a>(&self, project: &'a Project, merge_base: Option<&str>) -> Result<Vec<&'a Workspace>, Error> {
         let git_root
             = git_utils::find_root(&project.project_cwd)?;
 
@@ -73,7 +78,7 @@ impl WorkspacesList {
                 if ignored_files.contains(&rel_p) || ignored_paths.iter().any(|ignored_path| ignored_path.contains(&rel_p)) {
                     continue;
                 }
-    
+
                 let containing_workspace = project.workspaces.iter()
                     .filter(|w| w.rel_path.contains(&rel_p))
                     .max_by_key(|w| w.rel_path.as_str().len());
@@ -140,7 +145,7 @@ impl WorkspacesList {
     #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
-            = project::Project::new(None).await?;
+            = Project::new(None).await?;
 
         if self.verbose || (self.recursive && self.since.is_some()) {
             project

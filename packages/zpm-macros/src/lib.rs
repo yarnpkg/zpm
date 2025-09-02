@@ -3,35 +3,12 @@ extern crate proc_macro;
 use std::{collections::HashMap, sync::LazyLock};
 
 use convert_case::{Case, Casing};
-use parse_enum::ParseEnumArgs;
 use proc_macro2::Span;
 use quote::{quote, ToTokens, TokenStreamExt};
 use regex::Regex;
 use syn::{parse_macro_input, DeriveInput, Expr, Ident, ImplItem, ImplItemFn, Type};
 
 mod helpers;
-mod parse_enum;
-
-#[proc_macro_attribute]
-pub fn parse_enum(args_tokens: proc_macro::TokenStream, input_tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let mut args = ParseEnumArgs::default();
-
-    let args_parser = syn::meta::parser(|meta| {
-        if meta.path.is_ident("or_else") {
-            args.or_else = Some(meta.value()?.parse()?);
-            Ok(())
-        } else {
-            Err(meta.error("unsupported tea property"))
-        }
-    });
-
-    parse_macro_input!(args_tokens with args_parser);
-
-    let ast = parse_macro_input!(input_tokens as DeriveInput);
-
-    parse_enum::parse_enum(args, ast)
-        .unwrap_or_else(|err| err.to_compile_error().into())
-}
 
 // Turn X<Y> into X::<Y>
 fn get_expr_path_from_type(input: &syn::Type) -> proc_macro2::TokenStream {
@@ -340,10 +317,21 @@ pub fn yarn_config(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream
                     .ok_missing()?
                     .unwrap_or_default();
 
+                let path
+                    = zpm_parsers::Path::from_file_string(&name)?;
+
+                let cc_segments
+                    = path.segments.iter()
+                        .map(|segment| segment.to_case(Case::Camel))
+                        .collect::<Vec<_>>();
+
+                let cc_path
+                    = zpm_parsers::Path::from_segments(cc_segments);
+
                 let updated_config
                     = zpm_parsers::yaml::Yaml::update_document_field(
                         &config_text,
-                        zpm_parsers::Path::from_file_string(&name.to_case(Case::Camel))?,
+                        cc_path,
                         zpm_parsers::Value::String(value.to_file_string())
                     )?;
 

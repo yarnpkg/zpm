@@ -1,16 +1,14 @@
 use std::str::FromStr;
 
 use itertools::Itertools;
+use zpm_git::PrepareParams;
+use zpm_primitives::Locator;
 use zpm_utils::{Path, ToFileString};
-use bincode::{Decode, Encode};
 
-use crate::{error::Error, primitives::Locator, script::ScriptEnvironment};
-
-#[derive(Clone, Default, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PrepareParams {
-    pub cwd: Option<String>,
-    pub workspace: Option<String>,
-}
+use crate::{
+    error::Error,
+    script::ScriptEnvironment,
+};
 
 #[derive(Debug)]
 enum PackageManager {
@@ -179,7 +177,7 @@ async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams
 
     let pack_path = folder_path
         .with_join_str("package.tgz");
-    
+
     let pack_args = match &params.workspace {
         Some(workspace) => vec!["workspace", workspace.as_str(), "pack", "--filename", pack_path.as_str()],
         None => vec!["pack", "--filename", pack_path.as_str()],
@@ -194,7 +192,7 @@ async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams
 
     let pack_tgz
         = pack_path.fs_read()?;
-    
+
     Ok(pack_tgz)
 }
 

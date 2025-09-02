@@ -1,9 +1,10 @@
-use std::io::Read;
-
 use zpm_formats::zip::ZipSupport;
-use zpm_utils::ToHumanString;
+use zpm_primitives::{Ident, Locator, PatchReference};
+use zpm_utils::Hash64;
 
-use crate::{error::Error, hash::Sha256, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, misc, patch, primitives::{reference, Ident, Locator}, resolvers::Resolution};
+use crate::{
+    error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, misc::unpack_brotli_data, patch::apply::apply_patch, resolvers::Resolution
+};
 
 use super::PackageData;
 
@@ -18,7 +19,7 @@ pub fn has_builtin_patch(ident: &Ident) -> bool {
         .any(|(name, _)| *name == ident.as_str())
 }
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::PatchReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &PatchReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     let project = context.project
         .expect("The project is required to fetch a patch package");
 
@@ -39,7 +40,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
             is_builtin = true;
 
-            misc::unpack_brotli_data(compressed_patch)?
+            unpack_brotli_data(compressed_patch)?
         },
 
         path if path.starts_with("~/") => {
@@ -59,9 +60,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     };
 
     let patch_checksum
-        = Sha256::from_string(&patch_content);
+        = Hash64::from_string(&patch_content);
 
-    let reference = reference::PatchReference {
+    let reference = PatchReference {
         inner: params.inner.clone(),
         path: params.path.clone(),
         checksum: Some(patch_checksum),
@@ -116,12 +117,12 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
         let patched_entries = match is_builtin {
             true => {
-                patch::apply::apply_patch(original_entries.clone(), &patch_content, &package_version)
+                apply_patch(original_entries.clone(), &patch_content, &package_version)
                     .unwrap_or(original_entries)
             },
 
             false => {
-                patch::apply::apply_patch(original_entries, &patch_content, &package_version)?
+                apply_patch(original_entries, &patch_content, &package_version)?
             },
         };
 

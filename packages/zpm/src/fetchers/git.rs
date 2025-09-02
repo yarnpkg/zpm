@@ -1,8 +1,17 @@
-use crate::{error::Error, git, install::{FetchResult, InstallContext}, manifest::RemoteManifest, prepare, primitives::{reference, Locator}, resolvers::Resolution};
+use zpm_primitives::{GitReference, Locator};
+
+use crate::{
+    error::Error,
+    git,
+    install::{FetchResult, InstallContext},
+    manifest::RemoteManifest,
+    prepare,
+    resolvers::Resolution,
+};
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::GitReference) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &GitReference) -> Result<FetchResult, Error> {
     let pkg_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
         let repository_path
             = git::clone_repository(context, &params.git.repo, &params.git.commit).await?;

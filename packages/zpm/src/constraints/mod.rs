@@ -1,6 +1,12 @@
 use structs::{ConstraintsDependency, ConstraintsPackage, ConstraintsWorkspace};
+use zpm_primitives::Reference;
 
-use crate::{error::Error, install::InstallState, primitives::Reference, project::{Project, Workspace}, resolvers::Resolution};
+use crate::{
+    error::Error,
+    install::InstallState,
+    project::{Project, Workspace},
+    resolvers::Resolution,
+};
 
 pub mod apply;
 pub mod structs;

@@ -1,7 +1,7 @@
 use std::ops::{Index, Range, RangeFrom, RangeInclusive, RangeTo};
 
-use serde::{de, Deserialize, Deserializer};
-use zpm_utils::{impl_serialization_traits_no_serde, DataType, FromFileString, ToFileString, ToHumanString};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
 
 use crate::{json::escape_string, Error};
 
@@ -146,9 +146,12 @@ impl FromFileString for Path {
     type Error = Error;
 
     fn from_file_string(src: &str) -> Result<Self, Error> {
-        let mut segments = Vec::new();
-        let mut chars = src.chars();
-        let mut current_segment = String::new();
+        let mut segments
+            = Vec::new();
+        let mut chars
+            = src.chars();
+        let mut current_segment
+            = String::new();
 
         while let Some(ch) = chars.next() {
             match ch {
@@ -316,7 +319,13 @@ impl ToHumanString for Path {
     }
 }
 
-impl_serialization_traits_no_serde!(Path);
+impl_file_string_from_str!(Path);
+
+impl Serialize for Path {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        serializer.serialize_str(&self.to_file_string())
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(untagged)]

@@ -2,9 +2,17 @@ use std::{collections::BTreeMap, fmt, marker::PhantomData, str::FromStr, sync::{
 
 use regex::Regex;
 use serde::{de::{self, DeserializeOwned, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
+use zpm_config::ConfigExt;
+use zpm_primitives::{Descriptor, Ident, Locator, RegistryReference, RegistrySemverRange, RegistryTagRange, UrlReference};
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, npm, primitives::{range, reference, Descriptor, Ident, Locator}, resolvers::{workspace::{self, resolve_locator_ident}, Resolution}};
+use crate::{
+    error::Error,
+    install::{InstallContext, IntoResolutionResult, ResolutionResult},
+    manifest::RemoteManifest,
+    npm,
+    resolvers::{workspace, Resolution},
+};
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
@@ -167,7 +175,7 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
         .as_ref()
         .expect("Expected the registry to return a 'dist' field amongst the manifest data");
 
-    let registry_reference = reference::RegistryReference {
+    let registry_reference = RegistryReference {
         ident: package_ident.clone(),
         version,
     };
@@ -177,18 +185,18 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
 
     let locator = descriptor.resolve_with(match expected_registry_url == dist_manifest.tarball {
         true => registry_reference.into(),
-        false => reference::UrlReference {url: dist_manifest.tarball.clone()}.into(),
+        false => UrlReference {url: dist_manifest.tarball.clone()}.into(),
     });
 
     Resolution::from_remote_manifest(locator, manifest.remote)
         .into_resolution_result(context)
 }
 
-pub async fn resolve_semver_or_workspace_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistrySemverRange) -> Result<ResolutionResult, Error> {
+pub async fn resolve_semver_or_workspace_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistrySemverRange) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
-    if project.config.project.enable_transparent_workspaces.value {
+    if project.config.settings.enable_transparent_workspaces.value {
         if let Some(resolved) = workspace::resolve_ident(context, &descriptor.ident) {
             if params.range.check(&resolved.resolution.version) {
                 return Ok(resolved);
@@ -199,7 +207,7 @@ pub async fn resolve_semver_or_workspace_descriptor(context: &InstallContext<'_>
     resolve_semver_descriptor(context, descriptor, params).await
 }
 
-pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistrySemverRange) -> Result<ResolutionResult, Error> {
+pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistrySemverRange) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -231,11 +239,11 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
 }
 
-pub async fn resolve_tag_or_workspace_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistryTagRange) -> Result<ResolutionResult, Error> {
+pub async fn resolve_tag_or_workspace_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistryTagRange) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
-    if project.config.project.enable_transparent_workspaces.value {
+    if project.config.settings.enable_transparent_workspaces.value {
         if let Some(resolved) = workspace::resolve_ident(context, &descriptor.ident) {
             return Ok(resolved);
         }
@@ -244,7 +252,7 @@ pub async fn resolve_tag_or_workspace_descriptor(context: &InstallContext<'_>, d
     resolve_tag_descriptor(context, descriptor, params).await
 }
 
-pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::RegistryTagRange) -> Result<ResolutionResult, Error> {
+pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistryTagRange) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -287,7 +295,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
 }
 
-pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &reference::RegistryReference) -> Result<ResolutionResult, Error> {
+pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &RegistryReference) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 

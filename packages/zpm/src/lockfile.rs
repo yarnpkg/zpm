@@ -1,15 +1,22 @@
-use std::{collections::BTreeMap, fmt::{self, Debug}, hash::Hash, marker::PhantomData, sync::Arc};
+use std::{collections::BTreeMap, fmt::{self, Debug, Display}, hash::Hash, marker::PhantomData, sync::Arc};
 
 use bincode::{Decode, Encode};
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
-use zpm_utils::ToFileString;
+use zpm_primitives::{Descriptor, Locator};
+use zpm_utils::{FromFileString, Hash64, ToFileString};
 
-use crate::{config::ENV_CONFIG, content_flags::ContentFlags, error::Error, hash::Sha256, primitives::{Descriptor, Locator}, resolvers::Resolution};
+use crate::{
+    content_flags::ContentFlags,
+    error::Error,
+    resolvers::Resolution,
+};
+
+const LOCKFILE_VERSION: u64 = 9;
 
 #[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockfileEntry {
-    pub checksum: Option<Sha256>,
+    pub checksum: Option<Hash64>,
     pub resolution: Resolution,
 
     #[serde(default, skip_serializing_if = "zpm_utils::is_default")]
@@ -153,13 +160,13 @@ impl<T> Serialize for MultiKey<T> where T: ToFileString {
     }
 }
 
-impl<'de, T> Deserialize<'de> for MultiKey<T> where T: std::str::FromStr<Err = Error> {
+impl<'de, T: FromFileString> Deserialize<'de> for MultiKey<T> where <T as FromFileString>::Error: Display {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
         struct VecVisitor<T> {
             marker: PhantomData<fn() -> T>,
         }
 
-        impl<T> Visitor<'_> for VecVisitor<T> where T: std::str::FromStr<Err = Error> {
+        impl<T: FromFileString> Visitor<'_> for VecVisitor<T> where <T as FromFileString>::Error: Display {
             type Value = Vec<T>;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -167,15 +174,20 @@ impl<'de, T> Deserialize<'de> for MultiKey<T> where T: std::str::FromStr<Err = E
             }
 
             fn visit_str<E>(self, value: &str) -> Result<Vec<T>, E> where E: de::Error {
-                value
+                let result = value
                     .split(',')
                     .map(str::trim)
-                    .map(|s| T::from_str(s).map_err(|err| de::Error::custom(err)))
-                    .collect()
+                    .map(|s| T::from_file_string(s))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(de::Error::custom)?;
+
+                Ok(result)
             }
         }
 
-        let visitor = VecVisitor { marker: PhantomData };
+        let visitor
+            = VecVisitor { marker: PhantomData };
+
         deserializer.deserialize_str(visitor).map(MultiKey)
     }
 }
@@ -189,8 +201,14 @@ pub struct LockfileMetadata {
 
 impl LockfileMetadata {
     pub fn new() -> Self {
+        let version
+            = std::env::var("YARN_LOCKFILE_VERSION_OVERRIDE")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(LOCKFILE_VERSION);
+
         LockfileMetadata {
-            version: ENV_CONFIG.lockfile_version_override.value,
+            version,
             cache_key: 0,
             linker_key: 0,
         }

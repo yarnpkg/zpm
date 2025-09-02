@@ -1,11 +1,18 @@
 use bytes::Bytes;
+use zpm_primitives::{Locator, TarballReference};
 
-use crate::{error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, primitives::{reference, Locator}, resolvers::Resolution};
+use crate::{
+    error::Error,
+    install::{FetchResult, InstallContext, InstallOpResult},
+    manifest::Manifest,
+    resolvers::Resolution,
+};
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &reference::TarballReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
-    let parent_data = dependencies[0].as_fetched();
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &TarballReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+    let parent_data
+        = dependencies[0].as_fetched();
 
     let tarball_path = parent_data.package_data
         .context_directory()

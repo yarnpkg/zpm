@@ -1,20 +1,31 @@
-use crate::{error::Error, fetchers, install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, primitives::{range, reference, Descriptor, Locator}, serialize::UrlEncoded};
+use zpm_primitives::{Descriptor, Locator, PatchRange, PatchReference};
+use zpm_utils::UrlEncoded;
 
-pub async fn resolve_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::PatchRange, mut dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+use crate::{
+    error::Error,
+    fetchers,
+    install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
+    primitives_exts::RangeExt,
+};
+
+pub async fn resolve_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &PatchRange, mut dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     let mut dependencies_it
         = dependencies.iter();
 
+    let range_details
+        = descriptor.range.details();
+
     // Patch dependencies don't always need to be bound to their parents; they only have the parent listed as dependency
     // if it's required (ie. the patchfile is a relative path from the parent package).
-    if descriptor.range.must_bind() {
+    if range_details.require_binding {
         dependencies_it.next().unwrap();
     }
 
     let inner_locator
         = dependencies_it.next().unwrap().as_resolved_locator().clone();
 
-    let reference = reference::PatchReference {
-        inner: Box::new(UrlEncoded::new(inner_locator)),
+    let reference = PatchReference {
+        inner: Box::new(UrlEncoded::new(inner_locator.clone())),
         path: params.path.clone(),
         checksum: None,
     };
@@ -24,7 +35,7 @@ pub async fn resolve_descriptor(context: &InstallContext<'_>, descriptor: &Descr
 
     // We need to remove the "resolve" operation where we resolved the
     // descriptor into a locator before passing it to fetch
-    dependencies.remove(match descriptor.range.must_bind() {
+    dependencies.remove(match range_details.require_binding {
         true => 1,
         false => 0,
     });
@@ -36,7 +47,7 @@ pub async fn resolve_descriptor(context: &InstallContext<'_>, descriptor: &Descr
     Ok(fetch_result.into_resolution_result(context))
 }
 
-pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, _params: &reference::PatchReference, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, _params: &PatchReference, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     let fetch_result
         = fetchers::fetch_locator(context.clone(), locator, false, dependencies).await?;
 

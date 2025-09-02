@@ -1,6 +1,12 @@
-use crate::{error::Error, install::{InstallContext, IntoResolutionResult, ResolutionResult}, primitives::{range, reference, Descriptor, Ident, Locator, Reference}, resolvers::Resolution};
+use zpm_primitives::{Descriptor, Ident, Locator, Reference, WorkspaceIdentRange, WorkspaceIdentReference, WorkspacePathRange, WorkspacePathReference};
 
-pub fn resolve_name_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::WorkspaceIdentRange) -> Result<ResolutionResult, Error> {
+use crate::{
+    error::Error,
+    install::{InstallContext, IntoResolutionResult, ResolutionResult},
+    resolvers::Resolution,
+};
+
+pub fn resolve_name_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &WorkspaceIdentRange) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -8,25 +14,28 @@ pub fn resolve_name_descriptor(context: &InstallContext<'_>, descriptor: &Descri
         .manifest
         .clone();
 
-    let reference = reference::WorkspaceIdentReference {
+    let reference = WorkspaceIdentReference {
         ident: params.ident.clone(),
     };
 
-    let locator = descriptor.resolve_with(reference.into());
-    let mut resolution = Resolution::from_remote_manifest(locator, manifest.remote);
+    let locator
+        = descriptor.resolve_with(reference.into());
+    let mut resolution
+        = Resolution::from_remote_manifest(locator, manifest.remote);
 
     resolution.dependencies.extend(manifest.dev_dependencies);
 
     Ok(resolution.into_resolution_result(context))
 }
 
-pub fn resolve_path_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &range::WorkspacePathRange) -> Result<ResolutionResult, Error> {
+pub fn resolve_path_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &WorkspacePathRange) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
-    let workspace = project.workspace_by_rel_path(&params.path)?;
+    let workspace
+        = project.workspace_by_rel_path(&params.path)?;
 
-    resolve_name_descriptor(context, descriptor, &range::WorkspaceIdentRange {ident: workspace.name.clone()})
+    resolve_name_descriptor(context, descriptor, &WorkspaceIdentRange {ident: workspace.name.clone()})
 }
 
 pub fn resolve_ident(context: &InstallContext<'_>, ident: &Ident) -> Option<ResolutionResult> {
@@ -37,9 +46,9 @@ pub fn resolve_ident(context: &InstallContext<'_>, ident: &Ident) -> Option<Reso
         return None;
     };
 
-    let locator = Locator::new(ident.clone(), Reference::WorkspaceIdent(reference::WorkspaceIdentReference {
+    let locator = Locator::new(ident.clone(), WorkspaceIdentReference {
         ident: workspace.name.clone(),
-    }));
+    }.into());
 
     let Reference::WorkspaceIdent(reference) = &locator.reference else {
         panic!("Expected the locator to be a workspace ident");
@@ -52,7 +61,7 @@ pub fn resolve_ident(context: &InstallContext<'_>, ident: &Ident) -> Option<Reso
     Some(resolved)
 }
 
-pub fn resolve_locator_ident(context: &InstallContext<'_>, locator: &Locator, params: &reference::WorkspaceIdentReference) -> Result<ResolutionResult, Error> {
+pub fn resolve_locator_ident(context: &InstallContext<'_>, locator: &Locator, params: &WorkspaceIdentReference) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -61,14 +70,15 @@ pub fn resolve_locator_ident(context: &InstallContext<'_>, locator: &Locator, pa
         .manifest
         .clone();
 
-    let mut resolution = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
+    let mut resolution
+        = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
     resolution.dependencies.extend(manifest.dev_dependencies);
 
     Ok(resolution.into_resolution_result(context))
 }
 
-pub fn resolve_locator_path(context: &InstallContext<'_>, locator: &Locator, params: &reference::WorkspacePathReference) -> Result<ResolutionResult, Error> {
+pub fn resolve_locator_path(context: &InstallContext<'_>, locator: &Locator, params: &WorkspacePathReference) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -77,7 +87,8 @@ pub fn resolve_locator_path(context: &InstallContext<'_>, locator: &Locator, par
         .manifest
         .clone();
 
-    let mut resolution = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
+    let mut resolution
+        = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
     resolution.dependencies.extend(manifest.dev_dependencies);
 

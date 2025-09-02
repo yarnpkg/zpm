@@ -1,0 +1,16 @@
+[package]
+name = "zpm-macro-enum"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0.79"
+quote = "1.0.36"
+regex = "1.10.6"
+rstest = "0.22.0"
+syn = "2.0.74"
+convert_case = "0.8.0"
+zpm-macro-helpers = { path = "../zpm-macro-helpers" }

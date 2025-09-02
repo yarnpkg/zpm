@@ -2,12 +2,17 @@
 resolver = "2"
 members = [
     "packages/zpm-ci",
+    "packages/zpm-config",
     "packages/zpm-formats",
+    "packages/zpm-macro-enum",
+    "packages/zpm-macro-helpers",
     "packages/zpm-macros",
     "packages/zpm-parsers",
+    "packages/zpm-primitives",
     "packages/zpm-semver",
     "packages/zpm-switch",
     "packages/zpm-utils",
+    "packages/zpm-git",
     "packages/zpm",
 ]
 

@@ -2,14 +2,14 @@ use std::{mem::take, sync::Arc};
 
 use bincode::{Decode, Encode};
 use serde::Deserialize;
-use zpm_macros::parse_enum;
-use zpm_utils::{impl_serialization_traits, FromFileString, IoResultExt, Path, ToFileString, ToHumanString};
+use zpm_macro_enum::zpm_enum;
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, IoResultExt, Path, ToFileString, ToHumanString};
 
 use crate::errors::Error;
 
 use zpm_semver::Version;
 
-#[parse_enum(or_else = |s| Err(Error::UnknownBinaryName(s.to_string())))]
+#[zpm_enum(or_else = |s| Err(Error::UnknownBinaryName(s.to_string())))]
 #[derive(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq)]
 #[derive_variants(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq)]
 enum BinaryName {
@@ -31,9 +31,10 @@ impl ToHumanString for BinaryName {
     }
 }
 
-impl_serialization_traits!(BinaryName);
+impl_file_string_from_str!(BinaryName);
+impl_file_string_serialization!(BinaryName);
 
-#[parse_enum(or_else = |s| Err(Error::InvalidPackageManagerReference(s.to_string())))]
+#[zpm_enum(or_else = |s| Err(Error::InvalidPackageManagerReference(s.to_string())))]
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq)]
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq)]
 pub enum PackageManagerReference {
@@ -72,7 +73,8 @@ impl ToHumanString for PackageManagerReference {
     }
 }
 
-impl_serialization_traits!(PackageManagerReference);
+impl_file_string_from_str!(PackageManagerReference);
+impl_file_string_serialization!(PackageManagerReference);
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq)]
 pub struct PackageManagerField {
@@ -111,7 +113,8 @@ impl ToHumanString for PackageManagerField {
     }
 }
 
-impl_serialization_traits!(PackageManagerField);
+impl_file_string_from_str!(PackageManagerField);
+impl_file_string_serialization!(PackageManagerField);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

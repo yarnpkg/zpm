@@ -1,11 +1,14 @@
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Deserializer};
-use zpm_macros::parse_enum;
-use zpm_utils::{impl_serialization_traits, FromFileString, ToFileString, ToHumanString};
+use zpm_macro_enum::zpm_enum;
+use zpm_primitives::{Descriptor, Ident, Locator, Range};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
-use crate::{error::Error, primitives::{Descriptor, Ident, Locator, Range}};
+use crate::{
+    error::Error,
+};
 
-#[parse_enum(or_else = |s| Err(Error::InvalidResolution(s.to_string())))]
+#[zpm_enum(or_else = |s| Err(Error::InvalidResolution(s.to_string())))]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode)]
 #[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode)]
 pub enum ResolutionSelector {
@@ -119,7 +122,8 @@ impl ToHumanString for ResolutionSelector {
     }
 }
 
-impl_serialization_traits!(ResolutionSelector);
+impl_file_string_from_str!(ResolutionSelector);
+impl_file_string_serialization!(ResolutionSelector);
 
 use serde::{ser::SerializeMap, Serialize, Serializer};
 use serde::de::{self, Visitor, MapAccess};
@@ -147,11 +151,11 @@ impl ResolutionsField {
     pub fn iter(&self) -> impl Iterator<Item = (&ResolutionSelector, &Range)> {
         self.entries.iter().map(|(k, v)| (k, v))
     }
-    
+
     pub fn get_by_ident(&self, ident: &Ident) -> Option<&Vec<(ResolutionSelector, Range)>> {
         self.by_ident.get(ident)
     }
-    
+
     fn add_entry(&mut self, selector: ResolutionSelector, range: Range) {
         let target_ident = selector.target_ident().clone();
         self.entries.push((selector.clone(), range.clone()));
@@ -163,18 +167,18 @@ impl ResolutionsField {
 }
 
 impl<'de> Deserialize<'de> for ResolutionsField {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> 
-    where 
-        D: Deserializer<'de> 
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>
     {
         deserializer.deserialize_map(ResolutionsFieldVisitor)
     }
 }
 
 impl Serialize for ResolutionsField {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> 
-    where 
-        S: Serializer 
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer
     {
         let mut map = serializer.serialize_map(Some(self.entries.len()))?;
         for (key, value) in &self.entries {
@@ -193,23 +197,23 @@ impl<'de> Visitor<'de> for ResolutionsFieldVisitor {
         formatter.write_str("a map of resolution selectors to ranges")
     }
 
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> 
-    where 
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
         A: MapAccess<'de>
     {
         let mut field = ResolutionsField::new();
-        
+
         while let Some(key) = map.next_key::<String>()? {
             let selector = ResolutionSelector::from_file_string(&key)
                 .map_err(|e| de::Error::custom(format!("Invalid resolution selector '{}': {}", key, e)))?;
-            
+
             let value_str: String = map.next_value()?;
             let range = Range::from_file_string(&value_str)
                 .map_err(|e| de::Error::custom(format!("Invalid range '{}': {}", value_str, e)))?;
-            
+
             field.add_entry(selector, range);
         }
-        
+
         Ok(field)
     }
 }

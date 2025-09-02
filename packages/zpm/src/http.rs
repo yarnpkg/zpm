@@ -1,17 +1,22 @@
 use std::{collections::HashMap, net::SocketAddr, sync::{Arc, OnceLock}, time::Duration};
 
 use hickory_resolver::{config::LookupIpStrategy, TokioResolver};
+use http::HeaderMap;
 use itertools::Itertools;
 use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Client, Method, RequestBuilder, Response, Url};
 use tokio::sync::{Mutex, broadcast};
 use wax::Program;
+use zpm_config::{Configuration, NetworkSettings, Setting};
+use zpm_utils::Glob;
 
-use crate::{config::Config, config_fields::{Glob, GlobField}, error::Error, settings::NetworkSettings};
+use crate::{
+    error::Error,
+};
 
 #[derive(Debug)]
 pub struct HttpConfig {
     pub http_retry: usize,
-    pub unsafe_http_whitelist: Vec<GlobField>,
+    pub unsafe_http_whitelist: Vec<Setting<Glob>>,
 
     enable_network: bool,
 
@@ -19,27 +24,20 @@ pub struct HttpConfig {
 }
 
 impl HttpConfig {
-    pub fn url_settings(&self, url: &Url) -> NetworkSettings {
-        let url_settings
-            = url.host_str()
-                .map(|host_str| {
-                    self.network_settings
-                        .iter()
-                        .fold(NetworkSettings::default(), |existing, (glob, settings)| {
-                            if glob.matcher().is_match(host_str) {
-                                NetworkSettings {
-                                    enable_network: existing.enable_network.or(settings.enable_network),
-                                }
-                            } else {
-                                existing
-                            }
-                        })
-                })
-                .unwrap_or_default();
+    pub fn is_network_enabled(&self, url: &Url) -> bool {
+        let Some(host_str) = url.host_str() else {
+            return false;
+        };
 
-        NetworkSettings {
-            enable_network: url_settings.enable_network.or(Some(self.enable_network)),
+        for (glob, settings) in &self.network_settings {
+            if let Some(enable_network) = settings.enable_network.value {
+                if glob.matcher().is_match(host_str) {
+                    return enable_network;
+                }
+            }
         }
+
+        self.enable_network
     }
 }
 
@@ -207,16 +205,31 @@ pub struct HttpClient {
 pub struct HttpRequest<'a> {
     client: &'a HttpClient,
     builder: RequestBuilder,
-
-    retry: bool,
+    enable_retry: bool,
+    enable_status_check: bool,
 }
 
 impl<'a> HttpRequest<'a> {
-    pub fn new(client: &'a HttpClient, url: Url, method: Method, retry: bool) -> Self {
+    pub fn new(client: &'a HttpClient, url: Url, method: Method) -> Self {
         let builder
-            = client.client.request(method, url);
+            = client.client.request(method.clone(), url);
 
-        Self { builder, client, retry }
+        Self {
+            builder,
+            client,
+            enable_retry: method == Method::GET,
+            enable_status_check: true,
+        }
+    }
+
+    pub fn enable_retry(mut self, enable_retry: bool) -> Self {
+        self.enable_retry = enable_retry;
+        self
+    }
+
+    pub fn enable_status_check(mut self, enable_status_check: bool) -> Self {
+        self.enable_status_check = enable_status_check;
+        self
     }
 
     pub async fn send(self) -> Result<Response, reqwest::Error> {
@@ -224,10 +237,15 @@ impl<'a> HttpRequest<'a> {
             = 0;
 
         // If the request is not retriable, we should avoid cloning the builder.
-        if !self.retry {
-            return self.builder.send()
-                .await?
-                .error_for_status();
+        if !self.enable_retry {
+            let response
+                = self.builder.send().await?;
+
+            if self.enable_status_check {
+                return Ok(response.error_for_status()?);
+            } else {
+                return Ok(response);
+            }
         }
 
         loop {
@@ -253,18 +271,30 @@ impl<'a> HttpRequest<'a> {
                 }
             }
 
-            return response?.error_for_status();
+            return if self.enable_status_check {
+                response?.error_for_status()
+            } else {
+                response
+            };
         }
     }
 
-    pub fn header<K, V>(mut self, key: K, value: V) -> Self
+    pub fn headers(&self) -> HeaderMap {
+        // TODO: This is filthy
+        self.builder.try_clone().unwrap().build().unwrap().headers().clone()
+    }
+
+    pub fn header<K, V>(mut self, key: K, value: Option<V>) -> Self
     where
         HeaderName: TryFrom<K>,
         <HeaderName as TryFrom<K>>::Error: Into<http::Error>,
         HeaderValue: TryFrom<V>,
         <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
     {
-        self.builder = self.builder.header(key, value);
+        if let Some(value) = value {
+            self.builder = self.builder.header(key, value);
+        }
+
         self
     }
 
@@ -272,13 +302,22 @@ impl<'a> HttpRequest<'a> {
         self.builder = self.builder.body(body);
         self
     }
+
+    pub fn try_clone(&self) -> Option<Self> {
+        self.builder.try_clone().map(|builder| Self {
+            client: self.client,
+            builder,
+            enable_retry: self.enable_retry,
+            enable_status_check: self.enable_status_check,
+        })
+    }
 }
 
 impl HttpClient {
-    pub fn new(config: &Config) -> Result<Arc<Self>, Error> {
+    pub fn new(config: &Configuration) -> Result<Arc<Self>, Error> {
         let client = reqwest::Client::builder()
             // Connection pooling settings
-            .pool_max_idle_per_host(config.user.network_concurrency.value as usize)
+            .pool_max_idle_per_host(config.settings.network_concurrency.value)
             .pool_idle_timeout(Duration::from_secs(30))
 
             // Timeout settings
@@ -300,13 +339,12 @@ impl HttpClient {
             .map_err(|err| Error::DnsResolutionError(Arc::new(err)))?;
 
         let config = HttpConfig {
-            http_retry: config.user.http_retry.value as usize,
-            unsafe_http_whitelist: config.project.unsafe_http_whitelist.value.clone(),
+            http_retry: config.settings.http_retry.value,
+            unsafe_http_whitelist: config.settings.unsafe_http_whitelist.clone(),
 
-            enable_network: config.user.enable_network.value,
+            enable_network: config.settings.enable_network.value,
 
-            network_settings: config.user.network_settings.value
-                .clone()
+            network_settings: config.settings.network_settings.clone()
                 .into_iter()
                 // Sort the config by key length to match on the most specific pattern.
                 .sorted_by_cached_key(|(glob, _)| -(glob.raw().len() as isize))
@@ -319,33 +357,41 @@ impl HttpClient {
         }))
     }
 
-    fn request(&self, url: impl AsRef<str>, method: Method, retry: bool) -> Result<HttpRequest, Error> {
-        let url = url.as_ref();
+    pub fn request(&self, url: impl AsRef<str>, method: Method) -> Result<HttpRequest, Error> {
+        let url
+            = url.as_ref();
 
-        let url = Url::parse(url)
-            .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
+        let url
+            = Url::parse(url.as_ref())
+                .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
 
-        let url_settings = self.config.url_settings(&url);
-        if url_settings.enable_network == Some(false) {
+        if !self.config.is_network_enabled(&url) {
             return Err(Error::NetworkDisabledError(url));
         }
 
-        if url.scheme() == "http"
-            && !self.config.unsafe_http_whitelist
-                .iter()
-                .any(|glob| glob.value.matcher().is_match(url.host_str().expect("\"http:\" URL should have a host")))
-        {
-            return Err(Error::UnsafeHttpError(url));
+        if url.scheme() == "http" {
+            let is_explicitly_allowed
+                = self.config.unsafe_http_whitelist
+                    .iter()
+                    .any(|glob| glob.value.matcher().is_match(url.host_str().expect("\"http:\" URL should have a host")));
+
+            if !is_explicitly_allowed {
+                return Err(Error::UnsafeHttpError(url));
+            }
         }
 
-        Ok(HttpRequest::new(self, url, method, retry))
+        Ok(HttpRequest::new(self, url, method))
     }
 
     pub fn get(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
-        self.request(url, Method::GET, true)
+        self.request(url, Method::GET)
     }
 
     pub fn post(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
-        self.request(url, Method::POST, false)
+        self.request(url, Method::POST)
+    }
+
+    pub fn put(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
+        self.request(url, Method::PUT)
     }
 }

@@ -2,10 +2,16 @@ use std::collections::BTreeSet;
 
 use clipanion::cli;
 use zpm_parsers::{JsonFormatter, Value};
+use zpm_primitives::Ident;
 use zpm_semver::RangeKind;
 use zpm_utils::ToFileString;
 
-use crate::{error::Error, install::InstallContext, primitives::{loose_descriptor, Ident, LooseDescriptor}, project::{self, InstallMode, RunInstallOptions, Workspace}};
+use crate::{
+    descriptor_loose::{self, LooseDescriptor},
+    error::Error,
+    install::InstallContext,
+    project::{InstallMode, Project, RunInstallOptions, Workspace}
+};
 
 #[cli::command]
 #[cli::path("up")]
@@ -38,7 +44,7 @@ impl Up {
     #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
-            = project::Project::new(None).await?;
+            = Project::new(None).await?;
 
         let all_idents = project.workspaces.iter()
             .flat_map(|workspace| self.list_workspace_idents(workspace))
@@ -57,10 +63,10 @@ impl Up {
         } else if self.caret {
             RangeKind::Caret
         } else {
-            project.config.project.default_semver_range_prefix.value
+            project.config.settings.default_semver_range_prefix.value
         };
 
-        let resolve_options = loose_descriptor::ResolveOptions {
+        let resolve_options = descriptor_loose::ResolveOptions {
             active_workspace_ident: project.active_workspace()?.name.clone(),
             range_kind,
             resolve_tags: !self.fixed,
@@ -111,7 +117,7 @@ impl Up {
         }
 
         let mut project
-            = project::Project::new(None).await?;
+            = Project::new(None).await?;
 
         project.run_install(RunInstallOptions {
             mode: self.mode,

@@ -2,7 +2,10 @@
 pub enum Error {
     #[error("Utf8 conversion error: {0}")]
     Utf8Conversion(#[from] std::str::Utf8Error),
-    
+
+    #[error("Invalid UTF-8 sequence: {0}")]
+    InvalidUtf8Sequence(#[from] std::string::FromUtf8Error),
+
     #[error("Invalid syntax: {0}")]
     InvalidSyntax(String),
 

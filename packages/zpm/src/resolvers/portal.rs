@@ -1,9 +1,15 @@
 use zpm_formats::zip::ZipSupport;
+use zpm_primitives::{Descriptor, Locator, PortalRange, PortalReference, Reference};
 
-use crate::{error::Error, install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::helpers::parse_manifest, primitives::{range, reference, Descriptor, Locator, Reference}, resolvers::Resolution};
+use crate::{
+    error::Error,
+    install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
+    manifest::helpers::parse_manifest,
+    resolvers::Resolution,
+};
 
-pub fn resolve_descriptor(ctx: &InstallContext, descriptor: &Descriptor, params: &range::PortalRange, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
-    let reference = reference::PortalReference {
+pub fn resolve_descriptor(ctx: &InstallContext, descriptor: &Descriptor, params: &PortalRange, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+    let reference = PortalReference {
         path: params.path.clone(),
     };
 
@@ -17,8 +23,9 @@ pub fn resolve_descriptor(ctx: &InstallContext, descriptor: &Descriptor, params:
     resolve_locator(ctx, &locator, params, dependencies)
 }
 
-pub fn resolve_locator(context: &InstallContext, locator: &Locator, params: &reference::PortalReference, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
-    let parent_data = dependencies[0].as_fetched();
+pub fn resolve_locator(context: &InstallContext, locator: &Locator, params: &PortalReference, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+    let parent_data
+        = dependencies[0].as_fetched();
 
     let package_directory = parent_data.package_data
         .context_directory()

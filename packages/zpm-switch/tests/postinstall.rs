@@ -1,10 +1,9 @@
 use assert_cmd::prelude::*; // Add methods on commands
 use zpm_utils::{Path, ToFileString}; // Used for writing assertions
-use std::{process::Command, str::FromStr}; // Run programs
+use std::process::Command; // Run programs
 
 struct TestEnv {
     cmd: Command,
-    bin_dir: Path,
     tmp_dir: Path,
 }
 
@@ -13,19 +12,12 @@ fn init_test_env() -> TestEnv {
         = Command::cargo_bin("yarn")
             .expect("Failed to get yarn command");
 
-    let bin_dir
-        = Path::from_str(cmd.get_program().to_str().unwrap())
-            .ok()
-            .and_then(|p| p.dirname())
-            .expect("Failed to get bin dir");
-
     let tmp_dir
         = Path::temp_dir()
             .expect("Failed to create temp dir");
-    
+
     TestEnv {
         cmd,
-        bin_dir,
         tmp_dir,
     }
 }
@@ -34,7 +26,6 @@ fn init_test_env() -> TestEnv {
 fn empty_profile_file() -> Result<(), Box<dyn std::error::Error>> {
     let TestEnv {
         mut cmd,
-        bin_dir: _,
         tmp_dir,
     } = init_test_env();
 
@@ -58,7 +49,6 @@ fn empty_profile_file() -> Result<(), Box<dyn std::error::Error>> {
 fn profile_file_with_existing_path() -> Result<(), Box<dyn std::error::Error>> {
     let TestEnv {
         mut cmd,
-        bin_dir: _,
         tmp_dir,
     } = init_test_env();
 
@@ -87,7 +77,6 @@ fn profile_file_with_existing_path() -> Result<(), Box<dyn std::error::Error>> {
 fn profile_file_with_duplicate_path() -> Result<(), Box<dyn std::error::Error>> {
     let TestEnv {
         mut cmd,
-        bin_dir: _,
         tmp_dir,
     } = init_test_env();
 

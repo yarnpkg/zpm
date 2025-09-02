@@ -1,12 +1,16 @@
 use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sync::LazyLock};
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use zpm_utils::{Path, ToHumanString};
+use zpm_config::PackageExtension;
+use zpm_primitives::{Descriptor, Ident, Locator, PatchRange, PeerRange, Range, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange};
+use zpm_utils::{Hash64, Path, ToHumanString, UrlEncoded};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
-use crate::{build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, hash::Sha256, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives::{range, Descriptor, Ident, Locator, PeerRange, Range, SemverDescriptor}, project::{InstallMode, Project}, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, serialize::UrlEncoded, settings::PackageExtension, system, tree_resolver::{ResolutionTree, TreeResolver}};
+use crate::{
+    build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives_exts::RangeExt, project::{InstallMode, Project}, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}
+};
 
 
 #[derive(Clone)]
@@ -284,7 +288,7 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                 }
 
                 if let Some(mut inner_descriptor) = descriptor.range.inner_descriptor().cloned() {
-                    if inner_descriptor.range.must_bind() {
+                    if inner_descriptor.range.details().require_binding {
                         inner_descriptor.parent = descriptor.parent.clone();
                     }
 
@@ -391,7 +395,10 @@ impl InstallCache {
 impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for InstallCache {
     fn graph_cache(&self, ctx: &InstallContext<'a>, op: &InstallOp) -> Option<InstallOpResult> {
         if let InstallOp::Resolve {descriptor} = op {
-            if !descriptor.range.is_transient_resolution() {
+            let range_details
+                = descriptor.range.details();
+
+            if !range_details.transient_resolution {
                 if let Some(locator) = self.lockfile.resolutions.get(descriptor) {
                     if self.lockfile.metadata.version != LockfileMetadata::new().version || ctx.refresh_lockfile {
                         return Some(InstallOpResult::Pinned(PinnedResult {
@@ -586,7 +593,7 @@ impl<'a> InstallManager<'a> {
                     .fs_read_prealloc()?;
 
                 let checksum
-                    = Sha256::from_data(&archive_data);
+                    = Hash64::from_data(&archive_data);
 
                 Ok((locator, checksum))
             })
@@ -719,7 +726,7 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
         if let Some(replacement_range) = resolution_override {
             descriptor.range = replacement_range;
 
-            if descriptor.range.must_bind() {
+            if descriptor.range.details().require_binding {
                 let root_workspace = context.project
                     .expect("The project is required to bind a parent to a descriptor")
                     .root_workspace();
@@ -728,12 +735,12 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
             } else {
                 descriptor.parent = None;
             }
-        } else if descriptor.range.must_bind() {
+        } else if descriptor.range.details().require_binding {
             descriptor.parent = Some(resolution.locator.clone());
         }
 
         if has_builtin_patch(&descriptor.ident) {
-            descriptor.range = range::PatchRange {
+            descriptor.range = PatchRange {
                 inner: Box::new(UrlEncoded::new(descriptor.clone())),
                 path: "<builtin>".to_string(),
             }.into();
@@ -746,11 +753,17 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
         },
 
         Range::AnonymousSemver(params) => {
-            descriptor.range = range::RegistrySemverRange {ident: None, range: params.range.clone()}.into();
+            descriptor.range = RegistrySemverRange {
+                ident: None,
+                range: params.range.clone(),
+            }.into();
         },
 
         Range::AnonymousTag(params) => {
-            descriptor.range = range::RegistryTagRange {ident: None, tag: params.tag.clone()}.into();
+            descriptor.range = RegistryTagRange {
+                ident: None,
+                tag: params.tag.clone(),
+            }.into();
         },
 
         _ => {},
@@ -781,17 +794,17 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     let mut peer_dependencies
         = resolution.peer_dependencies.clone();
 
-    for (descriptor, extension) in project.config.project.package_extensions.value.iter() {
+    for (descriptor, extension) in project.config.settings.package_extensions.iter() {
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
             for (dependency, range) in extension.dependencies.iter() {
                 if !dependencies.contains_key(dependency) {
-                    dependencies.insert(dependency.clone(), range.clone());
+                    dependencies.insert(dependency.clone(), Descriptor::new_bound(dependency.clone(), range.value.clone(), None));
                 }
             }
 
             for (peer_dependency, range) in extension.peer_dependencies.iter() {
                 if !peer_dependencies.contains_key(peer_dependency) {
-                    peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                    peer_dependencies.insert(peer_dependency.clone(), range.value.clone());
                 }
             }
         }
@@ -801,13 +814,13 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
             for (dependency, range) in extension.dependencies.iter() {
                 if !dependencies.contains_key(dependency) {
-                    dependencies.insert(dependency.clone(), range.clone());
+                    dependencies.insert(dependency.clone(), Descriptor::new_bound(dependency.clone(), range.value.clone(), None));
                 }
             }
 
             for (peer_dependency, range) in extension.peer_dependencies.iter() {
                 if !peer_dependencies.contains_key(peer_dependency) {
-                    peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                    peer_dependencies.insert(peer_dependency.clone(), range.value.clone());
                 }
             }
         }
@@ -827,7 +840,7 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
 
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
         peer_dependencies.entry(name.type_ident())
-            .or_insert(range::SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}.into());
+            .or_insert(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}.into());
     }
 
     (dependencies, peer_dependencies)

@@ -1,0 +1,83 @@
+use std::{hash::Hash, sync::LazyLock};
+
+use bincode::{Decode, Encode};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
+
+#[derive(thiserror::Error, Clone, Debug)]
+pub enum IdentError {
+    #[error("Invalixd ident: {0}")]
+    SyntaxError(String),
+}
+
+#[derive(Clone, Debug, Default, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Ident(String);
+
+impl Ident {
+    pub fn new<P: AsRef<str>>(full: P) -> Ident {
+        Ident(full.as_ref().to_string())
+    }
+
+    pub fn scope(&self) -> Option<&str> {
+        self.0.split_once('/').map(|(scope, _)| scope)
+    }
+
+    pub fn name(&self) -> &str {
+        self.0.split_once('/').map(|(_,  name)| name).unwrap_or(&self.0)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn slug(&self) -> String {
+        self.0.replace("/", "-")
+    }
+
+    pub fn nm_subdir(&self) -> String {
+        format!("node_modules/{}", self.0)
+    }
+
+    pub fn type_ident(&self) -> Ident {
+        Ident::new(self.scope().map_or_else(
+            || format!("@types/{}", self.name()),
+            |scope| format!("@types/{}__{}", &scope[1..], self.name())
+        ))
+    }
+}
+
+impl AsRef<str> for Ident {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+static IDENT_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^(?:@[^/]*/)?([^@/]+)$").unwrap()
+});
+
+impl FromFileString for Ident {
+    type Error = IdentError;
+
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
+        if !IDENT_REGEX.is_match(src) {
+            return Err(IdentError::SyntaxError(src.to_string()));
+        }
+
+        Ok(Ident::new(src))
+    }
+}
+
+impl ToFileString for Ident {
+    fn to_file_string(&self) -> String {
+        self.as_str().to_string()
+    }
+}
+
+impl ToHumanString for Ident {
+    fn to_print_string(&self) -> String {
+        DataType::Custom(215, 135, 95).colorize(&self.as_str())
+    }
+}
+
+impl_file_string_from_str!(Ident);
+impl_file_string_serialization!(Ident);

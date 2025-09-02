@@ -1,9 +1,16 @@
 use clipanion::cli;
 use zpm_parsers::{JsonFormatter, Value};
+use zpm_primitives::Ident;
 use zpm_utils::{IoResultExt, Path, ToFileString};
 
 use crate::{
-    commands::dlx, error::Error, install::InstallContext, manifest::Manifest, primitives::{loose_descriptor, Ident, LooseDescriptor}, project::{self, Project}, script::ScriptEnvironment
+    commands::dlx,
+    descriptor_loose::{self, LooseDescriptor},
+    error::Error,
+    install::InstallContext,
+    manifest::Manifest,
+    project::{Project, RunInstallOptions},
+    script::ScriptEnvironment,
 };
 
 #[cli::command(proxy)]
@@ -45,7 +52,7 @@ impl InitWithTemplate {
         let mut project
             = init_project(&init_cwd, params).await?;
 
-        let resolve_options = loose_descriptor::ResolveOptions {
+        let resolve_options = descriptor_loose::ResolveOptions {
             active_workspace_ident: project.active_workspace()?.name.clone(),
             range_kind: zpm_semver::RangeKind::Exact,
             resolve_tags: true,
@@ -61,7 +68,7 @@ impl InitWithTemplate {
         let template
             = self.template.resolve(&install_context, &resolve_options).await?;
 
-        project.run_install(project::RunInstallOptions {
+        project.run_install(RunInstallOptions {
             ..Default::default()
         }).await?;
 
@@ -117,7 +124,7 @@ impl Init {
         let mut project
             = init_project(&init_cwd, params).await?;
 
-        project.run_install(project::RunInstallOptions {
+        project.run_install(RunInstallOptions {
             ..Default::default()
         }).await?;
 
@@ -133,7 +140,7 @@ pub struct InitParams {
 
 pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project, Error> {
     let existing_project
-        = project::Project::find_closest_project(init_cwd.clone()).ok();
+        = Project::find_closest_project(init_cwd.clone()).ok();
 
     let manifest_path
         = init_cwd.with_join_str("package.json");
@@ -335,7 +342,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     }
 
     let project
-        = project::Project::new(Some(init_cwd.clone())).await?;
+        = Project::new(Some(init_cwd.clone())).await?;
 
     Ok(project)
 }

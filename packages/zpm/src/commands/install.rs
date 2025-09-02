@@ -1,4 +1,5 @@
 use clipanion::cli;
+use zpm_config::Source;
 
 use crate::{error::Error, project::{self, InstallMode, RunInstallOptions}};
 
@@ -33,11 +34,13 @@ impl Install {
             = project::Project::new(None).await?;
 
         if self.immutable {
-            project.config.project.enable_immutable_installs.value = true;
+            project.config.settings.enable_immutable_installs.value = true;
+            project.config.settings.enable_immutable_installs.source = Source::Cli;
         }
 
         if self.immutable_cache {
-            project.config.project.enable_immutable_cache.value = true;
+            project.config.settings.enable_immutable_cache.value = true;
+            project.config.settings.enable_immutable_cache.source = Source::Cli;
         }
 
         project.run_install(RunInstallOptions {
@@ -51,4 +54,3 @@ impl Install {
         Ok(())
     }
 }
-

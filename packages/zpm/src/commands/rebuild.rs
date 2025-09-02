@@ -1,6 +1,11 @@
 use clipanion::cli;
+use zpm_primitives::Ident;
 
-use crate::{build::BuildState, error::Error, primitives::Ident, project::{self, RunInstallOptions}};
+use crate::{
+    build::BuildState,
+    error::Error,
+    project::{self, RunInstallOptions},
+};
 
 #[cli::command]
 #[cli::path("rebuild")]
