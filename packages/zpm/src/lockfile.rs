@@ -12,6 +12,8 @@ use crate::{
     resolvers::Resolution,
 };
 
+const LOCKFILE_VERSION: u64 = 9;
+
 #[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockfileEntry {
     pub checksum: Option<Hash64>,
@@ -203,7 +205,7 @@ impl LockfileMetadata {
             = std::env::var("YARN_LOCKFILE_VERSION_OVERRIDE")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(42);
+                .unwrap_or(LOCKFILE_VERSION);
 
         LockfileMetadata {
             version,
