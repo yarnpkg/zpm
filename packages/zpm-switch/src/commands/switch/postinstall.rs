@@ -3,7 +3,7 @@ use std::process::Command;
 
 use clipanion::cli;
 use sonic_rs::JsonValueMutTrait;
-use zpm_utils::{DataType, FromFileString, Note, IoResultExt, Path, ToFileString};
+use zpm_utils::{DataType, FromFileString, Note, IoResultExt, Path, ToFileString, ToHumanString};
 
 use crate::errors::Error;
 
