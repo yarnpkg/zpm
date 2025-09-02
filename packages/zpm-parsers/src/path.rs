@@ -146,9 +146,12 @@ impl FromFileString for Path {
     type Error = Error;
 
     fn from_file_string(src: &str) -> Result<Self, Error> {
-        let mut segments = Vec::new();
-        let mut chars = src.chars();
-        let mut current_segment = String::new();
+        let mut segments
+            = Vec::new();
+        let mut chars
+            = src.chars();
+        let mut current_segment
+            = String::new();
 
         while let Some(ch) = chars.next() {
             match ch {

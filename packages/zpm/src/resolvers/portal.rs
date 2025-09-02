@@ -24,7 +24,8 @@ pub fn resolve_descriptor(ctx: &InstallContext, descriptor: &Descriptor, params:
 }
 
 pub fn resolve_locator(context: &InstallContext, locator: &Locator, params: &PortalReference, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
-    let parent_data = dependencies[0].as_fetched();
+    let parent_data
+        = dependencies[0].as_fetched();
 
     let package_directory = parent_data.package_data
         .context_directory()

@@ -102,6 +102,7 @@ struct Field {
     types: Vec<Type>,
     title: Option<String>,
     default: Option<Expression>,
+    property_aliases: Option<BTreeMap<String, Vec<String>>>,
     properties: Option<BTreeMap<String, Field>>,
     additional_keys: Option<Box<Field>>,
     additional_properties: Option<Box<Field>>,
@@ -119,6 +120,10 @@ impl Field {
 
             if let Some(properties) = &self.properties {
                 for (name, field) in properties.iter() {
+                    let field_aliases = self.property_aliases.as_ref()
+                        .and_then(|aliases| aliases.get(name).cloned())
+                        .unwrap_or_default();
+
                     let field_default = match field.default.as_ref() {
                         Some(Expression::String(default)) if default.contains("::")
                             => format!("|| Setting::new({}, Source::Default)", default),
@@ -142,6 +147,7 @@ impl Field {
                     fields.push(GeneratorField {
                         name: name.to_string(),
                         type_: field.get_type(),
+                        aliases: field_aliases,
                         default: field_default,
                     });
                 }
@@ -236,17 +242,20 @@ impl Field {
 struct GeneratorField {
     name: String,
     type_: InternalType,
+    aliases: Vec<String>,
     default: String,
 }
 
 struct Generator {
     structs: BTreeMap<String, Vec<GeneratorField>>,
+    root_name: String,
 }
 
 impl Generator {
-    pub fn new() -> Self {
+    pub fn new(root_name: &str) -> Self {
         Self {
             structs: BTreeMap::new(),
+            root_name: root_name.to_string(),
         }
     }
 
@@ -260,7 +269,8 @@ impl Generator {
 
         for (name, fields) in &self.structs {
             writeln!(writer).unwrap();
-            writeln!(writer, "    #[derive(Default, Deserialize)]").unwrap();
+            writeln!(writer, "    #[derive(Debug, Default, Deserialize)]").unwrap();
+            writeln!(writer, "    #[serde(rename_all = \"camelCase\")]").unwrap();
             writeln!(writer, "    pub struct {} {{", name).unwrap();
 
             for field in fields {
@@ -278,16 +288,24 @@ impl Generator {
         writeln!(writer, "}}").unwrap();
         writeln!(writer).unwrap();
 
-        for (name, fields) in &self.structs {
+        for (struct_name, fields) in &self.structs {
             writeln!(writer).unwrap();
             writeln!(writer, "#[derive(Debug, Clone, Deserialize)]").unwrap();
-            writeln!(writer, "pub struct {name} {{").unwrap();
+            writeln!(writer, "#[serde(rename_all = \"camelCase\")]").unwrap();
+            writeln!(writer, "pub struct {struct_name} {{").unwrap();
 
             for field in fields {
                 let lc_snake_name
                     = field.name.to_case(Case::Snake);
                 let type_
                     = &field.type_;
+
+                for alias in &field.aliases {
+                    let alias_camel_case
+                        = alias.to_case(Case::Camel);
+
+                    writeln!(writer, "    #[serde(alias = \"{alias_camel_case}\")]").unwrap();
+                }
 
                 if field.type_.nullable || matches!(field.type_.kind, InternalTypeKind::Map(_, _) | InternalTypeKind::Array(_)) {
                     writeln!(writer, "    #[serde(default)]").unwrap();
@@ -298,10 +316,10 @@ impl Generator {
 
             writeln!(writer, "}}").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "impl MergeSettings for {name} {{").unwrap();
-            writeln!(writer, "    type Intermediate = intermediate::{name};").unwrap();
+            writeln!(writer, "impl MergeSettings for {struct_name} {{").unwrap();
+            writeln!(writer, "    type Intermediate = intermediate::{struct_name};").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "    fn from_env_string(value: &str) -> Result<Self, HydrateError> {{").unwrap();
+            writeln!(writer, "    fn from_env_string(_value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {{").unwrap();
             writeln!(writer, "        unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer).unwrap();
@@ -318,7 +336,13 @@ impl Generator {
                 let lc_snake_name
                     = name.to_case(Case::Snake);
 
-                writeln!(writer, "            \"{name}\" => MergeSettings::hydrate(&self.{lc_snake_name}, &path[1..], value_str),").unwrap();
+                let all_names
+                    = field.aliases.iter()
+                        .chain(std::iter::once(name));
+
+                for name in all_names {
+                    writeln!(writer, "            \"{name}\" => MergeSettings::hydrate(&self.{lc_snake_name}, &path[1..], value_str),").unwrap();
+                }
             }
 
             writeln!(writer, "            _ => Err(HydrateError::KeyNotFound(key_str.to_string())),").unwrap();
@@ -338,14 +362,20 @@ impl Generator {
                 let lc_snake_name
                     = name.to_case(Case::Snake);
 
-                writeln!(writer, "            \"{name}\" => MergeSettings::get(&self.{lc_snake_name}, &path[1..]),").unwrap();
+                let all_names
+                    = field.aliases.iter()
+                        .chain(std::iter::once(name));
+
+                for name in all_names {
+                    writeln!(writer, "            \"{name}\" => MergeSettings::get(&self.{lc_snake_name}, &path[1..]),").unwrap();
+                }
             }
 
             writeln!(writer, "            _ => Err(GetError::KeyNotFound(key_str.to_string())),").unwrap();
             writeln!(writer, "        }}").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {{").unwrap();
+            writeln!(writer, "    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {{").unwrap();
             writeln!(writer, "        let user = user.unwrap_or_default();").unwrap();
             writeln!(writer, "        let project = project.unwrap_or_default();").unwrap();
             writeln!(writer).unwrap();
@@ -357,10 +387,33 @@ impl Generator {
 
                 let lc_snake_name
                     = name.to_case(Case::Snake);
-                let uc_snake_name
-                    = name.to_case(Case::UpperSnake);
 
-                writeln!(writer, "            {lc_snake_name}: MergeSettings::merge(context, prefix.map(|p| format!(\"{{}}_{uc_snake_name}\", p)).as_deref(), user.{lc_snake_name}, project.{lc_snake_name}, {default}),").unwrap();
+                let merge_expr
+                    = format!("MergeSettings::merge(context, user.{lc_snake_name}, project.{lc_snake_name}, {default})");
+
+                if struct_name == &self.root_name {
+                    writeln!(writer, "            {lc_snake_name}: {{").unwrap();
+                    writeln!(writer, "                let merged_value").unwrap();
+                    writeln!(writer, "                    = {merge_expr};").unwrap();
+                    writeln!(writer).unwrap();
+                    writeln!(writer, "                let env_value").unwrap();
+                    writeln!(writer, "                    = context.env.get(\"YARN_{}\");", name.to_case(Case::UpperSnake)).unwrap();
+
+                    for alias in &field.aliases {
+                        writeln!(writer, "                let env_value = env_value").unwrap();
+                        writeln!(writer, "                    .or_else(|| context.env.get(\"YARN_{}\"));", alias.to_case(Case::UpperSnake)).unwrap();
+                    }
+
+                    writeln!(writer).unwrap();
+                    writeln!(writer, "                if let Some(env_value) = env_value {{").unwrap();
+                    writeln!(writer, "                    MergeSettings::from_env_string(env_value, Some(merged_value)).unwrap()").unwrap();
+                    writeln!(writer, "                }} else {{").unwrap();
+                    writeln!(writer, "                    merged_value").unwrap();
+                    writeln!(writer, "                }}").unwrap();
+                    writeln!(writer, "            }},").unwrap();
+                } else {
+                    writeln!(writer, "            {lc_snake_name}: {merge_expr},").unwrap();
+                }
             }
 
             writeln!(writer, "        }}").unwrap();
@@ -378,7 +431,7 @@ fn main() {
             .expect("Failed to parse schema");
 
     let mut generator
-        = Generator::new();
+        = Generator::new("Settings");
 
     schema.send_to(&mut generator);
 

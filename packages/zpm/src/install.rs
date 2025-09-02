@@ -723,13 +723,10 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
                 })
             });
 
-        let range_details
-            = descriptor.range.details();
-
         if let Some(replacement_range) = resolution_override {
             descriptor.range = replacement_range;
 
-            if range_details.require_binding {
+            if descriptor.range.details().require_binding {
                 let root_workspace = context.project
                     .expect("The project is required to bind a parent to a descriptor")
                     .root_workspace();
@@ -738,7 +735,7 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
             } else {
                 descriptor.parent = None;
             }
-        } else if range_details.require_binding {
+        } else if descriptor.range.details().require_binding {
             descriptor.parent = Some(resolution.locator.clone());
         }
 

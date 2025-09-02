@@ -76,7 +76,7 @@ impl<T> Partial<T> where T: Default {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Interpolated<T> {
     value: T,
 }
@@ -133,6 +133,7 @@ trait MergeSettings: Sized {
 
     fn from_env_string(
         value: &str,
+        from_config: Option<Self>,
     ) -> Result<Self, HydrateError>;
 
     fn hydrate(
@@ -148,7 +149,6 @@ trait MergeSettings: Sized {
 
     fn merge<F: Fn() -> Self>(
         context: &ConfigurationContext,
-        prefix: Option<&str>,
         user: Partial<Self::Intermediate>,
         project: Partial<Self::Intermediate>,
         default: F,
@@ -158,7 +158,7 @@ trait MergeSettings: Sized {
 impl<K: Ord + FromFileString + ToStringComplete, T: MergeSettings> MergeSettings for BTreeMap<K, T> {
     type Intermediate = BTreeMap<K, T::Intermediate>;
 
-    fn from_env_string(_value: &str) -> Result<Self, HydrateError> {
+    fn from_env_string(_value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
         unimplemented!("Configuration maps cannot be returned directly just yet");
     }
 
@@ -194,7 +194,7 @@ impl<K: Ord + FromFileString + ToStringComplete, T: MergeSettings> MergeSettings
         entry.get(&path[1..])
     }
 
-    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
+    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
         let mut join
             = BTreeMap::new();
 
@@ -217,12 +217,8 @@ impl<K: Ord + FromFileString + ToStringComplete, T: MergeSettings> MergeSettings
             = BTreeMap::new();
 
         for (k, (user_value, project_value)) in join {
-            let next_prefix
-                = prefix.map(|p| format!("{}_{}", p, k.to_file_string()));
-
             let hydrated_item = T::merge(
                 context,
-                next_prefix.as_deref(),
                 user_value,
                 project_value,
                 || unreachable!("We shouldn't reach this place since we insert only if there's a value in either user or project settings"),
@@ -238,8 +234,24 @@ impl<K: Ord + FromFileString + ToStringComplete, T: MergeSettings> MergeSettings
 impl<T: MergeSettings> MergeSettings for Vec<T> {
     type Intermediate = Vec<T::Intermediate>;
 
-    fn from_env_string(_value: &str) -> Result<Self, HydrateError> {
-        unimplemented!("Configuration lists cannot be returned directly just yet");
+    fn from_env_string(value: &str, from_config: Option<Self>) -> Result<Self, HydrateError> {
+        let mut result
+            = from_config.unwrap_or_default();
+
+        let items = value
+            .split(',')
+            .map(|s| s.trim());
+
+        for item_str in items {
+            let value
+                = T::from_env_string(item_str, None)
+                    .map_err(|e| HydrateError::InvalidValue(e.to_string()))
+                        .unwrap();
+
+            result.push(value);
+        }
+
+        Ok(result)
     }
 
     fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
@@ -274,7 +286,7 @@ impl<T: MergeSettings> MergeSettings for Vec<T> {
         self[key].get(&path[1..])
     }
 
-    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
+    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
         let mut result
             = Vec::new();
 
@@ -282,7 +294,6 @@ impl<T: MergeSettings> MergeSettings for Vec<T> {
             result.extend(user.into_iter().map(|v| {
                 T::merge(
                     context,
-                    None,
                     Partial::Value(v),
                     Partial::Missing,
                     || unreachable!("We shouldn't reach this place since we insert only if there's a value in either user or project settings"),
@@ -294,29 +305,11 @@ impl<T: MergeSettings> MergeSettings for Vec<T> {
             result.extend(project.into_iter().map(|v| {
                 T::merge(
                     context,
-                    None,
                     Partial::Missing,
                     Partial::Value(v),
                     || unreachable!("We shouldn't reach this place since we insert only if there's a value in either user or project settings"),
                 )
             }));
-        }
-
-        if let Some(prefix) = prefix {
-            if let Some(value) = context.env.get(prefix) {
-                let items = value
-                    .split(',')
-                    .map(|s| s.trim());
-
-                for item_str in items {
-                    let value
-                        = T::from_env_string(item_str)
-                            .map_err(|e| HydrateError::InvalidValue(e.to_string()))
-                                .unwrap();
-
-                    result.push(value);
-                }
-            }
         }
 
         result
@@ -326,7 +319,7 @@ impl<T: MergeSettings> MergeSettings for Vec<T> {
 impl MergeSettings for Setting<Path> {
     type Intermediate = Interpolated<Path>;
 
-    fn from_env_string(value: &str) -> Result<Self, HydrateError> {
+    fn from_env_string(value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
         let value
             = Path::from_file_string(value)
                 .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
@@ -360,26 +353,7 @@ impl MergeSettings for Setting<Path> {
         })
     }
 
-    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
-        if let Some(key) = prefix {
-            if let Some(value) = context.env.get(key) {
-                let mut path
-                    = Path::from_file_string(value).unwrap();
-
-                if path.is_relative() {
-                    path = context.project_cwd
-                        .as_ref()
-                        .expect("A project cwd must be set when assigning a relative path value to a Yarn setting from the environment")
-                        .with_join(&path);
-                }
-
-                return Self {
-                    value: path,
-                    source: Source::Environment,
-                };
-            }
-        }
-
+    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
         if let Partial::Value(project_rel_path) = project {
             let path = context
                 .package_cwd
@@ -415,7 +389,7 @@ macro_rules! merge_settings_impl {
         impl MergeSettings for Setting<$type> {
             type Intermediate = Interpolated<$type>;
 
-            fn from_env_string(value: &str) -> Result<Self, HydrateError> {
+            fn from_env_string(value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
                 let value
                     = <$type as FromFileString>::from_file_string(value)
                         .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
@@ -449,16 +423,7 @@ macro_rules! merge_settings_impl {
                 })
             }
 
-            fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, key: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
-                if let Some(key) = key {
-                    if let Some(value) = context.env.get(key) {
-                        return Self {
-                            value: $from_str(value),
-                            source: Source::Environment,
-                        };
-                    }
-                }
-
+            fn merge<F: FnOnce() -> Self>(_context: &ConfigurationContext, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
                 if let Partial::Value(project) = project {
                     return Self {
                         value: project.into_inner(),
@@ -480,7 +445,7 @@ macro_rules! merge_settings_impl {
         impl MergeSettings for Setting<Option<$type>> {
             type Intermediate = Option<Interpolated<$type>>;
 
-            fn from_env_string(value: &str) -> Result<Self, HydrateError> {
+            fn from_env_string(value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
                 let value
                     = <Option<$type> as FromFileString>::from_file_string(value)
                         .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
@@ -514,11 +479,11 @@ macro_rules! merge_settings_impl {
                 })
             }
 
-            fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, prefix: Option<&str>, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
+            fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
                 if let Partial::Value(user) = user {
                     let inner = user.map(|user| {
                         Setting::<$type>::merge(
-                            context, prefix,
+                            context,
                             Partial::Value(user),
                             Partial::Missing,
                             || panic!("We shouldn't reach this place since we insert only if there's a value in either user or project settings")
@@ -534,7 +499,7 @@ macro_rules! merge_settings_impl {
                 if let Partial::Value(project) = project {
                     let inner = project.map(|project| {
                         Setting::<$type>::merge(
-                            context, prefix,
+                            context,
                             Partial::Missing,
                             Partial::Value(project),
                             || panic!("We shouldn't reach this place since we insert only if there's a value in either user or project settings")
@@ -655,7 +620,6 @@ impl Configuration {
 
         let settings = Settings::merge(
             &context,
-            Some("YARN"),
             intermediate_user_config,
             intermediate_project_config,
             || panic!("No configuration found")
@@ -680,9 +644,9 @@ pub use types::*;
 
 // Rust doesn't support specialization, so we can't have a blanket implementation for FromStr
 // and a different one for Option<T: FromStr>; instead we manually generate whatever we need.
-merge_settings!(String, |s: &str| s.to_string());
-merge_settings!(bool, |s: &str| s.parse().unwrap());
-merge_settings!(usize, |s: &str| s.parse().unwrap());
+merge_settings!(String, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(bool, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(usize, |s: &str| FromFileString::from_file_string(s).unwrap());
 
 merge_settings!(Descriptor, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(Glob, |s: &str| FromFileString::from_file_string(s).unwrap());

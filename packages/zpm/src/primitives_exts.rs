@@ -42,6 +42,7 @@ impl RangeExt for Range {
             },
 
             Range::Folder(_) |
+            Range::Portal(_) |
             Range::Tarball(_) => {
                 RangeDetails {
                     require_binding: true,
@@ -60,8 +61,7 @@ impl RangeExt for Range {
                 }
             },
 
-            Range::Link(_) |
-            Range::Portal(_) => {
+            Range::Link(_) => {
                 RangeDetails {
                     require_binding: true,
                     fetch_before_resolve: false,
