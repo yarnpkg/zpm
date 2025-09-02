@@ -17,6 +17,10 @@ pub struct QueryString {
 }
 
 impl QueryString {
+    pub fn from_iter(iter: impl Iterator<Item = (String, QueryStringValue)>) -> Self {
+        Self {fields: iter.collect()}
+    }
+
     pub fn encode(value: &'_ str) -> Cow<'_, str> {
         urlencoding::encode(value)
     }

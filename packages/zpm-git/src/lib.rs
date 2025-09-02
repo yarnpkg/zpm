@@ -35,6 +35,8 @@ pub(crate) static GH_URL_SET: LazyLock<Vec<Regex>> = LazyLock::new(|| vec![
     Regex::new(r"^https?:\/\/github\.com\/(?!\.{1,2}\/)([a-zA-Z0-9._-]+)\/(?!\.{1,2}(?:#|$))([a-zA-Z0-9._-]+?)\/tarball\/(.+)?$").unwrap(),
 ]);
 
+pub(crate) static LEGACY_HASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"#([^#=:]+):(.*)$").unwrap());
+
 pub fn is_git_url<P: AsRef<str>>(url: P) -> bool {
     GH_URL_SET.iter().any(|r| r.is_match(url.as_ref()).unwrap())
 }
@@ -48,6 +50,7 @@ pub fn normalize_git_url<P: AsRef<str>>(url: P) -> String {
 
     normalized = GH_URL.replace(&normalized, "https://github.com/$1/$2.git$3").to_string();
     normalized = GH_TARBALL_URL.replace(&normalized, "https://github.com/$1/$2.git#$3").to_string();
+    normalized = LEGACY_HASH.replace(&normalized, "#$1=$2").to_string();
 
     normalized
 }

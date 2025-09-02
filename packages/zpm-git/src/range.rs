@@ -30,61 +30,72 @@ impl FromFileString for GitRange {
         let normalized
             = normalize_git_url(src);
 
-        let hash_index
-            = normalized.find('#');
-
-        if hash_index.is_none() {
+        let Some(hash_index) = normalized.find('#') else {
             return Ok(GitRange {
                 repo: GitSource::from_file_string(&normalized).unwrap_infallible(),
                 treeish: GitTreeish::Head("HEAD".to_string()),
                 prepare_params: PrepareParams::default(),
             });
-        }
+        };
 
         let mut treeish
             = GitTreeish::Head("HEAD".to_string());
         let mut prepare_params
             = PrepareParams::default();
 
-        let qs
-            = QueryString::from_file_string(&normalized[hash_index.unwrap()..])?;
+        let (repo_str, qs_str)
+            = normalized.split_at(hash_index);
 
-        for (key, value) in qs.fields {
-            if let QueryStringValue::String(value) = value {
-                match key.as_str() {
-                    "head" => {
-                        treeish = GitTreeish::Head(value.to_string());
-                    },
+        let qs_str
+            = qs_str[1..].to_string();
 
-                    "commit" => {
-                        treeish = GitTreeish::Commit(value.to_string());
-                    },
+        let repo
+            = GitSource::from_file_string(repo_str)
+                .unwrap_infallible();
 
-                    "semver" => {
-                        treeish = GitTreeish::Semver(zpm_semver::Range::from_file_string(value.as_ref())?);
-                    },
+        if !qs_str.contains('=') {
+            treeish = GitTreeish::AnythingGoes(qs_str.to_string());
+        } else {
+            let qs
+                = QueryString::from_file_string(&qs_str)?;
 
-                    "tag" => {
-                        treeish = GitTreeish::Tag(value.to_string());
-                    },
+            for (key, value) in qs.fields {
+                if let QueryStringValue::String(value) = value {
+                    match key.as_str() {
+                        "head" => {
+                            treeish = GitTreeish::Head(value.to_string());
+                        },
 
-                    "cwd" => {
-                        prepare_params.cwd = Some(value.to_string());
-                    },
+                        "commit" => {
+                            treeish = GitTreeish::Commit(value.to_string());
+                        },
 
-                    "workspace" => {
-                        prepare_params.workspace = Some(value.to_string());
-                    },
+                        "semver" => {
+                            treeish = GitTreeish::Semver(zpm_semver::Range::from_file_string(value.as_ref())?);
+                        },
 
-                    _ => {
-                        // Skip unknown keys
-                    },
+                        "tag" => {
+                            treeish = GitTreeish::Tag(value.to_string());
+                        },
+
+                        "cwd" => {
+                            prepare_params.cwd = Some(value.to_string());
+                        },
+
+                        "workspace" => {
+                            prepare_params.workspace = Some(value.to_string());
+                        },
+
+                        _ => {
+                            // Skip unknown keys
+                        },
+                    }
                 }
             }
         }
 
         return Ok(GitRange {
-            repo: GitSource::from_file_string(&normalized).unwrap_infallible(),
+            repo,
             treeish,
             prepare_params,
         });
