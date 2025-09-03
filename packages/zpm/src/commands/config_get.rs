@@ -7,6 +7,9 @@ use crate::{error::Error, project::Project};
 #[cli::category("Configuration commands")]
 #[cli::description("Get a configuration value")]
 pub struct ConfigGet {
+    #[cli::option("--json", default = false)]
+    json: bool,
+
     name: zpm_parsers::path::Path,
 }
 
@@ -25,7 +28,7 @@ impl ConfigGet {
         let entry
             = project.config.get(&segments)?;
 
-        println!("{}", entry.value.to_print_string());
+        println!("{}", entry.value.export(self.json));
 
         Ok(())
     }

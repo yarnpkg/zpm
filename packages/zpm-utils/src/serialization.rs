@@ -1,4 +1,6 @@
 use colored::Colorize;
+use erased_serde::serialize_trait_object;
+use serde::{Serialize, Serializer};
 use thiserror::Error;
 
 use crate::DataType;
@@ -24,10 +26,42 @@ pub trait ToHumanString {
     fn to_print_string(&self) -> String;
 }
 
-pub trait ToStringComplete: ToFileString + ToHumanString {
+pub trait Extracted: erased_serde::Serialize + ToHumanString {
 }
 
-impl<T: ToFileString + ToHumanString> ToStringComplete for T {
+impl<T: erased_serde::Serialize + ToHumanString> Extracted for T {
+}
+
+serialize_trait_object!(Extracted);
+
+pub struct AbstractValue<'a> {
+    value: Box<dyn Extracted + 'a>,
+}
+
+impl<'a> AbstractValue<'a> {
+    pub fn new<T: Extracted + 'a>(value: T) -> Self {
+        Self {value: Box::new(value)}
+    }
+
+    pub fn export(self, json: bool) -> String {
+        if json {
+            sonic_rs::to_string(&self.value).unwrap()
+        } else {
+            self.value.to_print_string()
+        }
+    }
+}
+
+impl<'a> Serialize for AbstractValue<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        self.value.serialize(serializer)
+    }
+}
+
+impl<'a> ToHumanString for AbstractValue<'a> {
+    fn to_print_string(&self) -> String {
+        self.value.to_print_string()
+    }
 }
 
 impl<T: FromFileString> FromFileString for Box<T> {
@@ -97,6 +131,26 @@ impl ToFileString for usize {
 }
 
 impl ToHumanString for usize {
+    fn to_print_string(&self) -> String {
+        DataType::Number.colorize(&self.to_file_string())
+    }
+}
+
+impl FromFileString for u64 {
+    type Error = std::num::ParseIntError;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl ToFileString for u64 {
+    fn to_file_string(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl ToHumanString for u64 {
     fn to_print_string(&self) -> String {
         DataType::Number.colorize(&self.to_file_string())
     }

@@ -46,7 +46,7 @@ pub struct CompositeCache {
 }
 
 impl CompositeCache {
-    pub fn key_path(&self, key: &Locator, ext: &str) -> Result<Path, Error> {
+    pub fn key_path(&self, key: &Locator, ext: &str) -> Path {
         if let Some(ref cache) = self.local_cache {
             return cache.key_path(key, ext);
         }
@@ -152,7 +152,7 @@ impl DiskCache {
         }
     }
 
-    pub fn key_path(&self, locator: &Locator, ext: &str) -> Result<Path, Error> {
+    pub fn key_path(&self, locator: &Locator, ext: &str) -> Path {
         let key_name
             = format!("{}{}", locator.slug(), ext);
 
@@ -163,11 +163,11 @@ impl DiskCache {
             accessed.insert(key_name);
         }
 
-        Ok(key_path)
+        key_path
     }
 
     pub fn cache_entry(&self, key: Locator, ext: &str) -> Result<InfoCacheEntry, Error> {
-        let key_path = self.key_path(&key, ext)?;
+        let key_path = self.key_path(&key, ext);
 
         Ok(InfoCacheEntry {
             path: key_path,
@@ -176,7 +176,7 @@ impl DiskCache {
     }
 
     pub fn check_cache_entry(&self, key: Locator, ext: &str) -> Result<Option<InfoCacheEntry>, Error> {
-        let key_path = self.key_path(&key, ext)?;
+        let key_path = self.key_path(&key, ext);
 
         Ok(key_path.if_exists().map(|path| {
             InfoCacheEntry {
@@ -191,7 +191,7 @@ impl DiskCache {
         R: Future<Output = Result<Vec<u8>, Error>>,
         F: FnOnce() -> R,
     {
-        let key_path = self.key_path(&key, ext)?;
+        let key_path = self.key_path(&key, ext);
         let key_path_buf = key_path.to_path_buf();
 
         let exists = tokio::fs::try_exists(key_path_buf.clone()).await?;
@@ -229,7 +229,7 @@ impl DiskCache {
         R: Future<Output = Result<Vec<u8>, Error>>,
         F: FnOnce() -> R,
     {
-        let key_path = self.key_path(&key, ext)?;
+        let key_path = self.key_path(&key, ext);
         let key_path_buf = key_path.to_path_buf();
 
         let read = tokio::fs::read(key_path_buf.clone()).await;

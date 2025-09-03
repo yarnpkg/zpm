@@ -80,12 +80,6 @@ pub enum Range {
         path: String,
     },
 
-    #[pattern(spec = r"virtual:(?<inner>.*)#(?<hash>[a-f0-9]*)$")]
-    Virtual {
-        inner: Box<Range>,
-        hash: Hash64,
-    },
-
     #[pattern(spec = r"workspace:(?<magic>.*)")]
     WorkspaceMagic {
         magic: zpm_semver::RangeKind,
@@ -119,6 +113,13 @@ pub enum Range {
     #[pattern(spec = r"(?<tag>.*)")]
     AnonymousTag {
         tag: String,
+    },
+
+    // We keep this at the end so virtual ranges are listed last when sorted
+    #[pattern(spec = r"virtual:(?<inner>.*)#(?<hash>[a-f0-9]*)$")]
+    Virtual {
+        inner: Box<Range>,
+        hash: Hash64,
     },
 }
 

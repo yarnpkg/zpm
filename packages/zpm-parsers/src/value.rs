@@ -7,6 +7,7 @@ pub enum Value {
     Array(Vec<Value>),
     Object(Vec<(String, Value)>), // Preserves insertion order
     Undefined, // Used to remove values
+    Raw(String), // Used to store raw JSON or YAML; not portable
 }
 
 impl Value {
@@ -84,6 +85,10 @@ impl Value {
 
             Value::Undefined => {
                 panic!("Undefined value cannot be converted to JSON");
+            },
+
+            Value::Raw(s) => {
+                s.clone()
             },
         }
     }

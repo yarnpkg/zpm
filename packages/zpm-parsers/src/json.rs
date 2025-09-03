@@ -851,6 +851,10 @@ impl JsonFormatter {
             Value::Undefined => {
                 unreachable!()
             },
+
+            Value::Raw(s) => {
+                s.clone()
+            },
         }
     }
 }

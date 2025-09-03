@@ -1,17 +1,10 @@
-use serde::{Deserialize, Deserializer};
-use zpm_utils::{FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeLinker {
     Pnp,
     Pnpm,
     NodeModules,
-}
-
-impl<'de> Deserialize<'de> for NodeLinker {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
-        Self::from_file_string(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
-    }
 }
 
 impl FromFileString for NodeLinker {
@@ -48,17 +41,14 @@ impl ToHumanString for NodeLinker {
     }
 }
 
+impl_file_string_from_str!(NodeLinker);
+impl_file_string_serialization!(NodeLinker);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PnpFallbackMode {
     None,
     DependenciesOnly,
     All,
-}
-
-impl<'de> Deserialize<'de> for PnpFallbackMode {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
-        Self::from_file_string(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
-    }
 }
 
 impl FromFileString for PnpFallbackMode {
@@ -89,3 +79,6 @@ impl ToHumanString for PnpFallbackMode {
         self.to_file_string()
     }
 }
+
+impl_file_string_from_str!(PnpFallbackMode);
+impl_file_string_serialization!(PnpFallbackMode);

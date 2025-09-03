@@ -47,3 +47,4 @@ convert_case = "0.8.0"
 brotli = "8.0.1"
 env_logger = "0.11.8"
 hickory-resolver = "0.25.2"
+indexmap = {version = "2.11.0", features = ["serde"]}

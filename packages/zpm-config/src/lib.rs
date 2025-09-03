@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc};
 use serde::{de, Deserialize, Deserializer};
 use zpm_primitives::{Descriptor, Locator, PeerRange, Range, Reference};
 use zpm_semver::RangeKind;
-use zpm_utils::{FromFileString, Glob, IoResultExt, Path, ToStringComplete};
+use zpm_utils::{AbstractValue, FromFileString, Glob, IoResultExt, Path};
 
 #[derive(Debug, Clone)]
 pub struct ConfigurationContext {
@@ -140,7 +140,7 @@ trait MergeSettings: Sized {
         &self,
         path: &[&str],
         value_str: &str,
-    ) -> Result<Box<dyn ToStringComplete>, HydrateError>;
+    ) -> Result<AbstractValue, HydrateError>;
 
     fn get(
         &self,
@@ -155,14 +155,14 @@ trait MergeSettings: Sized {
     ) -> Self;
 }
 
-impl<K: Ord + FromFileString + ToStringComplete, T: MergeSettings> MergeSettings for BTreeMap<K, T> {
+impl<K: Ord + FromFileString, T: MergeSettings> MergeSettings for BTreeMap<K, T> {
     type Intermediate = BTreeMap<K, T::Intermediate>;
 
     fn from_env_string(_value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
         unimplemented!("Configuration maps cannot be returned directly just yet");
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
         let Some(key_str) = path.first() else {
             unimplemented!("Configuration maps cannot be returned directly just yet");
         };
@@ -254,7 +254,7 @@ impl<T: MergeSettings> MergeSettings for Vec<T> {
         Ok(result)
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
         let Some(key_str) = path.first() else {
             unimplemented!("Configuration lists cannot be returned directly just yet");
         };
@@ -330,7 +330,7 @@ impl MergeSettings for Setting<Path> {
         })
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
         if let Some(key) = path.first() {
             return Err(HydrateError::KeyNotFound(key.to_string()));
         }
@@ -339,7 +339,7 @@ impl MergeSettings for Setting<Path> {
             = Path::from_file_string(value_str)
                 .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
 
-        Ok(Box::new(value))
+        Ok(AbstractValue::new(value))
     }
 
     fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
@@ -348,7 +348,7 @@ impl MergeSettings for Setting<Path> {
         }
 
         Ok(ConfigurationEntry {
-            value: Box::new(self.value.clone()),
+            value: AbstractValue::new(self.value.clone()),
             source: self.source,
         })
     }
@@ -400,7 +400,7 @@ macro_rules! merge_settings_impl {
                 })
             }
 
-            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
                 if let Some(key) = path.first() {
                     return Err(HydrateError::KeyNotFound(key.to_string()));
                 }
@@ -409,7 +409,7 @@ macro_rules! merge_settings_impl {
                     = <$type as FromFileString>::from_file_string(value_str)
                         .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
 
-                Ok(Box::new(value))
+                Ok(AbstractValue::new(value))
             }
 
             fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
@@ -418,7 +418,7 @@ macro_rules! merge_settings_impl {
                 }
 
                 Ok(ConfigurationEntry {
-                    value: Box::new(self.value.clone()),
+                    value: AbstractValue::new(self.value.clone()),
                     source: self.source,
                 })
             }
@@ -456,7 +456,7 @@ macro_rules! merge_settings_impl {
                 })
             }
 
-            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
                 if let Some(key) = path.first() {
                     return Err(HydrateError::KeyNotFound(key.to_string()));
                 }
@@ -465,7 +465,7 @@ macro_rules! merge_settings_impl {
                     = <Option<$type> as FromFileString>::from_file_string(value_str)
                         .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
 
-                Ok(Box::new(value))
+                Ok(AbstractValue::new(value))
             }
 
             fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
@@ -474,7 +474,7 @@ macro_rules! merge_settings_impl {
                 }
 
                 Ok(ConfigurationEntry {
-                    value: Box::new(self.value.clone()),
+                    value: AbstractValue::new(self.value.clone()),
                     source: self.source,
                 })
             }
@@ -547,8 +547,8 @@ impl From<serde_yaml::Error> for ConfigurationError {
     }
 }
 
-pub struct ConfigurationEntry {
-    pub value: Box<dyn ToStringComplete>,
+pub struct ConfigurationEntry<'a> {
+    pub value: AbstractValue<'a>,
     pub source: Source,
 }
 
@@ -574,7 +574,7 @@ pub enum HydrateError {
 }
 
 impl Configuration {
-    pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {
+    pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
         self.settings.hydrate(path, value_str)
     }
 

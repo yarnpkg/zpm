@@ -1,12 +1,15 @@
 use clipanion::cli;
 
-use crate::{error::Error, linker::nm::{hoist::{self, Hoister, InputTree, WorkTree}}, project};
+use crate::{error::Error, linker::nm::hoist::{self, Hoister, InputTree, WorkTree}, project, ui};
 
 #[cli::command]
 #[cli::path("debug", "print-hoisting")]
 pub struct PrintHoisting {
     #[cli::option("-v,--verbose", default = false)]
     verbose: bool,
+
+    #[cli::option("-j,--json", default = false)]
+    json: bool,
 }
 
 impl PrintHoisting {
@@ -33,8 +36,12 @@ impl PrintHoisting {
         hoister.set_print_logs(self.verbose);
         hoister.hoist();
 
+        let root_node
+            = hoist::TreeRenderer::new(&work_tree).convert();
+
         let rendering
-            = hoist::TreeRenderer::new(&work_tree).render();
+            = ui::tree::TreeRenderer::new()
+                .render(&root_node, self.json);
 
         print!("{}", rendering);
 

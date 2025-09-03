@@ -1,7 +1,6 @@
 use ouroboros::self_referencing;
-use serde::{de, Deserialize, Deserializer};
 
-use crate::{FromFileString, ToFileString, ToHumanString};
+use crate::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
 #[self_referencing]
 #[derive(Debug)]
@@ -91,9 +90,5 @@ impl ToHumanString for Glob {
     }
 }
 
-impl<'de> Deserialize<'de> for Glob {
-    fn deserialize<D>(deserializer: D) -> Result<Glob, D::Error> where D: Deserializer<'de> {
-        Ok(Glob::parse(String::deserialize(deserializer)?)
-            .map_err(|err| de::Error::custom(err.to_string()))?)
-    }
-}
+impl_file_string_from_str!(Glob);
+impl_file_string_serialization!(Glob);

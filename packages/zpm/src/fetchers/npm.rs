@@ -13,7 +13,7 @@ use super::PackageData;
 
 fn get_mock_fetch_result(context: &InstallContext, locator: &Locator, params: &RegistryReference) -> Result<FetchResult, Error> {
     let archive_path = context.package_cache.unwrap()
-        .key_path(locator, ".zip")?;
+        .key_path(locator, ".zip");
 
     let package_directory = archive_path
         .with_join_str(params.ident.nm_subdir());

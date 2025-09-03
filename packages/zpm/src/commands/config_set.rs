@@ -47,10 +47,7 @@ impl ConfigSet {
         let updated_document = Yaml::update_document_field(
             &document,
             self.name.clone(),
-            // TODO: It shouldn't always be a string; we should improve `hydrate` to return
-            // a zpm_parsers::Value instead of a Box<dyn ToStringComplete>, but that would
-            // require some hefty changes.
-            zpm_parsers::Value::String(value.to_file_string()),
+            zpm_parsers::Value::Raw(value.export(true)),
         )?;
 
         document_path

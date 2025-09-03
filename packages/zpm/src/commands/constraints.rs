@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use clipanion::cli;
 use colored::Colorize;
-use zpm_utils::{DataType, IoResultExt, Path, ToFileString, ToHumanString};
+use zpm_utils::{AbstractValue, DataType, Path, ToFileString, ToHumanString};
 use zpm_parsers::JsonFormatter;
 
 use crate::{constraints::{structs::{ConstraintsContext, ConstraintsOutput, WorkspaceError, WorkspaceOperation}, to_constraints_package, to_constraints_workspace}, error::Error, project::Project, script::ScriptEnvironment, ui::tree};
@@ -179,10 +179,8 @@ fn display_report(project: &Project, output: &ConstraintsOutput) -> Result<(), E
         println!();
     }
 
-    let mut root = tree::Node {
-        label: String::new(),
-        children: vec![],
-    };
+    let mut root_children
+        = vec![];
 
     let cog
         = "⚙".truecolor(130, 130, 130).to_string();
@@ -191,31 +189,32 @@ fn display_report(project: &Project, output: &ConstraintsOutput) -> Result<(), E
         let workspace
             = project.workspace_by_rel_path(&workspace_rel_path)?;
 
-        let mut workspace_node = tree::Node {
-            label: workspace.locator_path().to_print_string(),
-            children: vec![],
-        };
+        let mut report_children
+            = vec![];
 
         for error in errors {
             match error {
                 WorkspaceError::MissingField { field_path, expected } => {
-                    workspace_node.children.push(tree::Node {
-                        label: format!("{cog} Missing field {}; expected {}", field_path.to_print_string(), expected),
-                        children: vec![],
+                    report_children.push(tree::Node {
+                        label: Some(format!("{cog} Missing field {}; expected {}", field_path.to_print_string(), expected)),
+                        value: None,
+                        children: None,
                     });
                 },
 
                 WorkspaceError::ExtraneousField { field_path, current_value } => {
-                    workspace_node.children.push(tree::Node {
-                        label: format!("{cog} Extraneous field {} currently set to {}", field_path.to_print_string(), current_value),
-                        children: vec![],
+                    report_children.push(tree::Node {
+                        label: Some(format!("{cog} Extraneous field {} currently set to {}", field_path.to_print_string(), current_value)),
+                        value: None,
+                        children: None,
                     });
                 },
 
                 WorkspaceError::InvalidField { field_path, expected, current_value } => {
-                    workspace_node.children.push(tree::Node {
-                        label: format!("{cog} Invalid field {}; expected {}, found {}", field_path.to_print_string(), expected, current_value),
-                        children: vec![],
+                    report_children.push(tree::Node {
+                        label: Some(format!("{cog} Invalid field {}; expected {}, found {}", field_path.to_print_string(), expected, current_value)),
+                        value: None,
+                        children: None,
                     });
                 },
 
@@ -236,26 +235,38 @@ fn display_report(project: &Project, output: &ConstraintsOutput) -> Result<(), E
 
                     let options = flat_entries.iter()
                         .map(|(value, caller)| format!("{} at {}", value, caller.to_print_string()))
-                        .map(|option| tree::Node {label: option, children: vec![]})
+                        .map(|option| tree::Node {label: Some(option), value: None, children: None})
                         .collect::<Vec<_>>();
 
-                    workspace_node.children.push(tree::Node {
-                        label: format!("Conflict detected in constraint targeting {}; conflicting values are:", field_path.to_print_string()),
-                        children: options,
+                    report_children.push(tree::Node {
+                        label: Some(format!("Conflict detected in constraint targeting {}; conflicting values are:", field_path.to_print_string())),
+                        value: None,
+                        children: Some(tree::TreeNodeChildren::Vec(options)),
                     });
                 },
 
                 WorkspaceError::UserError { message } => {
-                    workspace_node.children.push(tree::Node {
-                        label: message.to_string(),
-                        children: vec![],
+                    report_children.push(tree::Node {
+                        label: Some(message.to_string()),
+                        value: None,
+                        children: None,
                     });
                 },
             }
         }
 
-        root.children.push(workspace_node);
+        root_children.push(tree::Node {
+            label: None,
+            value: Some(AbstractValue::new(workspace.locator_path())),
+            children: Some(tree::TreeNodeChildren::Vec(report_children)),
+        });
     }
+
+    let root = tree::Node {
+        label: None,
+        value: None,
+        children: Some(tree::TreeNodeChildren::Vec(root_children)),
+    };
 
     print!("{}", root.to_string());
 

@@ -85,6 +85,10 @@ impl Formatter for YamlFormatter {
             Value::Undefined => {
                 panic!("Undefined value cannot be converted to YAML");
             },
+
+            Value::Raw(s) => {
+                s.clone()
+            },
         }
     }
 }

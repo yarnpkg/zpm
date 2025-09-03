@@ -323,7 +323,7 @@ impl Generator {
             writeln!(writer, "        unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<Box<dyn ToStringComplete>, HydrateError> {{").unwrap();
+            writeln!(writer, "    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {{").unwrap();
             writeln!(writer, "        let Some(key_str) = path.first() else {{").unwrap();
             writeln!(writer, "            unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
             writeln!(writer, "        }};").unwrap();

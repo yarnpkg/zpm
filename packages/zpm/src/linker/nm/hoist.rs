@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use itertools::{Either, Itertools};
+use itertools::Itertools;
 use zpm_primitives::{Ident, Locator};
 use zpm_utils::ToHumanString;
 
@@ -246,112 +246,97 @@ impl WorkTree {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct TreeRenderer<'a> {
-    pub tree: &'a WorkTree,
-    pub node_idx: usize,
-    pub available_dependencies: BTreeMap<&'a Ident, &'a Locator>,
-    pub invalid_dependencies: Vec<&'a Locator>,
-    pub stack: Vec<usize>,
-    pub is_cycle: bool,
+    tree: &'a WorkTree,
+
+    parent_dependencies: BTreeMap<&'a Ident, &'a Locator>,
+    parent_stack: Vec<usize>,
 }
 
 impl<'a> TreeRenderer<'a> {
     pub fn new(tree: &'a WorkTree) -> Self {
-        Self::new_impl(tree, 0, &BTreeMap::new(), &vec![])
+        Self {
+            tree,
+            parent_dependencies: BTreeMap::new(),
+            parent_stack: vec![],
+        }
     }
 
-    fn new_impl(tree: &'a WorkTree, node_idx: usize, parent_dependencies: &BTreeMap<&'a Ident, &'a Locator>, parent_stack: &Vec<usize>) -> Self {
-        let mut stack
-            = parent_stack.clone();
-        let is_cycle
-            = stack.contains(&node_idx);
+    pub fn convert(&mut self) -> ui::tree::Node<'a> {
+        self.convert_impl(0, BTreeMap::new())
+    }
 
-        stack.push(node_idx);
+    fn convert_impl(&mut self, node_idx: usize, available_dependencies: BTreeMap<&'a Ident, &'a Locator>) -> ui::tree::Node<'a> {
+        let is_cycle
+            = self.parent_stack.contains(&node_idx);
+
+        self.parent_stack.push(node_idx);
 
         let available_dependencies
-            = Self::extend_available_dependencies(parent_dependencies.clone(), tree, node_idx);
+            = self.extend_available_dependencies(available_dependencies, node_idx);
 
         let node
-            = &tree.nodes[node_idx];
+            = &self.tree.nodes[node_idx];
 
         let invalid_dependencies
             = node.dependencies.values()
                 .filter(|locator| available_dependencies.get(&locator.ident) != Some(locator))
                 .collect::<Vec<_>>();
 
-        TreeRenderer {
-            tree,
-            node_idx,
-            available_dependencies,
-            invalid_dependencies,
-            stack,
-            is_cycle,
+        let mut label
+            = node.locator.to_print_string();
+
+        if is_cycle {
+            label.push_str(" (cycle)");
+        }
+
+        let mut children
+            = Vec::new();
+
+        for &locator in &invalid_dependencies {
+            let invalid_dependency_locator
+                = available_dependencies.get(&locator.ident);
+
+            let label = format!(
+                "❌ Invalid dependency {} (expected {})",
+                invalid_dependency_locator.map(|locator| locator.to_print_string()).unwrap_or_else(|| "<none>".to_string()),
+                locator.to_print_string(),
+            );
+
+            children.push(ui::tree::Node {
+                label: Some(label),
+                value: None,
+                children: None,
+            });
+        }
+
+        for &child_idx in self.tree.nodes[node_idx].children.values() {
+            children.push(self.convert_impl(child_idx, available_dependencies.clone()));
+        }
+
+        self.parent_stack.pop();
+
+        ui::tree::Node {
+            label: Some(label),
+            value: None,
+            children: Some(ui::tree::TreeNodeChildren::Vec(children)),
         }
     }
 
-    fn extend_available_dependencies(mut available_dependencies: BTreeMap<&'a Ident, &'a Locator>, tree: &'a WorkTree, node_idx: usize) -> BTreeMap<&'a Ident, &'a Locator> {
+    fn extend_available_dependencies(&self, mut available_dependencies: BTreeMap<&'a Ident, &'a Locator>, node_idx: usize) -> BTreeMap<&'a Ident, &'a Locator> {
         let node
-            = &tree.nodes[node_idx];
+            = &self.tree.nodes[node_idx];
 
         available_dependencies.insert(&node.locator.ident, &node.locator);
 
         available_dependencies.extend(node.children.iter().map(|(ident, child_idx)| {
             let child_node
-                = &tree.nodes[*child_idx];
+                = &self.tree.nodes[*child_idx];
 
             (ident, &child_node.locator)
         }));
 
         available_dependencies
-    }
-
-    pub fn render(&self) -> String {
-        ui::tree::TreeRenderer::new().render(self)
-    }
-}
-
-impl<'a> ui::tree::RenderTreeNode for TreeRenderer<'a> {
-    fn get_label(&self) -> String {
-        let node
-            = &self.tree.nodes[self.node_idx];
-
-        let mut result
-            = node.locator.to_print_string();
-
-        if self.is_cycle {
-            result.push_str(" (cycle)");
-        }
-
-        result
-    }
-
-    fn has_children(&self) -> bool {
-        !self.is_cycle && (!self.invalid_dependencies.is_empty() || !self.tree.nodes[self.node_idx].children.is_empty())
-    }
-
-    fn get_children(&self) -> Vec<Either<ui::tree::Node, Self>> {
-        let mut children
-            = Vec::new();
-
-        for &locator in &self.invalid_dependencies {
-            let label = format!(
-                "❌ Invalid dependency {} (expected {})",
-                self.available_dependencies.get(&locator.ident).map(|locator| locator.to_print_string()).unwrap_or_else(|| "<none>".to_string()),
-                locator.to_print_string(),
-            );
-
-            children.push(Either::Left(ui::tree::Node {
-                label,
-                children: vec![],
-            }));
-        }
-
-        for &child_idx in self.tree.nodes[self.node_idx].children.values() {
-            children.push(Either::Right(Self::new_impl(self.tree, child_idx, &self.available_dependencies, &self.stack)));
-        }
-
-        children
     }
 }
 
