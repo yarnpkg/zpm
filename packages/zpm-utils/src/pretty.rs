@@ -5,7 +5,8 @@ use serde::Serialize;
 
 use crate::{DataType, ToHumanString};
 
-const BYTE_UNITS: [&str; 6] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+const BYTE_UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+const FINAL_UNIT: &str = "TiB";
 
 pub struct Size<T> {
     pub size: T,
@@ -30,7 +31,7 @@ impl<T: Integer + DivAssign + Rem + PartialOrd + Display + Copy + NumCast> ToHum
             value /= 1024.0;
         }
 
-        DataType::Number.colorize(&format!("{:.2} {}", self.size, BYTE_UNITS[0]))
+        DataType::Number.colorize(&format!("{:.2} {}", value, FINAL_UNIT))
     }
 }
 
