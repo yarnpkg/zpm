@@ -210,6 +210,9 @@ pub enum Error {
     #[error("Invalid Git branch ({0})")]
     InvalidGitBranch(String),
 
+    #[error("Invalid dedupe strategy ({0})")]
+    InvalidDedupeStrategy(String),
+
     #[error("Invalid Git specifier")]
     InvalidGitSpecifier,
 

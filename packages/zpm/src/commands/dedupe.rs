@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, process::ExitCode};
+use std::{collections::BTreeMap, process::ExitCode, str::FromStr};
 
 use clipanion::cli;
 use indexmap::IndexMap;
@@ -7,6 +7,26 @@ use zpm_primitives::{Descriptor, Ident, IdentGlob, Locator, Range, Reference, Re
 use zpm_utils::AbstractValue;
 
 use crate::{error::Error, project::{InstallMode, Project, RunInstallOptions}, ui};
+
+#[derive(Debug, Default)]
+enum DedupeStrategy {
+    #[default]
+    Highest,
+}
+
+impl FromStr for DedupeStrategy {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "highest"
+                => Ok(Self::Highest),
+
+            _
+                => Err(Error::InvalidDedupeStrategy(s.to_string())),
+        }
+    }
+}
 
 #[cli::command]
 #[cli::path("dedupe")]
@@ -21,6 +41,9 @@ pub struct Dedupe {
 
     #[cli::option("--json", default = false)]
     json: bool,
+
+    #[cli::option("--strategy", default = DedupeStrategy::Highest)]
+    strategy: DedupeStrategy,
 
     patterns: Vec<IdentGlob>,
 }
