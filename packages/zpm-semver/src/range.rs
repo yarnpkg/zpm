@@ -149,11 +149,8 @@ impl Range {
         }
     }
 
-    pub fn check<P: Borrow<Version>>(&self, version: P) -> bool {
+    pub fn check(&self, version: &Version) -> bool {
         let mut n = 0;
-
-        let version
-            = version.borrow();
 
         // https://docs.npmjs.com/cli/v6/using-npm/semver#prerelease-tags
         //

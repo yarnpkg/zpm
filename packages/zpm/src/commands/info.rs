@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use clipanion::cli;
 use globset::GlobBuilder;
 use indexmap::IndexMap;
-use zpm_primitives::{DescriptorResolution, Locator, Reference};
+use zpm_primitives::{DescriptorResolution, IdentGlob, Locator, Reference};
 use zpm_utils::{AbstractValue, Size, ToFileString};
 
 use crate::{
@@ -61,7 +61,7 @@ pub struct Info {
     json: bool,
 
     #[cli::positional]
-    patterns: Vec<String>,
+    patterns: Vec<IdentGlob>,
 }
 
 impl Info {
@@ -335,16 +335,8 @@ impl Info {
     }
 
     fn get_filter(&self) -> Result<impl Fn(&Locator) -> bool, Error> {
-        let matchers = self.patterns
-            .iter()
-            .map(|pattern| GlobBuilder::new(pattern).literal_separator(false).build())
-            .collect::<Result<Vec<_>, _>>()?
-            .iter()
-            .map(|glob| glob.compile_matcher())
-            .collect::<Vec<_>>();
-
         Ok(move |locator: &Locator| {
-            matchers.is_empty() || matchers.iter().any(|matcher| matcher.is_match(locator.ident.to_file_string()))
+            self.patterns.is_empty() || self.patterns.iter().any(|matcher| matcher.check(&locator.ident))
         })
     }
 

@@ -81,7 +81,7 @@ use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 #[case("1.2.x", "1.2.0", true)]
 #[case("1.2.X", "1.2.0", true)]
 fn test_range_check(#[case] range: Range, #[case] version: Version, #[case] expected: bool) {
-    assert_eq!(range.check(version), expected);
+    assert_eq!(range.check(&version), expected);
 }
 
 #[rstest]

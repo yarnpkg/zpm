@@ -20,6 +20,7 @@ pub struct InstallContext<'a> {
     pub system_description: &'a system::Description,
     pub check_checksums: bool,
     pub check_resolutions: bool,
+    pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
     pub refresh_lockfile: bool,
     pub mode: Option<InstallMode>,
 }
@@ -32,6 +33,7 @@ impl<'a> Default for InstallContext<'a> {
             system_description: system::Description::current(),
             check_checksums: false,
             check_resolutions: false,
+            enforced_resolutions: BTreeMap::new(),
             refresh_lockfile: false,
             mode: None,
         }
@@ -56,6 +58,11 @@ impl<'a> InstallContext<'a> {
 
     pub fn set_check_resolutions(mut self, check_resolutions: bool) -> Self {
         self.check_resolutions = check_resolutions;
+        self
+    }
+
+    pub fn set_enforced_resolutions(mut self, enforced_resolutions: BTreeMap<Descriptor, Locator>) -> Self {
+        self.enforced_resolutions = enforced_resolutions;
         self
     }
 
@@ -398,8 +405,15 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
             let range_details
                 = descriptor.range.details();
 
-            if !range_details.transient_resolution {
-                if let Some(locator) = self.lockfile.resolutions.get(descriptor) {
+            if range_details.transient_resolution {
+                return None;
+            }
+
+            let enforced_resolution
+                = ctx.enforced_resolutions.get(descriptor);
+
+            if let Some(locator) = self.lockfile.resolutions.get(descriptor) {
+                if enforced_resolution.map_or(true, |enforced_resolution| locator == enforced_resolution) {
                     if self.lockfile.metadata.version != LockfileMetadata::new().version || ctx.refresh_lockfile {
                         return Some(InstallOpResult::Pinned(PinnedResult {
                             locator: locator.clone(),
@@ -412,6 +426,12 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
                     return Some(InstallOpResult::Resolved(entry.resolution.clone().into_resolution_result(ctx)));
                 }
             }
+
+            if let Some(locator) = enforced_resolution {
+                return Some(InstallOpResult::Pinned(PinnedResult {
+                    locator: locator.clone(),
+                }));
+            }
         }
 
         None
@@ -422,6 +442,7 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
 pub struct InstallState {
     pub last_installed_at: u128,
     pub resolution_tree: ResolutionTree,
+    pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
     pub normalized_resolutions: BTreeMap<Locator, Resolution>,
     pub packages_by_location: BTreeMap<Path, Locator>,
     pub locations_by_package: BTreeMap<Locator, Path>,
@@ -522,7 +543,8 @@ impl<'a> InstallManager<'a> {
     }
 
     pub async fn resolve_and_fetch(mut self) -> Result<Install, Error> {
-        let cache = InstallCache::new(self.initial_lockfile.clone());
+        let cache
+            = InstallCache::new(self.initial_lockfile.clone());
 
         let mut graph
             = GraphTasks::new(self.context.clone(), cache);
@@ -659,10 +681,11 @@ impl<'a> InstallManager<'a> {
         }
 
         self.result.install_state.resolution_tree = TreeResolver::default()
-            .with_resolutions(&self.result.lockfile.resolutions, &self.result.install_state.normalized_resolutions)
+            .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)
             .with_roots(self.roots.clone())
             .run();
 
+        self.result.lockfile.resolutions = self.result.install_state.descriptor_to_locator.clone();
         self.result.lockfile_changed = self.result.lockfile != self.initial_lockfile;
 
         self.result.skip_build = self.context.mode == Some(InstallMode::SkipBuild);
@@ -699,7 +722,7 @@ impl<'a> InstallManager<'a> {
     }
 
     fn record_descriptor(&mut self, descriptor: Descriptor, locator: Locator) {
-        self.result.lockfile.resolutions.insert(descriptor, locator);
+        self.result.install_state.descriptor_to_locator.insert(descriptor, locator);
     }
 
     fn record_fetch(&mut self, locator: Locator, package_data: PackageData) {

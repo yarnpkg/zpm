@@ -15,3 +15,4 @@ zpm-macro-enum = { path = "../zpm-macro-enum" }
 zpm-semver = { path = "../zpm-semver" }
 zpm-utils = { path = "../zpm-utils" }
 rstest = "0.26.1"
+globset = "0.4.16"

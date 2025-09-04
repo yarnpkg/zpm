@@ -313,7 +313,8 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
 
     fix_manifest(&mut manifest);
 
-    let resolution = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
+    let resolution
+        = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
     Ok(resolution.into_resolution_result(context))
 }

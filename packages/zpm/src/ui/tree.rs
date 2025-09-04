@@ -3,6 +3,7 @@ use indexmap::IndexMap;
 use serde::{ser::SerializeMap, Serialize};
 use zpm_utils::{AbstractValue, Extracted, ToHumanString};
 
+#[derive(Debug)]
 pub enum TreeNodeChildren<'a> {
     Vec(Vec<Node<'a>>),
     Map(IndexMap<String, Node<'a>>),
@@ -52,6 +53,7 @@ impl<'a> Serialize for TreeNodeChildren<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct Node<'a> {
     pub label: Option<String>,
     pub value: Option<AbstractValue<'a>>,

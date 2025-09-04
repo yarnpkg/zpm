@@ -8,6 +8,7 @@ use crate::{DataType, ToHumanString};
 const BYTE_UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
 const FINAL_UNIT: &str = "TiB";
 
+#[derive(Debug)]
 pub struct Size<T> {
     pub size: T,
 }

@@ -50,6 +50,7 @@ impl_file_string_serialization!(InstallMode);
 pub struct RunInstallOptions {
     pub check_checksums: bool,
     pub check_resolutions: bool,
+    pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
     pub refresh_lockfile: bool,
     pub silent_or_error: bool,
     pub mode: Option<InstallMode>,
@@ -549,6 +550,7 @@ impl Project {
         self.run_install(RunInstallOptions {
             check_checksums: false,
             check_resolutions: false,
+            enforced_resolutions: BTreeMap::new(),
             refresh_lockfile: false,
             silent_or_error: true,
             mode: None,
@@ -570,6 +572,7 @@ impl Project {
                 .with_package_cache(Some(&package_cache))
                 .with_project(Some(self))
                 .set_check_checksums(options.check_checksums)
+                .set_enforced_resolutions(options.enforced_resolutions)
                 .set_refresh_lockfile(options.refresh_lockfile)
                 .set_mode(options.mode);
 

@@ -1,4 +1,5 @@
 use ouroboros::self_referencing;
+use wax::Program;
 
 use crate::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
@@ -61,6 +62,10 @@ impl Glob {
 
     pub fn matcher(&self) -> &wax::Glob {
         self.inner.borrow_pattern()
+    }
+
+    pub fn is_match(&self, s: &str) -> bool {
+        self.matcher().is_match(s)
     }
 
     pub fn to_regex_string(&self) -> String {

@@ -12,6 +12,7 @@ mod config;
 mod config_get;
 mod config_set;
 mod constraints;
+mod dedupe;
 mod dlx;
 mod exec;
 mod info;
@@ -47,6 +48,7 @@ program!(YarnCli, [
     config_get::ConfigGet,
     config_set::ConfigSet,
     constraints::Constraints,
+    dedupe::Dedupe,
     dlx::DlxWithPackages,
     dlx::Dlx,
     exec::Exec,

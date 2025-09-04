@@ -3,7 +3,7 @@ use colored::Colorize;
 use convert_case::{Case, Casing};
 use zpm_utils::ToHumanString;
 
-use crate::{error::Error, project::Project, ui::tree::Node};
+use crate::{error::Error, project::Project};
 
 #[cli::command]
 #[cli::path("config")]

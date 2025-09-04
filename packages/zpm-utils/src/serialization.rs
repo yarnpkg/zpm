@@ -1,3 +1,5 @@
+use std::fmt;
+
 use colored::Colorize;
 use erased_serde::serialize_trait_object;
 use serde::{Serialize, Serializer};
@@ -26,10 +28,10 @@ pub trait ToHumanString {
     fn to_print_string(&self) -> String;
 }
 
-pub trait Extracted: erased_serde::Serialize + ToHumanString {
+pub trait Extracted: erased_serde::Serialize + ToHumanString + fmt::Debug {
 }
 
-impl<T: erased_serde::Serialize + ToHumanString> Extracted for T {
+impl<T: erased_serde::Serialize + ToHumanString + fmt::Debug> Extracted for T {
 }
 
 serialize_trait_object!(Extracted);
@@ -49,6 +51,12 @@ impl<'a> AbstractValue<'a> {
         } else {
             self.value.to_print_string()
         }
+    }
+}
+
+impl<'a> fmt::Debug for AbstractValue<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.value.fmt(f)
     }
 }
 
