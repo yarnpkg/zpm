@@ -23,6 +23,7 @@ mod pack;
 mod rebuild;
 mod remove;
 mod run;
+mod set_resolution;
 mod set_version;
 mod up;
 mod workspaces_list;
@@ -56,6 +57,7 @@ program!(YarnCli, [
     init::InitWithTemplate,
     init::Init,
     install::Install,
+    set_resolution::SetResolution,
     set_version::SetVersion,
     node::Node,
     pack::Pack,
