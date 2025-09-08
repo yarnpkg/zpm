@@ -18,6 +18,43 @@ use crate::{
 
 static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
 
+#[derive(Debug)]
+pub enum GitOperation {
+    Merge,
+    Rebase,
+}
+
+impl GitOperation {
+    pub fn true_theirs(&self) -> &str {
+        match self {
+            GitOperation::Merge => "--theirs",
+            GitOperation::Rebase => "--ours",
+        }
+    }
+}
+
+pub async fn detect_git_operation(p: &Path) -> Result<Option<GitOperation>, Error> {
+    let merge_head_check = ScriptEnvironment::new()?
+        .with_cwd(p.clone())
+        .run_exec("git", &["rev-parse", "-q", "--verify", "MERGE_HEAD"])
+        .await?;
+
+    if merge_head_check.success() {
+        return Ok(Some(GitOperation::Merge));
+    }
+
+    let rebase_head_check = ScriptEnvironment::new()?
+        .with_cwd(p.clone())
+        .run_exec("git", &["rev-parse", "-q", "--verify", "REBASE_HEAD"])
+        .await?;
+
+    if rebase_head_check.success() {
+        return Ok(Some(GitOperation::Rebase));
+    }
+
+    Ok(None)
+}
+
 fn validate_repo_url(url: &str, config: &HttpConfig) -> Result<(), Error> {
     let git_url
         = GitUrl::parse(url)

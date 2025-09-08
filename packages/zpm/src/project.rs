@@ -12,6 +12,7 @@ use crate::{
     cache::{CompositeCache, DiskCache},
     diff_finder::SaveEntry,
     error::Error,
+    git::{detect_git_operation, GitOperation},
     http::HttpClient,
     install::{InstallContext, InstallManager, InstallState},
     lockfile::{from_legacy_berry_lockfile, Lockfile},
@@ -202,7 +203,7 @@ impl Project {
 
     pub fn lockfile(&self) -> Result<Lockfile, Error> {
         let lockfile_path
-            = self.project_cwd.with_join_str(LOCKFILE_NAME);
+            = self.lockfile_path();
 
         if !lockfile_path.fs_exists() {
             return Ok(Lockfile::new());
@@ -288,7 +289,7 @@ impl Project {
 
     pub fn write_lockfile(&self, lockfile: &Lockfile) -> Result<(), Error> {
         let lockfile_path
-            = self.project_cwd.with_join_str(LOCKFILE_NAME);
+            = self.lockfile_path();
 
         let contents
             = sonic_rs::to_string_pretty(lockfile)?;
@@ -511,7 +512,8 @@ impl Project {
             return Err(Error::ScriptNotFound(name.to_string()));
         }
 
-        let mut iterator = self.workspaces.iter();
+        let mut iterator
+            = self.workspaces.iter();
 
         let script_match = iterator
             .find_map(|w| w.manifest.scripts.get(name).map(|s| (w.locator(), s.clone())));
@@ -571,6 +573,38 @@ impl Project {
             let package_cache
                 = self.package_cache()?;
 
+            let mut lockfile
+                = self.lockfile();
+
+            if let Err(Error::LockfileParseError(_)) = lockfile {
+                let lockfile_path
+                    = self.lockfile_path();
+
+                let lockfile_content = lockfile_path
+                    .fs_read_text()?;
+
+                if lockfile_content.contains("<<<<<<<") {
+                    if self.config.settings.enable_immutable_installs.value {
+                        return Err(Error::ImmutableLockfileAutofix);
+                    }
+
+                    let git_operation
+                        = detect_git_operation(&self.project_cwd)
+                            .await?
+                            .unwrap_or(GitOperation::Merge);
+
+                    ScriptEnvironment::new()?
+                        .with_cwd(self.project_cwd.clone())
+                        .run_exec("git", vec!["checkout", git_operation.true_theirs(), lockfile_path.as_str()])
+                        .await?
+                        .ok()
+                        .map_err(|e| Error::LockfileAutofixGitError(e.to_string()))?;
+
+                    lockfile
+                        = self.lockfile();
+                }
+            }
+
             let install_context = InstallContext::default()
                 .with_package_cache(Some(&package_cache))
                 .with_project(Some(self))
@@ -582,7 +616,7 @@ impl Project {
 
             InstallManager::new()
                 .with_context(install_context)
-                .with_lockfile(self.lockfile()?)
+                .with_lockfile(lockfile?)
                 .with_roots_iter(self.workspaces.iter().map(|w| w.descriptor()))
                 .resolve_and_fetch().await?
                 .finalize(self).await?;
@@ -722,14 +756,15 @@ impl Workspace {
                 for (glob, _) in positive_patterns {
                     positive_builder.add(glob);
                 }
-                let positive_glob_set
-                    = positive_builder.build()?;
 
                 let mut negative_builder
                     = GlobSetBuilder::new();
                 for (glob, _) in negative_patterns {
                     negative_builder.add(glob);
                 }
+
+                let positive_glob_set
+                    = positive_builder.build()?;
                 let negative_glob_set
                     = negative_builder.build()?;
 

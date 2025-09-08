@@ -51,6 +51,15 @@ pub enum Error {
     #[error("[YN0028] The lockfile would have been created by this install, which is explicitly forbidden.")]
     ImmutableLockfile,
 
+    #[error("Cannot autofix a lockfile when running an immutable install.")]
+    ImmutableLockfileAutofix,
+
+    #[error("Git returned an error when attempting to autofix the lockfile: {0}")]
+    LockfileAutofixGitError(String),
+
+    #[error("The lockfile is a v1 lockfile; please first migrate to Yarn Berry then migrate again to Yarn ZPM")]
+    LockfileV1Error,
+
     #[error("[YN0056] Cache entry required but missing for {0:?}.")]
     ImmutableCache(Locator),
 
@@ -192,7 +201,7 @@ pub enum Error {
     #[error("No merge base could be found between any of HEAD and {args}", args = .0.join(", "))]
     NoMergeBaseFound(Vec<String>),
 
-    #[error("An error occured while parsing the lockfile ({0})")]
+    #[error("An error occured while parsing the Yarn Berry lockfile: {0}")]
     LegacyLockfileParseError(Arc<serde_yaml::Error>),
 
     #[error("Lockfile generation error")]
