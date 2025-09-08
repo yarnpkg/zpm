@@ -19,7 +19,8 @@ use crate::{
     manifest::{bin::BinField, helpers::read_manifest_with_size, BinManifest, Manifest},
     manifest_finder::CachedManifestFinder,
     report::{with_report_result, StreamReport, StreamReportConfig},
-    script::Binary, system::System,
+    script::{Binary, ScriptEnvironment},
+    system::System,
 };
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
