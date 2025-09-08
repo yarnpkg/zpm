@@ -1,5 +1,7 @@
 # CLI commands
 
+All commands are located within the [packages/zpm/src/commands](../../packages/zpm/src/commands/) folder.
+
 We use a Rust implementation of [Clipanion](http://github.com/arcanis/clipanion-rs/) to build our CLI commands, strongly inspired by the [TypeScript implementation](https://github.com/arcanis/clipanion/). It works roughly the same way but Rust allows a very nice improvements: option parameters can now be strongly typed.
 
 ## Command definition
