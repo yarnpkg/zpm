@@ -219,7 +219,7 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     // incompatible with the current system (even if the package isn't
     // marked as optional).
     let is_compatible = resolution.requirements
-        .validate(&system::Description::from_current());
+        .validate_system(&system::System::from_current());
 
     let must_build
         = should_build_if_compatible && is_compatible;

@@ -232,6 +232,33 @@
         }
       }
     },
+    "supportedArchitectures": {
+      "type": "object",
+      "title": "SupportedArchitectures",
+      "properties": {
+        "cpu": {
+          "type": "array",
+          "description": "List of CPU architectures to cover.",
+          "items": {
+            "type": "crate::Cpu"
+          }
+        },
+        "libc": {
+          "type": "array",
+          "description": "The list of standard C libraries to cover.",
+          "items": {
+            "type": "crate::Libc"
+          }
+        },
+        "os": {
+          "type": "array",
+          "description": "The list of operating systems to cover.",
+          "items": {
+            "type": "crate::Os"
+          }
+        }
+      }
+    },
     "unsafeHttpWhitelist": {
       "type": "array",
       "description": "The patterns to whitelist when using unsafe HTTP",

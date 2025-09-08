@@ -52,6 +52,13 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
         = Vec::new();
     let mut deserialization_arms
         = Vec::new();
+    let mut deserialization_literal_arms
+        = Vec::new();
+    let mut serialization_literal_arms
+        = Some(Vec::new());
+
+    // Track fallback variant information (variant_ident, struct_ident, is_tuple, field_name_opt)
+    let mut fallback_variant: Option<(syn::Ident, Option<syn::Ident>, bool, Option<String>)> = None;
 
     for variant in &data.variants {
         let variant_ident
@@ -84,34 +91,48 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
             },
         };
 
-        // 2. Generate a struct with the specified fields
+        // Check for fallback attribute early to determine struct generation
+        let has_fallback = variant.attrs.iter()
+            .any(|attr| attr.path().is_ident("fallback"));
+
+        // 2. Generate a struct with the specified fields (skip for fallback tuple variants)
 
         let struct_ident
             = syn::Ident::new(&format!("{}{}", variant.ident, name), proc_macro2::Span::call_site());
 
+        let skip_struct_generation = has_fallback && matches!(&variant.fields, Fields::Unnamed(_));
+
         if let Some(fields) = &fields {
-            let struct_members = fields.iter().map(|(name, ty)| {
-                let field_ident = syn::Ident::new(name, proc_macro2::Span::call_site());
-                quote! {pub #field_ident: #ty}
-            });
+            if !skip_struct_generation {
+                let struct_members = fields.iter().map(|(name, ty)| {
+                    let field_ident = syn::Ident::new(name, proc_macro2::Span::call_site());
+                    quote! {pub #field_ident: #ty}
+                });
 
-            generated_structs.push(quote!{
-                #(#derive_variants_attrs)*
-                pub struct #struct_ident {
-                    #(#struct_members),*
-                }
-
-                impl Into<#name> for #struct_ident {
-                    fn into(self) -> #name {
-                        #name::#variant_ident(self)
+                generated_structs.push(quote!{
+                    #(#derive_variants_attrs)*
+                    pub struct #struct_ident {
+                        #(#struct_members),*
                     }
-                }
-            });
+
+                    impl Into<#name> for #struct_ident {
+                        fn into(self) -> #name {
+                            #name::#variant_ident(self)
+                        }
+                    }
+                });
+            }
         }
 
         // 3. Replace the variant with the new struct as only parameter (ie we turn `Foo { a: i32, b: i32 }` into `Foo(FooEnum)`)
+        // But keep tuple variants as-is if they have #[fallback]
 
-        if fields.is_some() {
+        if skip_struct_generation {
+            // Keep the original tuple variant for fallback
+            generated_variants.push(quote!{
+                #variant_ident(String)
+            });
+        } else if fields.is_some() {
             generated_variants.push(quote!{
                 #variant_ident(#struct_ident)
             });
@@ -121,14 +142,130 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
             });
         }
 
-        // 4. Generate the deserialization code for the variant
+        // 4. Parse fallback attribute
+
+        if has_fallback {
+            // Check that fallback variant doesn't have pattern or literal attributes
+            if variant.attrs.iter().any(|attr| attr.path().is_ident("pattern") || attr.path().is_ident("literal")) {
+                return Err(syn::Error::new(variant.span(), "#[fallback] variant cannot have #[pattern] or #[literal] attributes"));
+            }
+
+            // Check if we already have a fallback variant
+            if fallback_variant.is_some() {
+                return Err(syn::Error::new(variant.span(), "Only one variant can have the #[fallback] attribute"));
+            }
+
+            // Handle both tuple and struct variants
+            match &variant.fields {
+                Fields::Unnamed(unnamed_fields) => {
+                    // Tuple variant like `Other(String)`
+                    if unnamed_fields.unnamed.len() != 1 {
+                        return Err(syn::Error::new(variant.span(), "#[fallback] tuple variant must have exactly one field"));
+                    }
+
+                    let field_type = &unnamed_fields.unnamed.first().unwrap().ty;
+
+                    // Check if the field type is String
+                    let is_string = match field_type {
+                        Type::Path(type_path) => {
+                            type_path.path.segments.last()
+                                .map(|seg| seg.ident == "String")
+                                .unwrap_or(false)
+                        }
+                        _ => false
+                    };
+
+                    if !is_string {
+                        return Err(syn::Error::new(variant.span(), "#[fallback] variant field must be of type String"));
+                    }
+
+                    fallback_variant = Some((variant_ident.clone(), None, true, None));
+                }
+                Fields::Named(_) => {
+                    // Struct variant like `Other { value: String }`
+                    let fields = fields.as_ref()
+                        .ok_or_else(|| syn::Error::new(variant.span(), "#[fallback] struct variant must have fields"))?;
+
+                    if fields.len() != 1 {
+                        return Err(syn::Error::new(variant.span(), "#[fallback] struct variant must have exactly one field"));
+                    }
+
+                    let (field_name, field_type) = fields.iter().next().unwrap();
+
+                    // Check if the field type is String
+                    let is_string = match field_type {
+                        Type::Path(type_path) => {
+                            type_path.path.segments.last()
+                                .map(|seg| seg.ident == "String")
+                                .unwrap_or(false)
+                        }
+                        _ => false
+                    };
+
+                    if !is_string {
+                        return Err(syn::Error::new(variant.span(), "#[fallback] variant field must be of type String"));
+                    }
+
+                    let struct_ident = syn::Ident::new(&format!("{}{}", variant.ident, name), proc_macro2::Span::call_site());
+                    fallback_variant = Some((variant_ident.clone(), Some(struct_ident), false, Some(field_name.clone())));
+                }
+                Fields::Unit => {
+                    return Err(syn::Error::new(variant.span(), "#[fallback] variant must have a String field"));
+                }
+            }
+        }
+
+        // 5. Parse literal attributes
+
+        let literal_attrs = variant.attrs.iter()
+            .filter(|attr| attr.path().is_ident("literal"))
+            .collect::<Vec<_>>();
+
+        let mut is_first_literal
+            = true;
+
+        for attr in &literal_attrs {
+            // parse #[literal("...")] into a string
+            let meta_list = attr.meta.require_list()?;
+            let tokens = &meta_list.tokens;
+            let lit_str: syn::LitStr = syn::parse2(tokens.clone())
+                .map_err(|_| syn::Error::new(attr.span(), "Expected a string literal in #[literal(\"...\")]"))?;
+            let literal_value = lit_str.value();
+
+            if is_first_literal {
+                if let Some(serialization_literal_arms) = serialization_literal_arms.as_mut() {
+                    serialization_literal_arms.push(quote! {
+                        Self::#variant_ident => #literal_value.to_string(),
+                    });
+                }
+            }
+
+            if fields.is_some() {
+                deserialization_literal_arms.push(quote! {
+                    #literal_value => return Ok(Self::#variant_ident(Default::default())),
+                });
+            } else {
+                deserialization_literal_arms.push(quote! {
+                    #literal_value => return Ok(Self::#variant_ident),
+                });
+            }
+
+            is_first_literal = false;
+        }
+
+        // Only disable ToFileString generation if there's no literal AND no fallback
+        if is_first_literal && !has_fallback {
+            serialization_literal_arms = None;
+        }
+
+        // 6. Generate the deserialization code for the variant
 
         let pattern_attrs = variant.attrs.iter()
             .filter(|attr| attr.path().is_ident("pattern"))
             .collect::<Vec<_>>();
 
-        if pattern_attrs.is_empty() && !variant.attrs.iter().any(|attr| attr.path().is_ident("no_pattern")) {
-            panic!("All variants are expected to have either a #[pattern] attribute or #[no_pattern] if it's intended to be manually created");
+        if pattern_attrs.is_empty() && !variant.attrs.iter().any(|attr| attr.path().is_ident("no_pattern") || attr.path().is_ident("literal") || attr.path().is_ident("fallback")) {
+            panic!("All variants are expected to have either #[pattern] / #[literal] / #[no_pattern] / #[fallback] attributes");
         }
 
         for attr in pattern_attrs {
@@ -212,7 +349,29 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
         }
     }
 
-    if let Some(or_else) = &args.or_else {
+    if let Some((variant_ident, struct_ident_opt, is_tuple, field_name_opt)) = &fallback_variant {
+        // If we have a fallback variant, use it for unrecognized strings
+        let variant_constructor = if *is_tuple {
+            // Tuple variant: Other(src.to_string())
+            quote!{
+                Self::#variant_ident(src.to_string())
+            }
+        } else {
+            // Struct variant: Other(OtherEnum { field: src.to_string() })
+            let struct_ident = struct_ident_opt.as_ref().unwrap();
+            let field_name = field_name_opt.as_ref().unwrap();
+            let field_ident = syn::Ident::new(field_name, proc_macro2::Span::call_site());
+            quote!{
+                Self::#variant_ident(#struct_ident {
+                    #field_ident: src.to_string(),
+                })
+            }
+        };
+
+        arms.push(quote!{
+            return Ok(#variant_constructor);
+        });
+    } else if let Some(or_else) = &args.or_else {
         arms.push(quote!{
             return Some(src).map(#or_else).unwrap();
         });
@@ -221,6 +380,52 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
             panic!("Invalid value: {}", src);
         });
     }
+
+    // Generate ToFileString implementation if all variants have literals or there's a fallback
+
+    let to_file_string_impl = if let Some(mut serialization_literal_arms) = serialization_literal_arms {
+        // Add fallback arm for ToFileString if present
+        if let Some((variant_ident, struct_ident_opt, is_tuple, field_name_opt)) = &fallback_variant {
+            let fallback_arm = if *is_tuple {
+                // Tuple variant: extract the string directly
+                quote! {
+                    Self::#variant_ident(value) => value.clone(),
+                }
+            } else {
+                // Struct variant: extract the string from the field
+                let struct_ident = struct_ident_opt.as_ref().unwrap();
+                let field_name = field_name_opt.as_ref().unwrap();
+                let field_ident = syn::Ident::new(field_name, proc_macro2::Span::call_site());
+                quote! {
+                    Self::#variant_ident(#struct_ident { #field_ident, .. }) => #field_ident.clone(),
+                }
+            };
+            serialization_literal_arms.push(fallback_arm);
+        }
+
+        quote! {
+            impl zpm_utils::ToFileString for #name {
+                fn to_file_string(&self) -> String {
+                    match self {
+                        #(#serialization_literal_arms)*
+                    }
+                }
+            }
+
+            impl zpm_utils::ToHumanString for #name {
+                fn to_print_string(&self) -> String {
+                    use zpm_utils::ToFileString;
+
+                    zpm_utils::DataType::Code.colorize(&self.to_file_string())
+                }
+            }
+
+            zpm_utils::impl_file_string_from_str!(#name);
+            zpm_utils::impl_file_string_serialization!(#name);
+        }
+    } else {
+        quote! {}
+    };
 
     let expanded = quote! {
         #(#generated_structs)*
@@ -234,10 +439,19 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
             type Error = #error;
 
             fn from_file_string(src: &str) -> Result<Self, Self::Error> {
+                // First try literal matching for quick shortcuts
+                match src {
+                    #(#deserialization_literal_arms)*
+                    _ => {}
+                }
+
+                // Then try pattern matching
                 #(#deserialization_arms)*
                 #(#arms)*
             }
         }
+
+        #to_file_string_impl
     };
 
     //panic!("{:?}", expanded.to_string());

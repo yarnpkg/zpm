@@ -18,7 +18,7 @@ use crate::{
     manifest::{bin::BinField, helpers::read_manifest_with_size, BinManifest, Manifest},
     manifest_finder::CachedManifestFinder,
     report::{with_report_result, StreamReport, StreamReportConfig},
-    script::Binary,
+    script::Binary, system::System,
 };
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
@@ -564,6 +564,9 @@ impl Project {
             ..StreamReportConfig::from_config(&self.config)
         });
 
+        let systems
+            = System::from_supported_architectures(&self.config.settings.supported_architectures);
+
         with_report_result(report, async {
             let package_cache
                 = self.package_cache()?;
@@ -574,7 +577,8 @@ impl Project {
                 .set_check_checksums(options.check_checksums)
                 .set_enforced_resolutions(options.enforced_resolutions)
                 .set_refresh_lockfile(options.refresh_lockfile)
-                .set_mode(options.mode);
+                .set_mode(options.mode)
+                .with_systems(Some(&systems));
 
             InstallManager::new()
                 .with_context(install_context)

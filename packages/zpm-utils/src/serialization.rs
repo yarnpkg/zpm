@@ -293,6 +293,7 @@ macro_rules! impl_file_string_from_str(($type:ty) => {
 macro_rules! impl_file_string_serialization(($type:ty) => {
     impl serde::Serialize for $type {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+            use $crate::ToFileString;
             serializer.serialize_str(&self.to_file_string())
         }
     }
