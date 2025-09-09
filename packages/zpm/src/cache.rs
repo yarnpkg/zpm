@@ -82,6 +82,16 @@ impl CompositeCache {
         panic!("Expected at least one cache to be set");
     }
 
+    pub async fn ensure_archive<R, F>(&self, key: Locator, ext: &str, func: F) -> Result<CacheEntry, Error>
+    where
+        R: Future<Output = Result<Vec<u8>, Error>>,
+        F: FnOnce() -> R,
+    {
+        self.ensure_blob(key, ext, || async {
+            func().await
+        }).await
+    }
+
     pub async fn ensure_blob<R, F>(&self, key: Locator, ext: &str, func: F) -> Result<CacheEntry, Error>
     where
         R: Future<Output = Result<Vec<u8>, Error>>,

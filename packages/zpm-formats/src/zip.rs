@@ -1,9 +1,14 @@
 use pnp::fs::VPathInfo;
 use zpm_utils::{Path, ToFileString};
 
-use crate::{error::Error, zip_iter::ZipIterator, zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, FileHeader, GeneralRecord}};
+use crate::{error::Error, zip_iter::ZipIterator, zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, FileHeader, GeneralRecord}, CompressionAlgorithm};
 
 use super::Entry;
+
+#[derive(Debug, Clone)]
+pub struct CraftZipOptions {
+    pub compression: Option<CompressionAlgorithm>,
+}
 
 unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
     ::core::slice::from_raw_parts(
@@ -26,18 +31,35 @@ pub fn craft_zip(entries: &[Entry]) -> Vec<u8> {
     let mut central_directory_capacity = std::mem::size_of::<EndOfCentralDirectoryRecord>();
 
     for entry in entries {
-        general_capacity += std::mem::size_of::<GeneralRecord>() + entry.name.len() + entry.data.len();
-        central_directory_capacity += std::mem::size_of::<CentralDirectoryRecord>() + entry.name.len();
+        let compressed_data = entry.compression
+            .as_ref()
+            .map_or(&entry.data, |compressed_data| &compressed_data.data);
+
+        general_capacity
+            += std::mem::size_of::<GeneralRecord>() + entry.name.len() + compressed_data.len();
+
+        central_directory_capacity
+            += std::mem::size_of::<CentralDirectoryRecord>() + entry.name.len();
     }
 
-    let mut general_segment = Vec::with_capacity(general_capacity);
-    let mut central_directory_segment = Vec::with_capacity(central_directory_capacity);
+    let mut general_segment
+        = Vec::with_capacity(general_capacity);
+    let mut central_directory_segment
+        = Vec::with_capacity(central_directory_capacity);
 
     for entry in entries {
+        let compressed_data = entry.compression
+            .as_ref()
+            .map_or(&entry.data, |compressed_data| &compressed_data.data);
+
+        let compression = entry.compression
+            .as_ref()
+            .map(|compressed_data| compressed_data.algorithm);
+
         let offset = general_segment.len();
 
-        inject_general_record(&mut general_segment, entry);
-        inject_central_directory_record(&mut central_directory_segment, entry, offset);
+        inject_general_record(&mut general_segment, entry, compressed_data, compression);
+        inject_central_directory_record(&mut central_directory_segment, entry, compressed_data, offset, compression);
     }
 
     unsafe {
@@ -61,19 +83,24 @@ pub fn craft_zip(entries: &[Entry]) -> Vec<u8> {
     [general_segment, central_directory_segment].concat()
 }
 
-fn inject_general_record(target: &mut Vec<u8>, entry: &Entry) {
+fn inject_general_record(target: &mut Vec<u8>, entry: &Entry, compressed_data: &[u8], compression: Option<CompressionAlgorithm>) {
+    let compression_method = match compression {
+        Some(CompressionAlgorithm::Deflate(_)) => 0x08, // Deflate compression
+        None => 0x00, // No compression
+    };
+
     unsafe {
         target.extend_from_slice(
             any_as_u8_slice(&GeneralRecord {
                 signature: [0x50, 0x4b, 0x03, 0x04],
                 header: FileHeader {
-                    version_needed_to_extract: 0x0A,
+                    version_needed_to_extract: if compression_method == 0x08 { 0x14 } else { 0x0A },
                     general_purpose_bit_flag: 0x00,
-                    compression_method: 0x00,
+                    compression_method,
                     last_mod_file_time: 0xae40,
                     last_mod_file_date: 0x08d6,
                     crc_32: entry.crc,
-                    compressed_size: entry.data.len() as u32,
+                    compressed_size: compressed_data.len() as u32,
                     uncompressed_size: entry.data.len() as u32,
                     file_name_length: entry.name.len() as u16,
                     extra_field_length: 0x00,
@@ -85,24 +112,29 @@ fn inject_general_record(target: &mut Vec<u8>, entry: &Entry) {
     // File name
     target.extend_from_slice(entry.name.as_bytes());
 
-    // File data
-    target.extend_from_slice(&entry.data);
+    // File data (compressed or uncompressed)
+    target.extend_from_slice(compressed_data);
 }
 
-fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, offset: usize) {
+fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, compressed_data: &[u8], offset: usize, compression: Option<CompressionAlgorithm>) {
+    let compression_method = match compression {
+        Some(CompressionAlgorithm::Deflate(_)) => 0x08, // Deflate compression
+        None => 0x00, // No compression
+    };
+
     unsafe {
         target.extend_from_slice(
             any_as_u8_slice(&CentralDirectoryRecord {
                 signature: [0x50, 0x4b, 0x01, 0x02],
                 version_made_by: 0x0314, // UNIX
                 header: FileHeader {
-                    version_needed_to_extract: 0x14,
+                    version_needed_to_extract: if compression_method == 0x08 { 0x14 } else { 0x14 },
                     general_purpose_bit_flag: 0x00,
-                    compression_method: 0x00,
+                    compression_method,
                     last_mod_file_time: 0xae40,
                     last_mod_file_date: 0x08d6,
                     crc_32: entry.crc,
-                    compressed_size: entry.data.len() as u32,
+                    compressed_size: compressed_data.len() as u32,
                     uncompressed_size: entry.data.len() as u32,
                     file_name_length: entry.name.len() as u16,
                     extra_field_length: 0x00,

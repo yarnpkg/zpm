@@ -1,5 +1,6 @@
-use std::{borrow::Cow, os::unix::fs::PermissionsExt};
+use std::{borrow::Cow, io::Write, os::unix::fs::PermissionsExt};
 
+use flate2::{write::DeflateEncoder, Compression as FlateCompression};
 use zpm_utils::{Path, ToFileString};
 
 pub(crate) mod zip_structs;
@@ -14,12 +15,45 @@ pub mod zip;
 
 pub use error::Error;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone, Copy)]
+pub enum CompressionAlgorithm {
+    Deflate(usize),
+}
+
+#[derive(Debug, Clone)]
+pub struct Compression<'a> {
+    pub data: Cow<'a, [u8]>,
+    pub algorithm: CompressionAlgorithm,
+}
+
+#[derive(Debug, Clone)]
 pub struct Entry<'a> {
     pub name: String,
     pub mode: u32,
     pub crc: u32,
     pub data: Cow<'a, [u8]>,
+    pub compression: Option<Compression<'a>>,
+}
+
+impl<'a> Entry<'a> {
+    pub fn into_compressed(mut self, compression: CompressionAlgorithm) -> Self {
+        let compressed_data = match compression {
+            CompressionAlgorithm::Deflate(level) => {
+                let mut encoder
+                    = DeflateEncoder::new(Vec::new(), FlateCompression::new(level as u32));
+
+                encoder.write_all(&self.data).unwrap();
+                encoder.finish().unwrap()
+            },
+        };
+
+        self.compression = Some(Compression {
+            data: Cow::Owned(compressed_data),
+            algorithm: compression,
+        });
+
+        self
+    }
 }
 
 pub fn entries_to_disk<'a>(entries: &[Entry<'a>], base: &Path) -> Result<(), Error> {
@@ -60,6 +94,7 @@ pub fn entries_from_folder<'a>(path: &Path) -> Result<Vec<Entry<'a>>, Error> {
                 mode,
                 crc: 0,
                 data: Cow::Owned(data),
+                compression: None,
             });
         }
     }
@@ -85,6 +120,7 @@ pub fn entries_from_files<'a>(base: &Path, files: &[Path]) -> Result<Vec<Entry<'
             mode,
             crc: 0,
             data: Cow::Owned(data),
+            compression: None,
         });
     }
 

@@ -24,12 +24,12 @@ impl<'a> TarIterator<'a> {
     fn parse_pax_headers(&self, data: &[u8]) -> Result<HashMap<String, String>, Error> {
         let mut headers = HashMap::new();
         let content = std::str::from_utf8(data)?;
-        
+
         for line in content.lines() {
             if line.is_empty() {
                 continue;
             }
-            
+
             // PAX format: "length keyword=value\n"
             if let Some(space_pos) = line.find(' ') {
                 let keyword_value = &line[space_pos + 1..];
@@ -40,7 +40,7 @@ impl<'a> TarIterator<'a> {
                 }
             }
         }
-        
+
         Ok(headers)
     }
 
@@ -58,7 +58,7 @@ impl<'a> TarIterator<'a> {
 
             let mut name
                 = std::str::from_utf8(name_slice)?.to_string();
-            
+
             // Check for UStar format prefix (at offset 345, length 155)
             if let Some(prefix_slice) = self.buffer.get(offset + 345..offset + 500) {
                 let prefix_slice
@@ -70,7 +70,7 @@ impl<'a> TarIterator<'a> {
                     }
                 }
             }
-            
+
             name
         };
 
@@ -99,6 +99,7 @@ impl<'a> TarIterator<'a> {
             mode,
             crc: 0,
             data: Cow::Borrowed(data),
+            compression: None,
         })
     }
 
@@ -124,7 +125,7 @@ impl<'a> TarIterator<'a> {
 
             let type_flag
                 = self.buffer[offset + 156];
-            
+
             match type_flag {
                 // Regular file
                 b'0' | 0 => {
@@ -238,10 +239,10 @@ mod tests {
     #[test]
     fn test_pax_header_parsing() {
         let pax_data = b"52 comment=679be5902097ed612fb5062b5549f3f32b6f5f47\n101 path=strophejs-plugin-stream-management-679be5902097ed612fb5062b5549f3f32b6f5f47/src/strophe.stream-management.js\n";
-        
+
         let iterator = TarIterator::new(&[]);
         let headers = iterator.parse_pax_headers(pax_data).unwrap();
-        
+
         assert_eq!(headers.get("comment"), Some(&"679be5902097ed612fb5062b5549f3f32b6f5f47".to_string()));
         assert_eq!(headers.get("path"), Some(&"strophejs-plugin-stream-management-679be5902097ed612fb5062b5549f3f32b6f5f47/src/strophe.stream-management.js".to_string()));
     }
@@ -249,20 +250,20 @@ mod tests {
     #[test]
     fn test_global_headers_precedence() {
         let mut iterator = TarIterator::new(&[]);
-        
+
         // Set up global headers
         iterator.global_headers.insert("comment".to_string(), "global-comment".to_string());
         iterator.global_headers.insert("author".to_string(), "global-author".to_string());
-        
+
         // Local headers that should override global ones
         let mut local_headers = HashMap::new();
         local_headers.insert("comment".to_string(), "local-comment".to_string());
         local_headers.insert("path".to_string(), "test/file.txt".to_string());
-        
+
         // Test the merging logic by simulating what happens in parse_entry_at
         let mut combined_headers = iterator.global_headers.clone();
         combined_headers.extend(local_headers.iter().map(|(k, v)| (k.clone(), v.clone())));
-        
+
         // Local headers should take precedence
         assert_eq!(combined_headers.get("comment"), Some(&"local-comment".to_string()));
         assert_eq!(combined_headers.get("path"), Some(&"test/file.txt".to_string()));

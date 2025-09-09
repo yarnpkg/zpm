@@ -53,7 +53,7 @@ impl ResolutionSelector {
                 }
 
                 Some(replacement_range.clone())
-            }
+            },
 
             ResolutionSelector::Ident(params) => {
                 if params.ident != descriptor.ident {
@@ -61,7 +61,7 @@ impl ResolutionSelector {
                 }
 
                 Some(replacement_range.clone())
-            }
+            },
 
             ResolutionSelector::DescriptorIdent(params) => {
                 if params.ident != descriptor.ident {
@@ -77,7 +77,7 @@ impl ResolutionSelector {
                 }
 
                 Some(replacement_range.clone())
-            }
+            },
 
             ResolutionSelector::IdentIdent(params) => {
                 if params.ident != descriptor.ident {
@@ -89,7 +89,7 @@ impl ResolutionSelector {
                 }
 
                 Some(replacement_range.clone())
-            }
+            },
         }
     }
 }

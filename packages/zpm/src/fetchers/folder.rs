@@ -17,7 +17,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .context_directory()
         .with_join_str(&params.path);
 
-    let pkg_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
+    let pkg_blob = context.package_cache.unwrap().upsert_archive(locator.clone(), ".zip", || async {
         Ok(zpm_formats::convert::convert_folder_to_zip(&locator.ident.nm_subdir(), &context_directory)?)
     }).await?;
 
