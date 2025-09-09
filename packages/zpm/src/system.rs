@@ -67,16 +67,28 @@ impl System {
     }
 
     pub fn from_current() -> Self {
+        let arch = std::env::var("YARN_CPU_OVERRIDE").ok()
+            .map_or(Some(ARCH), |s| Some(zpm_config::Cpu::from_str(&s).unwrap()));
+
+        let os = std::env::var("YARN_OS_OVERRIDE").ok()
+            .map_or(Some(OS), |s| Some(zpm_config::Os::from_str(&s).unwrap()));
+
+        let libc = std::env::var("YARN_LIBC_OVERRIDE").ok()
+            .map_or(detect_libc(), |s| Some(zpm_config::Libc::from_str(&s).unwrap()));
+
         Self {
-            arch: Some(ARCH),
-            os: Some(OS),
-            libc: detect_libc().map(|s| s),
+            arch,
+            os,
+            libc,
         }
     }
 
     pub fn from_supported_architectures(supported_architectures: &SupportedArchitectures) -> Vec<Self> {
         let mut systems
             = Vec::new();
+
+        let current
+            = Self::from_current();
 
         let cpus = if supported_architectures.cpu.is_empty() {
             vec![&zpm_config::Cpu::Current]
@@ -99,10 +111,28 @@ impl System {
         for &cpu in &cpus {
             for &os in &os {
                 for &libc in &libc {
+                    let arch = if cpu == &zpm_config::Cpu::Current {
+                        current.arch.clone()
+                    } else {
+                        Some(cpu.clone())
+                    };
+
+                    let os = if os == &zpm_config::Os::Current {
+                        current.os.clone()
+                    } else {
+                        Some(os.clone())
+                    };
+
+                    let libc = if libc == &zpm_config::Libc::Current {
+                        current.libc.clone()
+                    } else {
+                        Some(libc.clone())
+                    };
+
                     systems.push(Self {
-                        arch: Some(if cpu == &zpm_config::Cpu::Current {ARCH} else {cpu.clone()}),
-                        os: Some(if os == &zpm_config::Os::Current {OS} else {os.clone()}),
-                        libc: if libc == &zpm_config::Libc::Current {LIBC} else {Some(libc.clone())},
+                        arch,
+                        os,
+                        libc,
                     });
                 }
             }
