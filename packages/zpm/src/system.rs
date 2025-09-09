@@ -78,13 +78,31 @@ impl System {
         let mut systems
             = Vec::new();
 
-        for cpu in supported_architectures.cpu.iter() {
-            for os in supported_architectures.os.iter() {
-                for libc in supported_architectures.libc.iter() {
+        let cpus = if supported_architectures.cpu.is_empty() {
+            vec![&zpm_config::Cpu::Current]
+        } else {
+            supported_architectures.cpu.iter().map(|c| &c.value).collect()
+        };
+
+        let os = if supported_architectures.os.is_empty() {
+            vec![&zpm_config::Os::Current]
+        } else {
+            supported_architectures.os.iter().map(|o| &o.value).collect()
+        };
+
+        let libc = if supported_architectures.libc.is_empty() {
+            vec![&zpm_config::Libc::Current]
+        } else {
+            supported_architectures.libc.iter().map(|l| &l.value).collect()
+        };
+
+        for &cpu in &cpus {
+            for &os in &os {
+                for &libc in &libc {
                     systems.push(Self {
-                        arch: Some(if cpu.value == zpm_config::Cpu::Current {ARCH} else {cpu.value.clone()}),
-                        os: Some(if os.value == zpm_config::Os::Current {OS} else {os.value.clone()}),
-                        libc: if libc.value == zpm_config::Libc::Current {LIBC} else {Some(libc.value.clone())},
+                        arch: Some(if cpu == &zpm_config::Cpu::Current {ARCH} else {cpu.clone()}),
+                        os: Some(if os == &zpm_config::Os::Current {OS} else {os.clone()}),
+                        libc: if libc == &zpm_config::Libc::Current {LIBC} else {Some(libc.clone())},
                     });
                 }
             }
@@ -108,6 +126,14 @@ pub struct Requirements {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     libc: Vec<zpm_config::Libc>,
+}
+
+impl FromStr for Requirements {
+    type Err = sonic_rs::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(sonic_rs::from_str(s)?)
+    }
 }
 
 impl Requirements {
