@@ -534,6 +534,9 @@ pub struct Configuration {
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum ConfigurationError {
+    #[error("Invalid enum value ({0})")]
+    EnumError(String),
+
     #[error(transparent)]
     PathError(#[from] zpm_utils::PathError),
 
@@ -648,11 +651,15 @@ merge_settings!(String, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(bool, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(usize, |s: &str| FromFileString::from_file_string(s).unwrap());
 
+merge_settings!(crate::types::NodeLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::Cpu, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::Libc, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::Os, |s: &str| FromFileString::from_file_string(s).unwrap());
+
 merge_settings!(Descriptor, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(Glob, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(Locator, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(NodeLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(PeerRange, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(RangeKind, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(Range, |s: &str| FromFileString::from_file_string(s).unwrap());

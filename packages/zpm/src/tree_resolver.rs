@@ -21,7 +21,6 @@ pub struct ResolutionTree {
 #[derive(Default)]
 pub struct TreeResolver {
     resolution_tree: ResolutionTree,
-    accessible_locators: BTreeSet<Locator>,
     virtual_stack: BTreeMap<Locator, u8>,
     resolution_stack: Vec<Locator>,
     virtual_dependents: BTreeMap<Descriptor, BTreeSet<Locator>>,
@@ -30,6 +29,7 @@ pub struct TreeResolver {
     peer_dependency_dependents: BTreeMap<Locator, BTreeSet<Locator>>,
     virtual_instances: BTreeMap<Locator, BTreeMap<(Ident, Vec<Locator>), Descriptor>>,
     volatile_descriptor: BTreeSet<Descriptor>,
+    volatile_locator: BTreeSet<Locator>,
 }
 
 impl TreeResolver {
@@ -66,6 +66,14 @@ impl TreeResolver {
             .cloned()
             .collect_vec();
 
+        self.volatile_descriptor = self.resolution_tree.descriptor_to_locator.keys()
+            .cloned()
+            .collect();
+
+        self.volatile_locator = self.resolution_tree.locator_resolutions.keys()
+            .cloned()
+            .collect();
+
         for root_descriptor in roots {
             let resolution = self.resolution_tree.descriptor_to_locator
                 .get(&root_descriptor)
@@ -87,6 +95,15 @@ impl TreeResolver {
             }
         }
 
+        for volatile_descriptor in self.volatile_descriptor.iter() {
+            self.resolution_tree.descriptor_to_locator.remove(volatile_descriptor);
+        }
+
+        for volatile_locator in self.volatile_locator.iter() {
+            self.resolution_tree.locator_resolutions.remove(volatile_locator);
+            self.resolution_tree.optional_builds.remove(volatile_locator);
+        }
+
         self.resolution_tree
     }
 
@@ -95,7 +112,7 @@ impl TreeResolver {
             self.resolution_tree.optional_builds.remove(parent_locator);
         }
 
-        if !self.accessible_locators.insert(parent_locator.clone()) {
+        if !self.volatile_locator.remove(parent_locator) {
             return;
         }
 
@@ -169,6 +186,9 @@ impl TreeResolver {
                 .clone();
 
             virtualized_resolution.locator = virtualized_locator.clone();
+
+            // We need to add it so it can be removed from within the nested resolve_peer_dependencies_impl call
+            self.volatile_locator.insert(virtualized_locator.clone());
 
             self.resolution_tree.locator_resolutions.insert(
                 virtualized_locator.clone(),
@@ -321,7 +341,6 @@ impl TreeResolver {
 
                 self.resolution_tree.descriptor_to_locator.remove(&operation.virtualized_descriptor);
                 self.resolution_tree.locator_resolutions.remove(&operation.virtualized_locator);
-                self.accessible_locators.remove(&operation.virtualized_locator);
 
                 let mut all_dependents: Vec<_> = self.virtual_dependents
                     .entry(operation.virtualized_descriptor.clone()).or_default()
@@ -424,6 +443,9 @@ impl TreeResolver {
             for missing_peer_dependency in &virtualized_resolution.missing_peer_dependencies {
                 virtualized_resolution.dependencies.remove(missing_peer_dependency);
             }
+
+            // No need to keep track of the original package after it's been virtualized
+            self.resolution_tree.optional_builds.remove(&operation.physical_locator);
         }
     }
 

@@ -17,7 +17,7 @@ use crate::{
 pub struct InstallContext<'a> {
     pub package_cache: Option<&'a CompositeCache>,
     pub project: Option<&'a Project>,
-    pub system_description: &'a system::Description,
+    pub systems: Option<&'a Vec<system::System>>,
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
@@ -30,7 +30,7 @@ impl<'a> Default for InstallContext<'a> {
         Self {
             package_cache: None,
             project: None,
-            system_description: system::Description::current(),
+            systems: None,
             check_checksums: false,
             check_resolutions: false,
             enforced_resolutions: BTreeMap::new(),
@@ -73,6 +73,11 @@ impl<'a> InstallContext<'a> {
 
     pub fn set_mode(mut self, mode: Option<InstallMode>) -> Self {
         self.mode = mode;
+        self
+    }
+
+    pub fn with_systems(mut self, systems: Option<&'a Vec<system::System>>) -> Self {
+        self.systems = systems;
         self
     }
 }
@@ -217,9 +222,12 @@ impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
             },
 
             InstallOpResult::Resolved(ResolutionResult {resolution, ..}) => {
+                let systems
+                    = ctx.systems.unwrap();
+
                 let mut follow_ups = vec![InstallOp::Fetch {
                     locator: resolution.locator.clone(),
-                    is_mock_request: !resolution.requirements.validate(ctx.system_description),
+                    is_mock_request: !resolution.requirements.validate_any(systems),
                 }];
 
                 let transitive_dependencies = resolution.dependencies
@@ -499,7 +507,6 @@ impl Install {
 }
 
 pub struct InstallManager<'a> {
-    description: system::Description,
     initial_lockfile: Lockfile,
     roots: Vec<Descriptor>,
     context: InstallContext<'a>,
@@ -515,7 +522,6 @@ impl Default for InstallManager<'_> {
 impl<'a> InstallManager<'a> {
     pub fn new() -> Self {
         InstallManager {
-            description: system::Description::from_current(),
             initial_lockfile: Lockfile::new(),
             roots: vec![],
             context: InstallContext::default(),
@@ -625,20 +631,33 @@ impl<'a> InstallManager<'a> {
             = self.result.lockfile.metadata.version == self.initial_lockfile.metadata.version;
 
         for entry in self.result.lockfile.entries.values_mut() {
-            let package_data = self.result.package_data.get(&entry.resolution.locator)
+            let package_data = self.result.package_data
+                .get(&entry.resolution.locator)
                 .unwrap_or_else(|| panic!("Expected a matching package data to be found for any fetched locator; not found for {}.", entry.resolution.locator.to_file_string()));
 
-            let previous_entry = self.initial_lockfile.entries.get(&entry.resolution.locator);
-            let previous_checksum = previous_entry.and_then(|s| s.checksum.as_ref());
-            let mut previous_flags = previous_entry.map(|s| &s.flags);
+            let previous_entry
+                = self.initial_lockfile.entries.get(&entry.resolution.locator);
+
+            let previous_checksum = previous_entry
+                .and_then(|s| s.checksum.as_ref());
+            let mut previous_flags = previous_entry
+                .map(|s| &s.flags);
 
             if !are_metadata_up_to_date || entry.resolution.locator.reference.is_disk_reference() {
                 previous_flags = None;
             }
 
-            let checksum = package_data.checksum()
+            let mut checksum = package_data.checksum()
                 .or_else(|| previous_checksum.cloned())
                 .or_else(|| late_checksums.get(&entry.resolution.locator).cloned());
+
+            let is_conditional_locator
+                = self.result.install_state.conditional_locators
+                    .contains(&entry.resolution.locator);
+
+            if is_conditional_locator {
+                checksum = None;
+            }
 
             if self.context.check_checksums {
                 if let Some(previous_checksum) = previous_checksum {
@@ -707,9 +726,12 @@ impl<'a> InstallManager<'a> {
         });
 
         if resolution.requirements.is_conditional() {
+            let systems
+                = self.context.systems.unwrap();
+
             self.result.install_state.conditional_locators.insert(resolution.locator.clone());
 
-            if !resolution.requirements.validate(&self.description) {
+            if !resolution.requirements.validate_any(systems) {
                 self.result.install_state.disabled_locators.insert(resolution.locator.clone());
             }
         }

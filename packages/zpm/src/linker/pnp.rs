@@ -219,7 +219,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
 
         let mut package_dependencies: BTreeMap<Ident, PnpDependencyTarget> = resolution.dependencies.iter().map(|(ident, descriptor)| {
             let dependency_resolution = tree.descriptor_to_locator.get(descriptor)
-                .expect("Failed to find dependency resolution");
+                .unwrap_or_else(|| panic!("Failed to find dependency resolution for {}", descriptor.to_print_string()));
 
             let dependency_target = if &dependency_resolution.ident == ident {
                 PnpDependencyTarget::Simple(PnpReference(dependency_resolution.clone()))
