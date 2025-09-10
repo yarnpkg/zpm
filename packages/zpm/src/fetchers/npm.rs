@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use itertools::Itertools;
 use zpm_config::ConfigExt;
 use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Locator, RegistryReference};
@@ -7,7 +8,7 @@ use zpm_primitives::{Locator, RegistryReference};
 use crate::{
     error::Error,
     install::{FetchResult, InstallContext},
-    npm,
+    npm::{self, NpmEntryExt},
 };
 
 use super::PackageData;
@@ -75,9 +76,10 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             = zpm_formats::tar::entries_from_tar(&tar_data)?
                 .into_iter()
                 .strip_first_segment()
+                .prepare_npm_entries(&params.ident)
                 .collect::<Vec<_>>();
 
-        Ok(package_cache.bundle_entries(locator, entries)?)
+        Ok(package_cache.bundle_entries(entries)?)
     }).await?.into_info();
 
     let package_directory = cached_blob.path

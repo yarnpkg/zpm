@@ -3,7 +3,7 @@ use zpm_primitives::{Ident, Locator, PatchReference};
 use zpm_utils::{Hash64, ToFileString};
 
 use crate::{
-    error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, misc::unpack_brotli_data, patch::apply::apply_patch, resolvers::Resolution
+    error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, misc::unpack_brotli_data, npm::NpmEntryExt, patch::apply::apply_patch, resolvers::Resolution
 };
 
 use super::PackageData;
@@ -127,7 +127,12 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             },
         };
 
-        Ok(package_cache.bundle_entries(&locator, patched_entries)?)
+        let patched_entries = patched_entries
+            .into_iter()
+            .prepare_npm_entries(&locator.ident)
+            .collect::<Vec<_>>();
+
+        Ok(package_cache.bundle_entries(patched_entries)?)
     }).await?;
 
     let first_entry

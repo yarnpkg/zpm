@@ -2,12 +2,7 @@ use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{GitReference, Locator};
 
 use crate::{
-    error::Error,
-    git,
-    install::{FetchResult, InstallContext},
-    manifest::RemoteManifest,
-    prepare,
-    resolvers::Resolution,
+    error::Error, git, install::{FetchResult, InstallContext}, manifest::RemoteManifest, npm::NpmEntryExt, prepare, resolvers::Resolution
 };
 
 use super::PackageData;
@@ -33,9 +28,10 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             = zpm_formats::tar::entries_from_tar(&pack_tar)?
                 .into_iter()
                 .strip_first_segment()
-                .collect();
+                .prepare_npm_entries(&locator.ident)
+                .collect::<Vec<_>>();
 
-        Ok(package_cache.bundle_entries(locator, entries)?)
+        Ok(package_cache.bundle_entries(entries)?)
     }).await?;
 
     let first_entry

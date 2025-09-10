@@ -4,29 +4,13 @@ use flate2::write::DeflateEncoder;
 
 use crate::{Compression, CompressionAlgorithm, Entry};
 
-pub trait VecExt<'a> {
-    fn normalize(&mut self);
-}
-
-impl<'a> VecExt<'a> for Vec<Entry<'a>> {
-    fn normalize(&mut self) {
-        self.sort_by(|a, b| {
-            a.name.cmp(&b.name)
-        });
-
-        if let Some(manifest_idx) = self.iter().position(|entry| entry.name == "package.json") {
-            let manifest_entry = self.remove(manifest_idx);
-            self.insert(0, manifest_entry);
-        }
-    }
-}
-
 pub trait IterExt<'a> {
     fn strip_first_segment(self) -> StripFirstSegment<Self> where Self: Sized;
     fn strip_path_prefix(self, prefix: String) -> StripPathPrefix<Self> where Self: Sized;
     fn prefix_path(self, prefix: &str) -> PrefixPath<Self> where Self: Sized;
     fn update_crc32(self) -> UpdateCrc32<Self> where Self: Sized;
     fn compress(self, algorithm: Option<CompressionAlgorithm>) -> Compress<Self> where Self: Sized;
+    fn move_to_front(self, predicate: impl Fn(&Entry<'a>) -> bool) -> impl Iterator<Item = Entry<'a>> where Self: Sized;
 }
 
 impl<'a, T> IterExt<'a> for T where T: Iterator<Item = Entry<'a>> {
@@ -48,6 +32,13 @@ impl<'a, T> IterExt<'a> for T where T: Iterator<Item = Entry<'a>> {
 
     fn compress(self, algorithm: Option<CompressionAlgorithm>) -> Compress<Self> {
         Compress::new(self, algorithm)
+    }
+
+    fn move_to_front(self, predicate: impl Fn(&Entry<'a>) -> bool) -> impl Iterator<Item = Entry<'a>> {
+        let (selected, other): (Vec<_>, Vec<_>)
+            = self.partition(predicate);
+
+        selected.into_iter().chain(other.into_iter())
     }
 }
 

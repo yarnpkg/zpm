@@ -4,11 +4,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::collections::HashSet;
 use std::sync::Mutex;
-use zpm_formats::{iter_ext::{IterExt, VecExt}, zip::ToZip, Entry};
+use zpm_formats::{iter_ext::IterExt, zip::ToZip, Entry};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::Locator;
 use zpm_utils::{Hash64, Path};
-use bincode;
 use futures::Future;
 
 use crate::{
@@ -48,12 +47,10 @@ pub struct CompositeCache {
 }
 
 impl CompositeCache {
-    pub fn bundle_entries(&self, locator: &Locator, mut entries: Vec<Entry>) -> Result<Vec<u8>, Error> {
-        entries.normalize();
-
+    pub fn bundle_entries(&self, entries: Vec<Entry>) -> Result<Vec<u8>, Error> {
         let archive = entries
             .into_iter()
-            .prefix_path(&locator.ident.nm_subdir())
+            .update_crc32()
             .compress(self.compression_algorithm)
             .collect::<Vec<_>>()
             .to_zip();

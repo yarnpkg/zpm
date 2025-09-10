@@ -4,10 +4,7 @@ use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Locator, UrlReference};
 
 use crate::{
-    error::Error,
-    install::{FetchResult, InstallContext},
-    manifest::Manifest,
-    resolvers::Resolution,
+    error::Error, install::{FetchResult, InstallContext}, manifest::Manifest, npm::NpmEntryExt, resolvers::Resolution
 };
 
 use super::PackageData;
@@ -32,9 +29,10 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             = zpm_formats::tar::entries_from_tar(&tar_data)?
                 .into_iter()
                 .strip_first_segment()
-                .collect();
+                .prepare_npm_entries(&locator.ident)
+                .collect::<Vec<_>>();
 
-        Ok(package_cache.bundle_entries(locator, entries)?)
+        Ok(package_cache.bundle_entries(entries)?)
     }).await?;
 
     let first_entry
