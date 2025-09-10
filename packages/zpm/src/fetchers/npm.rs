@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use zpm_config::ConfigExt;
+use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Locator, RegistryReference};
 
 use crate::{
@@ -57,14 +58,26 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let registry_url
         =  npm::registry_url_for_package_data(&project.config.registry_base_for(&params.ident), &params.ident, &params.version);
 
-    let cached_blob = context.package_cache.unwrap().ensure_blob(locator.clone(), ".zip", || async {
+    let package_cache = context.package_cache
+        .expect("The package cache is required for fetching npm packages");
+
+    let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
         let response
             = project.http_client.get(&registry_url)?.send().await?;
 
-        let archive = response.bytes().await
+        let tgz_data = response.bytes().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
-        Ok(zpm_formats::convert::convert_tar_gz_to_zip_async(&params.ident.nm_subdir(), archive).await?)
+        let tar_data
+            = zpm_formats::tar::unpack_tgz(&tgz_data)?;
+
+        let entries
+            = zpm_formats::tar::entries_from_tar(&tar_data)?
+                .into_iter()
+                .strip_first_segment()
+                .collect::<Vec<_>>();
+
+        Ok(package_cache.bundle_entries(locator, entries)?)
     }).await?.into_info();
 
     let package_directory = cached_blob.path

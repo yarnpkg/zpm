@@ -1,3 +1,4 @@
+use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{GitReference, Locator};
 
 use crate::{
@@ -12,7 +13,10 @@ use crate::{
 use super::PackageData;
 
 pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &GitReference) -> Result<FetchResult, Error> {
-    let pkg_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
+    let package_cache = context.package_cache
+        .expect("The package cache is required for fetching git packages");
+
+    let pkg_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
         let repository_path
             = git::clone_repository(context, &params.git.repo, &params.git.commit).await?;
 
@@ -22,7 +26,16 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             &params.git.prepare_params,
         ).await?;
 
-        Ok(zpm_formats::convert::convert_tar_gz_to_zip_async(&locator.ident.nm_subdir(), pack_tgz.into()).await?)
+        let pack_tar
+            = zpm_formats::tar::unpack_tgz(&pack_tgz)?;
+
+        let entries
+            = zpm_formats::tar::entries_from_tar(&pack_tar)?
+                .into_iter()
+                .strip_first_segment()
+                .collect();
+
+        Ok(package_cache.bundle_entries(locator, entries)?)
     }).await?;
 
     let first_entry

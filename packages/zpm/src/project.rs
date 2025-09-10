@@ -323,13 +323,28 @@ impl Project {
             }
         }
 
-        let global_cache
-            = Some(DiskCache::new(global_cache_path, self.config.settings.enable_immutable_cache.value));
+        let compression_algorithm
+            = self.config.settings.compression_level.value;
 
-        let local_cache = (!self.config.settings.enable_global_cache.value)
-            .then(|| DiskCache::new(local_cache_path, self.config.settings.enable_immutable_cache.value));
+        let enable_global_cache
+            = self.config.settings.enable_global_cache.value;
+
+        let enable_immutable_cache
+            = self.config.settings.enable_immutable_cache.value;
+
+        let name_suffix = match compression_algorithm {
+            Some(zpm_formats::CompressionAlgorithm::Deflate(_)) => format!("-d{}", compression_algorithm.unwrap().to_file_string()),
+            None => "".to_string(),
+        };
+
+        let global_cache
+            = Some(DiskCache::new(global_cache_path, name_suffix.clone(), enable_immutable_cache));
+
+        let local_cache = (!enable_global_cache)
+            .then(|| DiskCache::new(local_cache_path, name_suffix, enable_immutable_cache));
 
         Ok(CompositeCache {
+            compression_algorithm,
             global_cache,
             local_cache,
         })

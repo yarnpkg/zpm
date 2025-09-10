@@ -1,7 +1,6 @@
-use std::{borrow::Cow, io::Write, os::unix::fs::PermissionsExt};
+use std::{borrow::Cow, os::unix::fs::PermissionsExt};
 
-use flate2::{write::DeflateEncoder, Compression as FlateCompression};
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::{FromFileString, impl_file_string_serialization, impl_file_string_from_str, Path, ToFileString, ToHumanString};
 
 pub(crate) mod zip_structs;
 
@@ -15,45 +14,68 @@ pub mod zip;
 
 pub use error::Error;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum CompressionAlgorithm {
     Deflate(usize),
 }
 
-#[derive(Debug, Clone)]
+impl FromFileString for CompressionAlgorithm {
+    type Error = Error;
+
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
+        Ok(CompressionAlgorithm::Deflate(src.parse().unwrap()))
+    }
+}
+
+impl ToFileString for CompressionAlgorithm {
+    fn to_file_string(&self) -> String {
+        match self {
+            CompressionAlgorithm::Deflate(level) => level.to_string(),
+        }
+    }
+}
+
+impl ToHumanString for CompressionAlgorithm {
+    fn to_print_string(&self) -> String {
+        match self {
+            CompressionAlgorithm::Deflate(level) => level.to_string(),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for CompressionAlgorithm {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
+        let s
+            = usize::deserialize(deserializer)?;
+
+        Ok(CompressionAlgorithm::Deflate(s))
+    }
+}
+
+impl serde::Serialize for CompressionAlgorithm {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+        match self {
+            CompressionAlgorithm::Deflate(level)
+                => serializer.serialize_u32(*level as u32),
+        }
+    }
+}
+
+impl_file_string_from_str!(CompressionAlgorithm);
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Compression<'a> {
     pub data: Cow<'a, [u8]>,
     pub algorithm: CompressionAlgorithm,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Entry<'a> {
     pub name: String,
     pub mode: u32,
     pub crc: u32,
     pub data: Cow<'a, [u8]>,
     pub compression: Option<Compression<'a>>,
-}
-
-impl<'a> Entry<'a> {
-    pub fn into_compressed(mut self, compression: CompressionAlgorithm) -> Self {
-        let compressed_data = match compression {
-            CompressionAlgorithm::Deflate(level) => {
-                let mut encoder
-                    = DeflateEncoder::new(Vec::new(), FlateCompression::new(level as u32));
-
-                encoder.write_all(&self.data).unwrap();
-                encoder.finish().unwrap()
-            },
-        };
-
-        self.compression = Some(Compression {
-            data: Cow::Owned(compressed_data),
-            algorithm: compression,
-        });
-
-        self
-    }
 }
 
 pub fn entries_to_disk<'a>(entries: &[Entry<'a>], base: &Path) -> Result<(), Error> {
@@ -125,55 +147,4 @@ pub fn entries_from_files<'a>(base: &Path, files: &[Path]) -> Result<Vec<Entry<'
     }
 
     Ok(entries)
-}
-
-pub fn normalize_entries(mut entries: Vec<Entry>) -> Vec<Entry> {
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
-
-    if let Some(manifest_idx) = entries.iter().position(|entry| entry.name == "package.json") {
-        let manifest_entry = entries.remove(manifest_idx);
-        entries.insert(0, manifest_entry);
-    }
-
-    entries
-}
-
-pub fn prefix_entries<T: AsRef<str>>(mut entries: Vec<Entry>, prefix: T) -> Vec<Entry> {
-    for entry in entries.iter_mut() {
-        entry.name = format!("{}/{}", prefix.as_ref(), entry.name);
-    }
-
-    entries
-}
-pub fn strip_first_segment(entries: Vec<Entry>) -> Vec<Entry> {
-    let mut next = vec![];
-
-    for mut entry in entries.into_iter() {
-        if let Some(slash_index) = entry.name.find('/') {
-            entry.name = entry.name[slash_index + 1..].to_string();
-            next.push(entry);
-        }
-    }
-
-    next
-}
-
-pub fn strip_prefix<T: AsRef<str>>(mut entries: Vec<Entry>, prefix: T) -> Vec<Entry> {
-    let prefix = prefix.as_ref();
-
-    for entry in entries.iter_mut() {
-        if entry.name.starts_with(prefix) {
-            entry.name = entry.name[prefix.len() + 1..].to_string();
-        }
-    }
-
-    entries
-}
-
-pub fn compute_crc32(mut entries: Vec<Entry>) -> Vec<Entry> {
-    for entry in entries.iter_mut() {
-        entry.crc = crc32fast::hash(&entry.data);
-    }
-
-    entries
 }

@@ -1,7 +1,8 @@
 use std::{collections::{BTreeMap, BTreeSet, HashMap}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
 
+use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Descriptor, FilterDescriptor, Ident, Locator};
-use zpm_utils::{Path, PathError};
+use zpm_utils::{Path, PathError, ToFileString};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -99,9 +100,10 @@ pub fn fs_extract_archive(destination: &Path, package_data: &PackageData) -> Res
         };
 
         let entries
-            = zpm_formats::zip::entries_from_zip(&package_bytes)?;
-        let entries
-            = zpm_formats::strip_prefix(entries, package_subpath.as_str());
+            = zpm_formats::zip::entries_from_zip(&package_bytes)?
+                .into_iter()
+                .strip_path_prefix(package_subpath.to_file_string())
+                .collect::<Vec<_>>();
 
         for entry in entries {
             let target_path = destination

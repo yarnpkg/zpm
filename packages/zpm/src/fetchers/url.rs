@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Locator, UrlReference};
 
 use crate::{
@@ -15,14 +16,25 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let project = context.project
         .expect("The project is required for fetching URL packages");
 
-    let cached_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
+    let package_cache = context.package_cache
+        .expect("The package cache is required for fetching URL packages");
+
+    let cached_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
         let response
             = project.http_client.get(&params.url)?.send().await?;
 
-        let archive = response.bytes().await
+        let tgz_data = response.bytes().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+        let tar_data
+            = zpm_formats::tar::unpack_tgz(&tgz_data)?;
 
-        Ok(zpm_formats::convert::convert_tar_gz_to_zip_async(&locator.ident.nm_subdir(), archive).await?)
+        let entries
+            = zpm_formats::tar::entries_from_tar(&tar_data)?
+                .into_iter()
+                .strip_first_segment()
+                .collect();
+
+        Ok(package_cache.bundle_entries(locator, entries)?)
     }).await?;
 
     let first_entry

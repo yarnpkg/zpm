@@ -1,6 +1,6 @@
-use zpm_formats::zip::ZipSupport;
+use zpm_formats::{iter_ext::IterExt, zip::ZipSupport};
 use zpm_primitives::{Ident, Locator, PatchReference};
-use zpm_utils::Hash64;
+use zpm_utils::{Hash64, ToFileString};
 
 use crate::{
     error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, misc::unpack_brotli_data, patch::apply::apply_patch, resolvers::Resolution
@@ -74,7 +74,10 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let original_data
         = dependencies_it.next().unwrap().as_fetched();
 
-    let cached_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
+    let package_cache = context.package_cache
+        .expect("The package cache is required to fetch a patch package");
+
+    let cached_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
         let original_bytes = match &original_data.package_data {
             PackageData::Zip {archive_path, ..} => Some(archive_path.fs_read()?),
             _ => None,
@@ -86,13 +89,13 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             },
 
             PackageData::Zip {..} => {
-                let entries
-                    = zpm_formats::zip::entries_from_zip(original_bytes.as_ref().unwrap())?;
-
                 let package_subpath
                     = original_data.package_data.package_subpath();
 
-                zpm_formats::strip_prefix(entries, package_subpath.as_str())
+                zpm_formats::zip::entries_from_zip(original_bytes.as_ref().unwrap())?
+                    .into_iter()
+                    .strip_path_prefix(package_subpath.to_file_string())
+                    .collect::<Vec<_>>()
             },
 
             PackageData::MissingZip {..} => {
@@ -100,12 +103,10 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             },
         };
 
-        // I have to locate the package.json and extract its version to pass it as
-        // parameter to patch::apply::apply_patch
-
         let package_json_entry
-            = original_entries.iter()
-                .find(|entry| entry.name == "package.json")
+            = original_entries
+                // The cached files always have the package.json at the beginning of the archive
+                .first()
                 .ok_or(Error::MissingPackageManifest)?;
 
         let package_json_content
@@ -126,7 +127,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             },
         };
 
-        Ok(zpm_formats::convert::convert_entries_to_zip(&locator.ident.nm_subdir(), patched_entries)?)
+        Ok(package_cache.bundle_entries(&locator, patched_entries)?)
     }).await?;
 
     let first_entry

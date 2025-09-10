@@ -4092,6 +4092,7 @@ dependencies = [
  "sonic-rs",
  "thiserror 2.0.16",
  "zpm-ci",
+ "zpm-formats",
  "zpm-macro-enum",
  "zpm-primitives",
  "zpm-semver",
@@ -4108,8 +4109,10 @@ dependencies = [
  "itertools 0.13.0",
  "pnp",
  "regex",
+ "serde",
  "thiserror 1.0.69",
  "tokio",
+ "zpm-macro-enum",
  "zpm-utils",
 ]
 
