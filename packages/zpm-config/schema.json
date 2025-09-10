@@ -6,6 +6,10 @@
     "enableAutoTypes": ["tsEnableAutoTypes"]
   },
   "properties": {
+    "compressionLevel": {
+      "type": ["zpm_formats::CompressionAlgorithm", "null"],
+      "description": "The compression level to use for the packed file"
+    },
     "defaultSemverRangePrefix": {
       "type": "zpm_semver::RangeKind",
       "description": "The default semver range prefix to use for dependencies",

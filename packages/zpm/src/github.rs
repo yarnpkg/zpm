@@ -2,6 +2,7 @@ use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
 use reqwest::StatusCode;
+use zpm_formats::iter_ext::IterExt;
 use zpm_git::GitSource;
 use zpm_utils::Path;
 
@@ -42,7 +43,7 @@ pub async fn download_into(source: &GitSource, commit: &str, download_dir: &Path
     let response
         = http_client.get(public_tarball_url(owner, &repository, commit))?.send().await;
 
-    let data = match response {
+    let tgz_data = match response {
         Ok(response) => {
             response.bytes().await.map_err(|_| Error::ReplaceMe)?
         },
@@ -56,15 +57,14 @@ pub async fn download_into(source: &GitSource, commit: &str, download_dir: &Path
         },
     };
 
-    let uncompressed_data
-        = zpm_formats::convert::convert_tar_gz_to_tar(data)?;
+    let tar_data
+        = zpm_formats::tar::unpack_tgz(&tgz_data)?;
 
     let entries
-        = zpm_formats::tar_iter::TarIterator::new(&uncompressed_data)
-            .collect::<Result<Vec<_>, _>>()?;
-
-    let entries
-        = zpm_formats::strip_first_segment(entries);
+        = zpm_formats::tar_iter::TarIterator::new(&tar_data)
+            .filter_map(|entry| entry.ok())
+            .strip_first_segment()
+            .collect::<Vec<_>>();
 
     zpm_formats::entries_to_disk(&entries, download_dir)?;
 

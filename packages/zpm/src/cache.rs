@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::collections::HashSet;
 use std::sync::Mutex;
+use zpm_formats::{iter_ext::IterExt, zip::ToZip, Entry};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::Locator;
 use zpm_utils::{Hash64, Path};
-use bincode;
 use futures::Future;
 
 use crate::{
@@ -41,11 +41,23 @@ impl CacheEntry {
 }
 
 pub struct CompositeCache {
+    pub compression_algorithm: Option<zpm_formats::CompressionAlgorithm>,
     pub global_cache: Option<DiskCache>,
     pub local_cache: Option<DiskCache>,
 }
 
 impl CompositeCache {
+    pub fn bundle_entries(&self, entries: Vec<Entry>) -> Result<Vec<u8>, Error> {
+        let archive = entries
+            .into_iter()
+            .update_crc32()
+            .compress(self.compression_algorithm)
+            .collect::<Vec<_>>()
+            .to_zip();
+
+        Ok(archive)
+    }
+
     pub fn key_path(&self, key: &Locator, ext: &str) -> Path {
         if let Some(ref cache) = self.local_cache {
             return cache.key_path(key, ext);
@@ -137,16 +149,16 @@ impl CompositeCache {
 
 pub struct DiskCache {
     cache_path: Path,
-    data_config: bincode::config::Configuration,
+    name_suffix: String,
     immutable: bool,
     accessed_files: Arc<Mutex<HashSet<String>>>,
 }
 
 impl DiskCache {
-    pub fn new(cache_path: Path, immutable: bool) -> Self {
+    pub fn new(cache_path: Path, name_suffix: String, immutable: bool) -> Self {
         DiskCache {
             cache_path,
-            data_config: bincode::config::standard(),
+            name_suffix,
             immutable,
             accessed_files: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -154,7 +166,7 @@ impl DiskCache {
 
     pub fn key_path(&self, locator: &Locator, ext: &str) -> Path {
         let key_name
-            = format!("{}{}", locator.slug(), ext);
+            = format!("{}{}{}", locator.slug(), self.name_suffix, ext);
 
         let key_path = self.cache_path
             .with_join_str(&key_name);

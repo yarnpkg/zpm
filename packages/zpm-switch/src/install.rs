@@ -2,7 +2,7 @@ use std::{future::Future, process::Command};
 
 use blake2::{Blake2s256, Digest};
 use serde::Serialize;
-use zpm_formats::entries_to_disk;
+use zpm_formats::{entries_to_disk, iter_ext::IterExt};
 use zpm_utils::{get_system_string, FromFileString, IoResultExt, Path, ToFileString};
 
 use crate::{errors::Error, http::fetch, manifest::VersionPackageManagerReference};
@@ -99,12 +99,12 @@ async fn install_node_js_from_package(url: &str, main_file: Path) -> Result<Comm
             = zpm_formats::tar::unpack_tgz(&compressed_data)?;
 
         let entries
-            = zpm_formats::tar::entries_from_tar(&data)?;
+            = zpm_formats::tar::entries_from_tar(&data)?
+                .into_iter()
+                .strip_first_segment()
+                .collect::<Vec<_>>();
 
-        let stripped_entries
-            = zpm_formats::strip_first_segment(entries);
-
-        zpm_formats::entries_to_disk(&stripped_entries, &p)?;
+        zpm_formats::entries_to_disk(&entries, &p)?;
 
         Ok(())
     }).await?;

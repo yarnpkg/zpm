@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use zpm_formats::{iter_ext::IterExt, tar::ToTar};
 use zpm_primitives::Locator;
 use zpm_utils::Path;
 use clipanion::cli;
@@ -152,12 +153,11 @@ impl Pack {
             manifest_entry.data = pack_manifest_content.into_bytes().into();
         }
 
-        let entries
-            = zpm_formats::prefix_entries(entries, "package");
-
-        let packed_file
-            = zpm_formats::tar::craft_tgz(&entries)?;
-
+        let packed_file = entries
+            .into_iter()
+            .prefix_path("package")
+            .collect::<Vec<_>>()
+            .to_tgz()?;
 
         let package_name
             = pack_manifest.name.map_or_else(

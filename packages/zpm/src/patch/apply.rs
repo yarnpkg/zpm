@@ -110,6 +110,7 @@ pub fn apply_patch<'a>(entries: Vec<Entry<'a>>, patch: &str, package_version: &z
                     mode: *mode,
                     crc: 0,
                     data: Cow::Owned(data),
+                    compression: None,
                 };
 
                 entry_map.insert(path.to_file_string(), entry);

@@ -19,6 +19,7 @@ fn simple_case() {
         mode: 0o644,
         crc: 0,
         data: Cow::Owned("this\nis\na\nfile\n".as_bytes().to_vec()),
+        compression: None,
     }];
 
     let res
@@ -29,5 +30,6 @@ fn simple_case() {
         mode: 0o644,
         crc: 0,
         data: Cow::Owned("this\nis\nmy\nfile\n".as_bytes().to_vec()),
+        compression: None,
     }]);
 }

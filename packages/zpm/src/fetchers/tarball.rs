@@ -1,11 +1,9 @@
 use bytes::Bytes;
+use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Locator, TarballReference};
 
 use crate::{
-    error::Error,
-    install::{FetchResult, InstallContext, InstallOpResult},
-    manifest::Manifest,
-    resolvers::Resolution,
+    error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::Manifest, npm::NpmEntryExt, resolvers::Resolution
 };
 
 use super::PackageData;
@@ -18,8 +16,23 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .context_directory()
         .with_join_str(&params.path);
 
-    let cached_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
-        Ok(zpm_formats::convert::convert_tar_gz_to_zip_async(&locator.ident.nm_subdir(), Bytes::from(tarball_path.fs_read()?)).await?)
+    let package_cache = context.package_cache
+        .expect("The package cache is required for fetching tarball packages");
+
+    let cached_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
+        let tgz_data
+            = tarball_path.fs_read()?;
+        let tar_data
+            = zpm_formats::tar::unpack_tgz(&tgz_data)?;
+
+        let entries
+            = zpm_formats::tar::entries_from_tar(&tar_data)?
+                .into_iter()
+                .strip_first_segment()
+                .prepare_npm_entries(&locator.ident)
+                .collect();
+
+        Ok(package_cache.bundle_entries(entries)?)
     }).await?;
 
     let first_entry

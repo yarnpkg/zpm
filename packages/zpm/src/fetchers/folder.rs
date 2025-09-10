@@ -1,10 +1,8 @@
+use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{FolderReference, Locator};
 
 use crate::{
-    error::Error,
-    install::{FetchResult, InstallContext, InstallOpResult},
-    manifest::RemoteManifest,
-    resolvers::Resolution,
+    error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::RemoteManifest, npm::NpmEntryExt, resolvers::Resolution
 };
 
 use super::PackageData;
@@ -17,8 +15,17 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .context_directory()
         .with_join_str(&params.path);
 
-    let pkg_blob = context.package_cache.unwrap().upsert_blob(locator.clone(), ".zip", || async {
-        Ok(zpm_formats::convert::convert_folder_to_zip(&locator.ident.nm_subdir(), &context_directory)?)
+    let package_cache = context.package_cache
+        .expect("The package cache is required for fetching folder packages");
+
+    let pkg_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
+        let entries
+            = zpm_formats::entries_from_folder(&context_directory)?
+                .into_iter()
+                .prepare_npm_entries(&locator.ident)
+                .collect::<Vec<_>>();
+
+        Ok(package_cache.bundle_entries(entries)?)
     }).await?;
 
     let first_entry

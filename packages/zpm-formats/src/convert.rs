@@ -5,52 +5,54 @@ use zpm_utils::Path;
 
 use crate::error::Error;
 
-use super::{entries_from_folder, normalize_entries, prefix_entries, strip_first_segment, tar, zip, Entry};
+use super::{entries_from_folder, tar, zip, Entry};
 
-pub fn convert_tar_gz_to_tar(tar_gz_data: Bytes) -> Result<Vec<u8>, Error> {
-    let mut decompressed = vec![];
+// pub fn convert_tar_gz_to_tar(tar_gz_data: Bytes, compression: Option<CompressionAlgorithm>) -> Result<Vec<u8>, Error> {
+//     let mut decompressed = vec![];
 
-    if tar_gz_data.starts_with(&[0x1f, 0x8b]) {
-        flate2::read::GzDecoder::new(Cursor::new(tar_gz_data)).read_to_end(&mut decompressed)?;
-    } else {
-        return Ok(tar_gz_data.to_vec());
-    }
+//     if tar_gz_data.starts_with(&[0x1f, 0x8b]) {
+//         flate2::read::GzDecoder::new(Cursor::new(tar_gz_data)).read_to_end(&mut decompressed)?;
+//     } else {
+//         return Ok(tar_gz_data.to_vec());
+//     }
 
-    Ok(decompressed)
-}
+//     Ok(decompressed)
+// }
 
-pub fn convert_entries_to_zip(prefix: &str, entries: Vec<Entry>) -> Result<Vec<u8>, Error> {
-    let entries = normalize_entries(entries);
-    let entries = prefix_entries(entries, prefix);
+// pub fn convert_entries_to_zip(prefix: &str, entries: Vec<Entry>) -> Result<Vec<u8>, Error> {
+//     let entries = normalize_entries(entries);
+//     let entries = prefix_entries(entries, prefix);
 
-    Ok(zip::craft_zip(&entries))
-}
+//     Ok(zip::craft_zip(&entries))
+// }
 
-pub fn convert_tar_gz_to_zip(prefix: &str, tar_gz_data: Bytes) -> Result<Vec<u8>, Error> {
-    let mut decompressed = vec![];
+// pub fn convert_tar_gz_to_zip(prefix: &str, tar_gz_data: Bytes) -> Result<Vec<u8>, Error> {
+//     let mut decompressed = vec![];
 
-    if tar_gz_data.starts_with(&[0x1f, 0x8b]) {
-        flate2::read::GzDecoder::new(Cursor::new(tar_gz_data)).read_to_end(&mut decompressed)?;
-    } else {
-        decompressed = tar_gz_data.to_vec();
-    }
+//     if tar_gz_data.starts_with(&[0x1f, 0x8b]) {
+//         flate2::read::GzDecoder::new(Cursor::new(tar_gz_data)).read_to_end(&mut decompressed)?;
+//     } else {
+//         decompressed = tar_gz_data.to_vec();
+//     }
 
-    let entries = tar::entries_from_tar(&decompressed)?;
-    let entries = strip_first_segment(entries);
+//     let entries = tar::entries_from_tar(&decompressed)?;
+//     let entries = strip_first_segment(entries);
 
-    convert_entries_to_zip(prefix, entries)
-}
+//     convert_entries_to_zip(prefix, entries)
+// }
 
-pub async fn convert_tar_gz_to_zip_async(prefix: &str, tar_gz_data: Bytes) -> Result<Vec<u8>, Error> {
-    let prefix = prefix.to_owned();
 
-    tokio::task::spawn_blocking(move || {
-        convert_tar_gz_to_zip(&prefix, tar_gz_data)
-    }).await.unwrap()
-}
 
-pub fn convert_folder_to_zip(prefix: &str, folder_path: &Path) -> Result<Vec<u8>, Error> {
-    let entries = entries_from_folder(folder_path)?;
+// pub async fn convert_tar_gz_to_zip_async(prefix: &str, tar_gz_data: Bytes) -> Result<Vec<u8>, Error> {
+//     let prefix = prefix.to_owned();
 
-    convert_entries_to_zip(prefix, entries)
-}
+//     tokio::task::spawn_blocking(move || {
+//         convert_tar_gz_to_zip(&prefix, tar_gz_data)
+//     }).await.unwrap()
+// }
+
+// pub fn convert_folder_to_zip(prefix: &str, folder_path: &Path) -> Result<Vec<u8>, Error> {
+//     let entries = entries_from_folder(folder_path)?;
+
+//     convert_entries_to_zip(prefix, entries)
+// }

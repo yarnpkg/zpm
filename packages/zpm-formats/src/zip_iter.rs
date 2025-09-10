@@ -1,6 +1,6 @@
 use std::{borrow::Cow, io::Read};
 
-use crate::{zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, GeneralRecord}, Entry, Error};
+use crate::{zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, GeneralRecord}, Compression, CompressionAlgorithm, Entry, Error};
 
 fn unpack_deflate(data: &[u8]) -> Result<Vec<u8>, Error> {
     let mut decoder
@@ -39,7 +39,7 @@ impl<'a> ZipIterator<'a> {
 
         let central_directory_record_offset
             = end_of_central_directory_record.offset_of_central_directory as usize;
-    
+
         Ok(ZipIterator {
             buffer,
 
@@ -62,17 +62,30 @@ impl<'a> ZipIterator<'a> {
         let data
             = &self.buffer[data_offset..data_offset + data_size];
 
-        let data = match central_directory_record.header.compression_method {
-            8 => Cow::Owned(unpack_deflate(data)?),
-            _ => Cow::Borrowed(data),
-        };
-
-        Ok(Entry {
+        let mut entry = Entry {
             name: name.to_string(),
             mode: (central_directory_record.external_file_attributes as u64 >> 16) as u32,
             crc: general_record.header.crc_32,
-            data,
-        })
+            data: Cow::Borrowed(data),
+            compression: None,
+        };
+
+        match central_directory_record.header.compression_method {
+            8 => {
+                entry.compression = Some(Compression {
+                    data: Cow::Borrowed(data),
+                    algorithm: CompressionAlgorithm::Deflate(0),
+                });
+
+                entry.data = Cow::Owned(unpack_deflate(data)?);
+            },
+
+            _ => {
+
+            },
+        }
+
+        Ok(entry)
     }
 }
 
@@ -104,4 +117,3 @@ impl<'a> Iterator for ZipIterator<'a> {
         Some(self.parse_entry_at(local_file_header_offset, central_directory_record, general_record))
     }
 }
-
