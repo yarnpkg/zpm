@@ -213,6 +213,9 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
     let mut package_build_entries
         = BTreeMap::new();
 
+    let mut unplugged_packages
+        = BTreeMap::new();
+
     for (locator, resolution) in &tree.locator_resolutions {
         let physical_package_data = install.package_data.get(&locator.physical_locator())
             .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator().to_print_string()));
@@ -288,6 +291,11 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
                 physical_package_data,
             )?;
 
+            unplugged_packages.insert(locator.clone(), (
+                package_location_abs.clone(),
+                is_freshly_unplugged,
+            ));
+
             is_physically_on_disk = true;
         }
 
@@ -348,6 +356,45 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
                 allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
                 force_rebuild: is_freshly_unplugged,
             });
+        }
+    }
+
+    // Native dynamic libraries sometimes have runtime dependencies on other dynamic libraries. They
+    // address that by using rpath to encode the place where those dependencies can be found. In
+    // typical node_modules structures that's either node_modules/<dependency_name>, or one of the
+    // parent folders. In PnP installs it's trickier because the unplugged folder is flat, so all
+    // entries inside it have arbitrary hashes.
+    //
+    // To solve this, detect cases where an unplugged package depends on another unplugged package
+    // and create a symlink between them in node_modules/<dependency_name>. See `sharp` for an example.
+
+    for (locator, (package_location_abs, is_freshly_unplugged)) in &unplugged_packages {
+        // TODO: Implement a `fs_sync` method that both adds entries and remove existing ones, rather
+        // than check if we're just unplugging right now (otherwise we will never update them).
+        if !is_freshly_unplugged {
+            continue;
+        }
+
+        let resolution
+            = tree.locator_resolutions.get(locator)
+                .expect("Failed to find resolution for unplugged package");
+
+        for descriptor in resolution.dependencies.values() {
+            let dependency
+                = tree.descriptor_to_locator.get(descriptor)
+                    .expect("Failed to find dependency resolution");
+
+            let dependency_locator
+                = dependency.physical_locator();
+
+            let Some((dependency_location_abs, _)) = unplugged_packages.get(&dependency_locator) else {
+                continue;
+            };
+
+            package_location_abs
+                .with_join_str(dependency.ident.nm_subdir())
+                .fs_create_parent()?
+                .fs_symlink(dependency_location_abs)?;
         }
     }
 
