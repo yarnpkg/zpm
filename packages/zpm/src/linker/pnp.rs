@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use zpm_config::PnpFallbackMode;
 use zpm_primitives::{Ident, Locator, Reference};
 use zpm_utils::{Path, ToHumanString};
+use sha2::{Sha512, Digest};
+use hex;
 use itertools::Itertools;
 use serde::{Serialize, Serializer};
 use serde_with::serde_as;
@@ -49,6 +51,33 @@ fn make_virtual_path(base: &Path, component: &str, to: &Path) -> Path {
     full_virtual_path
 }
 
+// Helper function to compute SHA512 hash and return as hex string
+fn compute_sha512_hex(input: &str) -> String {
+    let mut hasher = Sha512::new();
+    hasher.update(input.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+// Generates a Yarn Berry-compatible hash. Used for Sharp packages
+fn yarn_berry_hash(locator: &Locator) -> Result<String, Error> {
+    let package_version = locator.reference.to_file_string();
+
+    // Extract scope without '@' prefix, or empty string if no scope
+    let package_scope = locator.ident.scope()
+        .and_then(|scope| scope.strip_prefix('@'))
+        .unwrap_or("");
+
+    // Step 1: Hash the package identifier (scope + name)
+    let package_identifier = format!("{}{}", package_scope, locator.ident.name());
+    let identifier_hash = compute_sha512_hex(&package_identifier);
+
+    // Step 2: Hash the combination of identifier hash and version
+    let combined_input = format!("{}{}", identifier_hash, package_version);
+    let final_hash = compute_sha512_hex(&combined_input);
+
+    // Return first 10 characters to match Yarn Berry's hash length
+    Ok(final_hash[..10].to_string())
+}
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -378,6 +407,26 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         let resolution
             = tree.locator_resolutions.get(locator)
                 .expect("Failed to find resolution for unplugged package");
+
+         // Special handling for @img/sharp packages - create an additional symlink in .yarn/unplugged
+         // to match the path expected (Yarn Berry hash) by Sharp binary's rpath lookup
+         if locator.ident.as_str().starts_with("@img/sharp") {
+             if let Ok(yarn_hash) = yarn_berry_hash(locator) {
+                 let base_name = format!("{}-{}-{}",
+                     locator.ident.slug(),
+                     locator.reference.slug(),
+                     yarn_hash
+                 );
+                 let unplugged_symlink_target = project.project_cwd
+                     .with_join_str(".yarn/unplugged")
+                     .with_join_str(base_name)
+                     .with_join_str(locator.ident.nm_subdir());
+
+                 unplugged_symlink_target
+                     .fs_create_parent()?
+                     .fs_symlink(package_location_abs)?;
+             }
+         }
 
         for descriptor in resolution.dependencies.values() {
             let dependency
