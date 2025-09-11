@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 
 use zpm_config::PnpFallbackMode;
 use zpm_primitives::{Ident, Locator, Reference};
-use zpm_utils::{Path, ToHumanString};
+use zpm_utils::{Path, SyncEntryKind, ToHumanString};
 use sha2::{Sha512, Digest};
 use hex;
 use itertools::Itertools;
@@ -312,7 +312,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         } else if package_build_info.must_extract {
             package_location_abs = project.project_cwd
                 .with_join_str(".yarn/unplugged")
-                .with_join_str(locator.slug())
+                .with_join_str(format!("{}-{}-{}", locator.ident.slug(), locator.reference.slug(), yarn_berry_hash(locator)?))
                 .with_join(&physical_package_data.package_subpath());
 
             is_freshly_unplugged = linker::helpers::fs_extract_archive(
@@ -320,10 +320,10 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
                 physical_package_data,
             )?;
 
-            unplugged_packages.insert(locator.clone(), (
+            unplugged_packages.insert(
+                locator.clone(),
                 package_location_abs.clone(),
-                is_freshly_unplugged,
-            ));
+            );
 
             is_physically_on_disk = true;
         }
@@ -397,36 +397,13 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
     // To solve this, detect cases where an unplugged package depends on another unplugged package
     // and create a symlink between them in node_modules/<dependency_name>. See `sharp` for an example.
 
-    for (locator, (package_location_abs, is_freshly_unplugged)) in &unplugged_packages {
-        // TODO: Implement a `fs_sync` method that both adds entries and remove existing ones, rather
-        // than check if we're just unplugging right now (otherwise we will never update them).
-        if !is_freshly_unplugged {
-            continue;
-        }
-
+    for (locator, package_location_abs) in &unplugged_packages {
         let resolution
             = tree.locator_resolutions.get(locator)
                 .expect("Failed to find resolution for unplugged package");
 
-         // Special handling for @img/sharp packages - create an additional symlink in .yarn/unplugged
-         // to match the path expected (Yarn Berry hash) by Sharp binary's rpath lookup
-         if locator.ident.as_str().starts_with("@img/sharp") {
-             if let Ok(yarn_hash) = yarn_berry_hash(locator) {
-                 let base_name = format!("{}-{}-{}",
-                     locator.ident.slug(),
-                     locator.reference.slug(),
-                     yarn_hash
-                 );
-                 let unplugged_symlink_target = project.project_cwd
-                     .with_join_str(".yarn/unplugged")
-                     .with_join_str(base_name)
-                     .with_join_str(locator.ident.nm_subdir());
-
-                 unplugged_symlink_target
-                     .fs_create_parent()?
-                     .fs_symlink(package_location_abs)?;
-             }
-         }
+        let mut symlinks_to_create
+            = BTreeMap::new();
 
         for descriptor in resolution.dependencies.values() {
             let dependency
@@ -436,15 +413,21 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
             let dependency_locator
                 = dependency.physical_locator();
 
-            let Some((dependency_location_abs, _)) = unplugged_packages.get(&dependency_locator) else {
+            let Some(dependency_location_abs) = unplugged_packages.get(&dependency_locator) else {
                 continue;
             };
 
-            package_location_abs
-                .with_join_str(dependency.ident.nm_subdir())
-                .fs_create_parent()?
-                .fs_symlink(dependency_location_abs)?;
+            symlinks_to_create.insert(
+                Path::from_str(&dependency.ident.as_str())?,
+                SyncEntryKind::Symlink(dependency_location_abs.clone()),
+            );
         }
+
+        package_location_abs
+            .with_join_str("node_modules")
+            .fs_create_dir_all()?
+            .fs_sync_dir(symlinks_to_create)
+            .map_err(Error::from)?;
     }
 
     for workspace in project.workspaces.iter().sorted_by_cached_key(|w| w.descriptor()) {

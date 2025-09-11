@@ -1,8 +1,33 @@
-use std::{io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}};
+use std::{collections::BTreeMap, io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}};
 
 use bincode::{Decode, Encode};
 
 use crate::{diff_data, impl_file_string_from_str, impl_file_string_serialization, path_resolve::resolve_path, DataType, FromFileString, IoResultExt, PathError, PathIterator, ToFileString, ToHumanString};
+
+#[derive(Debug)]
+pub struct SyncEntry {
+    pub rel_path: Path,
+    pub kind: SyncEntryKind,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum SyncEntryKind {
+    Folder,
+    Symlink(Path),
+    File(String, bool),
+}
+
+#[derive(thiserror::Error, Clone, Debug)]
+pub enum SyncError {
+    #[error("Path error: {0}")]
+    PathError(#[from] PathError),
+
+    #[error("Forward path required: {}", .0.to_print_string())]
+    ForwardPathRequired(Path),
+
+    #[error("Conflicting path types: {}", .0.to_print_string())]
+    ConflictingPathTypes(Path),
+}
 
 #[derive(Debug)]
 pub struct ExplicitPath {
@@ -138,12 +163,22 @@ impl Path {
         self.path.is_empty()
     }
 
+    /**
+     * Iterates over the subpaths, starting from the root. For example, for
+     * the path `/a/b/c`, this will yield the paths `/`, `/a`, `/a/b`, and
+     * finally `/a/b/c`.
+     *
+     * The stream is double ended, so you can also iterate in reverse by
+     * using `iter_path().rev()`.
+     */
     pub fn iter_path(&self) -> PathIterator {
         PathIterator::new(self)
     }
 
     pub fn dirname<'a>(&'a self) -> Option<Path> {
-        let mut slice_len = self.path.len();
+        let mut slice_len
+            = self.path.len();
+
         if self.path.ends_with('/') {
             if self.path.len() > 1 {
                 slice_len -= 1;
@@ -152,7 +187,9 @@ impl Path {
             }
         }
 
-        let slice = &self.path[..slice_len];
+        let slice
+            = &self.path[..slice_len];
+
         if let Some(last_slash) = slice.rfind('/') {
             if last_slash > 0 {
                 return Some(Path::from_str(&slice[..last_slash]).unwrap());
@@ -288,6 +325,10 @@ impl Path {
         Ok(self)
     }
 
+    pub fn fs_symlink_metadata(&self) -> Result<std::fs::Metadata, PathError> {
+        Ok(std::fs::symlink_metadata(&self.path)?)
+    }
+
     pub fn fs_metadata(&self) -> Result<std::fs::Metadata, PathError> {
         Ok(std::fs::metadata(&self.path)?)
     }
@@ -296,12 +337,20 @@ impl Path {
         self.fs_metadata().is_ok()
     }
 
+    pub fn fs_is_symlink(&self) -> bool {
+        self.fs_symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false)
+    }
+
     pub fn fs_is_file(&self) -> bool {
         self.fs_metadata().map(|m| m.is_file()).unwrap_or(false)
     }
 
     pub fn fs_is_dir(&self) -> bool {
         self.fs_metadata().map(|m| m.is_dir()).unwrap_or(false)
+    }
+
+    pub fn fs_is_real_dir(&self) -> bool {
+        self.fs_symlink_metadata().map(|m| m.is_dir()).unwrap_or(false)
     }
 
     pub fn if_exists(&self) -> Option<Path> {
@@ -397,6 +446,94 @@ impl Path {
 
     pub fn fs_append_text<T: AsRef<str>>(&self, text: T) -> Result<&Self, PathError> {
         self.fs_append(text.as_ref())
+    }
+
+    pub fn fs_sync_dir(&self, mut entries: BTreeMap<Path, SyncEntryKind>) -> Result<&Self, SyncError> {
+        let first_non_forward_path = entries.keys()
+            .find(|path| !path.is_forward());
+
+        if let Some(first_non_forward_path) = first_non_forward_path {
+            return Err(SyncError::ForwardPathRequired(first_non_forward_path.clone()));
+        }
+
+        let entry_keys = entries.keys()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for path in entry_keys {
+            let dirname = path.dirname()
+                .expect("Expected a parent directory for every path");
+
+            for dir in dirname.iter_path() {
+                let existing_entry
+                    = entries.get(&dir);
+
+                if let Some(existing_entry) = existing_entry {
+                    if existing_entry != &SyncEntryKind::Folder {
+                        return Err(SyncError::ConflictingPathTypes(dir.clone()));
+                    } else {
+                        continue;
+                    }
+                }
+
+                entries.insert(dir, SyncEntryKind::Folder);
+            }
+        }
+
+        let mut traverse_queue = vec![
+            Path::new(),
+        ];
+
+        while let Some(path_rel) = traverse_queue.pop() {
+            let path_abs
+                = self.with_join(&path_rel);
+
+            for entry in path_abs.fs_read_dir()? {
+                let entry = entry
+                    .map_err(PathError::from)?;
+
+                let file_name = entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| PathError::InvalidUtf8Path)?;
+
+                let entry_rel_path = path_rel
+                    .with_join_str(&file_name);
+                let entry_abs_path = path_abs
+                    .with_join_str(&file_name);
+
+                if entries.remove(&entry_rel_path).is_none() {
+                    entry_abs_path.fs_rm()?;
+                    continue;
+                };
+
+                if entry_abs_path.fs_is_real_dir() {
+                    traverse_queue.push(entry_rel_path);
+                }
+            }
+        }
+
+        for (path, kind) in entries {
+            let path_abs
+                = self.with_join(&path);
+
+            path_abs.fs_sync_file(kind)?;
+        }
+
+        Ok(self)
+    }
+
+    pub fn fs_sync_file(&self, kind: SyncEntryKind) -> Result<&Self, PathError> {
+        match kind {
+            SyncEntryKind::Symlink(target)
+                => self.fs_symlink(&target),
+
+            SyncEntryKind::File(data, is_exec)
+                => self.fs_change(&data, is_exec),
+
+            SyncEntryKind::Folder
+                => self.fs_create_dir_all(),
+        }
     }
 
     pub fn fs_expect<T: AsRef<[u8]>>(&self, expected_data: T, is_exec: bool) -> Result<&Self, PathError> {
@@ -524,7 +661,7 @@ impl Path {
     }
 
     pub fn fs_rm(&self) -> Result<&Self, PathError> {
-        match self.fs_is_dir() {
+        match self.fs_is_real_dir() {
             true => std::fs::remove_dir_all(self.to_path_buf()),
             false => std::fs::remove_file(self.to_path_buf()),
         }?;

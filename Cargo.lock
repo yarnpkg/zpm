@@ -4273,6 +4273,7 @@ dependencies = [
  "ouroboros",
  "path-slash",
  "radix_trie",
+ "rstest 0.26.1",
  "serde",
  "serde_derive",
  "serde_json",

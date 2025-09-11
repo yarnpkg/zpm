@@ -3,41 +3,20 @@ use std::str::FromStr;
 use crate::Path;
 
 pub struct PathIterator<'a> {
-    components: Vec<&'a str>,
-    front_idx: usize,
-    back_idx: usize,
-    has_trailing_slash: bool,
+    path_str: &'a str,
+    lookup_idx: Option<(usize, usize)>,
 }
 
 impl<'a> PathIterator<'a> {
     pub fn new(path: &'a Path) -> Self {
-        let path_str = path.as_str();
-
-        let has_leading_slash = path_str.starts_with('/');
-        let has_trailing_slash = path_str.ends_with('/') && path_str.len() > 1;
-
-        let components_path = path_str;
-        let components_path = components_path.strip_prefix('/').unwrap_or(components_path);
-        let components_path = components_path.strip_suffix('/').unwrap_or(components_path);
-
-        let mut components = Vec::new();
-
-        if has_leading_slash {
-            components.push("");
-        }
-
-        if components_path.len() > 0 {
-            components.extend(components_path.split('/'));
-        }
-
-        let front_idx = 1;
-        let back_idx = components.len();
+        let path_str
+            = path.as_str();
+        let lookup_idx
+            = Some((0, path_str.len()));
 
         Self {
-            components,
-            front_idx,
-            back_idx,
-            has_trailing_slash,
+            path_str,
+            lookup_idx,
         }
     }
 }
@@ -46,44 +25,104 @@ impl<'a> Iterator for PathIterator<'a> {
     type Item = Path;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.front_idx > self.back_idx {
+        let Some((lookup_idx, back_idx)) = self.lookup_idx else {
             return None;
+        };
+
+        let next_slash_idx
+            = self.path_str[lookup_idx..]
+                .find('/')
+                .map(|idx| idx + lookup_idx + 1)
+                .unwrap_or(back_idx);
+
+        self.lookup_idx = if back_idx > next_slash_idx {
+            Some((next_slash_idx + 1, back_idx))
+        } else {
+            None
+        };
+
+        let mut sub_path
+            = &self.path_str[0..next_slash_idx];
+
+        if sub_path.ends_with('/') && sub_path.len() > 1 {
+            sub_path = &sub_path[..sub_path.len() - 1];
         }
 
-        let front_idx = self.front_idx;
-        self.front_idx += 1;
-
-        if front_idx == 1 {
-            return Some(Path::root());
-        }
-
-        let mut path
-            = self.components[0..front_idx].join("/");
-
-        if self.has_trailing_slash {
-            path.push('/');
-        }
-
-        Some(Path::from_str(&path).unwrap())
+        Some(Path::from_str(sub_path).unwrap())
     }
 }
 
 impl<'a> DoubleEndedIterator for PathIterator<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.front_idx > self.back_idx {
+        let Some((lookup_idx, back_idx)) = self.lookup_idx else {
             return None;
+        };
+
+        let last_slash_idx
+            = self.path_str[lookup_idx..back_idx]
+                .strip_suffix('/')
+                .unwrap_or(&self.path_str[lookup_idx..back_idx])
+                .rfind('/')
+                .map(|idx| idx + lookup_idx + 1)
+                .unwrap_or(lookup_idx);
+
+        self.lookup_idx = if lookup_idx < last_slash_idx {
+            Some((lookup_idx, last_slash_idx))
+        } else {
+            None
+        };
+
+        let mut sub_path
+            = &self.path_str[0..back_idx];
+
+        if sub_path.ends_with('/') && sub_path.len() > 1 {
+            sub_path = &sub_path[..sub_path.len() - 1];
         }
 
-        let back_idx = self.back_idx;
-        self.back_idx -= 1;
+        Some(Path::from_str(sub_path).unwrap())
+    }
+}
 
-        if back_idx == 1 {
-            return Some(Path::root());
-        }
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
 
-        let components
-            = self.components[0..back_idx].join("/");
+    use super::*;
 
-        Some(Path::from_str(&components).unwrap())
+    #[rstest]
+    #[case("/a/b/c", vec!["/", "/a", "/a/b", "/a/b/c"])]
+    #[case("/a/b/c/", vec!["/", "/a", "/a/b", "/a/b/c"])]
+    #[case("a/b/c", vec!["a", "a/b", "a/b/c"])]
+    #[case("", vec![""])]
+    #[case("/", vec!["/"])]
+    fn test_path_iterator(#[case] path: Path, #[case] expected: Vec<&'static str>) {
+        let yielded_paths = path
+            .iter_path()
+            .collect::<Vec<_>>();
+
+        let yielded_path_strs = yielded_paths.iter()
+            .map(|p| p.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(yielded_path_strs, expected);
+    }
+
+    #[rstest]
+    #[case("/a/b/c", vec!["/a/b/c", "/a/b", "/a", "/"])]
+    #[case("/a/b/c/", vec!["/a/b/c", "/a/b", "/a", "/"])]
+    #[case("a/b/c", vec!["a/b/c", "a/b", "a"])]
+    #[case("", vec![""])]
+    #[case("/", vec!["/"])]
+    fn test_path_iterator_reverse(#[case] path: Path, #[case] expected: Vec<&'static str>) {
+        let yielded_paths = path
+            .iter_path()
+            .rev()
+            .collect::<Vec<_>>();
+
+        let yielded_path_strs = yielded_paths.iter()
+            .map(|p| p.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(yielded_path_strs, expected);
     }
 }
