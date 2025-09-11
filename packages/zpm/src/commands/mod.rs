@@ -20,6 +20,8 @@ mod init;
 mod install;
 mod node;
 mod pack;
+mod patch_commit;
+mod patch;
 mod rebuild;
 mod remove;
 mod run;
@@ -62,6 +64,8 @@ program!(YarnCli, [
     set_version::SetVersion,
     node::Node,
     pack::Pack,
+    patch_commit::PatchCommit,
+    patch::Patch,
     rebuild::Rebuild,
     remove::Remove,
     run::Run,

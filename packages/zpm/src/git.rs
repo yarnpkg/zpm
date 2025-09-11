@@ -55,6 +55,64 @@ pub async fn detect_git_operation(p: &Path) -> Result<Option<GitOperation>, Erro
     Ok(None)
 }
 
+static DIFF_PATH_NORMALIZER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^/?(.*)/?$").unwrap());
+
+pub async fn diff_folders(original: &Path, user: &Path) -> Result<String, Error> {
+    let diff_command = ScriptEnvironment::new()?
+        // These variables aim to ignore the global git config so we get predictable output
+        // https://git-scm.com/docs/git#Documentation/git.txt-codeGITCONFIGNOSYSTEMcode
+        .with_env_variable("GIT_CONFIG_NOSYSTEM", "1")
+        .with_env_variable("HOME", "")
+        .with_env_variable("XDG_CONFIG_HOME", "")
+        .with_env_variable("USERPROFILE", "")
+
+        .run_exec("git", &[
+            "-c", "core.safecrlf=false",
+            "diff",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "--ignore-cr-at-eol",
+            "--full-index",
+            "--no-index",
+            "--no-renames",
+            "--text",
+            original.as_str(),
+            user.as_str()
+        ])
+
+        .await?
+        .output();
+
+    if !diff_command.stderr.is_empty() {
+        return Err(Error::DiffFailed(String::from_utf8_lossy(&diff_command.stderr).into_owned()));
+    }
+
+    if diff_command.stdout.is_empty() {
+        return Err(Error::EmptyDiff);
+    }
+
+    let diff
+        = String::from_utf8(diff_command.stdout)?;
+
+    let original_path_normalized
+        = DIFF_PATH_NORMALIZER.replace(original.as_str(), "/$1/").to_string();
+    let user_path_normalized
+        = DIFF_PATH_NORMALIZER.replace(user.as_str(), "/$1/").to_string();
+
+    let original_path_escaped
+        = regex::escape(&original_path_normalized);
+    let user_path_escaped
+        = regex::escape(&user_path_normalized);
+
+    let regex
+        = Regex::new(format!("(a|b)({}|{})", original_path_escaped, user_path_escaped).as_str()).unwrap();
+
+    let diff
+        = regex.replace_all(&diff, "$1/").to_string();
+
+    Ok(diff)
+}
+
 fn validate_repo_url(url: &str, config: &HttpConfig) -> Result<(), Error> {
     let git_url
         = GitUrl::parse(url)

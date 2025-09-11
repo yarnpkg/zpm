@@ -27,6 +27,9 @@ pub enum Error {
     #[error("Failed to hydrate the requested setting: {0}")]
     ConfigurationHydrateError(#[from] zpm_config::HydrateError),
 
+    #[error("Invalid locator: {0}")]
+    LocatorError(#[from] zpm_primitives::LocatorError),
+
     #[error("Generic internal error: Please replace this error with a more specific one")]
     ReplaceMe,
 
@@ -56,6 +59,15 @@ pub enum Error {
 
     #[error("Git returned an error when attempting to autofix the lockfile: {0}")]
     LockfileAutofixGitError(String),
+
+    #[error("The argument folder didn't get created by 'yarn patch'")]
+    NotAPatchFolder(Path),
+
+    #[error("Git returned an error when attempting to diff the folders: {0}")]
+    DiffFailed(String),
+
+    #[error("No changes found when attempting to diff the folders")]
+    EmptyDiff,
 
     #[error("The lockfile is a v1 lockfile; please first migrate to Yarn Berry then migrate again to Yarn ZPM")]
     LockfileV1Error,
