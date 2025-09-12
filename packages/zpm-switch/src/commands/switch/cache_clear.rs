@@ -5,6 +5,7 @@ use crate::{cache, errors::Error};
 
 #[cli::command]
 #[cli::path("switch", "cache", "clear")]
+#[cli::path("switch", "cache", "clean")]
 #[derive(Debug)]
 pub struct CacheClearCommand {
     #[cli::option("--old", default = false)]
@@ -41,7 +42,8 @@ impl CacheClearCommand {
             }
         } else {
             cache_dir
-                .fs_rm()?;
+                .fs_rm()
+                .ok_missing()?;
         }
 
         Ok(())
