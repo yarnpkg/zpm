@@ -252,10 +252,6 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
 
         if !gitignore_path.fs_exists() {
             let gitignore_content = vec![
-                ".yarn/ignore/*\n",
-                "\n",
-                "# Whether you use PnP or not, the node_modules folder is often used to store\n",
-                "# build artifacts that should be gitignored\n",
                 "node_modules\n",
             ];
 

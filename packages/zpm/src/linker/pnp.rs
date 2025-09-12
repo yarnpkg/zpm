@@ -2,7 +2,7 @@ use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 
 use zpm_config::PnpFallbackMode;
 use zpm_primitives::{Ident, Locator, Reference};
-use zpm_utils::{Path, SyncEntryKind, ToHumanString};
+use zpm_utils::{IoResultExt, Path, SyncEntryKind, ToHumanString};
 use sha2::{Sha512, Digest};
 use hex;
 use itertools::Itertools;
@@ -242,7 +242,19 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
     let mut package_build_entries
         = BTreeMap::new();
 
-    let mut unplugged_packages
+    let unplugged_path
+        = project.unplugged_path();
+
+    let mut extraneous_unplugged_packages
+        = unplugged_path.fs_read_dir()
+            .ok_missing()?
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| Path::try_from(entry.path()).ok())
+            .collect::<BTreeSet<_>>();
+
+    let mut concrete_unplugged_packages
         = BTreeMap::new();
 
     for (locator, resolution) in &tree.locator_resolutions {
@@ -310,20 +322,25 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         if locator.reference.is_disk_reference() {
             is_physically_on_disk = true;
         } else if package_build_info.must_extract {
-            package_location_abs = project.project_cwd
-                .with_join_str(".yarn/unplugged")
-                .with_join_str(format!("{}-{}-{}", locator.ident.slug(), locator.reference.slug(), yarn_berry_hash(locator)?))
+            let package_unplugged_wrapper_path = unplugged_path
+                .with_join_str(format!("{}-{}-{}", locator.ident.slug(), locator.reference.slug(), yarn_berry_hash(locator)?));
+
+            package_location_abs = package_unplugged_wrapper_path
                 .with_join(&physical_package_data.package_subpath());
 
-            is_freshly_unplugged = linker::helpers::fs_extract_archive(
-                &package_location_abs,
-                physical_package_data,
-            )?;
+            if !matches!(physical_package_data, PackageData::MissingZip {..}) {
+                extraneous_unplugged_packages.remove(&package_unplugged_wrapper_path);
 
-            unplugged_packages.insert(
-                locator.clone(),
-                package_location_abs.clone(),
-            );
+                concrete_unplugged_packages.insert(
+                    locator.clone(),
+                    package_location_abs.clone(),
+                );
+
+                is_freshly_unplugged = linker::helpers::fs_extract_archive(
+                    &package_location_abs,
+                    physical_package_data,
+                )?;
+            }
 
             is_physically_on_disk = true;
         }
@@ -363,7 +380,10 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
 
         if let Some(build_commands) = package_build_info.build_commands {
             let build_cwd = match is_physically_on_disk {
-                true => package_location_rel.clone(),
+                true => {
+                    package_location_rel.clone()
+                },
+
                 false => {
                     let build_dir_pattern
                         = format!("zpm/{}/build/<>", locator.slug());
@@ -388,6 +408,10 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         }
     }
 
+    for path in extraneous_unplugged_packages {
+        path.fs_rm()?;
+    }
+
     // Native dynamic libraries sometimes have runtime dependencies on other dynamic libraries. They
     // address that by using rpath to encode the place where those dependencies can be found. In
     // typical node_modules structures that's either node_modules/<dependency_name>, or one of the
@@ -397,7 +421,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
     // To solve this, detect cases where an unplugged package depends on another unplugged package
     // and create a symlink between them in node_modules/<dependency_name>. See `sharp` for an example.
 
-    for (locator, package_location_abs) in &unplugged_packages {
+    for (locator, package_location_abs) in &concrete_unplugged_packages {
         let resolution
             = tree.locator_resolutions.get(locator)
                 .expect("Failed to find resolution for unplugged package");
@@ -413,7 +437,7 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
             let dependency_locator
                 = dependency.physical_locator();
 
-            let Some(dependency_location_abs) = unplugged_packages.get(&dependency_locator) else {
+            let Some(dependency_location_abs) = concrete_unplugged_packages.get(&dependency_locator) else {
                 continue;
             };
 
