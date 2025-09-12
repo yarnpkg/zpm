@@ -37,4 +37,3 @@ pub mod script;
 pub mod scratchpad;
 pub mod system;
 pub mod tree_resolver;
-pub mod ui;

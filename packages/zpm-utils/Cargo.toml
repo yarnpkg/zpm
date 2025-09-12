@@ -27,3 +27,5 @@ wax = { git = "https://github.com/arcanis/wax.git" }
 erased-serde = "0.4.6"
 num = "0.4.3"
 rstest = "0.26.1"
+indexmap = {version = "2.11.0", features = ["serde"]}
+timeago = "0.5.0"

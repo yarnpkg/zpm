@@ -6,7 +6,7 @@ use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
 use zpm_config::Configuration;
 use zpm_primitives::{Descriptor, Locator};
 use zpm_switch::get_bin_version;
-use zpm_utils::{Path, ToHumanString};
+use zpm_utils::{DataType, Path, ToHumanString};
 
 use crate::error::Error;
 
@@ -131,6 +131,15 @@ impl StreamReportConfig {
 pub enum Severity {
     Info,
     Error,
+}
+
+impl Severity {
+    pub fn color(&self) -> DataType {
+        match self {
+            Severity::Info => DataType::Info,
+            Severity::Error => DataType::Error,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -338,8 +347,8 @@ impl Reporter {
         }
     }
 
-    fn format_prefix(&self, caret_color: Color) -> String {
-        format!("{} {}", "➤".color(caret_color), self.format_indent())
+    fn format_prefix(&self, severity: Severity) -> String {
+        format!("{} {}", severity.color().colorize("➤"), self.format_indent())
     }
 
     fn write_line<T: Write>(&mut self, writer: &mut T, line: &str, severity: Severity) {
@@ -351,10 +360,8 @@ impl Reporter {
 
         self.last_message_type = Some(LastMessageType::Line);
 
-        let prefix = self.format_prefix(match severity {
-            Severity::Info => Color::BrightBlue,
-            Severity::Error => Color::BrightRed,
-        });
+        let prefix
+            = self.format_prefix(severity);
 
         if let Some(buffered_lines) = &mut self.buffered_lines {
             buffered_lines.push(format!("{}{}", prefix, line));

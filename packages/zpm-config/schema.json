@@ -48,7 +48,7 @@
     "enableProgressBars": {
       "type": "boolean",
       "description": "Whether to show progress bars in the output",
-      "default": "!zpm_ci::is_ci().is_some() && std::io::IsTerminal::is_terminal(&std::io::stdout())"
+      "default": "zpm_ci::is_terminal()"
     },
     "enableScripts": {
       "type": "boolean",

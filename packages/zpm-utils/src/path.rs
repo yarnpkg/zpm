@@ -433,6 +433,15 @@ impl Path {
         Ok(self)
     }
 
+    pub fn fs_set_modified(&self, modified: std::time::SystemTime) -> Result<&Self, PathError> {
+        let file
+            = std::fs::File::open(self.to_path_buf())?;
+
+        file.set_modified(modified)?;
+
+        Ok(self)
+    }
+
     pub fn fs_append<T: AsRef<[u8]>>(&self, data: T) -> Result<&Self, PathError> {
         let mut file = std::fs::OpenOptions::new()
             .append(true)
