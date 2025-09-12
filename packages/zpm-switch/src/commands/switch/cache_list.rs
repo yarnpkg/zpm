@@ -44,12 +44,12 @@ impl CacheListCommand {
                 label: None,
                 value: Some(AbstractValue::new(entry_meta.version)),
                 children: Some(tree::TreeNodeChildren::Map(tree::Map::from([
-                    ("Path".to_string(), tree::Node {
+                    ("path".to_string(), tree::Node {
                         label: Some("Path".to_string()),
                         value: Some(AbstractValue::new(entry_path)),
                         children: None,
                     }),
-                    ("Age".to_string(), tree::Node {
+                    ("age".to_string(), tree::Node {
                         label: Some("Age".to_string()),
                         value: Some(AbstractValue::new(TimeAgo::new(entry_age.elapsed().unwrap()))),
                         children: None,

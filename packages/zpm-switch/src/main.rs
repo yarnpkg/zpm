@@ -1,12 +1,12 @@
 use std::process::ExitCode;
 
-mod attachments;
 mod cache;
 mod commands;
 mod cwd;
 mod errors;
 mod http;
 mod install;
+mod links;
 mod manifest;
 mod yarn_enums;
 mod yarn;

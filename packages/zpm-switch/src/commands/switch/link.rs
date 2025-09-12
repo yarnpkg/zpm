@@ -1,16 +1,16 @@
 use clipanion::cli;
 use zpm_utils::{Path, ToHumanString};
 
-use crate::{attachments::{set_attachment, Attachment}, cwd::get_final_cwd, errors::Error, manifest::find_closest_package_manager};
+use crate::{links::{set_link, Link}, cwd::get_final_cwd, errors::Error, manifest::find_closest_package_manager};
 
 #[cli::command]
-#[cli::path("switch", "attach")]
+#[cli::path("switch", "link")]
 #[derive(Debug)]
-pub struct AttachCommand {
+pub struct LinkCommand {
     path: Path,
 }
 
-impl AttachCommand {
+impl LinkCommand {
     pub async fn execute(&self) -> Result<(), Error> {
         let lookup_path
             = get_final_cwd()?;
@@ -22,12 +22,12 @@ impl AttachCommand {
             return Err(Error::ProjectNotFound);
         };
 
-        set_attachment(&Attachment {
+        set_link(&Link {
             project_cwd: detected_root_path.clone(),
             bin_path: self.path.fs_canonicalize()?,
         })?;
 
-        println!("Attached {} to {}", self.path.to_print_string(), detected_root_path.to_print_string());
+        println!("Linked {} to {}", self.path.to_print_string(), detected_root_path.to_print_string());
 
         Ok(())
     }

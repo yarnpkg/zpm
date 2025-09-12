@@ -10,12 +10,13 @@ pub mod proxy;
 pub mod switch;
 
 program_async!(SwitchExecCli, [
-    switch::attach::AttachCommand,
     switch::cache_clear::CacheClearCommand,
     switch::cache_list::CacheListCommand,
-    switch::detach::DetachCommand,
-    switch::postinstall::PostinstallCommand,
     switch::explicit::ExplicitCommand,
+    switch::links::LinksCommand,
+    switch::link::LinkCommand,
+    switch::postinstall::PostinstallCommand,
+    switch::unlink::UnlinkCommand,
     switch::version::VersionCommand,
     switch::which::WhichCommand,
     proxy::ProxyCommand,

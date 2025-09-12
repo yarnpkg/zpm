@@ -1,8 +1,9 @@
-pub mod attach;
 pub mod cache_clear;
 pub mod cache_list;
-pub mod detach;
 pub mod explicit;
+pub mod links;
+pub mod link;
 pub mod postinstall;
+pub mod unlink;
 pub mod version;
 pub mod which;
