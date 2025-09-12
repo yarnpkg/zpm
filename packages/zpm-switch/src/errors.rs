@@ -44,6 +44,9 @@ pub enum Error {
     #[error("Server answered with HTTP {0} ({1})")]
     HttpStatus(StatusCode, String),
 
+    #[error("Project not found")]
+    ProjectNotFound,
+
     #[error("Failed to retrieve the latest tag from the Yarn registry")]
     FailedToRetrieveLatestYarnTag,
 

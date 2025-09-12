@@ -298,7 +298,7 @@ impl Path {
         Ok(())
     }
 
-    pub fn fn_canonicalize(&self) -> Result<Path, PathError> {
+    pub fn fs_canonicalize(&self) -> Result<Path, PathError> {
         Ok(Path::try_from(std::fs::canonicalize(&self.path)?)?)
     }
 

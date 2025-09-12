@@ -1,5 +1,6 @@
 use std::process::ExitCode;
 
+mod attachments;
 mod cache;
 mod commands;
 mod cwd;

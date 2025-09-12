@@ -5,7 +5,7 @@ use serde::Deserialize;
 use zpm_macro_enum::zpm_enum;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, IoResultExt, Path, ToFileString, ToHumanString};
 
-use crate::errors::Error;
+use crate::{attachments::get_attachment, errors::Error};
 
 use zpm_semver::Version;
 
