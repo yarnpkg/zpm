@@ -139,7 +139,7 @@ impl PostinstallCommand {
             You will need to manually append the following line to your shell configuration file (perhaps {}?):
             {}
         ", profile.as_path().to_print_string(), DataType::Code.colorize(&profile.to_source_line(env_path)))).print();
-}
+    }
 
     fn write_env(&self, env_path: &Path, bin_dir: &Path, profile: &ShellProfile) {
         let env_path_lines

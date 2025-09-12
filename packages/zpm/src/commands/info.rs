@@ -1,13 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use clipanion::cli;
-use globset::GlobBuilder;
 use indexmap::IndexMap;
 use zpm_primitives::{DescriptorResolution, IdentGlob, Locator, Reference};
-use zpm_utils::{AbstractValue, Size, ToFileString};
+use zpm_utils::{tree, AbstractValue, Unit};
 
 use crate::{
-    cache::CompositeCache, error::Error, install::InstallState, project::{Project, Workspace}, ui::{self, tree::{Node, TreeNodeChildren}}
+    cache::CompositeCache, error::Error, install::InstallState, project::{Project, Workspace}
 };
 
 #[cli::command]
@@ -134,14 +133,14 @@ impl Info {
             ));
         }
 
-        let root_node = ui::tree::Node {
+        let root_node = tree::Node {
             label: None,
             value: None,
-            children: Some(ui::tree::TreeNodeChildren::Vec(root_children)),
+            children: Some(tree::TreeNodeChildren::Vec(root_children)),
         };
 
         let rendering
-            = ui::tree::TreeRenderer::new()
+            = tree::TreeRenderer::new()
                 .render(&root_node, self.json);
 
         print!("{}", rendering);
@@ -149,7 +148,7 @@ impl Info {
         Ok(())
     }
 
-    fn generate_info_node(&self, package_cache: &CompositeCache, install_state: &InstallState, dependent_map: &BTreeMap<Locator, BTreeSet<Locator>>, virtual_map: &BTreeMap<Locator, BTreeSet<Locator>>, locator: Locator) -> ui::tree::Node<'_> {
+    fn generate_info_node(&self, package_cache: &CompositeCache, install_state: &InstallState, dependent_map: &BTreeMap<Locator, BTreeSet<Locator>>, virtual_map: &BTreeMap<Locator, BTreeSet<Locator>>, locator: Locator) -> tree::Node<'_> {
         let mut children
             = IndexMap::new();
 
@@ -158,7 +157,7 @@ impl Info {
                 = install_state.normalized_resolutions.get(&locator)
                     .expect("Expected the locator to be in the normalized resolutions");
 
-            children.insert("Version".to_string(), Node {
+            children.insert("Version".to_string(), tree::Node {
                 label: Some("Version".to_string()),
                 value: Some(AbstractValue::new(resolution.version.clone())),
                 children: None,
@@ -174,7 +173,7 @@ impl Info {
                     .map(|metadata| metadata.len());
 
                 let mut cache_children = vec![
-                    Node {
+                    tree::Node {
                         label: Some("Path".to_string()),
                         value: Some(AbstractValue::new(cache_path)),
                         children: None,
@@ -182,17 +181,17 @@ impl Info {
                 ];
 
                 if let Some(cache_size) = cache_size {
-                    cache_children.push(Node {
+                    cache_children.push(tree::Node {
                         label: Some("Size".to_string()),
-                        value: Some(AbstractValue::new(Size::new(cache_size))),
+                        value: Some(AbstractValue::new(Unit::bytes(cache_size))),
                         children: None,
                     });
                 }
 
-                children.insert("Cache".to_string(), Node {
+                children.insert("Cache".to_string(), tree::Node {
                     label: Some("Cache".to_string()),
                     value: None,
-                    children: Some(TreeNodeChildren::Vec(cache_children)),
+                    children: Some(tree::TreeNodeChildren::Vec(cache_children)),
                 });
             }
 
@@ -200,22 +199,22 @@ impl Info {
                 = resolution.dependencies.values()
                     .map(|descriptor| (descriptor, &install_state.resolution_tree.descriptor_to_locator[descriptor]))
                     .map(|(descriptor, locator)| DescriptorResolution::new(descriptor.clone(), locator.clone()))
-                    .map(|descriptor_resolution| Node::new_value(descriptor_resolution))
+                    .map(|descriptor_resolution| tree::Node::new_value(descriptor_resolution))
                     .collect::<Vec<_>>();
 
             if dep_children.len() > 0 {
-                children.insert("Dependencies".to_string(), Node {
+                children.insert("Dependencies".to_string(), tree::Node {
                     label: Some("Dependencies".to_string()),
                     value: None,
-                    children: Some(TreeNodeChildren::Vec(dep_children)),
+                    children: Some(tree::TreeNodeChildren::Vec(dep_children)),
                 });
             }
         }
 
-        ui::tree::Node {
+        tree::Node {
             label: None,
             value: Some(AbstractValue::new(locator)),
-            children: Some(TreeNodeChildren::Map(children)),
+            children: Some(tree::TreeNodeChildren::Map(children)),
         }
     }
 

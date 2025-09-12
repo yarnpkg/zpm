@@ -2,10 +2,10 @@ use std::process::ExitCode;
 
 use clipanion::cli;
 use colored::Colorize;
-use zpm_utils::{AbstractValue, DataType, Path, ToFileString, ToHumanString};
+use zpm_utils::{tree, AbstractValue, DataType, Path, ToFileString, ToHumanString};
 use zpm_parsers::JsonFormatter;
 
-use crate::{constraints::{structs::{ConstraintsContext, ConstraintsOutput, WorkspaceError, WorkspaceOperation}, to_constraints_package, to_constraints_workspace}, error::Error, project::Project, script::ScriptEnvironment, ui::tree};
+use crate::{constraints::{structs::{ConstraintsContext, ConstraintsOutput, WorkspaceError, WorkspaceOperation}, to_constraints_package, to_constraints_workspace}, error::Error, project::Project, script::ScriptEnvironment};
 
 #[cli::command]
 #[cli::path("constraints")]

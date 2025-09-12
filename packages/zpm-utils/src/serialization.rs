@@ -164,6 +164,26 @@ impl ToHumanString for u64 {
     }
 }
 
+impl FromFileString for std::time::Duration {
+    type Error = std::num::ParseIntError;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        s.parse::<u64>().map(|s| std::time::Duration::from_secs(s as u64))
+    }
+}
+
+impl ToFileString for std::time::Duration {
+    fn to_file_string(&self) -> String {
+        self.as_secs().to_string()
+    }
+}
+
+impl ToHumanString for std::time::Duration {
+    fn to_print_string(&self) -> String {
+        DataType::Number.colorize(&self.to_file_string())
+    }
+}
+
 impl FromFileString for String {
     type Error = std::convert::Infallible;
 

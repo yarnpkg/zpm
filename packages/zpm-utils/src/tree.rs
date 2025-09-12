@@ -1,7 +1,10 @@
 use colored::Colorize;
 use indexmap::IndexMap;
 use serde::{ser::SerializeMap, Serialize};
-use zpm_utils::{AbstractValue, Extracted, ToHumanString};
+
+use crate::{AbstractValue, Extracted, ToHumanString};
+
+pub type Map<'a> = IndexMap<String, Node<'a>>;
 
 #[derive(Debug)]
 pub enum TreeNodeChildren<'a> {

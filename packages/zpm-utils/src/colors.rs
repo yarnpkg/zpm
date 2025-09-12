@@ -1,5 +1,17 @@
 use colored::{Color, Colorize};
 
+const INFO_COLOR: Color
+    = Color::BrightBlue;
+
+const WARNING_COLOR: Color
+    = Color::BrightYellow;
+
+const ERROR_COLOR: Color
+    = Color::BrightRed;
+
+const SUCCESS_COLOR: Color
+    = Color::BrightGreen;
+
 const STRING_COLOR: Color
     = Color::TrueColor { r: 50, g: 170, b: 80 };
 
@@ -25,6 +37,10 @@ const REFERENCE_COLOR: Color
     = Color::TrueColor { r: 135, g: 175, b: 255 };
 
 pub enum DataType {
+    Info,
+    Warning,
+    Error,
+    Success,
     String,
     Number,
     Boolean,
@@ -39,6 +55,10 @@ pub enum DataType {
 impl DataType {
     pub fn color(&self) -> Color {
         match self {
+            DataType::Info => INFO_COLOR,
+            DataType::Warning => WARNING_COLOR,
+            DataType::Error => ERROR_COLOR,
+            DataType::Success => SUCCESS_COLOR,
             DataType::String => STRING_COLOR,
             DataType::Number => NUMBER_COLOR,
             DataType::Boolean => BOOLEAN_COLOR,

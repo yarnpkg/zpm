@@ -14,6 +14,8 @@ mod serialization;
 mod system;
 mod url;
 
+pub mod tree;
+
 pub use crate::colors::*;
 pub use crate::errors::*;
 pub use crate::glob::*;

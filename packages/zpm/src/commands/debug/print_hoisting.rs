@@ -1,6 +1,7 @@
 use clipanion::cli;
+use zpm_utils::tree;
 
-use crate::{error::Error, linker::nm::hoist::{self, Hoister, InputTree, WorkTree}, project, ui};
+use crate::{error::Error, linker::nm::hoist::{self, Hoister, InputTree, WorkTree}, project};
 
 #[cli::command]
 #[cli::path("debug", "print-hoisting")]
@@ -40,7 +41,7 @@ impl PrintHoisting {
             = hoist::TreeRenderer::new(&work_tree).convert();
 
         let rendering
-            = ui::tree::TreeRenderer::new()
+            = tree::TreeRenderer::new()
                 .render(&root_node, self.json);
 
         print!("{}", rendering);
