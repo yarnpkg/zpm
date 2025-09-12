@@ -33,8 +33,8 @@ pub enum PathError {
         backtrace: Arc<std::backtrace::Backtrace>,
     },
 
-    #[error("UTF-8 path error: {0}")]
-    FromUtf8Error(#[from] std::str::Utf8Error),
+    #[error("Invalid UTF8 path")]
+    InvalidUtf8Path,
 
     #[error("Invalid explicit path parameter: {0}")]
     InvalidExplicitPathParameter(String),
@@ -56,5 +56,11 @@ impl From<std::io::Error> for PathError {
             inner: Arc::new(error),
             backtrace: Arc::new(std::backtrace::Backtrace::capture()),
         }
+    }
+}
+
+impl From<std::str::Utf8Error> for PathError {
+    fn from(error: std::str::Utf8Error) -> Self {
+        Self::InvalidUtf8Path
     }
 }

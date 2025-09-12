@@ -39,8 +39,11 @@ pub enum Error {
     #[error("Network error: {0}")]
     HttpError(#[from] Arc<reqwest::Error>),
 
-    #[error("{0}")]
+    #[error(transparent)]
     PathError(#[from] zpm_utils::PathError),
+
+    #[error(transparent)]
+    SyncError(#[from] zpm_utils::SyncError),
 
     #[error("Conflicting options: {0}")]
     ConflictingOptions(String),
