@@ -1,6 +1,10 @@
 pub mod cache_clear;
 pub mod cache_list;
 pub mod explicit;
+pub mod links_clear;
+pub mod links_list;
+pub mod link;
 pub mod postinstall;
+pub mod unlink;
 pub mod version;
 pub mod which;

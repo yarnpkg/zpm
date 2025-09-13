@@ -6,6 +6,7 @@ mod cwd;
 mod errors;
 mod http;
 mod install;
+mod links;
 mod manifest;
 mod yarn_enums;
 mod yarn;

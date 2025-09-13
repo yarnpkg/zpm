@@ -12,8 +12,12 @@ pub mod switch;
 program_async!(SwitchExecCli, [
     switch::cache_clear::CacheClearCommand,
     switch::cache_list::CacheListCommand,
-    switch::postinstall::PostinstallCommand,
     switch::explicit::ExplicitCommand,
+    switch::links_list::LinksListCommand,
+    switch::links_clear::LinksClearCommand,
+    switch::link::LinkCommand,
+    switch::postinstall::PostinstallCommand,
+    switch::unlink::UnlinkCommand,
     switch::version::VersionCommand,
     switch::which::WhichCommand,
     proxy::ProxyCommand,
@@ -39,7 +43,7 @@ pub async fn run_default() -> ExitCode {
 
     let env
         = Environment::default()
-            .with_program_name("Yarn Switch Wrapper".to_string())
+            .with_program_name("Yarn Switch".to_string())
             .with_binary_name("yarn".to_string())
             .with_version(version)
             .with_argv(args);

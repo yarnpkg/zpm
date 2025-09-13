@@ -3,11 +3,13 @@ use std::process::ExitStatus;
 use clipanion::cli;
 use zpm_utils::ToFileString;
 
-use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, manifest::{find_closest_package_manager, validate_package_manager}, yarn::get_default_yarn_version, yarn_enums::ReleaseLine};
+use crate::{links::get_link, cwd::{get_fake_cwd, get_final_cwd}, errors::Error, manifest::{find_closest_package_manager, validate_package_manager, LocalPackageManagerReference, PackageManagerField}, yarn::get_default_yarn_version, yarn_enums::ReleaseLine};
 
 use super::switch::explicit::ExplicitCommand;
 
 #[cli::command(default, proxy)]
+#[cli::category("General commands")]
+#[cli::description("Call the suitable Yarn binary for the current project")]
 #[derive(Debug)]
 pub struct ProxyCommand {
     args: Vec<String>,
@@ -18,11 +20,19 @@ impl ProxyCommand {
         let lookup_path
             = get_final_cwd()?;
 
-        let find_result
+        let mut find_result
             = find_closest_package_manager(&lookup_path)?;
 
         if let Some(detected_root_path) = find_result.detected_root_path {
             std::env::set_var("YARNSW_DETECTED_ROOT", detected_root_path.to_file_string());
+
+            if let Some(link) = get_link(&detected_root_path)? {
+                find_result.detected_package_manager = Some(PackageManagerField {
+                    name: "yarn".to_string(),
+                    reference: LocalPackageManagerReference {path: link.bin_path}.into(),
+                    checksum: None,
+                });
+            }
         }
 
         let reference = match find_result.detected_package_manager {

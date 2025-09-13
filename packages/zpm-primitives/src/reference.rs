@@ -54,7 +54,7 @@ pub enum Reference {
         checksum: Option<Hash64>,
     },
 
-    #[pattern(spec = r"virtual:(?<inner>.*)#(?<hash>[a-f0-9]*)$")]
+    #[pattern(spec = r"virtual:(?<hash>[a-f0-9]*)#(?<inner>.*)$")]
     Virtual {
         inner: Box<Reference>,
         hash: Hash64,
@@ -229,7 +229,7 @@ impl ToFileString for Reference {
             },
 
             Reference::Virtual(params) => {
-                format!("virtual:{}#{}", params.inner.to_file_string(), params.hash.to_file_string())
+                format!("virtual:{}#{}", params.hash.to_file_string(), params.inner.to_file_string())
             },
 
             Reference::WorkspaceIdent(params) => {
