@@ -5,6 +5,8 @@ use crate::{links::unset_link, cwd::get_final_cwd, errors::Error, manifest::find
 
 #[cli::command]
 #[cli::path("switch", "unlink")]
+#[cli::category("Local Yarn development")]
+#[cli::description("Unlink local Yarn binaries from the current project")]
 #[derive(Debug)]
 pub struct UnlinkCommand {
     project_cwd: Option<Path>,

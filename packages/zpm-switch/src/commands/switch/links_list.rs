@@ -5,11 +5,13 @@ use crate::{links::list_links, errors::Error};
 
 #[cli::command]
 #[cli::path("switch", "links")]
+#[cli::category("Local Yarn development")]
+#[cli::description("List all local links")]
 #[derive(Debug)]
-pub struct LinksCommand {
+pub struct LinksListCommand {
 }
 
-impl LinksCommand {
+impl LinksListCommand {
     pub async fn execute(&self) -> Result<(), Error> {
         let links
             = list_links()?;

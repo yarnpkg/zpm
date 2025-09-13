@@ -4,7 +4,9 @@ use zpm_utils::{tree, AbstractValue, IoResultExt, Path, TimeAgo};
 use crate::{cache, errors::Error};
 
 #[cli::command]
-#[cli::path("switch", "cache", "list")]
+#[cli::path("switch", "cache")]
+#[cli::category("Cache management")]
+#[cli::description("List all cached Yarn binaries")]
 #[derive(Debug)]
 pub struct CacheListCommand {
 }

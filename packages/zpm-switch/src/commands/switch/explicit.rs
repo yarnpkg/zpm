@@ -7,6 +7,8 @@ use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_
 
 #[cli::command(proxy)]
 #[cli::path("switch")]
+#[cli::category("General commands")]
+#[cli::description("Call a custom Yarn binary for the current project")]
 #[derive(Debug)]
 pub struct ExplicitCommand {
     selector: Selector,

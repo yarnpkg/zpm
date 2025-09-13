@@ -5,6 +5,8 @@ use crate::{links::{set_link, Link}, cwd::get_final_cwd, errors::Error, manifest
 
 #[cli::command]
 #[cli::path("switch", "link")]
+#[cli::category("Local Yarn development")]
+#[cli::description("Link a local Yarn binary to the current project")]
 #[derive(Debug)]
 pub struct LinkCommand {
     path: Path,
