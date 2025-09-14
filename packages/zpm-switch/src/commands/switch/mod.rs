@@ -6,5 +6,6 @@ pub mod links_list;
 pub mod link;
 pub mod postinstall;
 pub mod unlink;
+pub mod update;
 pub mod version;
 pub mod which;
