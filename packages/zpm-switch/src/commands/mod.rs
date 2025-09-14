@@ -18,6 +18,7 @@ program_async!(SwitchExecCli, [
     switch::link::LinkCommand,
     switch::postinstall::PostinstallCommand,
     switch::unlink::UnlinkCommand,
+    switch::update::UpdateCommand,
     switch::version::VersionCommand,
     switch::which::WhichCommand,
     proxy::ProxyCommand,
