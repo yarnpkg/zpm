@@ -26,12 +26,13 @@ jobs:
           - [Gatsby, gatsby]
         packageManager:
           - zpm
-          - classic
-          - yarn
-          - yarn-nm
-          - yarn-pnpm
-          - npm
-          - pnpm
+# We don't run those benchmarks here; they're run in the Berry repository
+#          - classic
+#          - yarn
+#          - yarn-nm
+#          - yarn-pnpm
+#          - npm
+#          - pnpm
 
     name: 'Benchmarking ${{matrix.benchmark[0]}} w/ ${{matrix.packageManager}}'
     runs-on: ubuntu-latest
