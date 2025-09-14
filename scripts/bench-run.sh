@@ -15,6 +15,10 @@ bench() {
   PREPARE_COMMAND=$1; shift
   BENCH_COMMAND=$1; shift
 
+  if [[ $PACKAGE_MANAGER == "zpm" ]]; then
+    cargo install flamegraph@0.6.9
+  fi
+
   echo "Testing $SUBTEST_NAME"
   hyperfine ${HYPERFINE_OPTIONS:-} --export-json=bench-$SUBTEST_NAME.json --min-runs=10 --warmup=1 --prepare="$PREPARE_COMMAND" "$BENCH_COMMAND"
 
