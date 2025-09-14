@@ -21,7 +21,7 @@ export TEST_BINARY="${REPO_DIR}/yarn.sh"
 export TEST_MAJOR="5"
 
 if [[ "$TEST_FLAMEGRAPH" == "1" ]]; then
-  cargo flamegraph --root -r -p zpm -o "$TEST_FLAMEGRAPH_OUTPUT" -- "$@"
+  ~/.cargo/bin/flamegraph --root -o "$TEST_FLAMEGRAPH_OUTPUT" -- "$ZPM_SWITCH_BINARY_PATH" "$@"
 else
   "$ZPM_SWITCH_BINARY_PATH" "$@"
 fi
