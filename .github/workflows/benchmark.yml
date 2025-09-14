@@ -4,6 +4,7 @@ on:
   schedule:
   # Every Monday and Friday at 2:00 AM UTC
   - cron: '0 2 * * 1,5'
+  push:
   workflow_dispatch:
     inputs:
       sendReport:
@@ -77,3 +78,9 @@ jobs:
       env:
         DD_API_KEY: ${{secrets.DD_API_KEY}}
         HYPERFINE_OPTIONS: ${{github.event.inputs.hyperfineOptions}}
+
+    - name: 'Upload the flamegraph'
+      uses: actions/upload-artifact@v4
+      with:
+        name: 'flamegraph-${{matrix.packageManager}}-${{matrix.benchmark[1]}}'
+        path: "$BENCH_DIR/flamegraphs/*"
