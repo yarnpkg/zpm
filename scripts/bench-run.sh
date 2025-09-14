@@ -19,8 +19,8 @@ bench() {
   hyperfine ${HYPERFINE_OPTIONS:-} --export-json=bench-$SUBTEST_NAME.json --min-runs=10 --warmup=1 --prepare="$PREPARE_COMMAND" "$BENCH_COMMAND"
 
   if [[ $PACKAGE_MANAGER == "zpm" ]]; then
-    "$PREPARE_COMMAND"
-    TEST_FLAMEGRAPH=1 TEST_FLAMEGRAPH_OUTPUT=flamegraphs/$PACKAGE_MANAGER-$SUBTEST_NAME.svg "$BENCH_COMMAND"
+    bash -c "$PREPARE_COMMAND"
+    TEST_FLAMEGRAPH=1 TEST_FLAMEGRAPH_OUTPUT=flamegraphs/$PACKAGE_MANAGER-$SUBTEST_NAME.svg bash -c "$BENCH_COMMAND"
   fi
 }
 
