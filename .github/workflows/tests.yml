@@ -23,6 +23,9 @@ jobs:
       url: "https://iteratum.ai/examples/jest-ui/?url=https%3A%2F%2Frepo.yarnpkg.com%2Fbuilds%2Fzpm%2Fcommits%2F${{github.sha}}%2Ftests"
 
     steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
       - uses: ./.github/actions/prepare
         with:
           target: x86_64-unknown-linux-musl

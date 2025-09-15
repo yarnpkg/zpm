@@ -10,9 +10,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Checkout the repo
-      uses: actions/checkout@v4
-
     - uses: actions/setup-node@v4
       with:
         node-version: '22'
