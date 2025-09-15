@@ -4091,7 +4091,7 @@ checksum = "626bd9fa9734751fc50d6060752170984d7053f5a39061f524cda68023d4db8a"
 
 [[package]]
 name = "zpm"
-version = "6.0.0-alpha.0"
+version = "0.0.0"
 dependencies = [
  "base64",
  "bincode",
@@ -4138,14 +4138,14 @@ dependencies = [
 
 [[package]]
 name = "zpm-ci"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "zpm-config"
-version = "6.0.0-alpha.0"
+version = "0.0.0"
 dependencies = [
  "bincode",
  "convert_case 0.8.0",
@@ -4165,7 +4165,7 @@ dependencies = [
 
 [[package]]
 name = "zpm-formats"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "bytes",
  "crc32fast",
@@ -4182,7 +4182,7 @@ dependencies = [
 
 [[package]]
 name = "zpm-git"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "bincode",
  "fancy-regex",
@@ -4195,7 +4195,7 @@ dependencies = [
 
 [[package]]
 name = "zpm-macro-enum"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "convert_case 0.8.0",
  "proc-macro2",
@@ -4208,14 +4208,14 @@ dependencies = [
 
 [[package]]
 name = "zpm-macro-helpers"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "syn",
 ]
 
 [[package]]
 name = "zpm-parsers"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "erased-serde",
  "indoc",
@@ -4248,7 +4248,7 @@ dependencies = [
 
 [[package]]
 name = "zpm-semver"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "bincode",
  "bincode_derive",
@@ -4262,7 +4262,7 @@ dependencies = [
 
 [[package]]
 name = "zpm-switch"
-version = "0.1.0"
+version = "6.0.0-rc.0"
 dependencies = [
  "assert_cmd",
  "bincode",
@@ -4288,7 +4288,7 @@ dependencies = [
 
 [[package]]
 name = "zpm-utils"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "bincode",
  "bincode_derive",

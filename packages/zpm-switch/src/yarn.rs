@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde_with::serde_as;
 use std::{collections::BTreeMap, fmt::Debug, str::FromStr};
-use zpm_semver::{Range, Version};
+use zpm_semver::{Range, Version, VersionRc};
 use zpm_utils::{ExplicitPath, FromFileString, Path, ToFileString};
 
 use crate::{errors::Error, http::fetch, manifest::{PackageManagerReference, VersionPackageManagerReference}, yarn_enums::{ChannelSelector, Selector}};
@@ -116,9 +116,21 @@ pub struct BinMeta {
 }
 
 pub fn get_bin_version() -> String {
-    option_env!("INFRA_VERSION")
-        .unwrap_or(env!("CARGO_PKG_VERSION"))
-        .to_string()
+    if let Some(version) = option_env!("INFRA_VERSION") {
+        return version.to_string();
+    }
+
+    let mut cargo_version
+        = zpm_semver::Version::from_str(env!("CARGO_PKG_VERSION"))
+            .expect("Failed to parse Cargo package version");
+
+    let mut rc = cargo_version.rc
+        .unwrap_or_default();
+
+    rc.push(VersionRc::String("local".to_string()));
+
+    cargo_version.rc = Some(rc);
+    cargo_version.to_file_string()
 }
 
 pub fn extract_bin_meta() -> BinMeta {

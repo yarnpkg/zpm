@@ -36,7 +36,7 @@ runs:
         git_sha=$GITHUB_SHA
         git_date=$(git show -s --format=%cd --date=format:'%Y%m%d' $GITHUB_SHA)
 
-        zpm_version=$(cargo pkgid -p zpm | cut -d "#" -f2 | cut -d- -f1)
+        zpm_version=$(cargo pkgid -p zpm-switch | cut -d "#" -f2 | cut -d- -f1)
         INFRA_VERSION=$zpm_version-git.${git_date}.hash-${git_sha}
 
         echo -e "INFRA_VERSION=$INFRA_VERSION" >> $GITHUB_ENV
