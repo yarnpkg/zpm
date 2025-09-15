@@ -14,3 +14,5 @@ flamegraph.svg
 /.yarn/ignore
 /.yarn/cache
 /.yarn/unplugged
+
+/local

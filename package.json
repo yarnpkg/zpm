@@ -12,7 +12,7 @@
     "typescript": "^5.8.3"
   },
   "scripts": {
-    "berry": "export TEST_BINARY=$PROJECT_CWD/target/release/yarn && export YARNSW_DEFAULT=local:$PROJECT_CWD/target/release/yarn-bin && export TEST_MAJOR=5 && cd ${BERRY_DIR:-../berry} && yarn"
+    "berry": "export TEST_BINARY=$PROJECT_CWD/local/yarn && export YARNSW_DEFAULT=local:$PROJECT_CWD/local/yarn-bin && export TEST_MAJOR=5 && cd ${BERRY_DIR:-../berry} && yarn"
   },
   "dependencies": {
     "clipanion": "^4.0.0-rc.4"

@@ -33,7 +33,7 @@ jobs:
 
       - name: Copy files to the standard local path
         run: |
-          cp -rf target/x86_64-unknown-linux-musl/release target/
+          ln -rs target/x86_64-unknown-linux-musl/release local
 
       - name: Clone the berry repo
         uses: actions/checkout@v4

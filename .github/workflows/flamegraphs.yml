@@ -26,7 +26,7 @@ jobs:
 
     - name: Copy files to the standard local path
       run: |
-        cp -rf target/aarch64-apple-darwin/release-lto target/release
+        ln -rs target/aarch64-apple-darwin/release-lto local
 
     - name: Install Flamegraph
       run: |
