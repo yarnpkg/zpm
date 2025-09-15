@@ -36,6 +36,10 @@ jobs:
         target: x86_64-unknown-linux-musl
         profile: release-lto
 
+    - name: Copy files to the standard local path
+      run: |
+        cp -rf target/x86_64-unknown-linux-musl/release-lto target/
+
     - name: Install Flamegraph
       run: |
         cargo install flamegraph@0.6.9
