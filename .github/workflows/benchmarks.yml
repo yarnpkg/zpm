@@ -3,6 +3,7 @@ name: 'Performance tests'
 on:
   schedule:
   - cron: '0 2-23/4 * * *'
+  push:
   workflow_dispatch:
     inputs:
       sendReport:
