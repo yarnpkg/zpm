@@ -36,7 +36,6 @@ zpm-config = { path = "../zpm-config" }
 zpm-formats = { path = "../zpm-formats" }
 zpm-git = { path = "../zpm-git" }
 zpm-macro-enum = { path = "../zpm-macro-enum" }
-zpm-macros = { path = "../zpm-macros" }
 zpm-parsers = { path = "../zpm-parsers" }
 zpm-primitives = { path = "../zpm-primitives" }
 zpm-semver = { path = "../zpm-semver" }

@@ -4129,7 +4129,6 @@ dependencies = [
  "zpm-formats",
  "zpm-git",
  "zpm-macro-enum",
- "zpm-macros",
  "zpm-parsers",
  "zpm-primitives",
  "zpm-semver",
@@ -4215,18 +4214,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zpm-macros"
-version = "0.1.0"
-dependencies = [
- "convert_case 0.8.0",
- "proc-macro2",
- "quote",
- "regex",
- "rstest 0.22.0",
- "syn",
-]
-
-[[package]]
 name = "zpm-parsers"
 version = "0.1.0"
 dependencies = [
@@ -4295,7 +4282,6 @@ dependencies = [
  "zpm-ci",
  "zpm-formats",
  "zpm-macro-enum",
- "zpm-macros",
  "zpm-semver",
  "zpm-utils",
 ]

@@ -6,23 +6,35 @@ It's a work in progress and is not meant to be used in production.
 
 ## Usage
 
-1. Clone both this repository and the `berry` repository.
+1. Make sure you have Yarn Switch installed.
+
+```bash
+curl -s https://repo.yarnpkg.com/install | bash
+```
+
+2. Clone both this repository and the `berry` repository next to each other.
 
 ```bash
 git clone https://github.com/yarnpkg/zpm.git
 git clone https://github.com/yarnpkg/berry.git
 ```
 
-2. Build the project. We build in release mode to reproduce as closely as possible the performances in which zpm will be used. Rust is known to be significantly slower in debug mode.
+3. Move into the `zpm` directory, then build the project. We build in release mode to reproduce as closely as possible the performances in which zpm will be used. Rust is known to be significantly slower in debug mode.
 
 ```bash
-cd zpm && cargo build -r -p zpm-switch -p zpm
+cargo build --release -p zpm-switch -p zpm
 ```
 
-3. Run the tests.
+4. (optional) Configure Yarn Switch to use your local binary when working on this repository.
 
 ```bash
-cd zpm && ./yarn.sh berry test:integration
+yarn switch link target/release/yarn-bin
+```
+
+5. Run the tests.
+
+```bash
+yarn berry test:integration
 ```
 
 > [!NOTE]

@@ -5,7 +5,6 @@ use zpm_utils::{to_shell_line, FromFileString, Path, ToFileString};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
-use zpm_macros::track_time;
 
 use crate::{
     error::Error,

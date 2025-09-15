@@ -517,13 +517,6 @@
         ]
       }
     },
-    "husky@npm:^9.1.7": {
-      "checksum": "cf70bb463a88536420362946cef67186b4d52e3b81bb637085e6e44380cbc98f6ccd234a193cfb73a709494320440d34cd4d75f01fcf0928f344fca126392762",
-      "resolution": {
-        "resolution": "husky@npm:9.1.7",
-        "version": "9.1.7"
-      }
-    },
     "lodash@npm:^4.17.21": {
       "checksum": "9c92ff31a61e1bb60f9c6629c19d5f4db12d60abd0b975b429e8349c947d98c9b343b49a58b74c7ad5bdb3afd0fc0bfdb82968b70fade7388716ea3c82153042",
       "resolution": {
@@ -542,7 +535,6 @@
           "@yarnpkg/types": "^4.0.1",
           "clipanion": "^4.0.0-rc.4",
           "esbuild": "^0.25.5",
-          "husky": "^9.1.7",
           "lodash": "^4.17.21",
           "typescript": "^5.8.3"
         }

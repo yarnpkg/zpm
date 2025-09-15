@@ -15,16 +15,12 @@ bench() {
   PREPARE_COMMAND=$1; shift
   BENCH_COMMAND=$1; shift
 
-  if [[ $PACKAGE_MANAGER == "zpm" ]]; then
-    cargo install flamegraph@0.6.9
-  fi
-
   echo "Testing $SUBTEST_NAME"
-  hyperfine ${HYPERFINE_OPTIONS:-} --export-json=bench-$SUBTEST_NAME.json --min-runs=10 --warmup=1 --prepare="$PREPARE_COMMAND" "$BENCH_COMMAND"
+  # hyperfine ${HYPERFINE_OPTIONS:-} --export-json=bench-$SUBTEST_NAME.json --min-runs=10 --warmup=1 --prepare="$PREPARE_COMMAND" "$BENCH_COMMAND"
 
   if [[ $PACKAGE_MANAGER == "zpm" ]]; then
     bash -c "$PREPARE_COMMAND"
-    TEST_FLAMEGRAPH=1 TEST_FLAMEGRAPH_OUTPUT=flamegraphs/$PACKAGE_MANAGER-$SUBTEST_NAME.svg bash -c "$BENCH_COMMAND"
+    ~/.cargo/bin/flamegraph --root -o flamegraphs/$PACKAGE_MANAGER-$SUBTEST_NAME.svg bash -c "$BENCH_COMMAND"
   fi
 }
 
@@ -40,7 +36,7 @@ else
   echo "Reflink aren't supported! Installs may be quite slower than necessary"
 fi
 
-ZPM_PATH="${HERE_DIR}/../yarn.sh"
+ZPM_PATH="${HERE_DIR}/../target/release/yarn-bin"
 
 setup-zpm() {
   export YARN_GLOBAL_FOLDER="${BENCH_DIR}/.yarn-global"

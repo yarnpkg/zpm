@@ -13,7 +13,7 @@ cargo build -p zpm -r
 The ZPM codebase can run all tests from the Yarn Berry repository. To do that, clone github.com/yarnpkg/berry inside your home folder then run the following command from the ZPM repository:
 
 ```bash
-./yarn.sh berry test:integration {jest options}
+yarn berry test:integration {jest options}
 ```
 
 The integration tests can sometimes fail due to being overly dependent on the Yarn Berry implementation. Some examples:
