@@ -3,7 +3,6 @@ name: 'Performance tests'
 on:
   schedule:
   - cron: '0 2-23/4 * * *'
-  push:
   workflow_dispatch:
     inputs:
       sendReport:
@@ -56,7 +55,7 @@ jobs:
 
     - name: 'Run the performance test'
       run: |
-        bash scripts/bench-run.sh zpm '${{matrix.benchmark[1]}}' "$BENCH_DIR"
+        bash scripts/bench-run.sh zpm '${{matrix.benchmark[1]}}' hyperfine "$BENCH_DIR"
 
         if [[ '${{github.event_name}}' != 'push' && '${{github.event.inputs.sendReport}}' != 'false' ]]; then
           yarn node scripts/submit-bench-data.js zpm '${{matrix.benchmark[1]}}' "$BENCH_DIR"

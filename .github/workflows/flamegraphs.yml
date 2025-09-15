@@ -1,0 +1,48 @@
+name: 'Flamegraphs'
+
+on:
+  push:
+
+jobs:
+  flamegraphs:
+    strategy:
+      fail-fast: false
+      matrix:
+        benchmark:
+          - [Next.js, next]
+          - [Gatsby, gatsby]
+
+    name: 'Generating flamegraphs for the ${{matrix.benchmark[0]}} benchmark'
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout the repo
+      uses: actions/checkout@v4
+
+    - uses: ./.github/actions/prepare
+      with:
+        target: aarch64-apple-darwin
+        profile: release-lto
+
+    - name: Copy files to the standard local path
+      run: |
+        cp -rf target/aarch64-apple-darwin/release-lto target/release
+
+    - name: Install Flamegraph
+      run: |
+        cargo install flamegraph@0.6.9
+
+    - name: 'Creates a temporary directory'
+      run: |
+        BENCH_DIR=$(mktemp -d)
+        echo "BENCH_DIR=$BENCH_DIR" >> "$GITHUB_ENV"
+
+    - name: 'Run the performance test'
+      run: |
+        sudo bash scripts/bench-run.sh zpm '${{matrix.benchmark[1]}}' flamegraph "$BENCH_DIR"
+
+    - name: 'Upload the flamegraph'
+      uses: actions/upload-artifact@v4
+      with:
+        name: 'flamegraph-zpm-${{matrix.benchmark[1]}}'
+        path: "$BENCH_DIR/flamegraphs/*"

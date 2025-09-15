@@ -4,10 +4,12 @@ set -e
 
 PACKAGE_MANAGER=$1; shift
 TEST_NAME=$1; shift
+TEST_MODE=$1; shift
 BENCH_DIR=$1; shift
 
 HERE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
+echo "BENCH_DIR: $BENCH_DIR"
 cd "$BENCH_DIR"
 
 bench() {
@@ -17,11 +19,18 @@ bench() {
   FLAMEGRAPH_COMMAND=$1; shift
 
   echo "Testing $SUBTEST_NAME"
-  # hyperfine ${HYPERFINE_OPTIONS:-} --export-json=bench-$SUBTEST_NAME.json --min-runs=10 --warmup=1 --prepare="$PREPARE_COMMAND" "$BENCH_COMMAND"
 
-  if [[ "$FLAMEGRAPH_COMMAND" != "" ]]; then
+  if [[ "$TEST_MODE" == "flamegraph" ]]; then
+    mkdir -p flamegraphs
+
+    (bash -c "$PREPARE_COMMAND" && bash -c "$BENCH_COMMAND") >& /dev/null || true
+
     bash -c "$PREPARE_COMMAND"
     bash -c "$FLAMEGRAPH_COMMAND"
+  fi
+
+  if [[ "$TEST_MODE" == "hyperfine" ]]; then
+    hyperfine ${HYPERFINE_OPTIONS:-} --export-json=bench-$SUBTEST_NAME.json --min-runs=10 --warmup=1 --prepare="$PREPARE_COMMAND" "$BENCH_COMMAND"
   fi
 }
 
@@ -93,19 +102,19 @@ case $PACKAGE_MANAGER in
     bench install-full-cold \
       'rm -rf .yarn .pnp.* yarn.lock .yarn-global' \
       "$ZPM_PATH install" \
-      "~/.cargo/bin/flamegraph --root -o flamegraphs/zpm-install-full-cold.svg -- $ZPM_PATH install"
+      "~/.cargo/bin/flamegraph -o flamegraphs/zpm-install-full-cold.svg -- $ZPM_PATH install"
     bench install-cache-only \
       'rm -rf .yarn .pnp.* yarn.lock' \
       "$ZPM_PATH install" \
-      "~/.cargo/bin/flamegraph --root -o flamegraphs/zpm-install-cache-only.svg -- $ZPM_PATH install"
+      "~/.cargo/bin/flamegraph -o flamegraphs/zpm-install-cache-only.svg -- $ZPM_PATH install"
     bench install-cache-and-lock \
       'rm -rf .yarn .pnp.*' \
       "$ZPM_PATH install" \
-      "~/.cargo/bin/flamegraph --root -o flamegraphs/zpm-install-cache-and-lock.svg -- $ZPM_PATH install"
+      "~/.cargo/bin/flamegraph -o flamegraphs/zpm-install-cache-and-lock.svg -- $ZPM_PATH install"
     bench install-ready \
       "$ZPM_PATH remove dummy-pkg || true" \
       "$ZPM_PATH add dummy-pkg@link:./dummy-pkg" \
-      "~/.cargo/bin/flamegraph --root -o flamegraphs/zpm-install-ready.svg -- $ZPM_PATH add dummy-pkg@link:./dummy-pkg"
+      "~/.cargo/bin/flamegraph -o flamegraphs/zpm-install-ready.svg -- $ZPM_PATH add dummy-pkg@link:./dummy-pkg"
     ;;
   classic)
     bench install-full-cold \
