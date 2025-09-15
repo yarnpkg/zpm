@@ -46,7 +46,8 @@ else
   echo "Reflink aren't supported! Installs may be quite slower than necessary"
 fi
 
-ZPM_PATH="${HERE_DIR}/../target/release/yarn-bin"
+ls -l "${HERE_DIR}/../local/"
+ZPM_PATH="${HERE_DIR}/../local/yarn-bin"
 
 setup-zpm() {
   export YARN_GLOBAL_FOLDER="${BENCH_DIR}/.yarn-global"
