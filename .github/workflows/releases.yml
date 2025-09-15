@@ -76,7 +76,7 @@ jobs:
         with:
           name: yarn-${{matrix.target}}
           path: |
-            yarn-${{matrix.target}}.tar.gz
+            yarn-${{matrix.target}}.tgz
 
   release:
     if: needs.check.outputs.needs-release == 'true'
