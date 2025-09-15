@@ -37,7 +37,7 @@ jobs:
 
     - name: Copy files to the standard local path
       run: |
-        cp -rf target/x86_64-unknown-linux-musl/release-lto target/release
+        ln -s target/x86_64-unknown-linux-musl/release-lto local
 
     - name: Install Flamegraph
       run: |
