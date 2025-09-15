@@ -48,6 +48,10 @@ jobs:
         name: flamegraph-binary
         path: local
 
+    - name: Set the +x flag on the binaries
+      run: |
+        chmod +x local/{yarn,yarn-bin}
+
     - name: Install Flamegraph
       run: |
         cargo install flamegraph@0.6.9
