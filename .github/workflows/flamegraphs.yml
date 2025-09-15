@@ -3,30 +3,50 @@ name: 'Flamegraphs'
 on:
   push:
 
-jobs:
-  flamegraphs:
-    strategy:
-      fail-fast: false
-      matrix:
-        benchmark:
-          - [Next.js, next]
-          - [Gatsby, gatsby]
+env:
+  CARGO_TERM_COLOR: always
 
-    name: 'Generating flamegraphs for the ${{matrix.benchmark[0]}} benchmark'
+jobs:
+  build:
+    name: 'Building the flamegraph binary'
     runs-on: macos-latest
 
     steps:
     - name: Checkout the repo
       uses: actions/checkout@v4
 
-    - uses: ./.github/actions/prepare
+    - name: Build the repository
+      uses: ./.github/actions/prepare
       with:
         target: aarch64-apple-darwin
         profile: release-lto
 
-    - name: Copy files to the standard local path
-      run: |
-        ln -s target/aarch64-apple-darwin/release-lto local
+    - name: Store the build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: flamegraph-binary
+        path: target/aarch64-apple-darwin/release-lto
+
+  flamegraphs:
+    strategy:
+      matrix:
+        benchmark:
+          - [Next.js, next]
+          - [Gatsby, gatsby]
+
+    needs: [build]
+
+    name: 'Generating the ${{matrix.benchmark[0]}} flamegraphs'
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout the repo
+      uses: actions/checkout@v4
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: flamegraph-binary
+        path: local
 
     - name: Install Flamegraph
       run: |
@@ -44,5 +64,5 @@ jobs:
     - name: 'Upload the flamegraph'
       uses: actions/upload-artifact@v4
       with:
-        name: flamegraph-zpm-${{matrix.benchmark[1]}}
+        name: flamegraphs-${{matrix.benchmark[1]}}
         path: ${{steps.bench-dir.outputs.BENCH_DIR}}/flamegraphs

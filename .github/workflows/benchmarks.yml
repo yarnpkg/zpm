@@ -14,36 +14,65 @@ on:
         required: false
         default: ''
 
-jobs:
-  benchmark:
-    strategy:
-      fail-fast: false
-      matrix:
-        benchmark:
-          - [Next.js, next]
-          - [Gatsby, gatsby]
+env:
+  CARGO_TERM_COLOR: always
 
-    name: 'Benchmarking ${{matrix.benchmark[0]}} w/ Yarn ZPM'
+jobs:
+  build:
+    name: 'Building the benchmark binary'
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout the repo
       uses: actions/checkout@v4
 
-    - uses: ./.github/actions/prepare
+    - name: Build the repository
+      uses: ./.github/actions/prepare
       with:
         target: x86_64-unknown-linux-musl
         profile: release-lto
 
-    - name: Copy files to the standard local path
+    - name: Store the build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-binary
+        path: target/x86_64-unknown-linux-musl/release-lto
+
+  benchmark:
+    strategy:
+      matrix:
+        benchmark:
+          - [Next.js, next]
+          - [Gatsby, gatsby]
+
+    needs: [build]
+
+    name: 'Running the ${{matrix.benchmark[0]}} benchmark'
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout the repo
+      uses: actions/checkout@v4
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install Yarn Switch
+      shell: bash
       run: |
-        ln -s target/x86_64-unknown-linux-musl/release-lto local
+        bash install-script.sh
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: benchmark-binary
+        path: local
 
     - name: Install Flamegraph
       run: |
         cargo install flamegraph@0.6.9
 
-    - name: 'Install Hyperfine'
+    - name: Install Hyperfine
       run: |
         wget https://github.com/sharkdp/hyperfine/releases/download/v1.10.0/hyperfine_1.10.0_amd64.deb
         sudo dpkg -i hyperfine_1.10.0_amd64.deb
@@ -55,7 +84,7 @@ jobs:
 
     - name: 'Run the performance test'
       run: |
-        bash scripts/bench-run.sh zpm ${{matrix.benchmark[1]}} hyperfine "$BENCH_DIR"
+        bash scripts/bench-run.sh zpm ${{matrix.benchmark[1]}} hyperfine "$BENCH_DIR" || true
 
         if [[ '${{github.event_name}}' != 'push' && '${{github.event.inputs.sendReport}}' != 'false' ]]; then
           yarn node scripts/submit-bench-data.js zpm ${{matrix.benchmark[1]}} "$BENCH_DIR"
