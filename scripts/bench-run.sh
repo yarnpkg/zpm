@@ -21,7 +21,7 @@ bench() {
   echo "Testing $SUBTEST_NAME"
 
   if [[ "$TEST_MODE" == "flamegraph" ]]; then
-    mkdir -p flamegraphs
+    mkdir -p "$BENCH_DIR/flamegraphs"
 
     (bash -c "$PREPARE_COMMAND" && bash -c "$BENCH_COMMAND") >& /dev/null || true
 

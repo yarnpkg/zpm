@@ -33,16 +33,16 @@ jobs:
         cargo install flamegraph@0.6.9
 
     - name: 'Creates a temporary directory'
+      id: bench-dir
       run: |
-        BENCH_DIR=$(mktemp -d)
-        echo "BENCH_DIR=$BENCH_DIR" >> "$GITHUB_ENV"
+        echo "BENCH_DIR=$(mktemp -d)" >> "$GITHUB_OUTPUT"
 
     - name: 'Run the performance test'
       run: |
-        sudo bash scripts/bench-run.sh zpm '${{matrix.benchmark[1]}}' flamegraph "$BENCH_DIR"
+        sudo bash scripts/bench-run.sh zpm ${{matrix.benchmark[1]}} flamegraph ${{steps.bench-dir.outputs.BENCH_DIR}}
 
     - name: 'Upload the flamegraph'
       uses: actions/upload-artifact@v4
       with:
-        name: 'flamegraph-zpm-${{matrix.benchmark[1]}}'
-        path: "$BENCH_DIR/flamegraphs/*"
+        name: flamegraph-zpm-${{matrix.benchmark[1]}}
+        path: ${{steps.bench-dir.outputs.BENCH_DIR}}/flamegraphs
