@@ -14,13 +14,14 @@ bench() {
   SUBTEST_NAME=$1; shift
   PREPARE_COMMAND=$1; shift
   BENCH_COMMAND=$1; shift
+  FLAMEGRAPH_COMMAND=$1; shift
 
   echo "Testing $SUBTEST_NAME"
   # hyperfine ${HYPERFINE_OPTIONS:-} --export-json=bench-$SUBTEST_NAME.json --min-runs=10 --warmup=1 --prepare="$PREPARE_COMMAND" "$BENCH_COMMAND"
 
-  if [[ $PACKAGE_MANAGER == "zpm" ]]; then
+  if [[ "$FLAMEGRAPH_COMMAND" != "" ]]; then
     bash -c "$PREPARE_COMMAND"
-    ~/.cargo/bin/flamegraph --root -o flamegraphs/$PACKAGE_MANAGER-$SUBTEST_NAME.svg bash -c "$BENCH_COMMAND"
+    bash -c "$FLAMEGRAPH_COMMAND"
   fi
 }
 
@@ -91,16 +92,20 @@ case $PACKAGE_MANAGER in
     setup-zpm
     bench install-full-cold \
       'rm -rf .yarn .pnp.* yarn.lock .yarn-global' \
-      "$ZPM_PATH install"
+      "$ZPM_PATH install" \
+      "~/.cargo/bin/flamegraph --root -o flamegraphs/zpm-install-full-cold.svg -- $ZPM_PATH install"
     bench install-cache-only \
       'rm -rf .yarn .pnp.* yarn.lock' \
-      "$ZPM_PATH install"
+      "$ZPM_PATH install" \
+      "~/.cargo/bin/flamegraph --root -o flamegraphs/zpm-install-cache-only.svg -- $ZPM_PATH install"
     bench install-cache-and-lock \
       'rm -rf .yarn .pnp.*' \
-      "$ZPM_PATH install"
+      "$ZPM_PATH install" \
+      "~/.cargo/bin/flamegraph --root -o flamegraphs/zpm-install-cache-and-lock.svg -- $ZPM_PATH install"
     bench install-ready \
       "$ZPM_PATH remove dummy-pkg || true" \
-      "$ZPM_PATH add dummy-pkg@link:./dummy-pkg"
+      "$ZPM_PATH add dummy-pkg@link:./dummy-pkg" \
+      "~/.cargo/bin/flamegraph --root -o flamegraphs/zpm-install-ready.svg -- $ZPM_PATH add dummy-pkg@link:./dummy-pkg"
     ;;
   classic)
     bench install-full-cold \
