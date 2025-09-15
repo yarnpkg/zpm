@@ -6,6 +6,9 @@ inputs:
     description: 'The profile to build with'
     required: true
     default: 'release-lto-nodebug'
+  version:
+    description: 'The version of the build'
+    required: false
 
 outputs:
   version:
@@ -29,14 +32,19 @@ runs:
       id: version
       shell: bash
       run: |
-        git_sha=$GITHUB_SHA
-        git_date=$(git show -s --format=%cd --date=format:'%Y%m%d' $GITHUB_SHA)
+        zpm_version=${{inputs.version}}
 
-        zpm_version=$(cargo pkgid -p zpm-switch | cut -d "#" -f2 | cut -d- -f1)
-        INFRA_VERSION=$zpm_version-git.${git_date}.hash-${git_sha}
+        if [[ -z "$zpm_version" ]]; then
+          git_sha=$GITHUB_SHA
+          git_date=$(git show -s --format=%cd --date=format:'%Y%m%d' $GITHUB_SHA)
 
-        echo -e "INFRA_VERSION=$INFRA_VERSION" >> $GITHUB_ENV
-        echo -e "version=$INFRA_VERSION" >> $GITHUB_OUTPUT
+          git_suffix=git.${git_date}.hash-${git_sha}
+
+          zpm_version=$(cargo pkgid -p zpm-switch | cut -d "#" -f2 | cut -d- -f1)-${git_suffix}
+        fi
+
+        echo -e "INFRA_VERSION=$zpm_version" >> $GITHUB_ENV
+        echo -e "version=$zpm_version" >> $GITHUB_OUTPUT
 
     - name: Rust Cache
       uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0

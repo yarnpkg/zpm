@@ -1,0 +1,106 @@
+name: Releases
+
+on:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-release:
+    name: Checking if a release exists
+    runs-on: ubuntu-latest
+
+    outputs:
+      needs-release: ${{steps.check-release.outputs.needs-release}}
+      version: ${{steps.version.outputs.version}}
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
+      - name: Compute version
+        id: version
+        run: |
+          version=$(cargo pkgid -p zpm-switch | cut -d "#" -f2)
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Check if release exists
+        id: check-release
+        run: |
+          if gh release view "v${{steps.version.outputs.version}}" >/dev/null 2>&1; then
+            echo "needs-release=false" >> $GITHUB_OUTPUT
+            echo "Release v${{ steps.version.outputs.version }} already exists"
+          else
+            echo "needs-release=true" >> $GITHUB_OUTPUT
+            echo "Release v${{ steps.version.outputs.version }} does not exist"
+          fi
+        env:
+          GH_TOKEN: ${{github.token}}
+
+  build-release:
+    if: needs.check-release.outputs.needs-release == 'true'
+    needs: check-release
+
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+
+    name: 'Building ${{matrix.target}}'
+    runs-on: ${{matrix.os}}
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
+      - uses: ./.github/actions/build
+        id: build
+        with:
+          target: ${{matrix.target}}
+          profile: release-lto-nodebug
+          version: ${{needs.check-release.outputs.version}}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yarn-${{matrix.target}}
+          path: |
+            target/${{matrix.target}}/release-lto-nodebug/yarn-bin
+            target/${{matrix.target}}/release-lto-nodebug/yarn
+            target/${{matrix.target}}/release-lto-nodebug/LICENSE.md
+
+  release:
+    if: needs.check-release.outputs.needs-release == 'true'
+    needs: check-release
+
+    name: 'Creating a release'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
+      - name: Prepare release assets
+        run: |
+          gh run download -D artifacts ${{github.run_id}}
+        env:
+          GH_TOKEN: ${{github.token}}
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "v${{needs.check-release.outputs.version}}" \
+            --title "v${{needs.check-release.outputs.version}}" \
+            --target ${{github.ref}} \
+            --attach artifacts/*.zip
+        env:
+          GH_TOKEN: ${{github.token}}
