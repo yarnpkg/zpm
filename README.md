@@ -25,13 +25,19 @@ git clone https://github.com/yarnpkg/berry.git
 cargo build --release -p zpm-switch -p zpm
 ```
 
-4. (optional) Configure Yarn Switch to use your local binary when working on this repository.
+4. Configure the `local` symlink to point to the binaries you just built.
+
+```bash
+ln -s target/release local
+```
+
+5. (optional) Configure Yarn Switch to use your local binary when working on this repository.
 
 ```bash
 yarn switch link target/release/yarn-bin
 ```
 
-5. Run the tests.
+6. Run the tests.
 
 ```bash
 yarn berry test:integration

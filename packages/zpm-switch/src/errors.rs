@@ -29,6 +29,9 @@ pub enum Error {
     #[error("Unknown binary name: {0}")]
     UnknownBinaryName(String),
 
+    #[error("Cache not found: {version}", version = .0.to_print_string())]
+    CacheNotFound(zpm_semver::Version),
+
     #[error("Failed to get current executable path")]
     FailedToGetExecutablePath,
 
