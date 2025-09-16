@@ -4,7 +4,7 @@ use crate::{zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, G
 
 fn unpack_deflate(data: &[u8]) -> Result<Vec<u8>, Error> {
     let mut decoder
-        = flate2::read::DeflateDecoder::new(data);
+        = flate2::bufread::DeflateDecoder::new(data);
 
     let mut buffer
         = Vec::new();
@@ -52,7 +52,7 @@ impl<'a> ZipIterator<'a> {
         let name_offset
             = local_file_header_offset + std::mem::size_of::<GeneralRecord>();
         let data_offset
-            = name_offset + general_record.header.file_name_length as usize;
+            = name_offset + general_record.header.file_name_length as usize + general_record.header.extra_field_length as usize;
 
         let name
             = std::str::from_utf8(&self.buffer[name_offset..name_offset + general_record.header.file_name_length as usize])?;
@@ -111,8 +111,9 @@ impl<'a> Iterator for ZipIterator<'a> {
         };
 
         self.central_directory_record_offset += std::mem::size_of::<CentralDirectoryRecord>()
-            + general_record.header.file_name_length as usize
-            + general_record.header.extra_field_length as usize;
+            + central_directory_record.header.file_name_length as usize
+            + central_directory_record.header.extra_field_length as usize
+            + central_directory_record.file_comment_length as usize;
 
         Some(self.parse_entry_at(local_file_header_offset, central_directory_record, general_record))
     }
