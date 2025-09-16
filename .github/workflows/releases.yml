@@ -67,16 +67,16 @@ jobs:
           profile: release-lto-nodebug
           version: ${{needs.check.outputs.version}}
 
-      - name: Generate the tgz file
+      - name: Generate the archive files
         run: |
-          tar -czf yarn-${{matrix.target}}.tgz -C target/${{matrix.target}}/release-lto-nodebug yarn-bin yarn LICENSE.md
+          zip -j yarn-${{matrix.target}}.zip target/${{matrix.target}}/release-lto-nodebug/{yarn-bin,yarn,LICENSE.md}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: yarn-${{matrix.target}}
           path: |
-            yarn-${{matrix.target}}.tgz
+            yarn-${{matrix.target}}.zip
 
   release:
     if: needs.check.outputs.needs-release == 'true'
@@ -108,8 +108,9 @@ jobs:
 
           gh release create "v${{needs.check.outputs.version}}" \
             --title "v${{needs.check.outputs.version}}" \
+            --notes "Release of v${{needs.check.outputs.version}}" \
             --target ${{github.ref}} \
             $PRERELEASE_OPTIONS \
-            artifacts/*.tgz
+            artifacts/*
         env:
           GH_TOKEN: ${{github.token}}
