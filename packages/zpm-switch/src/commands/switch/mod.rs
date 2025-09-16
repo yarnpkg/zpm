@@ -1,3 +1,4 @@
+pub mod cache_check;
 pub mod cache_clear;
 pub mod cache_list;
 pub mod explicit;

@@ -95,7 +95,7 @@ async fn pretty_download<F: Future<Output = Result<(), Error>>>(key_data: &Cache
     result
 }
 
-pub async fn ensure<R: Future<Output = Result<(), Error>>, F: FnOnce(Path) -> R>(key_data: &CacheKey, f: F) -> Result<Path, Error> {
+fn access(key_data: &CacheKey) -> Result<(Path, bool), Error> {
     let key_string
         = sonic_rs::to_string(key_data).unwrap();
     let key_hash
@@ -109,34 +109,51 @@ pub async fn ensure<R: Future<Output = Result<(), Error>>, F: FnOnce(Path) -> R>
     let ready_path = cache_path
         .with_join_str(".ready");
 
-    if !ready_path.fs_exists() {
-        pretty_download(key_data, async {
-            let temp_dir
-                = Path::temp_dir()?;
+    Ok((cache_path, ready_path.fs_exists()))
+}
 
-            f(temp_dir.clone()).await?;
+pub fn check(key_data: &CacheKey) -> Result<bool, Error> {
+    Ok(access(key_data)?.1)
+}
 
-            temp_dir
-                .with_join_str("meta.json")
-                .fs_write(sonic_rs::to_string(&key_data)?)?;
+pub async fn ensure<R: Future<Output = Result<(), Error>>, F: FnOnce(Path) -> R>(key_data: &CacheKey, f: F) -> Result<Path, Error> {
+    match access(key_data)? {
+        (cache_path, true) => {
+            let ready_path = cache_path
+                .with_join_str(".ready");
 
-            temp_dir
-                .with_join_str(".ready")
-                .fs_write([])?;
+            ready_path
+                .fs_set_modified(std::time::SystemTime::now())?;
 
-            cache_path
-                .fs_create_parent()?;
+            Ok(cache_path)
+        },
 
-            temp_dir
-                .fs_move(&cache_path)
-                .ok_exists()?;
+        (cache_path, false) => {
+            pretty_download(key_data, async {
+                let temp_dir
+                    = Path::temp_dir()?;
 
-            Ok(())
-        }).await?;
-    } else {
-        ready_path
-            .fs_set_modified(std::time::SystemTime::now())?;
+                f(temp_dir.clone()).await?;
+
+                temp_dir
+                    .with_join_str("meta.json")
+                    .fs_write(sonic_rs::to_string(&key_data)?)?;
+
+                temp_dir
+                    .with_join_str(".ready")
+                    .fs_write([])?;
+
+                cache_path
+                    .fs_create_parent()?;
+
+                temp_dir
+                    .fs_move(&cache_path)
+                    .ok_exists()?;
+
+                Ok(())
+            }).await?;
+
+            Ok(cache_path)
+        },
     }
-
-    Ok(cache_path)
 }
