@@ -69,7 +69,7 @@ jobs:
 
       - name: Generate the archive files
         run: |
-          zip -j yarn-${{matrix.target}}.zip target/${{matrix.target}}/release-lto-nodebug/{yarn-bin,yarn,LICENSE.md}
+          zip -jX yarn-${{matrix.target}}.zip target/${{matrix.target}}/release-lto-nodebug/{yarn-bin,yarn,LICENSE.md}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
