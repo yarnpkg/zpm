@@ -38,6 +38,7 @@ program!(YarnCli, [
     debug::check_reference::CheckReference,
     debug::check_requirements::CheckRequirements,
     debug::check_semver_version::CheckSemverVersion,
+    debug::iter_zip::IterZip,
     debug::print_hoisting::PrintHoisting,
     debug::print_platform::PrintPlatform,
 
