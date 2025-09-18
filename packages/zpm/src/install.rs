@@ -1,5 +1,6 @@
 use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sync::LazyLock};
 
+use dashmap::DashMap;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, Ident, Locator, PatchRange, PeerRange, Range, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange};
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
-    build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives_exts::RangeExt, project::{InstallMode, Project}, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}
+    build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives_exts::RangeExt, project::{InstallMode, Project}, report::{async_section, with_context_result, ReportContext}, resolvers::{npm::NpmPayload, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}
 };
 
 
@@ -21,6 +22,7 @@ pub struct InstallContext<'a> {
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
+    pub npm_metadata_cache: Option<&'a DashMap<Ident, NpmPayload>>,
     pub refresh_lockfile: bool,
     pub mode: Option<InstallMode>,
 }
@@ -34,6 +36,7 @@ impl<'a> Default for InstallContext<'a> {
             check_checksums: false,
             check_resolutions: false,
             enforced_resolutions: BTreeMap::new(),
+            npm_metadata_cache: None,
             refresh_lockfile: false,
             mode: None,
         }
@@ -41,6 +44,11 @@ impl<'a> Default for InstallContext<'a> {
 }
 
 impl<'a> InstallContext<'a> {
+    pub fn with_npm_metadata_cache(mut self, npm_metadata_cache: Option<&'a DashMap<Ident, NpmPayload>>) -> Self {
+        self.npm_metadata_cache = npm_metadata_cache;
+        self
+    }
+
     pub fn with_package_cache(mut self, package_cache: Option<&'a CompositeCache>) -> Self {
         self.package_cache = package_cache;
         self

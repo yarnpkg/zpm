@@ -1,5 +1,6 @@
 use std::{collections::{BTreeMap, HashSet}, io::ErrorKind, sync::Arc, time::UNIX_EPOCH};
 
+use dashmap::DashMap;
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
@@ -625,7 +626,11 @@ impl Project {
                 }
             }
 
+            let npm_metadata_cache
+                = DashMap::new();
+
             let install_context = InstallContext::default()
+                .with_npm_metadata_cache(Some(&npm_metadata_cache))
                 .with_package_cache(Some(&package_cache))
                 .with_project(Some(self))
                 .set_check_checksums(options.check_checksums)
