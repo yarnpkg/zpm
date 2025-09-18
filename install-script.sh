@@ -104,7 +104,7 @@ rm "$tmp_dir"/yarn-bin
 rm "$archive"
 
 if [[ -n "$bin_dir" ]]; then
-  mv "$tmp_dir"/yarn "$bin_dir"/
+  mv -f "$tmp_dir"/yarn "$bin_dir"/
 else
   rm -rf "$install_dir"
   mv "$tmp_dir" "$install_dir"
