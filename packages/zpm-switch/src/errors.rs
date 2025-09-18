@@ -26,6 +26,9 @@ pub enum Error {
     #[error(transparent)]
     JsonError(#[from] Arc<sonic_rs::Error>),
 
+    #[error("Failed to execute the Yarn binary: {0}")]
+    FailedToExecuteBinary(Arc<std::io::Error>),
+
     #[error("Unknown binary name: {0}")]
     UnknownBinaryName(String),
 
