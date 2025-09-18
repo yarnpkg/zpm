@@ -16,6 +16,13 @@ use crate::{
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
 
+#[derive(Clone, Deserialize, Debug)]
+pub struct InterestingScriptsOnly {
+    preinstall: Option<String>,
+    install: Option<String>,
+    postinstall: Option<String>,
+}
+
 /**
  * We need to read the scripts to figure out whether the package has an implicit node-gyp dependency.
  */
@@ -25,8 +32,7 @@ pub struct RemoteManifestWithScripts {
     remote: RemoteManifest,
 
     #[serde(default)]
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    scripts: BTreeMap<String, String>,
+    scripts: Option<InterestingScriptsOnly>,
 }
 
 #[derive(Clone, Deserialize, Debug)]
@@ -43,10 +49,14 @@ fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
     // Also, node-gyp is not always set as a dependency in packages, so it will also be added if used in scripts.
     //
     if !manifest.remote.dependencies.contains_key(&NODE_GYP_IDENT) && !manifest.remote.peer_dependencies.contains_key(&NODE_GYP_IDENT) {
-        for script in manifest.scripts.values() {
-            if NODE_GYP_MATCH.is_match(script.as_str()) {
-                manifest.remote.dependencies.insert(NODE_GYP_IDENT.clone(), Descriptor::new_semver(NODE_GYP_IDENT.clone(), "*").unwrap());
-                break;
+        if let Some(scripts) = &manifest.scripts {
+            for maybe_script in [&scripts.preinstall, &scripts.install, &scripts.postinstall] {
+                if let Some(script) = maybe_script {
+                    if NODE_GYP_MATCH.is_match(script.as_str()) {
+                        manifest.remote.dependencies.insert(NODE_GYP_IDENT.clone(), Descriptor::new_semver(NODE_GYP_IDENT.clone(), "*").unwrap());
+                        break;
+                    }
+                }
             }
         }
     }

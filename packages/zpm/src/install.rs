@@ -44,6 +44,11 @@ impl<'a> Default for InstallContext<'a> {
 }
 
 impl<'a> InstallContext<'a> {
+    pub fn with_npm_metadata_cache(mut self, npm_metadata_cache: Option<&'a DashMap<Ident, NpmPayload>>) -> Self {
+        self.npm_metadata_cache = npm_metadata_cache;
+        self
+    }
+
     pub fn with_package_cache(mut self, package_cache: Option<&'a CompositeCache>) -> Self {
         self.package_cache = package_cache;
         self
