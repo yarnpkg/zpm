@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
 
 use zpm_primitives::Locator;
-use zpm_utils::{to_shell_line, FromFileString, Path, ToFileString};
+use zpm_utils::{to_shell_line, FromFileString, IoResultExt, Path, ToFileString};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -471,38 +471,30 @@ impl ScriptEnvironment {
         self.binaries.hash(&mut hash);
         let hash = hash.finish();
 
-        // We don't use a nonce in this pattern because we want to use the same
-        // temporary directory for the same package.
-        let dir_name = format!("zpm-{}", hash);
-        let dir = Path::temp_dir_pattern(&dir_name)?;
+        let dir_name
+            = format!(".yarn/zpm/binaries/zpm-{}", hash);
 
-        // We try to reuse directories rather than generate the binaries at
-        // every command; I noticed that on OSX the content of these directories
-        // is sometimes purged (perhaps because we write in /tmp?), so to avoid
-        // that we check whether a known file is still there before blindly
-        // using the directory.
-        //
-        let ready_path = dir
-            .with_join_str(".ready");
-
-        if !ready_path.fs_exists() && dir.fs_exists() {
-            dir.fs_rm()?;
-        }
+        let dir = Path::home_dir()?
+            .expect("Expected home directory")
+            .with_join_str(&dir_name);
 
         if !dir.fs_exists() {
-            let temp_dir = Path::temp_dir()?;
-            temp_dir.fs_create_dir_all()?;
+            let temp_dir
+                = Path::temp_dir()?;
 
             temp_dir
-                .with_join_str(".ready")
-                .fs_write_text("")?;
+                .fs_create_dir_all()?;
 
             for binary in &self.binaries.binaries {
                 make_path_wrapper(&temp_dir, &binary.name, &binary.argv0, &binary.args)?;
             }
 
+            dir
+                .fs_create_parent()?;
+
             temp_dir
-                .fs_rename(&dir)?;
+                .fs_rename(&dir)
+                .ok_exists()?;
         }
 
         Ok(dir)
