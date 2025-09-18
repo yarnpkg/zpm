@@ -1,5 +1,6 @@
 use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sync::LazyLock};
 
+use dashmap::DashMap;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, Ident, Locator, PatchRange, PeerRange, Range, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange};
@@ -21,6 +22,7 @@ pub struct InstallContext<'a> {
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
+    pub npm_metadata_cache: Option<&'a DashMap<Ident, String>>,
     pub refresh_lockfile: bool,
     pub mode: Option<InstallMode>,
 }
@@ -34,6 +36,7 @@ impl<'a> Default for InstallContext<'a> {
             check_checksums: false,
             check_resolutions: false,
             enforced_resolutions: BTreeMap::new(),
+            npm_metadata_cache: None,
             refresh_lockfile: false,
             mode: None,
         }
@@ -48,6 +51,11 @@ impl<'a> InstallContext<'a> {
 
     pub fn with_project(mut self, project: Option<&'a Project>) -> Self {
         self.project = project;
+        self
+    }
+
+    pub fn with_npm_metadata_cache(mut self, npm_metadata_cache: Option<&'a DashMap<Ident, String>>) -> Self {
+        self.npm_metadata_cache = npm_metadata_cache;
         self
     }
 

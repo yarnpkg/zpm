@@ -207,34 +207,52 @@ pub async fn resolve_semver_or_workspace_descriptor(context: &InstallContext<'_>
     resolve_semver_descriptor(context, descriptor, params).await
 }
 
-pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistrySemverRange) -> Result<ResolutionResult, Error> {
+async fn get_package_metadata_text<T>(context: &InstallContext<'_>, package_ident: &Ident, f: impl FnOnce(&String) -> Result<T, Error>) -> Result<T, Error> {
+    let cache_entry = context.npm_metadata_cache.as_ref()
+        .and_then(|cache| cache.get(package_ident));
+
+    if let Some(cache_entry) = cache_entry {
+        return Ok(f(&cache_entry)?);
+    }
+
     let project = context.project
         .expect("The project is required for resolving a workspace package");
-
-    let package_ident = params.ident.as_ref()
-        .unwrap_or(&descriptor.ident);
 
     let registry_url
         = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
 
-    let response
+        let response
         = project.http_client.get(&registry_url)?.send().await?;
 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+    let result
+        = f(&registry_text)?;
 
-    let mut deserializer
-        = sonic_rs::Deserializer::from_str(registry_text.as_str());
+    context.npm_metadata_cache.as_ref()
+        .map(|cache| cache.insert(package_ident.clone(), registry_text));
 
-    let (version, manifest) = deserializer.deserialize_map(FindFieldNested {
-        field: "versions",
-        nested: FindHighestCompatibleVersion {
-            range: params.range.clone(),
-            phantom: PhantomData::<RemoteManifestWithScripts>,
-        },
-    })?.ok_or_else(|| {
-        Error::NoCandidatesFound(descriptor.range.clone())
-    })?;
+    Ok(result)
+}
+
+pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistrySemverRange) -> Result<ResolutionResult, Error> {
+    let package_ident = params.ident.as_ref()
+        .unwrap_or(&descriptor.ident);
+
+    let (version, manifest) = get_package_metadata_text(context, package_ident, |registry_text| {
+        let mut deserializer
+            = sonic_rs::Deserializer::from_str(registry_text);
+
+        deserializer.deserialize_map(FindFieldNested {
+            field: "versions",
+            nested: FindHighestCompatibleVersion {
+                range: params.range.clone(),
+                phantom: PhantomData::<RemoteManifestWithScripts>,
+            },
+        })?.ok_or_else(|| {
+            Error::NoCandidatesFound(descriptor.range.clone())
+        })
+    }).await?;
 
     Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
 }
@@ -253,44 +271,37 @@ pub async fn resolve_tag_or_workspace_descriptor(context: &InstallContext<'_>, d
 }
 
 pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistryTagRange) -> Result<ResolutionResult, Error> {
-    let project = context.project
-        .expect("The project is required for resolving a workspace package");
-
     let package_ident = params.ident.as_ref()
         .unwrap_or(&descriptor.ident);
 
-    let registry_url
-        = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
+    let (version, manifest) = get_package_metadata_text(context, package_ident, |registry_text| {
+        #[derive(Deserialize)]
+        struct RegistryMetadata {
+            #[serde(rename(deserialize = "dist-tags"))]
+            dist_tags: sonic_rs::Value,
+            versions: sonic_rs::Value,
+        }
 
-    let response
-        = project.http_client.get(&registry_url)?.send().await?;
+        let registry_data: RegistryMetadata = sonic_rs::from_str(registry_text.as_str())
+            .map_err(Arc::new)?;
 
-    let registry_text = response.text().await
-        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+        let version = registry_data.dist_tags.deserialize_map(FindField {
+            value: params.tag.as_str(),
+            phantom: PhantomData::<zpm_semver::Version>,
+        })?.ok_or_else(|| {
+            Error::TagNotFound(params.tag.clone())
+        })?;
 
-    #[derive(Deserialize)]
-    struct RegistryMetadata {
-        #[serde(rename(deserialize = "dist-tags"))]
-        dist_tags: sonic_rs::Value,
-        versions: sonic_rs::Value,
-    }
+        let manifest = registry_data.versions.deserialize_map(FindField {
+            value: &version.to_file_string(),
+            phantom: PhantomData::<RemoteManifestWithScripts>,
+        })?.ok_or_else(|| {
+            Error::NoCandidatesFound(descriptor.range.clone())
+        })?;
 
-    let registry_data: RegistryMetadata = sonic_rs::from_str(registry_text.as_str())
-        .map_err(Arc::new)?;
+        Ok((version, manifest))
+    }).await?;
 
-    let version = registry_data.dist_tags.deserialize_map(FindField {
-        value: params.tag.as_str(),
-        phantom: PhantomData::<zpm_semver::Version>,
-    })?.ok_or_else(|| {
-        Error::TagNotFound(params.tag.clone())
-    })?;
-
-    let manifest = registry_data.versions.deserialize_map(FindField {
-        value: &version.to_file_string(),
-        phantom: PhantomData::<RemoteManifestWithScripts>,
-    })?.ok_or_else(|| {
-        Error::NoCandidatesFound(descriptor.range.clone())
-    })?;
 
     Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
 }
