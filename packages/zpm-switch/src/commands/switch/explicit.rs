@@ -1,4 +1,4 @@
-use std::process::{Command, ExitStatus, Stdio};
+use std::{process::{Command, ExitStatus, Stdio}, sync::Arc};
 
 use clipanion::cli;
 use zpm_utils::ToFileString;
@@ -28,7 +28,11 @@ impl ExplicitCommand {
         binary.stdout(Stdio::inherit());
         binary.args(args);
 
-        Ok(binary.status()?)
+        let exit_code
+            = binary.status()
+                .map_err(|err| Error::FailedToExecuteBinary(binary.get_program().to_string_lossy().to_string(), Arc::new(err)))?;
+
+        Ok(exit_code)
     }
 
     pub async fn execute(&self) -> Result<ExitStatus, Error> {

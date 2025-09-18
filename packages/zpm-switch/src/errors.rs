@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use reqwest::StatusCode;
-use zpm_utils::{PathError, ToHumanString};
+use zpm_utils::{DataType, PathError, ToHumanString};
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum Error {
@@ -25,6 +25,9 @@ pub enum Error {
 
     #[error(transparent)]
     JsonError(#[from] Arc<sonic_rs::Error>),
+
+    #[error("Failed to execute the {program} binary: {error}", program = DataType::Code.colorize(&.0), error = .1.to_string())]
+    FailedToExecuteBinary(String, Arc<std::io::Error>),
 
     #[error("Unknown binary name: {0}")]
     UnknownBinaryName(String),
