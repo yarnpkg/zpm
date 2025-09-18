@@ -30,7 +30,7 @@ impl ExplicitCommand {
 
         let exit_code
             = binary.status()
-                .map_err(|err| Error::FailedToExecuteBinary(Arc::new(err)))?;
+                .map_err(|err| Error::FailedToExecuteBinary(binary.get_program().to_string_lossy().to_string(), Arc::new(err)))?;
 
         Ok(exit_code)
     }
