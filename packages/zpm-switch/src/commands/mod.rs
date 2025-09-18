@@ -12,6 +12,7 @@ pub mod switch;
 program_async!(SwitchExecCli, [
     switch::cache_check::CacheCheckCommand,
     switch::cache_clear::CacheClearCommand,
+    switch::cache_install::CacheInstallCommand,
     switch::cache_list::CacheListCommand,
     switch::explicit::ExplicitCommand,
     switch::links_list::LinksListCommand,

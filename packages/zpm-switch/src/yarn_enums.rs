@@ -108,7 +108,6 @@ pub enum Selector {
     },
 }
 
-
 impl ToFileString for Selector {
     fn to_file_string(&self) -> String {
         match self {

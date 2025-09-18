@@ -7,7 +7,7 @@ const WARNING_COLOR: Color
     = Color::BrightYellow;
 
 const ERROR_COLOR: Color
-    = Color::BrightRed;
+    = Color::TrueColor { r: 200, g: 100, b: 100 };
 
 const SUCCESS_COLOR: Color
     = Color::BrightGreen;
