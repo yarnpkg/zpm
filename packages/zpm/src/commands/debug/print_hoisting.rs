@@ -35,7 +35,9 @@ impl PrintHoisting {
             = Hoister::new(&mut work_tree);
 
         hoister.set_print_logs(self.verbose);
+        println!("Hoisting...");
         hoister.hoist();
+        println!("Hoisted!");
 
         let root_node
             = hoist::TreeRenderer::new(&work_tree).convert();

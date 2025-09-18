@@ -1,10 +1,9 @@
-use std::{collections::BTreeMap, fmt, marker::PhantomData, str::FromStr, sync::{Arc, LazyLock}};
+use std::{collections::BTreeMap, str::FromStr, sync::{Arc, LazyLock}};
 
 use regex::Regex;
-use serde::{de::{self, DeserializeOwned, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
+use serde::Deserialize;
 use zpm_config::ConfigExt;
 use zpm_primitives::{Descriptor, Ident, Locator, RegistryReference, RegistrySemverRange, RegistryTagRange, UrlReference};
-use zpm_utils::ToFileString;
 
 use crate::{
     error::Error,
@@ -18,135 +17,23 @@ static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
 
 /**
- * Deserializer that only deserializes the requested field and skips all others.
- */
-pub struct FindFieldNested<'a, T> {
-    field: &'a str,
-    nested: T,
-}
-
-impl<'de, T> Visitor<'de> for FindFieldNested<'_, T> where T: DeserializeSeed<'de> + Clone {
-    type Value = T::Value;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a map with a matching field")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
-        let mut selected = None;
-
-        while let Some(key) = map.next_key::<String>()? {
-            if key == self.field {
-                selected = Some(map.next_value_seed(self.nested.clone())?);
-            } else {
-                let _ = map.next_value::<IgnoredAny>();
-            }
-        }
-
-        selected
-            .ok_or(de::Error::missing_field(""))
-    }
-}
-
-/**
- * Deserializer that only deserializes the value for the highest key matching the provided semver range.
- */
-#[derive(Clone)]
-pub struct FindHighestCompatibleVersion<T> {
-    range: zpm_semver::Range,
-    phantom: PhantomData<T>,
-}
-
-impl<'de, T> DeserializeSeed<'de> for FindHighestCompatibleVersion<T> where T: DeserializeOwned {
-    type Value = Option<(zpm_semver::Version, T)>;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error> where D: Deserializer<'de> {
-        deserializer.deserialize_map(self)
-    }
-}
-
-impl<'de, T> Visitor<'de> for FindHighestCompatibleVersion<T> where T: DeserializeOwned {
-    type Value = Option<(zpm_semver::Version, T)>;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a map with a matching version")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
-        let mut selected = None;
-
-        while let Some(key) = map.next_key::<String>()? {
-            let version
-                = zpm_semver::Version::from_str(key.as_str()).unwrap();
-
-            if self.range.check(&version) && selected.as_ref().map(|(current_version, _)| *current_version < version).unwrap_or(true) {
-                selected = Some((version, map.next_value::<sonic_rs::Value>()?));
-            } else {
-                map.next_value::<IgnoredAny>()?;
-            }
-        }
-
-        let Some((version, version_payload)) = selected else {
-            return Ok(None);
-        };
-
-        let deserialized_payload
-            = T::deserialize(&version_payload).unwrap();
-
-        Ok(Some((version, deserialized_payload)))
-    }
-}
-
-/**
- * Deserializer that only deserializes the value for the highest key matching the provided semver range.
- */
-#[derive(Clone)]
-pub struct FindField<'a, TVal> {
-    value: &'a str,
-    phantom: PhantomData<TVal>,
-}
-
-impl<'de, TVal> DeserializeSeed<'de> for FindField<'de, TVal> where TVal: Deserialize<'de> + std::fmt::Debug {
-    type Value = Option<TVal>;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error> where D: Deserializer<'de> {
-        deserializer.deserialize_map(self)
-    }
-}
-
-impl<'de, TVal> Visitor<'de> for FindField<'de, TVal> where TVal: Deserialize<'de> + std::fmt::Debug {
-    type Value = Option<TVal>;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a map with a matching version")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
-        let mut res = None;
-
-        while let Some(key) = map.next_key::<String>()? {
-            if self.value == key {
-                res = Some(map.next_value::<TVal>()?);
-            } else {
-                map.next_value::<IgnoredAny>()?;
-            }
-        }
-
-        Ok(res)
-    }
-}
-
-/**
  * We need to read the scripts to figure out whether the package has an implicit node-gyp dependency.
  */
 #[derive(Clone, Deserialize, Debug)]
-struct RemoteManifestWithScripts {
+pub struct RemoteManifestWithScripts {
     #[serde(flatten)]
     remote: RemoteManifest,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     scripts: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct NpmPayload {
+    #[serde(rename = "dist-tags")]
+    dist_tags: BTreeMap<String, zpm_semver::Version>,
+    versions: BTreeMap<zpm_semver::Version, RemoteManifestWithScripts>,
 }
 
 fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
@@ -207,12 +94,20 @@ pub async fn resolve_semver_or_workspace_descriptor(context: &InstallContext<'_>
     resolve_semver_descriptor(context, descriptor, params).await
 }
 
-pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistrySemverRange) -> Result<ResolutionResult, Error> {
+async fn process_registry_data<R>(context: &InstallContext<'_>, package_ident: &Ident, f: impl FnOnce(&NpmPayload) -> Result<R, Error>) -> Result<R, Error> {
+    let npm_metadata_cache
+        = context.npm_metadata_cache
+            .expect("The npm metadata cache is required for resolving a semver descriptor");
+
+    let cached_registry_data
+        = npm_metadata_cache.get(package_ident);
+
+    if let Some(cached_registry_data) = cached_registry_data {
+        return Ok(f(&cached_registry_data.value())?);
+    }
+
     let project = context.project
         .expect("The project is required for resolving a workspace package");
-
-    let package_ident = params.ident.as_ref()
-        .unwrap_or(&descriptor.ident);
 
     let registry_url
         = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
@@ -222,21 +117,28 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+    let registry_data: NpmPayload
+        = sonic_rs::from_str(registry_text.as_str())?;
 
-    let mut deserializer
-        = sonic_rs::Deserializer::from_str(registry_text.as_str());
+    npm_metadata_cache.insert(package_ident.clone(), registry_data.clone());
 
-    let (version, manifest) = deserializer.deserialize_map(FindFieldNested {
-        field: "versions",
-        nested: FindHighestCompatibleVersion {
-            range: params.range.clone(),
-            phantom: PhantomData::<RemoteManifestWithScripts>,
-        },
-    })?.ok_or_else(|| {
-        Error::NoCandidatesFound(descriptor.range.clone())
-    })?;
+    Ok(f(&registry_data)?)
+}
 
-    Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
+pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistrySemverRange) -> Result<ResolutionResult, Error> {
+    let package_ident = params.ident.as_ref()
+        .unwrap_or(&descriptor.ident);
+
+    let (version, manifest) = process_registry_data(context, package_ident, |registry_data| {
+        registry_data.versions.iter()
+            .filter(|(version, _)| params.range.check(version))
+            .max_by(|(version, _), (other_version, _)| version.cmp(other_version))
+            .ok_or_else(|| Error::NoCandidatesFound(descriptor.range.clone()))
+            .map(|(version, manifest)| (version.clone(), manifest.clone()))
+    }).await?;
+
+
+    Ok(build_resolution_result(context, descriptor, package_ident, version.clone(), manifest.clone()))
 }
 
 pub async fn resolve_tag_or_workspace_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistryTagRange) -> Result<ResolutionResult, Error> {
@@ -253,46 +155,22 @@ pub async fn resolve_tag_or_workspace_descriptor(context: &InstallContext<'_>, d
 }
 
 pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistryTagRange) -> Result<ResolutionResult, Error> {
-    let project = context.project
-        .expect("The project is required for resolving a workspace package");
-
     let package_ident = params.ident.as_ref()
         .unwrap_or(&descriptor.ident);
 
-    let registry_url
-        = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
+    let (version, manifest) = process_registry_data(context, package_ident, |registry_data| {
+        let version = registry_data.dist_tags
+            .get(params.tag.as_str())
+            .ok_or_else(|| Error::TagNotFound(params.tag.clone()))?;
 
-    let response
-        = project.http_client.get(&registry_url)?.send().await?;
+        let manifest = registry_data.versions
+            .get(version)
+            .ok_or_else(|| Error::TagNotFound(params.tag.clone()))?;
 
-    let registry_text = response.text().await
-        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+        Ok((version.clone(), manifest.clone()))
+    }).await?;
 
-    #[derive(Deserialize)]
-    struct RegistryMetadata {
-        #[serde(rename(deserialize = "dist-tags"))]
-        dist_tags: sonic_rs::Value,
-        versions: sonic_rs::Value,
-    }
-
-    let registry_data: RegistryMetadata = sonic_rs::from_str(registry_text.as_str())
-        .map_err(Arc::new)?;
-
-    let version = registry_data.dist_tags.deserialize_map(FindField {
-        value: params.tag.as_str(),
-        phantom: PhantomData::<zpm_semver::Version>,
-    })?.ok_or_else(|| {
-        Error::TagNotFound(params.tag.clone())
-    })?;
-
-    let manifest = registry_data.versions.deserialize_map(FindField {
-        value: &version.to_file_string(),
-        phantom: PhantomData::<RemoteManifestWithScripts>,
-    })?.ok_or_else(|| {
-        Error::NoCandidatesFound(descriptor.range.clone())
-    })?;
-
-    Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
+    Ok(build_resolution_result(context, descriptor, package_ident, version.clone(), manifest.clone()))
 }
 
 pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &RegistryReference) -> Result<ResolutionResult, Error> {
