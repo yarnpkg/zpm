@@ -1,5 +1,6 @@
 pub mod cache_check;
 pub mod cache_clear;
+pub mod cache_install;
 pub mod cache_list;
 pub mod explicit;
 pub mod links_clear;
