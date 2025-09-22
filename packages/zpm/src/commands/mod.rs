@@ -43,6 +43,7 @@ program!(YarnCli, [
     debug::print_platform::PrintPlatform,
 
     npm::login::Login,
+    npm::logout::Logout,
     npm::whoami::Whoami,
 
     add::Add,

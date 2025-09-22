@@ -1,13 +1,11 @@
-use crate::{node::{Field, Node}, Error, Parser, Path};
+use crate::{node::{Field, Node, Span}, Error, Parser, Path};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Scope {
     pub path: Path,
     pub indent: usize,
-
+    pub field: usize,
     pub offset: usize,
-    pub column: usize,
-    pub lines: usize,
 }
 
 impl Scope {
@@ -15,9 +13,8 @@ impl Scope {
         Self {
             path: Path::new(),
             indent: 0,
+            field: 0,
             offset: 0,
-            column: 0,
-            lines: 0,
         }
     }
 }
@@ -208,13 +205,9 @@ impl<'a> YamlParser<'a> {
         Ok(None)
     }
 
-    fn try_start_block(&mut self, key: &str) -> bool {
+    fn try_start_block(&mut self, key: &str, field_start: usize) -> bool {
         let block_offset
             = self.offset;
-        let block_column
-            = self.column;
-        let block_lines
-            = self.lines;
 
         // A block must start with a newline
         if self.offset >= self.input.len() || self.input[self.offset] != b'\n' {
@@ -253,22 +246,16 @@ impl<'a> YamlParser<'a> {
         self.stack.push(Scope {
             path: new_path,
             indent,
-
+            field: field_start,
             offset: block_offset,
-            column: block_column,
-            lines: block_lines,
         });
 
         return true;
     }
 
-    fn try_parse_value(&mut self) -> Result<Option<Node>, Error> {
+    fn try_parse_value(&mut self, field_start: usize) -> Result<Option<Node>, Error> {
         let value_offset
             = self.offset;
-        let value_column
-            = self.column;
-        let value_lines
-            = self.lines;
 
         let indent = self.stack.last()
             .map_or(0, |scope| scope.indent);
@@ -278,35 +265,26 @@ impl<'a> YamlParser<'a> {
             match self.input[self.offset] {
                 b'\n' => {
                     let node = Node {
-                        offset: value_offset,
-                        size: self.offset - value_offset,
-
+                        field_span: Span::new(field_start, self.offset - field_start + 1),
+                        value_span: Span::new(value_offset, self.offset - value_offset),
                         indent,
-                        column: value_column,
-                        lines: value_lines,
                     };
 
                     self.offset += 1;
-                    self.column = 0;
-                    self.lines += 1;
 
                     return Ok(Some(node));
                 }
 
                 _ => {
                     self.offset += 1;
-                    self.column += 1;
                 }
             }
         }
 
         Ok(Some(Node {
-            offset: value_offset,
-            size: self.offset - value_offset,
-
+            field_span: Span::new(field_start, self.offset - field_start),
+            value_span: Span::new(value_offset, self.offset - value_offset),
             indent,
-            column: value_column,
-            lines: value_lines,
         }))
     }
 
@@ -326,16 +304,16 @@ impl<'a> YamlParser<'a> {
                     return Ok(Some(Field {
                         path: scope.path,
                         node: Node {
-                            offset: scope.offset,
-                            size,
-
+                            field_span: Span::new(scope.field, self.offset - scope.field),
+                            value_span: Span::new(scope.offset, size),
                             indent: scope.indent,
-                            column: scope.column,
-                            lines: scope.lines,
                         },
                     }));
                 }
             }
+
+            let field_start
+                = self.offset;
 
             // We don't care about whitespaces since the indent was already checked
             // right before (to handle dedents) and in the previous iteration (indents)
@@ -347,11 +325,11 @@ impl<'a> YamlParser<'a> {
 
             self.skip_whitespace();
 
-            if self.try_start_block(&key) {
+            if self.try_start_block(&key, field_start) {
                 continue;
             }
 
-            if let Some(inline_value) = self.try_parse_value()? {
+            if let Some(inline_value) = self.try_parse_value(field_start)? {
                 let mut field_path = self.stack.last()
                     .map(|scope| scope.path.clone())
                     .unwrap_or_default();
@@ -386,7 +364,7 @@ impl<'a> Iterator for YamlParser<'a> {
             },
 
             Ok(Some(field)) => {
-                self.last_field_end = Some(field.node.offset + field.node.size);
+                self.last_field_end = Some(field.node.value_span.offset + field.node.value_span.size);
                 Some(Ok(field))
             },
 
@@ -411,11 +389,9 @@ mod tests {
             Field {
                 path: Path::new(),
                 node: Node {
-                    offset: 0,
-                    size: 0,
+                    field_span: Span::new(0, 0),
+                    value_span: Span::new(0, 0),
                     indent: 0,
-                    column: 0,
-                    lines: 0,
                 },
             },
         ]);
@@ -431,21 +407,17 @@ mod tests {
             Field {
                 path: Path::from_segments(vec!["test".to_string()]),
                 node: Node {
-                    offset: 6,
-                    size: 5,
+                    field_span: Span::new(0, 12),
+                    value_span: Span::new(6, 5),
                     indent: 0,
-                    column: 6,
-                    lines: 0,
                 },
             },
             Field {
                 path: Path::new(),
                 node: Node {
-                    offset: 0,
-                    size: 11,
+                    field_span: Span::new(0, 12),
+                    value_span: Span::new(0, 11),
                     indent: 0,
-                    column: 0,
-                    lines: 0,
                 },
             },
         ]);
@@ -461,21 +433,17 @@ mod tests {
             Field {
                 path: Path::from_segments(vec!["foo:bar".to_string()]),
                 node: Node {
-                    offset: 11,
-                    size: 5,
+                    field_span: Span::new(0, 17),
+                    value_span: Span::new(11, 5),
                     indent: 0,
-                    column: 11,
-                    lines: 0,
                 },
             },
             Field {
                 path: Path::new(),
                 node: Node {
-                    offset: 0,
-                    size: 16,
+                    field_span: Span::new(0, 17),
+                    value_span: Span::new(0, 16),
                     indent: 0,
-                    column: 0,
-                    lines: 0,
                 },
             },
         ]);
@@ -491,21 +459,17 @@ mod tests {
             Field {
                 path: Path::from_segments(vec!["test".to_string()]),
                 node: Node {
-                    offset: 16,
-                    size: 5,
+                    field_span: Span::new(10, 12),
+                    value_span: Span::new(16, 5),
                     indent: 0,
-                    column: 6,
-                    lines: 1,
                 },
             },
             Field {
                 path: Path::new(),
                 node: Node {
-                    offset: 0,
-                    size: 21,
+                    field_span: Span::new(0, 22),
+                    value_span: Span::new(0, 21),
                     indent: 0,
-                    column: 0,
-                    lines: 0,
                 },
             },
         ]);
@@ -521,21 +485,17 @@ mod tests {
             Field {
                 path: Path::from_segments(vec!["test".to_string()]),
                 node: Node {
-                    offset: 6,
-                    size: 5,
+                    field_span: Span::new(0, 11),
+                    value_span: Span::new(6, 5),
                     indent: 0,
-                    column: 6,
-                    lines: 0,
                 },
             },
             Field {
                 path: Path::new(),
                 node: Node {
-                    offset: 0,
-                    size: 11,
+                    field_span: Span::new(0, 11),
+                    value_span: Span::new(0, 11),
                     indent: 0,
-                    column: 0,
-                    lines: 0,
                 },
             },
         ]);
@@ -551,31 +511,25 @@ mod tests {
             Field {
                 path: Path::from_segments(vec!["foo".to_string()]),
                 node: Node {
-                    offset: 5,
-                    size: 5,
+                    field_span: Span::new(0, 11),
+                    value_span: Span::new(5, 5),
                     indent: 0,
-                    column: 5,
-                    lines: 0,
                 },
             },
             Field {
                 path: Path::from_segments(vec!["bar".to_string()]),
                 node: Node {
-                    offset: 16,
-                    size: 5,
+                    field_span: Span::new(11, 11),
+                    value_span: Span::new(16, 5),
                     indent: 0,
-                    column: 5,
-                    lines: 1,
                 },
             },
             Field {
                 path: Path::new(),
                 node: Node {
-                    offset: 0,
-                    size: 21,
+                    field_span: Span::new(0, 22),
+                    value_span: Span::new(0, 21),
                     indent: 0,
-                    column: 0,
-                    lines: 0,
                 },
             },
         ]);
@@ -591,31 +545,25 @@ mod tests {
             Field {
                 path: Path::from_segments(vec!["foo".to_string()]),
                 node: Node {
-                    offset: 5,
-                    size: 5,
+                    field_span: Span::new(0, 11),
+                    value_span: Span::new(5, 5),
                     indent: 0,
-                    column: 5,
-                    lines: 0,
                 },
             },
             Field {
                 path: Path::from_segments(vec!["bar".to_string()]),
-                    node: Node {
-                    offset: 18,
-                    size: 5,
+                node: Node {
+                    field_span: Span::new(13, 11),
+                    value_span: Span::new(18, 5),
                     indent: 0,
-                    column: 5,
-                    lines: 3,
                 },
             },
             Field {
                 path: Path::new(),
                 node: Node {
-                    offset: 0,
-                    size: 23,
+                    field_span: Span::new(0, 24),
+                    value_span: Span::new(0, 23),
                     indent: 0,
-                    column: 0,
-                    lines: 0,
                 },
             },
         ]);
@@ -631,31 +579,25 @@ mod tests {
             Field {
                 path: Path::from_segments(vec!["foo".to_string(), "bar".to_string()]),
                 node: Node {
-                    offset: 12,
-                    size: 3,
+                    field_span: Span::new(5, 11),
+                    value_span: Span::new(12, 3),
                     indent: 2,
-                    column: 7,
-                    lines: 1,
                 },
             },
             Field {
                 path: Path::from_segments(vec!["foo".to_string()]),
                 node: Node {
-                    offset: 4,
-                    size: 11,
+                    field_span: Span::new(0, 16),
+                    value_span: Span::new(4, 11),
                     indent: 2,
-                    column: 4,
-                    lines: 0,
                 },
             },
             Field {
                 path: Path::new(),
                 node: Node {
-                    offset: 0,
-                    size: 15,
+                    field_span: Span::new(0, 16),
+                    value_span: Span::new(0, 15),
                     indent: 0,
-                    column: 0,
-                    lines: 0,
                 },
             },
         ]);
@@ -671,71 +613,57 @@ mod tests {
             Field {
                 path: Path::from_segments(vec!["foo".to_string(), "bar".to_string()]),
                 node: Node {
-                    offset: 12,
-                    size: 3,
+                    field_span: Span::new(5, 11),
+                    value_span: Span::new(12, 3),
                     indent: 2,
-                    column: 7,
-                    lines: 1,
                 },
             },
             Field {
                 path: Path::from_segments(vec!["foo".to_string(), "baz".to_string()]),
                 node: Node {
-                    offset: 23,
-                    size: 3,
+                    field_span: Span::new(16, 11),
+                    value_span: Span::new(23, 3),
                     indent: 2,
-                    column: 7,
-                    lines: 2,
                 },
             },
             Field {
                 path: Path::from_segments(vec!["foo".to_string(), "qux".to_string(), "quux".to_string()]),
                 node: Node {
-                    offset: 44,
-                    size: 5,
+                    field_span: Span::new(34, 16),
+                    value_span: Span::new(44, 5),
                     indent: 4,
-                    column: 10,
-                    lines: 4,
                 },
             },
             Field {
                 path: Path::from_segments(vec!["foo".to_string(), "qux".to_string()]),
                 node: Node {
-                    offset: 33,
-                    size: 16,
+                    field_span: Span::new(27, 23),
+                    value_span: Span::new(33, 16),
                     indent: 4,
-                    column: 6,
-                    lines: 3,
                 },
             },
             Field {
                 path: Path::from_segments(vec!["foo".to_string(), "grault".to_string()]),
                 node: Node {
-                    offset: 60,
-                    size: 6,
+                    field_span: Span::new(50, 17),
+                    value_span: Span::new(60, 6),
                     indent: 2,
-                    column: 10,
-                    lines: 5,
                 },
             },
             Field {
                 path: Path::from_segments(vec!["foo".to_string()]),
                 node: Node {
-                    offset: 4,
-                    size: 62,
+                    field_span: Span::new(0, 67),
+                    value_span: Span::new(4, 62),
                     indent: 2,
-                    column: 4,
-                    lines: 0,
                 },
             },
             Field {
                 path: Path::new(),
                 node: Node {
-                    offset: 0,
-                    size: 66,
+                    field_span: Span::new(0, 67),
+                    value_span: Span::new(0, 66),
                     indent: 0,
-                    column: 0,
-                    lines: 0,
                 },
             },
         ]);

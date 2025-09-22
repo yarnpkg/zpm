@@ -56,6 +56,14 @@ impl Path {
         self.segments.push(segment);
     }
 
+    pub fn pop(&mut self) {
+        self.segments.pop();
+    }
+
+    pub fn starts_with(&self, other: &[String]) -> bool {
+        self.segments.starts_with(other)
+    }
+
     fn to_parts<'a>(&'a self) -> Vec<PathSegment<'a>> {
         let mut result
             = Vec::new();
