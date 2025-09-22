@@ -506,15 +506,6 @@
           "@esbuild/win32-ia32",
           "@esbuild/win32-x64"
         ]
-      },
-      "flags": {
-        "build_commands": [
-          {
-            "type": "Script",
-            "event": "postinstall",
-            "script": "node install.js"
-          }
-        ]
       }
     },
     "lodash@npm:^4.17.21": {
@@ -538,9 +529,6 @@
           "lodash": "^4.17.21",
           "typescript": "^5.8.3"
         }
-      },
-      "flags": {
-        "prefer_extracted": false
       }
     },
     "tslib@npm:^2.4.0": {
@@ -597,9 +585,6 @@
           "esbuild": "^0.25.5",
           "lodash": "^4.17.21"
         }
-      },
-      "flags": {
-        "prefer_extracted": false
       }
     }
   }

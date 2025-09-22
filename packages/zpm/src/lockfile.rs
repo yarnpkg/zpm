@@ -7,7 +7,6 @@ use zpm_primitives::{Descriptor, Locator};
 use zpm_utils::{FromFileString, Hash64, ToFileString};
 
 use crate::{
-    content_flags::ContentFlags,
     error::Error,
     resolvers::Resolution,
 };
@@ -18,9 +17,6 @@ const LOCKFILE_VERSION: u64 = 9;
 pub struct LockfileEntry {
     pub checksum: Option<Hash64>,
     pub resolution: Resolution,
-
-    #[serde(default, skip_serializing_if = "zpm_utils::is_default")]
-    pub flags: ContentFlags,
 }
 
 #[derive(Clone, Debug, Default, Encode, Decode, PartialEq, Eq)]
@@ -275,7 +271,6 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
                 optional_peer_dependencies: Default::default(),
                 missing_peer_dependencies: Default::default(),
             },
-            flags: Default::default(),
         });
     }
 

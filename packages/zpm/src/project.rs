@@ -4,7 +4,7 @@ use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::{Descriptor, Ident, Locator, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString, ToHumanString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -16,7 +16,7 @@ use crate::{
     http::HttpClient,
     install::{InstallContext, InstallManager, InstallState},
     lockfile::{from_legacy_berry_lockfile, Lockfile},
-    manifest::{bin::BinField, helpers::read_manifest_with_size, BinManifest, Manifest},
+    manifest::{helpers::read_manifest_with_size, Manifest},
     manifest_finder::CachedManifestFinder,
     report::{with_report_result, StreamReport, StreamReportConfig},
     script::{Binary, ScriptEnvironment},
@@ -438,34 +438,17 @@ impl Project {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
 
-        let location = install_state.locations_by_package.get(locator)
-            .expect("Expected locator to have a location");
+        let package_location = install_state.locations_by_package.get(locator)
+            .unwrap_or_else(|| panic!("Expected {} to have a package location", locator.to_print_string()));
 
-        let manifest_text = self.project_cwd
-            .with_join(location)
-            .with_join_str(MANIFEST_NAME)
-            .fs_read_text_with_zip()?;
+        let content_flags = install_state.content_flags.get(&locator.physical_locator())
+            .unwrap_or_else(|| panic!("Expected {} to have content flags", locator.to_print_string()));
 
-        let manifest
-            = sonic_rs::from_str::<BinManifest>(&manifest_text)
-                .map_err(|_| Error::ManifestParseError(location.clone()))?;
+        let binaries = content_flags.binaries.iter()
+            .map(|(name, path)| (name.clone(), Binary::new(self, package_location.with_join(&path))))
+            .collect();
 
-        Ok(match manifest.bin {
-            Some(BinField::String(bin)) => {
-                if let Some(name) = manifest.name {
-                    BTreeMap::from_iter([(name.name().to_string(), Binary::new(self, location.with_join(&bin.path)))])
-                } else {
-                    BTreeMap::new()
-                }
-            }
-
-            Some(BinField::Map(bins)) => bins
-                .into_iter()
-                .map(|(name, path)| (name.name().to_string(), Binary::new(self, location.with_join(&path.path))))
-                .collect(),
-
-            None => BTreeMap::new(),
-        })
+        Ok(binaries)
     }
 
     pub fn package_visible_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
@@ -637,6 +620,7 @@ impl Project {
             InstallManager::new()
                 .with_context(install_context)
                 .with_lockfile(lockfile?)
+                .with_previous_state(self.install_state.as_ref())
                 .with_roots_iter(self.workspaces.iter().map(|w| w.descriptor()))
                 .resolve_and_fetch().await?
                 .finalize(self).await?;

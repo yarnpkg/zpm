@@ -16,8 +16,6 @@ use crate::{
     script::ScriptEnvironment,
 };
 
-static NEW_STYLE_GIT_SELECTOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+=").unwrap());
-
 #[derive(Debug)]
 pub enum GitOperation {
     Merge,
@@ -184,6 +182,8 @@ async fn resolve_git_treeish_stricter(repo: &GitSource, treeish: GitTreeish, con
 
 fn make_git_env() -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
+
+    env.insert("GIT_TERMINAL_PROMPT".to_string(), "0".to_string());
 
     if let Err(std::env::VarError::NotPresent) = std::env::var("GIT_SSH_COMMAND") {
         let ssh = std::env::var("GIT_SSH").unwrap_or("ssh".to_string());

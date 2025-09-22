@@ -191,10 +191,9 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     // should always be the same for the same package, so we keep them in
     // the install state so we don't have to recompute them at every install.
     //
-    let package_flags = &install.lockfile.entries
+    let package_flags = &install.install_state.content_flags
         .get(&locator.physical_locator())
-        .expect("Expected package flags to be set")
-        .flags;
+        .expect("Expected package flags to be set");
 
     // We don't take into account `is_compatible` here, as it may change
     // depending on the system and we don't want the paths encoded in the

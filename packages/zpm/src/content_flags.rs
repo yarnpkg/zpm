@@ -4,14 +4,11 @@ use bincode::{Decode, Encode};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{DefaultOnError, serde_as};
-use zpm_primitives::Locator;
+use zpm_primitives::{Ident, Locator, Reference};
 use zpm_utils::Path;
 
 use crate::{
-    build,
-    error::Error,
-    fetchers::PackageData,
-    system,
+    build, error::Error, fetchers::PackageData, manifest::bin::BinField, system
 };
 
 static UNPLUG_SCRIPTS: &[&str] = &["preinstall", "install", "postinstall"];
@@ -30,6 +27,12 @@ static UNPLUG_EXT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
  */
 #[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContentFlags {
+    /**
+     * The binaries that should be made available to the package.
+     */
+    #[serde(default)]
+    pub binaries: BTreeMap<String, Path>,
+
     /**
      * The build scripts that should be run after the package got installed.
      */
@@ -53,6 +56,7 @@ pub struct ContentFlags {
 impl Default for ContentFlags {
     fn default() -> Self {
         Self {
+            binaries: BTreeMap::new(),
             build_commands: vec![],
             prefer_extracted: None,
             suggest_extracted: false,
@@ -65,7 +69,13 @@ impl Default for ContentFlags {
 #[serde(rename_all = "camelCase")]
 struct Manifest {
     #[serde(default)]
+    name: Option<Ident>,
+
+    #[serde(default)]
     r#type: Option<String>,
+
+    #[serde(default)]
+    bin: Option<BinField>,
 
     #[serde(default)]
     requirements: system::Requirements,
@@ -78,8 +88,28 @@ struct Manifest {
     scripts: BTreeMap<String, String>,
 }
 
+fn extract_binaries(name: Option<Ident>, bin: Option<BinField>) -> BTreeMap<String, Path> {
+    let Some(bin) = bin else {
+        return BTreeMap::new();
+    };
+
+    match bin {
+        BinField::String(path) => name
+            .map(|name| BTreeMap::from_iter([(name.name().to_string(), path.path)]))
+            .unwrap_or_default(),
+
+        BinField::Map(bins) => bins.into_iter()
+            .map(|(name, path)| (name.name().to_string(), path.path))
+            .collect(),
+    }
+}
+
 impl ContentFlags {
     pub fn extract(locator: &Locator, package_data: &PackageData) -> Result<Self, Error> {
+        if matches!(locator.reference, Reference::Link(_)) {
+            return Ok(Self::default());
+        }
+
         match package_data {
             PackageData::Local {package_directory, is_synthetic_package} if !is_synthetic_package => {
                 Self::extract_local(package_directory)
@@ -110,6 +140,7 @@ impl ContentFlags {
                 .collect::<Vec<_>>();
 
         Ok(ContentFlags {
+            binaries: extract_binaries(manifest.name, manifest.bin),
             build_commands,
             prefer_extracted: Some(false),
             suggest_extracted: false,
@@ -152,6 +183,7 @@ impl ContentFlags {
             = entries.iter().any(|entry| UNPLUG_EXT_REGEX.is_match(&entry.name));
 
         Ok(ContentFlags {
+            binaries: extract_binaries(meta_manifest.name, meta_manifest.bin),
             build_commands,
             prefer_extracted,
             suggest_extracted,

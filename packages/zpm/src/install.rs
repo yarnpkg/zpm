@@ -12,7 +12,6 @@ use crate::{
     build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives_exts::RangeExt, project::{InstallMode, Project}, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}
 };
 
-
 #[derive(Clone)]
 pub struct InstallContext<'a> {
     pub package_cache: Option<&'a CompositeCache>,
@@ -449,6 +448,7 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
 #[derive(Clone, Debug, Encode, Decode, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstallState {
     pub last_installed_at: u128,
+    pub content_flags: BTreeMap<Locator, ContentFlags>,
     pub resolution_tree: ResolutionTree,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
     pub normalized_resolutions: BTreeMap<Locator, Resolution>,
@@ -510,6 +510,7 @@ pub struct InstallManager<'a> {
     initial_lockfile: Lockfile,
     roots: Vec<Descriptor>,
     context: InstallContext<'a>,
+    previous_state: Option<&'a InstallState>,
     result: Install,
 }
 
@@ -525,12 +526,18 @@ impl<'a> InstallManager<'a> {
             initial_lockfile: Lockfile::new(),
             roots: vec![],
             context: InstallContext::default(),
+            previous_state: None,
             result: Install::default(),
         }
     }
 
     pub fn with_context(mut self, context: InstallContext<'a>) -> Self {
         self.context = context;
+        self
+    }
+
+    pub fn with_previous_state(mut self, previous_state: Option<&'a InstallState>) -> Self {
+        self.previous_state = previous_state;
         self
     }
 
@@ -586,7 +593,7 @@ impl<'a> InstallManager<'a> {
                 },
 
                 (InstallOp::Fetch {locator, ..}, InstallOpResult::Fetched(FetchResult {package_data, ..})) => {
-                    self.record_fetch(locator, package_data);
+                    self.record_fetch(locator, package_data)?;
                 },
 
                 _ => panic!("Unsupported install result ({:?})", entry),
@@ -627,9 +634,6 @@ impl<'a> InstallManager<'a> {
             })
             .collect::<Result<BTreeMap<_, _>, Error>>()?;
 
-        let are_metadata_up_to_date
-            = self.result.lockfile.metadata.version == self.initial_lockfile.metadata.version;
-
         for entry in self.result.lockfile.entries.values_mut() {
             let package_data = self.result.package_data
                 .get(&entry.resolution.locator)
@@ -640,12 +644,6 @@ impl<'a> InstallManager<'a> {
 
             let previous_checksum = previous_entry
                 .and_then(|s| s.checksum.as_ref());
-            let mut previous_flags = previous_entry
-                .map(|s| &s.flags);
-
-            if !are_metadata_up_to_date || entry.resolution.locator.reference.is_disk_reference() {
-                previous_flags = None;
-            }
 
             let mut checksum = package_data.checksum()
                 .or_else(|| previous_checksum.cloned())
@@ -683,20 +681,7 @@ impl<'a> InstallManager<'a> {
                 }
             }
 
-            let mut content_flags
-                = None;
-
-            if let Some(previous_flags) = previous_flags {
-                content_flags = Some(previous_flags.clone());
-            }
-
-            let content_flags = content_flags.map_or_else(
-                || ContentFlags::extract(&entry.resolution.locator, &package_data),
-                Ok,
-            )?;
-
             entry.checksum = checksum;
-            entry.flags = content_flags;
         }
 
         self.result.install_state.resolution_tree = TreeResolver::default()
@@ -722,7 +707,6 @@ impl<'a> InstallManager<'a> {
         self.result.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
             checksum: None,
             resolution: original_resolution,
-            flags: ContentFlags::default(),
         });
 
         if resolution.requirements.is_conditional() {
@@ -737,7 +721,7 @@ impl<'a> InstallManager<'a> {
         }
 
         if let Some(package_data) = package_data {
-            self.record_fetch(resolution.locator, package_data);
+            self.record_fetch(resolution.locator, package_data)?;
         }
 
         Ok(())
@@ -747,8 +731,18 @@ impl<'a> InstallManager<'a> {
         self.result.install_state.descriptor_to_locator.insert(descriptor, locator);
     }
 
-    fn record_fetch(&mut self, locator: Locator, package_data: PackageData) {
-        self.result.package_data.insert(locator, package_data);
+    fn record_fetch(&mut self, locator: Locator, package_data: PackageData) -> Result<(), Error> {
+        let content_flags
+            = self.previous_state
+                .and_then(|previous_state| previous_state.content_flags.get(&locator))
+                .cloned()
+                .map_or_else(|| ContentFlags::extract(&locator, &package_data), Ok)?;
+
+        self.result.package_data.insert(locator.clone(), package_data);
+
+        self.result.install_state.content_flags.insert(locator, content_flags);
+
+        Ok(())
     }
 }
 

@@ -28,6 +28,20 @@ impl<T> UnwrapInfallible for Result<T, Infallible> {
     }
 }
 
+pub trait ResultExt<T, E> {
+    fn discard_error(self, f: impl Fn(&E) -> bool) -> Result<Option<T>, E>;
+}
+
+impl<T, E> ResultExt<T, E> for Result<T, E> {
+    fn discard_error(self, f: impl Fn(&E) -> bool) -> Result<Option<T>, E> {
+        match self {
+            Ok(value) => Ok(Some(value)),
+            Err(err) if f(&err) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+}
+
 pub trait IoResultExt<T, E> {
     fn discard_io_error(self, f: impl Fn(std::io::ErrorKind) -> bool) -> Result<Option<T>, E>;
     fn ok_missing(self) -> Result<Option<T>, E>;
