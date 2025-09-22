@@ -1,7 +1,8 @@
-use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
+use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
 
+use serde::Serialize;
 use zpm_primitives::Locator;
-use zpm_utils::{to_shell_line, FromFileString, IoResultExt, Path, ToFileString};
+use zpm_utils::{to_shell_line, FromFileString, Hash64, IoResultExt, Path, ToFileString};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -112,14 +113,14 @@ impl Binary {
     }
 }
 
-#[derive(Hash)]
+#[derive(Serialize)]
 pub struct ScriptBinary {
     pub name: String,
     pub argv0: String,
     pub args: Vec<String>,
 }
 
-#[derive(Default, Hash)]
+#[derive(Default, Serialize)]
 pub struct ScriptBinaries {
     pub binaries: Vec<ScriptBinary>,
 }
@@ -467,12 +468,10 @@ impl ScriptEnvironment {
     }
 
     fn install_binaries(&mut self) -> Result<Path, Error> {
-        let mut hash = DefaultHasher::new();
-        self.binaries.hash(&mut hash);
-        let hash = hash.finish();
-
+        let hash
+            = Hash64::from_string(&sonic_rs::to_string(&self.binaries)?);
         let dir_name
-            = format!(".yarn/zpm/binaries/zpm-{}", hash);
+            = format!(".yarn/zpm/binaries/zpm-{}", hash.to_file_string());
 
         let dir = Path::home_dir()?
             .expect("Expected home directory")
@@ -494,7 +493,8 @@ impl ScriptEnvironment {
 
             temp_dir
                 .fs_rename(&dir)
-                .ok_exists()?;
+                .ok_missing()
+                .discard_io_error(|kind| kind == std::io::ErrorKind::DirectoryNotEmpty)?;
         }
 
         Ok(dir)
