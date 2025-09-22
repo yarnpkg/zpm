@@ -106,6 +106,10 @@ impl Reference {
         matches!(&self, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_) | Reference::Portal(_) | Reference::Link(_))
     }
 
+    pub fn is_virtual_reference(&self) -> bool {
+        matches!(&self, Reference::Virtual(_))
+    }
+
     pub fn inner_locator(&self) -> Option<&Locator> {
         // Keep this implementation in sync w/ Range::inner_descriptor
 

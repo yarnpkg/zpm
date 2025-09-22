@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use clipanion::cli;
 use indexmap::IndexMap;
-use zpm_primitives::{DescriptorResolution, IdentGlob, Locator, Reference};
-use zpm_utils::{tree, AbstractValue, Unit};
+use zpm_primitives::{DescriptorResolution, IdentGlob, IdentResolution, Locator, Reference};
+use zpm_utils::{tree, AbstractValue, Unit, ToFileString};
 
 use crate::{
     cache::CompositeCache, error::Error, install::InstallState, project::{Project, Workspace}
@@ -78,7 +78,7 @@ impl Info {
         };
 
         project
-            .import_install_state()?;
+            .lazy_install().await?;
 
         let package_cache
             = project.package_cache()?;
@@ -124,6 +124,9 @@ impl Info {
             = vec![];
 
         for locator in selection {
+            let virtual_instances
+                = virtual_map.get(&locator);
+
             root_children.push(self.generate_info_node(
                 &package_cache,
                 install_state,
@@ -131,6 +134,14 @@ impl Info {
                 &virtual_map,
                 locator,
             ));
+
+            if self.virtuals {
+                if let Some(virtual_instances) = virtual_instances {
+                    for virtual_instance in virtual_instances {
+                        root_children.push(self.generate_vinfo_virtual_node(install_state, &dependent_map, virtual_instance));
+                    }
+                }
+            }
         }
 
         let root_node = tree::Node {
@@ -152,6 +163,11 @@ impl Info {
         let mut children
             = IndexMap::new();
 
+        let virtual_instances
+            = virtual_map.get(&locator)
+                .map(|instances| instances.iter().map(|instance| instance.clone()).collect::<Vec<_>>())
+                .unwrap_or_default();
+
         if !self.name_only {
             let resolution
                 = install_state.normalized_resolutions.get(&locator)
@@ -162,6 +178,14 @@ impl Info {
                 value: Some(AbstractValue::new(resolution.version.clone())),
                 children: None,
             });
+
+            if virtual_instances.len() > 0 {
+                children.insert("Instances".to_string(), tree::Node {
+                    label: Some("Instances".to_string()),
+                    value: Some(AbstractValue::new(virtual_instances.len())),
+                    children: None,
+                });
+            }
 
             if self.cache {
                 let cache_path
@@ -209,11 +233,93 @@ impl Info {
                     children: Some(tree::TreeNodeChildren::Vec(dep_children)),
                 });
             }
+
+            if self.dependents {
+                if let Some(dependents) = dependent_map.get(&locator) {
+                    let dependent_nodes
+                        = dependents
+                            .iter()
+                            .map(|dependent| tree::Node::new_value(dependent.clone()))
+                            .collect::<Vec<_>>();
+
+                    if dependent_nodes.len() > 0 {
+                        children.insert("Dependents".to_string(), tree::Node {
+                            label: Some("Dependents".to_string()),
+                            value: None,
+                            children: Some(tree::TreeNodeChildren::Vec(dependent_nodes)),
+                        });
+                    }
+                }
+            }
         }
 
         tree::Node {
             label: None,
             value: Some(AbstractValue::new(locator)),
+            children: Some(tree::TreeNodeChildren::Map(children)),
+        }
+    }
+
+    fn generate_vinfo_virtual_node(&self, install_state: &InstallState, dependent_map: &BTreeMap<Locator, BTreeSet<Locator>>, virtual_instance: &Locator) -> tree::Node<'_> {
+        let mut children
+            = IndexMap::new();
+
+        let resolution
+            = install_state.resolution_tree.locator_resolutions.get(virtual_instance)
+                .expect("Expected the locator to be in the resolution tree");
+
+        children.insert("Version".to_string(), tree::Node {
+            label: Some("Version".to_string()),
+            value: Some(AbstractValue::new(resolution.version.clone())),
+            children: None,
+        });
+
+        let mut peer_dependencies_children
+            = vec![];
+
+        for ident in resolution.peer_dependencies.keys() {
+            let dependency
+                = resolution.dependencies.get(ident);
+
+            let locator = dependency
+                .map(|descriptor| install_state.resolution_tree.descriptor_to_locator[descriptor].clone());
+
+            peer_dependencies_children.push(tree::Node {
+                label: None,
+                value: Some(AbstractValue::new(IdentResolution::new(ident.clone(), locator.clone()))),
+                children: None,
+            });
+        }
+
+        children.insert("Peer dependencies".to_string(), tree::Node {
+            label: Some("Peer dependencies".to_string()),
+            value: None,
+            children: Some(tree::TreeNodeChildren::Vec(peer_dependencies_children)),
+        });
+
+        if self.dependents {
+            println!("dependents: {:?}", dependent_map);
+            println!("virtual_instance: {:?}", virtual_instance);
+            if let Some(dependents) = dependent_map.get(virtual_instance) {
+                let dependent_nodes
+                    = dependents
+                        .iter()
+                        .map(|dependent| tree::Node::new_value(dependent.clone()))
+                        .collect::<Vec<_>>();
+
+                if dependent_nodes.len() > 0 {
+                    children.insert("Dependents".to_string(), tree::Node {
+                        label: Some("Dependents".to_string()),
+                        value: None,
+                        children: Some(tree::TreeNodeChildren::Vec(dependent_nodes)),
+                    });
+                }
+            }
+        }
+
+        tree::Node {
+            label: None,
+            value: Some(AbstractValue::new(virtual_instance.clone())),
             children: Some(tree::TreeNodeChildren::Map(children)),
         }
     }
@@ -351,11 +457,19 @@ impl Info {
             for descriptor in resolution.dependencies.values() {
                 let dependency = install_state.resolution_tree.descriptor_to_locator
                     .get(descriptor)
-                    .expect("Expected the descriptor to be in the resolution tree")
-                    .physical_locator();
+                    .expect("Expected the descriptor to be in the resolution tree");
 
-                if selection.contains(&dependency) {
-                    dependent_map.entry(dependency)
+                let physical_dependency
+                    = dependency.physical_locator();
+
+                if selection.contains(&physical_dependency) {
+                    let relevant_dependency = if self.virtuals {
+                        dependency.clone()
+                    } else {
+                        physical_dependency
+                    };
+
+                    dependent_map.entry(relevant_dependency)
                         .or_insert_with(BTreeSet::new)
                         .insert(locator.clone());
                 }
