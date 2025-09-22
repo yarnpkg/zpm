@@ -29,7 +29,7 @@ impl Bin {
             = project::Project::new(None).await?;
 
         project
-            .import_install_state()?;
+            .lazy_install().await?;
 
         let binary
             = project.find_binary(&self.name)?;

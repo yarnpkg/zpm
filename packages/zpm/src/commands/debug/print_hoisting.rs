@@ -20,7 +20,7 @@ impl PrintHoisting {
             = project::Project::new(None).await?;
 
         project
-            .import_install_state()?;
+            .lazy_install().await?;
 
         let install_state
             = project.install_state.as_ref().unwrap();
