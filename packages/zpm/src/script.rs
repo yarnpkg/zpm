@@ -492,9 +492,7 @@ impl ScriptEnvironment {
                 .fs_create_parent()?;
 
             temp_dir
-                .fs_rename(&dir)
-                .ok_missing()
-                .discard_io_error(|kind| kind == std::io::ErrorKind::DirectoryNotEmpty)?;
+                .fs_concurrent_move(&dir)?;
         }
 
         Ok(dir)
