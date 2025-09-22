@@ -1,5 +1,6 @@
 use clipanion::cli;
 use zpm_config::Source;
+use zpm_utils::ResultExt;
 
 use crate::{error::Error, project::{self, InstallMode, RunInstallOptions}};
 
@@ -42,6 +43,9 @@ impl Install {
             project.config.settings.enable_immutable_cache.value = true;
             project.config.settings.enable_immutable_cache.source = Source::Cli;
         }
+
+        // Discard errors; worst case scenario we just recompute the whole state from scratch.
+        let _ = project.import_install_state();
 
         project.run_install(RunInstallOptions {
             check_checksums: self.check_checksums,
