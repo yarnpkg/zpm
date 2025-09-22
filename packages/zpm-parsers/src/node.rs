@@ -1,6 +1,6 @@
 use crate::Path;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Span {
     pub offset: usize,
     pub size: usize,
@@ -12,7 +12,7 @@ impl Span {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Node {
     pub field_span: Span,
     pub value_span: Span,
@@ -25,7 +25,7 @@ impl Node {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Field {
     pub path: Path,
     pub node: Node,

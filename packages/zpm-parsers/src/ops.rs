@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{node::Field, Formatter, Path, Value};
 
@@ -114,9 +114,9 @@ impl Ops {
             child_values: Vec<(Path, Value)>,
         }
 
-        let mut extraneous_fields: Vec<Path>
-            = Vec::new();
-        let mut missing_fields: HashMap<Path, MissingField>
+        let mut extraneous_fields
+            = HashSet::new();
+        let mut missing_fields
             = HashMap::new();
 
         for (path, value) in self.set.iter() {
@@ -144,19 +144,26 @@ impl Ops {
                 while path_to_remove.len() > 0 {
                     let sibling_field_count
                         = field_map.keys()
-                            .filter(|p| p.starts_with(&path_to_remove[0..path_to_remove.len() - 1]) && p.len() == path_to_remove.len())
+                            .filter(|&p| p.len() == path_to_remove.len() && p.starts_with(&path_to_remove[0..path_to_remove.len() - 1]) && !extraneous_fields.contains(p))
                             .count();
 
                     if sibling_field_count == 1 {
                         path_to_remove.pop();
+                        extraneous_fields.insert(path_to_remove.clone());
                     } else {
                         break;
                     }
                 }
 
-                extraneous_fields.push(path_to_remove);
+                extraneous_fields.insert(path.clone());
             }
         }
+
+        let extraneous_fields
+            = extraneous_fields.clone()
+                .into_iter()
+                .filter(|p| p.len() == 0 || !extraneous_fields.contains(&Path::from_segments(p[0..p.len() - 1].to_vec())))
+                .collect::<HashSet<_>>();
 
         let mut current_indent
             = 0usize;
@@ -446,6 +453,28 @@ mod tests {
                 Update {
                     offset: 21,
                     size: 16,
+                    data: "".to_string(),
+                },
+            ],
+        });
+    }
+
+    #[test]
+    fn derive_remove_multiple_nested_fields() {
+        let mut ops = Ops::new();
+
+        ops.set(Path::from_segments(vec!["test".to_string(), "test2".to_string()]), Value::Undefined);
+        ops.set(Path::from_segments(vec!["test".to_string(), "test3".to_string()]), Value::Undefined);
+
+        let fields = yaml_parser::YamlParser::new("test:\n  test2: value\n  test3: value3\n".as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(ops.derive::<YamlFormatter>(&fields), UpdateSet {
+            updates: vec![
+                Update {
+                    offset: 0,
+                    size: 37,
                     data: "".to_string(),
                 },
             ],

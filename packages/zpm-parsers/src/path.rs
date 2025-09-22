@@ -1,7 +1,7 @@
 use std::ops::{Index, Range, RangeFrom, RangeInclusive, RangeTo};
 
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, DataType, FromFileString, ToFileString, ToHumanString};
 
 use crate::{json::escape_string, Error};
 
