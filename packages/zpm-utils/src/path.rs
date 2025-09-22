@@ -622,6 +622,13 @@ impl Path {
         Ok(self)
     }
 
+    /**
+     * Rename a file or directory to a new location.
+     *
+     * The source and destination must be on the same device or the function
+     * will return an error. Use `fs_move` or `fs_concurrent_move` when this
+     * behavior isn't desired.
+     */
     pub fn fs_rename(&self, new_path: &Path) -> Result<&Self, PathError> {
         std::fs::rename(self.to_path_buf(), new_path.to_path_buf())?;
         Ok(self)
@@ -653,6 +660,14 @@ impl Path {
         Ok(self)
     }
 
+    /**
+     * Move a file or directory to a new location, copying it if the source and
+     * destination are on different devices.
+     *
+     * The function will return an error if the destination already exists; prefer
+     * using `fs_concurrent_move` when multiple processes may try to write into
+     * the same location and you don't care which one succeeds first.
+     */
     pub fn fs_move(&self, new_path: &Path) -> Result<&Self, PathError> {
         match std::fs::rename(self.to_path_buf(), new_path.to_path_buf()) {
             Ok(_) => Ok(self),
@@ -662,6 +677,20 @@ impl Path {
             },
             Err(err) => Err(err.into()),
         }
+    }
+
+    /**
+     * Move a file or directory to a new location, copying it if the source and
+     * destination are on different devices.
+     *
+     * This function will discard errors about the destination already existing,
+     * making it safe to use when multiple processes could write into the same
+     * location but you don't care which one succeeds first.
+     */
+    pub fn fs_concurrent_move(&self, new_path: &Path) -> Result<&Self, PathError> {
+        self.fs_move(new_path)
+            .discard_io_error(|kind| kind == std::io::ErrorKind::DirectoryNotEmpty || kind == std::io::ErrorKind::AlreadyExists)
+            .map(|_| self)
     }
 
     pub fn fs_rm_file(&self) -> Result<&Self, PathError> {

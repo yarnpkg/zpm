@@ -147,8 +147,7 @@ pub async fn ensure<R: Future<Output = Result<(), Error>>, F: FnOnce(Path) -> R>
                     .fs_create_parent()?;
 
                 temp_dir
-                    .fs_move(&cache_path)
-                    .ok_exists()?;
+                    .fs_concurrent_move(&cache_path)?;
 
                 Ok(())
             }).await?;
