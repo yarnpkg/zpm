@@ -563,6 +563,12 @@ impl Project {
     }
 
     pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<(), Error> {
+        // Useful for optimization purposes as we can reuse some information such as content flags.
+        // Discard errors; worst case scenario we just recompute the whole state from scratch.
+        if self.install_state.is_none() {
+            let _ = self.import_install_state();
+        }
+
         let report = StreamReport::new(StreamReportConfig {
             include_version: true,
             silent_or_error: options.silent_or_error,

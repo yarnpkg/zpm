@@ -176,33 +176,6 @@
         }
       }
     },
-    "pnpEnableInlining": {
-      "type": "boolean",
-      "description": "Whether to inline the PnP dependency tree in the generated .pnp.cjs file",
-      "default": true
-    },
-    "pnpFallbackMode": {
-      "type": "crate::PnpFallbackMode",
-      "description": "The fallback mode to use for PnP",
-      "default": "dependencies-only"
-    },
-    "pnpIgnorePatterns": {
-      "type": "array",
-      "description": "The patterns to ignore when using PnP",
-      "items": {
-        "type": "zpm_utils::Glob"
-      }
-    },
-    "pnpShebang": {
-      "type": "string",
-      "description": "The shebang to use for the generated .pnp.cjs file",
-      "default": "#!/usr/bin/env node"
-    },
-    "pnpmStoreFolder": {
-      "type": "string",
-      "description": "The folder to use for the Pnpm store",
-      "default": "node_modules/.store"
-    },
     "packageExtensions": {
       "type": "object",
       "description": "Configuration specific to each package extension",
@@ -235,6 +208,38 @@
           }
         }
       }
+    },
+    "pnpEnableInlining": {
+      "type": "boolean",
+      "description": "Whether to inline the PnP dependency tree in the generated .pnp.cjs file",
+      "default": true
+    },
+    "pnpFallbackMode": {
+      "type": "crate::PnpFallbackMode",
+      "description": "The fallback mode to use for PnP",
+      "default": "dependencies-only"
+    },
+    "pnpIgnorePatterns": {
+      "type": "array",
+      "description": "The patterns to ignore when using PnP",
+      "items": {
+        "type": "zpm_utils::Glob"
+      }
+    },
+    "pnpShebang": {
+      "type": "string",
+      "description": "The shebang to use for the generated .pnp.cjs file",
+      "default": "#!/usr/bin/env node"
+    },
+    "pnpmStoreFolder": {
+      "type": "string",
+      "description": "The folder to use for the Pnpm store",
+      "default": "node_modules/.store"
+    },
+    "preferReuse": {
+      "type": "boolean",
+      "description": "Whether to prefer reusing dependencies from the lockfile when running `yarn add`",
+      "default": false
     },
     "supportedArchitectures": {
       "type": "object",

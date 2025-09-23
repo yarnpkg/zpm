@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, FutureExt};
@@ -9,7 +9,7 @@ use zpm_primitives::{AnonymousSemverRange, AnonymousTagRange, Descriptor, Folder
 use zpm_semver::RangeKind;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString, ToHumanString};
 
-use crate::{error::Error, install::InstallContext, manifest::helpers::{parse_manifest_from_bytes, read_manifest}, resolvers};
+use crate::{error::Error, install::InstallContext, manifest::helpers::{parse_manifest_from_bytes, read_manifest}, project::Project, resolvers};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ResolveOptions {
@@ -291,6 +291,12 @@ impl LooseDescriptor {
                     ));
                 }
 
+                if project.config.settings.prefer_reuse.value {
+                    if let Some(descriptor) = find_project_descriptor(project, ident.clone())? {
+                        return Ok(descriptor);
+                    }
+                }
+
                 let descriptor = Descriptor::new(
                     ident.clone(),
                     RegistryTagRange {
@@ -362,6 +368,34 @@ impl ToHumanString for LooseDescriptor {
             },
         }
     }
+}
+
+fn find_project_descriptor(project: &Project, ident: Ident) -> Result<Option<Descriptor>, Error> {
+    let mut occurrences
+        = BTreeMap::new();
+
+    fn try_match<'a>(descriptor: &'a Descriptor, occurrences: &mut BTreeMap<&'a Descriptor, usize>) {
+        occurrences.entry(descriptor)
+            .and_modify(|count| *count += 1)
+            .or_insert(1);
+    }
+
+    for workspace in project.workspaces.iter() {
+        if let Some(regular_descriptor) = workspace.manifest.remote.dependencies.get(&ident) {
+            try_match(regular_descriptor, &mut occurrences);
+        }
+
+        if let Some(dev_descriptor) = workspace.manifest.dev_dependencies.get(&ident) {
+            try_match(dev_descriptor, &mut occurrences);
+        }
+    }
+
+    let best_match
+        = occurrences.into_iter()
+            .max_by_key(|(_, count)| *count)
+            .map(|(descriptor, _)| descriptor.clone());
+
+    Ok(best_match)
 }
 
 impl_file_string_from_str!(LooseDescriptor);
