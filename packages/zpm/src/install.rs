@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
-    build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives_exts::RangeExt, project::{InstallMode, Project}, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}
+    build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives_exts::RangeExt, project::{InstallMode, Project}, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}
 };
 
 #[derive(Clone)]
@@ -466,6 +466,7 @@ pub struct Install {
     pub package_data: BTreeMap<Locator, PackageData>,
     pub install_state: InstallState,
     pub skip_build: bool,
+    pub constraints_check: bool,
 }
 
 impl Install {
@@ -491,6 +492,19 @@ impl Install {
             if !build_result.build_errors.is_empty() {
                 return Err(Error::SilentError);
             }
+        }
+
+        if self.constraints_check {
+            async_section("Checking constraints", async {
+                let output
+                    = check_constraints(project, false).await?;
+
+                if !output.is_empty() {
+                    return Err(Error::AutoConstraintsError);
+                }
+
+                Ok(())
+            }).await?;
         }
 
         let ignore_path
@@ -548,6 +562,11 @@ impl<'a> InstallManager<'a> {
 
     pub fn with_roots(mut self, roots: Vec<Descriptor>) -> Self {
         self.roots = roots;
+        self
+    }
+
+    pub fn with_constraints_check(mut self, constraints_check: bool) -> Self {
+        self.result.constraints_check = constraints_check;
         self
     }
 

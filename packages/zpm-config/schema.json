@@ -20,6 +20,11 @@
       "description": "Whether to automatically add @types/ packages to the dependencies",
       "default": "crate::check_tsconfig(context)"
     },
+    "enableConstraintsChecks": {
+      "type": "boolean",
+      "description": "Whether to check constraints when performing explicit installs",
+      "default": false
+    },
     "enableGlobalCache": {
       "type": "boolean",
       "description": "Whether to keep the packages in a global cache rather than inside the project",

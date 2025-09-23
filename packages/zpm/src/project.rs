@@ -622,6 +622,7 @@ impl Project {
                 .with_lockfile(lockfile?)
                 .with_previous_state(self.install_state.as_ref())
                 .with_roots_iter(self.workspaces.iter().map(|w| w.descriptor()))
+                .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value)
                 .resolve_and_fetch().await?
                 .finalize(self).await?;
 
