@@ -1,0 +1,53 @@
+---
+import MobileMenuToggle from "virtual:starlight/components/MobileMenuToggle";
+import Footer from "./Footer.astro";
+import clsx from "clsx";
+import SectionModal from "@/components/SectionModal";
+import { fade } from "astro:transitions";
+
+const { hasSidebar } = Astro.locals.starlightRoute;
+---
+
+{hasSidebar && <SectionModal client:only="preact" />}
+
+<div
+  transition:animate={fade({ duration: "0.2s" })}
+  class="min-h-screen flex flex-col justify-between"
+>
+  <div>
+    <header class="header"><slot name="header" /></header>
+
+    <div
+      class={clsx(
+        "page overflow-hidden",
+        hasSidebar && "flex gap-x-20 container pt-16"
+      )}
+    >
+      {
+        hasSidebar && (
+          <nav
+            class="sidebar print:hidden w-full lg:w-1/3 xl:w-1/4 max-lg:hidden"
+            aria-label={Astro.locals.t("sidebarNav.accessibleLabel")}
+          >
+            <MobileMenuToggle />
+            <div id="starlight__sidebar" class="sidebar-pane">
+              <div class="sidebar-content sl-flex">
+                <slot name="sidebar" />
+              </div>
+            </div>
+          </nav>
+        )
+      }
+      <div
+        class={clsx(
+          "main-frame max-w-full",
+          hasSidebar ? "lg:w-3/5 xl:w-3/4" : "w-full"
+        )}
+      >
+        <slot />
+      </div>
+    </div>
+  </div>
+
+  <Footer />
+</div>

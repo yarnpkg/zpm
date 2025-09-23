@@ -1,0 +1,23 @@
+---
+export async function getStaticPaths() {
+  return [
+    // Fallback route for any package
+    { params: { all: undefined } },
+  ];
+}
+
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import PackageLayout from "src/layouts/PackageLayout";
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Package",
+  }}
+  {...{
+    hideTitle: true,
+    hideBackground: true,
+  }}
+>
+  <PackageLayout client:only="preact" />
+</StarlightPage>

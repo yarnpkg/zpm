@@ -206,6 +206,25 @@ impl Project {
         self.ignore_path().with_join_str("build")
     }
 
+    pub fn global_cache_path(&self) -> Path {
+        self.config.settings.global_folder.value
+            .with_join_str("cache")
+    }
+
+    pub fn local_cache_path(&self) -> Path {
+        self.project_cwd
+            .with_join_str(".yarn")
+            .with_join_str(&self.config.settings.local_cache_folder_name.value)
+    }
+
+    pub fn preferred_cache_path(&self) -> Path {
+        if self.config.settings.enable_global_cache.value {
+            self.global_cache_path()
+        } else {
+            self.local_cache_path()
+        }
+    }
+
     pub fn lockfile(&self) -> Result<Lockfile, Error> {
         let lockfile_path
             = self.lockfile_path();
@@ -309,13 +328,10 @@ impl Project {
     }
 
     pub fn package_cache(&self) -> Result<CompositeCache, Error> {
-        let global_cache_path = self.config.settings.global_folder.value
-            .with_join_str("cache");
-
+        let global_cache_path
+            = self.global_cache_path();
         let local_cache_path
-            = self.project_cwd
-                .with_join_str(".yarn")
-                .with_join_str(&self.config.settings.local_cache_folder_name.value);
+            = self.local_cache_path();
 
         global_cache_path.fs_create_dir_all()?;
 

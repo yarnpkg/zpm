@@ -1,0 +1,32 @@
+---
+title: "yarn plugin check"
+description: "find all third-party plugins that differ from their own spec"
+slug: "cli/plugin/check"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+Find all third-party plugins that differ from their own spec
+
+</div>
+
+## Usage
+<Code code="yarn plugin check" lang="bash" />
+
+## Examples
+<p>find all third-party plugins that differ from their own spec
+:</p>
+<Code code="yarn plugin check" lang="bash" />
+
+## Details
+Check only the plugins from https.
+
+If this command detects any plugin differences in the CI environment, it will 
+throw an error.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-json" className="header-code"><code className="language-text">--json</code></h4> | Format the output as an NDJSON stream |

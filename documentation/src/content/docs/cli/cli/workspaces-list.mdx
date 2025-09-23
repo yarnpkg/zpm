@@ -1,0 +1,43 @@
+---
+title: "yarn workspaces list"
+description: "list all available workspaces"
+slug: "cli/workspaces/list"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+List all available workspaces
+
+</div>
+
+## Usage
+<Code code="yarn workspaces list" lang="bash" />
+
+## Details
+This command will print the list of all workspaces in the project.
+
+- If `--since` is set, Yarn will only list workspaces that have been modified 
+since the specified ref. By default Yarn will use the refs specified by the 
+`changesetBaseRefs` configuration option.
+
+- If `-R,--recursive` is set, Yarn will find workspaces to run the command on by 
+recursively evaluating `dependencies` and `devDependencies` fields, instead of 
+looking at the `workspaces` fields.
+
+- If `--no-private` is set, Yarn will not list any workspaces that have the 
+`private` field set to `true`.
+
+- If both the `-v,--verbose` and `--json` options are set, Yarn will also return 
+the cross-dependencies between each workspaces (useful when you wish to 
+automatically generate Buck / Bazel rules).
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-since" className="header-code"><code className="language-text">--since</code></h4> | Only include workspaces that have been changed since the specified ref. |
+| <h4 id="options-R%2C-recursive" className="header-code"><code className="language-text">-R,--recursive</code></h4> | Find packages via dependencies/devDependencies instead of using the workspaces field |
+| <h4 id="options-no-private" className="header-code"><code className="language-text">--no-private</code></h4> | Exclude workspaces that have the private field set to true |
+| <h4 id="options-v%2C-verbose" className="header-code"><code className="language-text">-v,--verbose</code></h4> | Also return the cross-dependencies between workspaces |
+| <h4 id="options-json" className="header-code"><code className="language-text">--json</code></h4> | Format the output as an NDJSON stream |

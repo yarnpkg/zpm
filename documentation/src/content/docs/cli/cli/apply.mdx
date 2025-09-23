@@ -1,0 +1,54 @@
+---
+title: "yarn version apply"
+description: "apply all the deferred version bumps at once"
+slug: "cli/apply"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+apply all the deferred version bumps at once
+
+</div>
+
+## Usage
+<Code code="yarn version apply" lang="bash" />
+
+## Examples
+<p>Apply the version change to the local workspace
+:</p>
+<Code code="yarn version apply" lang="bash" />
+
+<p>Apply the version change to all the workspaces in the local workspace
+:</p>
+<Code code="yarn version apply --all" lang="bash" />
+
+## Details
+This command will apply the deferred version changes and remove their 
+definitions from the repository.
+
+Note that if `--prerelease` is set, the given prerelease identifier (by default 
+`rc.%n`) will be used on all new versions and the version definitions will be 
+kept as-is.
+
+By default only the current workspace will be bumped, but you can configure this 
+behavior by using one of:
+
+- `--recursive` to also apply the version bump on its dependencies
+
+- `--all` to apply the version bump on all packages in the repository
+
+Note that this command will also update the `workspace:` references across all 
+your local workspaces, thus ensuring that they keep referring to the same 
+workspaces even after the version bump.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-all" className="header-code"><code className="language-text">--all</code></h4> | Apply the deferred version changes on all workspaces |
+| <h4 id="options-dry-run" className="header-code"><code className="language-text">--dry-run</code></h4> | Print the versions without actually generating the package archive |
+| <h4 id="options-prerelease" className="header-code"><code className="language-text">--prerelease</code></h4> | Add a prerelease identifier to new versions |
+| <h4 id="options-exact" className="header-code"><code className="language-text">--exact</code></h4> | Use the exact version of each package, removes any range. Useful for nightly releases where the range might match another version. |
+| <h4 id="options-R%2C-recursive" className="header-code"><code className="language-text">-R,--recursive</code></h4> | Release the transitive workspaces as well |
+| <h4 id="options-json" className="header-code"><code className="language-text">--json</code></h4> | Format the output as an NDJSON stream |

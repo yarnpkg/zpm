@@ -1,0 +1,46 @@
+---
+title: "yarn pack"
+description: "generate a tarball from the active workspace"
+slug: "cli/pack"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+generate a tarball from the active workspace
+
+</div>
+
+## Usage
+<Code code="yarn pack" lang="bash" />
+
+## Examples
+<p>Create an archive from the active workspace
+:</p>
+<Code code="yarn pack" lang="bash" />
+
+<p>List the files that would be made part of the workspace's archive
+:</p>
+<Code code="yarn pack --dry-run" lang="bash" />
+
+<p>Name and output the archive in a dedicated folder
+:</p>
+<Code code="yarn pack --out /artifacts/%s-%v.tgz" lang="bash" />
+
+## Details
+This command will turn the active workspace into a compressed archive suitable 
+for publishing. The archive will by default be stored at the root of the 
+workspace (`package.tgz`).
+
+If the `-o,--out` is set the archive will be created at the specified path. The 
+`%s` and `%v` variables can be used within the path and will be respectively 
+replaced by the package name and version.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-install-if-needed" className="header-code"><code className="language-text">--install-if-needed</code></h4> | Run a preliminary `yarn install` if the package contains build scripts |
+| <h4 id="options-n%2C-dry-run" className="header-code"><code className="language-text">-n,--dry-run</code></h4> | Print the file paths without actually generating the package archive |
+| <h4 id="options-json" className="header-code"><code className="language-text">--json</code></h4> | Format the output as an NDJSON stream |
+| <h4 id="options-o%2C-out%20%230" className="header-code"><code className="language-text">-o,--out #0</code></h4> | Create the archive at the specified path |

@@ -1,0 +1,99 @@
+---
+import "@docsearch/css";
+import SearchIcon from "src/assets/svg/search-icon.svg";
+---
+
+<div transition:persist class="search-container">
+  <div class="bg-linear-to-b from-white/5 to-white/15 rounded-full p-px">
+    <div class="rounded-full bg-linear-to-t from-gray-950 to-gray-800">
+      <button
+        type="button"
+        id="docsearch-button"
+        class="flex items-center rounded-full gap-x-2 px-6 py-3"
+        aria-label="Search documentation"
+      >
+        <SearchIcon class="size-6 shrink-0" />
+        <span
+          class="max-lg:hidden text-white font-montserrat font-medium text-sm"
+        >
+          Search
+        </span>
+      </button>
+    </div>
+  </div>
+
+  <div id="docsearch-container"></div>
+</div>
+
+<script>
+  import { DocSearchModal } from "@docsearch/react";
+  import { createElement, render } from "preact";
+
+  export function initializeSearch() {
+    let isOpen = false;
+    const button = document.getElementById("docsearch-button");
+    const container = document.getElementById("docsearch-container");
+
+    // Keyboard shortcuts
+    function handleGlobalKeys(event) {
+      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+        event.preventDefault();
+        openModal();
+      }
+      if (event.key === "Escape" && isOpen) {
+        closeModal();
+      }
+    }
+
+    document.addEventListener("keydown", handleGlobalKeys);
+
+    if (button) {
+      button.onclick = () => {
+        openModal();
+      };
+    }
+
+    function openModal() {
+      isOpen = true;
+      renderModal();
+    }
+
+    function closeModal() {
+      isOpen = false;
+      if (container) {
+        render(null, container);
+      }
+    }
+
+    function renderModal() {
+      if (!isOpen || !container) return;
+
+      const modalProps = {
+        initialQuery: "",
+        appId: "STXW7VT1S5",
+        apiKey: "ecdfaea128fd901572b14543a2116eee",
+        indexName: "yarnpkg_next",
+        onClose: closeModal,
+        transformItems: (items) => items,
+        placeholder: "Search documentation",
+        hitComponent: ({ hit, children }) => ({
+          ...children,
+          type: "a",
+          props: {
+            children,
+            href: hit.url,
+            class: "!w-full !bg-transparent !hover:bg-transparent",
+          },
+        }),
+        navigator: {
+          navigate({ itemUrl }) {
+            window.location.assign(itemUrl);
+          },
+        },
+      };
+
+      render(createElement(DocSearchModal, modalProps), container);
+    }
+  }
+  initializeSearch();
+</script>

@@ -382,6 +382,7 @@ impl ScriptEnvironment {
 
         self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
         self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
+        self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_file_string()));
 
         self
     }
@@ -600,7 +601,13 @@ impl ScriptEnvironment {
         let mut bash_args = vec![];
 
         bash_args.push("-c".to_string());
-        bash_args.push(format!("{} \"$@\"", script));
+
+        if script.ends_with(")") {
+            bash_args.push(script.to_string());
+        } else {
+            bash_args.push(format!("{} \"$@\"", script));
+        }
+
         bash_args.push("yarn-script".to_string());
         bash_args.extend(args.into_iter().map(|arg| arg.to_string()));
 

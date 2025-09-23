@@ -1,0 +1,35 @@
+---
+import DesktopNavigation from "./partial/DesktopNavigation.astro";
+import MobileNavigation from "./partial/client/MobileNavigation";
+import { Image } from "astro:assets";
+
+import stars from "src/assets/image/stars.png";
+
+const { hideBackground } = Astro.locals.starlightRoute;
+
+const { pathname } = Astro.url;
+---
+
+<nav class="container md:pt-6 pt-4 relative z-10">
+  <div class="max-xl:hidden">
+    <DesktopNavigation pathname={pathname} />
+  </div>
+  <div class="xl:hidden">
+    <MobileNavigation client:only="preact" pathname={pathname} />
+  </div>
+</nav>
+
+{
+  !hideBackground && (
+    <div class="relative">
+      <Image
+        src={stars}
+        alt="Stars Background"
+        class="absolute inset-0 w-full -z-20 top-0"
+        loading="eager"
+        decoding="sync"
+        fetchpriority="high"
+      />
+    </div>
+  )
+}

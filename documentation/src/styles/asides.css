@@ -1,0 +1,195 @@
+@layer starlight.components {
+  .starlight-aside {
+    padding: 1rem;
+    border-inline-start: 0.25rem solid var(--sl-color-asides-border);
+    color: var(--sl-color-white);
+    p {
+      line-height: 1.75rem !important;
+    }
+  }
+
+  .starlight-aside pre {
+    background-color: transparent !important;
+    border-radius: 12px;
+    border: none !important;
+  }
+
+  /* Note */
+  .starlight-aside--note {
+    padding: 24px;
+    background: rgba(42, 87, 219, 0.05);
+    border: 1px solid #ba88ff;
+    backdrop-filter: blur(4px);
+    border-radius: 16px;
+  }
+
+  .starlight-aside--note code {
+    background: rgba(42, 87, 219, 0.05);
+    color: #ba88ff;
+    font-size: 14px;
+  }
+
+  .starlight-aside--note .starlight-aside__content pre code {
+    background: rgba(42, 87, 219, 0.05);
+    border-radius: 12px;
+  }
+
+  .starlight-aside--note a code {
+    background: none;
+    border: none;
+    padding: 0;
+  }
+
+  .starlight-aside--note .starlight-aside__title svg {
+    color: #ba88ff;
+  }
+
+  .starlight-aside--note .starlight-aside__content a {
+    color: #ba88ff;
+  }
+
+  /* Tip */
+  .starlight-aside--tip {
+    padding: 24px;
+    background: rgba(186, 136, 255, 0.05);
+    border: 1px solid #b2ffb5;
+    backdrop-filter: blur(4px);
+    border-radius: 16px;
+  }
+
+  .starlight-aside--tip code {
+    background: rgba(186, 136, 255, 0.05);
+    color: #b2ffb5;
+    font-size: 14px;
+  }
+
+  .starlight-aside--tip .starlight-aside__content pre code {
+    background: rgba(186, 136, 255, 0.05);
+    border-radius: 12px;
+  }
+
+  .starlight-aside--tip a code {
+    background: none;
+    border: none;
+    padding: 0;
+  }
+
+  .starlight-aside--tip .starlight-aside__content a {
+    color: #b2ffb5;
+  }
+
+  .starlight-aside--tip .starlight-aside__title svg {
+    display: none;
+  }
+
+  .starlight-aside--tip .starlight-aside__title::before {
+    content: "";
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    background: url("../assets/svg/bulb.svg") no-repeat center / contain;
+  }
+
+  /* Caution */
+  .starlight-aside--caution {
+    padding: 24px;
+    background: rgba(255, 184, 136, 0.05);
+    border: 1px solid #ffb888;
+    border-radius: 16px;
+  }
+
+  .starlight-aside--caution code {
+    background: rgba(255, 184, 136, 0.05);
+    color: #ffb888;
+    font-size: 14px;
+  }
+
+  .starlight-aside--caution .starlight-aside__content pre code {
+    background: rgba(255, 184, 136, 0.05);
+    border-radius: 12px;
+  }
+
+  .starlight-aside--caution a code {
+    background: none;
+    border: none;
+    padding: 0;
+  }
+
+  .starlight-aside--caution .starlight-aside__content a {
+    color: #ffb888;
+  }
+
+  .starlight-aside--caution .starlight-aside__title svg {
+    display: none;
+  }
+
+  .starlight-aside--caution .starlight-aside__title::before {
+    content: "";
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    background: url("../assets/svg/exclamation.svg") no-repeat center / contain;
+  }
+
+  /* Danger */
+  .starlight-aside--danger {
+    padding: 24px;
+    background: rgba(219, 42, 77, 0.05);
+    border: 1px solid #db2a4d;
+    border-radius: 16px;
+  }
+
+  .starlight-aside--danger code {
+    background: rgba(219, 42, 77, 0.05);
+    color: #db2a4d;
+    font-size: 14px;
+  }
+
+  .starlight-aside--danger .starlight-aside__content pre code {
+    background: rgba(219, 42, 77, 0.05);
+    border-radius: 12px;
+  }
+
+  .starlight-aside--danger a code {
+    background: none;
+    border: none;
+    padding: 0;
+  }
+
+  .starlight-aside--danger .starlight-aside__content a {
+    color: #db2a4d;
+  }
+
+  .starlight-aside--danger .starlight-aside__title svg {
+    display: none;
+  }
+
+  .starlight-aside--danger .starlight-aside__title::before {
+    content: "";
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    background: url("../assets/svg/danger.svg") no-repeat center / contain;
+  }
+
+  .starlight-aside__title {
+    font-weight: 400;
+    font-size: 20px;
+    line-height: 140%;
+    color: #ffffff;
+  }
+
+  .starlight-aside__icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  .starlight-aside__title + .starlight-aside__content {
+    margin-top: 16px;
+    font-style: normal;
+    font-weight: 400;
+    font-size: 16px;
+    line-height: 160%;
+    color: rgba(255, 255, 255, 0.8);
+  }
+}

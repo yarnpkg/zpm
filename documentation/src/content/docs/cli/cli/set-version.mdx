@@ -1,0 +1,97 @@
+---
+title: "yarn set version"
+description: "lock the Yarn version used by the project"
+slug: "cli/set/version"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+Lock the yarn version used by the project
+
+</div>
+
+## Usage
+<Code code="yarn set version <version>" lang="bash" />
+
+## Examples
+<p>Download the latest release from the Yarn repository
+:</p>
+<Code code="yarn set version latest" lang="bash" />
+
+<p>Download the latest canary release from the Yarn repository
+:</p>
+<Code code="yarn set version canary" lang="bash" />
+
+<p>Download the latest classic release from the Yarn repository
+:</p>
+<Code code="yarn set version classic" lang="bash" />
+
+<p>Download the most recent Yarn 3 build
+:</p>
+<Code code="yarn set version 3.x" lang="bash" />
+
+<p>Download a specific Yarn 2 build
+:</p>
+<Code code="yarn set version 2.0.0-rc.30" lang="bash" />
+
+<p>Switch back to a specific Yarn 1 release
+:</p>
+<Code code="yarn set version 1.22.1" lang="bash" />
+
+<p>Use a release from the local filesystem
+:</p>
+<Code code="yarn set version ./yarn.cjs" lang="bash" />
+
+<p>Use a release from a URL
+:</p>
+<Code code="yarn set version https://repo.yarnpkg.com/3.1.0/packages/yarnpkg-cli/bin/yarn.js" lang="bash" />
+
+<p>Download the version used to invoke the command
+:</p>
+<Code code="yarn set version self" lang="bash" />
+
+## Details
+This command will set a specific release of Yarn to be used by Corepack: 
+https://nodejs.org/api/corepack.html.
+
+By default it only will set the `packageManager` field at the root of your 
+project, but if the referenced release cannot be represented this way, if you 
+already have `yarnPath` configured, or if you set the `--yarn-path` command line 
+flag, then the release will also be downloaded from the Yarn GitHub repository, 
+stored inside your project, and referenced via the `yarnPath` settings from your 
+project `.yarnrc.yml` file.
+
+A very good use case for this command is to enforce the version of Yarn used by 
+any single member of your team inside the same project - by doing this you 
+ensure that you have control over Yarn upgrades and downgrades (including on 
+your deployment servers), and get rid of most of the headaches related to 
+someone using a slightly different version and getting different behavior.
+
+The version specifier can be:
+
+- a tag:
+
+- `latest` / `berry` / `stable` -> the most recent stable berry (`>=2.0.0`) 
+release
+
+- `canary` -> the most recent canary (release candidate) berry (`>=2.0.0`) 
+release
+
+- `classic` -> the most recent classic (`^0.x || ^1.x`) release
+
+- a semver range (e.g. `2.x`) -> the most recent version satisfying the range 
+(limited to berry releases)
+
+- a semver version (e.g. `2.4.1`, `1.22.1`)
+
+- a local file referenced through either a relative or absolute path
+
+- `self` -> the version used to invoke the command
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-yarn-path" className="header-code"><code className="language-text">--yarn-path</code></h4> | Set the yarnPath setting even if the version can be accessed by Corepack |
+| <h4 id="options-only-if-needed" className="header-code"><code className="language-text">--only-if-needed</code></h4> | Only lock the Yarn version if it isn't already locked |

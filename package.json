@@ -1,6 +1,7 @@
 {
   "packageManager": "yarn@6.0.0-git.20250914.hash-7ff8b08d5f9c179210949c4ff0f99e5542b3d22f",
   "workspaces": [
+    "documentation",
     "packages/*"
   ],
   "devDependencies": {

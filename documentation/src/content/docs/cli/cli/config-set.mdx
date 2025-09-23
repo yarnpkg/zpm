@@ -1,0 +1,56 @@
+---
+title: "yarn config set"
+description: "change a configuration settings"
+slug: "cli/config/set"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+Change a configuration settings
+
+</div>
+
+## Usage
+<Code code="yarn config set <name> <value>" lang="bash" />
+
+## Examples
+<p>Set a simple configuration setting (a string, a number, or a boolean)
+:</p>
+<Code code="yarn config set initScope myScope" lang="bash" />
+
+<p>Set a simple configuration setting (a string, a number, or a boolean) using the `--json` flag
+:</p>
+<Code code="yarn config set initScope --json \&quot;myScope\&quot;" lang="bash" />
+
+<p>Set a complex configuration setting (an Array) using the `--json` flag
+:</p>
+<Code code="yarn config set unsafeHttpWhitelist --json '[&quot;*.example.com&quot;, &quot;example.com&quot;]'" lang="bash" />
+
+<p>Set a complex configuration setting (an Object) using the `--json` flag
+:</p>
+<Code code="yarn config set packageExtensions --json '{ &quot;@babel/parser@*&quot;: { &quot;dependencies&quot;: { &quot;@babel/types&quot;: &quot;*&quot; } } }'" lang="bash" />
+
+<p>Set a nested configuration setting
+:</p>
+<Code code="yarn config set npmScopes.company.npmRegistryServer &quot;https://npm.example.com&quot;" lang="bash" />
+
+<p>Set a nested configuration setting using indexed access for non-simple keys
+:</p>
+<Code code="yarn config set 'npmRegistries[&quot;//npm.example.com&quot;].npmAuthToken' &quot;ffffffff-ffff-ffff-ffff-ffffffffffff&quot;" lang="bash" />
+
+## Details
+This command will set a configuration setting.
+
+When used without the `--json` flag, it can only set a simple configuration 
+setting (a string, a number, or a boolean).
+
+When used with the `--json` flag, it can set both simple and complex 
+configuration settings, including Arrays and Objects.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-json" className="header-code"><code className="language-text">--json</code></h4> | Set complex configuration settings to JSON values |
+| <h4 id="options-H%2C-home" className="header-code"><code className="language-text">-H,--home</code></h4> | Update the home configuration instead of the project configuration |

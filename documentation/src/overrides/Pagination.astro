@@ -1,0 +1,58 @@
+---
+import clsx from "clsx";
+
+// Images
+import LeftChevronIcon from "src/assets/svg/left-chevron.svg";
+import RightChevronIcon from "src/assets/svg/right-chevron.svg";
+
+const { dir, pagination } = Astro.locals.starlightRoute;
+const { prev, next } = pagination;
+const isRtl = dir === "rtl";
+---
+
+<div
+  class={clsx(
+    "print:hidden flex items-center",
+    next && !prev ? "justify-end" : "justify-between gap-4"
+  )}
+  dir={dir}
+>
+  {
+    prev && (
+      <a href={prev.href} rel="prev" class="flex items-center gap-x-5">
+        <div class="rounded-full size-12 flex items-center justify-center p-[1px] bg-linear-to-l from-white/15 to-white/5">
+          <div class="bg-linear-to-l from-[#181A1F] to-[#0D0F14] rounded-full w-full h-full flex items-center justify-center">
+            {isRtl ? (
+              <RightChevronIcon class="size-4 stroke-white" />
+            ) : (
+              <LeftChevronIcon class="size-4 stroke-white" />
+            )}
+          </div>
+        </div>
+        <span class="font-montserrat text-white font-medium leading-[22px] max-md:text-sm">
+          {prev.label}
+        </span>
+      </a>
+    )
+  }
+
+  {
+    next && (
+      <a href={next.href} rel="next" class="flex items-center gap-x-5">
+        <span class="font-montserrat text-white font-medium leading-[22px] max-md:text-sm">
+          {next.label}
+        </span>
+
+        <div class="rotate-180 rounded-full size-12 flex items-center justify-center p-[1px] bg-linear-to-l from-white/15 to-white/5">
+          <div class="bg-linear-to-l from-[#181A1F] to-[#0D0F14] rounded-full w-full h-full flex items-center justify-center">
+            {isRtl ? (
+              <RightChevronIcon class="size-4 stroke-white" />
+            ) : (
+              <LeftChevronIcon class="size-4 stroke-white" />
+            )}
+          </div>
+        </div>
+      </a>
+    )
+  }
+</div>
