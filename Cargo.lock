@@ -4235,6 +4235,7 @@ version = "0.0.0"
 dependencies = [
  "erased-serde",
  "indoc",
+ "itertools 0.14.0",
  "pretty_assertions",
  "regex",
  "rstest 0.26.1",

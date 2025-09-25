@@ -48,8 +48,8 @@ impl Path {
         self.segments.len()
     }
 
-    pub fn last(&self) -> Option<&String> {
-        self.segments.last()
+    pub fn last(&self) -> Option<&str> {
+        self.segments.last().map(|s| s.as_str())
     }
 
     pub fn push(&mut self, segment: String) {
@@ -62,6 +62,10 @@ impl Path {
 
     pub fn starts_with(&self, other: &[String]) -> bool {
         self.segments.starts_with(other)
+    }
+
+    pub fn is_direct_child_of(&self, other: &Path) -> bool {
+        self.segments.starts_with(&other.segments) && self.segments.len() == other.segments.len() + 1
     }
 
     fn to_parts<'a>(&'a self) -> Vec<PathSegment<'a>> {
