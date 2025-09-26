@@ -47,6 +47,14 @@ impl JsonDocument {
         Ok(())
     }
 
+    pub fn update_path(&mut self, path: &Path, value: Value) -> Result<(), Error> {
+        if self.paths.contains_key(path) {
+            self.set_path(&path, value)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn set_path(&mut self, path: &Path, value: Value) -> Result<(), Error> {
         let key_span
             = self.paths.get(path);
