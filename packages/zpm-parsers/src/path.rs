@@ -3,7 +3,7 @@ use std::ops::{Index, Range, RangeFrom, RangeInclusive, RangeTo};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use zpm_utils::{impl_file_string_from_str, DataType, FromFileString, ToFileString, ToHumanString};
 
-use crate::{json::escape_string, Error};
+use crate::Error;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct Path {
@@ -38,6 +38,14 @@ impl Path {
 
     pub fn segments(&self) -> &[String] {
         &self.segments
+    }
+
+    pub fn parent(&self) -> Option<Path> {
+        if self.segments.is_empty() {
+            None
+        } else {
+            Some(Path::from_segments(self.segments[..self.segments.len() - 1].to_vec()))
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -281,7 +289,7 @@ impl ToFileString for Path {
 
                 PathSegment::String(segment) => {
                     result.push_str("[");
-                    result.push_str(&escape_string(segment));
+                    result.push_str(&sonic_rs::to_string(segment).expect("Failed to escape string"));
                     result.push_str("]");
                 },
             }
@@ -321,7 +329,7 @@ impl ToHumanString for Path {
 
                 PathSegment::String(segment) => {
                     result.push_str(&DataType::Code.colorize("["));
-                    result.push_str(&DataType::String.colorize(&escape_string(segment)));
+                    result.push_str(&DataType::String.colorize(&sonic_rs::to_string(segment).expect("Failed to escape string")));
                     result.push_str(&DataType::Code.colorize("]"));
                 },
             }

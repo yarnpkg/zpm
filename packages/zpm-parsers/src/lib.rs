@@ -11,12 +11,10 @@ pub mod json;
 
 pub use error::Error;
 pub use path::Path;
-pub use json::JsonFormatter;
+pub use json::JsonDocument;
 pub use value::Value;
 
 use crate::node::Field;
-
-mod foo;
 
 pub trait Parser {
     fn parse(input: &str) -> Result<Vec<Field>, Error>;
