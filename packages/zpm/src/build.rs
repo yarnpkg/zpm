@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
 use zpm_utils::{CollectHash, Hash64, IoResultExt, Path, ToFileString};
 use bincode::{Decode, Encode};
@@ -183,7 +184,7 @@ impl BuildState {
             .await
             .unwrap_or_else(|_| "{}".to_owned());
 
-        sonic_rs::from_str::<Self>(&build_state_text)
+        JsonDocument::hydrate_from_str::<Self>(&build_state_text)
             .expect("Failed to parse the build state")
     }
 
@@ -195,7 +196,7 @@ impl BuildState {
             .fs_create_parent()?;
 
         let build_state_text
-            = sonic_rs::to_string(self)?;
+            = JsonDocument::to_string(self)?;
 
         build_state_path
             .fs_change(build_state_text, false)?;

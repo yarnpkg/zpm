@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde_with::serde_as;
+use zpm_parsers::JsonDocument;
 use std::{collections::BTreeMap, fmt::Debug, str::FromStr};
 use zpm_semver::{Range, Version, VersionRc};
 use zpm_utils::{ExplicitPath, FromFileString, Path, ToFileString};
@@ -54,8 +55,8 @@ pub async fn resolve_semver_range(range: &Range) -> Result<Version, Error> {
     let response
         = fetch("https://repo.yarnpkg.com/releases").await?;
 
-    let data: TagsPayload = sonic_rs::from_slice(&response)
-        .unwrap();
+    let data: TagsPayload
+        = JsonDocument::hydrate_from_slice(&response)?;
 
     let highest = data.release_lines.values()
         .flat_map(|release_line| &release_line.tags)

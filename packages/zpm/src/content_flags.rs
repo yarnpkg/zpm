@@ -4,6 +4,7 @@ use bincode::{Decode, Encode};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{DefaultOnError, serde_as};
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{Ident, Locator, Reference};
 use zpm_utils::Path;
 
@@ -130,8 +131,8 @@ impl ContentFlags {
             = package_directory.with_join_str("package.json");
         let manifest_bytes
             = manifest_path.fs_read_prealloc()?;
-        let manifest
-            = sonic_rs::from_slice::<Manifest>(&manifest_bytes)?;
+        let manifest: Manifest
+            = JsonDocument::hydrate_from_slice(&manifest_bytes)?;
 
         let build_commands
             = UNPLUG_SCRIPTS.iter()
@@ -151,11 +152,11 @@ impl ContentFlags {
         let package_bytes
             = archive_path.fs_read()?;
 
-        let first_entry = zpm_formats::zip::first_entry_from_zip(&package_bytes)
-            .unwrap();
+        let first_entry
+            = zpm_formats::zip::first_entry_from_zip(&package_bytes)?;
 
-        let meta_manifest = sonic_rs::from_slice::<Manifest>(&first_entry.data)
-            .unwrap();
+        let meta_manifest: Manifest
+            = JsonDocument::hydrate_from_slice(&first_entry.data)?;
 
         let mut build_commands = UNPLUG_SCRIPTS.iter()
             .filter_map(|k| meta_manifest.scripts.get(*k).map(|s| (k, s)))

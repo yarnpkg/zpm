@@ -24,7 +24,7 @@ pub enum Error {
     RequestError(#[from] Arc<reqwest::Error>),
 
     #[error(transparent)]
-    JsonError(#[from] Arc<sonic_rs::Error>),
+    JsonError(#[from] zpm_parsers::Error),
 
     #[error("Failed to execute the {program} binary: {error}", program = DataType::Code.colorize(&.0), error = .1.to_string())]
     FailedToExecuteBinary(String, Arc<std::io::Error>),
@@ -45,7 +45,7 @@ pub enum Error {
     InvalidVersionSelector(String),
 
     #[error("Failed to parse manifest: {0}")]
-    FailedToParseManifest(Arc<sonic_rs::Error>),
+    FailedToParseManifest(zpm_parsers::Error),
 
     #[error("Server answered with HTTP {0} ({1})")]
     HttpStatus(StatusCode, String),
@@ -93,11 +93,5 @@ impl From<reqwest::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
         Error::from(Arc::new(value))
-    }
-}
-
-impl From<sonic_rs::Error> for Error {
-    fn from(value: sonic_rs::Error) -> Self {
-        Error::JsonError(Arc::new(value))
     }
 }

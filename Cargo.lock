@@ -401,7 +401,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -410,7 +410,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -620,6 +620,12 @@ dependencies = [
  "thiserror 1.0.69",
  "zeroize",
 ]
+
+[[package]]
+name = "diff"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 
 [[package]]
 name = "difflib"
@@ -2108,6 +2114,16 @@ name = "pretty-duration"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8868e7264af614b3634ff0abbe37b178e61000611b8a75221aea40221924aba"
+
+[[package]]
+name = "pretty_assertions"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d"
+dependencies = [
+ "diff",
+ "yansi",
+]
 
 [[package]]
 name = "proc-macro-crate"
@@ -3607,7 +3623,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4121,7 +4137,6 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "sha2",
- "sonic-rs",
  "thiserror 1.0.69",
  "tokio",
  "wax",
@@ -4153,11 +4168,11 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "shellexpand",
- "sonic-rs",
  "thiserror 2.0.16",
  "zpm-ci",
  "zpm-formats",
  "zpm-macro-enum",
+ "zpm-parsers",
  "zpm-primitives",
  "zpm-semver",
  "zpm-utils",
@@ -4219,7 +4234,10 @@ version = "0.0.0"
 dependencies = [
  "erased-serde",
  "indoc",
+ "itertools 0.14.0",
+ "pretty_assertions",
  "regex",
+ "rstest 0.26.1",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -4276,12 +4294,12 @@ dependencies = [
  "serde",
  "serde_plain",
  "serde_with",
- "sonic-rs",
  "thiserror 2.0.16",
  "tokio",
  "zpm-ci",
  "zpm-formats",
  "zpm-macro-enum",
+ "zpm-parsers",
  "zpm-semver",
  "zpm-utils",
 ]
@@ -4309,7 +4327,6 @@ dependencies = [
  "serde_json",
  "shlex",
  "similar",
- "sonic-rs",
  "thiserror 2.0.16",
  "timeago",
  "tokio",

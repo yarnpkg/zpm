@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use clipanion::cli;
 use wax::{Glob, Program};
 use zpm_config::Configuration;
-use zpm_parsers::JsonFormatter;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
 use zpm_utils::ToFileString;
 
@@ -85,23 +85,35 @@ impl Remove {
             .with_join_str("package.json");
 
         let manifest_content = manifest_path
-            .fs_read_text_prealloc()?;
+            .fs_read_prealloc()?;
 
         let mut formatter
-            = JsonFormatter::from(&manifest_content)?;
+            = JsonDocument::new(manifest_content)?;
 
         for ident in removed_dependencies.iter() {
-            formatter.remove(vec!["dependencies".to_string(), ident.to_file_string()])?;
-            formatter.remove(vec!["optionalDependencies".to_string(), ident.to_file_string()])?;
-            formatter.remove(vec!["peerDependencies".to_string(), ident.to_file_string()])?;
-            formatter.remove(vec!["devDependencies".to_string(), ident.to_file_string()])?;
+            formatter.set_path(
+                &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), ident.to_file_string()]),
+                zpm_parsers::Value::Undefined,
+            )?;
+
+            formatter.set_path(
+                &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), ident.to_file_string()]),
+                zpm_parsers::Value::Undefined,
+            )?;
+
+            formatter.set_path(
+                &zpm_parsers::Path::from_segments(vec!["peerDependencies".to_string(), ident.to_file_string()]),
+                zpm_parsers::Value::Undefined,
+            )?;
+
+            formatter.set_path(
+                &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), ident.to_file_string()]),
+                zpm_parsers::Value::Undefined,
+            )?;
         }
 
-        let updated_content
-            = formatter.to_string();
-
         manifest_path
-            .fs_change(&updated_content, false)?;
+            .fs_change(&formatter.input, false)?;
 
         Ok(())
     }

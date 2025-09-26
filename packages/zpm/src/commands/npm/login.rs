@@ -1,5 +1,6 @@
 use clipanion::cli;
 use serde::{Deserialize, Serialize};
+use zpm_parsers::JsonDocument;
 use zpm_utils::{DataType, QueryString};
 
 use crate::{
@@ -120,7 +121,7 @@ impl Login {
         let user_url
             = format!("/-/user/{}", user_id);
 
-        let payload = sonic_rs::to_string(&NpmLoginPayload {
+        let payload = JsonDocument::to_string(&NpmLoginPayload {
             id: format!("org.couchdb.user:{}", username),
             name: username.to_string(),
             password: password.to_string(),
@@ -137,11 +138,13 @@ impl Login {
             authorization: None,
         }, payload).await?;
 
-        let body = response.text().await
-            .map_err(|e| Error::AuthenticationError(format!("Failed to read response: {}", e)))?;
+        let body
+            = response.text().await
+                .map_err(|e| Error::AuthenticationError(format!("Failed to read response: {}", e)))?;
 
-        let login_response: NpmLoginResponse = sonic_rs::from_str(&body)
-            .map_err(|e| Error::AuthenticationError(format!("Failed to parse response: {}", e)))?;
+        let login_response: NpmLoginResponse
+            = JsonDocument::hydrate_from_str(&body)
+                .map_err(|e| Error::AuthenticationError(format!("Failed to parse response: {}", e)))?;
 
         return Ok(login_response.token);
     }

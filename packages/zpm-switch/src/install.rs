@@ -13,13 +13,8 @@ async fn install_native_from_zip(source: &cache::CacheKey, binary_name: &str) ->
         let entries
             = zpm_formats::zip::entries_from_zip(&zip)?;
 
-        let meta_file = p
-            .with_join_str("meta.json");
         let target_dir = p
             .with_join_str("bin");
-
-        meta_file
-            .fs_write(sonic_rs::to_string(&source)?)?;
 
         entries_to_disk(&entries, &target_dir)?;
 
