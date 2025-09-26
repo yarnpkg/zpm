@@ -114,6 +114,9 @@ impl JsonDocument {
             },
 
             (true, false) => {
+                scanner.skip_char(b',')?;
+                scanner.skip_whitespace();
+
                 self.replace_range(key_offset..scanner.offset, b"")
             },
 
