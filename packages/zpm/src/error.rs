@@ -1,7 +1,7 @@
 use std::{future::Future, sync::Arc};
 
 use zpm_primitives::{Descriptor, Ident, Locator, Range};
-use zpm_utils::{Path, ToHumanString};
+use zpm_utils::{DataType, Path, ToHumanString};
 use tokio::task::JoinError;
 
 fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
@@ -257,6 +257,9 @@ pub enum Error {
 
     #[error("Workspace path not found ({})", .0.to_print_string())]
     WorkspacePathNotFound(Path),
+
+    #[error("Automatic constraints check failed; run {} to obtain details", DataType::Code.colorize("yarn constraints"))]
+    AutoConstraintsError,
 
     #[error("Install state file not found; please run an install operation first")]
     InstallStateNotFound,

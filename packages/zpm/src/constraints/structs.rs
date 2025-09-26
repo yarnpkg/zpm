@@ -133,10 +133,18 @@ pub enum WorkspaceOperation {
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct ConstraintsOutput {
+    #[serde(skip)]
+    pub raw_json: Vec<u8>,
     #[serde_as(as = "Vec<(_, _)>")]
     pub all_workspace_operations: BTreeMap<Path, Vec<WorkspaceOperation>>,
     #[serde_as(as = "Vec<(_, _)>")]
     pub all_workspace_errors: BTreeMap<Path, Vec<WorkspaceError>>,
+}
+
+impl ConstraintsOutput {
+    pub fn is_empty(&self) -> bool {
+        self.all_workspace_operations.is_empty() && self.all_workspace_errors.is_empty()
+    }
 }
 
 #[derive(Serialize)]
