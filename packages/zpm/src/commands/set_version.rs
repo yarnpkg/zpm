@@ -48,7 +48,7 @@ impl SetVersion {
         formatter.set_path(
             &zpm_parsers::Path::from_segments(vec!["packageManager".to_string()]),
             Value::String(package_manager.to_file_string()),
-        );
+        )?;
 
         manifest_path
             .fs_change(&formatter.input, false)?;

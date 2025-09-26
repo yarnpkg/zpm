@@ -93,17 +93,17 @@ impl Up {
                 = JsonDocument::new(manifest_content)?;
 
             for descriptor in descriptors.iter() {
-                formatter.set_path(
+                formatter.update_path(
                     &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), descriptor.ident.to_file_string()]),
                     Value::String(descriptor.range.to_file_string()),
                 )?;
 
-                formatter.set_path(
+                formatter.update_path(
                     &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), descriptor.ident.to_file_string()]),
                     Value::String(descriptor.range.to_file_string()),
                 )?;
 
-                formatter.set_path(
+                formatter.update_path(
                     &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()]),
                     Value::String(descriptor.range.to_file_string()),
                 )?;

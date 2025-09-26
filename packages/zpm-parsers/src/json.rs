@@ -74,6 +74,14 @@ impl JsonDocument {
         Ok(())
     }
 
+    pub fn update_path(&mut self, path: &Path, value: Value) -> Result<(), Error> {
+        if self.paths.contains_key(path) {
+            self.set_path(&path, value)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn set_path(&mut self, path: &Path, value: Value) -> Result<(), Error> {
         let key_span
             = self.paths.get(path);
@@ -141,6 +149,9 @@ impl JsonDocument {
             },
 
             (true, false) => {
+                scanner.skip_char(b',')?;
+                scanner.skip_whitespace();
+
                 self.replace_range(key_offset..scanner.offset, b"")
             },
 
@@ -766,6 +777,20 @@ mod tests {
     #[case(b"{\n  \"keep\": \"this\",\n  \"delete\": \"me\"\n}", vec!["delete"], Value::Undefined, b"{\n  \"keep\": \"this\"\n}")]
     #[case(b"{\"parent\": {\"child\": \"value\"}}", vec!["parent", "child"], Value::Undefined, b"{}")]
     #[case(b"{\"parent\": {\"keep\": \"this\", \"delete\": \"me\"}}", vec!["parent", "delete"], Value::Undefined, b"{\"parent\": {\"keep\": \"this\"}}")]
+
+    #[case(b"{\"first\": \"value1\", \"second\": \"value2\", \"third\": \"value3\"}", vec!["first"], Value::Undefined, b"{\"second\": \"value2\", \"third\": \"value3\"}")]
+    #[case(b"{\"first\": \"value1\", \"second\": \"value2\", \"third\": \"value3\"}", vec!["second"], Value::Undefined, b"{\"first\": \"value1\", \"third\": \"value3\"}")]
+    #[case(b"{\"first\": \"value1\", \"second\": \"value2\", \"third\": \"value3\"}", vec!["third"], Value::Undefined, b"{\"first\": \"value1\", \"second\": \"value2\"}")]
+    #[case(b"{\n  \"first\": \"value1\",\n  \"second\": \"value2\",\n  \"third\": \"value3\"\n}", vec!["first"], Value::Undefined, b"{\n  \"second\": \"value2\",\n  \"third\": \"value3\"\n}")]
+    #[case(b"{\n  \"first\": \"value1\",\n  \"second\": \"value2\",\n  \"third\": \"value3\"\n}", vec!["second"], Value::Undefined, b"{\n  \"first\": \"value1\",\n  \"third\": \"value3\"\n}")]
+    #[case(b"{\n  \"first\": \"value1\",\n  \"second\": \"value2\",\n  \"third\": \"value3\"\n}", vec!["third"], Value::Undefined, b"{\n  \"first\": \"value1\",\n  \"second\": \"value2\"\n}")]
+
+    #[case(b"{\"nested\": {\"first\": \"value1\", \"second\": \"value2\", \"third\": \"value3\"}}", vec!["nested", "first"], Value::Undefined, b"{\"nested\": {\"second\": \"value2\", \"third\": \"value3\"}}")]
+    #[case(b"{\"nested\": {\"first\": \"value1\", \"second\": \"value2\", \"third\": \"value3\"}}", vec!["nested", "second"], Value::Undefined, b"{\"nested\": {\"first\": \"value1\", \"third\": \"value3\"}}")]
+    #[case(b"{\"nested\": {\"first\": \"value1\", \"second\": \"value2\", \"third\": \"value3\"}}", vec!["nested", "third"], Value::Undefined, b"{\"nested\": {\"first\": \"value1\", \"second\": \"value2\"}}")]
+    #[case(b"{\n  \"nested\": {\n    \"first\": \"value1\",\n    \"second\": \"value2\",\n    \"third\": \"value3\"\n  }\n}", vec!["nested", "first"], Value::Undefined, b"{\n  \"nested\": {\n    \"second\": \"value2\",\n    \"third\": \"value3\"\n  }\n}")]
+    #[case(b"{\n  \"nested\": {\n    \"first\": \"value1\",\n    \"second\": \"value2\",\n    \"third\": \"value3\"\n  }\n}", vec!["nested", "second"], Value::Undefined, b"{\n  \"nested\": {\n    \"first\": \"value1\",\n    \"third\": \"value3\"\n  }\n}")]
+    #[case(b"{\n  \"nested\": {\n    \"first\": \"value1\",\n    \"second\": \"value2\",\n    \"third\": \"value3\"\n  }\n}", vec!["nested", "third"], Value::Undefined, b"{\n  \"nested\": {\n    \"first\": \"value1\",\n    \"second\": \"value2\"\n  }\n}")]
 
     // Complex nested structures
     #[case(b"{\"a\": {\"b\": {\"c\": \"value\"}}}", vec!["a", "b", "c"], Value::String("updated".to_string()), b"{\"a\": {\"b\": {\"c\": \"updated\"}}}")]
