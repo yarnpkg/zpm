@@ -1,6 +1,6 @@
 use std::{process::ExitStatus};
 
-use zpm_parsers::{JsonFormatter, Value};
+use zpm_parsers::{JsonDocument, Value};
 use zpm_primitives::Descriptor;
 use zpm_utils::{Path, ToFileString};
 use clipanion::cli;
@@ -129,23 +129,20 @@ pub async fn install_dependencies(workspace_path: &Path, descriptors: Vec<Descri
         .with_join_str("package.json");
 
     let manifest_content = manifest_path
-        .fs_read_text_prealloc()?;
+        .fs_read_prealloc()?;
 
     let mut formatter
-        = JsonFormatter::from(&manifest_content)?;
+        = JsonDocument::new(manifest_content)?;
 
     for descriptor in descriptors.into_iter() {
-        formatter.set(
-            vec!["dependencies".to_string(), descriptor.ident.to_file_string()],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), descriptor.ident.to_file_string()]),
             Value::String(descriptor.range.to_file_string()),
         )?;
     }
 
-    let updated_content
-        = formatter.to_string();
-
     manifest_path
-        .fs_change(&updated_content, false)?;
+        .fs_change(&formatter.input, false)?;
 
     let mut project
         = Project::new(Some(workspace_path.clone())).await?;

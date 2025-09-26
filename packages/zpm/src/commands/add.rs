@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use clipanion::cli;
-use zpm_parsers::{JsonFormatter, Value};
+use zpm_parsers::{JsonDocument, Value};
 use zpm_primitives::{AnonymousSemverRange, Descriptor};
 use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, ToFileString, ToHumanString};
@@ -223,10 +223,10 @@ impl Add {
             .with_join_str(project::MANIFEST_NAME);
 
         let manifest_content = manifest_path
-            .fs_read_text_prealloc()?;
+            .fs_read_prealloc()?;
 
         let mut formatter
-            = JsonFormatter::from(&manifest_content)?;
+            = JsonDocument::new(manifest_content)?;
 
         for (descriptor, request) in &requests {
             if request.dev && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
@@ -246,39 +246,36 @@ impl Add {
             }
 
             if request.dev {
-                formatter.set(
-                    vec!["devDependencies".to_string(), descriptor.ident.to_file_string()],
+                formatter.set_path(
+                    &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), descriptor.ident.to_file_string()]),
                     Value::String(descriptor.range.to_file_string()),
                 )?;
             }
 
             if request.optional {
-                formatter.set(
-                    vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()],
+                formatter.set_path(
+                    &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()]),
                     Value::String(descriptor.range.to_file_string()),
                 )?;
             }
 
             if request.peer {
-                formatter.set(
-                    vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()],
+                formatter.set_path(
+                    &zpm_parsers::Path::from_segments(vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()]),
                     Value::String("*".to_string()),
                 )?;
             }
 
             if request.prod {
-                formatter.set(
-                    vec!["dependencies".to_string(), descriptor.ident.to_file_string()],
+                formatter.set_path(
+                    &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), descriptor.ident.to_file_string()]),
                     Value::String(descriptor.range.to_file_string()),
                 )?;
             }
         }
 
-        let updated_content
-            = formatter.to_string();
-
         manifest_path
-            .fs_change(&updated_content, false)?;
+            .fs_change(&formatter.input, false)?;
 
         let mut project
             = project::Project::new(None).await?;
