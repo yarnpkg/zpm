@@ -1,4 +1,4 @@
-use crate::{Formatter, Value};
+use crate::{Formatter, JsonDocument, Value};
 
 pub struct YamlFormatter;
 
@@ -22,7 +22,7 @@ impl Formatter for YamlFormatter {
                     return s.to_string();
                 }
 
-                sonic_rs::to_string(s).expect("Failed to convert string to JSON")
+                JsonDocument::to_string(s).expect("Failed to convert string to JSON")
             },
 
             Value::Array(arr) => {

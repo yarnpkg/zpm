@@ -47,7 +47,7 @@ impl<'a> AbstractValue<'a> {
 
     pub fn export(self, json: bool) -> String {
         if json {
-            sonic_rs::to_string(&self.value).unwrap()
+            crate::internal::to_json_string(&self.value)
         } else {
             self.value.to_print_string()
         }

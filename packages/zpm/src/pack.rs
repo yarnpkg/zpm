@@ -281,14 +281,14 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
     if let Some(browser) = &manifest.publish_config.browser {
         formatter.set_path(
             &zpm_parsers::Path::from_segments(vec!["browser".to_string()]),
-            Value::from(&sonic_rs::to_value(browser)?),
+            Value::from_serializable(browser)?,
         )?;
     }
 
     if let Some(bin) = &manifest.publish_config.bin {
         formatter.set_path(
             &zpm_parsers::Path::from_segments(vec!["bin".to_string()]),
-            Value::from(&sonic_rs::to_value(bin)?),
+            Value::from_serializable(bin)?,
         )?;
     }
 

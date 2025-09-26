@@ -233,7 +233,7 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
             range: params.range.clone(),
             phantom: PhantomData::<RemoteManifestWithScripts>,
         },
-    })?.ok_or_else(|| {
+    }).map_err(zpm_parsers::Error::from)?.ok_or_else(|| {
         Error::NoCandidatesFound(descriptor.range.clone())
     })?;
 
@@ -282,14 +282,14 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let version = registry_data.dist_tags.deserialize_map(FindField {
         value: params.tag.as_str(),
         phantom: PhantomData::<zpm_semver::Version>,
-    })?.ok_or_else(|| {
+    }).map_err(zpm_parsers::Error::from)?.ok_or_else(|| {
         Error::TagNotFound(params.tag.clone())
     })?;
 
     let manifest = registry_data.versions.deserialize_map(FindField {
         value: &version.to_file_string(),
         phantom: PhantomData::<RemoteManifestWithScripts>,
-    })?.ok_or_else(|| {
+    }).map_err(zpm_parsers::Error::from)?.ok_or_else(|| {
         Error::NoCandidatesFound(descriptor.range.clone())
     })?;
 

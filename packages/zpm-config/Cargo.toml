@@ -7,7 +7,6 @@ convert_case = "0.8.0"
 serde_yaml = "0.9.34"
 serde = { version = "1.0.207", features = ["derive"] }
 shellexpand = "3.1.1"
-sonic-rs = "0.5.1"
 thiserror = "2.0.16"
 zpm-ci = { path = "../zpm-ci" }
 zpm-formats = { path = "../zpm-formats" }
@@ -21,5 +20,4 @@ bincode = "2.0.1"
 convert_case = "0.8.0"
 serde_with = "3.9.0"
 serde = { version = "1.0.207", features = ["derive"] }
-sonic-rs = "0.5.1"
 zpm-parsers = { path = "../zpm-parsers" }

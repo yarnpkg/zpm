@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::Error;
+use crate::{Error, JsonDocument, json::json_provider};
 
 #[derive(Debug, Clone)]
 pub struct Indent {
@@ -46,7 +46,7 @@ pub enum Value {
 
 impl Value {
     pub fn from_serializable<T: Serialize>(value: &T) -> Result<Self, Error> {
-        Ok(Value::from(&sonic_rs::to_value(value)?))
+        Ok(Value::from(&json_provider::to_value(value)?))
     }
 
     pub fn to_json_string(&self) -> String {
@@ -68,7 +68,7 @@ impl Value {
             },
 
             Value::String(s) => {
-                sonic_rs::to_string(s).expect("Failed to convert string to JSON")
+                JsonDocument::to_string(s).expect("Failed to convert string to JSON")
             },
 
             Value::Array(arr) => {
@@ -126,7 +126,7 @@ impl Value {
                         serializer.push(' ');
                     }
 
-                    serializer.push_str(&sonic_rs::to_string(k).expect("Failed to convert key to JSON"));
+                    serializer.push_str(&JsonDocument::to_string(k).expect("Failed to convert key to JSON"));
                     serializer.push_str(": ");
                     serializer.push_str(&v.to_indented_json_string(indent.increment()));
 
@@ -162,6 +162,38 @@ impl Value {
     }
 }
 
+#[cfg(target_pointer_width = "32")]
+impl From<&serde_json::Value> for Value {
+    fn from(value: &serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::Null => {
+                Value::Null
+            },
+
+            serde_json::Value::Bool(b) => {
+                Value::Bool(*b)
+            },
+
+            serde_json::Value::Number(n) => {
+                Value::Number(n.to_string())
+            },
+
+            serde_json::Value::String(s) => {
+                Value::String(s.to_string())
+            },
+
+            serde_json::Value::Array(arr) => {
+                Value::Array(arr.iter().map(From::from).collect())
+            },
+
+            serde_json::Value::Object(obj) => {
+                Value::Object(obj.iter().map(|(k, v)| (k.to_string(), From::from(v))).collect())
+            },
+        }
+    }
+}
+
+#[cfg(not(target_pointer_width = "32"))]
 impl From<&sonic_rs::Value> for Value {
     fn from(value: &sonic_rs::Value) -> Self {
         match value.as_ref() {
@@ -187,38 +219,6 @@ impl From<&sonic_rs::Value> for Value {
 
             sonic_rs::ValueRef::Object(obj) => {
                 Value::Object(obj.iter().map(|(k, v)| (k.to_string(), From::from(v))).collect())
-            },
-        }
-    }
-}
-
-impl From<serde_json::Value> for Value {
-    fn from(value: serde_json::Value) -> Self {
-        match value {
-            serde_json::Value::Null => {
-                Value::Null
-            },
-
-            serde_json::Value::Bool(b) => {
-                Value::Bool(b)
-            },
-
-            serde_json::Value::Number(n) => {
-                Value::Number(n.to_string())
-            },
-
-            serde_json::Value::String(s) => {
-                Value::String(s.clone())
-            },
-
-            serde_json::Value::Array(arr) => {
-                Value::Array(arr.into_iter().map(From::from).collect())
-            },
-
-            serde_json::Value::Object(obj) => {
-                Value::Object(obj.into_iter().map(|(k, v)| {
-                    (k, From::from(v))
-                }).collect())
             },
         }
     }

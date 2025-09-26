@@ -4,8 +4,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::{value::Indent, Error, Path, Value};
 
-pub type RawJsonDeserializer = sonic_rs::Deserializer;
-pub type RawJsonValue = sonic_rs::Value;
+#[cfg(target_pointer_width = "32")]
+pub use serde_json as json_provider;
+
+#[cfg(not(target_pointer_width = "32"))]
+pub use sonic_rs as json_provider;
+
+pub type RawJsonDeserializer<R> = json_provider::Deserializer<R>;
+pub type RawJsonValue = json_provider::Value;
 
 pub struct JsonDocument {
     pub input: Vec<u8>,
@@ -14,19 +20,19 @@ pub struct JsonDocument {
 
 impl JsonDocument {
     pub fn hydrate_from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
-        Ok(sonic_rs::from_str(input)?)
+        Ok(json_provider::from_str(input)?)
     }
 
     pub fn hydrate_from_slice<'de, T: Deserialize<'de>>(input: &'de [u8]) -> Result<T, Error> {
-        Ok(sonic_rs::from_slice(input)?)
+        Ok(json_provider::from_slice(input)?)
     }
 
-    pub fn to_string<T: Serialize>(input: &T) -> Result<String, Error> {
-        Ok(sonic_rs::to_string(input)?)
+    pub fn to_string<T: Serialize + ?Sized>(input: &T) -> Result<String, Error> {
+        Ok(json_provider::to_string(input)?)
     }
 
     pub fn to_string_pretty<T: Serialize>(input: &T) -> Result<String, Error> {
-        Ok(sonic_rs::to_string_pretty(input)?)
+        Ok(json_provider::to_string_pretty(input)?)
     }
 
     pub fn new(input: Vec<u8>) -> Result<Self, Error> {
@@ -679,7 +685,7 @@ impl<'a> Scanner<'a> {
             = &self.input[before_key_offset..self.offset];
 
         if let Some(path) = &mut self.path {
-            path.push(sonic_rs::from_slice(slice).unwrap());
+            path.push(JsonDocument::hydrate_from_slice(slice)?);
             self.fields.push((Path::from_segments(path.clone()), before_key_offset));
         }
 

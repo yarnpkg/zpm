@@ -14,6 +14,9 @@ const ARCH: zpm_config::Cpu = zpm_config::Cpu::X86_64;
 #[cfg(target_arch = "aarch64")]
 const ARCH: zpm_config::Cpu = zpm_config::Cpu::Aarch64;
 
+#[cfg(target_arch = "x86")]
+const ARCH: zpm_config::Cpu = zpm_config::Cpu::I386;
+
 #[cfg(target_os = "linux")]
 const OS: zpm_config::Os = zpm_config::Os::Linux;
 
