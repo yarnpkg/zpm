@@ -1,6 +1,7 @@
 use std::{future::Future, io::Write};
 
 use serde::{Deserialize, Serialize};
+use zpm_parsers::JsonDocument;
 use zpm_utils::{DataType, Hash64, IoResultExt, Path, ToFileString, ToHumanString, Unit};
 
 use crate::errors::Error;
@@ -35,7 +36,7 @@ pub fn cache_metadata(p: &Path) -> Result<CacheKey, Error> {
         .fs_read_text()?;
 
     let key_data: CacheKey
-        = sonic_rs::from_str(&key_string)?;
+        = JsonDocument::hydrate_from_str(&key_string)?;
 
     Ok(key_data)
 }
@@ -97,7 +98,7 @@ async fn pretty_download<F: Future<Output = Result<(), Error>>>(key_data: &Cache
 
 fn access(key_data: &CacheKey) -> Result<(Path, bool), Error> {
     let key_string
-        = sonic_rs::to_string(key_data).unwrap();
+        = JsonDocument::to_string(key_data)?;
     let key_hash
         = Hash64::from_string(&key_string);
 
@@ -135,9 +136,12 @@ pub async fn ensure<R: Future<Output = Result<(), Error>>, F: FnOnce(Path) -> R>
 
                 f(temp_dir.clone()).await?;
 
+                let meta_content
+                    = JsonDocument::to_string(&key_data)?;
+
                 temp_dir
                     .with_join_str("meta.json")
-                    .fs_write(sonic_rs::to_string(&key_data)?)?;
+                    .fs_write(&meta_content)?;
 
                 temp_dir
                     .with_join_str(".ready")

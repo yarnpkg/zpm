@@ -1,6 +1,7 @@
 use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 
 use clipanion::cli;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{Ident, Reference};
 use zpm_utils::{Path, ToFileString};
 
@@ -227,7 +228,7 @@ impl WorkspacesList {
                     mismatched_workspace_dependencies,
                 };
 
-                println!("{}", sonic_rs::to_string(&payload)?);
+                println!("{}", JsonDocument::to_string(&payload)?);
             } else {
                 println!("{}", workspace_printed_path);
             }

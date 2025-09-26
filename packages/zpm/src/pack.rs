@@ -260,14 +260,14 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
     if let Some(exports) = &manifest.publish_config.exports {
         formatter.set_path(
             &zpm_parsers::Path::from_segments(vec!["exports".to_string()]),
-            Value::from(&sonic_rs::to_value(exports)?),
+            Value::from_serializable(&exports)?,
         )?;
     }
 
     if let Some(imports) = &manifest.publish_config.imports {
         formatter.set_path(
             &zpm_parsers::Path::from_segments(vec!["imports".to_string()]),
-            Value::from(&sonic_rs::to_value(imports)?),
+            Value::from_serializable(&imports)?,
         )?;
     }
 

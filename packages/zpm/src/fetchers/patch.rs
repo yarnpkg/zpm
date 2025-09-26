@@ -1,4 +1,5 @@
 use zpm_formats::{iter_ext::IterExt, zip::ZipSupport};
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{Ident, Locator, PatchReference};
 use zpm_utils::{Hash64, ToFileString};
 
@@ -109,8 +110,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
                 .first()
                 .ok_or(Error::MissingPackageManifest)?;
 
-        let package_json_content
-            = sonic_rs::from_slice::<Manifest>(&package_json_entry.data)?;
+        let package_json_content: Manifest
+            = JsonDocument::hydrate_from_slice(&package_json_entry.data)?;
 
         let package_version
             = package_json_content.remote.version
@@ -138,8 +139,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let first_entry
         = zpm_formats::zip::first_entry_from_zip(&cached_blob.data)?;
 
-    let manifest
-        = sonic_rs::from_slice::<Manifest>(&first_entry.data)?;
+    let manifest: Manifest
+        = JsonDocument::hydrate_from_slice(&first_entry.data)?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);

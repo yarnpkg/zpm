@@ -1,6 +1,11 @@
 use std::{collections::BTreeMap, ops::Range};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{value::Indent, Error, Path, Value};
+
+pub type RawJsonDeserializer = sonic_rs::Deserializer;
+pub type RawJsonValue = sonic_rs::Value;
 
 pub struct JsonDocument {
     pub input: Vec<u8>,
@@ -8,6 +13,22 @@ pub struct JsonDocument {
 }
 
 impl JsonDocument {
+    pub fn hydrate_from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
+        Ok(sonic_rs::from_str(input)?)
+    }
+
+    pub fn hydrate_from_slice<'de, T: Deserialize<'de>>(input: &'de [u8]) -> Result<T, Error> {
+        Ok(sonic_rs::from_slice(input)?)
+    }
+
+    pub fn to_string<T: Serialize>(input: &T) -> Result<String, Error> {
+        Ok(sonic_rs::to_string(input)?)
+    }
+
+    pub fn to_string_pretty<T: Serialize>(input: &T) -> Result<String, Error> {
+        Ok(sonic_rs::to_string_pretty(input)?)
+    }
+
     pub fn new(input: Vec<u8>) -> Result<Self, Error> {
         let mut scanner
             = Scanner::new(&input, 0);
@@ -143,7 +164,7 @@ impl JsonDocument {
         let post_value_offset
             = scanner.offset;
 
-        self.replace_range(pre_value_offset..post_value_offset, value.to_json_string(indent).as_bytes())
+        self.replace_range(pre_value_offset..post_value_offset, value.to_indented_json_string(indent).as_bytes())
     }
 
     fn insert_key(&mut self, path: &Path, value: Value) -> Result<(), Error> {
@@ -222,7 +243,7 @@ impl JsonDocument {
 
         push_string(&mut injected_content, &new_key);
         injected_content.extend_from_slice(b": ");
-        injected_content.extend_from_slice(&value.to_json_string(indent).as_bytes());
+        injected_content.extend_from_slice(&value.to_indented_json_string(indent).as_bytes());
         injected_content.extend_from_slice(b",");
         injected_content.extend_from_slice(&prior_whitespaces);
 
@@ -260,7 +281,7 @@ impl JsonDocument {
 
         push_string(&mut injected_content, &new_key);
         injected_content.extend_from_slice(b": ");
-        injected_content.extend_from_slice(&value.to_json_string(indent).as_bytes());
+        injected_content.extend_from_slice(&value.to_indented_json_string(indent).as_bytes());
 
         self.replace_range(scanner.offset..scanner.offset, &injected_content)
     }
@@ -293,7 +314,7 @@ impl JsonDocument {
 
         push_string(&mut new_content, &new_key);
         new_content.extend_from_slice(b": ");
-        new_content.extend_from_slice(&value.to_json_string(indent.clone()).as_bytes());
+        new_content.extend_from_slice(&value.to_indented_json_string(indent.clone()).as_bytes());
 
         if indent.child_indent.is_some() {
             new_content.push(b'\n');

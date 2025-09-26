@@ -1,3 +1,4 @@
+use zpm_parsers::JsonDocument;
 use zpm_utils::{IoResultExt, Path};
 
 use crate::error::Error;
@@ -23,7 +24,7 @@ pub fn read_manifest_with_size(abs_path: &Path, size: u64) -> Result<Manifest, E
 
 pub fn parse_manifest_from_bytes(bytes: &[u8]) -> Result<Manifest, Error> {
     if bytes.len() > 0 {
-        Ok(sonic_rs::from_slice(bytes)?)
+        Ok(JsonDocument::hydrate_from_slice(bytes)?)
     } else {
         Ok(Manifest::default())
     }
@@ -31,7 +32,7 @@ pub fn parse_manifest_from_bytes(bytes: &[u8]) -> Result<Manifest, Error> {
 
 pub fn parse_manifest(manifest_text: &str) -> Result<Manifest, Error> {
     if manifest_text.len() > 0 {
-        Ok(sonic_rs::from_str(&manifest_text)?)
+        Ok(JsonDocument::hydrate_from_str(&manifest_text)?)
     } else {
         Ok(Manifest::default())
     }

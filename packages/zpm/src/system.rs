@@ -3,6 +3,7 @@ use std::{str::FromStr, sync::LazyLock};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_config::SupportedArchitectures;
+use zpm_parsers::JsonDocument;
 use zpm_utils::Path;
 
 const LDD_PATH: &str = "/usr/bin/ldd";
@@ -159,10 +160,10 @@ pub struct Requirements {
 }
 
 impl FromStr for Requirements {
-    type Err = sonic_rs::Error;
+    type Err = zpm_parsers::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(sonic_rs::from_str(s)?)
+        Ok(JsonDocument::hydrate_from_str(s)?)
     }
 }
 

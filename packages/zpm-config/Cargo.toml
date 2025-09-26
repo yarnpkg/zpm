@@ -22,3 +22,4 @@ convert_case = "0.8.0"
 serde_with = "3.9.0"
 serde = { version = "1.0.207", features = ["derive"] }
 sonic-rs = "0.5.1"
+zpm-parsers = { path = "../zpm-parsers" }

@@ -4174,6 +4174,7 @@ dependencies = [
  "zpm-ci",
  "zpm-formats",
  "zpm-macro-enum",
+ "zpm-parsers",
  "zpm-primitives",
  "zpm-semver",
  "zpm-utils",
@@ -4301,6 +4302,7 @@ dependencies = [
  "zpm-ci",
  "zpm-formats",
  "zpm-macro-enum",
+ "zpm-parsers",
  "zpm-semver",
  "zpm-utils",
 ]

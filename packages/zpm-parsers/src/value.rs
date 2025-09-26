@@ -1,3 +1,7 @@
+use serde::Serialize;
+
+use crate::Error;
+
 #[derive(Debug, Clone)]
 pub struct Indent {
     pub self_indent: Option<usize>,
@@ -41,7 +45,15 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn to_json_string(&self, indent: Indent) -> String {
+    pub fn from_serializable<T: Serialize>(value: &T) -> Result<Self, Error> {
+        Ok(Value::from(&sonic_rs::to_value(value)?))
+    }
+
+    pub fn to_json_string(&self) -> String {
+        self.to_indented_json_string(Indent::new(None, None))
+    }
+
+    pub fn to_indented_json_string(&self, indent: Indent) -> String {
         match self {
             Value::Null => {
                 "null".to_string()
@@ -75,7 +87,7 @@ impl Value {
                         serializer.push(' ');
                     }
 
-                    serializer.push_str(&item.to_json_string(indent.increment()));
+                    serializer.push_str(&item.to_indented_json_string(indent.increment()));
 
                     if i < arr.len() - 1 {
                         serializer.push_str(",");
@@ -116,7 +128,7 @@ impl Value {
 
                     serializer.push_str(&sonic_rs::to_string(k).expect("Failed to convert key to JSON"));
                     serializer.push_str(": ");
-                    serializer.push_str(&v.to_json_string(indent.increment()));
+                    serializer.push_str(&v.to_indented_json_string(indent.increment()));
 
                     if i < obj.len() - 1 {
                         serializer.push_str(",");

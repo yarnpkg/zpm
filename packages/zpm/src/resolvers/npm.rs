@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, fmt, marker::PhantomData, str::FromStr, sync::{
 use regex::Regex;
 use serde::{de::{self, DeserializeOwned, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
 use zpm_config::ConfigExt;
+use zpm_parsers::{JsonDocument, RawJsonDeserializer, RawJsonValue};
 use zpm_primitives::{Descriptor, Ident, Locator, RegistryReference, RegistrySemverRange, RegistryTagRange, UrlReference};
 use zpm_utils::ToFileString;
 
@@ -80,7 +81,7 @@ impl<'de, T> Visitor<'de> for FindHighestCompatibleVersion<T> where T: Deseriali
                 = zpm_semver::Version::from_str(key.as_str()).unwrap();
 
             if self.range.check(&version) && selected.as_ref().map(|(current_version, _)| *current_version < version).unwrap_or(true) {
-                selected = Some((version, map.next_value::<sonic_rs::Value>()?));
+                selected = Some((version, map.next_value::<RawJsonValue>()?));
             } else {
                 map.next_value::<IgnoredAny>()?;
             }
@@ -224,7 +225,7 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
     let mut deserializer
-        = sonic_rs::Deserializer::from_str(registry_text.as_str());
+        = RawJsonDeserializer::from_str(registry_text.as_str());
 
     let (version, manifest) = deserializer.deserialize_map(FindFieldNested {
         field: "versions",
@@ -271,12 +272,12 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     #[derive(Deserialize)]
     struct RegistryMetadata {
         #[serde(rename(deserialize = "dist-tags"))]
-        dist_tags: sonic_rs::Value,
-        versions: sonic_rs::Value,
+        dist_tags: RawJsonValue,
+        versions: RawJsonValue,
     }
 
-    let registry_data: RegistryMetadata = sonic_rs::from_str(registry_text.as_str())
-        .map_err(Arc::new)?;
+    let registry_data: RegistryMetadata
+        = JsonDocument::hydrate_from_str(registry_text.as_str())?;
 
     let version = registry_data.dist_tags.deserialize_map(FindField {
         value: params.tag.as_str(),
@@ -309,7 +310,7 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
     let mut manifest: RemoteManifestWithScripts
-        = sonic_rs::from_str(registry_text.as_str())?;
+        = JsonDocument::hydrate_from_str(registry_text.as_str())?;
 
     fix_manifest(&mut manifest);
 

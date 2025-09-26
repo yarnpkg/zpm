@@ -15,3 +15,9 @@ pub enum Error {
     #[error("Cannot navigate through primitive value")]
     InvalidPrimitiveNavigation,
 }
+
+impl From<sonic_rs::Error> for Error {
+    fn from(error: sonic_rs::Error) -> Self {
+        Error::InvalidSyntax(error.to_string())
+    }
+}

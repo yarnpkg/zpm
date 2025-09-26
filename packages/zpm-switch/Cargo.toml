@@ -23,6 +23,7 @@ tokio = { version = "1.39.2", features = ["full"] }
 zpm-ci = { path = "../zpm-ci" }
 zpm-formats = { path = "../zpm-formats" }
 zpm-macro-enum = { path = "../zpm-macro-enum" }
+zpm-parsers = { path = "../zpm-parsers" }
 zpm-semver = { path = "../zpm-semver" }
 zpm-utils = { path = "../zpm-utils" }
 assert_cmd = "2.0.17"

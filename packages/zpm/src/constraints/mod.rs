@@ -1,4 +1,5 @@
 use structs::{ConstraintsDependency, ConstraintsPackage, ConstraintsWorkspace};
+use zpm_parsers::JsonDocument;
 use zpm_primitives::Reference;
 use zpm_utils::{Path, ToFileString};
 
@@ -58,7 +59,7 @@ pub async fn check_constraints(project: &Project, fix: bool) -> Result<Constrain
         .fs_read_prealloc()?;
 
     let mut output
-        = sonic_rs::from_slice::<ConstraintsOutput>(&result_content)?;
+        = JsonDocument::hydrate_from_slice::<ConstraintsOutput>(&result_content)?;
 
     output.raw_json = result_content;
 
@@ -70,9 +71,9 @@ fn generate_constraints_adapter(config_path: &Path, context: &ConstraintsContext
         "\"use strict\";\n",
         "\n",
         "const CONFIG_PATH =\n",
-        &sonic_rs::to_string(&config_path).unwrap(), ";\n",
+        &JsonDocument::to_string(&config_path).unwrap(), ";\n",
         "const SERIALIZED_CONTEXT =\n",
-        &sonic_rs::to_string(&sonic_rs::to_string(&context).unwrap()).unwrap(), ";\n",
+        &JsonDocument::to_string(&JsonDocument::to_string(&context).unwrap()).unwrap(), ";\n",
         &format!("const FIX = {};\n", fix),
         "\n",
         std::include_str!("constraints.tpl.js"),

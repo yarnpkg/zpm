@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
+use zpm_parsers::JsonDocument;
 use zpm_utils::{Hash64, IoResultExt, Path, ToFileString};
 
 use crate::errors::Error;
@@ -29,7 +30,7 @@ pub fn set_link(link: &Link) -> Result<(), Error> {
 
     link_path
         .fs_create_parent()?
-        .fs_write(sonic_rs::to_string(link)?)?;
+        .fs_write(JsonDocument::to_string(link)?)?;
 
     Ok(())
 }
@@ -60,7 +61,7 @@ pub fn list_links() -> Result<BTreeSet<Link>, Error> {
         .filter(|entry| entry.file_type().map_or(false, |f| f.is_file()))
         .filter_map(|link_path| Path::try_from(link_path.path()).ok())
         .filter_map(|link_path| link_path.fs_read_text().ok())
-        .filter_map(|contents| sonic_rs::from_str::<Link>(&contents).ok())
+        .filter_map(|contents| JsonDocument::hydrate_from_str::<Link>(&contents).ok())
         .collect::<BTreeSet<_>>();
 
     Ok(links)
@@ -76,7 +77,7 @@ pub fn get_link(path: &Path) -> Result<Option<Link>, Error> {
     let link = link_path
         .fs_read_text()
         .ok_missing()?
-        .and_then(|link| sonic_rs::from_str(&link).ok());
+        .and_then(|link| JsonDocument::hydrate_from_str::<Link>(&link).ok());
 
     Ok(link)
 }

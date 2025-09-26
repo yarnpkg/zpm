@@ -1,6 +1,7 @@
 use std::{collections::{BTreeMap, BTreeSet, HashMap}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
 
 use zpm_formats::iter_ext::IterExt;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, FilterDescriptor, Ident, Locator};
 use zpm_utils::{Path, PathError, ToFileString};
 use itertools::Itertools;
@@ -40,7 +41,7 @@ impl TopLevelConfiguration {
     pub fn from_project(project: &Project) -> HashMap<Ident, Vec<(FilterDescriptor, PackageMeta)>> {
         project.manifest_path()
             .if_exists()
-            .and_then(|path| path.fs_read_text().ok()).map(|data| sonic_rs::from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta)
+            .and_then(|path| path.fs_read_text().ok()).map(|data| JsonDocument::hydrate_from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta)
             .unwrap_or_default()
             .into_iter()
             .map(|(filter, meta)| (filter.ident().clone(), (filter, meta)))
