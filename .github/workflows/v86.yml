@@ -1,0 +1,33 @@
+name: V86
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  v86:
+    name: 'Generate a v86 image'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
+      - uses: ./.github/actions/build
+        with:
+          target: i686-unknown-linux-musl
+          profile: release-lto
+
+      - name: Copy files to the standard local path
+        run: |
+          mkdir -p overlay/usr/bin
+          cp target/i686-unknown-linux-musl/release-lto/yarn overlay/usr/bin/yarn
+
+      - uses: arcanis/v86-buildroot-action
+        with:
+          config: |
+            BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y
+            BR2_PACKAGE_BASH=y
+          overlay: ./overlay
