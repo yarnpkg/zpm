@@ -6874,15 +6874,6 @@
           "@esbuild/win32-ia32",
           "@esbuild/win32-x64"
         ]
-      },
-      "flags": {
-        "build_commands": [
-          {
-            "type": "Script",
-            "event": "postinstall",
-            "script": "node install.js"
-          }
-        ]
       }
     },
     "esbuild@npm:esbuild-wasm@^0.23.0": {
@@ -11052,9 +11043,6 @@
           "lodash": "^4.17.21",
           "typescript": "^5.8.3"
         }
-      },
-      "flags": {
-        "prefer_extracted": false
       }
     },
     "run-parallel@npm:^1.1.9": {
@@ -12771,9 +12759,6 @@
           "esbuild": "^0.25.5",
           "lodash": "^4.17.21"
         }
-      },
-      "flags": {
-        "prefer_extracted": false
       }
     },
     "zwitch@npm:^2.0.0, zwitch@npm:^2.0.4": {

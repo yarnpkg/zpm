@@ -2,10 +2,10 @@ use std::process::ExitCode;
 
 use clipanion::cli;
 use colored::Colorize;
-use zpm_utils::{tree, AbstractValue, DataType, Path, ToFileString, ToHumanString};
-use zpm_parsers::JsonFormatter;
+use zpm_utils::{tree, AbstractValue, DataType, ToFileString, ToHumanString};
+use zpm_parsers::{JsonDocument, Value};
 
-use crate::{constraints::{structs::{ConstraintsContext, ConstraintsOutput, WorkspaceError, WorkspaceOperation}, to_constraints_package, to_constraints_workspace}, error::Error, project::Project, script::ScriptEnvironment};
+use crate::{constraints::{check_constraints, structs::{ConstraintsOutput, WorkspaceError, WorkspaceOperation}}, error::Error, project::Project};
 
 #[cli::command]
 #[cli::path("constraints")]
@@ -34,53 +34,8 @@ impl Constraints {
             project
                 .lazy_install().await?;
 
-            let install_state
-                = project.install_state.as_ref().unwrap();
-
-            let constraints_workspaces
-                = project.workspaces.iter()
-                    .map(|workspace| to_constraints_workspace(workspace, install_state))
-                    .collect::<Result<Vec<_>, _>>()?;
-
-            let constraints_packages
-                = install_state.resolution_tree.locator_resolutions.iter()
-                    .map(|(_, resolution)| to_constraints_package(&project, install_state, resolution))
-                    .collect::<Vec<_>>();
-
-            let constraints_context = ConstraintsContext {
-                workspaces: constraints_workspaces,
-                packages: constraints_packages,
-            };
-
-            let config_path = project.project_cwd
-                .with_join_str("yarn.config.cjs");
-
-            let script
-                = generate_constraints_adapter(&config_path, &constraints_context, self.fix);
-
-            let temp_dir
-                = Path::temp_dir()?;
-
-            let script_path = temp_dir
-                .with_join_str("script.js");
-            let result_path = temp_dir
-                .with_join_str("result.json");
-
-            script_path
-                .fs_write_text(&script)?;
-
-            ScriptEnvironment::new()?
-                .with_project(&project)
-                .enable_shell_forwarding()
-                .run_exec("node", &vec![script_path.to_file_string(), result_path.to_file_string()])
-                .await?
-                .ok()?;
-
-            let result_content = result_path
-                .fs_read_prealloc()?;
-
             let output
-                = sonic_rs::from_slice::<ConstraintsOutput>(&result_content)?;
+                = check_constraints(&project, self.fix).await?;
 
             for (workspace_rel_path, operations) in &output.all_workspace_operations {
                 // Read the current manifest
@@ -89,30 +44,27 @@ impl Constraints {
                     .with_join_str("package.json");
 
                 let manifest_content = manifest_path
-                    .fs_read_text_prealloc()?;
+                    .fs_read_prealloc()?;
 
                 let mut formatter
-                    = JsonFormatter::from(&manifest_content).unwrap();
+                    = JsonDocument::new(manifest_content)?;
 
                 // Apply each operation
                 for operation in operations {
                     match operation {
                         WorkspaceOperation::Set { path, value } => {
-                            formatter.set(path.clone(), value.clone().into())?;
+                            formatter.set_path(&zpm_parsers::Path::from_segments(path.clone()), value.clone().into())?;
                         },
 
                         WorkspaceOperation::Unset { path } => {
-                            formatter.remove(path.clone())?;
+                            formatter.set_path(&zpm_parsers::Path::from_segments(path.clone()), Value::Undefined)?;
                         },
                     }
                 }
 
                 // Write the formatted result back
-                let updated_content
-                    = formatter.to_string();
-
                 manifest_path
-                    .fs_change(&updated_content, false)?;
+                    .fs_change(&formatter.input, false)?;
             }
 
             let should_break = false
@@ -122,7 +74,7 @@ impl Constraints {
 
             if should_break {
                 if self.json {
-                    println!("{}", String::from_utf8_lossy(&result_content));
+                    println!("{}", String::from_utf8_lossy(&output.raw_json));
                 }
 
                 if !output.all_workspace_errors.is_empty() {
@@ -138,20 +90,6 @@ impl Constraints {
 
         unreachable!()
     }
-}
-
-fn generate_constraints_adapter(config_path: &Path, context: &ConstraintsContext, fix: bool) -> String {
-    vec![
-        "\"use strict\";\n",
-        "\n",
-        "const CONFIG_PATH =\n",
-        &sonic_rs::to_string(&config_path).unwrap(), ";\n",
-        "const SERIALIZED_CONTEXT =\n",
-        &sonic_rs::to_string(&sonic_rs::to_string(&context).unwrap()).unwrap(), ";\n",
-        &format!("const FIX = {};\n", fix),
-        "\n",
-        std::include_str!("constraints.tpl.js"),
-    ].join("")
 }
 
 fn display_report(project: &Project, output: &ConstraintsOutput) -> Result<(), Error> {

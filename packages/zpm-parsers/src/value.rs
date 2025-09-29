@@ -1,3 +1,33 @@
+#[derive(Debug, Clone)]
+pub struct Indent {
+    pub self_indent: Option<usize>,
+    pub child_indent: Option<usize>,
+}
+
+impl Indent {
+    pub fn new(self_indent: Option<usize>, child_indent: Option<usize>) -> Self {
+        Self {
+            self_indent,
+            child_indent,
+        }
+    }
+
+    pub fn increment(&self) -> Self {
+        let self_indent
+            = self.child_indent;
+
+        let child_indent = match self.child_indent {
+            Some(i) => Some(i + self.self_indent.unwrap_or(i)),
+            None => None,
+        };
+
+        Self {
+            self_indent,
+            child_indent,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Null,
@@ -11,7 +41,7 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn to_json_string(&self, indent_size: usize, indent: usize) -> String {
+    pub fn to_json_string(&self, indent: Indent) -> String {
         match self {
             Value::Null => {
                 "null".to_string()
@@ -33,23 +63,36 @@ impl Value {
                 let mut serializer
                     = String::new();
 
-                serializer.push_str("[\n");
-
-                let next_indent
-                    = indent + indent_size;
+                serializer.push_str("[");
 
                 for (i, item) in arr.iter().enumerate() {
-                    serializer.push_str(&" ".repeat(next_indent));
-                    serializer.push_str(&item.to_json_string(indent_size, next_indent));
+                    if let Some(child_indent) = indent.child_indent {
+                        serializer.push_str("\n");
+                        for _ in 0..child_indent {
+                            serializer.push_str(" ");
+                        }
+                    } else if i > 0 {
+                        serializer.push(' ');
+                    }
+
+                    serializer.push_str(&item.to_json_string(indent.increment()));
 
                     if i < arr.len() - 1 {
-                        serializer.push_str(",\n");
-                    } else {
-                        serializer.push('\n');
+                        serializer.push_str(",");
                     }
                 }
 
-                serializer.push_str(&" ".repeat(indent));
+                if !arr.is_empty() {
+                    if indent.child_indent.is_some() {
+                        serializer.push_str("\n");
+                        if let Some(child_indent) = indent.self_indent {
+                            for _ in 0..child_indent {
+                                serializer.push_str(" ");
+                            }
+                        }
+                    }
+                }
+
                 serializer.push(']');
 
                 serializer
@@ -59,25 +102,38 @@ impl Value {
                 let mut serializer
                     = String::new();
 
-                serializer.push_str("{\n");
-
-                let next_indent
-                    = indent + indent_size;
+                serializer.push_str("{");
 
                 for (i, (k, v)) in obj.iter().enumerate() {
-                    serializer.push_str(&" ".repeat(next_indent));
+                    if let Some(child_indent) = indent.child_indent {
+                        serializer.push_str("\n");
+                        for _ in 0..child_indent {
+                            serializer.push_str(" ");
+                        }
+                    } else if i > 0 {
+                        serializer.push(' ');
+                    }
+
                     serializer.push_str(&sonic_rs::to_string(k).expect("Failed to convert key to JSON"));
                     serializer.push_str(": ");
-                    serializer.push_str(&v.to_json_string(indent_size, next_indent));
+                    serializer.push_str(&v.to_json_string(indent.increment()));
 
                     if i < obj.len() - 1 {
-                        serializer.push_str(",\n");
-                    } else {
-                        serializer.push('\n');
+                        serializer.push_str(",");
                     }
                 }
 
-                serializer.push_str(&" ".repeat(indent));
+                if !obj.is_empty() {
+                    if indent.child_indent.is_some() {
+                        serializer.push_str("\n");
+                        if let Some(child_indent) = indent.self_indent {
+                            for _ in 0..child_indent {
+                                serializer.push_str(" ");
+                            }
+                        }
+                    }
+                }
+
                 serializer.push('}');
 
                 serializer

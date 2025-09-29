@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use zpm_parsers::JsonFormatter;
+use zpm_parsers::JsonDocument;
 use zpm_parsers::Value;
 use zpm_primitives::AnonymousSemverRange;
 use zpm_primitives::Descriptor;
@@ -236,73 +236,72 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         .with_join_str("package.json");
 
     let manifest_content = manifest_path
-        .fs_read_text_prealloc()?;
-
+        .fs_read_prealloc()?;
     let manifest: Manifest
-        = parse_manifest(&manifest_content)?;
+        = parse_manifest(&String::from_utf8_lossy(&manifest_content))?;
 
     let mut formatter
-        = JsonFormatter::from(&manifest_content)?;
+        = JsonDocument::new(manifest_content)?;
 
     if let Some(type_) = &manifest.publish_config.type_ {
-        formatter.set(
-            ["type"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["type".to_string()]),
             Value::String(type_.clone()),
         )?;
     }
 
     if let Some(main) = &manifest.publish_config.main {
-        formatter.set(
-            ["main"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["main".to_string()]),
             Value::String(main.clone()),
         )?;
     }
 
     if let Some(exports) = &manifest.publish_config.exports {
-        formatter.set(
-            ["exports"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["exports".to_string()]),
             Value::from(&sonic_rs::to_value(exports)?),
         )?;
     }
 
     if let Some(imports) = &manifest.publish_config.imports {
-        formatter.set(
-            ["imports"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["imports".to_string()]),
             Value::from(&sonic_rs::to_value(imports)?),
         )?;
     }
 
     if let Some(module) = &manifest.publish_config.module {
-        formatter.set(
-            ["module"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["module".to_string()]),
             Value::String(module.clone()),
         )?;
     }
 
     if let Some(browser) = &manifest.publish_config.browser {
-        formatter.set(
-            ["browser"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["browser".to_string()]),
             Value::from(&sonic_rs::to_value(browser)?),
         )?;
     }
 
     if let Some(bin) = &manifest.publish_config.bin {
-        formatter.set(
-            ["bin"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["bin".to_string()]),
             Value::from(&sonic_rs::to_value(bin)?),
         )?;
     }
 
     if let Some(types) = &manifest.publish_config.types {
-        formatter.set(
-            ["types"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["types".to_string()]),
             Value::String(types.clone()),
         )?;
     }
 
     if let Some(typings) = &manifest.publish_config.typings {
-        formatter.set(
-            ["typings"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["typings".to_string()]),
             Value::String(typings.clone()),
         )?;
     }
@@ -360,8 +359,8 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         let new_descriptor
             = new_descriptor_result?;
 
-        formatter.set(
-            vec![field_name.to_string(), new_descriptor.ident.to_file_string()],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec![field_name.to_string(), new_descriptor.ident.to_file_string()]),
             Value::String(new_descriptor.range.to_file_string()),
         )?;
     }
@@ -406,13 +405,13 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         let new_descriptor
             = new_descriptor_result?;
 
-        formatter.set(
-            vec!["peerDependencies".to_string(), new_descriptor.ident.to_file_string()],
-            Value::String(new_descriptor.range.to_file_string())
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["peerDependencies".to_string(), new_descriptor.ident.to_file_string()]),
+            Value::String(new_descriptor.range.to_file_string()),
         )?;
     }
 
-    Ok(formatter.to_string())
+    Ok(String::from_utf8_lossy(&formatter.input).to_string())
 }
 
 pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) -> Result<Vec<zpm_utils::Path>, Error> {

@@ -1,5 +1,6 @@
 use clipanion::cli;
 use zpm_config::Source;
+use zpm_utils::ResultExt;
 
 use crate::{error::Error, project::{self, InstallMode, RunInstallOptions}};
 

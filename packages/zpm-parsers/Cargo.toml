@@ -11,6 +11,9 @@ regex = "1.10.2"
 thiserror = "1.0"
 serde_json = "1.0.140"
 erased-serde = "0.4.6"
+rstest = "0.26.1"
+pretty_assertions = "1.4.1"
+itertools = "0.14.0"
 
 [dev-dependencies]
 indoc = "2.0"

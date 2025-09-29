@@ -1,8 +1,9 @@
 use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
 
-use serde::Serialize;
+use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 use zpm_primitives::Locator;
-use zpm_utils::{to_shell_line, FromFileString, Hash64, IoResultExt, Path, ToFileString};
+use zpm_utils::{to_shell_line, FromFileString, Hash64, Path, ToFileString};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -84,13 +85,13 @@ fn get_self_path() -> Result<Path, Error> {
     Ok(self_path)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, Serialize, Deserialize)]
 pub enum BinaryKind {
     Default,
     Node,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, Serialize, Deserialize)]
 pub struct Binary {
     pub path: Path,
     pub kind: BinaryKind,

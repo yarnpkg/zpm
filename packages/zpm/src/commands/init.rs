@@ -1,5 +1,5 @@
 use clipanion::cli;
-use zpm_parsers::{JsonFormatter, Value};
+use zpm_parsers::{JsonDocument, Value};
 use zpm_primitives::Ident;
 use zpm_utils::{IoResultExt, Path, ToFileString};
 
@@ -145,27 +145,27 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     let manifest_path
         = init_cwd.with_join_str("package.json");
     let manifest_content
-        = manifest_path.fs_read_text_prealloc()
+        = manifest_path.fs_read_prealloc()
             .ok_missing()?
-            .unwrap_or_else(|| "{}".to_string());
+            .unwrap_or_else(|| b"{}".to_vec());
 
     let mut formatter
-        = JsonFormatter::from(&manifest_content)?;
+        = JsonDocument::new(manifest_content)?;
 
     if !manifest_path.fs_exists() {
         let init_name = params.name.as_ref()
             .map(|n| Ident::new(n))
             .unwrap_or_else(|| Ident::new(init_cwd.basename().unwrap_or("package")));
 
-        formatter.set(
-            vec!["name".to_string()],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["name".to_string()]),
             Value::String(init_name.to_file_string()),
         )?;
     }
 
     if let Some(version) = option_env!("INFRA_VERSION") {
-        formatter.set(
-            vec!["packageManager".to_string()],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["packageManager".to_string()]),
             Value::String(format!("yarn@{version}")),
         )?;
     }
@@ -176,8 +176,8 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             false => Value::Undefined,
         };
 
-        formatter.set(
-            vec!["private".to_string()],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["private".to_string()]),
             private_field,
         )?;
     }
@@ -192,20 +192,19 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
         packages_dir
             .fs_create_dir_all()?;
 
-        formatter.set(
-            vec!["workspaces".to_string()],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["workspaces".to_string()]),
             Value::Array(vec![
                 Value::String("packages/*".to_string()),
             ]),
         )?;
     }
 
-    let manifest_json
-        = formatter.to_string();
-
     manifest_path
-        .fs_change(&manifest_json, false)?;
+        .fs_change(&formatter.input, false)?;
 
+    let manifest_json
+        = String::from_utf8_lossy(&formatter.input);
     let manifest
         = sonic_rs::from_str::<Manifest>(&manifest_json)?;
 
