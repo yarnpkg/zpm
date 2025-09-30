@@ -14,8 +14,10 @@ import yarnCliDocs                  from './src/plugins/yarn-cli-docs';
 
 // eslint-disable-next-line arca/no-default-export
 export default defineConfig({
-  site: `https://yarnpkg.github.io`,
-  base: `/zpm`,
+  site: process.env.DEPLOY_PRIME_URL !== `https://main--yarn6.netlify.app`
+    ? process.env.DEPLOY_PRIME_URL ?? `https://yarnpkg.com`
+    : `https://yarnpkg.com`,
+  base: `/`,
   output: `static`,
   prefetch: {
     prefetchAll: true,
@@ -42,7 +44,7 @@ export default defineConfig({
         {
           icon: `github`,
           label: `GitHub`,
-          href: `https://github.com/yarnpkg/berry`,
+          href: `https://github.com/yarnpkg/zpm`,
         },
       ],
       sidebar: [
