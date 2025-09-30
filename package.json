@@ -1,5 +1,5 @@
 {
-  "packageManager": "yarn@6.0.0-git.20250930.hash-204952658a4aa20b7dca48b6a029a4e51488a67f",
+  "packageManager": "yarn@6.0.0-git.20250930.hash-032c9e5ad771282bce075eedc07ac9f3d56e46f7",
   "workspaces": [
     "documentation",
     "packages/*"
