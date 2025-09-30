@@ -14,6 +14,8 @@ import yarnCliDocs                  from './src/plugins/yarn-cli-docs';
 
 // eslint-disable-next-line arca/no-default-export
 export default defineConfig({
+  site: `https://yarnpkg.github.io`,
+  base: `/zpm`,
   output: `static`,
   prefetch: {
     prefetchAll: true,
