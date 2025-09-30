@@ -1,8 +1,8 @@
-import { useEffect, Suspense } from "preact/compat";
-import { lazy } from "preact-iso";
+import {lazy}                from 'preact-iso';
+import {useEffect, Suspense} from 'preact/compat';
 
-const FileView = lazy(() => import("./FileView"));
-const PackagePage = lazy(() => import("./PackagePage"));
+const FileView = lazy(() => import(`./FileView`));
+const PackagePage = lazy(() => import(`./PackagePage`));
 
 interface RouteParams {
   name: string;
@@ -11,17 +11,17 @@ interface RouteParams {
 }
 
 const LoadingFallback = () => (
-  <div class="animate-pulse bg-gray-100/5 rounded-lg h-[80vh] w-full"></div>
+  <div class={`animate-pulse bg-gray-100/5 rounded-lg h-[80vh] w-full`}></div>
 );
 
-export default function PackageContent({ name, version, file }: RouteParams) {
+export default function PackageContent({name, version, file}: RouteParams) {
   useEffect(() => {
-    const title = name ? `${name} - Yarn` : "Yarn - Page Not Found";
+    const title = name ? `${name} - Yarn` : `Yarn - Page Not Found`;
     document.title = title;
   }, [name]);
 
   return (
-    <div class="lg:w-3/4">
+    <div class={`lg:w-3/4`}>
       <Suspense fallback={<LoadingFallback />}>
         {file ? (
           <FileView name={name} version={version} path={file} />

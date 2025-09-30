@@ -1,6 +1,7 @@
 declare module "@splidejs/react-splide" {
   // Fallback typings compatible with Preact
-  import type { FunctionComponent, ComponentChildren } from "preact";
+  import type {FunctionComponent, ComponentChildren} from 'preact';
+
   export interface Options {
     [key: string]: unknown;
   }
@@ -11,6 +12,6 @@ declare module "@splidejs/react-splide" {
     ariaLabel?: string;
     [key: string]: unknown;
   }
-  export const Splide: FunctionComponent<SplideProps> & { splide?: unknown };
-  export const SplideSlide: FunctionComponent<{ children?: ComponentChildren }>;
+  export const Splide: FunctionComponent<SplideProps> & {splide?: unknown};
+  export const SplideSlide: FunctionComponent<{children?: ComponentChildren}>;
 }

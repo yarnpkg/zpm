@@ -1,36 +1,36 @@
-import {Yarn} from '@yarnpkg/types';
-import get from 'lodash/get';
-import {createRequire} from 'module';
+import {Yarn}                        from '@yarnpkg/types';
 import {readFileSync, writeFileSync} from 'fs';
-import {join} from 'path';
+import get                           from 'lodash/get';
+import {createRequire}               from 'module';
+import {join}                        from 'path';
 
-import * as constraintsUtils from './constraintsUtils';
-import * as nodeUtils from './nodeUtils';
-import * as miscUtils from './miscUtils';
+import * as constraintsUtils         from './constraintsUtils';
+import * as miscUtils                from './miscUtils';
+import * as nodeUtils                from './nodeUtils';
 
 export type AnnotatedError =
-  | {type: `missingField`, fieldPath: string[], expected: any}
-  | {type: `extraneousField`, fieldPath: string[], currentValue: any}
-  | {type: `invalidField`, fieldPath: string[], expected: any, currentValue: any}
-  | {type: `conflictingValues`, fieldPath: string[], setValues: Array<[any, PerValueInfo]>, unsetValues: PerValueInfo | null}
+  | {type: `missingField`, fieldPath: Array<string>, expected: any}
+  | {type: `extraneousField`, fieldPath: Array<string>, currentValue: any}
+  | {type: `invalidField`, fieldPath: Array<string>, expected: any, currentValue: any}
+  | {type: `conflictingValues`, fieldPath: Array<string>, setValues: Array<[any, PerValueInfo]>, unsetValues: PerValueInfo | null}
   | {type: `userError`, message: string};
 
-export type Operation = 
-  | {type: `set`, path: string[], value: any}
-  | {type: `unset`, path: string[]};
+export type Operation =
+  | {type: `set`, path: Array<string>, value: any}
+  | {type: `unset`, path: Array<string>};
 
 type PerValueInfo = {
-  callers: Array<nodeUtils.Caller>,
+  callers: Array<nodeUtils.Caller>;
 };
 
 type PerPathInfo = {
-  fieldPath: string[],
-  values: Map<any, PerValueInfo>,
+  fieldPath: Array<string>;
+  values: Map<any, PerValueInfo>;
 };
 
 const allWorkspaceActions = new Map<string, {
-  updates: Map<string, PerPathInfo>,
-  errors: AnnotatedError[],
+  updates: Map<string, PerPathInfo>;
+  errors: Array<AnnotatedError>;
 }>();
 
 const workspaceIndex = new constraintsUtils.Index<Yarn.Constraints.Workspace>([`cwd`, `ident`]);
@@ -92,7 +92,7 @@ const input: {
     dependencies: Array<InputDependency>;
     peerDependencies: Array<InputDependency>;
     devDependencies: Array<InputDependency>;
-  }>,
+  }>;
   packages: Array<{
     locator: string;
     workspace: string | null;
@@ -101,7 +101,7 @@ const input: {
     dependencies: Array<[string, string]>;
     peerDependencies: Array<[string, string]>;
     optionalPeerDependencies: Array<[string, string]>;
-  }>,
+  }>;
 } = JSON.parse(SERIALIZED_CONTEXT);
 
 const packageByLocator = new Map<string, Yarn.Constraints.Package>();
@@ -115,14 +115,14 @@ for (const workspace of input.workspaces) {
     return setFn(path, undefined, {caller: nodeUtils.getCaller()});
   };
 
-  const manifestPath = join(workspace.cwd, 'package.json');
-  const manifestContent = readFileSync(manifestPath, 'utf8');
+  const manifestPath = join(workspace.cwd, `package.json`);
+  const manifestContent = readFileSync(manifestPath, `utf8`);
   const manifest = JSON.parse(manifestContent);
 
   const hydratedWorkspace: Yarn.Constraints.Workspace = {
     cwd: workspace.cwd,
     ident: workspace.ident,
-    manifest: manifest,
+    manifest,
     pkg: null as any,
     set: setFn,
     unset: unsetFn,
@@ -138,7 +138,7 @@ for (const pkg of input.packages) {
     ? workspaceByCwd.get(pkg.workspace)!
     : null;
 
-  if (typeof workspace === 'undefined')
+  if (typeof workspace === `undefined`)
     throw new Error(`Workspace ${pkg.workspace} not found`);
 
   const hydratedPackage: Yarn.Constraints.Package = {
@@ -159,7 +159,7 @@ for (const workspace of input.workspaces) {
   const errorFn = createErrorFn(workspace.cwd);
 
   const hydratedWorkspace = workspaceByCwd.get(workspace.cwd);
-  if (typeof hydratedWorkspace === 'undefined')
+  if (typeof hydratedWorkspace === `undefined`)
     throw new Error(`Workspace ${workspace.cwd} not found`);
 
   for (const dependency of workspace.dependencies) {
@@ -167,7 +167,7 @@ for (const workspace of input.workspaces) {
       ? packageByLocator.get(dependency.resolution)!
       : null;
 
-    if (typeof resolution === 'undefined')
+    if (typeof resolution === `undefined`)
       throw new Error(`Dependency ${dependency.ident}@${dependency.range} (resolution: ${dependency.resolution}) not found`);
 
     const hydratedDependency: Yarn.Constraints.Dependency = {
@@ -212,7 +212,7 @@ for (const workspace of input.workspaces) {
       ? packageByLocator.get(devDependency.resolution)!
       : null;
 
-    if (typeof resolution === 'undefined')
+    if (typeof resolution === `undefined`)
       throw new Error(`Dependency ${devDependency.ident} not found`);
 
     const hydratedDevDependency: Yarn.Constraints.Dependency = {
@@ -290,7 +290,7 @@ function applyEngineReport(fix: boolean) {
 
         workspaceErrors.push({
           type: `conflictingValues`,
-          fieldPath: fieldPath,
+          fieldPath,
           setValues,
           unsetValues,
         });
@@ -320,9 +320,9 @@ function applyEngineReport(fix: boolean) {
       }
     }
 
-    if (workspaceOperations.length > 0) {
+    if (workspaceOperations.length > 0)
       allWorkspaceOperations.set(workspaceCwd, workspaceOperations);
-    }
+
 
     if (workspaceErrors.length > 0) {
       allWorkspaceErrors.set(workspaceCwd, workspaceErrors);

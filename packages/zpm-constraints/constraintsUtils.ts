@@ -1,7 +1,7 @@
-import toPath from 'lodash/toPath';
+import toPath         from 'lodash/toPath';
 
-import * as nodeUtils from './nodeUtils';
 import * as miscUtils from './miscUtils';
+import * as nodeUtils from './nodeUtils';
 
 export type ProcessResult = {
   manifestUpdates: Map<string, Map<string, Map<any, Set<nodeUtils.Caller>>>>;

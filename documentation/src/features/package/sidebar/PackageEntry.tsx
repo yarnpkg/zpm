@@ -1,17 +1,17 @@
-import gitUrlParse from "git-url-parse";
-import InformationIcon from "src/assets/svg/information-icon.svg?react";
-import WebsiteIcon from "src/assets/svg/website-icon.svg?react";
-import GithubIcon from "src/assets/svg/github-icon.svg?react";
-import RunkitIcon from "src/assets/svg/runkit-icon.svg?react";
-import { formatPackageLink } from "@/utils/helpers";
-import { usePackageInfo } from "src/api/package";
+import {formatPackageLink} from '@/utils/helpers';
+import gitUrlParse         from 'git-url-parse';
+import {usePackageInfo}    from 'src/api/package';
+import GithubIcon          from 'src/assets/svg/github-icon.svg?react';
+import InformationIcon     from 'src/assets/svg/information-icon.svg?react';
+import RunkitIcon          from 'src/assets/svg/runkit-icon.svg?react';
+import WebsiteIcon         from 'src/assets/svg/website-icon.svg?react';
 
 interface PackageEntryProps {
   name: string;
   version: string;
 }
 
-export default function PackageEntry({ name, version }: PackageEntryProps) {
+export default function PackageEntry({name, version}: PackageEntryProps) {
   const packageData = usePackageInfo(name);
 
   if (packageData.error) return null;
@@ -27,7 +27,7 @@ export default function PackageEntry({ name, version }: PackageEntryProps) {
     const parsedRepoUrl = gitUrlParse(repository.url);
 
     if (
-      parsedRepoUrl.source === "github.com" &&
+      parsedRepoUrl.source === `github.com` &&
       parsedRepoUrl.owner &&
       parsedRepoUrl.name
     ) {
@@ -39,52 +39,52 @@ export default function PackageEntry({ name, version }: PackageEntryProps) {
   }
 
   return (
-    <ul className="flex flex-col gap-y-6 text-blue-300 px-8">
+    <ul className={`flex flex-col gap-y-6 text-blue-300 px-8`}>
       <li>
         <button
           onClick={() => {
             window.history.pushState(
               {},
-              "",
-              formatPackageLink(packageData.name, version)
+              ``,
+              formatPackageLink(packageData.name, version),
             );
-            window.dispatchEvent(new PopStateEvent("popstate"));
+            window.dispatchEvent(new PopStateEvent(`popstate`));
           }}
-          class="flex items-center gap-x-2"
+          class={`flex items-center gap-x-2`}
         >
-          <InformationIcon class="size-6 stroke-current" />
-          <span class="font-medium text-white hover:text-blue-50 transition-colors leading-[1.4em]">
+          <InformationIcon class={`size-6 stroke-current`} />
+          <span class={`font-medium text-white hover:text-blue-50 transition-colors leading-[1.4em]`}>
             Information
           </span>
         </button>
       </li>
-      {typeof homepageLink === "string" && (
+      {typeof homepageLink === `string` && (
         <li>
           <a
             href={homepageLink}
-            aria-label="Website"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="flex items-center gap-x-2"
+            aria-label={`Website`}
+            target={`_blank`}
+            rel={`noopener noreferrer`}
+            class={`flex items-center gap-x-2`}
           >
-            <WebsiteIcon class="size-6 stroke-current" />
-            <span class="font-medium text-white hover:text-blue-50 transition-colors leading-[1.4em]">
+            <WebsiteIcon class={`size-6 stroke-current`} />
+            <span class={`font-medium text-white hover:text-blue-50 transition-colors leading-[1.4em]`}>
               Website
             </span>
           </a>
         </li>
       )}
-      {typeof githubRepoUrl === "string" && (
+      {typeof githubRepoUrl === `string` && (
         <li>
           <a
             href={githubRepoUrl}
-            aria-label="Repository"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="flex items-center gap-x-2"
+            aria-label={`Repository`}
+            target={`_blank`}
+            rel={`noopener noreferrer`}
+            class={`flex items-center gap-x-2`}
           >
-            <GithubIcon class="size-6 stroke-current" />
-            <span class="font-medium text-white hover:text-blue-50 transition-colors leading-[1.4em]">
+            <GithubIcon class={`size-6 stroke-current`} />
+            <span class={`font-medium text-white hover:text-blue-50 transition-colors leading-[1.4em]`}>
               Repository
             </span>
           </a>
@@ -93,13 +93,13 @@ export default function PackageEntry({ name, version }: PackageEntryProps) {
       <li>
         <a
           href={`https://npm.runkit.com/${packageData.name}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Runkit"
-          class="flex items-center gap-x-2"
+          target={`_blank`}
+          rel={`noopener noreferrer`}
+          aria-label={`Runkit`}
+          class={`flex items-center gap-x-2`}
         >
-          <RunkitIcon class="size-6 stroke-current" />
-          <span class="font-medium text-white hover:text-blue-50 transition-colors leading-[1.4em]">
+          <RunkitIcon class={`size-6 stroke-current`} />
+          <span class={`font-medium text-white hover:text-blue-50 transition-colors leading-[1.4em]`}>
             Runkit
           </span>
         </a>

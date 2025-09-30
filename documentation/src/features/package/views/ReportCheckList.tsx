@@ -1,7 +1,7 @@
-import type { ChangeEvent } from "preact/compat";
-import type { Check } from "src/api/packageChecks";
-import { useLocalStorage } from "usehooks-ts";
-import clsx from "clsx";
+import clsx               from 'clsx';
+import type {ChangeEvent} from 'preact/compat';
+import type {Check}       from 'src/api/packageChecks';
+import {useLocalStorage}  from 'usehooks-ts';
 
 export default function ReportCheckList({
   name,
@@ -18,7 +18,7 @@ export default function ReportCheckList({
 }) {
   const [isEnabled, setIsEnabled] = useLocalStorage<boolean>(
     `check/${check.id}`,
-    check.defaultEnabled
+    check.defaultEnabled,
   );
 
   const checkResult = check.useCheck({
@@ -31,14 +31,14 @@ export default function ReportCheckList({
     <p
       className={clsx(
         `leading-[22px] text-base ${
-          checkResult.ok ? "text-green-600" : "text-yellow-600"
-        }`
+          checkResult.ok ? `text-green-600` : `text-yellow-600`
+        }`,
       )}
     >
-      {checkResult.ok ? "Check" : "Alert"}
+      {checkResult.ok ? `Check` : `Alert`}
     </p>
   ) : (
-    <p className="text-white/60 leading-[22px] text-base">Glass</p>
+    <p className={`text-white/60 leading-[22px] text-base`}>Glass</p>
   );
 
   if (!isEditMode && !isEnabled) return null;
@@ -46,8 +46,8 @@ export default function ReportCheckList({
   if (!isEditMode && checkResult?.ok && !checkResult.message) return null;
 
   return (
-    <div className="flex items-center justify-between">
-      <div className="pr-4">{statusLabel}</div>
+    <div className={`flex items-center justify-between`}>
+      <div className={`pr-4`}>{statusLabel}</div>
       <div>
         {checkResult?.message ??
           (checkResult?.ok ? check.success : check.failure)}
@@ -56,7 +56,7 @@ export default function ReportCheckList({
         <div>
           <label>
             <input
-              type="checkbox"
+              type={`checkbox`}
               onChange={(e: ChangeEvent<HTMLInputElement>) =>
                 setIsEnabled((e.target as HTMLInputElement).checked)
               }

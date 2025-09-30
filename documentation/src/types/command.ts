@@ -1,15 +1,15 @@
 export type CommandPart = {
-  type: "text" | "link";
+  type: `text` | `link`;
   value: string;
   href?: string;
 };
 
 export type CommandLine = {
-  parts: CommandPart[];
+  parts: Array<CommandPart>;
 };
 
 export type CommandSlideProps = {
-  command: string | CommandLine[];
+  command: string | Array<CommandLine>;
   title?: string | null;
   name?: string;
   description?: string | null;

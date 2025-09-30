@@ -25,7 +25,7 @@ export interface ReleaseNpmInfo {
 }
 
 export interface ReleaseJsDelivrInfo {
-  files: ReleaseFile[];
+  files: Array<ReleaseFile>;
   fileSet: Set<string>;
 }
 
@@ -50,7 +50,7 @@ export interface PkgInfo {
     [tag: string]: string | null | undefined;
   };
   time: Record<string, string>;
-  versions: Record<string, { deprecated?: boolean }>;
+  versions: Record<string, {deprecated?: boolean}>;
   readme?: string;
 }
 

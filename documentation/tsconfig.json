@@ -1,5 +1,6 @@
 {
   "extends": "astro/tsconfigs/strict",
+  "composite": true,
   "include": [
     ".astro/types.d.ts",
     "**/*"

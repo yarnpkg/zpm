@@ -1,11 +1,12 @@
-import semver from "semver";
-import VersionDropdown from "src/features/package/views/VersionDropdown";
+import semver           from 'semver';
+import {usePackageInfo} from 'src/api/package';
+import VersionDropdown  from 'src/features/package/views/VersionDropdown';
+
 import type {
   VersionSelectorProps,
   PkgInfo,
   VersionChoice,
-} from "src/types/package";
-import { usePackageInfo } from "src/api/package";
+} from 'src/types/package';
 
 export default function VersionSelector({
   name,
@@ -15,7 +16,7 @@ export default function VersionSelector({
 
   const versions = getFilteredVersions(pkgInfo);
 
-  const currentVersion = versions.find(({ value }) => {
+  const currentVersion = versions.find(({value}) => {
     return value === version;
   });
 
@@ -28,12 +29,12 @@ export default function VersionSelector({
   );
 }
 
-function getFilteredVersions(pkgInfo: PkgInfo): VersionChoice[] {
-  const { time = {}, versions = {} } = pkgInfo;
-  const latest = pkgInfo["dist-tags"]?.latest ?? "";
+function getFilteredVersions(pkgInfo: PkgInfo): Array<VersionChoice> {
+  const {time = {}, versions = {}} = pkgInfo;
+  const latest = pkgInfo[`dist-tags`]?.latest ?? ``;
 
   const versionEntries = Object.entries(time)
-    .filter(([v]) => v !== "created" && v !== "modified")
+    .filter(([v]) => v !== `created` && v !== `modified`)
     .map(([v, releaseTime]) => ({
       value: v,
       time: new Date(releaseTime as string),
@@ -41,8 +42,8 @@ function getFilteredVersions(pkgInfo: PkgInfo): VersionChoice[] {
 
   return versionEntries
     .sort((a, b) => b.time.getTime() - a.time.getTime())
-    .filter(({ value }, index) =>
-      isValidVersion(value, versions, latest, index)
+    .filter(({value}, index) =>
+      isValidVersion(value, versions, latest, index),
     );
 }
 
@@ -50,7 +51,7 @@ function isValidVersion(
   version: string,
   versionsData: any,
   latest: string,
-  index: number
+  index: number,
 ): boolean {
   const info = versionsData[version];
 
@@ -59,7 +60,7 @@ function isValidVersion(
   if (semver.prerelease(version) && semver.gt(latest, version)) return false;
 
   const isNightly = /-.*2[0-9]{3}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])/.test(
-    version
+    version,
   );
   if (isNightly && index > 0) return false;
 

@@ -1,19 +1,20 @@
-import { getCli } from "@yarnpkg/cli";
-import { parseShell } from "@yarnpkg/parsers";
-import { capitalize } from "es-toolkit/compat";
-import { visit } from "unist-util-visit";
-import manifestSchema from "../utils/configuration/manifest.json";
-import yarnrcSchema from "../utils/configuration/yarnrc.json";
+import {getCli}       from '@yarnpkg/cli';
+import {parseShell}   from '@yarnpkg/parsers';
+import {capitalize}   from 'es-toolkit/compat';
+import {visit}        from 'unist-util-visit';
+
+import manifestSchema from '../utils/configuration/manifest.json';
+import yarnrcSchema   from '../utils/configuration/yarnrc.json';
 
 let cliData = null;
 let userSpecs = null;
 
 export function remarkCommandLineHighlight() {
-  return async (tree) => {
+  return async tree => {
     if (!cliData) {
       try {
         cliData = await getCli();
-      } catch (error) {
+      } catch {
         return;
       }
     }
@@ -23,43 +24,43 @@ export function remarkCommandLineHighlight() {
         userSpecs = [
           {
             schema: manifestSchema,
-            urlGenerator: (name) =>
+            urlGenerator: name =>
               `/configuration/manifest${
-                process.env.NODE_ENV === "development" ? "" : "/"
+                process.env.NODE_ENV === `development` ? `` : `/`
               }#${name}`,
           },
           {
             schema: yarnrcSchema,
-            urlGenerator: (name) =>
+            urlGenerator: name =>
               `/configuration/yarnrc${
-                process.env.NODE_ENV === "development" ? "" : "/"
+                process.env.NODE_ENV === `development` ? `` : `/`
               }#${name}`,
           },
         ];
-      } catch (error) {
+      } catch {
         userSpecs = null;
       }
     }
 
-    visit(tree, "code", (node) => handleCodeBlock(node, cliData));
-    visit(tree, "inlineCode", (node) => {
+    visit(tree, `code`, node => handleCodeBlock(node, cliData));
+    visit(tree, `inlineCode`, node => {
       handleCodeBlock(node, cliData);
 
       // Try to link configuration options
       if (userSpecs) {
         const match = node.value.match(/^(?<name>[^:]+)(?:: (?<value>.*))?$/);
         if (match) {
-          const segments = match.groups.name.split(".");
+          const segments = match.groups.name.split(`.`);
 
           let result = null;
 
-          userSpecs.find((spec) => {
+          userSpecs.find(spec => {
             let schemaNode = spec.schema;
 
             for (const segment of segments) {
               if (
                 schemaNode &&
-                typeof schemaNode === "object" &&
+                typeof schemaNode === `object` &&
                 schemaNode.properties
               ) {
                 if (!Object.hasOwn(schemaNode.properties, segment))
@@ -71,12 +72,12 @@ export function remarkCommandLineHighlight() {
               }
             }
 
-            if (!schemaNode || typeof schemaNode.title === "undefined")
+            if (!schemaNode || typeof schemaNode.title === `undefined`)
               return false;
 
             result = {
               title: schemaNode.title,
-              description: schemaNode.description || "",
+              description: schemaNode.description || ``,
               url: spec.urlGenerator(segments.join(`.`)),
             };
 
@@ -84,12 +85,12 @@ export function remarkCommandLineHighlight() {
           });
 
           if (result !== null) {
-            const attributes = { ...match.groups, ...result };
+            const attributes = {...match.groups, ...result};
 
             const escapedTooltip = escapeHtmlAttribute(attributes.title);
             const escapedName = escapeHtml(attributes.name);
 
-            node.type = "html";
+            node.type = `html`;
             node.value = `<a href="${attributes.url}" class="tooltip-link text-white/80!" aria-label="${escapedTooltip}" data-tooltip="${escapedTooltip}">${escapedName}</a>`;
             return;
           }
@@ -100,13 +101,13 @@ export function remarkCommandLineHighlight() {
 }
 
 function handleCodeBlock(node, cliData) {
-  const isInlineCode = node.type === "inlineCode";
+  const isInlineCode = node.type === `inlineCode`;
 
   const lines = node.value
     .trim()
-    .split("\n")
-    .map((line) => {
-      if (line.startsWith("#") || line.length === 0) {
+    .split(`\n`)
+    .map(line => {
+      if (line.startsWith(`#`) || line.length === 0) {
         return makeRawLine(line);
       } else if (
         line.startsWith(`${cliData.binaryName} `) ||
@@ -119,19 +120,19 @@ function handleCodeBlock(node, cliData) {
     });
 
   // If any line can't be processed, bail out
-  if (lines.some((line) => line === null)) return;
+  if (lines.some(line => line === null)) return;
 
   const htmlContent = lines
-    .map((line) => {
-      if (line.type === "raw") {
+    .map(line => {
+      if (line.type === `raw`) {
         return escapeHtml(line.value);
       } else {
         return renderCommandLine(line);
       }
     })
-    .join(isInlineCode ? " " : "<br />");
+    .join(isInlineCode ? ` ` : `<br />`);
 
-  node.type = "html";
+  node.type = `html`;
 
   if (isInlineCode) {
     node.value = `<code>${htmlContent}</code>`;
@@ -142,7 +143,7 @@ function handleCodeBlock(node, cliData) {
 
 function makeRawLine(line) {
   return {
-    type: "raw",
+    type: `raw`,
     value: line,
   };
 }
@@ -150,29 +151,29 @@ function makeRawLine(line) {
 function makeCommandLine(line, cli) {
   const parsed = parseShell(line)[0].command.chain;
 
-  if (parsed.type !== "command") {
+  if (parsed.type !== `command`) {
     throw new Error(
-      `Unsupported command type: "${parsed.type}" when parsing "${line}"`
+      `Unsupported command type: "${parsed.type}" when parsing "${line}"`,
     );
   }
 
-  const strArgs = parsed.args.map((arg) => {
-    if (arg.type !== "argument") {
+  const strArgs = parsed.args.map(arg => {
+    if (arg.type !== `argument`) {
       throw new Error(
-        `Unsupported argument type: "${arg.type}" when parsing "${line}"`
+        `Unsupported argument type: "${arg.type}" when parsing "${line}"`,
       );
     }
 
     if (arg.segments.length !== 1) {
       throw new Error(
-        `Unsupported argument segments length: "${arg.segments.length}" when parsing "${line}"`
+        `Unsupported argument segments length: "${arg.segments.length}" when parsing "${line}"`,
       );
     }
 
     const segment = arg.segments[0];
-    if (segment.type !== "text") {
+    if (segment.type !== `text`) {
       throw new Error(
-        `Unsupported argument segment type: "${segment.type}" when parsing "${line}"`
+        `Unsupported argument segment type: "${segment.type}" when parsing "${line}"`,
       );
     }
 
@@ -180,7 +181,7 @@ function makeCommandLine(line, cli) {
   });
 
   const [name, ...argv] = strArgs;
-  const splitPoint = argv.indexOf("!");
+  const splitPoint = argv.indexOf(`!`);
 
   if (splitPoint !== -1) argv.splice(splitPoint, 1);
 
@@ -193,15 +194,15 @@ function makeCommandLine(line, cli) {
     });
   } catch (error) {
     // Handle AmbiguousSyntaxError by falling back to lenient parsing
-    if (error.constructor.name === "AmbiguousSyntaxError") {
+    if (error.constructor.name === `AmbiguousSyntaxError`)
       throw new Error(`Ambiguous command: ${line}`);
-    }
+
     throw error;
   }
 
-  const tokens = command.tokens.flatMap((token) => {
+  const tokens = command.tokens.flatMap(token => {
     if (token.segmentIndex < splitPoint) return [];
-    if (token.type !== "option") return [token];
+    if (token.type !== `option`) return [token];
     if (token.slice && token.slice[0] !== 0) return [token];
 
     const segment = argv[token.segmentIndex];
@@ -213,13 +214,13 @@ function makeCommandLine(line, cli) {
     return [
       {
         segmentIndex: token.segmentIndex,
-        type: "dash",
+        type: `dash`,
         slice: [0, firstNonDashIndex],
         option: token.option,
       },
       {
         segmentIndex: token.segmentIndex,
-        type: "option",
+        type: `option`,
         slice: [firstNonDashIndex, segmentLength],
         option: token.option,
       },
@@ -233,11 +234,11 @@ function makeCommandLine(line, cli) {
     : null;
 
   return {
-    type: "command",
-    command: { name, path, argv },
+    type: `command`,
+    command: {name, path, argv},
     split: splitPoint !== -1,
     tooltip,
-    tokens: tokens.map((token) => ({
+    tokens: tokens.map(token => ({
       ...token,
       text: getTokenText(token, argv),
       tooltip: getTokenTooltip(token, definition),
@@ -248,14 +249,14 @@ function makeCommandLine(line, cli) {
 function makeCommandOrRawLine(line, cli) {
   try {
     return makeCommandLine(line, cli);
-  } catch (error) {
+  } catch {
     // Fallback to a lenient parser that tolerates placeholders, subshells, and inline comments
     try {
       return makeLenientCommandLine(line, cli);
-    } catch (_) {
-      if (process.env.NODE_ENV === "development") {
+    } catch {
+      if (process.env.NODE_ENV === `development`)
         console.debug(`Failed to parse "${line}"`);
-      }
+
       return makeRawLine(line);
     }
   }
@@ -263,7 +264,7 @@ function makeCommandOrRawLine(line, cli) {
 
 function makeLenientCommandLine(line, cli) {
   // Strip inline comments starting with a space+hash (to avoid heading lines already handled)
-  const hashIndex = line.indexOf(" #");
+  const hashIndex = line.indexOf(` #`);
   const withoutComment = hashIndex !== -1 ? line.slice(0, hashIndex) : line;
 
   const trimmed = withoutComment.trim();
@@ -272,19 +273,19 @@ function makeLenientCommandLine(line, cli) {
   const parts = trimmed.split(/\s+/);
   const [name, ...argv] = parts;
 
-  if (name !== cli.binaryName) {
+  if (name !== cli.binaryName)
     return makeRawLine(line);
-  }
+
 
   // Enhanced tokenization for lenient parsing
   const tokens = argv.map((arg, index) => {
     // Try to identify option tokens (starting with -)
-    if (arg.startsWith("-")) {
+    if (arg.startsWith(`-`)) {
       return {
         segmentIndex: index,
-        type: "option",
+        type: `option`,
         text: arg,
-        option: arg.startsWith("--") ? arg.slice(2) : arg.slice(1),
+        option: arg.startsWith(`--`) ? arg.slice(2) : arg.slice(1),
       };
     }
 
@@ -292,7 +293,7 @@ function makeLenientCommandLine(line, cli) {
     if (index === 0) {
       return {
         segmentIndex: index,
-        type: "path",
+        type: `path`,
         text: arg,
       };
     }
@@ -300,7 +301,7 @@ function makeLenientCommandLine(line, cli) {
     // Default to text
     return {
       segmentIndex: index,
-      type: "text",
+      type: `text`,
       text: arg,
     };
   });
@@ -317,24 +318,24 @@ function makeLenientCommandLine(line, cli) {
     try {
       const definitions = cli.definitions();
       const definition = definitions.find(
-        (def) =>
+        def =>
           def.commandName === subcommand ||
           (def.path &&
             def.path.length > 0 &&
-            def.path[def.path.length - 1] === subcommand)
+            def.path[def.path.length - 1] === subcommand),
       );
 
       if (definition?.description) {
         tooltip = definition.description;
       }
-    } catch (error) {
+    } catch {
       // Ignore errors when trying to get tooltip
     }
   }
 
   return {
-    type: "command",
-    command: { name, path, argv },
+    type: `command`,
+    command: {name, path, argv},
     split: false,
     tooltip,
     tokens,
@@ -342,11 +343,11 @@ function makeLenientCommandLine(line, cli) {
 }
 
 function renderCommandLine(line) {
-  let firstPathToken = line.tokens.findIndex((token) => token.type === "path");
+  let firstPathToken = line.tokens.findIndex(token => token.type === `path`);
   if (firstPathToken === -1) firstPathToken = line.tokens.length;
 
   let firstNonPathToken = line.tokens.findIndex(
-    (token, i) => i >= firstPathToken && token.type !== "path"
+    (token, i) => i >= firstPathToken && token.type !== `path`,
   );
   if (firstNonPathToken === -1) firstNonPathToken = line.tokens.length;
 
@@ -360,7 +361,7 @@ function renderCommandLine(line) {
         const needsSpace =
           index > 0 &&
           token.segmentIndex !== prevToken?.segmentIndex &&
-          (token.type !== "path" || index > 0);
+          (token.type !== `path` || index > 0);
 
         const tooltip = token.tooltip
           ? escapeHtmlAttribute(token.tooltip)
@@ -369,35 +370,35 @@ function renderCommandLine(line) {
         const tokenContent = escapeHtml(token.text);
 
         const classes = [
-          tooltip && "tooltip-link",
-          token.type === "option" && tooltip
-            ? "underline decoration-dotted underline-offset-2 cursor-help"
+          tooltip && `tooltip-link`,
+          token.type === `option` && tooltip
+            ? `underline decoration-dotted underline-offset-2 cursor-help`
             : null,
         ].filter(Boolean);
 
         const attributes = [
           `data-type="${token.type}"`,
-          classes.length ? `class="${classes.join(" ")}"` : null,
+          classes.length ? `class="${classes.join(` `)}"` : null,
           tooltip ? `aria-label="${tooltip}" data-tooltip="${tooltip}"` : null,
         ]
           .filter(Boolean)
-          .join(" ");
+          .join(` `);
 
         return `${
-          needsSpace ? " " : ""
+          needsSpace ? ` ` : ``
         }<span ${attributes}>${tokenContent}</span>`;
       })
-      .join("");
+      .join(``);
   };
 
-  const wrapPath = (content) => {
+  const wrapPath = content => {
     // Only create links for path tokens (subcommands) if there's a path and it's not an option (doesn't start with -)
     if (
       line.command.path &&
       line.command.path.length > 0 &&
-      !line.command.path[0].startsWith("-")
+      !line.command.path[0].startsWith(`-`)
     ) {
-      const href = `/cli/${line.command.path.join("/")}`;
+      const href = `/cli/${line.command.path.join(`/`)}`;
       const ariaLabel = line.tooltip
         ? escapeHtmlAttribute(line.tooltip)
         : `Create a new package`;
@@ -411,14 +412,14 @@ function renderCommandLine(line) {
 
   return (
     (!line.split
-      ? escapeHtml(line.command.name) + `${line.tokens.length > 0 ? " " : ""}`
-      : "") +
-    (firstPathToken > 0 ? renderTokens(0, firstPathToken) : "") +
-    (firstPathToken > 0 && firstPathToken < line.tokens.length ? " " : "") +
-    (firstNonPathToken > 0 ? wrapPath(pathTokensContent) : "") +
+      ? `${escapeHtml(line.command.name)}${line.tokens.length > 0 ? ` ` : ``}`
+      : ``) +
+    (firstPathToken > 0 ? renderTokens(0, firstPathToken) : ``) +
+    (firstPathToken > 0 && firstPathToken < line.tokens.length ? ` ` : ``) +
+    (firstNonPathToken > 0 ? wrapPath(pathTokensContent) : ``) +
     (firstNonPathToken < line.tokens.length
-      ? " " + renderTokens(firstNonPathToken, line.tokens.length)
-      : "")
+      ? ` ${renderTokens(firstNonPathToken, line.tokens.length)}`
+      : ``)
   );
 }
 
@@ -429,10 +430,10 @@ function getTokenText(token, argv) {
 
 function getTokenTooltip(token, definition) {
   if (!definition) return null;
-  if (token.type !== "option") return null;
+  if (token.type !== `option`) return null;
 
   const option = definition.options.find(
-    (option) => option.preferredName === token.option
+    option => option.preferredName === token.option,
   );
   if (!option?.description) return null;
 
@@ -441,18 +442,18 @@ function getTokenTooltip(token, definition) {
 
 function escapeHtml(text) {
   return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+    .replace(/&/g, `&amp;`)
+    .replace(/</g, `&lt;`)
+    .replace(/>/g, `&gt;`)
+    .replace(/"/g, `&quot;`)
+    .replace(/'/g, `&#039;`);
 }
 
 function escapeHtmlAttribute(value) {
   return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/&/g, `&amp;`)
+    .replace(/"/g, `&quot;`)
+    .replace(/'/g, `&#39;`)
+    .replace(/</g, `&lt;`)
+    .replace(/>/g, `&gt;`);
 }

@@ -16,6 +16,8 @@
     "berry": "export TEST_BINARY=$PROJECT_CWD/local/yarn && export YARNSW_DEFAULT=local:$PROJECT_CWD/local/yarn-bin && export TEST_MAJOR=5 && cd ${BERRY_DIR:-../berry} && yarn"
   },
   "dependencies": {
-    "clipanion": "^4.0.0-rc.4"
+    "@yarnpkg/eslint-config": "^3.1.0",
+    "clipanion": "^4.0.0-rc.4",
+    "eslint": "^9.36.0"
   }
 }

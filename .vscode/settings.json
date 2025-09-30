@@ -10,5 +10,9 @@
   "typescript.tsdk": ".yarn/sdks/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true,
   "files.trimFinalNewlines": true,
-  "files.trimTrailingWhitespace": true
+  "files.trimTrailingWhitespace": true,
+  "eslint.nodePath": ".yarn/sdks",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "always"
+  },
 }

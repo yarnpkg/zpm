@@ -1,18 +1,19 @@
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
+import NotFound                           from 'src/pages/_404';
+
 import {
   ErrorBoundary,
   lazy,
   LocationProvider,
   Route,
   Router,
-} from "preact-iso";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import NotFound from "src/pages/_404";
+} from 'preact-iso';
 
 const PackageSidebar = lazy(
-  () => import("../features/package/sidebar/PackageSidebar")
+  () => import(`../features/package/sidebar/PackageSidebar`),
 );
 const PackageContent = lazy(
-  () => import("../features/package/views/PackageContent")
+  () => import(`../features/package/views/PackageContent`),
 );
 
 const queryClient = new QueryClient({
@@ -27,14 +28,11 @@ const queryClient = new QueryClient({
 export default function PackageLayout() {
   return (
     <QueryClientProvider client={queryClient}>
-      {/* @ts-ignore */}
-      <LocationProvider scope="package">
+      <LocationProvider scope={`package`}>
         <ErrorBoundary>
-          {/* @ts-ignore */}
           <Router>
-            {/* @ts-ignore */}
             <Route
-              path="package/:name/:version/:file?"
+              path={`package/:name/:version/:file?`}
               component={PackageWrapper as any}
             />
             <Route default component={NotFound} />
@@ -55,7 +53,7 @@ const PackageWrapper = ({
   file: string;
 }) => {
   return (
-    <div class="container pt-8 lg:pt-12 flex flex-col lg:flex-row lg:gap-x-10 xl:gap-x-20">
+    <div class={`container pt-8 lg:pt-12 flex flex-col lg:flex-row lg:gap-x-10 xl:gap-x-20`}>
       <PackageSidebar name={name} version={version} />
 
       <PackageContent name={name} version={version} file={file} />

@@ -1,27 +1,27 @@
-import { defineCollection, reference, z } from "astro:content";
-import { docsLoader } from "@astrojs/starlight/loaders";
-import { docsSchema } from "@astrojs/starlight/schema";
-import { file, glob } from "astro/loaders";
-import { autoSidebarLoader } from "starlight-auto-sidebar/loader";
-import { autoSidebarSchema } from "starlight-auto-sidebar/schema";
+import {docsLoader}                     from '@astrojs/starlight/loaders';
+import {docsSchema}                     from '@astrojs/starlight/schema';
+import {file, glob}                     from 'astro/loaders';
+import {defineCollection, reference, z} from 'astro:content';
+import {autoSidebarLoader}              from 'starlight-auto-sidebar/loader';
+import {autoSidebarSchema}              from 'starlight-auto-sidebar/schema';
 
 export const collections = {
-  docs: defineCollection({ loader: docsLoader(), schema: docsSchema() }),
+  docs: defineCollection({loader: docsLoader(), schema: docsSchema()}),
   blog: defineCollection({
-    loader: glob({ pattern: "**/*.mdx", base: "./src/content/blog" }),
+    loader: glob({pattern: `**/*.mdx`, base: `./src/content/blog`}),
     schema: z.object({
       title: z.string(),
       slug: z.string(),
-      author: reference("authors"),
+      author: reference(`authors`),
       description: z
         .string()
         .optional()
-        .transform((desc) => desc?.trim() || ""),
+        .transform(desc => desc?.trim() || ``),
     }),
   }),
 
   protocols: defineCollection({
-    loader: glob({ pattern: "**/*.mdx", base: "./src/content/protocols" }),
+    loader: glob({pattern: `**/*.mdx`, base: `./src/content/protocols`}),
     schema: z.object({
       title: z.string().optional(),
       slug: z.string().optional(),
@@ -34,7 +34,7 @@ export const collections = {
   }),
 
   authors: defineCollection({
-    loader: file("src/content/blog/authors.yml"),
+    loader: file(`src/content/blog/authors.yml`),
     schema: z.object({
       id: z.string(),
       name: z.string(),

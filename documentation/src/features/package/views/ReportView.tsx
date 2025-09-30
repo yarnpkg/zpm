@@ -1,11 +1,11 @@
-import { usePackageInfo, useReleaseReadme } from "src/api/package";
+import {usePackageInfo, useReleaseReadme} from 'src/api/package';
 
 interface ReportViewProps {
   name: string;
   version: string;
 }
 
-export default function ReportView({ name, version }: ReportViewProps) {
+export default function ReportView({name, version}: ReportViewProps) {
   const pkgInfo = usePackageInfo(name);
 
   if (pkgInfo.error) return <div>{pkgInfo.error}</div>;

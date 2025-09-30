@@ -1,5 +1,6 @@
-import { capitalize } from "es-toolkit/compat";
-import { dedent, generateFrontmatter, toHyphenCase } from "./helpers";
+import {capitalize}                                from 'es-toolkit/compat';
+
+import {dedent, generateFrontmatter, toHyphenCase} from './helpers';
 
 interface Command {
   path: string;
@@ -9,17 +10,17 @@ interface Command {
 export function createIndexContent(
   packageName: string,
   shortName: string,
-  commands: Command[]
+  commands: Array<Command>,
 ): string {
-  const isCorePackage = packageName === "@yarnpkg/cli";
+  const isCorePackage = packageName === `@yarnpkg/cli`;
 
   return dedent(`
       ${generateFrontmatter({
         title: packageName,
         description: `Documentation for all ${shortName} package commands`,
-        slug: shortName === "cli" ? "cli" : `cli/${shortName}`,
+        slug: shortName === `cli` ? `cli` : `cli/${shortName}`,
         sidebar_position: 1,
-        category: shortName === "cli" ? "cli" : `cli/${shortName}`,
+        category: shortName === `cli` ? `cli` : `cli/${shortName}`,
       })}
       
       import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
@@ -33,45 +34,45 @@ export function createIndexContent(
             - By downloading and running it in a temporary environment using [\`yarn dlx\`](/cli/dlx)
             :::
           `)
-          : ""
+          : ``
       }
       
         ${commands
           .map(
-            ({ path, description }: { path: string; description: string }) => {
-              const urlPath = path.split(" ").slice(1).join("/");
+            ({path, description}: {path: string, description: string}) => {
+              const urlPath = path.split(` `).slice(1).join(`/`);
 
               return dedent(`
               <LinkCard 
                 title="${path}" 
                 href="${
-                  shortName === "cli" ? "/cli" : `/cli/${shortName}`
+                  shortName === `cli` ? `/cli` : `/cli/${shortName}`
                 }/${toHyphenCase(urlPath)}" 
                 description="${capitalize(description)}"
               />
             `);
-            }
+            },
           )
-          .join("\n")}
+          .join(`\n`)}
     `);
 }
 
 export function createCommandContent(
   packageName: string,
   shortName: string,
-  commandInfo: any
+  commandInfo: any,
 ): string {
-  const isCorePackage = packageName === "@yarnpkg/cli";
-  const commandSlug = commandInfo.path.split(" ").slice(1).join("/");
+  const isCorePackage = packageName === `@yarnpkg/cli`;
+  const commandSlug = commandInfo.path.split(` `).slice(1).join(`/`);
 
   const frontMatter = {
     title: commandInfo.path,
-    description: commandInfo.description || "Yarn CLI command",
+    description: commandInfo.description || `Yarn CLI command`,
     slug:
-      shortName === "cli"
+      shortName === `cli`
         ? `cli/${toHyphenCase(commandSlug)}`
         : `cli/${shortName}/${toHyphenCase(commandSlug)}`,
-    category: shortName === "cli" ? "cli" : `cli/${shortName}`,
+    category: shortName === `cli` ? `cli` : `cli/${shortName}`,
   };
 
   const sections = [
@@ -104,7 +105,7 @@ export function createCommandContent(
           ## Usage
           <Code code="${commandInfo.usage.replace(
             /"/g,
-            "&quot;"
+            `&quot;`,
           )}" lang="bash" />
         `)
       : null,
@@ -114,13 +115,13 @@ export function createCommandContent(
       ? dedent(`
           ## Examples
           ${commandInfo.examples
-            .map(([description, example]: string[]) =>
+            .map(([description, example]: Array<string>) =>
               dedent(`
               <p>${description}:</p>
-              <Code code="${example.replace(/"/g, "&quot;")}" lang="bash" />
-            `)
+              <Code code="${example.replace(/"/g, `&quot;`)}" lang="bash" />
+            `),
             )
-            .join("\n\n")}
+            .join(`\n\n`)}
         `)
       : null,
 
@@ -149,14 +150,14 @@ export function createCommandContent(
               }) =>
                 dedent(`
               | <h4 id="${encodeURIComponent(
-                `options-${optDef}`.replace(/-+/g, "-")
+                `options-${optDef}`.replace(/-+/g, `-`),
               )}" className="header-code"><code className="language-text">${optDef}</code></h4> | ${description} |
-            `)
+            `),
             )
-            .join("\n")}
+            .join(`\n`)}
         `)
       : null,
   ];
 
-  return sections.filter(Boolean).join("\n\n");
+  return sections.filter(Boolean).join(`\n\n`);
 }
