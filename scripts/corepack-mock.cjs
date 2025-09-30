@@ -34,7 +34,7 @@ function main() {
   }
 
   if (!fs.existsSync(yarnSwitchPath)) {
-    const switchResult = spawnSync(`set -euo pipefail; curl -s https://repo.yarnpkg.com/install | bash`, {
+    const switchResult = spawnSync(`bash -c "set -euo pipefail; curl -s https://repo.yarnpkg.com/install | bash"`, {
       stdio: `pipe`,
       shell: true,
     });
