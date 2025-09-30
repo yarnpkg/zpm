@@ -142,7 +142,7 @@ function installSky(canvas: HTMLCanvasElement) {
 export function StarrySky() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isCrashed, setIsCrashed] = useState(false);
-  console.log(`StarrySky rendered`);
+
   useLayoutEffect(() => {
     try {
       installSky(canvasRef.current!);

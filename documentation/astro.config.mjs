@@ -125,6 +125,8 @@ export default defineConfig({
       },
       disable404Route: true,
       tableOfContents: false,
+      // https://github.com/withastro/starlight/blob/b33473fc85be10a1f8fb53e1c35760bb54d23d11/packages/starlight/index.ts#L162
+      pagefind: false,
     }),
     preact({compat: true}),
     yarnCliDocs(),
