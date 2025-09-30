@@ -39,8 +39,11 @@ function main() {
     });
 
     if (switchResult.status !== 0) {
-      console.error(`Failed to install Yarn Switch; run the following command to install it:`);
-      console.error(`curl -s https://repo.yarnpkg.com/install | bash`);
+      console.log(`stdout: ${switchResult.stdout.toString()}`);
+      console.log(`stderr: ${switchResult.stderr.toString()}`);
+      console.log();
+      console.log(`Failed to install Yarn Switch; run the following command to install it:`);
+      console.log(`curl -s https://repo.yarnpkg.com/install | bash`);
 
       process.exitCode = 1;
       return;
