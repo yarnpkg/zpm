@@ -34,13 +34,19 @@ function main() {
   }
 
   if (!fs.existsSync(yarnSwitchPath)) {
-    const switchResult = spawnSync(`curl -s https://repo.yarnpkg.com/install | bash`, {
+    const switchResult = spawnSync(`set -euo pipefail; curl -s https://repo.yarnpkg.com/install | bash`, {
       stdio: `pipe`,
+      shell: true,
     });
 
+    if (switchResult.error) {
+      console.log(switchResult.error.toString());
+    } else if (switchResult.status !== 0) {
+      console.log(`stdout: ${switchResult.stdout.toString().trim()}`);
+      console.log(`stderr: ${switchResult.stderr.toString().trim()}`);
+    }
+
     if (switchResult.status !== 0) {
-      console.log(`stdout: ${switchResult.stdout.toString()}`);
-      console.log(`stderr: ${switchResult.stderr.toString()}`);
       console.log();
       console.log(`Failed to install Yarn Switch; run the following command to install it:`);
       console.log(`curl -s https://repo.yarnpkg.com/install | bash`);
