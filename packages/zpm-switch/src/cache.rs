@@ -122,8 +122,10 @@ pub async fn ensure<R: Future<Output = Result<(), Error>>, F: FnOnce(Path) -> R>
             let ready_path = cache_path
                 .with_join_str(".ready");
 
-            ready_path
-                .fs_set_modified(std::time::SystemTime::now())?;
+            // Not a big deal if this fails, which may happen on filesystems
+            // with limited permissions (read-only ones)
+            let _ = ready_path
+                .fs_set_modified(std::time::SystemTime::now());
 
             Ok(cache_path)
         },
