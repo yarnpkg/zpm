@@ -256,8 +256,12 @@ impl PostinstallCommand {
         let volta_platform_path = volta_yarn_path
             .with_join_str("../../../../user/platform.json");
 
-        let volta_platform_content = volta_platform_path
+        let mut volta_platform_content = volta_platform_path
             .fs_read_prealloc()?;
+
+        if volta_platform_content.is_empty() {
+            volta_platform_content = "{}".as_bytes().to_vec();
+        }
 
         let mut volta_platform
             = sonic_rs::from_slice::<sonic_rs::Value>(&volta_platform_content)?;
