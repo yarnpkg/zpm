@@ -141,6 +141,14 @@ impl Range {
         }
     }
 
+    pub fn physical_range(&self) -> &Range {
+        if let Range::Virtual(params) = self {
+            params.inner.physical_range()
+        } else {
+            self
+        }
+    }
+
     pub fn to_semver_range(&self) -> Option<zpm_semver::Range> {
         match self {
             Range::AnonymousSemver(params) => {
