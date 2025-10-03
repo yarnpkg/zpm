@@ -450,6 +450,10 @@ impl Project {
                 Ok(Some(self.workspace_by_rel_path(&params.path)?))
             },
 
+            Range::WorkspaceSemver(_) => {
+                Ok(Some(self.workspace_by_ident(&descriptor.ident)?))
+            },
+
             Range::WorkspaceMagic(_) => {
                 Ok(Some(self.workspace_by_ident(&descriptor.ident)?))
             },
@@ -462,12 +466,18 @@ impl Project {
                 Ok(workspace)
             },
 
-            Range::RegistrySemver(params) => {
+            Range::RegistrySemver(params) if self.config.settings.enable_transparent_workspaces.value => {
                 let workspace
                     = self.workspaces_by_ident.get(params.ident.as_ref().unwrap_or(&descriptor.ident))
                         .map(|idx| &self.workspaces[*idx]);
 
-                Ok(workspace)
+                if let Some(workspace) = workspace {
+                    if params.range.check(&workspace.manifest.remote.version.clone().unwrap_or_default()) {
+                        return Ok(Some(workspace));
+                    }
+                }
+
+                Ok(None)
             },
 
             _ => {
@@ -691,7 +701,7 @@ impl Project {
                 .with_lockfile(lockfile?)
                 .with_previous_state(self.install_state.as_ref())
                 .with_roots(roots)
-                .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value)
+                .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
                 .with_skip_lockfile_update(options.roots.is_some())
                 .resolve_and_fetch().await?
                 .finalize(self).await?;
