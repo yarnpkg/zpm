@@ -19,6 +19,7 @@ pub struct InstallContext<'a> {
     pub systems: Option<&'a Vec<system::System>>,
     pub check_checksums: bool,
     pub check_resolutions: bool,
+    pub prune_dev_dependencies: bool,
     pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
     pub refresh_lockfile: bool,
     pub mode: Option<InstallMode>,
@@ -32,6 +33,7 @@ impl<'a> Default for InstallContext<'a> {
             systems: None,
             check_checksums: false,
             check_resolutions: false,
+            prune_dev_dependencies: false,
             enforced_resolutions: BTreeMap::new(),
             refresh_lockfile: false,
             mode: None,
@@ -62,6 +64,11 @@ impl<'a> InstallContext<'a> {
 
     pub fn set_enforced_resolutions(mut self, enforced_resolutions: BTreeMap<Descriptor, Locator>) -> Self {
         self.enforced_resolutions = enforced_resolutions;
+        self
+    }
+
+    pub fn set_prune_dev_dependencies(mut self, prune_dev_dependencies: bool) -> Self {
+        self.prune_dev_dependencies = prune_dev_dependencies;
         self
     }
 
@@ -568,10 +575,6 @@ impl<'a> InstallManager<'a> {
     pub fn with_constraints_check(mut self, constraints_check: bool) -> Self {
         self.result.constraints_check = constraints_check;
         self
-    }
-
-    pub fn with_roots_iter<T: Iterator<Item = Descriptor>>(self, it: T) -> Self {
-        self.with_roots(it.collect())
     }
 
     pub async fn resolve_and_fetch(mut self) -> Result<Install, Error> {

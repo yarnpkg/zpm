@@ -23,7 +23,9 @@ pub fn resolve_name_descriptor(context: &InstallContext<'_>, descriptor: &Descri
     let mut resolution
         = Resolution::from_remote_manifest(locator, manifest.remote);
 
-    resolution.dependencies.extend(manifest.dev_dependencies);
+    if !context.prune_dev_dependencies {
+        resolution.dependencies.extend(manifest.dev_dependencies);
+    }
 
     Ok(resolution.into_resolution_result(context))
 }
@@ -73,7 +75,9 @@ pub fn resolve_locator_ident(context: &InstallContext<'_>, locator: &Locator, pa
     let mut resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
-    resolution.dependencies.extend(manifest.dev_dependencies);
+    if !context.prune_dev_dependencies {
+        resolution.dependencies.extend(manifest.dev_dependencies);
+    }
 
     Ok(resolution.into_resolution_result(context))
 }
@@ -90,7 +94,9 @@ pub fn resolve_locator_path(context: &InstallContext<'_>, locator: &Locator, par
     let mut resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
-    resolution.dependencies.extend(manifest.dev_dependencies);
+    if !context.prune_dev_dependencies {
+        resolution.dependencies.extend(manifest.dev_dependencies);
+    }
 
     Ok(resolution.into_resolution_result(context))
 }
