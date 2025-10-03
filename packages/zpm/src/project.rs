@@ -1,9 +1,9 @@
-use std::{collections::{BTreeMap, HashSet}, io::ErrorKind, sync::Arc, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::Arc, time::UNIX_EPOCH};
 
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
-use zpm_primitives::{Descriptor, Ident, Locator, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
+use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString, ToHumanString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
@@ -53,9 +53,11 @@ pub struct RunInstallOptions {
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
-    pub refresh_lockfile: bool,
-    pub silent_or_error: bool,
+    pub prune_dev_dependencies: bool,
     pub mode: Option<InstallMode>,
+    pub refresh_lockfile: bool,
+    pub roots: Option<BTreeSet<Ident>>,
+    pub silent_or_error: bool,
 }
 
 pub struct Project {
@@ -438,6 +440,52 @@ impl Project {
         Ok(&self.workspaces[*idx])
     }
 
+    pub fn try_workspace_by_descriptor(&self, descriptor: &Descriptor) -> Result<Option<&Workspace>, Error> {
+        match &descriptor.range {
+            Range::WorkspaceIdent(params) => {
+                Ok(Some(self.workspace_by_ident(&params.ident)?))
+            },
+
+            Range::WorkspacePath(params) => {
+                Ok(Some(self.workspace_by_rel_path(&params.path)?))
+            },
+
+            Range::WorkspaceSemver(_) => {
+                Ok(Some(self.workspace_by_ident(&descriptor.ident)?))
+            },
+
+            Range::WorkspaceMagic(_) => {
+                Ok(Some(self.workspace_by_ident(&descriptor.ident)?))
+            },
+
+            Range::RegistryTag(_) if self.config.settings.enable_transparent_workspaces.value => {
+                let workspace
+                    = self.workspaces_by_ident.get(&descriptor.ident)
+                        .map(|idx| &self.workspaces[*idx]);
+
+                Ok(workspace)
+            },
+
+            Range::RegistrySemver(params) if self.config.settings.enable_transparent_workspaces.value => {
+                let workspace
+                    = self.workspaces_by_ident.get(params.ident.as_ref().unwrap_or(&descriptor.ident))
+                        .map(|idx| &self.workspaces[*idx]);
+
+                if let Some(workspace) = workspace {
+                    if params.range.check(&workspace.manifest.remote.version.clone().unwrap_or_default()) {
+                        return Ok(Some(workspace));
+                    }
+                }
+
+                Ok(None)
+            },
+
+            _ => {
+                Ok(None)
+            },
+        }
+    }
+
     pub fn workspace_by_rel_path(&self, rel_path: &Path) -> Result<&Workspace, Error> {
         let idx = self.workspaces_by_rel_path.get(rel_path)
             .ok_or_else(|| Error::WorkspacePathNotFound(rel_path.clone()))?;
@@ -572,9 +620,11 @@ impl Project {
             check_checksums: false,
             check_resolutions: false,
             enforced_resolutions: BTreeMap::new(),
+            prune_dev_dependencies: false,
             refresh_lockfile: false,
             silent_or_error: true,
             mode: None,
+            roots: None,
         }).await
     }
 
@@ -635,16 +685,24 @@ impl Project {
                 .with_project(Some(self))
                 .set_check_checksums(options.check_checksums)
                 .set_enforced_resolutions(options.enforced_resolutions)
+                .set_prune_dev_dependencies(options.prune_dev_dependencies)
                 .set_refresh_lockfile(options.refresh_lockfile)
                 .set_mode(options.mode)
                 .with_systems(Some(&systems));
+
+            let roots
+                = self.workspaces.iter()
+                    .filter(|w| options.roots.as_ref().map_or(true, |r| r.contains(&w.name)))
+                    .map(|w| w.descriptor())
+                    .collect();
 
             InstallManager::new()
                 .with_context(install_context)
                 .with_lockfile(lockfile?)
                 .with_previous_state(self.install_state.as_ref())
-                .with_roots_iter(self.workspaces.iter().map(|w| w.descriptor()))
-                .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value)
+                .with_roots(roots)
+                .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
+                .with_skip_lockfile_update(options.roots.is_some())
                 .resolve_and_fetch().await?
                 .finalize(self).await?;
 
