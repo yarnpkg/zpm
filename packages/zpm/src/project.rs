@@ -440,18 +440,38 @@ impl Project {
         Ok(&self.workspaces[*idx])
     }
 
-    pub fn workspace_by_range(&self, range: &Range) -> Result<&Workspace, Error> {
-        match range {
+    pub fn try_workspace_by_descriptor(&self, descriptor: &Descriptor) -> Result<Option<&Workspace>, Error> {
+        match &descriptor.range {
             Range::WorkspaceIdent(params) => {
-                self.workspace_by_ident(&params.ident)
+                Ok(Some(self.workspace_by_ident(&params.ident)?))
             },
 
             Range::WorkspacePath(params) => {
-                self.workspace_by_rel_path(&params.path)
+                Ok(Some(self.workspace_by_rel_path(&params.path)?))
+            },
+
+            Range::WorkspaceMagic(_) => {
+                Ok(Some(self.workspace_by_ident(&descriptor.ident)?))
+            },
+
+            Range::RegistryTag(_) if self.config.settings.enable_transparent_workspaces.value => {
+                let workspace
+                    = self.workspaces_by_ident.get(&descriptor.ident)
+                        .map(|idx| &self.workspaces[*idx]);
+
+                Ok(workspace)
+            },
+
+            Range::RegistrySemver(params) => {
+                let workspace
+                    = self.workspaces_by_ident.get(params.ident.as_ref().unwrap_or(&descriptor.ident))
+                        .map(|idx| &self.workspaces[*idx]);
+
+                Ok(workspace)
             },
 
             _ => {
-                Err(Error::Unsupported)
+                Ok(None)
             },
         }
     }
@@ -664,7 +684,7 @@ impl Project {
                 = self.workspaces.iter()
                     .filter(|w| options.roots.as_ref().map_or(true, |r| r.contains(&w.name)))
                     .map(|w| w.descriptor())
-                    .collect::<Vec<_>>();
+                    .collect();
 
             InstallManager::new()
                 .with_context(install_context)
@@ -672,6 +692,7 @@ impl Project {
                 .with_previous_state(self.install_state.as_ref())
                 .with_roots(roots)
                 .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value)
+                .with_skip_lockfile_update(options.roots.is_some())
                 .resolve_and_fetch().await?
                 .finalize(self).await?;
 

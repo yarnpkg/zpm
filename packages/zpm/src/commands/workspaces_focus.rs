@@ -56,7 +56,7 @@ impl WorkspacesFocus {
             }
 
             for dependency in relevant_dependencies {
-                if let Ok(workspace) = project.workspace_by_range(&dependency.range) {
+                if let Some(workspace) = project.try_workspace_by_descriptor(&dependency)? {
                     if processed_queue.insert(&workspace.name) {
                         process_queue.push(workspace);
                     }
@@ -65,6 +65,7 @@ impl WorkspacesFocus {
         }
 
         project.run_install(RunInstallOptions {
+            prune_dev_dependencies: self.production,
             roots: Some(processed_queue.into_iter().cloned().collect()),
             ..Default::default()
         }).await?;
