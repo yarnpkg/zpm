@@ -7,32 +7,15 @@ use zpm_utils::{DataType, FromFileString, Note, IoResultExt, Path, ToFileString,
 
 use crate::errors::Error;
 
-pub enum ShellProfile {
-    Posix(Path),
-    Fish(Path),
-}
+struct ShellProfile {
+    name: String,
+    force: bool,
 
-impl ShellProfile {
-    pub fn as_path(&self) -> &Path {
-        match self {
-            ShellProfile::Posix(path) => path,
-            ShellProfile::Fish(path) => path,
-        }
-    }
+    rc_file: Path,
+    rc_line: String,
 
-    pub fn to_env_path_lines(&self, bin_dir: &Path) -> String {
-        match self {
-            ShellProfile::Posix(_) => format!("export PATH=\"{}:$PATH\"\n", bin_dir.to_file_string()),
-            ShellProfile::Fish(_) => format!("set -x PATH \"{}:$PATH\"", bin_dir.to_file_string()),
-        }
-    }
-
-    pub fn to_source_line(&self, env_path: &Path) -> String {
-        match self {
-            ShellProfile::Posix(_) => format!("source \"{}\"", env_path.to_file_string()),
-            ShellProfile::Fish(_) => format!("source \"{}\"", env_path.to_file_string()),
-        }
-    }
+    env_file: Path,
+    env_line: String,
 }
 
 #[cli::command]
@@ -63,125 +46,120 @@ impl PostinstallCommand {
             return;
         };
 
-        let env_path = home
-            .with_join_str(".yarn/switch/env");
-
-        let fallback_profile
-            = ShellProfile::Posix(home.with_join_str(".bashrc"));
-
-        if !self.check_github_path(&bin_dir) {
-            if let Some(profile) = self.get_profile(&home) {
-                self.write_env(&env_path, &bin_dir, &profile);
-                self.write_profile(&profile, &env_path);
-            } else {
-                self.write_env(&env_path, &bin_dir, &fallback_profile);
-                self.report_profile_write_error(&fallback_profile, &env_path);
-            }
-        } else {
-            self.write_env(&env_path, &bin_dir, &ShellProfile::Posix(home.with_join_str(".bashrc")));
-        }
-
-        self.check_volta_interference();
+        self.update_shell_profiles(&home, &bin_dir);
+        self.install_github_path(&bin_dir);
+        self.check_volta_interference(&bin_dir);
     }
 
-    fn write_profile(&self, profile: &ShellProfile, env_path: &Path) {
-        let profile_path = profile
-            .as_path();
+    fn check_has_binary(&self, binary: &str) -> bool {
+        Command::new(binary)
+            .arg("--version")
+            .output()
+            .map_or(false, |output| output.status.success())
+    }
 
-        let profile_content = profile_path
+    fn update_shell_profiles(&self, home: &Path, bin_dir: &Path) {
+        let profiles = vec![
+            ShellProfile {
+                name: "Bash".to_string(),
+                force: self.check_has_binary("bash"),
+                rc_file: home.with_join_str(".bashrc"),
+                rc_line: format!("source \"{}\"\n", home.with_join_str(".yarn/switch/env/sh").to_file_string()),
+                env_file: home.with_join_str(".yarn/switch/env/sh"),
+                env_line: format!("export PATH=\"{}:$PATH\"\n", bin_dir.to_file_string()),
+            },
+            ShellProfile {
+                name: "Zsh".to_string(),
+                force: self.check_has_binary("zsh"),
+                rc_file: home.with_join_str(".zshrc"),
+                rc_line: format!("source \"{}\"\n", home.with_join_str(".yarn/switch/env/sh").to_file_string()),
+                env_file: home.with_join_str(".yarn/switch/env/sh"),
+                env_line: format!("export PATH=\"{}:$PATH\"\n", bin_dir.to_file_string()),
+            },
+            ShellProfile {
+                name: "Fish".to_string(),
+                force: self.check_has_binary("fish"),
+                rc_file: home.with_join_str(".fish/config.fish"),
+                rc_line: format!("source \"{}\"\n", home.with_join_str(".yarn/switch/env/fish").to_file_string()),
+                env_file: home.with_join_str(".yarn/switch/env/fish"),
+                env_line: format!("set -x PATH \"{}:$PATH\"", bin_dir.to_file_string()),
+            },
+        ];
+
+        for profile in profiles {
+            self.write_profile(&bin_dir, &profile);
+        }
+    }
+
+    fn write_profile(&self, bin_dir: &Path, profile: &ShellProfile) {
+        let profile_content = profile.rc_file
             .fs_read_text_prealloc()
             .ok_missing();
 
-        let Ok(profile_content) = profile_content else {
-            return;
-        };
+        if let Ok(maybe_profile_content) = profile_content {
+            if maybe_profile_content.is_none() && !profile.force {
+                return;
+            }
 
-        let mut profile_content
-            = profile_content.unwrap_or_default();
+            let profile_content
+                = maybe_profile_content.unwrap_or_default();
 
-        let profile_line
-            = format!("{}\n", profile.to_source_line(env_path));
+            if self.write_env(&profile.env_file, &profile.env_line).is_err() {
+                Note::Warning(format!("
+                    We failed to update the environment file referencing the Yarn Switch binary.
+                    You may need to manually add the following folder to your PATH:
+                    {}
+                ", bin_dir.to_print_string())).print();
 
-        if profile_content.contains(&profile_line) {
-            return;
+                return;
+            }
+
+            if self.write_rc(&profile.rc_file, profile_content, &profile.rc_line).is_ok() {
+                return;
+            }
         }
 
-        if !profile_content.is_empty() && !profile_content.ends_with('\n') {
-            profile_content.push('\n');
-        }
-
-        if !profile_content.is_empty() {
-            profile_content.push('\n');
-        }
-
-        profile_content
-            .push_str("# Added by Yarn Switch\n");
-        profile_content
-            .push_str(&profile_line);
-
-        let profile_write_result = profile_path
-            .fs_create_parent()
-            .and_then(|_| profile_path.fs_write_text(&profile_content));
-
-        if profile_write_result.is_ok() {
-            Note::Info(format!("
-                We updated your shell configuration file for you.
-                Please restart your shell or run {} to apply the changes.
-            ", DataType::Code.colorize(&profile.to_source_line(env_path)))).print();
-        } else {
-            self.report_profile_write_error(profile, env_path);
-        }
-    }
-
-    fn report_profile_write_error(&self, profile: &ShellProfile, env_path: &Path) {
         Note::Warning(format!("
-            We failed to update your shell configuration file.
-            You will need to manually append the following line to your shell configuration file (perhaps {}?):
+            We failed to update the profile file to load the Yarn Switch environment.
+            You may need to manually add the following line to your {} profile:
             {}
-        ", profile.as_path().to_print_string(), DataType::Code.colorize(&profile.to_source_line(env_path)))).print();
+        ", profile.name, DataType::Code.colorize(&profile.rc_line))).print();
     }
 
-    fn write_env(&self, env_path: &Path, bin_dir: &Path, profile: &ShellProfile) {
-        let env_path_lines
-            = profile.to_env_path_lines(bin_dir);
+    fn write_env(&self, env_file: &Path, env_line: &str) -> Result<(), Error> {
+        env_file
+            .fs_create_parent()?
+            .fs_write_text(env_line)?;
 
-        let env_write_result = env_path
-            .fs_create_parent()
-            .and_then(|_| env_path.fs_write_text(&env_path_lines));
+        Ok(())
+    }
 
-        if env_write_result.is_err() {
-            Note::Warning(format!("
-                We failed to update the Yarn Switch environment file.
-                You will need to manually append the following line to your shell configuration file:
-                {}
-            ", DataType::Code.colorize(&env_path_lines))).print();
-
-            return;
+    fn write_rc(&self, rc_file: &Path, mut rc_content: String, rc_line: &str) -> Result<(), Error> {
+        if rc_content.contains(&rc_line) {
+            return Ok(());
         }
-    }
 
-    fn get_profile(&self, home: &Path) -> Option<ShellProfile> {
-        let Ok(shell) = std::env::var("SHELL") else {
-            return None;
-        };
-
-        let shell_name = shell
-            .split('/')
-            .last();
-
-        let Some(shell_name) = shell_name else {
-            return None;
-        };
-
-        match shell_name {
-            "bash" => Some(ShellProfile::Posix(home.with_join_str(".bashrc"))),
-            "zsh" => Some(ShellProfile::Posix(home.with_join_str(".zshrc"))),
-            "fish" => Some(ShellProfile::Fish(home.with_join_str(".config/fish/config.fish"))),
-            _ => None,
+        if !rc_content.is_empty() && !rc_content.ends_with('\n') {
+            rc_content.push('\n');
         }
+
+        if !rc_content.is_empty() {
+            rc_content.push('\n');
+        }
+
+        rc_content
+            .push_str("# Added by Yarn Switch\n");
+        rc_content
+            .push_str(&rc_line);
+
+        rc_file
+            .fs_create_parent()?
+            .fs_write_text(&rc_content)?;
+
+        Ok(())
     }
 
-    fn check_github_path(&self, bin_dir: &Path) -> bool {
+    fn install_github_path(&self, bin_dir: &Path) -> bool {
         let Ok(github_path) = std::env::var("GITHUB_PATH") else {
             return false;
         };
@@ -214,8 +192,12 @@ impl PostinstallCommand {
         return true;
     }
 
-    fn check_volta_interference(&self) {
+    fn check_volta_interference(&self, bin_dir: &Path) {
+        let path
+            = format!("{}:{}", bin_dir.to_file_string(), std::env::var("PATH").unwrap_or_default());
+
         let output = Command::new("node")
+            .env("PATH", path)
             .arg("-p")
             .arg("process.env.PATH")
             .output();
