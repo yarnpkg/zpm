@@ -191,7 +191,6 @@ impl<TController: DiffController> DiffFinder<TController> {
         let mut all_changed_paths = BTreeSet::new();
 
         for cache_check in cache_checks {
-            println!("CacheCheck: {:?}", cache_check);
             match cache_check {
                 CacheCheck::Skip => {
                     // Nothing to do, it's just a directory that didn't change
