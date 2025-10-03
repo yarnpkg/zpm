@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs::{DirEntry, FileType, Metadata}, io::ErrorKind, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, BTreeSet}, fs::{DirEntry, FileType, Metadata}, fmt::Debug, io::ErrorKind, time::UNIX_EPOCH};
 
 use bincode::{Decode, Encode};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -6,6 +6,7 @@ use zpm_utils::Path;
 
 use crate::error::Error;
 
+#[derive(Debug)]
 enum CacheCheck<T> {
     Skip,
     NotFound(Path),
@@ -35,7 +36,7 @@ impl<T> SaveEntry<T> {
 
 /**
  * The save state contains the list of relevant files found on disk. It can be
- * persisted in a file and 
+ * persisted in a file and
  */
 #[derive(Default, Debug, Encode, Decode)]
 pub struct SaveState<T> {
@@ -69,7 +70,7 @@ impl<T> SaveState<T> {
  * tweak what we store inside the save state.
  */
 pub trait DiffController {
-    type Data: Send + Sync;
+    type Data: Debug + Send + Sync;
 
     fn is_relevant_entry(entry: &DirEntry, file_type: &FileType) -> bool;
     fn get_file_data(path: &Path, metadata: &Metadata) -> Result<Self::Data, Error>;
@@ -80,7 +81,7 @@ pub trait DiffController {
  * in a given directory between two rsync calls. The returned "save state" can
  * be serialized on disk, allowing this implementation to track changes even
  * across different CLI calls.
- * 
+ *
  * This strategy is similar to how `git status` works; subsequent invocations
  * only need to compare the cached mtime for each directory with the current
  * mtime to figure out whether they need perform the costly readdir syscall.
@@ -190,6 +191,7 @@ impl<TController: DiffController> DiffFinder<TController> {
         let mut all_changed_paths = BTreeSet::new();
 
         for cache_check in cache_checks {
+            println!("CacheCheck: {:?}", cache_check);
             match cache_check {
                 CacheCheck::Skip => {
                     // Nothing to do, it's just a directory that didn't change

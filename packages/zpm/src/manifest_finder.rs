@@ -17,7 +17,7 @@ pub trait ManifestFinder {
  * The CachedManifestFinder struct is meant to very quickly locate all the
  * manifests in a given directory, no matter how deep the directory structure
  * is, by caching the mtime of each directory it checks.
- * 
+ *
  * This strategy is similar to how `git status` works; subsequent invocations
  * only need to compare the cached mtime for each directory with the current
  * mtime to figure out whether they need perform the costly readdir syscall.
@@ -51,6 +51,19 @@ impl CachedManifestFinder {
         let data
             = self.diff_finder.save_state.to_vec()?;
 
+        // We don't care about write errors, as it may be due to read-only
+        // filesystems which were modified after we first scanned the filesystem
+        // (e.g. Docker images with COPY call right between a Yarn command and
+        // a USER directive); in the worst case Yarn commands will just need
+        // to re-scan some directories, but that's not that big a deal, especially
+        // within containers.
+        let _
+            = self.save_state_file(&data);
+
+        Ok(())
+    }
+
+    fn save_state_file(&self, data: &[u8]) -> Result<(), Error> {
         self.save_state_path
             .fs_create_parent()?
             .fs_write(&data)?;
@@ -81,7 +94,7 @@ impl DiffController for CachedManifestFinder {
         if file_type.is_dir() {
             return path.file_name() != ".yarn";
         }
-        
+
         if file_type.is_file() {
             return path.file_name() == "package.json";
         }
@@ -93,4 +106,3 @@ impl DiffController for CachedManifestFinder {
         read_manifest_with_size(&path, metadata.len())
     }
 }
-
