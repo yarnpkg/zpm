@@ -79,7 +79,7 @@ impl PostinstallCommand {
             ShellProfile {
                 name: "Fish".to_string(),
                 force: self.check_has_binary("fish"),
-                rc_file: home.with_join_str(".fish/config.fish"),
+                rc_file: home.with_join_str(".config/fish/config.fish"),
                 rc_line: format!("source \"{}\"\n", home.with_join_str(".yarn/switch/env/fish").to_file_string()),
                 env_file: home.with_join_str(".yarn/switch/env/fish"),
                 env_line: format!("set -x PATH \"{}:$PATH\"", bin_dir.to_file_string()),
