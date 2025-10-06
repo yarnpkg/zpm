@@ -14,7 +14,7 @@ ouroboros = "0.18.5"
 path-slash = "0.2.1"
 radix_trie = "0.2.1"
 serde_derive = { version = "1.0.163" }
-serde_json = "1.0.124"
+serde_json = "1.0.145"
 serde = { version = "1.0.163" }
 sonic-rs = "0.5.1"
 tokio = { version = "1.39.2", features = ["fs"] }

@@ -2,7 +2,7 @@ use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sy
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
-use zpm_primitives::{Descriptor, Ident, Locator, PatchRange, PeerRange, Range, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange};
+use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
 use zpm_utils::{Hash64, Path, ToHumanString, UrlEncoded};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -862,6 +862,46 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
 
     let mut peer_dependencies
         = resolution.peer_dependencies.clone();
+
+    if let Reference::Git(params) = &resolution.locator.reference {
+        for descriptor in resolution.dependencies.values() {
+            let updated_range = match &descriptor.range {
+                Range::WorkspaceIdent(WorkspaceIdentRange {ident, ..}) => {
+                    let mut workspace_git_range
+                        = params.git.to_git_range();
+
+                    workspace_git_range.prepare_params.workspace = Some(ident.to_file_string());
+
+                    Some(Range::Git(GitRange {
+                        git: workspace_git_range,
+                    }))
+                }
+
+                Range::WorkspaceMagic(_) |
+                Range::WorkspaceSemver(_) => {
+                    let mut workspace_git_range
+                        = params.git.to_git_range();
+
+                    workspace_git_range.prepare_params.workspace = Some(descriptor.ident.to_file_string());
+
+                    Some(Range::Git(GitRange {
+                        git: workspace_git_range,
+                    }))
+                },
+
+                _ => {
+                    None
+                },
+            };
+
+            if let Some(updated_range) = updated_range {
+                dependencies.insert(
+                    descriptor.ident.clone(),
+                    Descriptor::new(descriptor.ident.clone(), updated_range),
+                );
+            }
+        }
+    }
 
     for (descriptor, extension) in project.config.settings.package_extensions.iter() {
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
