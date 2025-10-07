@@ -46,6 +46,7 @@ jobs:
         benchmark:
           - [Next.js, next]
           - [Gatsby, gatsby]
+          - [Monorepo, monorepo]
 
     needs: [build]
 
