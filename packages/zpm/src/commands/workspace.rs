@@ -1,7 +1,6 @@
 use std::{path::PathBuf, process::ExitCode};
 
 use zpm_primitives::Ident;
-use zpm_utils::Path;
 use clipanion::{cli, prelude::*};
 
 use crate::{
@@ -28,7 +27,8 @@ impl Workspace {
         let workspace
             = project.workspace_by_ident(&self.workspace)?;
 
-        let cwd = workspace.path.clone();
+        let cwd
+            = workspace.path.clone();
 
         std::env::set_current_dir(PathBuf::from(cwd.as_str()))?;
 

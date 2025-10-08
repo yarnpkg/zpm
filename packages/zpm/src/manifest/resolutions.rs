@@ -1,7 +1,7 @@
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Deserializer};
 use zpm_macro_enum::zpm_enum;
-use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, Range, RegistrySemverRange};
+use zpm_primitives::{Descriptor, Ident, Locator, Range, RegistrySemverRange};
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
 use crate::{
