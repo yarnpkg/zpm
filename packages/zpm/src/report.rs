@@ -130,6 +130,7 @@ impl StreamReportConfig {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Severity {
     Info,
+    Warning,
     Error,
 }
 
@@ -137,6 +138,7 @@ impl Severity {
     pub fn color(&self) -> DataType {
         match self {
             Severity::Info => DataType::Info,
+            Severity::Warning => DataType::Warning,
             Severity::Error => DataType::Error,
         }
     }
@@ -453,6 +455,10 @@ impl StreamReport {
 
     pub fn info(&self, message: String) {
         self.report(ReportMessage::Line(Severity::Info, self.with_content_prefix(message)));
+    }
+
+    pub fn warn(&self, message: String) {
+        self.report(ReportMessage::Line(Severity::Warning, self.with_content_prefix(message)));
     }
 
     pub fn error(&mut self, error: Error) {

@@ -90,7 +90,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
             if should_warn {
                 current_report().await.as_mut().map(|report| {
-                    report.info(format!("Requests to {} are taking suspiciously long...", registry_base));
+                    report.warn(format!("Requests to {} are taking suspiciously long...", registry_base));
                 });
             }
         };
