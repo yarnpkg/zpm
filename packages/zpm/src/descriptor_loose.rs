@@ -122,7 +122,7 @@ impl LooseDescriptor {
                         .find(|entry| entry.name == "package.json");
 
                 let Some(package_json_entry) = package_json_entry else {
-                    return Err(Error::ManifestNotFound);
+                    return Err(Error::ManifestNotFound(path.with_join_str("package.json")));
                 };
 
                 let manifest

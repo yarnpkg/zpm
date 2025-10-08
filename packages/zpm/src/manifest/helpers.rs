@@ -8,7 +8,7 @@ use super::Manifest;
 pub fn read_manifest(abs_path: &Path) -> Result<Manifest, Error> {
     let metadata = abs_path.fs_metadata()
         .ok_missing()?
-        .ok_or(Error::ManifestNotFound)?;
+        .ok_or_else(|| Error::ManifestNotFound(abs_path.clone()))?;
 
     Ok(read_manifest_with_size(abs_path, metadata.len())?)
 }
@@ -16,7 +16,7 @@ pub fn read_manifest(abs_path: &Path) -> Result<Manifest, Error> {
 pub fn read_manifest_with_size(abs_path: &Path, size: u64) -> Result<Manifest, Error> {
     let manifest_text = abs_path.fs_read_text_with_size(size)
         .ok_missing()?
-        .ok_or(Error::ManifestNotFound)?;
+        .ok_or_else(|| Error::ManifestNotFound(abs_path.clone()))?;
 
     parse_manifest(&manifest_text)
         .map_err(|_| Error::ManifestParseError(abs_path.clone()))

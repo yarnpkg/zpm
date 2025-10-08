@@ -102,8 +102,8 @@ pub enum Error {
     #[error("Invalid ident ({0})")]
     InvalidIdent(String),
 
-    #[error("Package manifest not found")]
-    ManifestNotFound,
+    #[error("Package manifest not found ({})", .0.to_print_string())]
+    ManifestNotFound(Path),
 
     #[error("Package manifest failed to parse ({})", .0.to_print_string())]
     ManifestParseError(Path),
