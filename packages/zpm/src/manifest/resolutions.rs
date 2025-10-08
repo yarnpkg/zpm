@@ -222,6 +222,8 @@ impl<'de> Visitor<'de> for ResolutionsFieldVisitor {
             let is_valid_resolution_descriptor = matches!(selector,
                 | ResolutionSelector::Descriptor(DescriptorResolutionSelector {descriptor: Descriptor {range: Range::AnonymousSemver(_), ..}, ..})
                 | ResolutionSelector::DescriptorIdent(DescriptorIdentResolutionSelector {parent_descriptor: Descriptor {range: Range::AnonymousSemver(_), ..}, ..})
+                | ResolutionSelector::Ident(_)
+                | ResolutionSelector::IdentIdent(_)
             );
 
             if !is_valid_resolution_descriptor {
