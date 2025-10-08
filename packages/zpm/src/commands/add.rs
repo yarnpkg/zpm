@@ -108,10 +108,10 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
     Ok(type_requests)
 }
 
+/// Add new dependencies to the project
 #[cli::command]
 #[cli::path("add")]
 #[cli::category("Dependency management")]
-#[cli::description("Add new dependencies to the project")]
 pub struct Add {
     #[cli::option("-F,--fixed", default = false)]
     fixed: bool,
@@ -150,7 +150,6 @@ pub struct Add {
 }
 
 impl Add {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = project::Project::new(None).await?;

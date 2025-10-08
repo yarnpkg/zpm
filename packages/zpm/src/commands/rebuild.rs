@@ -7,16 +7,15 @@ use crate::{
     project::{self, RunInstallOptions},
 };
 
+/// Rebuild dependencies
 #[cli::command]
 #[cli::path("rebuild")]
 #[cli::category("Dependency management")]
-#[cli::description("Rebuild dependencies")]
 pub struct Rebuild {
     identifiers: Vec<Ident>,
 }
 
 impl Rebuild {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = project::Project::new(None).await?;

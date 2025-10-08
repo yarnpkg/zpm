@@ -9,10 +9,10 @@ use crate::{
     cache::CompositeCache, error::Error, install::InstallState, project::{Project, Workspace}
 };
 
+/// See information related to packages
 #[cli::command]
 #[cli::path("info")]
 #[cli::category("Package information")]
-#[cli::description("See information related to packages")]
 #[cli::usage(r#"
 This command prints various information related to the specified packages, accepting glob patterns.
 
@@ -64,7 +64,6 @@ pub struct Info {
 }
 
 impl Info {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project = Project::new(None).await?;
 

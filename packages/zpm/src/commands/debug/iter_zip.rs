@@ -10,7 +10,7 @@ pub struct IterZip {
 }
 
 impl IterZip {
-    pub fn execute(&self) -> Result<(), Error> {
+    pub async fn execute(&self) -> Result<(), Error> {
         let buffer = self.path
             .fs_read()?;
 

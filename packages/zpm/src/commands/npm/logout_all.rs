@@ -6,17 +6,16 @@ use crate::{
     project::Project, report::{current_report, with_report_result, StreamReport, StreamReportConfig},
 };
 
+/// Logout from all npm registries
 #[cli::command]
 #[cli::path("npm", "logout")]
 #[cli::category("Npm-related commands")]
-#[cli::description("Logout from all npm registries")]
 pub struct LogoutAll {
     #[cli::option("-A,--all")]
     _publish: bool,
 }
 
 impl LogoutAll {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;

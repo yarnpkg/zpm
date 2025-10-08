@@ -5,10 +5,10 @@ use crate::{
     error::Error, http_npm::get_registry, project::Project, report::{current_report, with_report_result, StreamReport, StreamReportConfig}
 };
 
+/// Logout from the npm registry
 #[cli::command]
 #[cli::path("npm", "logout")]
 #[cli::category("Npm-related commands")]
-#[cli::description("Logout from the npm registry")]
 pub struct Logout {
     #[cli::option("-s,--scope")]
     #[cli::description("Get the token for a given scope")]
@@ -20,7 +20,6 @@ pub struct Logout {
 }
 
 impl Logout {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;

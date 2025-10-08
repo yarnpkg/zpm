@@ -13,10 +13,10 @@ use crate::{
     project::{InstallMode, Project, RunInstallOptions, Workspace}
 };
 
+/// Update dependencies to the latest versions
 #[cli::command]
 #[cli::path("up")]
 #[cli::category("Dependency management")]
-#[cli::description("Update dependencies to the latest versions")]
 pub struct Up {
     #[cli::option("-F,--fixed", default = false)]
     fixed: bool,
@@ -41,7 +41,6 @@ pub struct Up {
 }
 
 impl Up {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;

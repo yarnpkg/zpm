@@ -3,10 +3,10 @@ use zpm_config::Source;
 
 use crate::{error::Error, project::{self, InstallMode, RunInstallOptions}};
 
+/// Install dependencies
 #[cli::command(default)]
 #[cli::path("install")]
 #[cli::category("Dependency management")]
-#[cli::description("Install dependencies")]
 pub struct Install {
     #[cli::option("--check-resolutions", default = false)]
     check_resolutions: bool,
@@ -28,7 +28,6 @@ pub struct Install {
 }
 
 impl Install {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = project::Project::new(None).await?;

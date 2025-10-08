@@ -12,10 +12,10 @@ use crate::{
     project::{InstallMode, Project, RunInstallOptions, Workspace},
 };
 
+/// Remove dependencies from the project
 #[cli::command]
 #[cli::path("remove")]
 #[cli::category("Dependency management")]
-#[cli::description("Remove dependencies from the project")]
 pub struct Remove {
     #[cli::option("-A,--all", default = false)]
     all: bool,
@@ -29,7 +29,6 @@ pub struct Remove {
 }
 
 impl Remove {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;

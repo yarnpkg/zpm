@@ -14,10 +14,10 @@ use crate::{
     script::ScriptEnvironment,
 };
 
+/// Pack the project into a distributable archive
 #[cli::command(proxy)]
 #[cli::path("pack")]
 #[cli::category("Release commands")]
-#[cli::description("Pack the project into a distributable archive")]
 pub struct Pack {
     #[cli::option("-n,--dry-run", default = false)]
     dry_run: bool,
@@ -36,7 +36,6 @@ pub struct Pack {
 }
 
 impl Pack {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = Project::new(None).await?;

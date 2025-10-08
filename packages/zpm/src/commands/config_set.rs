@@ -7,10 +7,10 @@ use crate::{
     project::Project,
 };
 
+/// Set a configuration value
 #[cli::command]
 #[cli::path("config", "set")]
 #[cli::category("Configuration commands")]
-#[cli::description("Set a configuration value")]
 pub struct ConfigSet {
     #[cli::option("-U,--user", default = false)]
     user: bool,
@@ -20,7 +20,6 @@ pub struct ConfigSet {
 }
 
 impl ConfigSet {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;

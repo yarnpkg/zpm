@@ -7,6 +7,7 @@ use zpm_parsers::{JsonDocument, Value};
 
 use crate::{constraints::{check_constraints, structs::{ConstraintsOutput, WorkspaceError, WorkspaceOperation}}, error::Error, project::Project};
 
+/// Check constraints
 #[cli::command]
 #[cli::path("constraints")]
 #[cli::category("Dependency management")]
@@ -19,7 +20,6 @@ pub struct Constraints {
 }
 
 impl Constraints {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<ExitCode, Error> {
         let mut project
             = Project::new(None).await?;

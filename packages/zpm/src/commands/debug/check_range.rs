@@ -11,7 +11,7 @@ pub struct CheckRange {
 }
 
 impl CheckRange {
-    pub fn execute(&self) -> Result<(), Error> {
+    pub async fn execute(&self) -> Result<(), Error> {
         let stringified
             = self.range.to_file_string();
 

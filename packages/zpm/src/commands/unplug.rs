@@ -8,10 +8,10 @@ use crate::{
     project,
 };
 
+/// Requests a package to be materialized on disk
 #[cli::command]
 #[cli::path("unplug")]
 #[cli::category("Dependency management")]
-#[cli::description("Requests a package to be materialized on disk")]
 pub struct Unplug {
     #[cli::option("--revert", default = false)]
     revert: bool,
@@ -20,7 +20,6 @@ pub struct Unplug {
 }
 
 impl Unplug {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = project::Project::new(None).await?;
