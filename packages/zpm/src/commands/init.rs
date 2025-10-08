@@ -205,8 +205,8 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
 
     let manifest_json
         = String::from_utf8_lossy(&formatter.input);
-    let manifest
-        = sonic_rs::from_str::<Manifest>(&manifest_json)?;
+    let manifest: Manifest
+        = JsonDocument::hydrate_from_str(&manifest_json)?;
 
     let mut changed_paths = vec![
         manifest_path.clone(),

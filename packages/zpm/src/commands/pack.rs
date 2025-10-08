@@ -107,7 +107,10 @@ impl Pack {
 
         if self.json {
             for path in pack_list {
-                sonic_rs::json!({"location": path}).to_string();
+                zpm_parsers::Value::Object(vec![(
+                    "location".to_string(),
+                    zpm_parsers::Value::String(path.to_file_string()),
+                )]).to_json_string();
             }
         } else {
             for path in pack_list {

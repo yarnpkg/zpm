@@ -1,5 +1,6 @@
 use clipanion::cli;
 use serde::Deserialize;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
 use zpm_utils::FromFileString;
 
@@ -54,7 +55,7 @@ impl Whoami {
         let body
             = response.text().await?;
         let whoami: WhoamiResponse
-            = sonic_rs::from_str(&body)?;
+            = JsonDocument::hydrate_from_str(&body)?;
 
         println!("{}", whoami.username);
 

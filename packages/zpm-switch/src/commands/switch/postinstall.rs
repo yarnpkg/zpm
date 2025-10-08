@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::process::Command;
 
 use clipanion::cli;
-use sonic_rs::JsonValueMutTrait;
+use zpm_parsers::JsonDocument;
 use zpm_utils::{DataType, FromFileString, Note, IoResultExt, Path, ToFileString, ToHumanString};
 
 use crate::errors::Error;
@@ -245,19 +245,16 @@ impl PostinstallCommand {
             volta_platform_content = "{}".as_bytes().to_vec();
         }
 
-        let mut volta_platform
-            = sonic_rs::from_slice::<sonic_rs::Value>(&volta_platform_content)?;
+        let mut document
+            = JsonDocument::new(volta_platform_content)?;
 
-        volta_platform
-            .as_object_mut()
-            .ok_or(Error::VoltaPlatformJsonInvalid)?
-            .remove(&"yarn");
-
-        let volta_platform_json
-            = sonic_rs::to_string_pretty(&volta_platform)?;
+        document.set_path(
+            &zpm_parsers::Path::from_segments(vec!["yarn".to_string()]),
+            zpm_parsers::Value::Undefined,
+        )?;
 
         volta_platform_path
-            .fs_write_text(&volta_platform_json)?;
+            .fs_write(&document.input)?;
 
         Ok(())
     }

@@ -2,6 +2,7 @@ mod colors;
 mod errors;
 mod glob;
 mod hash;
+mod internal;
 mod misc;
 mod notes;
 mod path;

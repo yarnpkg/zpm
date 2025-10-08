@@ -1,8 +1,9 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::Arc, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, time::UNIX_EPOCH};
 
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString, ToHumanString};
 use serde::Deserialize;
@@ -246,9 +247,9 @@ impl Project {
             return from_legacy_berry_lockfile(&src);
         }
 
-        let lockfile
-            = sonic_rs::from_str::<Lockfile>(&src)
-                .map_err(|e| Error::LockfileParseError(Arc::new(e)))?;
+        let lockfile: Lockfile
+            = JsonDocument::hydrate_from_str(&src)
+                .map_err(|e| Error::LockfileParseError(e))?;
 
         Ok(lockfile)
     }
@@ -318,7 +319,7 @@ impl Project {
             = self.lockfile_path();
 
         let contents
-            = sonic_rs::to_string_pretty(lockfile)?;
+            = JsonDocument::to_string_pretty(lockfile)?;
 
         if self.config.settings.enable_immutable_installs.value {
             lockfile_path.fs_expect(contents, false)?;
@@ -568,8 +569,8 @@ impl Project {
             .with_join_str(MANIFEST_NAME)
             .fs_read_text_with_zip()?;
 
-        let manifest
-            = sonic_rs::from_str::<ScriptManifest>(&manifest_text)?;
+        let manifest: ScriptManifest
+            = JsonDocument::hydrate_from_str(&manifest_text)?;
 
         if let Some(script) = manifest.scripts.as_ref().and_then(|s| s.get(name)) {
             return Ok((locator.clone(), script.clone()));

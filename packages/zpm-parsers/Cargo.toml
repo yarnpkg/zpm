@@ -3,17 +3,19 @@ name = "zpm-parsers"
 edition = "2021"
 
 [dependencies]
-zpm-utils = { path = "../zpm-utils" }
-sonic-rs = "0.5.1"
-serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
-regex = "1.10.2"
-thiserror = "1.0"
-serde_json = "1.0.145"
 erased-serde = "0.4.6"
-rstest = "0.26.1"
-pretty_assertions = "1.4.1"
 itertools = "0.14.0"
+pretty_assertions = "1.4.1"
+regex = "1.10.2"
+rstest = "0.26.1"
+serde_json = "1.0.140"
+serde_yaml = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+zpm-utils = { path = "../zpm-utils" }
 
 [dev-dependencies]
 indoc = "2.0"
+
+[target.'cfg(not(target_pointer_width = "32"))'.dependencies]
+sonic-rs = "0.5.1"

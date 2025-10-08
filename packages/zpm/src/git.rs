@@ -1,11 +1,10 @@
-use std::{collections::BTreeMap, sync::LazyLock};
+use std::collections::BTreeMap;
 
 use git_url_parse::GitUrl;
 use reqwest::Url;
 use zpm_git::{GitRange, GitSource, GitTreeish};
 use zpm_primitives::AnonymousSemverRange;
 use zpm_utils::{repeat_until_ok, Path};
-use fancy_regex::Regex;
 use zpm_utils::FromFileString;
 
 use crate::{

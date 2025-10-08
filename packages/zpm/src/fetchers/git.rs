@@ -1,4 +1,5 @@
 use zpm_formats::iter_ext::IterExt;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{GitReference, Locator};
 
 use crate::{
@@ -37,8 +38,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let first_entry
         = zpm_formats::zip::first_entry_from_zip(&pkg_blob.data)?;
 
-    let remote_manifest
-        = sonic_rs::from_slice::<RemoteManifest>(&first_entry.data)?;
+    let remote_manifest: RemoteManifest
+        = JsonDocument::hydrate_from_slice(&first_entry.data)?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), remote_manifest);

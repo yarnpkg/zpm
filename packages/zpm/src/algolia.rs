@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
+use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
 use zpm_utils::ToFileString;
 
@@ -53,7 +54,7 @@ pub async fn query_algolia(idents: &[Ident], http_client: &Arc<HttpClient>) -> R
     };
 
     let response = http_client.post(ALGOLIA_URL)?
-        .body(sonic_rs::to_string(&input_payload).unwrap())
+        .body(JsonDocument::to_string(&input_payload).unwrap())
         .header("x-algolia-application-id", Some("OFCNCOG2CU"))
         .header("x-algolia-api-key", Some("e8e1bd300d860104bb8c58453ffa1eb4"))
         .send()
@@ -66,7 +67,7 @@ pub async fn query_algolia(idents: &[Ident], http_client: &Arc<HttpClient>) -> R
     let body = response.text().await
         .map_err(|err| Error::AlgoliaRegistryError(Arc::new(err)))?;
 
-    let Ok(output_payload) = sonic_rs::from_str::<AlgoliaOutputPayload>(body.as_str()) else {
+    let Ok(output_payload) = JsonDocument::hydrate_from_str::<AlgoliaOutputPayload>(body.as_str()) else {
         return Ok(HashMap::new());
     };
 
