@@ -3,10 +3,10 @@ use zpm_utils::IoResultExt;
 
 use crate::{errors::Error, links::links_dir};
 
+/// Clear all local links
 #[cli::command]
 #[cli::path("switch", "links")]
 #[cli::category("Local Yarn development")]
-#[cli::description("Clear all local links")]
 #[derive(Debug)]
 pub struct LinksClearCommand {
     #[cli::option("-c,--clear,--clean")]

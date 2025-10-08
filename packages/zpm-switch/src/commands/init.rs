@@ -7,6 +7,7 @@ use crate::{cwd::get_final_cwd, errors::Error, manifest::{find_closest_package_m
 
 use super::switch::explicit::ExplicitCommand;
 
+/// Initialize a new Yarn project
 #[cli::command(proxy)]
 #[cli::path("init")]
 #[derive(Debug)]

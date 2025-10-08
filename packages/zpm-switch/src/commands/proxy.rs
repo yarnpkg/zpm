@@ -7,9 +7,9 @@ use crate::{links::get_link, cwd::{get_fake_cwd, get_final_cwd}, errors::Error, 
 
 use super::switch::explicit::ExplicitCommand;
 
+/// Call the suitable Yarn binary for the current project
 #[cli::command(default, proxy)]
 #[cli::category("General commands")]
-#[cli::description("Call the suitable Yarn binary for the current project")]
 #[derive(Debug)]
 pub struct ProxyCommand {
     args: Vec<String>,

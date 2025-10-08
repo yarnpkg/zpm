@@ -3,10 +3,10 @@ use zpm_utils::Path;
 
 use crate::{links::unset_link, cwd::get_final_cwd, errors::Error, manifest::find_closest_package_manager};
 
+/// Unlink local Yarn binaries from the current project
 #[cli::command]
 #[cli::path("switch", "unlink")]
 #[cli::category("Local Yarn development")]
-#[cli::description("Unlink local Yarn binaries from the current project")]
 #[derive(Debug)]
 pub struct UnlinkCommand {
     project_cwd: Option<Path>,
