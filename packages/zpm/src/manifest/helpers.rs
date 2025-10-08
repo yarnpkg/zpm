@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use zpm_parsers::JsonDocument;
 use zpm_utils::{IoResultExt, Path};
 
@@ -19,7 +21,7 @@ pub fn read_manifest_with_size(abs_path: &Path, size: u64) -> Result<Manifest, E
         .ok_or(Error::ManifestNotFound)?;
 
     parse_manifest(&manifest_text)
-        .map_err(|_| Error::ManifestParseError(abs_path.clone()))
+        .map_err(|err| Error::ManifestParseError(abs_path.clone(), Arc::new(err)))
 }
 
 pub fn parse_manifest_from_bytes(bytes: &[u8]) -> Result<Manifest, Error> {

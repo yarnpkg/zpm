@@ -1,7 +1,7 @@
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Deserializer};
 use zpm_macro_enum::zpm_enum;
-use zpm_primitives::{Descriptor, Ident, Locator, Range};
+use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, Range, RegistrySemverRange};
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
 use crate::{
@@ -157,10 +157,12 @@ impl ResolutionsField {
     }
 
     fn add_entry(&mut self, selector: ResolutionSelector, range: Range) {
-        let target_ident = selector.target_ident().clone();
+        let target_ident
+            = selector.target_ident();
+
         self.entries.push((selector.clone(), range.clone()));
         self.by_ident
-            .entry(target_ident)
+            .entry(target_ident.clone())
             .or_default()
             .push((selector, range));
     }
@@ -205,11 +207,28 @@ impl<'de> Visitor<'de> for ResolutionsFieldVisitor {
 
         while let Some(key) = map.next_key::<String>()? {
             let selector = ResolutionSelector::from_file_string(&key)
-                .map_err(|e| de::Error::custom(format!("Invalid resolution selector '{}': {}", key, e)))?;
+                .map_err(|_| de::Error::custom("invalid resolution selector"))?;
 
             let value_str: String = map.next_value()?;
             let range = Range::from_file_string(&value_str)
-                .map_err(|e| de::Error::custom(format!("Invalid range '{}': {}", value_str, e)))?;
+                .map_err(|_| de::Error::custom("invalid range"))?;
+
+            // TODO: Remove this in a future major version; we're keeping it for backwards compatibility with
+            // the Berry codebase in which `yarn patch` was adding the "npm:" prefix to all descriptors.
+            if matches!(selector, ResolutionSelector::Descriptor(DescriptorResolutionSelector {descriptor: Descriptor {range: Range::RegistrySemver(RegistrySemverRange {ident: None, ..}), ..}, ..})) {
+                return Err(de::Error::custom("the 'npm:' prefix is no longer needed"));
+            }
+
+            let is_valid_resolution_descriptor = matches!(selector,
+                | ResolutionSelector::Descriptor(DescriptorResolutionSelector {descriptor: Descriptor {range: Range::AnonymousSemver(_), ..}, ..})
+                | ResolutionSelector::DescriptorIdent(DescriptorIdentResolutionSelector {parent_descriptor: Descriptor {range: Range::AnonymousSemver(_), ..}, ..})
+                | ResolutionSelector::Ident(_)
+                | ResolutionSelector::IdentIdent(_)
+            );
+
+            if !is_valid_resolution_descriptor {
+                return Err(de::Error::custom("the range must be an anonymous semver range"));
+            }
 
             field.add_entry(selector, range);
         }
