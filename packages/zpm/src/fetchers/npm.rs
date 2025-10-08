@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use tokio::time::{sleep, Duration};
 use zpm_config::ConfigExt;
@@ -13,6 +14,8 @@ use crate::{
 };
 
 use super::PackageData;
+
+static WARNED_REGISTRIES: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
 fn get_mock_fetch_result(context: &InstallContext, locator: &Locator, params: &RegistryReference) -> Result<FetchResult, Error> {
     let archive_path = context.package_cache.unwrap()
@@ -57,15 +60,13 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         return Ok(get_mock_fetch_result(context, locator, params)?);
     }
 
-    let registry_url
-        =  npm::registry_url_for_package_data(&project.config.registry_base_for(&params.ident), &params.ident, &params.version);
+    let registry_base = project.config.registry_base_for(&params.ident);
+    let registry_url = npm::registry_url_for_package_data(&registry_base, &params.ident, &params.version);
 
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching npm packages");
 
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
-        let url = registry_url.clone();
-
         let fetch_future = async {
             let response = project.http_client.get(&registry_url)?.send().await?;
             let tgz_data = response.bytes().await
@@ -75,9 +76,23 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
         let warning_future = async {
             sleep(Duration::from_secs(15)).await;
-            current_report().await.as_mut().map(|report| {
-                report.info(format!("Request to {} is taking longer than 15 seconds...", url));
-            });
+
+            // Check if we should warn about this registry
+            let should_warn = {
+                let mut warned = WARNED_REGISTRIES.lock().unwrap();
+                if !warned.contains(&registry_base) {
+                    warned.insert(registry_base.clone());
+                    true
+                } else {
+                    false
+                }
+            }; // Lock is dropped here
+
+            if should_warn {
+                current_report().await.as_mut().map(|report| {
+                    report.info(format!("Requests to {} are taking suspiciously long...", registry_base));
+                });
+            }
         };
 
         let tgz_data = tokio::select! {
