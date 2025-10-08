@@ -1,0 +1,43 @@
+---
+import TableOfContentsList from "./TableOfContentsList.astro";
+import RightChevron from "src/assets/svg/right-chevron.svg";
+
+const { headings } = Astro.locals.starlightRoute;
+---
+
+{
+  headings && headings.length > 0 && (
+    <mobile-starlight-toc>
+      <nav aria-labelledby="starlight__on-this-page--mobile">
+        <details
+          id="starlight__mobile-toc"
+          class="p-4 rounded-xl bg-white/3 backdrop-blur-[2.75px] mt-6!"
+        >
+          <summary id="starlight__on-this-page--mobile" class="sl-flex">
+            <div class="toggle flex-1 flex items-center justify-between text-white text-lg font-medium leading-6">
+              {Astro.locals.t("tableOfContents.onThisPage")}
+
+              <RightChevron class="size-4 rotate-90 caret" />
+            </div>
+            <span class="display-current" />
+          </summary>
+          <div class="dropdown">
+            <TableOfContentsList
+              toc={headings}
+              isMobile
+              className="mt-4! flex flex-col gap-y-1"
+            />
+          </div>
+        </details>
+      </nav>
+    </mobile-starlight-toc>
+  )
+}
+
+<style>
+  @layer starlight.core {
+    details[open] .caret {
+      transform: rotateZ(180deg);
+    }
+  }
+</style>

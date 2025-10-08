@@ -231,7 +231,11 @@ impl PackList {
     }
 }
 
-pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String, Error> {
+pub struct PackManifestOptions {
+    pub preserve_workspaces: bool,
+}
+
+pub fn pack_manifest(project: &Project, workspace: &Workspace, options: PackManifestOptions) -> Result<String, Error> {
     let manifest_path = workspace.path
         .with_join_str("package.json");
 
@@ -312,57 +316,56 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         ("optionalDependencies", manifest.remote.optional_dependencies.iter()),
     ];
 
-    let updated_dependencies = hard_dependencies.into_iter().flat_map(|(field_name, iter)| {
-        iter.filter_map(move |(ident, descriptor)| {
-            match &descriptor.range {
-                Range::WorkspaceSemver(params) => {
-                    Some((field_name, Ok(Descriptor::new(ident.clone(), AnonymousSemverRange {
-                        range: params.range.clone()
-                    }.into()))))
-                },
+    if !options.preserve_workspaces {
+        for (field_name, dependencies) in hard_dependencies {
+            for (ident, descriptor) in dependencies {
+                let updated_range = match &descriptor.range {
+                    Range::WorkspaceSemver(params) => {
+                        Some(Range::AnonymousSemver(AnonymousSemverRange {
+                            range: params.range.clone()
+                        }))
+                    },
 
-                Range::WorkspaceMagic(params) => {
-                    let workspace
-                        = project.workspace_by_ident(&descriptor.ident);
+                    Range::WorkspaceMagic(params) => {
+                        let workspace
+                            = project.workspace_by_ident(&descriptor.ident)?;
 
-                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), AnonymousSemverRange {
-                        range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(params.magic),
-                    }.into()))))
-                },
+                        Some(Range::AnonymousSemver(AnonymousSemverRange {
+                            range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(params.magic),
+                        }))
+                    },
 
-                Range::WorkspaceIdent(params) => {
-                    let workspace
-                        = project.workspace_by_ident(&params.ident);
+                    Range::WorkspaceIdent(params) => {
+                        let workspace
+                            = project.workspace_by_ident(&params.ident)?;
 
-                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), AnonymousSemverRange {
-                        range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
-                    }.into()))))
-                },
+                        Some(Range::AnonymousSemver(AnonymousSemverRange {
+                            range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
+                        }))
+                    },
 
-                Range::WorkspacePath(params) => {
-                    let workspace
-                        = project.workspace_by_rel_path(&params.path);
+                    Range::WorkspacePath(params) => {
+                        let workspace
+                            = project.workspace_by_rel_path(&params.path)?;
 
-                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), AnonymousSemverRange {
-                        range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
-                    }.into()))))
-                },
+                        Some(Range::AnonymousSemver(AnonymousSemverRange {
+                            range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
+                        }))
+                    },
 
-                _ => {
-                    None
-                },
+                    _ => {
+                        None
+                    },
+                };
+
+                if let Some(updated_range) = updated_range {
+                    formatter.set_path(
+                        &zpm_parsers::Path::from_segments(vec![field_name.to_string(), ident.to_file_string()]),
+                        Value::String(updated_range.to_file_string()),
+                    )?;
+                }
             }
-        })
-    });
-
-    for (field_name, new_descriptor_result) in updated_dependencies {
-        let new_descriptor
-            = new_descriptor_result?;
-
-        formatter.set_path(
-            &zpm_parsers::Path::from_segments(vec![field_name.to_string(), new_descriptor.ident.to_file_string()]),
-            Value::String(new_descriptor.range.to_file_string()),
-        )?;
+        }
     }
 
     let updated_peer_dependencies = manifest.remote.peer_dependencies.iter().filter_map(|(ident, peer_range)| {

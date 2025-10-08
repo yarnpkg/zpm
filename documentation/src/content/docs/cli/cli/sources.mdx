@@ -1,0 +1,44 @@
+---
+title: "yarn plugin import from sources"
+description: "build a plugin from sources"
+slug: "cli/sources"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+build a plugin from sources
+
+</div>
+
+## Usage
+<Code code="yarn plugin import from sources <name>" lang="bash" />
+
+## Examples
+<p>Build and activate the "@yarnpkg/plugin-exec" plugin
+:</p>
+<Code code="yarn plugin import from sources @yarnpkg/plugin-exec" lang="bash" />
+
+<p>Build and activate the "@yarnpkg/plugin-exec" plugin (shorthand)
+:</p>
+<Code code="yarn plugin import from sources exec" lang="bash" />
+
+## Details
+This command clones the Yarn repository into a temporary folder, builds the 
+specified contrib plugin and updates the configuration to reference it in 
+further CLI invocations.
+
+The plugins can be referenced by their short name if sourced from the official 
+Yarn repository.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-path%20%230" className="header-code"><code className="language-text">--path #0</code></h4> | The path where the repository should be cloned to |
+| <h4 id="options-repository%20%230" className="header-code"><code className="language-text">--repository #0</code></h4> | The repository that should be cloned |
+| <h4 id="options-branch%20%230" className="header-code"><code className="language-text">--branch #0</code></h4> | The branch of the repository that should be cloned |
+| <h4 id="options-no-minify" className="header-code"><code className="language-text">--no-minify</code></h4> | Build a plugin for development (debugging) - non-minified and non-mangled |
+| <h4 id="options-f%2C-force" className="header-code"><code className="language-text">-f,--force</code></h4> | Always clone the repository instead of trying to fetch the latest commits |
+| <h4 id="options-f%2C-force" className="header-code"><code className="language-text">-f,--force</code></h4> | Always clone the repository instead of trying to fetch the latest commits |
+| <h4 id="options-skip-plugins" className="header-code"><code className="language-text">--skip-plugins</code></h4> | Skip updating the contrib plugins |

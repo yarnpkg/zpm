@@ -1,0 +1,141 @@
+---
+import Headline from "@/components/Headline.astro";
+import Heading from "@/components/Heading";
+import cn from "@/utils/cn";
+
+// Images
+import StabilityIcon from "src/assets/svg/stability.svg";
+import WorkspacesIcon from "src/assets/svg/workspaces.svg";
+import DocumentationIcon from "src/assets/svg/documentation.svg";
+import PluginIcon from "src/assets/svg/plugins.svg";
+import InnovationIcon from "src/assets/svg/innovation.svg";
+import OpennessIcon from "src/assets/svg/openness.svg";
+import StarsIcon from "src/assets/svg/feature-stars.svg";
+import InlineSkeleton from "src/assets/svg/inline-skeleton.svg?react";
+import ThreeRowSkeleton from "src/assets/svg/three-row-skeleton.svg?react";
+
+export type FeatureListProps = {
+  title: string;
+  icon: any;
+  description: string;
+  gridClass: string;
+};
+
+const FEATURE_LIST: Array<FeatureListProps> = [
+  {
+    title: "Stability",
+    icon: StabilityIcon,
+    description:
+      "Yarn guarantees that installs that work today will keep working the same way in the future.",
+    gridClass: "lg:col-span-2 xl:col-span-4",
+  },
+  {
+    title: "Workspaces",
+    icon: WorkspacesIcon,
+    description:
+      "First package manager built specifically around workspaces, Yarn lets you split your project into sub-components.",
+    gridClass: "lg:col-span-2 xl:col-span-5",
+  },
+  {
+    title: "Documentation",
+    icon: DocumentationIcon,
+    description:
+      "Special care is put into our documentation, which we keep improving at every new version.",
+    gridClass: "lg:col-span-2 xl:col-span-3",
+  },
+  {
+    title: "Plugins",
+    icon: PluginIcon,
+    description:
+      "Yarn may not solve all your problems - but it'll give you the tools to solve the ones you find on your way.",
+    gridClass: "lg:col-span-2 xl:col-span-3",
+  },
+  {
+    title: "Innovation",
+    icon: InnovationIcon,
+    description:
+      "We believe in challenging the status quo. Yarn will always be at the frontline, brewing new workflows and improving old ones.",
+    gridClass: "lg:col-span-2 xl:col-span-5",
+  },
+  {
+    title: "Openness",
+    icon: OpennessIcon,
+    description:
+      "Yarn is a fully independent open-source project tied to no company. Our contributor community defines the roadmap.",
+    gridClass: "lg:col-span-2 xl:col-span-4",
+  },
+];
+---
+
+<section class="container not-content">
+  <div class="flex flex-col items-center text-center">
+    <div class="pb-3 lg:pb-4">
+      <Headline>Key Features</Headline>
+    </div>
+    <Heading size="h2">All-in-one power</Heading>
+  </div>
+
+  <div
+    class="grid grid-cols-1 lg:grid-cols-4 xl:grid-cols-12 gap-4 xl:gap-8 pt-14"
+  >
+    {
+      FEATURE_LIST.map(
+        ({ title, description, icon: IconComponent, gridClass }, index) => {
+          return (
+            <div
+              class={cn(
+                "bg-linear-to-b from-white/15 to-white/5 rounded-[20px] p-px overflow-hidden",
+                gridClass
+              )}
+            >
+              <div class="bg-linear-to-b from-[#181A1F] to-[#0D0F14] backdrop-blur-[2.85px] rounded-[20px] h-full pt-10">
+                <div class="relative h-52 w-full">
+                  {index === 1 && (
+                    <>
+                      <ThreeRowSkeleton className="absolute left-0 top-1/2 -translate-y-1/2 w-auto h-52 -z-10 -translate-x-1/2 md:-translate-x-1/3 2xl:-translate-x-0" />
+                      <ThreeRowSkeleton className="absolute right-0 top-1/2 -translate-y-1/2 w-auto h-52 rotate-180 -z-10 translate-x-1/2 md:translate-x-1/3 2xl:translate-x-0" />
+                    </>
+                  )}
+                  {index % 2 === 1 && index > 1 && (
+                    <>
+                      <InlineSkeleton
+                        className={cn(
+                          "absolute left-0 top-1/2 -translate-y-1/2 h-42 w-auto -z-10 opacity-30",
+                          index === 3
+                            ? "-translate-x-1/2"
+                            : "-translate-x-1/2 md:-translate-x-1/4"
+                        )}
+                      />
+                      <InlineSkeleton
+                        className={cn(
+                          "absolute right-0 top-1/2 -translate-y-1/2 h-42 w-auto rotate-180 -z-10 opacity-30",
+                          index === 3
+                            ? "translate-x-1/2"
+                            : "translate-x-1/2 md:translate-x-1/4"
+                        )}
+                      />
+                    </>
+                  )}
+                  {index % 2 === 0 && (
+                    <StarsIcon class="absolute w-full h-full inset-0 -z-10 scale-110" />
+                  )}
+                  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/3 z-10">
+                    <IconComponent class="w-72 h-auto shrink-0" />
+                  </div>
+                </div>
+                <div class="p-4 md:p-6">
+                  <Heading size="h4" as="p" className="font-medium">
+                    {title}
+                  </Heading>
+                  <p class="pt-2 text-white/60 leading-5 text-base">
+                    {description}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        }
+      )
+    }
+  </div>
+</section>

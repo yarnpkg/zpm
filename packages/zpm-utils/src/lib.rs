@@ -12,6 +12,7 @@ mod pretty;
 mod process;
 mod serialization_builtins;
 mod serialization;
+mod shell;
 mod system;
 mod url;
 
@@ -29,5 +30,6 @@ pub use crate::pretty::*;
 pub use crate::process::*;
 pub use crate::serialization_builtins::*;
 pub use crate::serialization::*;
+pub use crate::shell::*;
 pub use crate::system::*;
 pub use crate::url::*;

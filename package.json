@@ -1,6 +1,7 @@
 {
-  "packageManager": "yarn@6.0.0-git.20250914.hash-7ff8b08d5f9c179210949c4ff0f99e5542b3d22f",
+  "packageManager": "yarn@6.0.0-git.20251007.hash-b589d4544f670cbe35ae229f7fedf919dd06af1c",
   "workspaces": [
+    "documentation",
     "packages/*"
   ],
   "devDependencies": {
@@ -15,6 +16,8 @@
     "berry": "export TEST_BINARY=$PROJECT_CWD/local/yarn && export YARNSW_DEFAULT=local:$PROJECT_CWD/local/yarn-bin && export TEST_MAJOR=5 && cd ${BERRY_DIR:-../berry} && yarn"
   },
   "dependencies": {
-    "clipanion": "^4.0.0-rc.4"
+    "@yarnpkg/eslint-config": "^3.1.0",
+    "clipanion": "^4.0.0-rc.4",
+    "eslint": "^9.36.0"
   }
 }

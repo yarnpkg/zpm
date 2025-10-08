@@ -27,6 +27,7 @@ mod set_resolution;
 mod set_version;
 mod unplug;
 mod up;
+mod workspaces_focus;
 mod workspaces_list;
 mod workspace;
 
@@ -71,6 +72,7 @@ program!(YarnCli, [
     run::Run,
     unplug::Unplug,
     up::Up,
+    workspaces_focus::WorkspacesFocus,
     workspaces_list::WorkspacesList,
     workspace::Workspace,
 ]);

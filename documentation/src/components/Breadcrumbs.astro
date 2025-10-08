@@ -1,0 +1,163 @@
+---
+import type {
+  SidebarEntry,
+  SidebarLink,
+} from "node_modules/@astrojs/starlight/utils/routing/types";
+import Arrow from "/src/assets/svg/right-arrow.svg";
+import cn from "@/utils/cn";
+import { breadcrumbsHolder } from "../content/consts";
+
+interface Props {
+  customPathname?: string;
+}
+
+let { pathname } = Astro.url;
+const { customPathname } = Astro.props;
+
+type Segment = {
+  name: string;
+  path?: string;
+};
+
+function ensureTrailingSlash(url: string) {
+  return url.endsWith("/") ? url : url + "/";
+}
+
+function buildBreadcrumbMapFromSidebar(
+  entries: SidebarEntry[],
+  trail: Segment[] = [],
+  map: Record<string, Segment[]> = {}
+): Record<string, Segment[]> {
+  for (const entry of entries) {
+    if (entry.type === "link") {
+      const path = ensureTrailingSlash(entry.href);
+      const fullTrail = [...trail, { name: entry.label, path }];
+      map[path] = fullTrail.slice(1);
+    }
+
+    if (entry.type === "group") {
+      let label = entry.label;
+      let href: string | undefined;
+
+      if (label === "") {
+        // Group has no label — CLI case
+        const reversed = entry.entries.reverse();
+        const named = reversed.pop() as SidebarLink | undefined;
+        entry.entries.reverse();
+
+        if (named) {
+          label = named.label;
+          href = named.href;
+        }
+      }
+
+      const groupSegment: Segment = { name: label };
+      if (href) groupSegment.path = ensureTrailingSlash(href);
+
+      const nextTrail = [...trail, groupSegment];
+
+      if (groupSegment.path) {
+        map[groupSegment.path] = groupSegment.name.startsWith("@yarnpkg/")
+          ? nextTrail.slice(1)
+          : nextTrail;
+      }
+
+      // Recurse
+      buildBreadcrumbMapFromSidebar(entry.entries, nextTrail, map);
+    }
+  }
+
+  if ("/protocols/" in map) {
+    if (map["/protocols/"].length > 2) {
+      map["/protocols/"] = map["/protocols/"].slice(0, 2);
+      map["/protocols/"][1].path = "/protocols/";
+    }
+  }
+
+  return map;
+}
+
+if (!breadcrumbsHolder.breadcrumbs) {
+  breadcrumbsHolder.breadcrumbs = buildBreadcrumbMapFromSidebar(
+    Astro.locals.starlightRoute.sidebar
+  );
+}
+
+const breadcrumbs = breadcrumbsHolder.breadcrumbs! as Record<string, Segment[]>;
+
+// Helper: formats segment name
+const formatSegmentName = (segment: string) =>
+  decodeURIComponent(segment)
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (l) => l.toUpperCase());
+
+// Helper: builds segments array from a path string
+const buildSegments = (path: string): Segment[] => {
+  return path
+    .split("/")
+    .filter(Boolean)
+    .map((segment, index, arr) => {
+      if (segment === "protocol" && arr[index + 1]) {
+        return { name: "Protocols", path: "/protocols" };
+      }
+      return {
+        name: formatSegmentName(segment),
+        path: "/" + arr.slice(0, index + 1).join("/"),
+      };
+    });
+};
+
+if (!pathname.endsWith("/")) pathname = `${pathname}/`;
+
+let segments: Segment[];
+// Pick path and build
+if (pathname in breadcrumbs) {
+  segments = breadcrumbs[pathname];
+} else {
+  segments = buildSegments(customPathname ?? pathname);
+}
+
+const length = segments.length;
+---
+
+<div aria-label="Breadcrumb" class="text-blue-50">
+  <ul class="flex flex-wrap items-end gap-x-4 text-sm font-montserrat">
+    <li class="flex items-center gap-2">
+      <a href="/" class="hover:underline text-blue-50">Home</a>
+      <span class="text-slate-400"><Arrow /></span>
+    </li>
+
+    {
+      segments.map((segment, index) => {
+        const Element =
+          index < length - 1 &&
+          length !== 1 &&
+          "path" in segment &&
+          segment.path
+            ? "a"
+            : "span";
+
+        return (
+          <li class="flex items-center gap-2">
+            <>
+              <Element
+                href={segment.path}
+                class={cn(
+                  "text-blue-50",
+                  index < length - 1 && segment?.path && "hover:underline"
+                )}
+              >
+                {segment.name}
+              </Element>
+              {index < length - 1 && (
+                <span class="text-slate-400">
+                  <Arrow />
+                </span>
+              )}
+            </>
+          </li>
+        );
+      })
+    }
+  </ul>
+</div>

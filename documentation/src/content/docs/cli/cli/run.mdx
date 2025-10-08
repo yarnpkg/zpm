@@ -1,0 +1,56 @@
+---
+title: "yarn run"
+description: "run a script defined in the package.json"
+slug: "cli/run"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+run a script defined in the package.json
+
+</div>
+
+## Usage
+<Code code="yarn run <scriptName> ..." lang="bash" />
+
+## Examples
+<p>Run the tests from the local workspace
+:</p>
+<Code code="yarn run test" lang="bash" />
+
+<p>Same thing, but without the "run" keyword
+:</p>
+<Code code="yarn test" lang="bash" />
+
+<p>Inspect Webpack while running
+:</p>
+<Code code="yarn run --inspect-brk webpack" lang="bash" />
+
+## Details
+This command will run a tool. The exact tool that will be executed will depend 
+on the current state of your workspace:
+
+- If the `scripts` field from your local package.json contains a matching script 
+name, its definition will get executed.
+
+- Otherwise, if one of the local workspace's dependencies exposes a binary with 
+a matching name, this binary will get executed.
+
+- Otherwise, if the specified name contains a colon character and if one of the 
+workspaces in the project contains exactly one script with a matching name, 
+then this script will get executed.
+
+Whatever happens, the cwd of the spawned process will be the workspace that 
+declares the script (which makes it possible to call commands cross-workspaces 
+using the third syntax).
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-inspect" className="header-code"><code className="language-text">--inspect</code></h4> | Forwarded to the underlying Node process when executing a binary |
+| <h4 id="options-inspect-brk" className="header-code"><code className="language-text">--inspect-brk</code></h4> | Forwarded to the underlying Node process when executing a binary |
+| <h4 id="options-T%2C-top-level" className="header-code"><code className="language-text">-T,--top-level</code></h4> | Check the root workspace for scripts and/or binaries instead of the current one |
+| <h4 id="options-B%2C-binaries-only" className="header-code"><code className="language-text">-B,--binaries-only</code></h4> | Ignore any user defined scripts and only check for binaries |
+| <h4 id="options-require%20%230" className="header-code"><code className="language-text">--require #0</code></h4> | Forwarded to the underlying Node process when executing a binary |

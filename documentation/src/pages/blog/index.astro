@@ -1,0 +1,114 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { getCollection, getEntry, render } from "astro:content";
+import dayjs from "dayjs";
+import Calendar from "src/assets/svg/calendar.svg";
+import Clock from "src/assets/svg/clock.svg";
+import { Image } from "astro:assets";
+import Headline from "@/components/Headline.astro";
+import Heading from "@/components/Heading";
+
+const entries = await getCollection("blog");
+
+const renderedEntries = await Promise.all(
+  entries.map(async (entry) => {
+    const { Content, remarkPluginFrontmatter } = await render(entry);
+    const { lastModified, minutesRead } = remarkPluginFrontmatter;
+
+    const rawDate = dayjs(lastModified);
+    const formattedDate = rawDate.format("MMMM D, YYYY");
+
+    const { data: author } = await getEntry(entry.data.author);
+
+    return {
+      entry,
+      rawDate,
+      date: formattedDate,
+      minutesRead,
+      author,
+      Content,
+    };
+  })
+);
+
+renderedEntries.sort((a, b) => b.rawDate.valueOf() - a.rawDate.valueOf());
+---
+
+<StarlightPage
+  frontmatter={{ title: "Blog", template: "splash" }}
+  {...{
+    hideTitle: true,
+    hideBackground: true,
+  }}
+>
+  <div class="container not-content pt-20">
+    <div class="flex flex-col items-center text-center pb-16">
+      <div class="pb-3 lg:pb-4">
+        <Headline> Blog </Headline>
+      </div>
+      <Heading size="h2">Find out the news</Heading>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 not-content">
+      {
+        renderedEntries.map(({ entry, date, minutesRead, author, Content }) => (
+          <div class="bg-gradient-to-b from-white/15 to-white/5 p-px rounded-[20px]">
+            <div class="rounded-[20px] p-4 md:p-6 bg-gradient-to-b from-gray-950 to-gray-800 h-full flex flex-col justify-between">
+              <a href={`/blog/${entry.data.slug}`}>
+                <Heading className="pb-2 md:pb-3">{entry.data.title}</Heading>
+              </a>
+              <div class="line-clamp-2">
+                <Content />
+              </div>
+
+              <div class="flex xl:flex-row flex-col gap-6 lg:gap-8 justify-between pt-4 lg:pt-5">
+                {author && (
+                  <div class="flex items-center gap-x-3 md:gap-x-4 mb-2">
+                    {author?.image_url && (
+                      <Image
+                        src={author.image_url}
+                        alt={`${author.name} profile picture`}
+                        width={56}
+                        height={56}
+                        class="rounded-full object-cover"
+                      />
+                    )}
+                    <div>
+                      <a
+                        href={author?.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <p class="leading-[22px] text-base font-medium underline text-white!">
+                          {author?.name}
+                        </p>
+                      </a>
+                      <p class="text-white/60 leading-[22px] text-base max-lg:text-sm pt-1.5">
+                        {author?.title}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                <div class="flex items-center gap-x-3">
+                  <p class="text-white/60 leading-[22px] text-base inline-flex items-center gap-x-2">
+                    <Calendar class="size-6" />
+                    <span class="font-medium text-white text-xs lg:text-sm">
+                      {date}
+                    </span>
+                  </p>
+                  <div class="size-1 bg-white/80 rounded-full" />
+                  <p class="text-white/60 leading-[22px] text-base inline-flex items-center gap-x-2">
+                    <Clock class="size-6" />
+                    <span class="font-medium text-white text-xs lg:text-sm">
+                      {minutesRead}
+                    </span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</StarlightPage>

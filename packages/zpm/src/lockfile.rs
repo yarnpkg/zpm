@@ -191,8 +191,6 @@ impl<'de, T: FromFileString> Deserialize<'de> for MultiKey<T> where <T as FromFi
 #[derive(Clone, Debug, Encode, Decode, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LockfileMetadata {
     pub version: u64,
-    pub cache_key: u64,
-    pub linker_key: u64,
 }
 
 impl LockfileMetadata {
@@ -205,8 +203,6 @@ impl LockfileMetadata {
 
         LockfileMetadata {
             version,
-            cache_key: 0,
-            linker_key: 0,
         }
     }
 }

@@ -459,8 +459,13 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
             .map_err(Error::from)?;
     }
 
-    for workspace in project.workspaces.iter().sorted_by_cached_key(|w| w.descriptor()) {
-        let locator = workspace.locator();
+    for descriptor in &install.roots {
+        let workspace = project
+            .try_workspace_by_descriptor(&descriptor)?
+            .expect("Install roots are expected to always be workspaces");
+
+        let locator
+            = workspace.locator();
 
         if workspace.path == project.project_cwd {
             let entry = package_registry_data

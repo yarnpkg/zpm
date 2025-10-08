@@ -1,0 +1,48 @@
+---
+title: "yarn npm login"
+description: "store new login info to access the npm registry"
+slug: "cli/login"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+store new login info to access the npm registry
+
+</div>
+
+## Usage
+<Code code="yarn npm login" lang="bash" />
+
+## Examples
+<p>Login to the default registry
+:</p>
+<Code code="yarn npm login" lang="bash" />
+
+<p>Login to the registry linked to the @my-scope registry
+:</p>
+<Code code="yarn npm login --scope my-scope" lang="bash" />
+
+<p>Login to the publish registry for the current package
+:</p>
+<Code code="yarn npm login --publish" lang="bash" />
+
+## Details
+This command will ask you for your username, password, and 2FA One-Time-Password 
+(when it applies). It will then modify your local configuration (in your home 
+folder, never in the project itself) to reference the new tokens thus generated.
+
+Adding the `-s,--scope` flag will cause the authentication to be done against 
+whatever registry is configured for the associated scope (see also `npmScopes`).
+
+Adding the `--publish` flag will cause the authentication to be done against the 
+registry used when publishing the package (see also `publishConfig.registry` and 
+`npmPublishRegistry`).
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-s%2C-scope%20%230" className="header-code"><code className="language-text">-s,--scope #0</code></h4> | Login to the registry configured for a given scope |
+| <h4 id="options-publish" className="header-code"><code className="language-text">--publish</code></h4> | Login to the publish registry |
+| <h4 id="options-always-auth" className="header-code"><code className="language-text">--always-auth</code></h4> | Set the npmAlwaysAuth configuration |

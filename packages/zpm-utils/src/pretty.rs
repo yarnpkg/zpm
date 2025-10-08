@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::{DataType, ToHumanString};
 
 #[derive(Debug)]
-struct UnitDefinition {
+pub struct UnitDefinition {
     initial: &'static str,
     units: &'static [(f64, &'static str)],
 }

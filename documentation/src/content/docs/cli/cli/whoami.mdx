@@ -1,0 +1,44 @@
+---
+title: "yarn npm whoami"
+description: "display the name of the authenticated user"
+slug: "cli/whoami"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+display the name of the authenticated user
+
+</div>
+
+## Usage
+<Code code="yarn npm whoami" lang="bash" />
+
+## Examples
+<p>Print username for the default registry
+:</p>
+<Code code="yarn npm whoami" lang="bash" />
+
+<p>Print username for the registry on a given scope
+:</p>
+<Code code="yarn npm whoami --scope company" lang="bash" />
+
+## Details
+Print the username associated with the current authentication settings to the 
+standard output.
+
+When using `-s,--scope`, the username printed will be the one that matches the 
+authentication settings of the registry associated with the given scope (those 
+settings can be overriden using the `npmRegistries` map, and the registry 
+associated with the scope is configured via the `npmScopes` map).
+
+When using `--publish`, the registry we'll select will by default be the one 
+used when publishing packages (`publishConfig.registry` or `npmPublishRegistry` 
+if available, otherwise we'll fallback to the regular `npmRegistryServer`).
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-s%2C-scope%20%230" className="header-code"><code className="language-text">-s,--scope #0</code></h4> | Print username for the registry configured for a given scope |
+| <h4 id="options-publish" className="header-code"><code className="language-text">--publish</code></h4> | Print username for the publish registry |

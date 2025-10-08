@@ -34,7 +34,11 @@ bench() {
   fi
 }
 
-cp "$HERE_DIR"/benchmarks/"$TEST_NAME".json package.json
+if [[ "$TEST_NAME" == "monorepo" ]]; then
+  tar xfz "$HERE_DIR"/benchmarks/"$TEST_NAME".tgz
+else
+  cp "$HERE_DIR"/benchmarks/"$TEST_NAME".json package.json
+fi
 
 mkdir dummy-pkg
 echo '{"name": "dummy-pkg", "version": "0.0.0"}' > dummy-pkg/package.json
@@ -54,6 +58,11 @@ setup-zpm() {
 
   >> "$BENCH_DIR/.yarnrc.yml" echo \
     "enableImmutableInstalls: false"
+
+  if [[ "$TEST_NAME" == "monorepo" ]]; then
+    >> "$BENCH_DIR/.yarnrc.yml" echo \
+      "enableScripts: false"
+  fi
 }
 
 setup-yarn2() {

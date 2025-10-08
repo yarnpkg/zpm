@@ -169,9 +169,15 @@ impl Info {
                 .unwrap_or_default();
 
         if !self.name_only {
+            let resolution_locator = if virtual_instances.is_empty() {
+                &locator
+            } else {
+                &virtual_instances[0]
+            };
+
             let resolution
-                = install_state.normalized_resolutions.get(&locator)
-                    .expect("Expected the locator to be in the normalized resolutions");
+                = install_state.resolution_tree.locator_resolutions.get(resolution_locator)
+                    .unwrap_or_else(|| panic!("Expected {} to be in the resolution tree", locator.to_file_string()));
 
             children.insert("Version".to_string(), tree::Node {
                 label: Some("Version".to_string()),
@@ -221,8 +227,15 @@ impl Info {
 
             let dep_children
                 = resolution.dependencies.values()
+                    .filter(|descriptor| !resolution.peer_dependencies.contains_key(&descriptor.ident))
                     .map(|descriptor| (descriptor, &install_state.resolution_tree.descriptor_to_locator[descriptor]))
-                    .map(|(descriptor, locator)| DescriptorResolution::new(descriptor.clone(), locator.clone()))
+                    .map(|(descriptor, locator)| {
+                        if self.virtuals {
+                            DescriptorResolution::new(descriptor.clone(), locator.clone())
+                        } else {
+                            DescriptorResolution::new(descriptor.physical_descriptor(), locator.physical_locator())
+                        }
+                    })
                     .map(|descriptor_resolution| tree::Node::new_value(descriptor_resolution))
                     .collect::<Vec<_>>();
 
@@ -298,8 +311,6 @@ impl Info {
         });
 
         if self.dependents {
-            println!("dependents: {:?}", dependent_map);
-            println!("virtual_instance: {:?}", virtual_instance);
             if let Some(dependents) = dependent_map.get(virtual_instance) {
                 let dependent_nodes
                     = dependents

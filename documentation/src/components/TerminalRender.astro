@@ -1,0 +1,14 @@
+---
+import { Code } from "@astrojs/starlight/components";
+
+const { content } = Astro.props;
+
+export function cleanTerminalText(input: string) {
+  let clean = input.replace(/\u001b\[[0-9;]*m/g, ""); // Remove ANSI color codes
+  clean = clean.replace(/\u001b\]8;;.*?\u0007/g, ""); // Remove OSC 8 hyperlinks
+
+  return clean;
+}
+---
+
+<Code code={cleanTerminalText(content)} lang="js" />

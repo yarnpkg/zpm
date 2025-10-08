@@ -12,5 +12,8 @@
     "target": "ES2022",
     "newLine": "lf"
   },
-  "include": ["**/*.ts"]
+  "include": ["**/*.ts", "**/*.tsx", "env.d.ts"],
+  "references": [
+    {"path": "documentation/tsconfig.json"}
+  ]
 }

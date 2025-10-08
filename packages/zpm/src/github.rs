@@ -1,6 +1,5 @@
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
-use regex::Regex;
 use reqwest::StatusCode;
 use zpm_formats::iter_ext::IterExt;
 use zpm_git::GitSource;
@@ -10,26 +9,6 @@ use crate::{
     error::Error,
     http::HttpClient,
 };
-
-static GITHUB_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new("^https://github.com/([^/#]+)/([^/#]+?)\\.git$").unwrap()
-});
-
-pub struct GitHubUrl {
-    owner: String,
-    name: String,
-}
-
-pub fn parse_github_url(s: &str) -> Option<GitHubUrl> {
-    if let Some(captures) = GITHUB_PATTERN.captures(s) {
-        return Some(GitHubUrl {
-            owner: captures.get(1).unwrap().as_str().to_string(),
-            name: captures.get(2).unwrap().as_str().to_string(),
-        });
-    }
-
-    None
-}
 
 pub fn public_tarball_url(owner: &str, repository: &str, commit: &str) -> String {
     format!("https://github.com/{}/{}/archive/{}.tar.gz", owner, repository, commit)

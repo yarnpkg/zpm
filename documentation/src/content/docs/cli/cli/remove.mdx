@@ -1,0 +1,65 @@
+---
+title: "yarn remove"
+description: "remove dependencies from the project"
+slug: "cli/remove"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+remove dependencies from the project
+
+</div>
+
+## Usage
+<Code code="yarn remove ..." lang="bash" />
+
+## Examples
+<p>Remove a dependency from the current project
+:</p>
+<Code code="yarn remove lodash" lang="bash" />
+
+<p>Remove a dependency from all workspaces at once
+:</p>
+<Code code="yarn remove lodash --all" lang="bash" />
+
+<p>Remove all dependencies starting with `eslint-`
+:</p>
+<Code code="yarn remove 'eslint-*'" lang="bash" />
+
+<p>Remove all dependencies with the `@babel` scope
+:</p>
+<Code code="yarn remove '@babel/*'" lang="bash" />
+
+<p>Remove all dependencies matching `react-dom` or `react-helmet`
+:</p>
+<Code code="yarn remove 'react-{dom,helmet}'" lang="bash" />
+
+## Details
+This command will remove the packages matching the specified patterns from the 
+current workspace.
+
+If the `--mode=<mode>` option is set, Yarn will change which artifacts are 
+generated. The modes currently supported are:
+
+- `skip-build` will not run the build scripts at all. Note that this is 
+different from setting `enableScripts` to false because the latter will 
+disable build scripts, and thus affect the content of the artifacts generated 
+on disk, whereas the former will just disable the build step - but not the 
+scripts themselves, which just won't run.
+
+- `update-lockfile` will skip the link step altogether, and only fetch packages 
+that are missing from the lockfile (or that have no associated checksums). 
+This mode is typically used by tools like Renovate or Dependabot to keep a 
+lockfile up-to-date without incurring the full install cost.
+
+This command accepts glob patterns as arguments (if valid Idents and supported 
+by [micromatch](https://github.com/micromatch/micromatch)). Make sure to escape 
+the patterns, to prevent your own shell from trying to expand them.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-A%2C-all" className="header-code"><code className="language-text">-A,--all</code></h4> | Apply the operation to all workspaces from the current project |
+| <h4 id="options-mode%20%230" className="header-code"><code className="language-text">--mode #0</code></h4> | Change what artifacts installs generate |

@@ -8,13 +8,11 @@ path = "src/main.rs"
 
 [dependencies]
 base64 = "0.22.0"
-bytes = "1.7.1"
 bincode = {version = "2.0.0-rc.3", features = ["serde"] }
 chrono = "0.4.38"
-clipanion = { git = "https://github.com/arcanis/clipanion-rs.git" }
+clipanion = { git = "https://github.com/arcanis/clipanion-rs.git", features = ["serde"] }
 colored = "3.0.0"
 dialoguer = "0.11.0"
-fancy-regex = "0.13.0"
 futures = "0.3.30"
 git-url-parse = "0.4.5"
 globset = "0.4.14"
@@ -27,7 +25,7 @@ serde_with = "3.9.0"
 serde_yaml = "0.9.34"
 thiserror = "1.0.63"
 tokio = { version = "1.39.2", features = ["full"] }
-serde_json = "1.0.124"
+serde_json = "1.0.145"
 serde = { version = "1.0.207", features = ["derive"] }
 wax = { git = "https://github.com/arcanis/wax.git" }
 zpm-config = { path = "../zpm-config" }

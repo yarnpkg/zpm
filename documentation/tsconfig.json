@@ -1,0 +1,31 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "composite": true,
+  "include": [
+    ".astro/types.d.ts",
+    "**/*"
+  ],
+  "exclude": [
+    "dist"
+  ],
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "strictNullChecks": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/components/*": [
+        "src/components/*"
+      ],
+      "@/layouts/*": [
+        "src/features/package/layouts/*"
+      ],
+      "@/utils/*": [
+        "src/utils/*"
+      ],
+      "@/sections/*": [
+        "src/sections/*"
+      ]
+    }
+  }
+}

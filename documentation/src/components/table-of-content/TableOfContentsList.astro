@@ -1,0 +1,47 @@
+---
+interface Props {
+  toc: any;
+  depth?: number;
+  isMobile?: boolean;
+  className?: string;
+}
+
+const { toc, isMobile = false, depth = 0, className } = Astro.props;
+
+const { headings: headingsFromRoute } = Astro.locals.starlightRoute;
+
+const headings = toc || headingsFromRoute;
+---
+
+<ul class:list={{ isMobile }} class={className}>
+  {
+    headings.map(
+      ({
+        slug,
+        text,
+        children,
+      }: {
+        slug: string;
+        text: string;
+        children: any;
+      }) => (
+        <li class="break-all line-clamp-1">
+          <a href={"#" + slug} aria-label={text}>
+            {text}
+          </a>
+          {children?.length > 0 && (
+            <Astro.self toc={children} depth={depth + 1} isMobile={isMobile} />
+          )}
+        </li>
+      )
+    )
+  }
+</ul>
+
+<style>
+  @layer starlight.core {
+    a[aria-current="true"] {
+      color: #c3d2ff;
+    }
+  }
+</style>

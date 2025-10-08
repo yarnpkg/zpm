@@ -1,0 +1,36 @@
+---
+title: "yarn explain"
+description: "explain an error code"
+slug: "cli/explain"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+explain an error code
+
+</div>
+
+## Usage
+<Code code="yarn explain [code]" lang="bash" />
+
+## Examples
+<p>Explain an error code
+:</p>
+<Code code="yarn explain YN0006" lang="bash" />
+
+<p>List all error codes
+:</p>
+<Code code="yarn explain" lang="bash" />
+
+## Details
+When the code argument is specified, this command prints its name and its 
+details.
+
+When used without arguments, this command lists all error codes and their names.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-json" className="header-code"><code className="language-text">--json</code></h4> | Format the output as an NDJSON stream |

@@ -9,7 +9,7 @@ use zpm_utils::ToFileString;
 use crate::{
     error::Error,
     manifest::helpers::parse_manifest,
-    pack::{pack_list, pack_manifest},
+    pack::{pack_list, pack_manifest, PackManifestOptions},
     project::{Project, RunInstallOptions, Workspace},
     script::ScriptEnvironment,
 };
@@ -24,6 +24,9 @@ pub struct Pack {
 
     #[cli::option("--install-if-needed", default = false)]
     install_if_needed: bool,
+
+    #[cli::option("--preserve-workspaces", default = false)]
+    preserve_workspaces: bool,
 
     #[cli::option("--json", default = false)]
     json: bool,
@@ -92,7 +95,9 @@ impl Pack {
 
     async fn dry_run(&self, project: &Project, active_workspace: &Workspace) -> Result<(), Error> {
         let pack_manifest_content
-            = pack_manifest(project, active_workspace)?;
+            = pack_manifest(project, active_workspace, PackManifestOptions {
+                preserve_workspaces: self.preserve_workspaces,
+            })?;
 
         let pack_manifest
             = parse_manifest(&pack_manifest_content)?;
@@ -118,7 +123,9 @@ impl Pack {
 
     async fn gen_archive(&self, project: &Project, active_workspace: &Workspace) -> Result<(), Error> {
         let pack_manifest_content
-            = pack_manifest(project, active_workspace)?;
+            = pack_manifest(project, active_workspace, PackManifestOptions {
+                preserve_workspaces: self.preserve_workspaces,
+            })?;
 
         let pack_manifest
             = parse_manifest(&pack_manifest_content)?;

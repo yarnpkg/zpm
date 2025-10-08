@@ -2,13 +2,23 @@ use bincode::{Decode, Encode};
 
 use zpm_utils::{DataType, FromFileString, QueryString, QueryStringValue, ToFileString, ToHumanString, UnwrapInfallible};
 
-use crate::{range::PrepareParams, Error, GitSource};
+use crate::{range::PrepareParams, Error, GitRange, GitSource, GitTreeish};
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GitReference {
     pub repo: GitSource,
     pub commit: String,
     pub prepare_params: PrepareParams,
+}
+
+impl GitReference {
+    pub fn to_git_range(&self) -> GitRange {
+        GitRange {
+            repo: self.repo.clone(),
+            treeish: GitTreeish::Commit(self.commit.clone()),
+            prepare_params: self.prepare_params.clone(),
+        }
+    }
 }
 
 impl FromFileString for GitReference {

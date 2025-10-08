@@ -1,0 +1,34 @@
+---
+title: "yarn cache clean"
+description: "remove the shared cache files"
+slug: "cli/clean"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+remove the shared cache files
+
+</div>
+
+## Usage
+<Code code="yarn cache clean" lang="bash" />
+
+## Examples
+<p>Remove all the local archives
+:</p>
+<Code code="yarn cache clean" lang="bash" />
+
+<p>Remove all the archives stored in the ~/.yarn directory
+:</p>
+<Code code="yarn cache clean --mirror" lang="bash" />
+
+## Details
+This command will remove all the files from the cache.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-mirror" className="header-code"><code className="language-text">--mirror</code></h4> | Remove the global cache files instead of the local cache files |
+| <h4 id="options-all" className="header-code"><code className="language-text">--all</code></h4> | Remove both the global cache files and the local cache files of the current project |

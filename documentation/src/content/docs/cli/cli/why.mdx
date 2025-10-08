@@ -1,0 +1,38 @@
+---
+title: "yarn why"
+description: "display the reason why a package is needed"
+slug: "cli/why"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+display the reason why a package is needed
+
+</div>
+
+## Usage
+<Code code="yarn why <package>" lang="bash" />
+
+## Examples
+<p>Explain why lodash is used in your project
+:</p>
+<Code code="yarn why lodash" lang="bash" />
+
+## Details
+This command prints the exact reasons why a package appears in the dependency 
+tree.
+
+If `-R,--recursive` is set, the listing will go in depth and will list, for each 
+workspaces, what are all the paths that lead to the dependency. Note that the 
+display is somewhat optimized in that it will not print the package listing 
+twice for a single package, so if you see a leaf named "Foo" when looking for 
+"Bar", it means that "Foo" already got printed higher in the tree.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-R%2C-recursive" className="header-code"><code className="language-text">-R,--recursive</code></h4> | List, for each workspace, what are all the paths that lead to the dependency |
+| <h4 id="options-json" className="header-code"><code className="language-text">--json</code></h4> | Format the output as an NDJSON stream |
+| <h4 id="options-peers" className="header-code"><code className="language-text">--peers</code></h4> | Also print the peer dependencies that match the specified name |

@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use zpm_formats::iter_ext::IterExt;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Locator, TarballReference};

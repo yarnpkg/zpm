@@ -1,0 +1,141 @@
+@layer base, starlight, theme, components, utilities;
+
+@import "@astrojs/starlight-tailwind";
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme {
+  /* Font families */
+  --font-montserrat: "Montserrat";
+  --font-etude: "Etude";
+  --font-forma: "Forma";
+
+  /* Gray scale */
+  --color-gray-50: #f4f0ff;
+  --color-gray-100: #ccd0f5;
+  --color-gray-200: #efedfd;
+  --color-gray-300: #656e98;
+  --color-gray-400: #a4a4bc;
+  --color-gray-500: #8f8f96;
+  --color-gray-600: #2e2e30;
+  --color-gray-700: #0f1116;
+  --color-gray-800: #0d0f14;
+  --color-gray-900: #0c0e13;
+  --color-gray-950: #181a1f;
+
+  /* Dark shades */
+  --color-dark-100: #101116;
+  --color-dark-200: #111217;
+  --color-dark-300: #17181d;
+  --color-dark-400: #282930;
+  --color-dark-500: #030014;
+  --color-dark-600: #0d0f19;
+  --color-dark-700: #0c0d13;
+
+  /* Blue scale */
+  --color-blue-50: #c3d2ff;
+  --color-blue-100: #c8cdf3;
+  --color-blue-400: #5a73ff;
+  --color-blue-500: #2259ff;
+  --color-blue-600: #2a57db;
+  --color-blue-700: #4251d7;
+  --color-blue-800: #08147e;
+
+  /* Purple scale */
+  --color-purple-100: #a4b1eb;
+  --color-purple-400: #9697ff;
+  --color-purple-500: #b988ff;
+  --color-purple-800: #ba88ff;
+
+  /* Green scale */
+  --color-green-400: #b2ffb5;
+  --color-green-500: #88ff8c;
+
+  /* Yellow */
+  --color-yellow-500: #ffeb88;
+
+  /* Red */
+  --color-red-500: #db2a4d;
+
+  /* Orange */
+  --color-orange-400: #ffb788;
+  --color-orange-500: #ffb888;
+
+  /* Light shades */
+  --color-light-100: #d9d9d9;
+}
+
+@utility container {
+  margin-inline: auto !important;
+  padding-inline: 1rem;
+}
+
+:root {
+  --sl-font: "Montserrat";
+
+  body {
+    @apply bg-gray-800;
+  }
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* Testimonials 3D Card Effects */
+.slide {
+  @apply will-change-transform opacity-0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transition: all 0.6s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.slide[data-status="active"] {
+  opacity: 1;
+  transform: translateY(0) translateX(0%) translateZ(0px) scale(1);
+  z-index: 10;
+}
+
+@media only screen and (min-width: 768px) {
+  .slide[data-status="next"] {
+    opacity: 1;
+    transform: translateY(0) translateX(12%) translateZ(-50px) scale(0.92);
+    z-index: 9;
+  }
+  .slide[data-status="prev"] {
+    opacity: 1;
+    transform: translateY(0) translateX(-12%) translateZ(-50px) scale(0.92);
+    z-index: 9;
+  }
+  .slide[data-status="background-next"] {
+    opacity: 0.5;
+    transform: translateY(0) translateX(24%) translateZ(-100px) scale(0.84);
+    z-index: 8;
+  }
+  .slide[data-status="background-prev"] {
+    opacity: 0.5;
+    transform: translateY(0) translateX(-24%) translateZ(-100px) scale(0.84);
+    z-index: 8;
+  }
+}
+
+@media only screen and (max-width: 768px) {
+  .slide[data-status="next"] {
+    opacity: 1;
+    transform: translateY(-8%) translateX(0) translateZ(-50px) scale(0.92);
+    z-index: 9;
+  }
+  .slide[data-status="prev"] {
+    opacity: 1;
+    transform: translateY(-16%) translateX(0) translateZ(-50px) scale(0.84);
+    z-index: 8;
+  }
+}
+
+input[type="search"]::-webkit-search-cancel-button {
+  cursor: pointer;
+}

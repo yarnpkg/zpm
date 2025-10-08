@@ -1,0 +1,17 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import PackageLayout from "src/layouts/PackageLayout";
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Page Not Found",
+    template: "splash",
+  }}
+  {...{
+    hideTitle: true,
+    hideBackground: true,
+  }}
+>
+  <PackageLayout client:only="preact" />
+</StarlightPage>

@@ -1,0 +1,366 @@
+---
+title: "@yarnpkg/cli"
+description: "Documentation for all cli package commands"
+slug: "cli"
+sidebar_position: "1"
+category: "cli"
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+
+
+<LinkCard 
+title="yarn cache clean" 
+href="/cli/clean" 
+description="remove the shared cache files
+"
+/>
+<LinkCard 
+title="yarn config get" 
+href="/cli/get" 
+description="read a configuration settings
+"
+/>
+<LinkCard 
+title="yarn config set" 
+href="/cli/set" 
+description="change a configuration settings
+"
+/>
+<LinkCard 
+title="yarn config unset" 
+href="/cli/unset" 
+description="unset a configuration setting
+"
+/>
+<LinkCard 
+title="yarn set resolution" 
+href="/cli/resolution" 
+description="enforce a package resolution
+"
+/>
+<LinkCard 
+title="yarn set version from sources" 
+href="/cli/sources" 
+description="build Yarn from master
+"
+/>
+<LinkCard 
+title="yarn set version" 
+href="/cli/version" 
+description="lock the Yarn version used by the project
+"
+/>
+<LinkCard 
+title="yarn workspaces list" 
+href="/cli/list" 
+description="list all available workspaces
+"
+/>
+<LinkCard 
+title="yarn add" 
+href="/cli/add" 
+description="add dependencies to the project
+"
+/>
+<LinkCard 
+title="yarn bin" 
+href="/cli/bin" 
+description="get the path to a binary script
+"
+/>
+<LinkCard 
+title="yarn config" 
+href="/cli/config" 
+description="display the current configuration
+"
+/>
+<LinkCard 
+title="yarn dedupe" 
+href="/cli/dedupe" 
+description="deduplicate dependencies with overlapping ranges
+"
+/>
+<LinkCard 
+title="yarn exec" 
+href="/cli/exec" 
+description="execute a shell script
+"
+/>
+<LinkCard 
+title="yarn explain peer-requirements" 
+href="/cli/peer-requirements" 
+description="explain a set of peer requirements
+"
+/>
+<LinkCard 
+title="yarn explain" 
+href="/cli/explain" 
+description="explain an error code
+"
+/>
+<LinkCard 
+title="yarn info" 
+href="/cli/info" 
+description="see information related to packages
+"
+/>
+<LinkCard 
+title="yarn install" 
+href="/cli/install" 
+description="install the project dependencies
+"
+/>
+<LinkCard 
+title="yarn link" 
+href="/cli/link" 
+description="connect the local project to another one
+"
+/>
+<LinkCard 
+title="yarn unlink" 
+href="/cli/unlink" 
+description="disconnect the local project from another one
+"
+/>
+<LinkCard 
+title="yarn node" 
+href="/cli/node" 
+description="run node with the hook already setup
+"
+/>
+<LinkCard 
+title="yarn plugin check" 
+href="/cli/check" 
+description="find all third-party plugins that differ from their own spec
+"
+/>
+<LinkCard 
+title="yarn plugin import from sources" 
+href="/cli/sources" 
+description="build a plugin from sources
+"
+/>
+<LinkCard 
+title="yarn plugin import" 
+href="/cli/import" 
+description="download a plugin
+"
+/>
+<LinkCard 
+title="yarn plugin remove" 
+href="/cli/remove" 
+description="remove a plugin
+"
+/>
+<LinkCard 
+title="yarn plugin list" 
+href="/cli/list" 
+description="list the available official plugins
+"
+/>
+<LinkCard 
+title="yarn plugin runtime" 
+href="/cli/runtime" 
+description="list the active plugins
+"
+/>
+<LinkCard 
+title="yarn rebuild" 
+href="/cli/rebuild" 
+description="rebuild the project's native packages
+"
+/>
+<LinkCard 
+title="yarn remove" 
+href="/cli/remove" 
+description="remove dependencies from the project
+"
+/>
+<LinkCard 
+title="yarn run" 
+href="/cli/run" 
+description="run a script defined in the package.json
+"
+/>
+<LinkCard 
+title="yarn up" 
+href="/cli/up" 
+description="upgrade dependencies across the project
+"
+/>
+<LinkCard 
+title="yarn why" 
+href="/cli/why" 
+description="display the reason why a package is needed
+"
+/>
+<LinkCard 
+title="yarn workspace" 
+href="/cli/workspace" 
+description="run a command within the specified workspace
+"
+/>
+<LinkCard 
+title="yarn constraints query" 
+href="/cli/query" 
+description="query the constraints fact database
+"
+/>
+<LinkCard 
+title="yarn constraints source" 
+href="/cli/source" 
+description="print the source code for the constraints
+"
+/>
+<LinkCard 
+title="yarn constraints" 
+href="/cli/constraints" 
+description="check that the project constraints are met
+"
+/>
+<LinkCard 
+title="yarn dlx" 
+href="/cli/dlx" 
+description="run a package in a temporary environment
+"
+/>
+<LinkCard 
+title="yarn init" 
+href="/cli/init" 
+description="create a new package
+"
+/>
+<LinkCard 
+title="yarn init" 
+href="/cli/init" 
+description="create a new package
+"
+/>
+<LinkCard 
+title="yarn search" 
+href="/cli/search" 
+description="open the search interface
+"
+/>
+<LinkCard 
+title="yarn upgrade-interactive" 
+href="/cli/upgrade-interactive" 
+description="open the upgrade interface
+"
+/>
+<LinkCard 
+title="yarn npm audit" 
+href="/cli/audit" 
+description="perform a vulnerability audit against the installed packages
+"
+/>
+<LinkCard 
+title="yarn npm info" 
+href="/cli/info" 
+description="show information about a package
+"
+/>
+<LinkCard 
+title="yarn npm login" 
+href="/cli/login" 
+description="store new login info to access the npm registry
+"
+/>
+<LinkCard 
+title="yarn npm logout" 
+href="/cli/logout" 
+description="logout of the npm registry
+"
+/>
+<LinkCard 
+title="yarn npm publish" 
+href="/cli/publish" 
+description="publish the active workspace to the npm registry
+"
+/>
+<LinkCard 
+title="yarn npm tag add" 
+href="/cli/add" 
+description="add a tag for a specific version of a package
+"
+/>
+<LinkCard 
+title="yarn npm tag list" 
+href="/cli/list" 
+description="list all dist-tags of a package
+"
+/>
+<LinkCard 
+title="yarn npm tag remove" 
+href="/cli/remove" 
+description="remove a tag from a package
+"
+/>
+<LinkCard 
+title="yarn npm whoami" 
+href="/cli/whoami" 
+description="display the name of the authenticated user
+"
+/>
+<LinkCard 
+title="yarn pack" 
+href="/cli/pack" 
+description="generate a tarball from the active workspace
+"
+/>
+<LinkCard 
+title="yarn patch-commit" 
+href="/cli/patch-commit" 
+description="generate a patch out of a directory
+"
+/>
+<LinkCard 
+title="yarn patch" 
+href="/cli/patch" 
+description="prepare a package for patching
+"
+/>
+<LinkCard 
+title="yarn unplug" 
+href="/cli/unplug" 
+description="force the unpacking of a list of packages
+"
+/>
+<LinkCard 
+title="yarn stage" 
+href="/cli/stage" 
+description="add all yarn files to your vcs
+"
+/>
+<LinkCard 
+title="yarn version apply" 
+href="/cli/apply" 
+description="apply all the deferred version bumps at once
+"
+/>
+<LinkCard 
+title="yarn version check" 
+href="/cli/check" 
+description="check that all the relevant packages have been bumped
+"
+/>
+<LinkCard 
+title="yarn version" 
+href="/cli/version" 
+description="apply a new version to the current package
+"
+/>
+<LinkCard 
+title="yarn workspaces focus" 
+href="/cli/focus" 
+description="install a single workspace and its dependencies
+"
+/>
+<LinkCard 
+title="yarn workspaces foreach" 
+href="/cli/foreach" 
+description="run a command on all workspaces
+"
+/>

@@ -1,0 +1,34 @@
+---
+import Breadcrumbs from "@/components/Breadcrumbs.astro";
+import clsx from "clsx";
+import MobileTableOfContents from "@/components/table-of-content/MobileTableOfContents.astro";
+import Heading from "@/components/Heading";
+
+const { entry, hasSidebar, hideTitle } = Astro.locals.starlightRoute;
+const { title, description } = entry.data;
+---
+
+<div class={clsx(!hasSidebar && "container py-16", hideTitle ? "sr-only" : "")}>
+  <Breadcrumbs />
+  <div class="lg:hidden!">
+    <MobileTableOfContents />
+  </div>
+
+  <div
+    class={clsx(
+      !hasSidebar && "flex justify-center text-center",
+      hideTitle ? "sr-only" : ""
+    )}
+  >
+    {
+      title && (
+        <Heading
+          size="h1"
+          className="pt-10 pb-8 md:text-[64px] md:leading-[86px] font-normal"
+        >
+          {title}
+        </Heading>
+      )
+    }
+  </div>
+</div>

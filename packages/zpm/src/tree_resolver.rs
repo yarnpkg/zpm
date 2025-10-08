@@ -12,7 +12,7 @@ use crate::{
 
 #[derive(Clone, Debug, Default, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolutionTree {
-    pub roots: Vec<Descriptor>,
+    pub roots: BTreeSet<Descriptor>,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
     pub locator_resolutions: BTreeMap<Locator, Resolution>,
     pub optional_builds: BTreeSet<Locator>,
@@ -55,7 +55,7 @@ impl TreeResolver {
         self
     }
 
-    pub fn with_roots(mut self, roots: Vec<Descriptor>) -> Self {
+    pub fn with_roots(mut self, roots: BTreeSet<Descriptor>) -> Self {
         self.resolution_tree.roots = roots;
         self
     }
