@@ -735,7 +735,7 @@ impl Workspace {
             .with_join_str(MANIFEST_NAME);
 
         let manifest_meta = manifest_path.fs_metadata().map_err(|err| match err.io_kind() {
-            Some(ErrorKind::NotFound) | Some(ErrorKind::NotADirectory) => Error::ManifestNotFound,
+            Some(ErrorKind::NotFound) | Some(ErrorKind::NotADirectory) => Error::ManifestNotFound(manifest_path.clone()),
             _ => err.into(),
         })?;
 
