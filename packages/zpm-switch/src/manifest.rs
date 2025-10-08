@@ -1,8 +1,9 @@
-use std::{mem::take, sync::Arc};
+use std::mem::take;
 
 use bincode::{Decode, Encode};
 use serde::Deserialize;
 use zpm_macro_enum::zpm_enum;
+use zpm_parsers::JsonDocument;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, IoResultExt, Path, ToFileString, ToHumanString};
 
 use crate::errors::Error;
@@ -144,8 +145,8 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
             .ok_missing()?;
 
         if let Some(manifest) = &manifest {
-            let parsed_manifest: Manifest = sonic_rs::from_str(&manifest)
-                .map_err(|err| Error::FailedToParseManifest(Arc::new(err)))?;
+            let parsed_manifest: Manifest = JsonDocument::hydrate_from_str(&manifest)
+                .map_err(|err| Error::FailedToParseManifest(err))?;
 
             if let Some(package_manager) = parsed_manifest.package_manager {
                 if matches!(package_manager.reference, PackageManagerReference::Local(_)) {

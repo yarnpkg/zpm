@@ -159,9 +159,6 @@ pub enum Error {
     #[error("Non-UTF-8 path")]
     NonUtf8Path,
 
-    #[error("Invalid JSON data ({0})")]
-    InvalidJsonData(#[from] Arc<sonic_rs::Error>),
-
     #[error("Error parsing an integer value")]
     ParseIntError(#[from] std::num::ParseIntError),
 
@@ -193,7 +190,7 @@ pub enum Error {
     LockfileReadError(Arc<std::io::Error>),
 
     #[error("An error occured while parsing the lockfile: {0}")]
-    LockfileParseError(Arc<sonic_rs::Error>),
+    LockfileParseError(zpm_parsers::Error),
 
     #[error("Can't perform this operation without a git root")]
     NoGitRoot,
@@ -207,8 +204,8 @@ pub enum Error {
     #[error("An error occured while parsing the Yarn Berry lockfile: {0}")]
     LegacyLockfileParseError(Arc<serde_yaml::Error>),
 
-    #[error("Lockfile generation error")]
-    LockfileGenerationError(Arc<sonic_rs::Error>),
+    #[error("Lockfile generation error: {0}")]
+    LockfileGenerationError(zpm_parsers::Error),
 
     #[error("Repository clone failed")]
     RepositoryCloneFailed(String),
@@ -415,12 +412,6 @@ impl From<wax::walk::WalkError> for Error {
 
 impl From<bincode::error::EncodeError> for Error {
     fn from(error: bincode::error::EncodeError) -> Self {
-        Arc::new(error).into()
-    }
-}
-
-impl From<sonic_rs::Error> for Error {
-    fn from(error: sonic_rs::Error) -> Self {
         Arc::new(error).into()
     }
 }

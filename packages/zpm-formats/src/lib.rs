@@ -1,10 +1,9 @@
 use std::{borrow::Cow, os::unix::fs::PermissionsExt};
 
-use zpm_utils::{FromFileString, impl_file_string_serialization, impl_file_string_from_str, Path, ToFileString, ToHumanString};
+use zpm_utils::{FromFileString, impl_file_string_from_str, Path, ToFileString, ToHumanString};
 
 pub(crate) mod zip_structs;
 
-pub mod convert;
 pub mod error;
 pub mod iter_ext;
 pub mod tar_iter;

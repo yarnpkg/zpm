@@ -1,6 +1,7 @@
 use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 
 use zpm_config::PnpFallbackMode;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{Ident, Locator, Reference};
 use zpm_utils::{IoResultExt, Path, SyncEntryKind, ToHumanString};
 use sha2::{Sha512, Digest};
@@ -149,7 +150,11 @@ struct PnpState {
     dependency_tree_roots: Vec<PnpDependencyTreeRoot>,
 }
 
-fn serialize_string(s: &str) -> String {
+/**
+ * We use this function rather than JsonDocument::to_string_pretty because we want a single quote string, to
+ * avoid having to escape the very common double quote found in the JSON payload.
+ */
+fn single_quote_stringify(s: &str) -> String {
     let mut escaped
         = String::with_capacity(s.len() * 110 / 100);
 
@@ -176,7 +181,7 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
         "\"use strict\";\n",
         "\n",
         "const RAW_RUNTIME_STATE =\n",
-        &serialize_string(&sonic_rs::to_string_pretty(&state).unwrap()), ";\n",
+        &single_quote_stringify(&JsonDocument::to_string_pretty(&state)?), ";\n",
         "\n",
         "function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n",
         "  return hydrateRuntimeState(JSON.parse(RAW_RUNTIME_STATE), {basePath: basePath || __dirname});\n",
@@ -210,7 +215,7 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
         .fs_change(script, true)?;
 
     project.pnp_data_path()
-        .fs_change(sonic_rs::to_string(&state).unwrap(), false)?;
+        .fs_change(JsonDocument::to_string(&state)?, false)?;
 
     Ok(())
 }

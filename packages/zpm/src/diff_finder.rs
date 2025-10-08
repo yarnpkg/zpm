@@ -10,7 +10,6 @@ use crate::error::Error;
 enum CacheCheck<T> {
     Skip,
     NotFound(Path),
-    StableFile(Path),
     ChangedFile(Path, u128, T),
     ChangedDirectory(Path, u128),
 }
@@ -180,7 +179,7 @@ impl<TController: DiffController> DiffFinder<TController> {
                     if mtime > save_entry.mtime() {
                         Ok(CacheCheck::ChangedFile(rel_path.clone(), mtime, TController::get_file_data(&abs_path, &metadata)?))
                     } else {
-                        Ok(CacheCheck::StableFile(rel_path.clone()))
+                        Ok(CacheCheck::Skip)
                     }
                 }
             })
@@ -193,11 +192,7 @@ impl<TController: DiffController> DiffFinder<TController> {
         for cache_check in cache_checks {
             match cache_check {
                 CacheCheck::Skip => {
-                    // Nothing to do, it's just a directory that didn't change
-                },
-
-                CacheCheck::StableFile(_) => {
-                    // Nothing to do, it's already in the cache
+                    // Nothing to do, it's just a file or directory that didn't change
                 },
 
                 CacheCheck::ChangedFile(rel_path, mtime, data) => {

@@ -18,3 +18,5 @@ flamegraph.svg
 /.yarn/unplugged
 
 /local
+
+.DS_Store

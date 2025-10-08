@@ -1,3 +1,5 @@
+use crate::json::json_provider;
+
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum Error {
     #[error("Utf8 conversion error: {0}")]
@@ -14,4 +16,10 @@ pub enum Error {
 
     #[error("Cannot navigate through primitive value")]
     InvalidPrimitiveNavigation,
+}
+
+impl From<json_provider::Error> for Error {
+    fn from(error: json_provider::Error) -> Self {
+        Error::InvalidSyntax(error.to_string())
+    }
 }

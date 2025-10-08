@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix
 
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
+use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
 use zpm_utils::{shell_escape, to_shell_line, FromFileString, Hash64, Path, ToFileString};
 use itertools::Itertools;
@@ -471,7 +472,7 @@ impl ScriptEnvironment {
 
     fn install_binaries(&mut self) -> Result<Path, Error> {
         let hash
-            = Hash64::from_string(&sonic_rs::to_string(&self.binaries)?);
+            = Hash64::from_string(&JsonDocument::to_string(&self.binaries)?);
         let dir_name
             = format!(".yarn/zpm/binaries/zpm-{}", hash.to_file_string());
 

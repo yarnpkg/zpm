@@ -144,7 +144,7 @@ impl TreeRenderer {
 
         if let Some(children) = &node.children {
             for child in children.iter() {
-                result.push_str(&sonic_rs::to_string(child).unwrap());
+                result.push_str(&crate::internal::to_json_string(child));
                 result.push('\n');
             }
         }

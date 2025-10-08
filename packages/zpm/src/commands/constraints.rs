@@ -53,7 +53,7 @@ impl Constraints {
                 for operation in operations {
                     match operation {
                         WorkspaceOperation::Set { path, value } => {
-                            formatter.set_path(&zpm_parsers::Path::from_segments(path.clone()), value.clone().into())?;
+                            formatter.set_path(&zpm_parsers::Path::from_segments(path.clone()), value.into())?;
                         },
 
                         WorkspaceOperation::Unset { path } => {

@@ -60,7 +60,7 @@ impl From<std::io::Error> for PathError {
 }
 
 impl From<std::str::Utf8Error> for PathError {
-    fn from(error: std::str::Utf8Error) -> Self {
+    fn from(_: std::str::Utf8Error) -> Self {
         Self::InvalidUtf8Path
     }
 }

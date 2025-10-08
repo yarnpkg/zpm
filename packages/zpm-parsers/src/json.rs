@@ -1,6 +1,17 @@
 use std::{collections::BTreeMap, ops::Range};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{value::Indent, Error, Path, Value};
+
+#[cfg(target_pointer_width = "32")]
+pub use serde_json as json_provider;
+
+#[cfg(not(target_pointer_width = "32"))]
+pub use sonic_rs as json_provider;
+
+pub type RawJsonDeserializer<R> = json_provider::Deserializer<R>;
+pub type RawJsonValue = json_provider::Value;
 
 pub struct JsonDocument {
     pub input: Vec<u8>,
@@ -8,6 +19,22 @@ pub struct JsonDocument {
 }
 
 impl JsonDocument {
+    pub fn hydrate_from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
+        Ok(json_provider::from_str(input)?)
+    }
+
+    pub fn hydrate_from_slice<'de, T: Deserialize<'de>>(input: &'de [u8]) -> Result<T, Error> {
+        Ok(json_provider::from_slice(input)?)
+    }
+
+    pub fn to_string<T: Serialize + ?Sized>(input: &T) -> Result<String, Error> {
+        Ok(json_provider::to_string(input)?)
+    }
+
+    pub fn to_string_pretty<T: Serialize>(input: &T) -> Result<String, Error> {
+        Ok(json_provider::to_string_pretty(input)?)
+    }
+
     pub fn new(input: Vec<u8>) -> Result<Self, Error> {
         let mut scanner
             = Scanner::new(&input, 0);
@@ -154,7 +181,7 @@ impl JsonDocument {
         let post_value_offset
             = scanner.offset;
 
-        self.replace_range(pre_value_offset..post_value_offset, value.to_json_string(indent).as_bytes())
+        self.replace_range(pre_value_offset..post_value_offset, value.to_indented_json_string(indent).as_bytes())
     }
 
     fn insert_key(&mut self, path: &Path, value: Value) -> Result<(), Error> {
@@ -233,7 +260,7 @@ impl JsonDocument {
 
         push_string(&mut injected_content, &new_key);
         injected_content.extend_from_slice(b": ");
-        injected_content.extend_from_slice(&value.to_json_string(indent).as_bytes());
+        injected_content.extend_from_slice(&value.to_indented_json_string(indent).as_bytes());
         injected_content.extend_from_slice(b",");
         injected_content.extend_from_slice(&prior_whitespaces);
 
@@ -271,7 +298,7 @@ impl JsonDocument {
 
         push_string(&mut injected_content, &new_key);
         injected_content.extend_from_slice(b": ");
-        injected_content.extend_from_slice(&value.to_json_string(indent).as_bytes());
+        injected_content.extend_from_slice(&value.to_indented_json_string(indent).as_bytes());
 
         self.replace_range(scanner.offset..scanner.offset, &injected_content)
     }
@@ -304,7 +331,7 @@ impl JsonDocument {
 
         push_string(&mut new_content, &new_key);
         new_content.extend_from_slice(b": ");
-        new_content.extend_from_slice(&value.to_json_string(indent.clone()).as_bytes());
+        new_content.extend_from_slice(&value.to_indented_json_string(indent.clone()).as_bytes());
 
         if indent.child_indent.is_some() {
             new_content.push(b'\n');
@@ -669,7 +696,7 @@ impl<'a> Scanner<'a> {
             = &self.input[before_key_offset..self.offset];
 
         if let Some(path) = &mut self.path {
-            path.push(sonic_rs::from_slice(slice).unwrap());
+            path.push(JsonDocument::hydrate_from_slice(slice)?);
             self.fields.push((Path::from_segments(path.clone()), before_key_offset));
         }
 
@@ -746,6 +773,7 @@ mod tests {
 
     // Delete operations
     #[case(b"{\"test\": \"value\"}", vec!["test"], Value::Undefined, b"{}")]
+    #[case(b"{\"keep\": \"this\", \"delete\": \"me\"}", vec!["delete"], Value::Undefined, b"{\"keep\": \"this\"}")]
     #[case(b"{\n  \"keep\": \"this\",\n  \"delete\": \"me\"\n}", vec!["delete"], Value::Undefined, b"{\n  \"keep\": \"this\"\n}")]
     #[case(b"{\"parent\": {\"child\": \"value\"}}", vec!["parent", "child"], Value::Undefined, b"{}")]
     #[case(b"{\"parent\": {\"keep\": \"this\", \"delete\": \"me\"}}", vec!["parent", "delete"], Value::Undefined, b"{\"parent\": {\"keep\": \"this\"}}")]
