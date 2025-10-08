@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use tokio::time::{sleep, Duration};
 use zpm_config::ConfigExt;
 use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Locator, RegistryReference};
@@ -8,6 +9,7 @@ use crate::{
     error::Error,
     install::{FetchResult, InstallContext},
     npm::{self, NpmEntryExt},
+    report::current_report,
 };
 
 use super::PackageData;
@@ -62,11 +64,31 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .expect("The package cache is required for fetching npm packages");
 
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
-        let response
-            = project.http_client.get(&registry_url)?.send().await?;
+        let url = registry_url.clone();
 
-        let tgz_data = response.bytes().await
-            .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+        let fetch_future = async {
+            let response = project.http_client.get(&registry_url)?.send().await?;
+            let tgz_data = response.bytes().await
+                .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+            Ok::<_, Error>(tgz_data)
+        };
+
+        let warning_future = async {
+            sleep(Duration::from_secs(15)).await;
+            current_report().await.as_mut().map(|report| {
+                report.info(format!("Request to {} is taking longer than 15 seconds...", url));
+            });
+        };
+
+        let tgz_data = tokio::select! {
+            result = fetch_future => result?,
+            _ = warning_future => {
+                // Warning was shown, now wait for the request to complete
+                let response = project.http_client.get(&registry_url)?.send().await?;
+                response.bytes().await
+                    .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?
+            }
+        };
 
         let tar_data
             = zpm_formats::tar::unpack_tgz(&tgz_data)?;
