@@ -1,7 +1,7 @@
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Deserializer};
 use zpm_macro_enum::zpm_enum;
-use zpm_primitives::{Descriptor, Ident, Locator, Range};
+use zpm_primitives::{Descriptor, Ident, Locator, Range, RegistrySemverRange};
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
 use crate::{
@@ -157,10 +157,12 @@ impl ResolutionsField {
     }
 
     fn add_entry(&mut self, selector: ResolutionSelector, range: Range) {
-        let target_ident = selector.target_ident().clone();
+        let target_ident
+            = selector.target_ident();
+
         self.entries.push((selector.clone(), range.clone()));
         self.by_ident
-            .entry(target_ident)
+            .entry(target_ident.clone())
             .or_default()
             .push((selector, range));
     }
@@ -210,6 +212,17 @@ impl<'de> Visitor<'de> for ResolutionsFieldVisitor {
             let value_str: String = map.next_value()?;
             let range = Range::from_file_string(&value_str)
                 .map_err(|e| de::Error::custom(format!("Invalid range '{}': {}", value_str, e)))?;
+
+            // TODO: Remove this in a future major version; we're keeping it for backwards compatibility with
+            // the Berry codebase in which `yarn patch` was adding the "npm:" prefix to all parent descriptors.
+            let has_deprecated_npm_prefix = matches!(selector,
+                | ResolutionSelector::Descriptor(DescriptorResolutionSelector {descriptor: Descriptor {range: Range::RegistrySemver(RegistrySemverRange {ident: None, ..}), ..}, ..})
+                | ResolutionSelector::DescriptorIdent(DescriptorIdentResolutionSelector {parent_descriptor: Descriptor {range: Range::RegistrySemver(RegistrySemverRange {ident: None, ..}), ..}, ..})
+            );
+
+            if has_deprecated_npm_prefix {
+                return Err(de::Error::custom("the 'npm:' prefix is no longer needed"));
+            }
 
             field.add_entry(selector, range);
         }

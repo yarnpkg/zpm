@@ -105,8 +105,8 @@ pub enum Error {
     #[error("Package manifest not found")]
     ManifestNotFound,
 
-    #[error("Package manifest failed to parse ({})", .0.to_print_string())]
-    ManifestParseError(Path),
+    #[error("Package manifest failed to parse ({}): {}", .0.to_print_string(), .1)]
+    ManifestParseError(Path, Arc<dyn std::error::Error + Send + Sync>),
 
     #[error("Invalid descriptor ({0})")]
     InvalidDescriptor(String),
