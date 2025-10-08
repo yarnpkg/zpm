@@ -3,17 +3,17 @@ use zpm_utils::{IoResultExt, Path};
 
 use crate::{cache, errors::Error};
 
+/// Clear all cached Yarn binaries
 #[cli::command]
 #[cli::path("switch", "cache")]
 #[cli::category("Cache management")]
-#[cli::description("Clear all cached Yarn binaries")]
 #[derive(Debug)]
 pub struct CacheClearCommand {
     #[cli::option("-c,--clear,--clean")]
     _clear: bool,
 
+    /// Clear cache entries older than 7 days
     #[cli::option("--old", default = false)]
-    #[cli::description("Clear cache entries older than 7 days")]
     old: bool,
 }
 

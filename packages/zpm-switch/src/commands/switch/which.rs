@@ -1,10 +1,10 @@
 use clipanion::cli;
 use zpm_utils::{Path, ToFileString};
 
+/// Print the path of the current Yarn Switch binary
 #[cli::command]
 #[cli::path("switch", "which")]
 #[cli::category("Switch commands")]
-#[cli::description("Print the path of the current Yarn Switch binary")]
 #[derive(Debug)]
 pub struct WhichCommand {
 }

@@ -5,16 +5,15 @@ use zpm_utils::{Path, ToFileString, ToHumanString};
 
 use crate::error::Error;
 
+/// Set the version of Yarn to use with the local project
 #[cli::command]
 #[cli::path("set", "version")]
 #[cli::category("Configuration commands")]
-#[cli::description("Set the version of Yarn to use with the local project")]
 pub struct SetVersion {
     version: zpm_switch::Selector,
 }
 
 impl SetVersion {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let Ok(switch_detected_root) = std::env::var("YARNSW_DETECTED_ROOT") else {
             return Err(Error::FailedToGetSwitchDetectedRoot);

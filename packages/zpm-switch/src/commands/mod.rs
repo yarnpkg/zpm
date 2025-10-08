@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use clipanion::{prelude::*, program_async, Environment};
+use clipanion::{prelude::*, Environment};
 use zpm_utils::{Path, ToFileString};
 
 use crate::{cwd::set_fake_cwd, yarn::{extract_bin_meta, BinMeta}};
@@ -9,23 +9,24 @@ pub mod init;
 pub mod proxy;
 pub mod switch;
 
-program_async!(SwitchExecCli, [
-    switch::cache_check::CacheCheckCommand,
-    switch::cache_clear::CacheClearCommand,
-    switch::cache_install::CacheInstallCommand,
-    switch::cache_list::CacheListCommand,
-    switch::explicit::ExplicitCommand,
-    switch::links_list::LinksListCommand,
-    switch::links_clear::LinksClearCommand,
-    switch::link::LinkCommand,
-    switch::postinstall::PostinstallCommand,
-    switch::unlink::UnlinkCommand,
-    switch::update::UpdateCommand,
-    switch::version::VersionCommand,
-    switch::which::WhichCommand,
-    proxy::ProxyCommand,
-    init::InitCommand,
-]);
+#[cli::program(async)]
+enum SwitchExecCli {
+    CacheCheckCommand(switch::cache_check::CacheCheckCommand),
+    CacheClearCommand(switch::cache_clear::CacheClearCommand),
+    CacheInstallCommand(switch::cache_install::CacheInstallCommand),
+    CacheListCommand(switch::cache_list::CacheListCommand),
+    ExplicitCommand(switch::explicit::ExplicitCommand),
+    LinksListCommand(switch::links_list::LinksListCommand),
+    LinksClearCommand(switch::links_clear::LinksClearCommand),
+    LinkCommand(switch::link::LinkCommand),
+    PostinstallCommand(switch::postinstall::PostinstallCommand),
+    UnlinkCommand(switch::unlink::UnlinkCommand),
+    UpdateCommand(switch::update::UpdateCommand),
+    VersionCommand(switch::version::VersionCommand),
+    WhichCommand(switch::which::WhichCommand),
+    ProxyCommand(proxy::ProxyCommand),
+    InitCommand(init::InitCommand),
+}
 
 pub async fn run_default() -> ExitCode {
     let self_path = Path::current_exe()

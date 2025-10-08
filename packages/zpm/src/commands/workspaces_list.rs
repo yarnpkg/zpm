@@ -11,10 +11,10 @@ use crate::{
     project::{Project, Workspace},
 };
 
+/// List the workspaces in the project
 #[cli::command]
 #[cli::path("workspaces", "list")]
 #[cli::category("Workspace commands")]
-#[cli::description("List the workspaces in the project")]
 pub struct WorkspacesList {
     #[cli::option("-v,--verbose", default = false)]
     verbose: bool,
@@ -143,7 +143,6 @@ impl WorkspacesList {
         Ok(workspaces)
     }
 
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = Project::new(None).await?;

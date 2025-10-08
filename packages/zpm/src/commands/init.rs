@@ -38,7 +38,6 @@ pub struct InitWithTemplate {
 }
 
 impl InitWithTemplate {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let init_cwd
             = Path::current_dir()?;
@@ -110,7 +109,6 @@ pub struct Init {
 }
 
 impl Init {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let init_cwd
             = Path::current_dir()?;

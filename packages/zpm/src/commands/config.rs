@@ -5,16 +5,15 @@ use zpm_utils::ToHumanString;
 
 use crate::{error::Error, project::Project};
 
+/// List the project's configuration values
 #[cli::command]
 #[cli::path("config")]
 #[cli::path("config", "get")]
 #[cli::category("Configuration commands")]
-#[cli::description("List the project's configuration values")]
 pub struct Config {
 }
 
 impl Config {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;

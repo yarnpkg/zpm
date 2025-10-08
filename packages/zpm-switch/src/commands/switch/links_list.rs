@@ -3,10 +3,10 @@ use zpm_utils::{tree, AbstractValue};
 
 use crate::{links::list_links, errors::Error};
 
+/// List all local links
 #[cli::command]
 #[cli::path("switch", "links")]
 #[cli::category("Local Yarn development")]
-#[cli::description("List all local links")]
 #[derive(Debug)]
 pub struct LinksListCommand {
 }

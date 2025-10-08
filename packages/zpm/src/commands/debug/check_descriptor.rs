@@ -11,7 +11,7 @@ pub struct CheckDescriptor {
 }
 
 impl CheckDescriptor {
-    pub fn execute(&self) -> Result<(), Error> {
+    pub async fn execute(&self) -> Result<(), Error> {
         let stringified
             = self.descriptor.to_file_string();
 

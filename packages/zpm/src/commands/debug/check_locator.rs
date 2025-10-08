@@ -11,7 +11,7 @@ pub struct CheckLocator {
 }
 
 impl CheckLocator {
-    pub fn execute(&self) -> Result<(), Error> {
+    pub async fn execute(&self) -> Result<(), Error> {
         let stringified
             = self.locator.to_file_string();
 

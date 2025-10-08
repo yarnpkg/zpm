@@ -11,10 +11,10 @@ use crate::{
     report::{current_report, with_report_result, PromptType, StreamReport, StreamReportConfig},
 };
 
+/// Store new login info to access the npm registry
 #[cli::command]
 #[cli::path("npm", "login")]
 #[cli::category("Npm-related commands")]
-#[cli::description("Store new login info to access the npm registry")]
 pub struct Login {
     #[cli::option("-s,--scope")]
     #[cli::description("Login to the registry configured for a given scope")]
@@ -52,7 +52,6 @@ struct Credentials {
 }
 
 impl Login {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;

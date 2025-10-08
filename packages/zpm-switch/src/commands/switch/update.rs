@@ -5,10 +5,10 @@ use zpm_utils::Path;
 
 use crate::{errors::Error, http::fetch};
 
+/// Update the Yarn Switch binary to the latest version
 #[cli::command]
 #[cli::path("switch", "update")]
 #[cli::category("Switch commands")]
-#[cli::description("Update the Yarn Switch binary to the latest version")]
 #[derive(Debug)]
 pub struct UpdateCommand {
 }

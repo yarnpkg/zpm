@@ -1,4 +1,5 @@
 {
+  "name": "@yarnpkg/documentation",
   "type": "module",
   "scripts": {
     "dev": "astro dev",

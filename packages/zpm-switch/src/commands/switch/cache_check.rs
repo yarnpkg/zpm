@@ -3,10 +3,10 @@ use zpm_utils::{get_system_string};
 
 use crate::{cache, errors::Error};
 
+/// Check if the specified versions are available in the cache
 #[cli::command]
 #[cli::path("switch", "cache")]
 #[cli::category("Cache management")]
-#[cli::description("Check if the specified versions are available in the cache")]
 #[derive(Debug)]
 pub struct CacheCheckCommand {
     #[cli::option("--check")]

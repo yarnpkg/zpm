@@ -14,10 +14,10 @@ use crate::{
     script::{Binary, ScriptEnvironment},
 };
 
+/// Install a temporary package and run it
 #[cli::command(proxy)]
 #[cli::path("dlx")]
 #[cli::category("Scripting commands")]
-#[cli::description("Install a temporary package and run it")]
 pub struct DlxWithPackages {
     #[cli::option("-q,--quiet", default = false)]
     quiet: bool,
@@ -30,7 +30,6 @@ pub struct DlxWithPackages {
 }
 
 impl DlxWithPackages {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
         let dlx_project
             = setup_project().await?;
@@ -74,7 +73,6 @@ pub struct Dlx {
 }
 
 impl Dlx {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
         let dlx_project
             = setup_project().await?;

@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use clipanion::{prelude::*, program, Environment};
+use clipanion::{prelude::*, Environment};
 use zpm_switch::{extract_bin_meta, BinMeta};
 
 mod debug;
@@ -31,53 +31,54 @@ mod workspaces_focus;
 mod workspaces_list;
 mod workspace;
 
-program!(YarnCli, [
-    debug::check_descriptor::CheckDescriptor,
-    debug::check_ident::CheckIdent,
-    debug::check_locator::CheckLocator,
-    debug::check_range::CheckRange,
-    debug::check_reference::CheckReference,
-    debug::check_requirements::CheckRequirements,
-    debug::check_semver_version::CheckSemverVersion,
-    debug::iter_zip::IterZip,
-    debug::print_hoisting::PrintHoisting,
-    debug::print_platform::PrintPlatform,
+#[cli::program(async)]
+pub enum YarnCli {
+    CheckDescriptor(debug::check_descriptor::CheckDescriptor),
+    CheckIdent(debug::check_ident::CheckIdent),
+    CheckLocator(debug::check_locator::CheckLocator),
+    CheckRange(debug::check_range::CheckRange),
+    CheckReference(debug::check_reference::CheckReference),
+    CheckRequirements(debug::check_requirements::CheckRequirements),
+    CheckSemverVersion(debug::check_semver_version::CheckSemverVersion),
+    IterZip(debug::iter_zip::IterZip),
+    PrintHoisting(debug::print_hoisting::PrintHoisting),
+    PrintPlatform(debug::print_platform::PrintPlatform),
 
-    npm::login::Login,
-    npm::logout_all::LogoutAll,
-    npm::logout::Logout,
-    npm::whoami::Whoami,
+    Login(npm::login::Login),
+    LogoutAll(npm::logout_all::LogoutAll),
+    Logout(npm::logout::Logout),
+    Whoami(npm::whoami::Whoami),
 
-    add::Add,
-    bin::BinList,
-    bin::Bin,
-    config::Config,
-    config_get::ConfigGet,
-    config_set::ConfigSet,
-    constraints::Constraints,
-    dedupe::Dedupe,
-    dlx::DlxWithPackages,
-    dlx::Dlx,
-    exec::Exec,
-    info::Info,
-    init::InitWithTemplate,
-    init::Init,
-    install::Install,
-    set_resolution::SetResolution,
-    set_version::SetVersion,
-    node::Node,
-    pack::Pack,
-    rebuild::Rebuild,
-    remove::Remove,
-    run::Run,
-    unplug::Unplug,
-    up::Up,
-    workspaces_focus::WorkspacesFocus,
-    workspaces_list::WorkspacesList,
-    workspace::Workspace,
-]);
+    Add(add::Add),
+    BinList(bin::BinList),
+    Bin(bin::Bin),
+    Config(config::Config),
+    ConfigGet(config_get::ConfigGet),
+    ConfigSet(config_set::ConfigSet),
+    Constraints(constraints::Constraints),
+    Dedupe(dedupe::Dedupe),
+    DlxWithPackages(dlx::DlxWithPackages),
+    Dlx(dlx::Dlx),
+    Exec(exec::Exec),
+    Info(info::Info),
+    InitWithTemplate(init::InitWithTemplate),
+    Init(init::Init),
+    Install(install::Install),
+    SetResolution(set_resolution::SetResolution),
+    SetVersion(set_version::SetVersion),
+    Node(node::Node),
+    Pack(pack::Pack),
+    Rebuild(rebuild::Rebuild),
+    Remove(remove::Remove),
+    Run(run::Run),
+    Unplug(unplug::Unplug),
+    Up(up::Up),
+    WorkspacesFocus(workspaces_focus::WorkspacesFocus),
+    WorkspacesList(workspaces_list::WorkspacesList),
+    Workspace(workspace::Workspace),
+}
 
-pub fn run_default() -> ExitCode {
+pub async fn run_default() -> ExitCode {
     let BinMeta {
         cwd,
         args,
@@ -96,5 +97,5 @@ pub fn run_default() -> ExitCode {
             .with_version(version)
             .with_argv(args);
 
-    YarnCli::run(env)
+    YarnCli::run(env).await
 }

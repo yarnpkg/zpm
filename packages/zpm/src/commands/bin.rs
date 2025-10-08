@@ -9,21 +9,20 @@ use crate::{error::Error, project};
 pub struct BinList {}
 
 impl BinList {
-    pub fn execute(&self) -> Result<(), Error> {
+    pub async fn execute(&self) -> Result<(), Error> {
         Ok(())
     }
 }
 
+/// Get the path of an accessible binary
 #[cli::command]
 #[cli::path("bin")]
 #[cli::category("Scripting commands")]
-#[cli::description("Get the path of an accessible binary")]
 pub struct Bin {
     name: String,
 }
 
 impl Bin {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = project::Project::new(None).await?;

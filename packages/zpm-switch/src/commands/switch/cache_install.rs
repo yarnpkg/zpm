@@ -2,10 +2,10 @@ use clipanion::cli;
 
 use crate::{cwd::get_final_cwd, errors::Error, install::install_package_manager, manifest::{find_closest_package_manager, validate_package_manager, PackageManagerReference, VersionPackageManagerReference}};
 
+/// Install the current project's Yarn version, or specific Yarn releases
 #[cli::command]
 #[cli::path("switch", "cache")]
 #[cli::category("Cache management")]
-#[cli::description("Install the current project's Yarn version, or specific Yarn releases")]
 #[derive(Debug)]
 pub struct CacheInstallCommand {
     #[cli::option("-i,--install")]

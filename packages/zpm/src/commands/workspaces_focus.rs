@@ -8,10 +8,10 @@ use crate::{
     project::{Project, RunInstallOptions, Workspace},
 };
 
+/// Install a single workspace and its dependencies
 #[cli::command]
 #[cli::path("workspaces", "focus")]
 #[cli::category("Workspace commands")]
-#[cli::description("Install a single workspace and its dependencies")]
 pub struct WorkspacesFocus {
     #[cli::option("-A,--all", default = false)]
     all: bool,
@@ -26,7 +26,6 @@ pub struct WorkspacesFocus {
 }
 
 impl WorkspacesFocus {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = Project::new(None).await?;

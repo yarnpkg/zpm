@@ -28,10 +28,10 @@ impl FromStr for DedupeStrategy {
     }
 }
 
+/// Run a shell command in the package environment
 #[cli::command]
 #[cli::path("dedupe")]
 #[cli::category("Scripting commands")]
-#[cli::description("Run a shell command in the package environment")]
 pub struct Dedupe {
     #[cli::option("--check", default = false)]
     check: bool,
@@ -49,7 +49,6 @@ pub struct Dedupe {
 }
 
 impl Dedupe {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<ExitCode, Error> {
         let mut project
             = Project::new(None).await?;

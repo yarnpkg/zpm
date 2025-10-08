@@ -7,7 +7,7 @@ pub struct PrintPlatform {
 }
 
 impl PrintPlatform {
-    pub fn execute(&self) {
+    pub async fn execute(&self) {
         let platform
             = get_system_string();
 
