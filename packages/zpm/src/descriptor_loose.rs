@@ -9,7 +9,7 @@ use zpm_primitives::{AnonymousSemverRange, AnonymousTagRange, Descriptor, Folder
 use zpm_semver::RangeKind;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString, ToHumanString};
 
-use crate::{error::Error, install::InstallContext, manifest::helpers::{parse_manifest_from_bytes, read_manifest}, project::Project, resolvers};
+use crate::{error::Error, install::InstallContext, manifest::helpers::{parse_manifest_from_bytes, read_manifest}, project::Project, report::{with_report_result, StreamReport, StreamReportConfig}, resolvers};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ResolveOptions {
@@ -95,10 +95,15 @@ impl LooseDescriptor {
             futures.push(future.boxed());
         }
 
-        let descriptors
-            = futures::future::join_all(futures).await
+        let report = StreamReport::new(StreamReportConfig {
+            ..StreamReportConfig::default()
+        });
+
+        let descriptors = with_report_result(report, async {
+            futures::future::join_all(futures).await
                 .into_iter()
-                .collect::<Result<Vec<_>, Error>>()?;
+                .collect::<Result<Vec<_>, Error>>()
+        }).await?;
 
         Ok(descriptors)
     }

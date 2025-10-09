@@ -108,7 +108,7 @@ pub async fn with_context_result<F, R>(context: ReportContext, f: F) -> Result<R
     }).await
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct StreamReportConfig {
     pub enable_progress_bars: bool,
     pub enable_timers: bool,
