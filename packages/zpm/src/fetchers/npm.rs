@@ -56,14 +56,24 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         return Ok(get_mock_fetch_result(context, locator, params)?);
     }
 
-    let registry_base = project.config.registry_base_for(&params.ident);
-    let registry_url = npm::registry_url_for_package_data(&registry_base, &params.ident, &params.version);
+    let registry_base
+        = project.config.registry_base_for(&params.ident);
+    let registry_url
+        = npm::registry_url_for_package_data(&registry_base, &params.ident, &params.version);
 
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching npm packages");
 
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
-        let response = http_npm::get_npm_url(&project.http_client, &registry_url, &registry_base).await?;
+        let path
+            = registry_url.strip_prefix(&registry_base).unwrap_or(&registry_url);
+        let response
+            = http_npm::get(&http_npm::NpmHttpParams {
+                http_client: &project.http_client,
+                registry: &registry_base,
+                path,
+                authorization: None,
+            }).await?;
         let tgz_data = response.bytes().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
