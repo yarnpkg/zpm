@@ -155,7 +155,11 @@ impl PatchCommit {
                 continue;
             };
 
-            let new_descriptor = Self::make_patch_descriptor(original_descriptor, &locator, &patch_rel_path);
+            // Convert the locator to a descriptor to use as the source for the patch
+            let source_range = Range::from_file_string(&locator.reference.to_file_string())
+                .map_err(|e| Error::InvalidRange(e.to_string()))?;
+            let source_descriptor = Descriptor::new(locator.ident.clone(), source_range);
+            let new_descriptor = Self::make_patch_descriptor(&source_descriptor, &patch_rel_path);
             
             formatter.set_path(
                 &zpm_parsers::Path::from_segments(vec![
@@ -175,8 +179,13 @@ impl PatchCommit {
             let manifest_content = manifest_path.fs_read_prealloc()?;
             let mut formatter = JsonDocument::new(manifest_content)?;
 
+            // Convert the locator to a descriptor to use as the source for the patch
+            let source_range = Range::from_file_string(&locator.reference.to_file_string())
+                .map_err(|e| Error::InvalidRange(e.to_string()))?;
+            let source_descriptor = Descriptor::new(locator.ident.clone(), source_range);
+
             for (original_descriptor, _) in &transitive_dependencies {
-                let new_descriptor = Self::make_patch_descriptor(original_descriptor, &locator, &patch_rel_path);
+                let new_descriptor = Self::make_patch_descriptor(&source_descriptor, &patch_rel_path);
                 
                 formatter.set_path(
                     &zpm_parsers::Path::from_segments(vec![
@@ -201,15 +210,15 @@ impl PatchCommit {
         }
     }
 
-    fn make_patch_descriptor(original_descriptor: &Descriptor, _source_locator: &Locator, patch_path: &str) -> Descriptor {
+    fn make_patch_descriptor(source_descriptor: &Descriptor, patch_path: &str) -> Descriptor {
         // Create the patch range using the descriptor protocol
         let patch_range = zpm_primitives::PatchRange {
-            inner: Box::new(UrlEncoded(original_descriptor.clone())),
+            inner: Box::new(UrlEncoded(source_descriptor.clone())),
             path: patch_path.to_string(),
         };
 
         Descriptor::new(
-            original_descriptor.ident.clone(),
+            source_descriptor.ident.clone(),
             Range::Patch(patch_range),
         )
     }
