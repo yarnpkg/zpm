@@ -1,0 +1,116 @@
+name: Releases
+
+on:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Checking if a release exists
+    runs-on: ubuntu-latest
+
+    outputs:
+      needs-release: ${{steps.check.outputs.needs-release}}
+      version: ${{steps.version.outputs.version}}
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
+      - name: Compute version
+        id: version
+        run: |
+          version=$(cargo pkgid -p zpm-switch | cut -d "#" -f2)
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Check if release exists
+        id: check
+        run: |
+          if gh release view "v${{steps.version.outputs.version}}" >/dev/null 2>&1; then
+            echo "needs-release=false" >> $GITHUB_OUTPUT
+            echo "Release v${{ steps.version.outputs.version }} already exists"
+          else
+            echo "needs-release=true" >> $GITHUB_OUTPUT
+            echo "Release v${{ steps.version.outputs.version }} does not exist"
+          fi
+        env:
+          GH_TOKEN: ${{github.token}}
+
+  build:
+    if: needs.check.outputs.needs-release == 'true'
+    needs: check
+
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+
+    name: 'Building ${{matrix.target}}'
+    runs-on: ${{matrix.os}}
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
+      - uses: ./.github/actions/build
+        id: build
+        with:
+          target: ${{matrix.target}}
+          profile: release-lto-nodebug
+          version: ${{needs.check.outputs.version}}
+
+      - name: Generate the archive files
+        run: |
+          zip -jX yarn-${{matrix.target}}.zip target/${{matrix.target}}/release-lto-nodebug/{yarn-bin,yarn,LICENSE.md}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yarn-${{matrix.target}}
+          path: |
+            yarn-${{matrix.target}}.zip
+
+  release:
+    if: needs.check.outputs.needs-release == 'true'
+    needs: [check, build]
+
+    name: 'Creating a release'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        run: |
+          PRERELEASE_OPTIONS=
+
+          if [[ '${{needs.check.outputs.version}}' =~ - ]]; then
+            PRERELEASE_OPTIONS=--prerelease
+          fi
+
+          gh release create "v${{needs.check.outputs.version}}" \
+            --title "v${{needs.check.outputs.version}}" \
+            --notes "Release of v${{needs.check.outputs.version}}" \
+            --target ${{github.ref}} \
+            $PRERELEASE_OPTIONS \
+            artifacts/*
+        env:
+          GH_TOKEN: ${{github.token}}

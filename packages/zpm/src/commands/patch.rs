@@ -1,25 +1,27 @@
 use clipanion::cli;
+use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Ident, Locator, Reference};
 use zpm_utils::{DataType, Path, ToFileString, ToHumanString};
 
-use crate::{error::Error, project};
+use crate::{error::Error, fetchers::PackageData, project::{self, RunInstallOptions}};
 
+/// Start writing a patch for the package
 #[cli::command]
 #[cli::path("patch")]
 #[cli::category("Dependency management")]
-#[cli::description("Start writing a patch for the package")]
 pub struct Patch {
     ident: Ident,
 }
 
 impl Patch {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = project::Project::new(None).await?;
 
-        project
-            .lazy_install().await?;
+        let install_result = project.run_install(RunInstallOptions {
+            silent_or_error: true,
+            ..Default::default()
+        }).await?;
 
         let install_state = project.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
@@ -35,22 +37,28 @@ impl Patch {
             .map(unwrap_patch_locator)
             .collect::<Vec<_>>();
 
-        let project_cache
-            = project.package_cache()?;
-
         for locator in relevant_locators {
-            let cache_path
-                = project_cache.key_path(&locator, ".zip");
-
-            if !cache_path.fs_exists() {
+            let Some(package_data) = install_result.package_data.get(&locator) else {
                 continue;
-            }
+            };
 
-            let cache_data
-                = cache_path.fs_read()?;
+            let PackageData::Zip {archive_path, package_directory, ..} = package_data else {
+                continue;
+            };
+
+            let cache_data = archive_path
+                .fs_read()?;
+
+            let package_subdir
+                = package_directory
+                    .strip_prefix(archive_path)
+                    .expect("The package directory should lead within the archive");
 
             let entries
-                = zpm_formats::zip::entries_from_zip(&cache_data)?;
+                = zpm_formats::zip::entries_from_zip(&cache_data)?
+                    .into_iter()
+                    .strip_path_prefix(&package_subdir)
+                    .collect::<Vec<_>>();
 
             let root_path
                 = Path::temp_dir_pattern("patch-<>")?;

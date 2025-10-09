@@ -1,6 +1,5 @@
 [package]
 name = "zpm"
-version = "6.0.0-alpha.0"
 edition = "2024"
 
 [[bin]]
@@ -9,13 +8,11 @@ path = "src/main.rs"
 
 [dependencies]
 base64 = "0.22.0"
-bytes = "1.7.1"
 bincode = {version = "2.0.0-rc.3", features = ["serde"] }
 chrono = "0.4.38"
-clipanion = { git = "https://github.com/arcanis/clipanion-rs.git" }
+clipanion = { git = "https://github.com/arcanis/clipanion-rs.git", features = ["serde"] }
 colored = "3.0.0"
 dialoguer = "0.11.0"
-fancy-regex = "0.13.0"
 futures = "0.3.30"
 git-url-parse = "0.4.5"
 globset = "0.4.14"
@@ -26,17 +23,15 @@ reqwest = { version = "0.12.5", default-features = false, features = ["gzip", "h
 regex = "1.10.6"
 serde_with = "3.9.0"
 serde_yaml = "0.9.34"
-sonic-rs = "0.5.1"
 thiserror = "1.0.63"
 tokio = { version = "1.39.2", features = ["full"] }
-serde_json = "1.0.124"
+serde_json = "1.0.145"
 serde = { version = "1.0.207", features = ["derive"] }
 wax = { git = "https://github.com/arcanis/wax.git" }
 zpm-config = { path = "../zpm-config" }
 zpm-formats = { path = "../zpm-formats" }
 zpm-git = { path = "../zpm-git" }
 zpm-macro-enum = { path = "../zpm-macro-enum" }
-zpm-macros = { path = "../zpm-macros" }
 zpm-parsers = { path = "../zpm-parsers" }
 zpm-primitives = { path = "../zpm-primitives" }
 zpm-semver = { path = "../zpm-semver" }
@@ -48,3 +43,5 @@ brotli = "8.0.1"
 env_logger = "0.11.8"
 hickory-resolver = "0.25.2"
 indexmap = {version = "2.11.0", features = ["serde"]}
+sha2 = "0.10.8"
+hex = "0.4.3"

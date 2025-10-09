@@ -2,13 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use itertools::Itertools;
 use zpm_primitives::{Ident, Locator};
-use zpm_utils::ToHumanString;
+use zpm_utils::{tree, ToHumanString};
 
 use crate::{
     algos,
     install::InstallState,
     project::Project,
-    ui,
 };
 
 #[derive(Debug, Clone)]
@@ -248,8 +247,6 @@ impl WorkTree {
 
 pub struct TreeRenderer<'a> {
     tree: &'a WorkTree,
-
-    parent_dependencies: BTreeMap<&'a Ident, &'a Locator>,
     parent_stack: Vec<usize>,
 }
 
@@ -257,16 +254,15 @@ impl<'a> TreeRenderer<'a> {
     pub fn new(tree: &'a WorkTree) -> Self {
         Self {
             tree,
-            parent_dependencies: BTreeMap::new(),
             parent_stack: vec![],
         }
     }
 
-    pub fn convert(&mut self) -> ui::tree::Node<'a> {
+    pub fn convert(&mut self) -> tree::Node<'a> {
         self.convert_impl(0, BTreeMap::new())
     }
 
-    fn convert_impl(&mut self, node_idx: usize, available_dependencies: BTreeMap<&'a Ident, &'a Locator>) -> ui::tree::Node<'a> {
+    fn convert_impl(&mut self, node_idx: usize, available_dependencies: BTreeMap<&'a Ident, &'a Locator>) -> tree::Node<'a> {
         let is_cycle
             = self.parent_stack.contains(&node_idx);
 
@@ -303,7 +299,7 @@ impl<'a> TreeRenderer<'a> {
                 locator.to_print_string(),
             );
 
-            children.push(ui::tree::Node {
+            children.push(tree::Node {
                 label: Some(label),
                 value: None,
                 children: None,
@@ -316,10 +312,10 @@ impl<'a> TreeRenderer<'a> {
 
         self.parent_stack.pop();
 
-        ui::tree::Node {
+        tree::Node {
             label: Some(label),
             value: None,
-            children: Some(ui::tree::TreeNodeChildren::Vec(children)),
+            children: Some(tree::TreeNodeChildren::Vec(children)),
         }
     }
 

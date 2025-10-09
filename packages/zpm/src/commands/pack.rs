@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, str::FromStr};
 
 use zpm_formats::{iter_ext::IterExt, tar::ToTar};
 use zpm_primitives::Locator;
@@ -9,21 +9,24 @@ use zpm_utils::ToFileString;
 use crate::{
     error::Error,
     manifest::helpers::parse_manifest,
-    pack::{pack_list, pack_manifest},
+    pack::{pack_list, pack_manifest, PackManifestOptions},
     project::{Project, RunInstallOptions, Workspace},
     script::ScriptEnvironment,
 };
 
+/// Pack the project into a distributable archive
 #[cli::command(proxy)]
 #[cli::path("pack")]
 #[cli::category("Release commands")]
-#[cli::description("Pack the project into a distributable archive")]
 pub struct Pack {
     #[cli::option("-n,--dry-run", default = false)]
     dry_run: bool,
 
     #[cli::option("--install-if-needed", default = false)]
     install_if_needed: bool,
+
+    #[cli::option("--preserve-workspaces", default = false)]
+    preserve_workspaces: bool,
 
     #[cli::option("--json", default = false)]
     json: bool,
@@ -33,7 +36,6 @@ pub struct Pack {
 }
 
 impl Pack {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = Project::new(None).await?;
@@ -92,7 +94,9 @@ impl Pack {
 
     async fn dry_run(&self, project: &Project, active_workspace: &Workspace) -> Result<(), Error> {
         let pack_manifest_content
-            = pack_manifest(project, active_workspace)?;
+            = pack_manifest(project, active_workspace, PackManifestOptions {
+                preserve_workspaces: self.preserve_workspaces,
+            })?;
 
         let pack_manifest
             = parse_manifest(&pack_manifest_content)?;
@@ -102,7 +106,10 @@ impl Pack {
 
         if self.json {
             for path in pack_list {
-                sonic_rs::json!({"location": path}).to_string();
+                zpm_parsers::Value::Object(vec![(
+                    "location".to_string(),
+                    zpm_parsers::Value::String(path.to_file_string()),
+                )]).to_json_string();
             }
         } else {
             for path in pack_list {
@@ -115,7 +122,9 @@ impl Pack {
 
     async fn gen_archive(&self, project: &Project, active_workspace: &Workspace) -> Result<(), Error> {
         let pack_manifest_content
-            = pack_manifest(project, active_workspace)?;
+            = pack_manifest(project, active_workspace, PackManifestOptions {
+                preserve_workspaces: self.preserve_workspaces,
+            })?;
 
         let pack_manifest
             = parse_manifest(&pack_manifest_content)?;
@@ -138,7 +147,7 @@ impl Pack {
         }
 
         for entry in entries.iter_mut() {
-            if executable_files.contains(&Path::try_from(&entry.name)?) {
+            if executable_files.contains(&entry.name) {
                 entry.mode = 0o755;
             } else {
                 entry.mode = 0o644;
@@ -147,7 +156,7 @@ impl Pack {
 
         let manifest_entry = entries
             .iter_mut()
-            .find(|entry| entry.name == "package.json");
+            .find(|entry| entry.name.basename() == Some("package.json"));
 
         if let Some(manifest_entry) = manifest_entry {
             manifest_entry.data = pack_manifest_content.into_bytes().into();
@@ -155,7 +164,7 @@ impl Pack {
 
         let packed_file = entries
             .into_iter()
-            .prefix_path("package")
+            .prefix_path(&Path::from_str("package")?)
             .collect::<Vec<_>>()
             .to_tgz()?;
 

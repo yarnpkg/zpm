@@ -1,0 +1,45 @@
+---
+import config from "virtual:starlight/user-config";
+import GitHub from "/src/assets/svg/github.svg";
+import Discord from "/src/assets/svg/discord.svg";
+
+interface IconMap {
+  [key: string]: ((props: astroHTML.JSX.SVGAttributes) => any) & ImageMetadata;
+}
+
+interface SocialLink {
+  label: string;
+  href: string;
+  icon: string;
+}
+
+const links: SocialLink[] = config.social || [];
+
+const iconMap: IconMap = {
+  github: GitHub,
+  discord: Discord,
+};
+---
+
+{
+  links.length > 0 && (
+    <div class="flex gap-x-6">
+      {links.map(({ label, href, icon }) => {
+        const IconComponent = iconMap[icon.toLowerCase()];
+        if (!IconComponent) return null;
+
+        return (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={label}
+            class="hover:opacity-80 transition-opacity"
+          >
+            <IconComponent class="w-6 h-6" />
+          </a>
+        );
+      })}
+    </div>
+  )
+}

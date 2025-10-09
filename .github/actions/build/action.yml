@@ -1,0 +1,58 @@
+inputs:
+  target:
+    description: 'The target to build for'
+    required: true
+  profile:
+    description: 'The profile to build with'
+    required: true
+    default: 'release-lto-nodebug'
+  version:
+    description: 'The version of the build'
+    required: false
+
+outputs:
+  version:
+    description: 'The version of the build'
+    value: ${{steps.version.outputs.version}}
+
+runs:
+  using: composite
+  steps:
+    - name: Install cross
+      uses: taiki-e/install-action@a27ef18d36cfa66b0af3a360104621793b41c036 # v2.54.3
+      with:
+        tool: cross
+
+    - name: Add Rust Target
+      shell: bash
+      run: |
+        rustup target add '${{inputs.target}}'
+
+    - name: Compute the version
+      id: version
+      shell: bash
+      run: |
+        zpm_version=${{inputs.version}}
+
+        if [[ -z "$zpm_version" ]]; then
+          git_sha=$GITHUB_SHA
+          git_date=$(git show -s --format=%cd --date=format:'%Y%m%d' $GITHUB_SHA)
+
+          git_suffix=git.${git_date}.hash-${git_sha}
+
+          zpm_version=$(cargo pkgid -p zpm-switch | cut -d "#" -f2 | cut -d- -f1)-${git_suffix}
+        fi
+
+        echo -e "INFRA_VERSION=$zpm_version" >> $GITHUB_ENV
+        echo -e "version=$zpm_version" >> $GITHUB_OUTPUT
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+      with:
+        shared-key: ${{inputs.profile}}-${{inputs.target}}
+
+    - name: Build ${{steps.version.outputs.version}}
+      shell: bash
+      run: |
+        cross build --verbose --profile=${{inputs.profile}} --target=${{inputs.target}}
+        cp LICENSE.md target/${{inputs.target}}/${{inputs.profile}}/

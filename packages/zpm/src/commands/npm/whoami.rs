@@ -1,5 +1,6 @@
 use clipanion::cli;
 use serde::Deserialize;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
 use zpm_utils::FromFileString;
 
@@ -9,10 +10,10 @@ use crate::{
     project::Project,
 };
 
+/// Get the current user's npm token
 #[cli::command]
 #[cli::path("npm", "whoami")]
 #[cli::category("Npm-related commands")]
-#[cli::description("Get the current user's npm token")]
 pub struct Whoami {
     #[cli::option("-s,--scope")]
     #[cli::description("Get the token for a given scope")]
@@ -24,7 +25,6 @@ pub struct Whoami {
 }
 
 impl Whoami {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;
@@ -54,7 +54,7 @@ impl Whoami {
         let body
             = response.text().await?;
         let whoami: WhoamiResponse
-            = sonic_rs::from_str(&body)?;
+            = JsonDocument::hydrate_from_str(&body)?;
 
         println!("{}", whoami.username);
 

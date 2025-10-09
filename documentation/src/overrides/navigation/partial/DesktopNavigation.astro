@@ -1,0 +1,44 @@
+---
+import CustomSearch from "src/overrides/CustomSearch.astro";
+import CustomSocialIcons from "src/overrides/CustomSocialIcons.astro";
+import { NAVIGATION } from "src/content/consts.ts";
+import DropdownMenu from "./client/DropdownMenu";
+import cn from "@/utils/cn";
+
+import { isActivePath } from "@/utils/helpers";
+import Logo from "@/components/Logo.astro";
+
+const { pathname } = Astro.props;
+---
+
+<div class="relative bg-linear-to-b from-white/15 to-white/5 p-px rounded-full z-50">
+  <div class="rounded-full pl-8 pr-3 py-3 bg-linear-to-b from-gray-950 to-gray-800">
+    <div class="flex justify-between items-center">
+      <div class="flex items-center gap-x-10">
+        <Logo />
+        <ul class="flex items-center gap-x-8">
+          {NAVIGATION.map(({ href, title }: { href: string; title: string }) => (
+            <li>
+              <a
+                href={href}
+                aria-label={title}
+                class={cn(
+                  "text-white/90 hover:text-[#7388FF] transition-colors font-montserrat text-sm leading-5 tracking-normal",
+                  isActivePath(pathname, href) && "text-[#7388FF]"
+                )}
+              >
+                {title}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div class="flex items-center gap-x-6">
+        <DropdownMenu client:only="preact" />
+        <CustomSocialIcons />
+        <CustomSearch />
+      </div>
+    </div>
+  </div>
+</div>

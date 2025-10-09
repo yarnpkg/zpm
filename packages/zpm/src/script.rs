@@ -1,11 +1,13 @@
-use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, hash::{DefaultHasher, Hash, Hasher}, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
+use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
 
+use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
+use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
-use zpm_utils::{to_shell_line, FromFileString, Path, ToFileString};
+use zpm_utils::{shell_escape, to_shell_line, FromFileString, Hash64, Path, ToFileString};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
-use zpm_macros::track_time;
 
 use crate::{
     error::Error,
@@ -84,13 +86,13 @@ fn get_self_path() -> Result<Path, Error> {
     Ok(self_path)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, Serialize, Deserialize)]
 pub enum BinaryKind {
     Default,
     Node,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, Serialize, Deserialize)]
 pub struct Binary {
     pub path: Path,
     pub kind: BinaryKind,
@@ -113,14 +115,14 @@ impl Binary {
     }
 }
 
-#[derive(Hash)]
+#[derive(Serialize)]
 pub struct ScriptBinary {
     pub name: String,
     pub argv0: String,
     pub args: Vec<String>,
 }
 
-#[derive(Default, Hash)]
+#[derive(Default, Serialize)]
 pub struct ScriptBinaries {
     pub binaries: Vec<ScriptBinary>,
 }
@@ -382,6 +384,7 @@ impl ScriptEnvironment {
 
         self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
         self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
+        self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_file_string()));
 
         self
     }
@@ -468,42 +471,31 @@ impl ScriptEnvironment {
     }
 
     fn install_binaries(&mut self) -> Result<Path, Error> {
-        let mut hash = DefaultHasher::new();
-        self.binaries.hash(&mut hash);
-        let hash = hash.finish();
+        let hash
+            = Hash64::from_string(&JsonDocument::to_string(&self.binaries)?);
+        let dir_name
+            = format!(".yarn/zpm/binaries/zpm-{}", hash.to_file_string());
 
-        // We don't use a nonce in this pattern because we want to use the same
-        // temporary directory for the same package.
-        let dir_name = format!("zpm-{}", hash);
-        let dir = Path::temp_dir_pattern(&dir_name)?;
-
-        // We try to reuse directories rather than generate the binaries at
-        // every command; I noticed that on OSX the content of these directories
-        // is sometimes purged (perhaps because we write in /tmp?), so to avoid
-        // that we check whether a known file is still there before blindly
-        // using the directory.
-        //
-        let ready_path = dir
-            .with_join_str(".ready");
-
-        if !ready_path.fs_exists() && dir.fs_exists() {
-            dir.fs_rm()?;
-        }
+        let dir = Path::home_dir()?
+            .expect("Expected home directory")
+            .with_join_str(&dir_name);
 
         if !dir.fs_exists() {
-            let temp_dir = Path::temp_dir()?;
-            temp_dir.fs_create_dir_all()?;
+            let temp_dir
+                = Path::temp_dir()?;
 
             temp_dir
-                .with_join_str(".ready")
-                .fs_write_text("")?;
+                .fs_create_dir_all()?;
 
             for binary in &self.binaries.binaries {
                 make_path_wrapper(&temp_dir, &binary.name, &binary.argv0, &binary.args)?;
             }
 
+            dir
+                .fs_create_parent()?;
+
             temp_dir
-                .fs_rename(&dir)?;
+                .fs_concurrent_move(&dir)?;
         }
 
         Ok(dir)
@@ -608,12 +600,19 @@ impl ScriptEnvironment {
     }
 
     pub async fn run_script<I, S>(&mut self, script: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+        let mut final_script
+            = script.to_string();
+
+        for arg in args {
+            final_script.push(' ');
+            final_script.push_str(&shell_escape(arg.to_string().as_str()));
+        }
+
         let mut bash_args = vec![];
 
         bash_args.push("-c".to_string());
-        bash_args.push(format!("{} \"$@\"", script));
+        bash_args.push(final_script);
         bash_args.push("yarn-script".to_string());
-        bash_args.extend(args.into_iter().map(|arg| arg.to_string()));
 
         self.run_exec("bash", bash_args).await
     }

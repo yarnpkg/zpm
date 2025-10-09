@@ -2,6 +2,7 @@ mod colors;
 mod errors;
 mod glob;
 mod hash;
+mod internal;
 mod misc;
 mod notes;
 mod path;
@@ -11,8 +12,11 @@ mod pretty;
 mod process;
 mod serialization_builtins;
 mod serialization;
+mod shell;
 mod system;
 mod url;
+
+pub mod tree;
 
 pub use crate::colors::*;
 pub use crate::errors::*;
@@ -26,5 +30,6 @@ pub use crate::pretty::*;
 pub use crate::process::*;
 pub use crate::serialization_builtins::*;
 pub use crate::serialization::*;
+pub use crate::shell::*;
 pub use crate::system::*;
 pub use crate::url::*;

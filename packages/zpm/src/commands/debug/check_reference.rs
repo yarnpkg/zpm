@@ -11,7 +11,7 @@ pub struct CheckReference {
 }
 
 impl CheckReference {
-    pub fn execute(&self) -> Result<(), Error> {
+    pub async fn execute(&self) -> Result<(), Error> {
         let stringified
             = self.reference.to_file_string();
 

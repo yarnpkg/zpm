@@ -1,0 +1,25 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import Hero from "@/sections/Hero.astro";
+import Features from "@/sections/Features.astro";
+import HowItWorks from "@/sections/HowItWorks.astro";
+import Testimonials from "@/sections/Testimonials.astro";
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Home",
+    template: "splash",
+  }}
+  {...{
+    hideTitle: true,
+    hideBackground: true,
+  }}
+>
+  <div class="flex flex-col gap-y-32">
+    <Hero />
+    <Features />
+    <HowItWorks />
+    <Testimonials />
+  </div>
+</StarlightPage>

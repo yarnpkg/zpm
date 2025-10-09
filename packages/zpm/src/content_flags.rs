@@ -1,17 +1,15 @@
-use std::{collections::BTreeMap, sync::LazyLock};
+use std::{collections::BTreeMap, str::FromStr, sync::LazyLock};
 
 use bincode::{Decode, Encode};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{DefaultOnError, serde_as};
-use zpm_primitives::Locator;
+use zpm_parsers::JsonDocument;
+use zpm_primitives::{Ident, Locator, Reference};
 use zpm_utils::Path;
 
 use crate::{
-    build,
-    error::Error,
-    fetchers::PackageData,
-    system,
+    build, error::Error, fetchers::PackageData, manifest::bin::BinField, system
 };
 
 static UNPLUG_SCRIPTS: &[&str] = &["preinstall", "install", "postinstall"];
@@ -30,6 +28,12 @@ static UNPLUG_EXT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
  */
 #[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContentFlags {
+    /**
+     * The binaries that should be made available to the package.
+     */
+    #[serde(default)]
+    pub binaries: BTreeMap<String, Path>,
+
     /**
      * The build scripts that should be run after the package got installed.
      */
@@ -53,6 +57,7 @@ pub struct ContentFlags {
 impl Default for ContentFlags {
     fn default() -> Self {
         Self {
+            binaries: BTreeMap::new(),
             build_commands: vec![],
             prefer_extracted: None,
             suggest_extracted: false,
@@ -65,7 +70,13 @@ impl Default for ContentFlags {
 #[serde(rename_all = "camelCase")]
 struct Manifest {
     #[serde(default)]
+    name: Option<Ident>,
+
+    #[serde(default)]
     r#type: Option<String>,
+
+    #[serde(default)]
+    bin: Option<BinField>,
 
     #[serde(default)]
     requirements: system::Requirements,
@@ -78,8 +89,28 @@ struct Manifest {
     scripts: BTreeMap<String, String>,
 }
 
+fn extract_binaries(name: Option<Ident>, bin: Option<BinField>) -> BTreeMap<String, Path> {
+    let Some(bin) = bin else {
+        return BTreeMap::new();
+    };
+
+    match bin {
+        BinField::String(path) => name
+            .map(|name| BTreeMap::from_iter([(name.name().to_string(), path.path)]))
+            .unwrap_or_default(),
+
+        BinField::Map(bins) => bins.into_iter()
+            .map(|(name, path)| (name.name().to_string(), path.path))
+            .collect(),
+    }
+}
+
 impl ContentFlags {
     pub fn extract(locator: &Locator, package_data: &PackageData) -> Result<Self, Error> {
+        if matches!(locator.reference, Reference::Link(_)) {
+            return Ok(Self::default());
+        }
+
         match package_data {
             PackageData::Local {package_directory, is_synthetic_package} if !is_synthetic_package => {
                 Self::extract_local(package_directory)
@@ -100,8 +131,8 @@ impl ContentFlags {
             = package_directory.with_join_str("package.json");
         let manifest_bytes
             = manifest_path.fs_read_prealloc()?;
-        let manifest
-            = sonic_rs::from_slice::<Manifest>(&manifest_bytes)?;
+        let manifest: Manifest
+            = JsonDocument::hydrate_from_slice(&manifest_bytes)?;
 
         let build_commands
             = UNPLUG_SCRIPTS.iter()
@@ -110,6 +141,7 @@ impl ContentFlags {
                 .collect::<Vec<_>>();
 
         Ok(ContentFlags {
+            binaries: extract_binaries(manifest.name, manifest.bin),
             build_commands,
             prefer_extracted: Some(false),
             suggest_extracted: false,
@@ -120,11 +152,11 @@ impl ContentFlags {
         let package_bytes
             = archive_path.fs_read()?;
 
-        let first_entry = zpm_formats::zip::first_entry_from_zip(&package_bytes)
-            .unwrap();
+        let first_entry
+            = zpm_formats::zip::first_entry_from_zip(&package_bytes)?;
 
-        let meta_manifest = sonic_rs::from_slice::<Manifest>(&first_entry.data)
-            .unwrap();
+        let meta_manifest: Manifest
+            = JsonDocument::hydrate_from_slice(&first_entry.data)?;
 
         let mut build_commands = UNPLUG_SCRIPTS.iter()
             .filter_map(|k| meta_manifest.scripts.get(*k).map(|s| (k, s)))
@@ -136,7 +168,7 @@ impl ContentFlags {
 
         if build_commands.is_empty() {
             let binding_gyp_name
-                = format!("node_modules/{}/binding.gyp", locator.ident.as_str());
+                = Path::from_str(&format!("node_modules/{}/binding.gyp", locator.ident.as_str()))?;
 
             if entries.iter().any(|entry| entry.name == binding_gyp_name) {
                 build_commands.push(build::Command::Program {
@@ -149,9 +181,10 @@ impl ContentFlags {
         let prefer_extracted
             = meta_manifest.prefer_unplugged;
         let suggest_extracted
-            = entries.iter().any(|entry| UNPLUG_EXT_REGEX.is_match(&entry.name));
+            = entries.iter().any(|entry| UNPLUG_EXT_REGEX.is_match(&entry.name.as_str()));
 
         Ok(ContentFlags {
+            binaries: extract_binaries(meta_manifest.name, meta_manifest.bin),
             build_commands,
             prefer_extracted,
             suggest_extracted,

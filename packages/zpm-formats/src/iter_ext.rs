@@ -1,13 +1,14 @@
 use std::{borrow::Cow, io::Write};
 
 use flate2::write::DeflateEncoder;
+use zpm_utils::Path;
 
 use crate::{Compression, CompressionAlgorithm, Entry};
 
 pub trait IterExt<'a> {
     fn strip_first_segment(self) -> StripFirstSegment<Self> where Self: Sized;
-    fn strip_path_prefix(self, prefix: String) -> StripPathPrefix<Self> where Self: Sized;
-    fn prefix_path(self, prefix: &str) -> PrefixPath<Self> where Self: Sized;
+    fn strip_path_prefix<'b>(self, prefix: &'b Path) -> StripPathPrefix<'b, Self> where Self: Sized;
+    fn prefix_path<'b>(self, prefix: &'b Path) -> PrefixPath<'b, Self> where Self: Sized;
     fn update_crc32(self) -> UpdateCrc32<Self> where Self: Sized;
     fn compress(self, algorithm: Option<CompressionAlgorithm>) -> Compress<Self> where Self: Sized;
     fn move_to_front(self, predicate: impl Fn(&Entry<'a>) -> bool) -> impl Iterator<Item = Entry<'a>> where Self: Sized;
@@ -18,12 +19,12 @@ impl<'a, T> IterExt<'a> for T where T: Iterator<Item = Entry<'a>> {
         StripFirstSegment::new(self)
     }
 
-    fn strip_path_prefix(self, prefix: String) -> StripPathPrefix<Self> {
+    fn strip_path_prefix<'b>(self, prefix: &'b Path) -> StripPathPrefix<'b, Self> {
         StripPathPrefix::new(self, prefix)
     }
 
-    fn prefix_path(self, prefix: &str) -> PrefixPath<Self> {
-        PrefixPath::new(self, prefix.to_string())
+    fn prefix_path<'b>(self, prefix: &'b Path) -> PrefixPath<'b, Self> {
+        PrefixPath::new(self, prefix)
     }
 
     fn update_crc32(self) -> UpdateCrc32<Self> {
@@ -64,56 +65,57 @@ impl<'a, T> Iterator for StripFirstSegment<T> where T: Iterator<Item = Entry<'a>
                 return None;
             };
 
-            if let Some(slash_index) = next.name.find('/') {
-                next.name = next.name[slash_index + 1..].to_string();
+            if let Some(stripped) = next.name.strip_first_segment() {
+                next.name = stripped;
                 return Some(next);
             }
         }
     }
 }
 
-pub struct StripPathPrefix<T> {
+pub struct StripPathPrefix<'a, T> {
     pub(crate) iter: T,
-    pub(crate) prefix: String,
+    pub(crate) prefix: &'a Path,
 }
 
-impl<T> StripPathPrefix<T> {
-    pub fn new(iter: T, prefix: String) -> Self {
+impl<'a, T> StripPathPrefix<'a, T> {
+    pub fn new(iter: T, prefix: &'a Path) -> Self {
         Self {iter, prefix}
     }
 }
 
-impl<'a, T> Iterator for StripPathPrefix<T> where T: Iterator<Item = Entry<'a>> {
-    type Item = Entry<'a>;
+impl<'a, 'b, T> Iterator for StripPathPrefix<'a, T> where T: Iterator<Item = Entry<'b>> {
+    type Item = Entry<'b>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next
-            = self.iter.next();
+        loop {
+            let next
+                = self.iter.next();
 
-        let Some(mut next) = next else {
-            return None;
-        };
+            let Some(mut next) = next else {
+                return None;
+            };
 
-        if next.name.starts_with(&self.prefix) {
-            next.name = next.name[self.prefix.len() + 1..].to_string();
+            if let Some(stripped) = next.name.strip_prefix(self.prefix) {
+                next.name = stripped;
+                return Some(next);
+            }
         }
-
-        Some(next)
     }
 }
 
-pub struct PrefixPath<T> {
+pub struct PrefixPath<'a, T> {
     pub(crate) iter: T,
-    pub(crate) prefix: String,
+    pub(crate) prefix: &'a Path,
 }
 
-impl<T> PrefixPath<T> {
-    pub fn new(iter: T, prefix: String) -> Self {
+impl<'a, T> PrefixPath<'a, T> {
+    pub fn new(iter: T, prefix: &'a Path) -> Self {
         Self {iter, prefix}
     }
 }
 
-impl<'a, T> Iterator for PrefixPath<T> where T: Iterator<Item = Entry<'a>> {
+impl<'a, 'b, T> Iterator for PrefixPath<'a, T> where T: Iterator<Item = Entry<'b>> {
     type Item = T::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -124,7 +126,8 @@ impl<'a, T> Iterator for PrefixPath<T> where T: Iterator<Item = Entry<'a>> {
             return None;
         };
 
-        next.name = format!("{}/{}", self.prefix, next.name);
+        next.name = self.prefix
+            .with_join(&next.name);
 
         Some(next)
     }

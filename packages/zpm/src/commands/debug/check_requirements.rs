@@ -9,7 +9,6 @@ pub struct CheckRequirements {
 }
 
 impl CheckRequirements {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;

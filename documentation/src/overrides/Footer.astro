@@ -1,0 +1,91 @@
+---
+import SocialIcons from "virtual:starlight/components/SocialIcons";
+import { NAVIGATION } from "src/content/consts";
+import CTA from "src/sections/CTA.astro";
+import Logo from "@/components/Logo.astro";
+import cn from "@/utils/cn";
+
+// Images
+import EllipseShape from "src/assets/svg/ellipse-shape.svg";
+import EllipseBlur from "src/assets/svg/ellipse-blur.svg";
+
+const { id } = Astro.locals.starlightRoute;
+
+const isBackgroundVisible = id === "" || id === "blog";
+---
+
+<footer class="relative not-content">
+  {
+    isBackgroundVisible && (
+      <div>
+        <CTA />
+        <EllipseBlur class="absolute inset-0 w-full h-full -z-30 blur-[100px] lg:blur-[200px]" />
+      </div>
+    )
+  }
+
+  <div>
+    <div class={cn("relative", isBackgroundVisible && "pt-24 md:pt-52")}>
+      {
+        isBackgroundVisible && (
+          <EllipseShape class="absolute inset-0 -z-20 w-full" />
+        )
+      }
+
+      <div class="max-2xl:bg-gray-800">
+        <div class="container">
+          <div class="flex justify-between pt-6 pb-12 max-lg:gap-x-14">
+            <div>
+              <Logo />
+              <div class="lg:hidden pt-6">
+                <SocialIcons />
+              </div>
+            </div>
+
+            <ul class="flex flex-wrap items-center max-lg:gap-y-4 lg:gap-x-8">
+              {
+                NAVIGATION.map(({ title, href }) => (
+                  <li class="max-lg:w-1/2">
+                    <a
+                      href={href}
+                      class="text-white font-montserrat leading-5 md:text-sm text-xs"
+                    >
+                      {title}
+                    </a>
+                  </li>
+                ))
+              }
+            </ul>
+
+            <div class="max-lg:hidden">
+              <SocialIcons />
+            </div>
+          </div>
+
+          <div
+            class="flex flex-wrap max-md:gap-y-6 items-center justify-between py-8 border-t border-white/15"
+          >
+            <ul class="flex items-center gap-x-4">
+              <li
+                class="text-sm font-medium tracking-normal leading-5 text-white/60"
+              >
+                <a href="#">Privacy Policy</a>
+              </li>
+              <li class="size-0.5 bg-white/60 rounded-full"></li>
+              <li
+                class="text-sm font-medium tracking-normal leading-5 text-white/60"
+              >
+                <a href="#">Terms of Conditions</a>
+              </li>
+            </ul>
+
+            <span
+              class="text-sm font-medium tracking-normal leading-5 text-white/60"
+              >All rights reserved</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>

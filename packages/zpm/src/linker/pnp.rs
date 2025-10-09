@@ -1,19 +1,22 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 
 use zpm_config::PnpFallbackMode;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{Ident, Locator, Reference};
-use zpm_utils::{Path, ToHumanString};
+use zpm_utils::{IoResultExt, Path, SyncEntryKind, ToHumanString};
+use sha2::{Sha512, Digest};
+use hex;
 use itertools::Itertools;
 use serde::{Serialize, Serializer};
 use serde_with::serde_as;
 use zpm_utils::ToFileString;
 
 use crate::{
-    build::{self, BuildRequests},
+    build,
     error::Error,
     fetchers::{PackageData, PackageLinking},
     install::Install,
-    linker,
+    linker::{self, LinkResult},
     misc,
     project::Project,
 };
@@ -49,6 +52,33 @@ fn make_virtual_path(base: &Path, component: &str, to: &Path) -> Path {
     full_virtual_path
 }
 
+// Helper function to compute SHA512 hash and return as hex string
+fn compute_sha512_hex(input: &str) -> String {
+    let mut hasher = Sha512::new();
+    hasher.update(input.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+// Generates a Yarn Berry-compatible hash. Used for Sharp packages
+fn yarn_berry_hash(locator: &Locator) -> Result<String, Error> {
+    let package_version = locator.reference.to_file_string();
+
+    // Extract scope without '@' prefix, or empty string if no scope
+    let package_scope = locator.ident.scope()
+        .and_then(|scope| scope.strip_prefix('@'))
+        .unwrap_or("");
+
+    // Step 1: Hash the package identifier (scope + name)
+    let package_identifier = format!("{}{}", package_scope, locator.ident.name());
+    let identifier_hash = compute_sha512_hex(&package_identifier);
+
+    // Step 2: Hash the combination of identifier hash and version
+    let combined_input = format!("{}{}", identifier_hash, package_version);
+    let final_hash = compute_sha512_hex(&combined_input);
+
+    // Return first 10 characters to match Yarn Berry's hash length
+    Ok(final_hash[..10].to_string())
+}
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -120,7 +150,11 @@ struct PnpState {
     dependency_tree_roots: Vec<PnpDependencyTreeRoot>,
 }
 
-fn serialize_string(s: &str) -> String {
+/**
+ * We use this function rather than JsonDocument::to_string_pretty because we want a single quote string, to
+ * avoid having to escape the very common double quote found in the JSON payload.
+ */
+fn single_quote_stringify(s: &str) -> String {
     let mut escaped
         = String::with_capacity(s.len() * 110 / 100);
 
@@ -147,7 +181,7 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
         "\"use strict\";\n",
         "\n",
         "const RAW_RUNTIME_STATE =\n",
-        &serialize_string(&sonic_rs::to_string_pretty(&state).unwrap()), ";\n",
+        &single_quote_stringify(&JsonDocument::to_string_pretty(&state)?), ";\n",
         "\n",
         "function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n",
         "  return hydrateRuntimeState(JSON.parse(RAW_RUNTIME_STATE), {basePath: basePath || __dirname});\n",
@@ -181,12 +215,12 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
         .fs_change(script, true)?;
 
     project.pnp_data_path()
-        .fs_change(sonic_rs::to_string(&state).unwrap(), false)?;
+        .fs_change(JsonDocument::to_string(&state)?, false)?;
 
     Ok(())
 }
 
-pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Install) -> Result<BuildRequests, Error> {
+pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) -> Result<LinkResult, Error> {
     let tree
         = &install.install_state.resolution_tree;
 
@@ -203,6 +237,9 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
     let dependencies_meta
         = linker::helpers::TopLevelConfiguration::from_project(project);
 
+    let mut packages_by_location
+        = BTreeMap::new();
+
     let mut package_registry_data: BTreeMap<_, BTreeMap<_, _>>
         = BTreeMap::new();
     let mut dependency_tree_roots
@@ -211,6 +248,21 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
     let mut all_build_entries
         = Vec::new();
     let mut package_build_entries
+        = BTreeMap::new();
+
+    let unplugged_path
+        = project.unplugged_path();
+
+    let mut extraneous_unplugged_packages
+        = unplugged_path.fs_read_dir()
+            .ok_missing()?
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| Path::try_from(entry.path()).ok())
+            .collect::<BTreeSet<_>>();
+
+    let mut concrete_unplugged_packages
         = BTreeMap::new();
 
     for (locator, resolution) in &tree.locator_resolutions {
@@ -278,15 +330,25 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         if locator.reference.is_disk_reference() {
             is_physically_on_disk = true;
         } else if package_build_info.must_extract {
-            package_location_abs = project.project_cwd
-                .with_join_str(".yarn/unplugged")
-                .with_join_str(locator.slug())
+            let package_unplugged_wrapper_path = unplugged_path
+                .with_join_str(format!("{}-{}-{}", locator.ident.slug(), locator.reference.slug(), yarn_berry_hash(locator)?));
+
+            package_location_abs = package_unplugged_wrapper_path
                 .with_join(&physical_package_data.package_subpath());
 
-            is_freshly_unplugged = linker::helpers::fs_extract_archive(
-                &package_location_abs,
-                physical_package_data,
-            )?;
+            if !matches!(physical_package_data, PackageData::MissingZip {..}) {
+                extraneous_unplugged_packages.remove(&package_unplugged_wrapper_path);
+
+                concrete_unplugged_packages.insert(
+                    locator.clone(),
+                    package_location_abs.clone(),
+                );
+
+                is_freshly_unplugged = linker::helpers::fs_extract_archive(
+                    &package_location_abs,
+                    physical_package_data,
+                )?;
+            }
 
             is_physically_on_disk = true;
         }
@@ -295,8 +357,10 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
             .relative_to(&project.project_cwd);
 
         if !matches!(physical_package_data, PackageData::MissingZip {..}) {
-            install.install_state.packages_by_location.insert(package_location_rel.clone(), locator.clone());
-            install.install_state.locations_by_package.insert(locator.clone(), package_location_rel.clone());
+            packages_by_location.insert(
+                package_location_rel.clone(),
+                locator.clone(),
+            );
         }
 
         let mut package_location = package_location_rel
@@ -326,7 +390,10 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
 
         if let Some(build_commands) = package_build_info.build_commands {
             let build_cwd = match is_physically_on_disk {
-                true => package_location_rel.clone(),
+                true => {
+                    package_location_rel.clone()
+                },
+
                 false => {
                     let build_dir_pattern
                         = format!("zpm/{}/build/<>", locator.slug());
@@ -351,8 +418,59 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         }
     }
 
-    for workspace in project.workspaces.iter().sorted_by_cached_key(|w| w.descriptor()) {
-        let locator = workspace.locator();
+    for path in extraneous_unplugged_packages {
+        path.fs_rm()?;
+    }
+
+    // Native dynamic libraries sometimes have runtime dependencies on other dynamic libraries. They
+    // address that by using rpath to encode the place where those dependencies can be found. In
+    // typical node_modules structures that's either node_modules/<dependency_name>, or one of the
+    // parent folders. In PnP installs it's trickier because the unplugged folder is flat, so all
+    // entries inside it have arbitrary hashes.
+    //
+    // To solve this, detect cases where an unplugged package depends on another unplugged package
+    // and create a symlink between them in node_modules/<dependency_name>. See `sharp` for an example.
+
+    for (locator, package_location_abs) in &concrete_unplugged_packages {
+        let resolution
+            = tree.locator_resolutions.get(locator)
+                .expect("Failed to find resolution for unplugged package");
+
+        let mut symlinks_to_create
+            = BTreeMap::new();
+
+        for descriptor in resolution.dependencies.values() {
+            let dependency
+                = tree.descriptor_to_locator.get(descriptor)
+                    .expect("Failed to find dependency resolution");
+
+            let dependency_locator
+                = dependency.physical_locator();
+
+            let Some(dependency_location_abs) = concrete_unplugged_packages.get(&dependency_locator) else {
+                continue;
+            };
+
+            symlinks_to_create.insert(
+                Path::from_str(&dependency.ident.as_str())?,
+                SyncEntryKind::Symlink(dependency_location_abs.clone()),
+            );
+        }
+
+        package_location_abs
+            .with_join_str("node_modules")
+            .fs_create_dir_all()?
+            .fs_sync_dir(symlinks_to_create)
+            .map_err(Error::from)?;
+    }
+
+    for descriptor in &install.roots {
+        let workspace = project
+            .try_workspace_by_descriptor(&descriptor)?
+            .expect("Install roots are expected to always be workspaces");
+
+        let locator
+            = workspace.locator();
 
         if workspace.path == project.project_cwd {
             let entry = package_registry_data
@@ -427,8 +545,13 @@ pub async fn link_project_pnp<'a>(project: &'a mut Project, install: &'a mut Ins
         &tree.descriptor_to_locator,
     );
 
-    Ok(build::BuildRequests {
+    let build_requests = build::BuildRequests {
         entries: all_build_entries,
         dependencies: package_build_dependencies?,
+    };
+
+    Ok(LinkResult {
+        packages_by_location,
+        build_requests,
     })
 }

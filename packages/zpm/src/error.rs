@@ -1,7 +1,7 @@
 use std::{future::Future, sync::Arc};
 
 use zpm_primitives::{Descriptor, Ident, Locator, Range};
-use zpm_utils::{Path, ToHumanString};
+use zpm_utils::{DataType, Path, ToHumanString};
 use tokio::task::JoinError;
 
 fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
@@ -42,8 +42,11 @@ pub enum Error {
     #[error("Network error: {0}")]
     HttpError(#[from] Arc<reqwest::Error>),
 
-    #[error("{0}")]
+    #[error(transparent)]
     PathError(#[from] zpm_utils::PathError),
+
+    #[error(transparent)]
+    SyncError(#[from] zpm_utils::SyncError),
 
     #[error("Conflicting options: {0}")]
     ConflictingOptions(String),
@@ -111,11 +114,11 @@ pub enum Error {
     #[error("Invalid ident ({0})")]
     InvalidIdent(String),
 
-    #[error("Package manifest not found")]
-    ManifestNotFound,
+    #[error("Package manifest not found ({})", .0.to_print_string())]
+    ManifestNotFound(Path),
 
-    #[error("Package manifest failed to parse ({})", .0.to_print_string())]
-    ManifestParseError(Path),
+    #[error("Package manifest failed to parse ({}): {}", .0.to_print_string(), .1)]
+    ManifestParseError(Path, Arc<dyn std::error::Error + Send + Sync>),
 
     #[error("Invalid descriptor ({0})")]
     InvalidDescriptor(String),
@@ -168,9 +171,6 @@ pub enum Error {
     #[error("Non-UTF-8 path")]
     NonUtf8Path,
 
-    #[error("Invalid JSON data ({0})")]
-    InvalidJsonData(#[from] Arc<sonic_rs::Error>),
-
     #[error("Error parsing an integer value")]
     ParseIntError(#[from] std::num::ParseIntError),
 
@@ -202,7 +202,7 @@ pub enum Error {
     LockfileReadError(Arc<std::io::Error>),
 
     #[error("An error occured while parsing the lockfile: {0}")]
-    LockfileParseError(Arc<sonic_rs::Error>),
+    LockfileParseError(zpm_parsers::Error),
 
     #[error("Can't perform this operation without a git root")]
     NoGitRoot,
@@ -216,8 +216,8 @@ pub enum Error {
     #[error("An error occured while parsing the Yarn Berry lockfile: {0}")]
     LegacyLockfileParseError(Arc<serde_yaml::Error>),
 
-    #[error("Lockfile generation error")]
-    LockfileGenerationError(Arc<sonic_rs::Error>),
+    #[error("Lockfile generation error: {0}")]
+    LockfileGenerationError(zpm_parsers::Error),
 
     #[error("Repository clone failed")]
     RepositoryCloneFailed(String),
@@ -266,6 +266,9 @@ pub enum Error {
 
     #[error("Workspace path not found ({})", .0.to_print_string())]
     WorkspacePathNotFound(Path),
+
+    #[error("Automatic constraints check failed; run {} to obtain details", DataType::Code.colorize("yarn constraints"))]
+    AutoConstraintsError,
 
     #[error("Install state file not found; please run an install operation first")]
     InstallStateNotFound,
@@ -421,12 +424,6 @@ impl From<wax::walk::WalkError> for Error {
 
 impl From<bincode::error::EncodeError> for Error {
     fn from(error: bincode::error::EncodeError) -> Self {
-        Arc::new(error).into()
-    }
-}
-
-impl From<sonic_rs::Error> for Error {
-    fn from(error: sonic_rs::Error) -> Self {
         Arc::new(error).into()
     }
 }

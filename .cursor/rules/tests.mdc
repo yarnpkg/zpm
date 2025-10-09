@@ -1,6 +1,6 @@
 ---
 description: Instructions to run the Yarn integration tests
-globs: 
+globs:
 alwaysApply: false
 ---
 To run integration tests from Yarn:
@@ -14,7 +14,7 @@ cargo build -r
 2. Run integration tests from the Berry repository:
 
 ```
-./yarn.sh berry test:integration <jest patterns>
+yarn berry test:integration <jest patterns>
 ```
 
 Some important tips:

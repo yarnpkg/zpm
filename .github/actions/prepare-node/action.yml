@@ -1,0 +1,16 @@
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install Yarn Switch
+      shell: bash
+      run: |
+        bash install-script.sh
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        yarn install

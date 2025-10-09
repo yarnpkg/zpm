@@ -4,7 +4,7 @@ use crate::{
     build::BuildRequests,
     error::Error,
     install::{Install, InstallState},
-    linker::nm::hoist::{Hoister, InputTree, WorkTree},
+    linker::{nm::hoist::{Hoister, InputTree, WorkTree}, LinkResult},
     project::Project,
 };
 
@@ -25,9 +25,12 @@ pub fn hoist_install(project: &Project, install_state: &InstallState) -> Result<
     Ok(work_tree)
 }
 
-pub async fn link_project_nm(_project: &mut Project, _install: &mut Install) -> Result<BuildRequests, Error> {
-    Ok(BuildRequests {
-        entries: vec![],
-        dependencies: BTreeMap::new(),
+pub async fn link_project_nm(_project: &Project, _install: &Install) -> Result<LinkResult, Error> {
+    Ok(LinkResult {
+        packages_by_location: BTreeMap::new(),
+        build_requests: BuildRequests {
+            entries: vec![],
+            dependencies: BTreeMap::new(),
+        },
     })
 }

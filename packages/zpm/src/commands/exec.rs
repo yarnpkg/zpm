@@ -4,17 +4,16 @@ use clipanion::cli;
 
 use crate::{error::Error, project, script::ScriptEnvironment};
 
+/// Run a shell command in the package environment
 #[cli::command(proxy)]
 #[cli::path("exec")]
 #[cli::category("Scripting commands")]
-#[cli::description("Run a shell command in the package environment")]
 pub struct Exec {
     script: String,
     args: Vec<String>,
 }
 
 impl Exec {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
         let mut project
             = project::Project::new(None).await?;

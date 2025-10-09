@@ -54,7 +54,7 @@ pub enum Reference {
         checksum: Option<Hash64>,
     },
 
-    #[pattern(spec = r"virtual:(?<inner>.*)#(?<hash>[a-f0-9]*)$")]
+    #[pattern(spec = r"virtual:(?<hash>[a-f0-9]*)#(?<inner>.*)$")]
     Virtual {
         inner: Box<Reference>,
         hash: Hash64,
@@ -104,6 +104,10 @@ impl Reference {
 
     pub fn is_disk_reference(&self) -> bool {
         matches!(&self, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_) | Reference::Portal(_) | Reference::Link(_))
+    }
+
+    pub fn is_virtual_reference(&self) -> bool {
+        matches!(&self, Reference::Virtual(_))
     }
 
     pub fn inner_locator(&self) -> Option<&Locator> {
@@ -229,7 +233,7 @@ impl ToFileString for Reference {
             },
 
             Reference::Virtual(params) => {
-                format!("virtual:{}#{}", params.inner.to_file_string(), params.hash.to_file_string())
+                format!("virtual:{}#{}", params.hash.to_file_string(), params.inner.to_file_string())
             },
 
             Reference::WorkspaceIdent(params) => {

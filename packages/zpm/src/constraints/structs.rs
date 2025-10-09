@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use zpm_parsers::RawJsonValue;
 use zpm_primitives::{Ident, Locator, Range};
 use zpm_utils::{ColoredJsonValue, DataType, Path, ToFileString, ToHumanString};
 
@@ -121,7 +122,7 @@ pub enum WorkspaceError {
 pub enum WorkspaceOperation {
     Set {
         path: Vec<String>,
-        value: serde_json::Value,
+        value: RawJsonValue,
     },
     Unset {
         path: Vec<String>,
@@ -133,10 +134,18 @@ pub enum WorkspaceOperation {
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct ConstraintsOutput {
+    #[serde(skip)]
+    pub raw_json: Vec<u8>,
     #[serde_as(as = "Vec<(_, _)>")]
     pub all_workspace_operations: BTreeMap<Path, Vec<WorkspaceOperation>>,
     #[serde_as(as = "Vec<(_, _)>")]
     pub all_workspace_errors: BTreeMap<Path, Vec<WorkspaceError>>,
+}
+
+impl ConstraintsOutput {
+    pub fn is_empty(&self) -> bool {
+        self.all_workspace_operations.is_empty() && self.all_workspace_errors.is_empty()
+    }
 }
 
 #[derive(Serialize)]

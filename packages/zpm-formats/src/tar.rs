@@ -48,9 +48,12 @@ impl<'a> ToTar for Vec<Entry<'a>> {
             = Vec::with_capacity(total_capacity);
 
         for entry in self {
+            let name_bytes
+                = entry.name.as_str().as_bytes();
+
             let file_name = {
                 let mut file_name: [u8; 100] = [0; 100];
-                file_name[..99][..entry.name.len()].copy_from_slice(entry.name.as_bytes());
+                file_name[..99][..name_bytes.len()].copy_from_slice(name_bytes);
                 file_name
             };
 

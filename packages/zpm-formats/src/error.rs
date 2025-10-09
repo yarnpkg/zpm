@@ -13,6 +13,9 @@ pub enum Error {
     #[error(transparent)]
     Utf8Conversion(#[from] std::str::Utf8Error),
 
+    #[error("Invalid os string conversion")]
+    OsStringConversion(std::ffi::OsString),
+
     #[error("Invalid zip file")]
     InvalidZipFile(String),
 
@@ -26,5 +29,11 @@ pub enum Error {
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
         Error::Io(Arc::new(e))
+    }
+}
+
+impl From<std::ffi::OsString> for Error {
+    fn from(e: std::ffi::OsString) -> Self {
+        Error::OsStringConversion(e)
     }
 }

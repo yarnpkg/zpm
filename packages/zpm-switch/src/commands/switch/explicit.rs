@@ -1,12 +1,14 @@
-use std::process::{Command, ExitStatus, Stdio};
+use std::{process::{Command, ExitStatus, Stdio}, sync::Arc};
 
 use clipanion::cli;
 use zpm_utils::ToFileString;
 
 use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}, yarn::resolve_selector, yarn_enums::Selector};
 
+/// Call a custom Yarn binary for the current project
 #[cli::command(proxy)]
 #[cli::path("switch")]
+#[cli::category("General commands")]
 #[derive(Debug)]
 pub struct ExplicitCommand {
     selector: Selector,
@@ -26,7 +28,11 @@ impl ExplicitCommand {
         binary.stdout(Stdio::inherit());
         binary.args(args);
 
-        Ok(binary.status()?)
+        let exit_code
+            = binary.status()
+                .map_err(|err| Error::FailedToExecuteBinary(binary.get_program().to_string_lossy().to_string(), Arc::new(err)))?;
+
+        Ok(exit_code)
     }
 
     pub async fn execute(&self) -> Result<ExitStatus, Error> {

@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, fs::File, io::Write, path::Path};
 use convert_case::{Case, Casing};
 use serde::Deserialize;
 use serde_with::{serde_as, OneOrMany};
+use zpm_parsers::JsonDocument;
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -129,7 +130,7 @@ impl Field {
                             => format!("|| Setting::new({}, Source::Default)", default),
 
                         Some(Expression::String(default))
-                            => format!("|| Setting::new(FromFileString::from_file_string({}).unwrap(), Source::Default)", sonic_rs::to_string(default).unwrap()),
+                            => format!("|| Setting::new(FromFileString::from_file_string({}).unwrap(), Source::Default)", JsonDocument::to_string(default).unwrap()),
 
                         Some(Expression::Bool(default))
                             => format!("|| Setting::new({}, Source::Default)", default),
@@ -426,8 +427,9 @@ impl Generator {
 fn main() {
     let schema_content
         = include_str!("schema.json");
-    let schema
-        = sonic_rs::from_str::<Field>(schema_content)
+
+    let schema: Field
+        = JsonDocument::hydrate_from_str(schema_content)
             .expect("Failed to parse schema");
 
     let mut generator

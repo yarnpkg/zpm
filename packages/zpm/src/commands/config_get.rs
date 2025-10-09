@@ -2,10 +2,10 @@ use clipanion::cli;
 
 use crate::{error::Error, project::Project};
 
+/// Get a configuration value
 #[cli::command]
 #[cli::path("config", "get")]
 #[cli::category("Configuration commands")]
-#[cli::description("Get a configuration value")]
 pub struct ConfigGet {
     #[cli::option("--json", default = false)]
     json: bool,
@@ -14,7 +14,6 @@ pub struct ConfigGet {
 }
 
 impl ConfigGet {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;

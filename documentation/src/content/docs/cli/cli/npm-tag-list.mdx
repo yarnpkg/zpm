@@ -1,0 +1,31 @@
+---
+title: "yarn npm tag list"
+description: "list all dist-tags of a package"
+slug: "cli/npm/tag/list"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+List all dist-tags of a package
+
+</div>
+
+## Usage
+<Code code="yarn npm tag list [package]" lang="bash" />
+
+## Examples
+<p>List all tags of package `my-pkg`
+:</p>
+<Code code="yarn npm tag list my-pkg" lang="bash" />
+
+## Details
+This command will list all tags of a package from the npm registry.
+
+If the package is not specified, Yarn will default to the current workspace.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-json" className="header-code"><code className="language-text">--json</code></h4> | Format the output as an NDJSON stream |

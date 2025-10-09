@@ -18,3 +18,7 @@ pub fn is_ci() -> Option<Provider> {
         None
     }
 }
+
+pub fn is_terminal() -> bool {
+    !is_ci().is_some() && std::io::IsTerminal::is_terminal(&std::io::stdout())
+}

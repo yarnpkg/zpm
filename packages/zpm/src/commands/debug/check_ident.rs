@@ -11,7 +11,7 @@ pub struct CheckIdent {
 }
 
 impl CheckIdent {
-    pub fn execute(&self) -> Result<(), Error> {
+    pub async fn execute(&self) -> Result<(), Error> {
         let stringified
             = self.ident.to_file_string();
 

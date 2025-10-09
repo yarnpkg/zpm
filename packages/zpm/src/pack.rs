@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use zpm_parsers::JsonFormatter;
+use zpm_parsers::JsonDocument;
 use zpm_parsers::Value;
 use zpm_primitives::AnonymousSemverRange;
 use zpm_primitives::Descriptor;
@@ -231,78 +231,81 @@ impl PackList {
     }
 }
 
-pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String, Error> {
+pub struct PackManifestOptions {
+    pub preserve_workspaces: bool,
+}
+
+pub fn pack_manifest(project: &Project, workspace: &Workspace, options: PackManifestOptions) -> Result<String, Error> {
     let manifest_path = workspace.path
         .with_join_str("package.json");
 
     let manifest_content = manifest_path
-        .fs_read_text_prealloc()?;
-
+        .fs_read_prealloc()?;
     let manifest: Manifest
-        = parse_manifest(&manifest_content)?;
+        = parse_manifest(&String::from_utf8_lossy(&manifest_content))?;
 
     let mut formatter
-        = JsonFormatter::from(&manifest_content)?;
+        = JsonDocument::new(manifest_content)?;
 
     if let Some(type_) = &manifest.publish_config.type_ {
-        formatter.set(
-            ["type"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["type".to_string()]),
             Value::String(type_.clone()),
         )?;
     }
 
     if let Some(main) = &manifest.publish_config.main {
-        formatter.set(
-            ["main"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["main".to_string()]),
             Value::String(main.clone()),
         )?;
     }
 
     if let Some(exports) = &manifest.publish_config.exports {
-        formatter.set(
-            ["exports"],
-            Value::from(&sonic_rs::to_value(exports)?),
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["exports".to_string()]),
+            Value::from_serializable(&exports)?,
         )?;
     }
 
     if let Some(imports) = &manifest.publish_config.imports {
-        formatter.set(
-            ["imports"],
-            Value::from(&sonic_rs::to_value(imports)?),
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["imports".to_string()]),
+            Value::from_serializable(&imports)?,
         )?;
     }
 
     if let Some(module) = &manifest.publish_config.module {
-        formatter.set(
-            ["module"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["module".to_string()]),
             Value::String(module.clone()),
         )?;
     }
 
     if let Some(browser) = &manifest.publish_config.browser {
-        formatter.set(
-            ["browser"],
-            Value::from(&sonic_rs::to_value(browser)?),
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["browser".to_string()]),
+            Value::from_serializable(browser)?,
         )?;
     }
 
     if let Some(bin) = &manifest.publish_config.bin {
-        formatter.set(
-            ["bin"],
-            Value::from(&sonic_rs::to_value(bin)?),
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["bin".to_string()]),
+            Value::from_serializable(bin)?,
         )?;
     }
 
     if let Some(types) = &manifest.publish_config.types {
-        formatter.set(
-            ["types"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["types".to_string()]),
             Value::String(types.clone()),
         )?;
     }
 
     if let Some(typings) = &manifest.publish_config.typings {
-        formatter.set(
-            ["typings"],
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["typings".to_string()]),
             Value::String(typings.clone()),
         )?;
     }
@@ -313,57 +316,56 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         ("optionalDependencies", manifest.remote.optional_dependencies.iter()),
     ];
 
-    let updated_dependencies = hard_dependencies.into_iter().flat_map(|(field_name, iter)| {
-        iter.filter_map(move |(ident, descriptor)| {
-            match &descriptor.range {
-                Range::WorkspaceSemver(params) => {
-                    Some((field_name, Ok(Descriptor::new(ident.clone(), AnonymousSemverRange {
-                        range: params.range.clone()
-                    }.into()))))
-                },
+    if !options.preserve_workspaces {
+        for (field_name, dependencies) in hard_dependencies {
+            for (ident, descriptor) in dependencies {
+                let updated_range = match &descriptor.range {
+                    Range::WorkspaceSemver(params) => {
+                        Some(Range::AnonymousSemver(AnonymousSemverRange {
+                            range: params.range.clone()
+                        }))
+                    },
 
-                Range::WorkspaceMagic(params) => {
-                    let workspace
-                        = project.workspace_by_ident(&descriptor.ident);
+                    Range::WorkspaceMagic(params) => {
+                        let workspace
+                            = project.workspace_by_ident(&descriptor.ident)?;
 
-                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), AnonymousSemverRange {
-                        range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(params.magic),
-                    }.into()))))
-                },
+                        Some(Range::AnonymousSemver(AnonymousSemverRange {
+                            range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(params.magic),
+                        }))
+                    },
 
-                Range::WorkspaceIdent(params) => {
-                    let workspace
-                        = project.workspace_by_ident(&params.ident);
+                    Range::WorkspaceIdent(params) => {
+                        let workspace
+                            = project.workspace_by_ident(&params.ident)?;
 
-                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), AnonymousSemverRange {
-                        range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
-                    }.into()))))
-                },
+                        Some(Range::AnonymousSemver(AnonymousSemverRange {
+                            range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
+                        }))
+                    },
 
-                Range::WorkspacePath(params) => {
-                    let workspace
-                        = project.workspace_by_rel_path(&params.path);
+                    Range::WorkspacePath(params) => {
+                        let workspace
+                            = project.workspace_by_rel_path(&params.path)?;
 
-                    Some((field_name, workspace.map(|workspace| Descriptor::new(ident.clone(), AnonymousSemverRange {
-                        range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
-                    }.into()))))
-                },
+                        Some(Range::AnonymousSemver(AnonymousSemverRange {
+                            range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
+                        }))
+                    },
 
-                _ => {
-                    None
-                },
+                    _ => {
+                        None
+                    },
+                };
+
+                if let Some(updated_range) = updated_range {
+                    formatter.set_path(
+                        &zpm_parsers::Path::from_segments(vec![field_name.to_string(), ident.to_file_string()]),
+                        Value::String(updated_range.to_file_string()),
+                    )?;
+                }
             }
-        })
-    });
-
-    for (field_name, new_descriptor_result) in updated_dependencies {
-        let new_descriptor
-            = new_descriptor_result?;
-
-        formatter.set(
-            vec![field_name.to_string(), new_descriptor.ident.to_file_string()],
-            Value::String(new_descriptor.range.to_file_string()),
-        )?;
+        }
     }
 
     let updated_peer_dependencies = manifest.remote.peer_dependencies.iter().filter_map(|(ident, peer_range)| {
@@ -406,13 +408,13 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace) -> Result<String,
         let new_descriptor
             = new_descriptor_result?;
 
-        formatter.set(
-            vec!["peerDependencies".to_string(), new_descriptor.ident.to_file_string()],
-            Value::String(new_descriptor.range.to_file_string())
+        formatter.set_path(
+            &zpm_parsers::Path::from_segments(vec!["peerDependencies".to_string(), new_descriptor.ident.to_file_string()]),
+            Value::String(new_descriptor.range.to_file_string()),
         )?;
     }
 
-    Ok(formatter.to_string())
+    Ok(String::from_utf8_lossy(&formatter.input).to_string())
 }
 
 pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) -> Result<Vec<zpm_utils::Path>, Error> {

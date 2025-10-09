@@ -1,0 +1,59 @@
+---
+title: "yarn init"
+description: "create a new package"
+slug: "cli/init"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+create a new package
+
+</div>
+
+## Usage
+<Code code="yarn init <initializer> ..." lang="bash" />
+
+## Examples
+<p>Create a new package in the local directory
+:</p>
+<Code code="yarn init" lang="bash" />
+
+<p>Create a new private package in the local directory
+:</p>
+<Code code="yarn init -p" lang="bash" />
+
+<p>Create a new package and store the Yarn release inside
+:</p>
+<Code code="yarn init -i=latest" lang="bash" />
+
+<p>Create a new private package and defines it as a workspace root
+:</p>
+<Code code="yarn init -w" lang="bash" />
+
+## Details
+This command will setup a new package in your local directory.
+
+If the `-p,--private` or `-w,--workspace` options are set, the package will be 
+private by default.
+
+If the `-w,--workspace` option is set, the package will be configured to accept 
+a set of workspaces in the `packages/` directory.
+
+If the `-i,--install` option is given a value, Yarn will first download it using 
+`yarn set version` and only then forward the init call to the newly downloaded 
+bundle. Without arguments, the downloaded bundle will be `latest`.
+
+The initial settings of the manifest can be changed by using the `initScope` and 
+`initFields` configuration values. Additionally, Yarn will generate an 
+EditorConfig file whose rules can be altered via `initEditorConfig`, and will 
+initialize a Git repository in the current directory.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-p%2C-private" className="header-code"><code className="language-text">-p,--private</code></h4> | Initialize a private package |
+| <h4 id="options-w%2C-workspace" className="header-code"><code className="language-text">-w,--workspace</code></h4> | Initialize a workspace root with a `packages/` directory |
+| <h4 id="options-i%2C-install" className="header-code"><code className="language-text">-i,--install</code></h4> | Initialize a package with a specific bundle that will be locked in the project |
+| <h4 id="options-n%2C-name%20%230" className="header-code"><code className="language-text">-n,--name #0</code></h4> | Initialize a package with the given name |

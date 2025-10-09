@@ -1,0 +1,77 @@
+name: 'Flamegraphs'
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: 'Building the flamegraph binary'
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout the repo
+      uses: actions/checkout@v4
+
+    - name: Build the repository
+      uses: ./.github/actions/build
+      with:
+        target: aarch64-apple-darwin
+        profile: release-lto
+
+    - name: Store the build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: flamegraph-binary
+        path: target/aarch64-apple-darwin/release-lto
+
+  flamegraphs:
+    strategy:
+      matrix:
+        benchmark:
+          - [Next.js, next]
+          - [Gatsby, gatsby]
+
+    needs: [build]
+
+    name: 'Generating the ${{matrix.benchmark[0]}} flamegraphs'
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout the repo
+      uses: actions/checkout@v4
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: flamegraph-binary
+        path: local
+
+    - name: Set the +x flag on the binaries
+      run: |
+        chmod +x local/{yarn,yarn-bin}
+
+    - name: Install Flamegraph
+      run: |
+        cargo install flamegraph@0.6.9
+
+    - name: 'Creates a temporary directory'
+      id: bench-dir
+      run: |
+        echo "BENCH_DIR=$(mktemp -d)" >> "$GITHUB_OUTPUT"
+
+    - name: Prepare Node
+      uses: ./.github/actions/prepare-node
+
+    - name: 'Run the performance test'
+      run: |
+        sudo bash scripts/bench-run.sh zpm ${{matrix.benchmark[1]}} flamegraph ${{steps.bench-dir.outputs.BENCH_DIR}}
+
+    - name: 'Upload the flamegraph'
+      uses: actions/upload-artifact@v4
+      with:
+        name: flamegraphs-${{matrix.benchmark[1]}}
+        path: ${{steps.bench-dir.outputs.BENCH_DIR}}/flamegraphs

@@ -4,9 +4,9 @@ use clipanion::cli;
 use indexmap::IndexMap;
 use itertools::Itertools;
 use zpm_primitives::{Descriptor, Ident, IdentGlob, Locator, Range, Reference, RegistryReference, RegistrySemverRange, ShorthandReference};
-use zpm_utils::AbstractValue;
+use zpm_utils::{tree, AbstractValue};
 
-use crate::{error::Error, project::{InstallMode, Project, RunInstallOptions}, ui};
+use crate::{error::Error, project::{InstallMode, Project, RunInstallOptions}};
 
 #[derive(Debug, Default)]
 enum DedupeStrategy {
@@ -28,10 +28,10 @@ impl FromStr for DedupeStrategy {
     }
 }
 
+/// Run a shell command in the package environment
 #[cli::command]
 #[cli::path("dedupe")]
 #[cli::category("Scripting commands")]
-#[cli::description("Run a shell command in the package environment")]
 pub struct Dedupe {
     #[cli::option("--check", default = false)]
     check: bool,
@@ -49,7 +49,6 @@ pub struct Dedupe {
 }
 
 impl Dedupe {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<ExitCode, Error> {
         let mut project
             = Project::new(None).await?;
@@ -93,33 +92,33 @@ impl Dedupe {
             let old_resolution
                 = &install_state.descriptor_to_locator[descriptor];
 
-            child_children.insert("oldResolution".to_string(), ui::tree::Node {
+            child_children.insert("oldResolution".to_string(), tree::Node {
                 label: Some("Old resolution".to_string()),
                 value: Some(AbstractValue::new(old_resolution.clone())),
                 children: None,
             });
 
-            child_children.insert("newResolution".to_string(), ui::tree::Node {
+            child_children.insert("newResolution".to_string(), tree::Node {
                 label: Some("New resolution".to_string()),
                 value: Some(AbstractValue::new(locator.clone())),
                 children: None,
             });
 
-            children.push(ui::tree::Node {
+            children.push(tree::Node {
                 label: None,
                 value: Some(AbstractValue::new(descriptor.clone())),
-                children: Some(ui::tree::TreeNodeChildren::Map(child_children)),
+                children: Some(tree::TreeNodeChildren::Map(child_children)),
             });
         }
 
-        let root_node = ui::tree::Node {
+        let root_node = tree::Node {
             label: None,
             value: None,
-            children: Some(ui::tree::TreeNodeChildren::Vec(children)),
+            children: Some(tree::TreeNodeChildren::Vec(children)),
         };
 
         let render
-            = ui::tree::TreeRenderer::new()
+            = tree::TreeRenderer::new()
                 .render(&root_node, self.json);
 
         print!("{}", render);

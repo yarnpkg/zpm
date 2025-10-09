@@ -217,15 +217,22 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
             .await?
             .to_file_string();
 
+    let mut pack_args
+        = vec![];
+
+    if let Some(workspace) = &params.workspace {
+        pack_args.push("workspace");
+        pack_args.push(workspace.as_str());
+    }
+
+    pack_args.push("pack");
+    pack_args.push("--install-if-needed");
+
     let pack_path = folder_path
         .with_join_str("package.tgz");
 
-    let pack_args = match &params.workspace {
-        Some(workspace_name) =>
-            vec!["workspace", workspace_name.as_str(), "pack", "--install-if-needed", "--filename", pack_path.as_str()],
-        None =>
-            vec!["pack", "--install-if-needed", "--filename", pack_path.as_str()],
-    };
+    pack_args.push("--filename");
+    pack_args.push(pack_path.as_str());
 
     ScriptEnvironment::new()?
         .with_cwd(folder_path.clone())
@@ -285,6 +292,7 @@ async fn prepare_yarn_zpm_project(folder_path: &Path, params: &PrepareParams) ->
     }
 
     pack_args.push("pack");
+    pack_args.push("--preserve-workspaces");
     pack_args.push("--install-if-needed");
     pack_args.push("--out");
     pack_args.push(archive_path.as_str());

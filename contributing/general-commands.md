@@ -2,18 +2,28 @@
 
 ## Compiling the project
 
-I've been working with the release binary even in development, and tests are configured to use it as well so we can have performances similar to what users would experience. Note that the release builds are configured to contain debug information, even if optimized.
+Building the project is done through Cargo:
 
 ```bash
 cargo build -p zpm -r
 ```
+
+Building with the release profile (ie the `-r` flag) is advised as debug builds are significantly slower. You also have access to `release-lto` and `release-lto-nodebug` profiles, although they are slower to build and are not recommended for development.
+
+Regardless what you pick, make sure to link the binary by creating a `local` symlink:
+
+```bash
+ln -s target/release local
+```
+
+Other parts of the infra such as the tests use this symlink to find the binaries to spawn.
 
 ## Running integration tests
 
 The ZPM codebase can run all tests from the Yarn Berry repository. To do that, clone github.com/yarnpkg/berry inside your home folder then run the following command from the ZPM repository:
 
 ```bash
-./yarn.sh berry test:integration {jest options}
+yarn berry test:integration {jest options}
 ```
 
 The integration tests can sometimes fail due to being overly dependent on the Yarn Berry implementation. Some examples:

@@ -1,9 +1,16 @@
 use std::collections::BTreeMap;
 use zpm_utils::{IoResultExt, ToHumanString};
 
-use crate::{build::{self, BuildRequests}, error::Error, fetchers::PackageData, install::Install, linker, project::Project};
+use crate::{
+    build,
+    error::Error,
+    fetchers::PackageData,
+    install::Install,
+    linker::{self, LinkResult},
+    project::Project,
+};
 
-pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut Install) -> Result<BuildRequests, Error> {
+pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -> Result<LinkResult, Error> {
     let tree
         = &install.install_state.resolution_tree;
 
@@ -14,6 +21,9 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
 
     // Remove existing node_modules
     linker::helpers::fs_remove_nm(nm_path)?;
+
+    let mut packages_by_location
+        = BTreeMap::new();
 
     let mut all_build_entries
         = Vec::new();
@@ -52,8 +62,10 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
         let package_location_rel = package_location_abs
             .relative_to(&project.project_cwd);
 
-        install.install_state.packages_by_location.insert(package_location_rel.clone(), locator.clone());
-        install.install_state.locations_by_package.insert(locator.clone(), package_location_rel.clone());
+        packages_by_location.insert(
+            package_location_rel.clone(),
+            locator.clone(),
+        );
 
         // We don't create node_modules directories and we don't build
         // local packages that are not fully contained within the project
@@ -174,8 +186,13 @@ pub async fn link_project_pnpm<'a>(project: &'a mut Project, install: &'a mut In
         &tree.descriptor_to_locator,
     );
 
-    Ok(build::BuildRequests {
+    let build_requests = build::BuildRequests {
         entries: all_build_entries,
         dependencies: package_build_dependencies?,
+    };
+
+    Ok(LinkResult {
+        packages_by_location,
+        build_requests,
     })
 }

@@ -1,4 +1,8 @@
+use std::collections::BTreeMap;
+
 use zpm_config::NodeLinker;
+use zpm_primitives::Locator;
+use zpm_utils::Path;
 
 use crate::{
     build::BuildRequests,
@@ -12,7 +16,13 @@ pub mod nm;
 pub mod pnpm;
 pub mod pnp;
 
-pub async fn link_project<'a>(project: &'a mut Project, install: &'a mut Install) -> Result<BuildRequests, Error> {
+#[derive(Debug)]
+pub struct LinkResult {
+    pub packages_by_location: BTreeMap<Path, Locator>,
+    pub build_requests: BuildRequests,
+}
+
+pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Result<LinkResult, Error> {
     match project.config.settings.node_linker.value {
         NodeLinker::NodeModules
             => nm::link_project_nm(project, install).await,

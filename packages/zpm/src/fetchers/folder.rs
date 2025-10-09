@@ -1,4 +1,4 @@
-use zpm_formats::iter_ext::IterExt;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{FolderReference, Locator};
 
 use crate::{
@@ -18,11 +18,14 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching folder packages");
 
+    let package_subdir
+        = locator.ident.nm_subdir();
+
     let pkg_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
         let entries
             = zpm_formats::entries_from_folder(&context_directory)?
                 .into_iter()
-                .prepare_npm_entries(&locator.ident)
+                .prepare_npm_entries(&package_subdir)
                 .collect::<Vec<_>>();
 
         Ok(package_cache.bundle_entries(entries)?)
@@ -31,14 +34,14 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let first_entry
         = zpm_formats::zip::first_entry_from_zip(&pkg_blob.data)?;
 
-    let remote_manifest
-        = sonic_rs::from_slice::<RemoteManifest>(&first_entry.data)?;
+    let remote_manifest: RemoteManifest
+        = JsonDocument::hydrate_from_slice(&first_entry.data)?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), remote_manifest);
 
     let package_directory = pkg_blob.info.path
-        .with_join_str(locator.ident.nm_subdir());
+        .with_join(&package_subdir);
 
     Ok(FetchResult {
         resolution: Some(resolution),

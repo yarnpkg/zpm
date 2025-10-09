@@ -1,10 +1,9 @@
 use std::{borrow::Cow, os::unix::fs::PermissionsExt};
 
-use zpm_utils::{FromFileString, impl_file_string_serialization, impl_file_string_from_str, Path, ToFileString, ToHumanString};
+use zpm_utils::{FromFileString, impl_file_string_from_str, Path, ToFileString, ToHumanString};
 
 pub(crate) mod zip_structs;
 
-pub mod convert;
 pub mod error;
 pub mod iter_ext;
 pub mod tar_iter;
@@ -71,7 +70,7 @@ pub struct Compression<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Entry<'a> {
-    pub name: String,
+    pub name: Path,
     pub mode: u32,
     pub crc: u32,
     pub data: Cow<'a, [u8]>,
@@ -80,7 +79,7 @@ pub struct Entry<'a> {
 
 pub fn entries_to_disk<'a>(entries: &[Entry<'a>], base: &Path) -> Result<(), Error> {
     for entry in entries {
-        base.with_join_str(&entry.name)
+        base.with_join(&entry.name)
             .fs_create_parent()?
             .fs_change(&entry.data, entry.mode & 0o111 == 0o111)?;
     }
@@ -104,7 +103,7 @@ pub fn entries_from_folder<'a>(path: &Path) -> Result<Vec<Entry<'a>>, Error> {
                 continue;
             }
 
-            let name = entry.file_name().into_string().unwrap();
+            let name = Path::try_from(entry.file_name().into_string()?)?;
             let data = path.fs_read()?;
             let metadata = path.fs_metadata()?;
 
@@ -138,7 +137,7 @@ pub fn entries_from_files<'a>(base: &Path, files: &[Path]) -> Result<Vec<Entry<'
         let mode = if is_exec { 0o755 } else { 0o644 };
 
         entries.push(Entry {
-            name: rel_path.to_file_string(),
+            name: rel_path.clone(),
             mode,
             crc: 0,
             data: Cow::Owned(data),

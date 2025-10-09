@@ -1,3 +1,7 @@
+use std::str::FromStr;
+
+use zpm_utils::Path;
+
 use super::*;
 
 const PATCH: &str = "diff --git a/index.ts b/index.ts
@@ -15,7 +19,7 @@ index 2de83dd..842652c 100644
 #[test]
 fn simple_case() {
     let entries = vec![Entry {
-        name: "index.ts".to_string(),
+        name: Path::from_str("index.ts").unwrap(),
         mode: 0o644,
         crc: 0,
         data: Cow::Owned("this\nis\na\nfile\n".as_bytes().to_vec()),
@@ -26,7 +30,7 @@ fn simple_case() {
         = apply_patch(entries, PATCH, &zpm_semver::Version::new()).unwrap();
 
     assert_eq!(res, vec![Entry {
-        name: "index.ts".to_string(),
+        name: Path::from_str("index.ts").unwrap(),
         mode: 0o644,
         crc: 0,
         data: Cow::Owned("this\nis\nmy\nfile\n".as_bytes().to_vec()),

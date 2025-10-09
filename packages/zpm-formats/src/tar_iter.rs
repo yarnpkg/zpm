@@ -1,8 +1,7 @@
-use std::{borrow::Cow, collections::HashMap, sync::LazyLock};
+use std::{borrow::Cow, collections::HashMap};
 
 use itertools::Itertools;
-use regex::Regex;
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::Path;
 
 use crate::{Entry, Error};
 
@@ -81,10 +80,6 @@ impl<'a> TarIterator<'a> {
 
         let name = clean_name(&name)?
             .ok_or_else(|| Error::InvalidTarFilePath(name.to_string()))?;
-
-        if ZIP_PATH_INVALID_PATTERNS.is_match(&name) {
-            return Err(Error::InvalidTarFilePath(name));
-        }
 
         let mode = self.buffer.get(offset + 100..offset + 108)
             .map(|raw| from_oct(&raw) as u32)
@@ -206,27 +201,14 @@ fn from_oct(x: &[u8]) -> u64 {
     result
 }
 
-static ZIP_PATH_INVALID_PATTERNS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\\|/\.{0,2}/|^\.{0,2}/|/\.{0,2}$|^\.{0,2}$").unwrap()
-});
+fn clean_name(name: &str) -> Result<Option<Path>, Error> {
+    let slice = name
+        .trim_end_matches('/');
+    let name
+        = Path::try_from(slice)?;
 
-fn clean_name(name: &str) -> Result<Option<String>, Error> {
-    if name.starts_with('/') {
+    if !name.is_forward() {
         return Ok(None)
-    }
-
-    let has_parent_specifier = name.split('/')
-        .any(|part| part == "..");
-
-    if has_parent_specifier {
-        return Ok(None)
-    }
-
-    let mut name = Path::try_from(name)?
-        .to_file_string();
-
-    if name.ends_with('/') {
-        name.pop();
     }
 
     Ok(Some(name))

@@ -1,10 +1,11 @@
-use std::{collections::{BTreeMap, HashSet}, io::ErrorKind, sync::Arc, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, time::UNIX_EPOCH};
 
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
-use zpm_primitives::{Descriptor, Ident, Locator, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString};
+use zpm_parsers::JsonDocument;
+use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString, ToHumanString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -14,9 +15,9 @@ use crate::{
     error::Error,
     git::{detect_git_operation, GitOperation},
     http::HttpClient,
-    install::{InstallContext, InstallManager, InstallState},
+    install::{InstallContext, InstallManager, InstallResult, InstallState},
     lockfile::{from_legacy_berry_lockfile, Lockfile},
-    manifest::{bin::BinField, helpers::read_manifest_with_size, BinManifest, Manifest},
+    manifest::{helpers::read_manifest_with_size, Manifest},
     manifest_finder::CachedManifestFinder,
     report::{with_report_result, StreamReport, StreamReportConfig},
     script::{Binary, ScriptEnvironment},
@@ -53,9 +54,11 @@ pub struct RunInstallOptions {
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
-    pub refresh_lockfile: bool,
-    pub silent_or_error: bool,
+    pub prune_dev_dependencies: bool,
     pub mode: Option<InstallMode>,
+    pub refresh_lockfile: bool,
+    pub roots: Option<BTreeSet<Ident>>,
+    pub silent_or_error: bool,
 }
 
 pub struct Project {
@@ -194,12 +197,35 @@ impl Project {
         self.project_cwd.with_join_str(".yarn/ignore")
     }
 
+    pub fn unplugged_path(&self) -> Path {
+        self.ignore_path().with_join_str("unplugged")
+    }
+
     pub fn install_state_path(&self) -> Path {
         self.ignore_path().with_join_str("install")
     }
 
     pub fn build_state_path(&self) -> Path {
         self.ignore_path().with_join_str("build")
+    }
+
+    pub fn global_cache_path(&self) -> Path {
+        self.config.settings.global_folder.value
+            .with_join_str("cache")
+    }
+
+    pub fn local_cache_path(&self) -> Path {
+        self.project_cwd
+            .with_join_str(".yarn")
+            .with_join_str(&self.config.settings.local_cache_folder_name.value)
+    }
+
+    pub fn preferred_cache_path(&self) -> Path {
+        if self.config.settings.enable_global_cache.value {
+            self.global_cache_path()
+        } else {
+            self.local_cache_path()
+        }
     }
 
     pub fn lockfile(&self) -> Result<Lockfile, Error> {
@@ -221,9 +247,9 @@ impl Project {
             return from_legacy_berry_lockfile(&src);
         }
 
-        let lockfile
-            = sonic_rs::from_str::<Lockfile>(&src)
-                .map_err(|e| Error::LockfileParseError(Arc::new(e)))?;
+        let lockfile: Lockfile
+            = JsonDocument::hydrate_from_str(&src)
+                .map_err(|e| Error::LockfileParseError(e))?;
 
         Ok(lockfile)
     }
@@ -293,7 +319,7 @@ impl Project {
             = self.lockfile_path();
 
         let contents
-            = sonic_rs::to_string_pretty(lockfile)?;
+            = JsonDocument::to_string_pretty(lockfile)?;
 
         if self.config.settings.enable_immutable_installs.value {
             lockfile_path.fs_expect(contents, false)?;
@@ -305,13 +331,10 @@ impl Project {
     }
 
     pub fn package_cache(&self) -> Result<CompositeCache, Error> {
-        let global_cache_path = self.config.settings.global_folder.value
-            .with_join_str("cache");
-
+        let global_cache_path
+            = self.global_cache_path();
         let local_cache_path
-            = self.project_cwd
-                .with_join_str(".yarn")
-                .with_join_str(&self.config.settings.local_cache_folder_name.value);
+            = self.local_cache_path();
 
         global_cache_path.fs_create_dir_all()?;
 
@@ -418,6 +441,52 @@ impl Project {
         Ok(&self.workspaces[*idx])
     }
 
+    pub fn try_workspace_by_descriptor(&self, descriptor: &Descriptor) -> Result<Option<&Workspace>, Error> {
+        match &descriptor.range {
+            Range::WorkspaceIdent(params) => {
+                Ok(Some(self.workspace_by_ident(&params.ident)?))
+            },
+
+            Range::WorkspacePath(params) => {
+                Ok(Some(self.workspace_by_rel_path(&params.path)?))
+            },
+
+            Range::WorkspaceSemver(_) => {
+                Ok(Some(self.workspace_by_ident(&descriptor.ident)?))
+            },
+
+            Range::WorkspaceMagic(_) => {
+                Ok(Some(self.workspace_by_ident(&descriptor.ident)?))
+            },
+
+            Range::RegistryTag(_) if self.config.settings.enable_transparent_workspaces.value => {
+                let workspace
+                    = self.workspaces_by_ident.get(&descriptor.ident)
+                        .map(|idx| &self.workspaces[*idx]);
+
+                Ok(workspace)
+            },
+
+            Range::RegistrySemver(params) if self.config.settings.enable_transparent_workspaces.value => {
+                let workspace
+                    = self.workspaces_by_ident.get(params.ident.as_ref().unwrap_or(&descriptor.ident))
+                        .map(|idx| &self.workspaces[*idx]);
+
+                if let Some(workspace) = workspace {
+                    if params.range.check(&workspace.manifest.remote.version.clone().unwrap_or_default()) {
+                        return Ok(Some(workspace));
+                    }
+                }
+
+                Ok(None)
+            },
+
+            _ => {
+                Ok(None)
+            },
+        }
+    }
+
     pub fn workspace_by_rel_path(&self, rel_path: &Path) -> Result<&Workspace, Error> {
         let idx = self.workspaces_by_rel_path.get(rel_path)
             .ok_or_else(|| Error::WorkspacePathNotFound(rel_path.clone()))?;
@@ -434,34 +503,17 @@ impl Project {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
 
-        let location = install_state.locations_by_package.get(locator)
-            .expect("Expected locator to have a location");
+        let package_location = install_state.locations_by_package.get(locator)
+            .unwrap_or_else(|| panic!("Expected {} to have a package location", locator.to_print_string()));
 
-        let manifest_text = self.project_cwd
-            .with_join(location)
-            .with_join_str(MANIFEST_NAME)
-            .fs_read_text_with_zip()?;
+        let content_flags = install_state.content_flags.get(&locator.physical_locator())
+            .unwrap_or_else(|| panic!("Expected {} to have content flags", locator.to_print_string()));
 
-        let manifest
-            = sonic_rs::from_str::<BinManifest>(&manifest_text)
-                .map_err(|_| Error::ManifestParseError(location.clone()))?;
+        let binaries = content_flags.binaries.iter()
+            .map(|(name, path)| (name.clone(), Binary::new(self, package_location.with_join(&path))))
+            .collect();
 
-        Ok(match manifest.bin {
-            Some(BinField::String(bin)) => {
-                if let Some(name) = manifest.name {
-                    BTreeMap::from_iter([(name.name().to_string(), Binary::new(self, location.with_join(&bin.path)))])
-                } else {
-                    BTreeMap::new()
-                }
-            }
-
-            Some(BinField::Map(bins)) => bins
-                .into_iter()
-                .map(|(name, path)| (name.name().to_string(), Binary::new(self, location.with_join(&path.path))))
-                .collect(),
-
-            None => BTreeMap::new(),
-        })
+        Ok(binaries)
     }
 
     pub fn package_visible_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
@@ -517,8 +569,8 @@ impl Project {
             .with_join_str(MANIFEST_NAME)
             .fs_read_text_with_zip()?;
 
-        let manifest
-            = sonic_rs::from_str::<ScriptManifest>(&manifest_text)?;
+        let manifest: ScriptManifest
+            = JsonDocument::hydrate_from_str(&manifest_text)?;
 
         if let Some(script) = manifest.scripts.as_ref().and_then(|s| s.get(name)) {
             return Ok((locator.clone(), script.clone()));
@@ -569,13 +621,23 @@ impl Project {
             check_checksums: false,
             check_resolutions: false,
             enforced_resolutions: BTreeMap::new(),
+            prune_dev_dependencies: false,
             refresh_lockfile: false,
             silent_or_error: true,
             mode: None,
-        }).await
+            roots: None,
+        }).await?;
+
+        Ok(())
     }
 
-    pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<(), Error> {
+    pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<InstallResult, Error> {
+        // Useful for optimization purposes as we can reuse some information such as content flags.
+        // Discard errors; worst case scenario we just recompute the whole state from scratch.
+        if self.install_state.is_none() {
+            let _ = self.import_install_state();
+        }
+
         let report = StreamReport::new(StreamReportConfig {
             include_version: true,
             silent_or_error: options.silent_or_error,
@@ -621,26 +683,36 @@ impl Project {
                 }
             }
 
-            let install_context = InstallContext::default()
-                .with_package_cache(Some(&package_cache))
-                .with_project(Some(self))
-                .set_check_checksums(options.check_checksums)
-                .set_enforced_resolutions(options.enforced_resolutions)
-                .set_refresh_lockfile(options.refresh_lockfile)
-                .set_mode(options.mode)
-                .with_systems(Some(&systems));
+            let install_context
+                = InstallContext::default()
+                    .with_package_cache(Some(&package_cache))
+                    .with_project(Some(self))
+                    .set_check_checksums(options.check_checksums)
+                    .set_enforced_resolutions(options.enforced_resolutions)
+                    .set_prune_dev_dependencies(options.prune_dev_dependencies)
+                    .set_refresh_lockfile(options.refresh_lockfile)
+                    .set_mode(options.mode)
+                    .with_systems(Some(&systems));
 
-            InstallManager::new()
-                .with_context(install_context)
-                .with_lockfile(lockfile?)
-                .with_roots_iter(self.workspaces.iter().map(|w| w.descriptor()))
-                .resolve_and_fetch().await?
-                .finalize(self).await?;
+            let roots
+                = self.workspaces.iter()
+                    .filter(|w| options.roots.as_ref().map_or(true, |r| r.contains(&w.name)))
+                    .map(|w| w.descriptor())
+                    .collect();
 
-            Ok(())
-        }).await?;
+            let install_result
+                = InstallManager::new()
+                    .with_context(install_context)
+                    .with_lockfile(lockfile?)
+                    .with_previous_state(self.install_state.as_ref())
+                    .with_roots(roots)
+                    .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
+                    .with_skip_lockfile_update(options.roots.is_some())
+                    .resolve_and_fetch().await?
+                    .link_and_build(self).await?;
 
-        Ok(())
+            Ok(install_result)
+        }).await
     }
 }
 
@@ -665,7 +737,7 @@ impl Workspace {
             .with_join_str(MANIFEST_NAME);
 
         let manifest_meta = manifest_path.fs_metadata().map_err(|err| match err.io_kind() {
-            Some(ErrorKind::NotFound) | Some(ErrorKind::NotADirectory) => Error::ManifestNotFound,
+            Some(ErrorKind::NotFound) | Some(ErrorKind::NotADirectory) => Error::ManifestNotFound(manifest_path.clone()),
             _ => err.into(),
         })?;
 

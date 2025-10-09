@@ -2,16 +2,27 @@ use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sy
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
-use zpm_primitives::{Descriptor, Ident, Locator, PatchRange, PeerRange, Range, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange};
-use zpm_utils::{Hash64, Path, ToHumanString, UrlEncoded};
+use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
+use zpm_utils::{Hash64, IoResultExt, Path, ToHumanString, UrlEncoded};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
-    build, cache::CompositeCache, content_flags::ContentFlags, error::Error, fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt}, graph::{GraphCache, GraphIn, GraphOut, GraphTasks}, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives_exts::RangeExt, project::{InstallMode, Project}, report::{async_section, with_context_result, ReportContext}, resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver}
+    build,
+    cache::CompositeCache,
+    constraints::check_constraints,
+    content_flags::ContentFlags,
+    error::Error,
+    fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt},
+    graph::{GraphCache, GraphIn, GraphOut, GraphTasks},
+    linker,
+    lockfile::{Lockfile, LockfileEntry, LockfileMetadata},
+    primitives_exts::RangeExt,
+    project::{InstallMode, Project},
+    report::{async_section, with_context_result, ReportContext},
+    resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver},
 };
-
 
 #[derive(Clone)]
 pub struct InstallContext<'a> {
@@ -20,6 +31,7 @@ pub struct InstallContext<'a> {
     pub systems: Option<&'a Vec<system::System>>,
     pub check_checksums: bool,
     pub check_resolutions: bool,
+    pub prune_dev_dependencies: bool,
     pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
     pub refresh_lockfile: bool,
     pub mode: Option<InstallMode>,
@@ -33,6 +45,7 @@ impl<'a> Default for InstallContext<'a> {
             systems: None,
             check_checksums: false,
             check_resolutions: false,
+            prune_dev_dependencies: false,
             enforced_resolutions: BTreeMap::new(),
             refresh_lockfile: false,
             mode: None,
@@ -63,6 +76,11 @@ impl<'a> InstallContext<'a> {
 
     pub fn set_enforced_resolutions(mut self, enforced_resolutions: BTreeMap<Descriptor, Locator>) -> Self {
         self.enforced_resolutions = enforced_resolutions;
+        self
+    }
+
+    pub fn set_prune_dev_dependencies(mut self, prune_dev_dependencies: bool) -> Self {
+        self.prune_dev_dependencies = prune_dev_dependencies;
         self
     }
 
@@ -449,6 +467,7 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
 #[derive(Clone, Debug, Encode, Decode, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstallState {
     pub last_installed_at: u128,
+    pub content_flags: BTreeMap<Locator, ContentFlags>,
     pub resolution_tree: ResolutionTree,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
     pub normalized_resolutions: BTreeMap<Locator, Resolution>,
@@ -465,25 +484,43 @@ pub struct Install {
     pub lockfile_changed: bool,
     pub package_data: BTreeMap<Locator, PackageData>,
     pub install_state: InstallState,
+    pub roots: BTreeSet<Descriptor>,
     pub skip_build: bool,
+    pub skip_lockfile_update: bool,
+    pub constraints_check: bool,
+}
+
+#[derive(Debug)]
+pub struct InstallResult {
+    pub package_data: BTreeMap<Locator, PackageData>,
 }
 
 impl Install {
-    pub async fn finalize(mut self, project: &mut Project) -> Result<(), Error> {
+    pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
         self.install_state.last_installed_at = project.last_changed_at;
 
         let link_future
             = linker::link_project(project, &mut self);
 
-        let build_requests
+        let link_result
             = async_section("Linking the project", link_future).await?;
 
-        project.attach_install_state(self.install_state)?;
-        project.write_lockfile(&self.lockfile)?;
+        for (location, locator) in &link_result.packages_by_location {
+            self.install_state.locations_by_package.insert(locator.clone(), location.clone());
+        }
 
-        if !self.skip_build && !build_requests.entries.is_empty() {
+        self.install_state.packages_by_location
+            = link_result.packages_by_location;
+
+        project.attach_install_state(self.install_state)?;
+
+        if !self.skip_lockfile_update {
+            project.write_lockfile(&self.lockfile)?;
+        }
+
+        if !self.skip_build && !link_result.build_requests.entries.is_empty() {
             let build_future
-                = build::BuildManager::new(build_requests).run(project);
+                = build::BuildManager::new(link_result.build_requests).run(project);
 
             let build_result
                 = async_section("Building the project", build_future).await?;
@@ -493,23 +530,34 @@ impl Install {
             }
         }
 
-        let ignore_path
-            = project.ignore_path();
+        if self.constraints_check {
+            async_section("Checking constraints", async {
+                let output
+                    = check_constraints(project, false).await?;
 
-        if ignore_path.fs_exists() {
-            ignore_path
-                .with_join_str(".gitignore")
-                .fs_change("*", false)?;
+                if !output.is_empty() {
+                    return Err(Error::AutoConstraintsError);
+                }
+
+                Ok(())
+            }).await?;
         }
 
-        Ok(())
+        project.ignore_path()
+            .with_join_str(".gitignore")
+            .fs_change("*", false)
+            .ok_missing()?;
+
+        Ok(InstallResult {
+            package_data: self.package_data,
+        })
     }
 }
 
 pub struct InstallManager<'a> {
     initial_lockfile: Lockfile,
-    roots: Vec<Descriptor>,
     context: InstallContext<'a>,
+    previous_state: Option<&'a InstallState>,
     result: Install,
 }
 
@@ -523,8 +571,8 @@ impl<'a> InstallManager<'a> {
     pub fn new() -> Self {
         InstallManager {
             initial_lockfile: Lockfile::new(),
-            roots: vec![],
             context: InstallContext::default(),
+            previous_state: None,
             result: Install::default(),
         }
     }
@@ -534,18 +582,29 @@ impl<'a> InstallManager<'a> {
         self
     }
 
+    pub fn with_previous_state(mut self, previous_state: Option<&'a InstallState>) -> Self {
+        self.previous_state = previous_state;
+        self
+    }
+
     pub fn with_lockfile(mut self, lockfile: Lockfile) -> Self {
         self.initial_lockfile = lockfile;
         self
     }
 
-    pub fn with_roots(mut self, roots: Vec<Descriptor>) -> Self {
-        self.roots = roots;
+    pub fn with_roots(mut self, roots: BTreeSet<Descriptor>) -> Self {
+        self.result.roots = roots;
         self
     }
 
-    pub fn with_roots_iter<T: Iterator<Item = Descriptor>>(self, it: T) -> Self {
-        self.with_roots(it.collect())
+    pub fn with_constraints_check(mut self, constraints_check: bool) -> Self {
+        self.result.constraints_check = constraints_check;
+        self
+    }
+
+    pub fn with_skip_lockfile_update(mut self, skip_lockfile_update: bool) -> Self {
+        self.result.skip_lockfile_update = skip_lockfile_update;
+        self
     }
 
     pub async fn resolve_and_fetch(mut self) -> Result<Install, Error> {
@@ -555,7 +614,7 @@ impl<'a> InstallManager<'a> {
         let mut graph
             = GraphTasks::new(self.context.clone(), cache);
 
-        for descriptor in self.roots.clone() {
+        for descriptor in self.result.roots.clone() {
             graph.register(InstallOp::Resolve {
                 descriptor,
             });
@@ -586,7 +645,7 @@ impl<'a> InstallManager<'a> {
                 },
 
                 (InstallOp::Fetch {locator, ..}, InstallOpResult::Fetched(FetchResult {package_data, ..})) => {
-                    self.record_fetch(locator, package_data);
+                    self.record_fetch(locator, package_data)?;
                 },
 
                 _ => panic!("Unsupported install result ({:?})", entry),
@@ -627,9 +686,6 @@ impl<'a> InstallManager<'a> {
             })
             .collect::<Result<BTreeMap<_, _>, Error>>()?;
 
-        let are_metadata_up_to_date
-            = self.result.lockfile.metadata.version == self.initial_lockfile.metadata.version;
-
         for entry in self.result.lockfile.entries.values_mut() {
             let package_data = self.result.package_data
                 .get(&entry.resolution.locator)
@@ -640,12 +696,6 @@ impl<'a> InstallManager<'a> {
 
             let previous_checksum = previous_entry
                 .and_then(|s| s.checksum.as_ref());
-            let mut previous_flags = previous_entry
-                .map(|s| &s.flags);
-
-            if !are_metadata_up_to_date || entry.resolution.locator.reference.is_disk_reference() {
-                previous_flags = None;
-            }
 
             let mut checksum = package_data.checksum()
                 .or_else(|| previous_checksum.cloned())
@@ -683,25 +733,12 @@ impl<'a> InstallManager<'a> {
                 }
             }
 
-            let mut content_flags
-                = None;
-
-            if let Some(previous_flags) = previous_flags {
-                content_flags = Some(previous_flags.clone());
-            }
-
-            let content_flags = content_flags.map_or_else(
-                || ContentFlags::extract(&entry.resolution.locator, &package_data),
-                Ok,
-            )?;
-
             entry.checksum = checksum;
-            entry.flags = content_flags;
         }
 
         self.result.install_state.resolution_tree = TreeResolver::default()
             .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)
-            .with_roots(self.roots.clone())
+            .with_roots(self.result.roots.clone())
             .run();
 
         self.result.lockfile.resolutions = self.result.install_state.descriptor_to_locator.clone();
@@ -722,7 +759,6 @@ impl<'a> InstallManager<'a> {
         self.result.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
             checksum: None,
             resolution: original_resolution,
-            flags: ContentFlags::default(),
         });
 
         if resolution.requirements.is_conditional() {
@@ -737,7 +773,7 @@ impl<'a> InstallManager<'a> {
         }
 
         if let Some(package_data) = package_data {
-            self.record_fetch(resolution.locator, package_data);
+            self.record_fetch(resolution.locator, package_data)?;
         }
 
         Ok(())
@@ -747,8 +783,18 @@ impl<'a> InstallManager<'a> {
         self.result.install_state.descriptor_to_locator.insert(descriptor, locator);
     }
 
-    fn record_fetch(&mut self, locator: Locator, package_data: PackageData) {
-        self.result.package_data.insert(locator, package_data);
+    fn record_fetch(&mut self, locator: Locator, package_data: PackageData) -> Result<(), Error> {
+        let content_flags
+            = self.previous_state
+                .and_then(|previous_state| previous_state.content_flags.get(&locator))
+                .cloned()
+                .map_or_else(|| ContentFlags::extract(&locator, &package_data), Ok)?;
+
+        self.result.package_data.insert(locator.clone(), package_data);
+
+        self.result.install_state.content_flags.insert(locator, content_flags);
+
+        Ok(())
     }
 }
 
@@ -838,6 +884,46 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
 
     let mut peer_dependencies
         = resolution.peer_dependencies.clone();
+
+    if let Reference::Git(params) = &resolution.locator.reference {
+        for descriptor in resolution.dependencies.values() {
+            let updated_range = match &descriptor.range {
+                Range::WorkspaceIdent(WorkspaceIdentRange {ident, ..}) => {
+                    let mut workspace_git_range
+                        = params.git.to_git_range();
+
+                    workspace_git_range.prepare_params.workspace = Some(ident.to_file_string());
+
+                    Some(Range::Git(GitRange {
+                        git: workspace_git_range,
+                    }))
+                }
+
+                Range::WorkspaceMagic(_) |
+                Range::WorkspaceSemver(_) => {
+                    let mut workspace_git_range
+                        = params.git.to_git_range();
+
+                    workspace_git_range.prepare_params.workspace = Some(descriptor.ident.to_file_string());
+
+                    Some(Range::Git(GitRange {
+                        git: workspace_git_range,
+                    }))
+                },
+
+                _ => {
+                    None
+                },
+            };
+
+            if let Some(updated_range) = updated_range {
+                dependencies.insert(
+                    descriptor.ident.clone(),
+                    Descriptor::new(descriptor.ident.clone(), updated_range),
+                );
+            }
+        }
+    }
 
     for (descriptor, extension) in project.config.settings.package_extensions.iter() {
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {

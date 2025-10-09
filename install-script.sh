@@ -2,46 +2,53 @@
 set -euo pipefail
 
 # Reset
-Color_Off=''
+color_off=''
 
 # Regular Colors
-Error=''
-Yarn=''
-Url=''
+color_error=''
+color_yarn=''
+color_url=''
 
 truecolor() {
-    echo -e "\x1b[38;2;${1};${2};${3}m"
+  echo -e "\x1b[38;2;${1};${2};${3}m"
 }
 
 if [[ -t 1 ]]; then
-    # Reset
-    Color_Off='\033[0m' # Text Reset
+  # Reset
+  color_off='\033[0m' # Text Reset
 
-    # Regular Colors
-    Error=$(truecolor 255 0 0)
-    Yarn=$(truecolor 100 180 215)
-    Url=$(truecolor 215 95 215)
+  # Regular Colors
+  color_error=$(truecolor 200 100 100)
+  color_yarn=$(truecolor 100 180 215)
+  color_url=$(truecolor 215 130 215)
 fi
 
 colorize() {
-    echo -e "$1$2${Color_Off}"
+  echo -e "$1$2${color_off}"
 }
 
 error() {
-    echo "$(colorize $Error "Error:") $1" >&2
-    exit 1
+  echo "$(colorize "$color_error" "Error:") $1" >&2
+  exit 1
 }
 
 command -v unzip >/dev/null ||
-    error 'The unzip command is required to install Yarn'
+  error 'The unzip command is required to install Yarn'
 
-Install_Channel=stable
-Positional_Args=()
+bin_dir=
+install_channel=stable
+positional_args=()
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --canary)
-      Install_Channel=canary
+      install_channel=canary
+      shift
+      ;;
+
+    --bin-dir)
+      bin_dir="$2"
+      shift
       shift
       ;;
 
@@ -51,13 +58,13 @@ while [[ $# -gt 0 ]]; do
       ;;
 
     *)
-      Positional_Args+=("$1")
+      positional_args+=("$1")
       shift
       ;;
   esac
 done
 
-if [[ ${#Positional_Args[@]} -gt 1 ]]; then
+if [[ ${#positional_args[@]} -gt 1 ]]; then
     error 'Too many arguments, only one representing a specific tag to install is allowed. (e.g. "6.0.0")'
 fi
 
@@ -65,14 +72,14 @@ platform=$(uname -ms)
 
 case $platform in
 'Darwin arm64')
-    target=aarch64-apple-darwin
-    ;;
+  target=aarch64-apple-darwin
+  ;;
 'Linux aarch64' | 'Linux arm64')
-    target=aarch64-unknown-linux-musl
-    ;;
+  target=aarch64-unknown-linux-musl
+  ;;
 'Linux x86_64' | *)
-    target=x86_64-unknown-linux-musl
-    ;;
+  target=x86_64-unknown-linux-musl
+  ;;
 esac
 
 install_dir=$HOME/.yarn/switch/bin
@@ -82,23 +89,27 @@ archive=$tmp_dir/yarn.zip
 rm -rf "$tmp_dir"
 mkdir -p "$tmp_dir"
 
-yarn_version=${Positional_Args[0]:-$(curl --fail --location -s https://repo.yarnpkg.com/channels/default/$Install_Channel)}
+yarn_version=${positional_args[0]:-$(curl --fail --location -s https://repo.yarnpkg.com/channels/default/$install_channel)}
 yarn_uri=https://repo.yarnpkg.com/releases/$yarn_version/$target
 
-echo "This script will install or update $(colorize "$Yarn" "Yarn Switch"), a utility that lets you lock Yarn versions in your projects."
-echo "For more information, please take a look at our documentation at $(colorize "$Url" "https://yarnpkg.com")"
+echo "This script will install or update $(colorize "$color_yarn" "Yarn Switch"), a utility that lets you lock Yarn versions in your projects."
+echo "For more information, please take a look at our documentation at $(colorize "$color_url" "https://yarnpkg.com")"
 echo
 
 curl --fail --location --progress-bar --output "$archive" $yarn_uri ||
-    error "Failed to download Yarn from $(colorize "$Url" "$yarn_uri")"
+    error "Failed to download Yarn from $(colorize "$color_url" "$yarn_uri")"
 
 unzip -q "$archive" -d "$tmp_dir"
 rm "$tmp_dir"/yarn-bin
 rm "$archive"
 
-rm -rf "$install_dir"
-mv "$tmp_dir" "$install_dir"
+if [[ -n "$bin_dir" ]]; then
+  mv -f "$tmp_dir"/yarn "$bin_dir"/
+else
+  rm -rf "$install_dir"
+  mv "$tmp_dir" "$install_dir"
 
-echo
+  echo
 
-"$install_dir"/yarn switch postinstall -H "$HOME"
+  "$install_dir"/yarn switch postinstall -H "$HOME"
+fi

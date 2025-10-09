@@ -1,0 +1,53 @@
+/* Overrides for Splide Slider Styles */
+.splide__pagination {
+  position: static !important;
+  margin-top: 48px !important;
+}
+
+@media (max-width: 768px) {
+  .splide__pagination {
+    bottom: 32px !important;
+  }
+}
+
+.splide__pagination__page {
+  background: linear-gradient(to bottom, #181a1f, #0d0f14) !important;
+  backdrop-filter: blur(5.7px);
+  -webkit-backdrop-filter: blur(5.7px);
+
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 50% !important;
+
+  display: inline-block !important;
+  margin: 6px !important;
+  opacity: 1 !important;
+  padding: 4px !important;
+  position: relative !important;
+  transition: transform 0.2s linear !important;
+
+  height: 8px !important;
+  width: 8px !important;
+
+  box-shadow: none !important;
+  transform: scale(1) !important;
+  z-index: auto !important;
+}
+
+.splide__pagination__page.is-active {
+  background: #fff !important;
+  transform: scale(1) !important;
+  z-index: 1 !important;
+  box-shadow: 0 0 14.3px 0 rgba(255, 255, 255, 0.8) !important;
+  border: none !important;
+}
+
+/* Fade-in and out effect for Command carousel */
+[data-active-wrapper] {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+
+.splide__slide.is-active [data-active-wrapper] {
+  opacity: 1;
+}

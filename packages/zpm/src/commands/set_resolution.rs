@@ -8,17 +8,16 @@ use crate::{
     project::{self, RunInstallOptions},
 };
 
+/// Pins the resolution of a dependency to a specific version
 #[cli::command]
 #[cli::path("set", "resolution")]
 #[cli::category("Dependency management")]
-#[cli::description("Pins the resolution of a dependency to a specific version")]
 pub struct SetResolution {
     descriptor: Descriptor,
     reference: Reference,
 }
 
 impl SetResolution {
-    #[tokio::main]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = project::Project::new(None).await?;

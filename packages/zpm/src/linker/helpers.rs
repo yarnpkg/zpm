@@ -1,8 +1,9 @@
 use std::{collections::{BTreeMap, BTreeSet, HashMap}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
 
 use zpm_formats::iter_ext::IterExt;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, FilterDescriptor, Ident, Locator};
-use zpm_utils::{Path, PathError, ToFileString};
+use zpm_utils::{Path, PathError};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -40,7 +41,7 @@ impl TopLevelConfiguration {
     pub fn from_project(project: &Project) -> HashMap<Ident, Vec<(FilterDescriptor, PackageMeta)>> {
         project.manifest_path()
             .if_exists()
-            .and_then(|path| path.fs_read_text().ok()).map(|data| sonic_rs::from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta)
+            .and_then(|path| path.fs_read_text().ok()).map(|data| JsonDocument::hydrate_from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta)
             .unwrap_or_default()
             .into_iter()
             .map(|(filter, meta)| (filter.ident().clone(), (filter, meta)))
@@ -102,12 +103,12 @@ pub fn fs_extract_archive(destination: &Path, package_data: &PackageData) -> Res
         let entries
             = zpm_formats::zip::entries_from_zip(&package_bytes)?
                 .into_iter()
-                .strip_path_prefix(package_subpath.to_file_string())
+                .strip_path_prefix(&package_subpath)
                 .collect::<Vec<_>>();
 
         for entry in entries {
             let target_path = destination
-                .with_join_str(&entry.name);
+                .with_join(&entry.name);
 
             target_path
                 .fs_create_parent()?
@@ -191,10 +192,9 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     // should always be the same for the same package, so we keep them in
     // the install state so we don't have to recompute them at every install.
     //
-    let package_flags = &install.lockfile.entries
+    let package_flags = &install.install_state.content_flags
         .get(&locator.physical_locator())
-        .expect("Expected package flags to be set")
-        .flags;
+        .expect("Expected package flags to be set");
 
     // We don't take into account `is_compatible` here, as it may change
     // depending on the system and we don't want the paths encoded in the

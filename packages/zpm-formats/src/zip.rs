@@ -1,5 +1,5 @@
 use pnp::fs::VPathInfo;
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::Path;
 
 use crate::{error::Error, zip_iter::ZipIterator, zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, FileHeader, GeneralRecord}, CompressionAlgorithm};
 
@@ -40,11 +40,14 @@ impl<'a> ToZip for Vec<Entry<'a>> {
                 .as_ref()
                 .map_or(&entry.data, |compressed_data| &compressed_data.data);
 
+            let name_bytes
+                = entry.name.as_str().as_bytes();
+
             general_capacity
-                += std::mem::size_of::<GeneralRecord>() + entry.name.len() + compressed_data.len();
+                += std::mem::size_of::<GeneralRecord>() + name_bytes.len() + compressed_data.len();
 
             central_directory_capacity
-                += std::mem::size_of::<CentralDirectoryRecord>() + entry.name.len();
+                += std::mem::size_of::<CentralDirectoryRecord>() + name_bytes.len();
         }
 
         let mut general_segment
@@ -95,6 +98,9 @@ fn inject_general_record(target: &mut Vec<u8>, entry: &Entry, compressed_data: &
         None => 0x00, // No compression
     };
 
+    let name_bytes
+        = entry.name.as_str().as_bytes();
+
     unsafe {
         target.extend_from_slice(
             any_as_u8_slice(&GeneralRecord {
@@ -108,7 +114,7 @@ fn inject_general_record(target: &mut Vec<u8>, entry: &Entry, compressed_data: &
                     crc_32: entry.crc,
                     compressed_size: compressed_data.len() as u32,
                     uncompressed_size: entry.data.len() as u32,
-                    file_name_length: entry.name.len() as u16,
+                    file_name_length: name_bytes.len() as u16,
                     extra_field_length: 0x00,
                 },
             }),
@@ -116,7 +122,7 @@ fn inject_general_record(target: &mut Vec<u8>, entry: &Entry, compressed_data: &
     }
 
     // File name
-    target.extend_from_slice(entry.name.as_bytes());
+    target.extend_from_slice(name_bytes);
 
     // File data (compressed or uncompressed)
     target.extend_from_slice(compressed_data);
@@ -127,6 +133,9 @@ fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, compress
         Some(CompressionAlgorithm::Deflate(_)) => 0x08, // Deflate compression
         None => 0x00, // No compression
     };
+
+    let name_bytes
+        = entry.name.as_str().as_bytes();
 
     unsafe {
         target.extend_from_slice(
@@ -142,7 +151,7 @@ fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, compress
                     crc_32: entry.crc,
                     compressed_size: compressed_data.len() as u32,
                     uncompressed_size: entry.data.len() as u32,
-                    file_name_length: entry.name.len() as u16,
+                    file_name_length: name_bytes.len() as u16,
                     extra_field_length: 0x00,
                 },
                 file_comment_length: 0x00,
@@ -155,7 +164,7 @@ fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, compress
     }
 
     // File name
-    target.extend_from_slice(entry.name.as_bytes());
+    target.extend_from_slice(name_bytes);
 }
 
 pub trait ZipSupport {
@@ -165,14 +174,11 @@ pub trait ZipSupport {
 
 impl ZipSupport for Path {
     fn fs_read_text_from_zip_buffer(&self, zip_data: &[u8]) -> Result<String, Error> {
-        let path_as_string
-            = self.to_file_string();
-
         let entries
             = entries_from_zip(zip_data)?;
 
         let entry = entries.iter()
-            .find(|entry| entry.name == path_as_string)
+            .find(|entry| &entry.name == self)
             .ok_or(std::io::Error::from(std::io::ErrorKind::NotFound))?;
 
         Ok(String::from_utf8_lossy(&entry.data).to_string())

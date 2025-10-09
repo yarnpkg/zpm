@@ -66,6 +66,14 @@ impl Descriptor {
         }
     }
 
+    pub fn physical_descriptor(&self) -> Descriptor {
+        if let Range::Virtual(params) = &self.range {
+            Descriptor::new_bound(self.ident.clone(), params.inner.physical_range().clone(), self.parent.clone())
+        } else {
+            self.clone()
+        }
+    }
+
     pub fn resolve_with(&self, reference: Reference) -> Locator {
         let parent = match reference.must_bind() {
             true => self.parent.clone().map(Arc::new),

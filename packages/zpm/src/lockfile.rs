@@ -7,7 +7,6 @@ use zpm_primitives::{Descriptor, Locator};
 use zpm_utils::{FromFileString, Hash64, ToFileString};
 
 use crate::{
-    content_flags::ContentFlags,
     error::Error,
     resolvers::Resolution,
 };
@@ -18,9 +17,6 @@ const LOCKFILE_VERSION: u64 = 9;
 pub struct LockfileEntry {
     pub checksum: Option<Hash64>,
     pub resolution: Resolution,
-
-    #[serde(default, skip_serializing_if = "zpm_utils::is_default")]
-    pub flags: ContentFlags,
 }
 
 #[derive(Clone, Debug, Default, Encode, Decode, PartialEq, Eq)]
@@ -195,8 +191,6 @@ impl<'de, T: FromFileString> Deserialize<'de> for MultiKey<T> where <T as FromFi
 #[derive(Clone, Debug, Encode, Decode, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LockfileMetadata {
     pub version: u64,
-    pub cache_key: u64,
-    pub linker_key: u64,
 }
 
 impl LockfileMetadata {
@@ -209,8 +203,6 @@ impl LockfileMetadata {
 
         LockfileMetadata {
             version,
-            cache_key: 0,
-            linker_key: 0,
         }
     }
 }
@@ -275,7 +267,6 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
                 optional_peer_dependencies: Default::default(),
                 missing_peer_dependencies: Default::default(),
             },
-            flags: Default::default(),
         });
     }
 

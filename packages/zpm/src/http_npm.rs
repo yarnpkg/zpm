@@ -4,6 +4,7 @@ use regex::{Captures, Regex};
 use reqwest::Response;
 use serde::Deserialize;
 use zpm_config::Configuration;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
 use zpm_utils::DataType;
 
@@ -264,7 +265,7 @@ async fn whoami(params: &NpmHttpParams<'_>, authorization: &str) -> Result<Strin
     let body
         = response.text().await?;
     let data: WhoamiResponse
-        = sonic_rs::from_str(&body)?;
+        = JsonDocument::hydrate_from_str(&body)?;
 
     Ok(data.username)
 }

@@ -10,25 +10,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{steps.set-matrix.outputs.matrix}}
-    steps:
-      - id: set-matrix
-        run: |
-          if [ "${{github.event_name}}" == "pull_request" ]; then
-            # For PRs, only include Linux targets
-            echo 'matrix={"include":[{"target":"x86_64-unknown-linux-musl","os":"ubuntu-latest"},{"target":"aarch64-unknown-linux-musl","os":"ubuntu-latest"}]}' >> $GITHUB_OUTPUT
-          else
-            # For pushes to main, include all targets
-            echo 'matrix={"include":[{"target":"x86_64-unknown-linux-musl","os":"ubuntu-latest"},{"target":"aarch64-unknown-linux-musl","os":"ubuntu-latest"},{"target":"aarch64-apple-darwin","os":"macos-latest"}]}' >> $GITHUB_OUTPUT
-          fi
-
   build:
-    needs: matrix
     strategy:
-      matrix: ${{fromJson(needs.matrix.outputs.matrix)}}
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: i686-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
 
     name: 'Building ${{matrix.target}}'
     runs-on: ${{matrix.os}}
@@ -37,138 +30,23 @@ jobs:
       - name: Checkout the repo
         uses: actions/checkout@v4
 
-      - name: Install cross
-        uses: taiki-e/install-action@a27ef18d36cfa66b0af3a360104621793b41c036 # v2.54.3
+      - uses: ./.github/actions/build
+        id: build
         with:
-          tool: cross
+          target: ${{matrix.target}}
+          profile: release-lto-nodebug
 
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
-        with:
-          shared-key: release-${{matrix.target}}
-
-      - name: Add Rust Target
-        run: rustup target add ${{matrix.target}}
-
-      - name: Compute the version
-        id: version
+      - name: "Build ${{steps.build.outputs.version}}"
         run: |
-          git_sha=$GITHUB_SHA
-          git_date=$(git show -s --format=%cd --date=format:'%Y%m%d' $GITHUB_SHA)
-
-          zpm_version=$(cargo pkgid -p zpm | cut -d "#" -f2 | cut -d- -f1)
-          INFRA_VERSION=$zpm_version-git.${git_date}.hash-${git_sha}
-
-          echo -e "INFRA_VERSION=$INFRA_VERSION" >> $GITHUB_ENV
-          echo -e "INFRA_VERSION=$INFRA_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Build ${{steps.version.outputs.INFRA_VERSION}}
-        run: |
-          export CARGO_PROFILE_RELEASE_STRIP=debuginfo
-          cross build --verbose --release --target=${{matrix.target}}
-
-          cp LICENSE.md target/${{matrix.target}}/release/
+          # The binary was already built in the previous step but we must have a step
+          # named exactly "Build <version>" to allow the Cloudflare workers to detect
+          # the version of the commit.
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: yarn-${{matrix.target}}
           path: |
-            target/${{matrix.target}}/release/yarn-bin
-            target/${{matrix.target}}/release/yarn
-            target/${{matrix.target}}/release/LICENSE.md
-
-  # test-report:
-  #   needs: build
-  #   runs-on: ubuntu-latest
-
-  #   steps:
-  #     - name: Checkout the repo
-  #       uses: actions/checkout@v4
-
-  #     - name: Download the binary
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: yarn-x86_64-unknown-linux-musl
-
-  #     - name: Puts back the binaries
-  #       run: |
-  #         mkdir -p target/release
-  #         mv {yarn-bin,yarn} target/release/
-  #         chmod +x target/release/{yarn-bin,yarn}
-
-  #     - name: Clone the berry repo
-  #       uses: actions/checkout@v4
-  #       with:
-  #         repository: yarnpkg/berry
-  #         path: berry
-
-  #     - name: Install dependencies
-  #       run: ./yarn.sh install
-
-  #     - name: Generate the test report
-  #       run: |
-  #         export BERRY_DIR=$GITHUB_WORKSPACE/berry
-  #         ./yarn.sh berry test:integration --json --outputFile=$(pwd)/report.json || true
-
-  #     - name: Upload test report
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: test-report
-  #         path: report.json
-
-  # publish:
-  #   needs: [build, test-report]
-  #   runs-on: ubuntu-latest
-
-  #   permissions:
-  #     contents: read
-  #     pages: write
-  #     id-token: write
-
-  #   environment:
-  #     name: github-pages
-  #     url: ${{steps.deployment.outputs.page_url}}
-
-  #   steps:
-  #     - name: Checkout the repo
-  #       uses: actions/checkout@v4
-
-  #     - name: Setup Node.js
-  #       uses: actions/setup-node@v4
-  #       with:
-  #         node-version: '22'
-
-  #     - name: Download the binary
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: yarn-x86_64-unknown-linux-musl
-
-  #     - name: Puts back the binaries
-  #       run: |
-  #         mkdir -p target/release
-  #         mv {yarn-bin,yarn} target/release/
-  #         chmod +x target/release/{yarn-bin,yarn}
-
-  #     - name: Download the test report
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: test-report
-
-  #     - name: Install dependencies
-  #       run: ./yarn.sh install
-
-  #     - name: Generate downloads page
-  #       run: ./yarn.sh build:site-artifacts
-
-  #     - name: Setup Pages
-  #       uses: actions/configure-pages@v4
-
-  #     - name: Upload Pages artifact
-  #       uses: actions/upload-pages-artifact@v3
-  #       with:
-  #         path: packages/site-artifacts/dist
-
-  #     - name: Deploy to GitHub Pages
-  #       id: deployment
-  #       uses: actions/deploy-pages@v4
+            target/${{matrix.target}}/release-lto-nodebug/yarn-bin
+            target/${{matrix.target}}/release-lto-nodebug/yarn
+            target/${{matrix.target}}/release-lto-nodebug/LICENSE.md

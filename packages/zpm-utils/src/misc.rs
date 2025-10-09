@@ -28,44 +28,59 @@ impl<T> UnwrapInfallible for Result<T, Infallible> {
     }
 }
 
+pub trait ResultExt<T, E> {
+    fn discard_error(self, f: impl Fn(&E) -> bool) -> Result<Option<T>, E>;
+}
+
+impl<T, E> ResultExt<T, E> for Result<T, E> {
+    fn discard_error(self, f: impl Fn(&E) -> bool) -> Result<Option<T>, E> {
+        match self {
+            Ok(value) => Ok(Some(value)),
+            Err(err) if f(&err) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+}
+
 pub trait IoResultExt<T, E> {
+    fn discard_io_error(self, f: impl Fn(std::io::ErrorKind) -> bool) -> Result<Option<T>, E>;
     fn ok_missing(self) -> Result<Option<T>, E>;
     fn ok_exists(self) -> Result<Option<T>, E>;
 }
 
 impl<T> IoResultExt<T, std::io::Error> for Result<T, std::io::Error> {
-    fn ok_missing(self) -> Result<Option<T>, std::io::Error> {
+    fn discard_io_error(self, f: impl Fn(std::io::ErrorKind) -> bool) -> Result<Option<T>, std::io::Error> {
         match self {
             Ok(value) => Ok(Some(value)),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) if f(err.kind()) => Ok(None),
             Err(err) => Err(err),
         }
     }
 
+    fn ok_missing(self) -> Result<Option<T>, std::io::Error> {
+        self.discard_io_error(|kind| kind == std::io::ErrorKind::NotFound)
+    }
+
     fn ok_exists(self) -> Result<Option<T>, std::io::Error> {
-        match self {
-            Ok(value) => Ok(Some(value)),
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
-            Err(err) => Err(err),
-        }
+        self.discard_io_error(|kind| kind == std::io::ErrorKind::AlreadyExists)
     }
 }
 
 impl<T> IoResultExt<T, PathError> for Result<T, PathError> {
-    fn ok_missing(self) -> Result<Option<T>, PathError> {
+    fn discard_io_error(self, f: impl Fn(std::io::ErrorKind) -> bool) -> Result<Option<T>, PathError> {
         match self {
             Ok(value) => Ok(Some(value)),
-            Err(err) if err.io_kind() == Some(std::io::ErrorKind::NotFound) => Ok(None),
+            Err(err) if matches!(err.io_kind(), Some(kind) if f(kind)) => Ok(None),
             Err(err) => Err(err),
         }
     }
 
+    fn ok_missing(self) -> Result<Option<T>, PathError> {
+        self.discard_io_error(|kind| kind == std::io::ErrorKind::NotFound)
+    }
+
     fn ok_exists(self) -> Result<Option<T>, PathError> {
-        match self {
-            Ok(value) => Ok(Some(value)),
-            Err(err) if err.io_kind() == Some(std::io::ErrorKind::AlreadyExists) => Ok(None),
-            Err(err) => Err(err),
-        }
+        self.discard_io_error(|kind| kind == std::io::ErrorKind::AlreadyExists)
     }
 }
 

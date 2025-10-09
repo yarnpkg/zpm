@@ -1,0 +1,33 @@
+---
+title: "yarn exec"
+description: "execute a shell script"
+slug: "cli/exec"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+execute a shell script
+
+</div>
+
+## Usage
+<Code code="yarn exec <commandName> ..." lang="bash" />
+
+## Examples
+<p>Execute a single shell command
+:</p>
+<Code code="yarn exec echo Hello World" lang="bash" />
+
+<p>Execute a shell script
+:</p>
+<Code code="yarn exec &quot;tsc & babel src --out-dir lib&quot;" lang="bash" />
+
+## Details
+This command simply executes a shell script within the context of the root 
+directory of the active workspace using the portable shell.
+
+It also makes sure to call it in a way that's compatible with the current 
+project (for example, on PnP projects the environment will be setup in such a 
+way that PnP will be correctly injected into the environment).

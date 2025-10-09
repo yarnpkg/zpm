@@ -5,10 +5,10 @@ use clipanion::cli;
 
 use crate::{error::Error, project, script::ScriptEnvironment};
 
+/// Run a dependency binary or local script
 #[cli::command(default, proxy)]
 #[cli::path("run")]
 #[cli::category("Scripting commands")]
-#[cli::description("Run a dependency binary or local script")]
 pub struct Run {
     #[cli::option("-T,--top-level", default = false)]
     top_level: bool,
@@ -39,7 +39,6 @@ pub struct Run {
 }
 
 impl Run {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
         let mut project
             = project::Project::new(None).await?;

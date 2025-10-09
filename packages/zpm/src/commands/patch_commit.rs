@@ -1,13 +1,16 @@
+use std::io::Write;
+
 use clipanion::cli;
 use zpm_primitives::{Ident, Locator, Reference};
 use zpm_utils::{DataType, Path, FromFileString, ToFileString, ToHumanString};
 
 use crate::{error::Error, git, project};
 
+/// Commit a patch for the package
+#[derive(Debug)]
 #[cli::command]
 #[cli::path("patch-commit")]
 #[cli::category("Dependency management")]
-#[cli::description("Commit a patch for the package")]
 pub struct PatchCommit {
     #[cli::option("-s,--save", default = false)]
     save: bool,
@@ -16,7 +19,6 @@ pub struct PatchCommit {
 }
 
 impl PatchCommit {
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = project::Project::new(None).await?;
@@ -41,15 +43,14 @@ impl PatchCommit {
         let locator
             = Locator::from_file_string(&locator_str)?;
 
-        println!("{:?}", locator);
-        println!("{:?}", original_path);
-        println!("{:?}", user_path);
-
         let diff
             = git::diff_folders(&original_path, &user_path).await?;
 
         if !self.save {
-            println!("{}", diff);
+            let mut stdout = std::io::stdout();
+            stdout.write_all(diff.as_bytes()).unwrap();
+            stdout.flush().unwrap();
+            return Ok(());
         }
 
         Ok(())

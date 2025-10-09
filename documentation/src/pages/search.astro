@@ -1,0 +1,18 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import SearchPackageInterface from "src/features/package/search/SearchPackageInterface";
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "",
+    template: "splash",
+  }}
+  {...{
+    hideBackground: true,
+  }}
+>
+  <div class="container not-content">
+    <SearchPackageInterface client:only="preact" />
+  </div>
+</StarlightPage>

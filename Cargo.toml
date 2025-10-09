@@ -6,7 +6,6 @@ members = [
     "packages/zpm-formats",
     "packages/zpm-macro-enum",
     "packages/zpm-macro-helpers",
-    "packages/zpm-macros",
     "packages/zpm-parsers",
     "packages/zpm-primitives",
     "packages/zpm-semver",
@@ -21,3 +20,12 @@ debug = true
 
 [profile.release]
 debug = true
+
+[profile.release-lto]
+inherits = "release"
+lto = true
+
+[profile.release-lto-nodebug]
+inherits = "release-lto"
+debug = false
+strip = "debuginfo"

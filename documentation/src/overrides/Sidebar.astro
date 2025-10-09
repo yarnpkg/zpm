@@ -1,0 +1,67 @@
+---
+import type {
+  SidebarGroup,
+  SidebarEntry,
+} from "node_modules/@astrojs/starlight/utils/routing/types";
+import DefaultSidebar from "@/components/sidebar/Sidebar";
+
+const currentBase = Astro.url.pathname.split("/").slice(0, 2).join("/");
+const { sidebar } = Astro.locals.starlightRoute;
+// Recursive function to check if any link in the group starts with currentBase
+function containsMatchingLink(entries: SidebarEntry[]): boolean {
+  return entries.some((entry) => {
+    if (entry.type === "link") {
+      return entry.href.startsWith(currentBase);
+    } else if (entry.type === "group") {
+      return containsMatchingLink(entry.entries);
+    }
+    return false;
+  });
+}
+
+function getDefaultExpandedGroup(entries: SidebarEntry[]) {
+  let defaultIndex = 0;
+  entries.forEach((entry, index) => {
+    if (
+      entry.type === "group" &&
+      entry.entries.filter(
+        (sub) => sub.type === "link" && matchesCurrentPath(sub.href)
+      ).length
+    ) {
+      defaultIndex = index;
+    }
+  });
+
+  return defaultIndex;
+}
+
+const filteredSidebar = sidebar.filter(
+  (entry) => entry.type === "group" && containsMatchingLink(entry.entries)
+) as SidebarGroup[]; // This is necessary because typescript doesn't narrow it down to a SidebarGroup.
+
+function matchesCurrentPath(url: string) {
+  const trueUrl = new URL(url, Astro.url);
+  return normalizeLink(Astro.url.pathname) === trueUrl.pathname;
+}
+
+function normalizeLink(link: string) {
+  if (!link.endsWith("/")) link = `${link}/`;
+  return link;
+}
+---
+
+{
+  filteredSidebar.map((group) => {
+    const defaultExpandedGroup = getDefaultExpandedGroup(group.entries);
+
+    return (
+      <div class="flex flex-col gap-y-3 z-20 w-80">
+        <DefaultSidebar
+          entries={group.entries}
+          defaultExpandedGroup={defaultExpandedGroup}
+          client:load
+        />
+      </div>
+    );
+  })
+}

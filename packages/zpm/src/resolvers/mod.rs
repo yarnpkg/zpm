@@ -5,10 +5,7 @@ use serde::{Deserialize, Serialize};
 use zpm_primitives::{Descriptor, Ident, Locator, PeerRange, Range, Reference, RegistryReference, SemverPeerRange, WorkspaceIdentRange, descriptor_map_serializer, descriptor_map_deserializer};
 
 use crate::{
-    error::Error,
-    install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
-    manifest::RemoteManifest,
-    system,
+    error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, system
 };
 
 pub mod folder;
@@ -146,6 +143,14 @@ pub fn try_resolve_descriptor_sync(context: InstallContext<'_>, descriptor: Desc
 }
 
 pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+    let project
+        = context.project
+            .expect("The project is required for resolving a workspace package");
+
+    if let Some(workspace) = project.try_workspace_by_descriptor(&descriptor)? {
+        return Ok(workspace::resolve_name_descriptor(&context, &descriptor, &WorkspaceIdentRange {ident: workspace.name.clone()})?);
+    }
+
     match &descriptor.range {
         Range::AnonymousSemver(params)
             => semver::resolve_descriptor(&context, &descriptor, params).await,
@@ -157,7 +162,7 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
             => git::resolve_descriptor(&context, &descriptor, params).await,
 
         Range::RegistrySemver(params)
-            => npm::resolve_semver_or_workspace_descriptor(&context, &descriptor, params).await,
+            => npm::resolve_semver_descriptor(&context, &descriptor, params).await,
 
         Range::Link(params)
             => link::resolve_descriptor(&context, &descriptor, params),
@@ -178,18 +183,18 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
             => portal::resolve_descriptor(&context, &descriptor, params, dependencies),
 
         Range::RegistryTag(params)
-            => npm::resolve_tag_or_workspace_descriptor(&context, &descriptor, params).await,
-
-        Range::WorkspaceMagic(_)
-            => workspace::resolve_name_descriptor(&context, &descriptor, &WorkspaceIdentRange {ident: descriptor.ident.clone()}),
-
-        Range::WorkspaceSemver(_)
-            => workspace::resolve_name_descriptor(&context, &descriptor, &WorkspaceIdentRange {ident: descriptor.ident.clone()}),
+            => npm::resolve_tag_descriptor(&context, &descriptor, params).await,
 
         Range::WorkspacePath(params)
             => workspace::resolve_path_descriptor(&context, &descriptor, params),
 
-        _ => Err(Error::Unsupported),
+        Range::MissingPeerDependency |
+        Range::WorkspaceMagic(_) |
+        Range::WorkspaceSemver(_) |
+        Range::WorkspaceIdent(_) |
+        Range::Virtual(_) => {
+            panic!("Those ranges should never end up being passed to a resolver");
+        }
     }
 }
 

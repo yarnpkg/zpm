@@ -1,0 +1,45 @@
+---
+title: "yarn npm publish"
+description: "publish the active workspace to the npm registry"
+slug: "cli/npm/publish"
+category: "cli"
+---
+
+import { Code } from "@astrojs/starlight/components";
+
+<div className="subtitle">
+Publish the active workspace to the npm registry
+
+</div>
+
+## Usage
+<Code code="yarn npm publish" lang="bash" />
+
+## Examples
+<p>Publish the active workspace
+:</p>
+<Code code="yarn npm publish" lang="bash" />
+
+## Details
+This command will pack the active workspace into a fresh archive and upload it 
+to the npm registry.
+
+The package will by default be attached to the `latest` tag on the registry, but 
+this behavior can be overridden by using the `--tag` option.
+
+Note that for legacy reasons scoped packages are by default published with an 
+access set to `restricted` (aka "private packages"). This requires you to 
+register for a paid npm plan. In case you simply wish to publish a public scoped 
+package to the registry (for free), just add the `--access public` flag. This 
+behavior can be enabled by default through the `npmPublishAccess` settings.
+
+## Options
+| Definition | Description |
+| ---------- | ----------- |
+| <h4 id="options-access%20%230" className="header-code"><code className="language-text">--access #0</code></h4> | The access for the published package (public or restricted) |
+| <h4 id="options-tag%20%230" className="header-code"><code className="language-text">--tag #0</code></h4> | The tag on the registry that the package should be attached to |
+| <h4 id="options-tolerate-republish" className="header-code"><code className="language-text">--tolerate-republish</code></h4> | Warn and exit when republishing an already existing version of a package |
+| <h4 id="options-otp%20%230" className="header-code"><code className="language-text">--otp #0</code></h4> | The OTP token to use with the command |
+| <h4 id="options-provenance" className="header-code"><code className="language-text">--provenance</code></h4> | Generate provenance for the package. Only available in GitHub Actions and GitLab CI. Can be set globally through the `npmPublishProvenance` setting or the `YARN_NPM_CONFIG_PROVENANCE` environment variable, or per-package through the `publishConfig.provenance` field in package.json. |
+| <h4 id="options-n%2C-dry-run" className="header-code"><code className="language-text">-n,--dry-run</code></h4> | Show what would be published without actually publishing |
+| <h4 id="options-json" className="header-code"><code className="language-text">--json</code></h4> | Output the result in JSON format |

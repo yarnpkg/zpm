@@ -1,10 +1,12 @@
 use std::{borrow::Cow, io::Read};
 
+use zpm_utils::Path;
+
 use crate::{zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, GeneralRecord}, Compression, CompressionAlgorithm, Entry, Error};
 
 fn unpack_deflate(data: &[u8]) -> Result<Vec<u8>, Error> {
     let mut decoder
-        = flate2::read::DeflateDecoder::new(data);
+        = flate2::bufread::DeflateDecoder::new(data);
 
     let mut buffer
         = Vec::new();
@@ -52,10 +54,12 @@ impl<'a> ZipIterator<'a> {
         let name_offset
             = local_file_header_offset + std::mem::size_of::<GeneralRecord>();
         let data_offset
-            = name_offset + general_record.header.file_name_length as usize;
+            = name_offset + general_record.header.file_name_length as usize + general_record.header.extra_field_length as usize;
 
-        let name
+        let name_str
             = std::str::from_utf8(&self.buffer[name_offset..name_offset + general_record.header.file_name_length as usize])?;
+        let name
+            = Path::try_from(name_str)?;
 
         let data_size
             = central_directory_record.header.compressed_size as usize;
@@ -63,7 +67,7 @@ impl<'a> ZipIterator<'a> {
             = &self.buffer[data_offset..data_offset + data_size];
 
         let mut entry = Entry {
-            name: name.to_string(),
+            name,
             mode: (central_directory_record.external_file_attributes as u64 >> 16) as u32,
             crc: general_record.header.crc_32,
             data: Cow::Borrowed(data),
@@ -111,8 +115,9 @@ impl<'a> Iterator for ZipIterator<'a> {
         };
 
         self.central_directory_record_offset += std::mem::size_of::<CentralDirectoryRecord>()
-            + general_record.header.file_name_length as usize
-            + general_record.header.extra_field_length as usize;
+            + central_directory_record.header.file_name_length as usize
+            + central_directory_record.header.extra_field_length as usize
+            + central_directory_record.file_comment_length as usize;
 
         Some(self.parse_entry_at(local_file_header_offset, central_directory_record, general_record))
     }

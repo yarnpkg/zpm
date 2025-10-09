@@ -1,7 +1,7 @@
-use std::{hash::Hash, sync::LazyLock};
+use std::{hash::Hash, str::FromStr, sync::LazyLock};
 
 use bincode::{Decode, Encode};
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, Path, ToFileString, ToHumanString};
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum IdentError {
@@ -33,8 +33,8 @@ impl Ident {
         self.0.replace("/", "-")
     }
 
-    pub fn nm_subdir(&self) -> String {
-        format!("node_modules/{}", self.0)
+    pub fn nm_subdir(&self) -> Path {
+        Path::from_str(&format!("node_modules/{}", self.0)).unwrap()
     }
 
     pub fn type_ident(&self) -> Ident {

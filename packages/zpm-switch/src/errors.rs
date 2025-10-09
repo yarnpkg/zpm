@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use reqwest::StatusCode;
-use zpm_utils::{PathError, ToHumanString};
+use zpm_utils::{DataType, PathError, ToHumanString};
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum Error {
@@ -24,10 +24,16 @@ pub enum Error {
     RequestError(#[from] Arc<reqwest::Error>),
 
     #[error(transparent)]
-    JsonError(#[from] Arc<sonic_rs::Error>),
+    JsonError(#[from] zpm_parsers::Error),
+
+    #[error("Failed to execute the {program} binary: {error}", program = DataType::Code.colorize(&.0), error = .1.to_string())]
+    FailedToExecuteBinary(String, Arc<std::io::Error>),
 
     #[error("Unknown binary name: {0}")]
     UnknownBinaryName(String),
+
+    #[error("Cache not found: {version}", version = .0.to_print_string())]
+    CacheNotFound(zpm_semver::Version),
 
     #[error("Failed to get current executable path")]
     FailedToGetExecutablePath,
@@ -39,10 +45,13 @@ pub enum Error {
     InvalidVersionSelector(String),
 
     #[error("Failed to parse manifest: {0}")]
-    FailedToParseManifest(Arc<sonic_rs::Error>),
+    FailedToParseManifest(zpm_parsers::Error),
 
     #[error("Server answered with HTTP {0} ({1})")]
     HttpStatus(StatusCode, String),
+
+    #[error("Project not found")]
+    ProjectNotFound,
 
     #[error("Failed to retrieve the latest tag from the Yarn registry")]
     FailedToRetrieveLatestYarnTag,
@@ -84,11 +93,5 @@ impl From<reqwest::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
         Error::from(Arc::new(value))
-    }
-}
-
-impl From<sonic_rs::Error> for Error {
-    fn from(value: sonic_rs::Error) -> Self {
-        Error::JsonError(Arc::new(value))
     }
 }

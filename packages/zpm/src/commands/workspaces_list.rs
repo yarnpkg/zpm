@@ -1,6 +1,7 @@
 use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 
 use clipanion::cli;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{Ident, Reference};
 use zpm_utils::{Path, ToFileString};
 
@@ -10,10 +11,10 @@ use crate::{
     project::{Project, Workspace},
 };
 
+/// List the workspaces in the project
 #[cli::command]
 #[cli::path("workspaces", "list")]
 #[cli::category("Workspace commands")]
-#[cli::description("List the workspaces in the project")]
 pub struct WorkspacesList {
     #[cli::option("-v,--verbose", default = false)]
     verbose: bool,
@@ -142,7 +143,6 @@ impl WorkspacesList {
         Ok(workspaces)
     }
 
-    #[tokio::main()]
     pub async fn execute(&self) -> Result<(), Error> {
         let mut project
             = Project::new(None).await?;
@@ -227,7 +227,7 @@ impl WorkspacesList {
                     mismatched_workspace_dependencies,
                 };
 
-                println!("{}", sonic_rs::to_string(&payload)?);
+                println!("{}", JsonDocument::to_string(&payload)?);
             } else {
                 println!("{}", workspace_printed_path);
             }

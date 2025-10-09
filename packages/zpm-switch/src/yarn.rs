@@ -1,7 +1,8 @@
 use serde::Deserialize;
 use serde_with::serde_as;
+use zpm_parsers::JsonDocument;
 use std::{collections::BTreeMap, fmt::Debug, str::FromStr};
-use zpm_semver::{Range, Version};
+use zpm_semver::{Range, Version, VersionRc};
 use zpm_utils::{ExplicitPath, FromFileString, Path, ToFileString};
 
 use crate::{errors::Error, http::fetch, manifest::{PackageManagerReference, VersionPackageManagerReference}, yarn_enums::{ChannelSelector, Selector}};
@@ -54,8 +55,8 @@ pub async fn resolve_semver_range(range: &Range) -> Result<Version, Error> {
     let response
         = fetch("https://repo.yarnpkg.com/releases").await?;
 
-    let data: TagsPayload = sonic_rs::from_slice(&response)
-        .unwrap();
+    let data: TagsPayload
+        = JsonDocument::hydrate_from_slice(&response)?;
 
     let highest = data.release_lines.values()
         .flat_map(|release_line| &release_line.tags)
@@ -116,9 +117,21 @@ pub struct BinMeta {
 }
 
 pub fn get_bin_version() -> String {
-    option_env!("INFRA_VERSION")
-        .unwrap_or(env!("CARGO_PKG_VERSION"))
-        .to_string()
+    if let Some(version) = option_env!("INFRA_VERSION") {
+        return version.to_string();
+    }
+
+    let mut cargo_version
+        = zpm_semver::Version::from_str(env!("CARGO_PKG_VERSION"))
+            .expect("Failed to parse Cargo package version");
+
+    let mut rc = cargo_version.rc
+        .unwrap_or_default();
+
+    rc.push(VersionRc::String("local".to_string()));
+
+    cargo_version.rc = Some(rc);
+    cargo_version.to_file_string()
 }
 
 pub fn extract_bin_meta() -> BinMeta {

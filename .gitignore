@@ -1,3 +1,5 @@
+.DS_Store
+.astro
 .idea
 
 /artifacts
@@ -14,3 +16,7 @@ flamegraph.svg
 /.yarn/ignore
 /.yarn/cache
 /.yarn/unplugged
+
+/local
+
+.DS_Store
