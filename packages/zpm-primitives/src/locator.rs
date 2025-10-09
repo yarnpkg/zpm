@@ -77,7 +77,7 @@ impl Locator {
         let key
             = Hash64::from_string(&self.to_file_string());
 
-        format!("{}-{}-{}", self.ident.slug(), self.reference.slug(), key.to_file_string())
+        format!("{}-{}-{}", self.ident.slug(), self.reference.slug(), key.short())
     }
 }
 
