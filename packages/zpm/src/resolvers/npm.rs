@@ -9,6 +9,7 @@ use zpm_utils::ToFileString;
 
 use crate::{
     error::Error,
+    http_npm,
     install::{InstallContext, IntoResolutionResult, ResolutionResult},
     manifest::RemoteManifest,
     npm,
@@ -215,11 +216,12 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     let package_ident = params.ident.as_ref()
         .unwrap_or(&descriptor.ident);
 
+    let registry_base = project.config.registry_base_for(package_ident);
     let registry_url
-        = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
+        = npm::registry_url_for_all_versions(&registry_base, package_ident);
 
     let response
-        = project.http_client.get(&registry_url)?.send().await?;
+        = http_npm::get_npm_url(&project.http_client, &registry_url, &registry_base).await?;
 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
@@ -247,11 +249,12 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let package_ident = params.ident.as_ref()
         .unwrap_or(&descriptor.ident);
 
+    let registry_base = project.config.registry_base_for(package_ident);
     let registry_url
-        = npm::registry_url_for_all_versions(&project.config.registry_base_for(package_ident), package_ident);
+        = npm::registry_url_for_all_versions(&registry_base, package_ident);
 
     let response
-        = project.http_client.get(&registry_url)?.send().await?;
+        = http_npm::get_npm_url(&project.http_client, &registry_url, &registry_base).await?;
 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
@@ -287,11 +290,12 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
+    let registry_base = project.config.registry_base_for(&params.ident);
     let registry_url
-        = npm::registry_url_for_one_version(&project.config.registry_base_for(&params.ident), &params.ident, &params.version);
+        = npm::registry_url_for_one_version(&registry_base, &params.ident, &params.version);
 
     let response
-        = project.http_client.get(&registry_url)?.send().await?;
+        = http_npm::get_npm_url(&project.http_client, &registry_url, &registry_base).await?;
 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;

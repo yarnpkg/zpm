@@ -1,21 +1,17 @@
-use std::collections::HashSet;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::Arc;
 
-use tokio::time::{sleep, Duration};
 use zpm_config::ConfigExt;
 use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Locator, RegistryReference};
 
 use crate::{
     error::Error,
+    http_npm,
     install::{FetchResult, InstallContext},
     npm::{self, NpmEntryExt},
-    report::current_report,
 };
 
 use super::PackageData;
-
-static WARNED_REGISTRIES: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
 fn get_mock_fetch_result(context: &InstallContext, locator: &Locator, params: &RegistryReference) -> Result<FetchResult, Error> {
     let archive_path = context.package_cache.unwrap()
@@ -67,43 +63,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .expect("The package cache is required for fetching npm packages");
 
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
-        let fetch_future = async {
-            let response = project.http_client.get(&registry_url)?.send().await?;
-            let tgz_data = response.bytes().await
-                .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
-            Ok::<_, Error>(tgz_data)
-        };
-
-        let warning_future = async {
-            sleep(Duration::from_secs(15)).await;
-
-            // Check if we should warn about this registry
-            let should_warn = {
-                let mut warned = WARNED_REGISTRIES.lock().unwrap();
-                if !warned.contains(&registry_base) {
-                    warned.insert(registry_base.clone());
-                    true
-                } else {
-                    false
-                }
-            }; // Lock is dropped here
-
-            if should_warn {
-                current_report().await.as_mut().map(|report| {
-                    report.warn(format!("Requests to {} are taking suspiciously long...", registry_base));
-                });
-            }
-        };
-
-        let tgz_data = tokio::select! {
-            result = fetch_future => result?,
-            _ = warning_future => {
-                // Warning was shown, now wait for the request to complete
-                let response = project.http_client.get(&registry_url)?.send().await?;
-                response.bytes().await
-                    .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?
-            }
-        };
+        let response = http_npm::get_npm_url(&project.http_client, &registry_url, &registry_base).await?;
+        let tgz_data = response.bytes().await
+            .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
         let tar_data
             = zpm_formats::tar::unpack_tgz(&tgz_data)?;

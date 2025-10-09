@@ -1,8 +1,10 @@
-use std::sync::LazyLock;
+use std::collections::HashSet;
+use std::sync::{LazyLock, Mutex};
 
 use regex::{Captures, Regex};
 use reqwest::Response;
 use serde::Deserialize;
+use tokio::time::{sleep, Duration};
 use zpm_config::Configuration;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
@@ -13,6 +15,8 @@ use crate::{
     http::{HttpClient, HttpRequest},
     report::{current_report, PromptType},
 };
+
+static WARNED_REGISTRIES: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
 pub struct NpmHttpParams<'a> {
     pub http_client: &'a HttpClient,
@@ -150,15 +154,96 @@ pub fn get_authorization(config: &Configuration, registry: &str, ident: Option<&
     None
 }
 
+pub async fn get_npm_url(http_client: &HttpClient, url: &str, registry_base: &str) -> Result<Response, Error> {
+    let registry_base = registry_base.to_string();
+    let url = url.to_string();
+
+    let fetch_future = async {
+        let request = http_client.get(&url)?;
+        Ok::<_, Error>(request.send().await?)
+    };
+
+    let warning_future = async {
+        sleep(Duration::from_secs(15)).await;
+
+        // Check if we should warn about this registry
+        let should_warn = {
+            let mut warned = WARNED_REGISTRIES.lock().unwrap();
+            if !warned.contains(&registry_base) {
+                warned.insert(registry_base.clone());
+                true
+            } else {
+                false
+            }
+        }; // Lock is dropped here
+
+        if should_warn {
+            current_report().await.as_mut().map(|report| {
+                report.warn(format!("Requests to {} are taking suspiciously long...", registry_base));
+            });
+        }
+    };
+
+    let response = tokio::select! {
+        result = fetch_future => result?,
+        _ = warning_future => {
+            // Warning was shown, now wait for the request to complete
+            let request = http_client.get(&url)?;
+            request.send().await?
+        }
+    };
+
+    Ok(response)
+}
+
 pub async fn get(params: &NpmHttpParams<'_>) -> Result<Response, Error> {
     let url
         = format!("{}{}", params.registry, params.path);
 
-    let request
-        = params.http_client.get(url)?
-            .header("authorization", params.authorization);
+    let registry_base = params.registry.to_string();
 
-    Ok(request.send().await?)
+    let fetch_future = async {
+        let request
+            = params.http_client.get(&url)?
+                .header("authorization", params.authorization);
+
+        Ok::<_, Error>(request.send().await?)
+    };
+
+    let warning_future = async {
+        sleep(Duration::from_secs(15)).await;
+
+        // Check if we should warn about this registry
+        let should_warn = {
+            let mut warned = WARNED_REGISTRIES.lock().unwrap();
+            if !warned.contains(&registry_base) {
+                warned.insert(registry_base.clone());
+                true
+            } else {
+                false
+            }
+        }; // Lock is dropped here
+
+        if should_warn {
+            current_report().await.as_mut().map(|report| {
+                report.warn(format!("Requests to {} are taking suspiciously long...", registry_base));
+            });
+        }
+    };
+
+    let response = tokio::select! {
+        result = fetch_future => result?,
+        _ = warning_future => {
+            // Warning was shown, now wait for the request to complete
+            let request
+                = params.http_client.get(&url)?
+                    .header("authorization", params.authorization);
+
+            request.send().await?
+        }
+    };
+
+    Ok(response)
 }
 
 pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {
