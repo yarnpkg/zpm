@@ -195,16 +195,34 @@ pub struct Manifest {
     pub resolutions: ResolutionsField,
 }
 
-impl Manifest {
-    pub fn iter_hard_dependencies(&self) -> impl Iterator<Item = (&Ident, &Descriptor)> {
-        self.remote.dependencies.iter()
-            .chain(self.remote.optional_dependencies.iter())
-            .chain(self.dev_dependencies.iter())
-    }
+pub enum HardDependencyType<'a> {
+    Dependency(&'a Descriptor),
+    OptionalDependency(&'a Descriptor),
+    DevDependency(&'a Descriptor),
+}
 
-    pub fn iter_hard_dependencies_mut(&mut self) -> impl Iterator<Item = (&Ident, &mut Descriptor)> {
-        self.remote.dependencies.iter_mut()
-            .chain(self.remote.optional_dependencies.iter_mut())
-            .chain(self.dev_dependencies.iter_mut())
+impl HardDependencyType {
+    pub fn to_str(&self) -> &str {
+        match self {
+            HardDependencyType::Dependency(_) => "dependency",
+            HardDependencyType::OptionalDependency(_) => "optionalDependency",
+            HardDependencyType::DevDependency(_) => "devDependency",
+        }
+    }
+}
+
+
+impl Manifest {
+    pub fn iter_hard_dependencies(&self) -> impl Iterator<Item = (&Ident, &Descriptor, HardDependencyType)> {
+        let dependencies_iter = self.remote.dependencies.iter()
+            .map(|(ident, descriptor)| HardDependencyType::Dependency(descriptor));
+
+        let optional_dependencies_iter = self.remote.optional_dependencies.iter()
+            .map(|(ident, descriptor)| HardDependencyType::OptionalDependency(descriptor));
+
+        let dev_dependencies_iter = self.dev_dependencies.iter()
+            .map(|(ident, descriptor)| HardDependencyType::DevDependency(descriptor));
+
+        dependencies_iter.chain(optional_dependencies_iter).chain(dev_dependencies_iter)
     }
 }

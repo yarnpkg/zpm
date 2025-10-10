@@ -16,6 +16,7 @@ pub type RawJsonValue = json_provider::Value;
 pub struct JsonDocument {
     pub input: Vec<u8>,
     pub paths: BTreeMap<Path, usize>,
+    pub changed: bool,
 }
 
 impl JsonDocument {
@@ -53,6 +54,7 @@ impl JsonDocument {
         Ok(Self {
             input,
             paths,
+            changed: false,
         })
     }
 
@@ -106,6 +108,8 @@ impl JsonDocument {
             = self.input.split_at(range.start);
         let (_, after)
             = after.split_at(range.end - range.start);
+
+        self.changed = true;
 
         self.input = [before, data, after].concat();
         self.rescan()?;
