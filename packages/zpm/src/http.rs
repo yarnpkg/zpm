@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, sync::{Arc, OnceLock}, time::Duration};
+use std::{collections::{HashMap, HashSet}, net::SocketAddr, sync::{Arc, LazyLock, OnceLock}, time::Duration};
 
 use hickory_resolver::{config::LookupIpStrategy, TokioResolver};
 use http::HeaderMap;
@@ -11,12 +11,16 @@ use zpm_utils::Glob;
 
 use crate::{
     error::Error,
+    report::current_report,
 };
+
+static WARNED_HOSTNAMES: LazyLock<tokio::sync::Mutex<HashSet<String>>> = LazyLock::new(|| tokio::sync::Mutex::new(HashSet::new()));
 
 #[derive(Debug)]
 pub struct HttpConfig {
     pub http_retry: usize,
     pub unsafe_http_whitelist: Vec<Setting<Glob>>,
+    pub slow_network_timeout: u64,
 
     enable_network: bool,
 
@@ -207,18 +211,20 @@ pub struct HttpRequest<'a> {
     builder: RequestBuilder,
     enable_retry: bool,
     enable_status_check: bool,
+    url: Url,
 }
 
 impl<'a> HttpRequest<'a> {
     pub fn new(client: &'a HttpClient, url: Url, method: Method) -> Self {
         let builder
-            = client.client.request(method.clone(), url);
+            = client.client.request(method.clone(), url.clone());
 
         Self {
             builder,
             client,
             enable_retry: method == Method::GET,
             enable_status_check: true,
+            url,
         }
     }
 
@@ -236,23 +242,44 @@ impl<'a> HttpRequest<'a> {
         let mut retry_count
             = 0;
 
-        // If the request is not retriable, we should avoid cloning the builder.
-        if !self.enable_retry {
-            let response
-                = self.builder.send().await?;
-
-            if self.enable_status_check {
-                return Ok(response.error_for_status()?);
-            } else {
-                return Ok(response);
-            }
-        }
+        let hostname
+            = self.url.host_str()
+                .map(|s| s.to_string());
 
         loop {
-            let response
-                = self.builder.try_clone().expect("builder should be clonable").send().await;
+            let mut fetch_future = Box::pin(async {
+                self.builder.try_clone()
+                    .expect("builder should be clonable")
+                    .send()
+                    .await
+            });
 
-            if retry_count < self.client.config.http_retry {
+            let warning_future = async {
+                tokio::time::sleep(Duration::from_millis(self.client.config.slow_network_timeout)).await;
+
+                // Check if we should warn about this hostname
+                if let Some(hostname) = &hostname {
+                    let should_warn
+                        = WARNED_HOSTNAMES.lock().await
+                            .insert(hostname.clone());
+
+                    if should_warn {
+                        current_report().await.as_mut().map(|report| {
+                            report.warn(format!("Requests to {} are taking suspiciously long...", hostname));
+                        });
+                    }
+                }
+            };
+
+            let response = tokio::select! {
+                result = &mut fetch_future => result,
+                _ = warning_future => {
+                    // Warning was issued, now wait for the actual fetch to complete
+                    fetch_future.await
+                }
+            };
+
+            if self.enable_retry && retry_count < self.client.config.http_retry {
                 let is_failure = match &response {
                     Ok(response) => response.status().is_server_error() || matches!(response.status().as_u16(), 408 | 413 | 429),
                     Err(_) => true,
@@ -309,6 +336,7 @@ impl<'a> HttpRequest<'a> {
             builder,
             enable_retry: self.enable_retry,
             enable_status_check: self.enable_status_check,
+            url: self.url.clone(),
         })
     }
 }
@@ -341,6 +369,7 @@ impl HttpClient {
         let config = HttpConfig {
             http_retry: config.settings.http_retry.value,
             unsafe_http_whitelist: config.settings.unsafe_http_whitelist.clone(),
+            slow_network_timeout: config.settings.slow_network_timeout.value,
 
             enable_network: config.settings.enable_network.value,
 

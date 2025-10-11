@@ -650,6 +650,7 @@ pub use types::*;
 merge_settings!(String, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(bool, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(usize, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(u64, |s: &str| FromFileString::from_file_string(s).unwrap());
 
 merge_settings!(zpm_formats::CompressionAlgorithm, |s: &str| FromFileString::from_file_string(s).unwrap());
 

@@ -246,6 +246,11 @@
       "description": "Whether to prefer reusing dependencies from the lockfile when running `yarn add`",
       "default": false
     },
+    "slowNetworkTimeout": {
+      "type": "u64",
+      "description": "The timeout in milliseconds to wait for a network request to complete before considering it slow",
+      "default": 5000
+    },
     "supportedArchitectures": {
       "type": "object",
       "title": "SupportedArchitectures",
