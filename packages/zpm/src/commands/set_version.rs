@@ -1,5 +1,5 @@
 use clipanion::cli;
-use zpm_parsers::{JsonDocument, Value};
+use zpm_parsers::{document::Document, JsonDocument, Value};
 use zpm_switch::{PackageManagerField, PackageManagerReference, VersionPackageManagerReference};
 use zpm_utils::{Path, ToFileString, ToHumanString};
 
@@ -28,7 +28,7 @@ impl SetVersion {
         let manifest_content = manifest_path
             .fs_read_prealloc()?;
 
-        let mut formatter
+        let mut document
             = JsonDocument::new(manifest_content)?;
 
         let resolved_version
@@ -44,13 +44,13 @@ impl SetVersion {
             checksum: None,
         };
 
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["packageManager".to_string()]),
             Value::String(package_manager.to_file_string()),
         )?;
 
         manifest_path
-            .fs_change(&formatter.input, false)?;
+            .fs_change(&document.input, false)?;
 
         println!("Switching to {}", resolved_version.to_print_string());
         println!("Saved into {}", manifest_path.to_print_string());

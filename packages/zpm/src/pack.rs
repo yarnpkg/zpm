@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
+use zpm_parsers::document::Document;
 use zpm_parsers::JsonDocument;
 use zpm_parsers::Value;
 use zpm_primitives::AnonymousSemverRange;
@@ -244,67 +245,67 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: PackMani
     let manifest: Manifest
         = parse_manifest(&String::from_utf8_lossy(&manifest_content))?;
 
-    let mut formatter
+    let mut document
         = JsonDocument::new(manifest_content)?;
 
     if let Some(type_) = &manifest.publish_config.type_ {
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["type".to_string()]),
             Value::String(type_.clone()),
         )?;
     }
 
     if let Some(main) = &manifest.publish_config.main {
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["main".to_string()]),
             Value::String(main.clone()),
         )?;
     }
 
     if let Some(exports) = &manifest.publish_config.exports {
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["exports".to_string()]),
             Value::from_serializable(&exports)?,
         )?;
     }
 
     if let Some(imports) = &manifest.publish_config.imports {
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["imports".to_string()]),
             Value::from_serializable(&imports)?,
         )?;
     }
 
     if let Some(module) = &manifest.publish_config.module {
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["module".to_string()]),
             Value::String(module.clone()),
         )?;
     }
 
     if let Some(browser) = &manifest.publish_config.browser {
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["browser".to_string()]),
             Value::from_serializable(browser)?,
         )?;
     }
 
     if let Some(bin) = &manifest.publish_config.bin {
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["bin".to_string()]),
             Value::from_serializable(bin)?,
         )?;
     }
 
     if let Some(types) = &manifest.publish_config.types {
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["types".to_string()]),
             Value::String(types.clone()),
         )?;
     }
 
     if let Some(typings) = &manifest.publish_config.typings {
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["typings".to_string()]),
             Value::String(typings.clone()),
         )?;
@@ -359,7 +360,7 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: PackMani
                 };
 
                 if let Some(updated_range) = updated_range {
-                    formatter.set_path(
+                    document.set_path(
                         &zpm_parsers::Path::from_segments(vec![field_name.to_string(), ident.to_file_string()]),
                         Value::String(updated_range.to_file_string()),
                     )?;
@@ -408,13 +409,13 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: PackMani
         let new_descriptor
             = new_descriptor_result?;
 
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["peerDependencies".to_string(), new_descriptor.ident.to_file_string()]),
             Value::String(new_descriptor.range.to_file_string()),
         )?;
     }
 
-    Ok(String::from_utf8_lossy(&formatter.input).to_string())
+    Ok(String::from_utf8_lossy(&document.input).to_string())
 }
 
 pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) -> Result<Vec<zpm_utils::Path>, Error> {

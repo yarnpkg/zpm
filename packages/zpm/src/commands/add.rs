@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use clipanion::cli;
-use zpm_parsers::{JsonDocument, Value};
+use zpm_parsers::{document::Document, JsonDocument, Value};
 use zpm_primitives::{AnonymousSemverRange, Descriptor};
 use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, ToFileString, ToHumanString};
@@ -58,18 +58,20 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
         };
 
         for workspace in &project.workspaces {
-            if !workspace.manifest.iter_hard_dependencies().any(|(ident, _)| ident == &descriptor.ident) {
+            if !workspace.manifest.iter_hard_dependencies().any(|dependency| dependency.descriptor.ident == descriptor.ident) {
                 continue;
             }
 
             let matching_type_dependency
                 = workspace.manifest.iter_hard_dependencies()
-                    .find(|(ident, _)| ident == &&type_ident);
+                    .find(|dependency| dependency.descriptor.ident == descriptor.ident);
 
-            if let Some((_, matching_type_dependency)) = matching_type_dependency {
-                type_requests.push((matching_type_dependency.clone(), type_request));
-                continue 'request_loop;
-            }
+            let Some(matching_type_dependency) = matching_type_dependency else {
+                continue;
+            };
+
+            type_requests.push((matching_type_dependency.descriptor.clone(), type_request));
+            continue 'request_loop;
         }
 
         // We only want to check for types if the dependency is a semver range or a tag, since other things may not map to DefinitelyTyped
@@ -224,7 +226,7 @@ impl Add {
         let manifest_content = manifest_path
             .fs_read_prealloc()?;
 
-        let mut formatter
+        let mut document
             = JsonDocument::new(manifest_content)?;
 
         for (descriptor, request) in &requests {
@@ -245,28 +247,28 @@ impl Add {
             }
 
             if request.dev {
-                formatter.set_path(
+                document.set_path(
                     &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), descriptor.ident.to_file_string()]),
                     Value::String(descriptor.range.to_file_string()),
                 )?;
             }
 
             if request.optional {
-                formatter.set_path(
+                document.set_path(
                     &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()]),
                     Value::String(descriptor.range.to_file_string()),
                 )?;
             }
 
             if request.peer {
-                formatter.set_path(
+                document.set_path(
                     &zpm_parsers::Path::from_segments(vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()]),
                     Value::String("*".to_string()),
                 )?;
             }
 
             if request.prod {
-                formatter.set_path(
+                document.set_path(
                     &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), descriptor.ident.to_file_string()]),
                     Value::String(descriptor.range.to_file_string()),
                 )?;
@@ -274,7 +276,7 @@ impl Add {
         }
 
         manifest_path
-            .fs_change(&formatter.input, false)?;
+            .fs_change(&document.input, false)?;
 
         let mut project
             = project::Project::new(None).await?;

@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, ops::Range};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{value::Indent, Error, Path, Value};
+use crate::{document::Document, value::Indent, Error, Path, Value};
 
 #[cfg(target_pointer_width = "32")]
 pub use serde_json as json_provider;
@@ -17,6 +17,35 @@ pub struct JsonDocument {
     pub input: Vec<u8>,
     pub paths: BTreeMap<Path, usize>,
     pub changed: bool,
+}
+
+impl Document for JsonDocument {
+    fn update_path(&mut self, path: &Path, value: Value) -> Result<(), Error> {
+        if self.paths.contains_key(path) {
+            self.set_path(&path, value)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn set_path(&mut self, path: &Path, value: Value) -> Result<(), Error> {
+        let key_span
+            = self.paths.get(path);
+
+        if value == Value::Undefined {
+            if let Some(key_span) = key_span {
+                return self.remove_key_at(path, key_span.clone());
+            } else {
+                return Ok(());
+            }
+        }
+
+        if let Some(key_span) = key_span {
+            self.update_key_at(&path, key_span.clone(), value)
+        } else {
+            self.insert_key(&path, value)
+        }
+    }
 }
 
 impl JsonDocument {
@@ -74,33 +103,6 @@ impl JsonDocument {
                 .collect();
 
         Ok(())
-    }
-
-    pub fn update_path(&mut self, path: &Path, value: Value) -> Result<(), Error> {
-        if self.paths.contains_key(path) {
-            self.set_path(&path, value)
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn set_path(&mut self, path: &Path, value: Value) -> Result<(), Error> {
-        let key_span
-            = self.paths.get(path);
-
-        if value == Value::Undefined {
-            if let Some(key_span) = key_span {
-                return self.remove_key_at(path, key_span.clone());
-            } else {
-                return Ok(());
-            }
-        }
-
-        if let Some(key_span) = key_span {
-            self.update_key_at(&path, key_span.clone(), value)
-        } else {
-            self.insert_key(&path, value)
-        }
     }
 
     fn replace_range(&mut self, range: Range<usize>, data: &[u8]) -> Result<(), Error> {

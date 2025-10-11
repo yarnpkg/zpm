@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use clipanion::cli;
 use colored::Colorize;
 use zpm_utils::{tree, AbstractValue, DataType, ToFileString, ToHumanString};
-use zpm_parsers::{JsonDocument, Value};
+use zpm_parsers::{document::Document, JsonDocument, Value};
 
 use crate::{constraints::{check_constraints, structs::{ConstraintsOutput, WorkspaceError, WorkspaceOperation}}, error::Error, project::Project};
 
@@ -46,25 +46,25 @@ impl Constraints {
                 let manifest_content = manifest_path
                     .fs_read_prealloc()?;
 
-                let mut formatter
+                let mut document
                     = JsonDocument::new(manifest_content)?;
 
                 // Apply each operation
                 for operation in operations {
                     match operation {
                         WorkspaceOperation::Set { path, value } => {
-                            formatter.set_path(&zpm_parsers::Path::from_segments(path.clone()), value.into())?;
+                            document.set_path(&zpm_parsers::Path::from_segments(path.clone()), value.into())?;
                         },
 
                         WorkspaceOperation::Unset { path } => {
-                            formatter.set_path(&zpm_parsers::Path::from_segments(path.clone()), Value::Undefined)?;
+                            document.set_path(&zpm_parsers::Path::from_segments(path.clone()), Value::Undefined)?;
                         },
                     }
                 }
 
                 // Write the formatted result back
                 manifest_path
-                    .fs_change(&formatter.input, false)?;
+                    .fs_change(&document.input, false)?;
             }
 
             let should_break = false

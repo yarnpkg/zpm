@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use clipanion::cli;
 use wax::{Glob, Program};
 use zpm_config::Configuration;
-use zpm_parsers::JsonDocument;
+use zpm_parsers::{document::Document, JsonDocument};
 use zpm_primitives::Ident;
 use zpm_utils::ToFileString;
 
@@ -86,33 +86,33 @@ impl Remove {
         let manifest_content = manifest_path
             .fs_read_prealloc()?;
 
-        let mut formatter
+        let mut document
             = JsonDocument::new(manifest_content)?;
 
         for ident in removed_dependencies.iter() {
-            formatter.set_path(
+            document.set_path(
                 &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), ident.to_file_string()]),
                 zpm_parsers::Value::Undefined,
             )?;
 
-            formatter.set_path(
+            document.set_path(
                 &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), ident.to_file_string()]),
                 zpm_parsers::Value::Undefined,
             )?;
 
-            formatter.set_path(
+            document.set_path(
                 &zpm_parsers::Path::from_segments(vec!["peerDependencies".to_string(), ident.to_file_string()]),
                 zpm_parsers::Value::Undefined,
             )?;
 
-            formatter.set_path(
+            document.set_path(
                 &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), ident.to_file_string()]),
                 zpm_parsers::Value::Undefined,
             )?;
         }
 
         manifest_path
-            .fs_change(&formatter.input, false)?;
+            .fs_change(&document.input, false)?;
 
         Ok(())
     }

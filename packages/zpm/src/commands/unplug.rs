@@ -1,5 +1,5 @@
 use clipanion::cli;
-use zpm_parsers::{JsonDocument, Value};
+use zpm_parsers::{document::Document, JsonDocument, Value};
 use zpm_primitives::Ident;
 use zpm_utils::ToFileString;
 
@@ -30,18 +30,18 @@ impl Unplug {
         let manifest_content = manifest_path
             .fs_read_prealloc()?;
 
-        let mut formatter
+        let mut document
             = JsonDocument::new(manifest_content)?;
 
         for identifier in &self.identifiers {
-            formatter.set_path(
+            document.set_path(
                 &zpm_parsers::Path::from_segments(vec!["dependenciesMeta".to_string(), identifier.to_file_string(), "unplugged".to_string()]),
                 if self.revert {Value::Undefined} else {Value::Bool(true)},
             )?;
         }
 
         manifest_path
-            .fs_change(&formatter.input, false)?;
+            .fs_change(&document.input, false)?;
 
         let mut project
             = project::Project::new(None).await?;
