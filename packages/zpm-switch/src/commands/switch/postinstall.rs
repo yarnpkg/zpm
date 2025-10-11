@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::process::Command;
 
 use clipanion::cli;
-use zpm_parsers::JsonDocument;
+use zpm_parsers::{document::Document, JsonDocument};
 use zpm_utils::{DataType, FromFileString, Note, IoResultExt, Path, ToFileString, ToHumanString};
 
 use crate::errors::Error;
@@ -249,7 +249,7 @@ impl PostinstallCommand {
             = JsonDocument::new(volta_platform_content)?;
 
         document.set_path(
-            &zpm_parsers::Path::from_segments(vec!["yarn".to_string()]),
+            &vec!["yarn".to_string()].into(),
             zpm_parsers::Value::Undefined,
         )?;
 

@@ -1,8 +1,10 @@
 use std::io::Write;
 
 use clipanion::cli;
-use zpm_primitives::{Ident, Locator, Reference};
-use zpm_utils::{DataType, Path, FromFileString, ToFileString, ToHumanString};
+use itertools::Itertools;
+use zpm_parsers::{document::Document, JsonDocument};
+use zpm_primitives::{Descriptor, Locator, Range};
+use zpm_utils::{FromFileString, Path, ToFileString, ToHumanString, UrlEncoded};
 
 use crate::{error::Error, git, project};
 
@@ -53,6 +55,134 @@ impl PatchCommit {
             return Ok(());
         }
 
+        let patch_rel_path
+            = Path::try_from(format!(".yarn/patches/{}.patch", locator.slug()))?;
+        let patch_str
+            = format!("~/{}", patch_rel_path.to_file_string());
+
+        project
+            .import_install_state()?;
+
+        let install_state = project.install_state.as_ref()
+            .ok_or(Error::InstallStateNotFound)?;
+
+        if !install_state.normalized_resolutions.contains_key(&locator) {
+            return Err(Error::ConflictingOptions(format!("No package found in the project for the given locator: {}", locator.to_print_string())));
+        }
+
+        // Those packages will have will to be patched through the `resolutions` field.
+        // Since the top-level package may be mutated as a workspace, we defer the update
+        // of the `resolutions` field until after we updated the workspace dependencies.
+        let mut transitive_dependencies
+            = Vec::new();
+
+        for (pkg_locator, resolution) in &install_state.normalized_resolutions {
+            let depends_on_the_patched_locator
+                = resolution.dependencies.values()
+                    .map(|d| Self::ensure_unpatched_descriptor(d))
+                    .map(|d| install_state.descriptor_to_locator.get(&d).unwrap_or_else(|| panic!("Dependency not found in descriptor to locator map")))
+                    .contains(&locator);
+
+            if !depends_on_the_patched_locator {
+                println!("Skipping {}", pkg_locator.to_file_string());
+                continue;
+            }
+
+            if let Some(workspace) = project.try_workspace_by_locator(pkg_locator)? {
+                let manifest_content
+                    = workspace.manifest_path()
+                        .fs_read_prealloc()?;
+
+                let mut document
+                    = JsonDocument::new(manifest_content)?;
+
+                for dependency in workspace.manifest.iter_hard_dependencies() {
+                    let unpatchified_descriptor
+                        = Self::ensure_unpatched_descriptor(dependency.descriptor);
+
+                    if dependency.descriptor.ident == locator.ident {
+                        let patch_descriptor
+                            = Self::make_patch_descriptor(&unpatchified_descriptor, &patch_str);
+
+                        dependency.kind.insert_into(&mut document, &patch_descriptor)?;
+                    }
+                }
+
+                println!("Changed? {}", document.changed);
+
+                if document.changed {
+                    workspace.manifest_path()
+                        .fs_write(&document.input)?;
+                }
+            } else {
+                for descriptor in resolution.dependencies.values() {
+                    let unpatchified_descriptor
+                        = Self::ensure_unpatched_descriptor(descriptor);
+
+                    let dependency_locator
+                        = install_state.descriptor_to_locator.get(&unpatchified_descriptor)
+                            .unwrap_or_else(|| panic!("Dependency not found in descriptor to locator map: {}", unpatchified_descriptor.to_print_string()));
+
+                    if dependency_locator == &locator {
+                        let patch_descriptor
+                            = Self::make_patch_descriptor(&descriptor, &patch_str);
+
+                        if &patch_descriptor != descriptor {
+                            transitive_dependencies.push((descriptor, patch_descriptor));
+                        }
+                    }
+                }
+            }
+        }
+
+        if transitive_dependencies.len() > 0 {
+            let top_level_manifest_path
+                = project.manifest_path();
+            let top_level_manifest_content
+                = top_level_manifest_path.fs_read_prealloc()?;
+
+            let mut document
+                = JsonDocument::new(top_level_manifest_content)?;
+
+            for (original_descriptor, replacement_descriptor) in &transitive_dependencies {
+                document.set_path(
+                    &["resolutions", &original_descriptor.to_file_string()].into(),
+                    zpm_parsers::Value::String(replacement_descriptor.range.to_file_string()),
+                )?;
+            }
+
+            if document.changed {
+                top_level_manifest_path
+                    .fs_write(document.input)?;
+            }
+        }
+
+        project.project_cwd
+            .with_join(&patch_rel_path)
+            .fs_create_parent()?
+            .fs_write(&diff)?;
+
         Ok(())
+    }
+
+    fn ensure_unpatched_descriptor(descriptor: &Descriptor) -> Descriptor {
+        if let Range::Patch(params) = &descriptor.range {
+            params.inner.0.clone()
+        } else {
+            descriptor.clone()
+        }
+    }
+
+    fn make_patch_descriptor(source_descriptor: &Descriptor, patch_path: &str) -> Descriptor {
+        // Create the patch range using the descriptor protocol
+        let patch_range = zpm_primitives::PatchRange {
+            inner: Box::new(UrlEncoded(source_descriptor.clone())),
+            path: patch_path.to_string(),
+        };
+
+        Descriptor::new(
+            source_descriptor.ident.clone(),
+            Range::Patch(patch_range),
+        )
     }
 }

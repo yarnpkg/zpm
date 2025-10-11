@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use browser::BrowserField;
 use serde_with::{serde_as, DefaultOnError};
+use zpm_parsers::{document::Document, Value};
 use zpm_primitives::{Descriptor, Ident, PeerRange, descriptor_map_deserializer, descriptor_map_serializer};
 use zpm_switch::PackageManagerField;
-use zpm_utils::Path;
+use zpm_utils::{Path, ToFileString};
 use bin::BinField;
 use bincode::{Decode, Encode};
 use exports::ExportsField;
@@ -195,16 +196,61 @@ pub struct Manifest {
     pub resolutions: ResolutionsField,
 }
 
-impl Manifest {
-    pub fn iter_hard_dependencies(&self) -> impl Iterator<Item = (&Ident, &Descriptor)> {
-        self.remote.dependencies.iter()
-            .chain(self.remote.optional_dependencies.iter())
-            .chain(self.dev_dependencies.iter())
-    }
+#[derive(Debug, Clone, Copy)]
+pub enum HardDependencyKind {
+    Dependency,
+    OptionalDependency,
+    DevDependency,
+}
 
-    pub fn iter_hard_dependencies_mut(&mut self) -> impl Iterator<Item = (&Ident, &mut Descriptor)> {
-        self.remote.dependencies.iter_mut()
-            .chain(self.remote.optional_dependencies.iter_mut())
-            .chain(self.dev_dependencies.iter_mut())
+impl HardDependencyKind {
+    pub fn to_str(&self) -> &str {
+        match self {
+            HardDependencyKind::Dependency => "dependencies",
+            HardDependencyKind::OptionalDependency => "optionalDependencies",
+            HardDependencyKind::DevDependency => "devDependencies",
+        }
+    }
+}
+
+impl HardDependencyKind {
+    pub fn insert_into<D: Document>(self, document: &mut D, descriptor: &Descriptor) -> Result<(), zpm_parsers::Error> {
+        document.set_path(
+            &zpm_parsers::Path::from_segments(vec![
+                self.to_str().to_string(),
+                descriptor.ident.to_file_string(),
+            ]),
+            Value::String(descriptor.range.to_file_string()),
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct HardDependency<'a> {
+    pub kind: HardDependencyKind,
+    pub descriptor: &'a Descriptor,
+}
+
+impl Manifest {
+    pub fn iter_hard_dependencies(&self) -> impl Iterator<Item = HardDependency> {
+        let dependencies_iter = self.remote.dependencies.values()
+            .map(|descriptor| HardDependency {
+                kind: HardDependencyKind::Dependency,
+                descriptor,
+            });
+
+        let optional_dependencies_iter = self.remote.optional_dependencies.values()
+            .map(|descriptor| HardDependency {
+                kind: HardDependencyKind::OptionalDependency,
+                descriptor,
+            });
+
+        let dev_dependencies_iter = self.dev_dependencies.values()
+            .map(|descriptor| HardDependency {
+                kind: HardDependencyKind::DevDependency,
+                descriptor,
+            });
+
+        dependencies_iter.chain(optional_dependencies_iter).chain(dev_dependencies_iter)
     }
 }

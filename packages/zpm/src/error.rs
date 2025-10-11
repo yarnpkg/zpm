@@ -138,8 +138,8 @@ pub enum Error {
     #[error("Tag not found ({0})")]
     TagNotFound(String),
 
-    #[error("Package not found ({}, at {})", .0.to_print_string(), .1.to_print_string())]
-    PackageNotFound(Ident, Path),
+    #[error("Package not found ({})", .0.to_print_string())]
+    PackageNotFound(Ident),
 
     #[error("No candidates found for {}", .0.to_print_string())]
     NoCandidatesFound(Range),

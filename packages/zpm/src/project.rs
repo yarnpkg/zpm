@@ -441,6 +441,22 @@ impl Project {
         Ok(&self.workspaces[*idx])
     }
 
+    pub fn try_workspace_by_locator(&self, locator: &Locator) -> Result<Option<&Workspace>, Error> {
+        match &locator.reference {
+            Reference::WorkspaceIdent(params) => {
+                Ok(Some(self.workspace_by_ident(&params.ident)?))
+            },
+
+            Reference::WorkspacePath(params) => {
+                Ok(Some(self.workspace_by_rel_path(&params.path)?))
+            },
+
+            _ => {
+                Ok(None)
+            },
+        }
+    }
+
     pub fn try_workspace_by_descriptor(&self, descriptor: &Descriptor) -> Result<Option<&Workspace>, Error> {
         match &descriptor.range {
             Range::WorkspaceIdent(params) => {
@@ -792,6 +808,10 @@ impl Workspace {
         Locator::new(self.name.clone(), WorkspacePathReference {
             path: self.rel_path.clone(),
         }.into())
+    }
+
+    pub fn manifest_path(&self) -> Path {
+        self.path.with_join_str(MANIFEST_NAME)
     }
 
     pub async fn workspaces(&self) -> Result<(Vec<Workspace>, u128), Error> {

@@ -1,5 +1,5 @@
 use clipanion::cli;
-use zpm_parsers::{JsonDocument, Value};
+use zpm_parsers::{document::Document, JsonDocument, Value};
 use zpm_primitives::Ident;
 use zpm_utils::{IoResultExt, Path, ToFileString};
 
@@ -147,7 +147,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             .ok_missing()?
             .unwrap_or_else(|| b"{}".to_vec());
 
-    let mut formatter
+    let mut document
         = JsonDocument::new(manifest_content)?;
 
     if !manifest_path.fs_exists() {
@@ -155,14 +155,14 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             .map(|n| Ident::new(n))
             .unwrap_or_else(|| Ident::new(init_cwd.basename().unwrap_or("package")));
 
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["name".to_string()]),
             Value::String(init_name.to_file_string()),
         )?;
     }
 
     if let Some(version) = option_env!("INFRA_VERSION") {
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["packageManager".to_string()]),
             Value::String(format!("yarn@{version}")),
         )?;
@@ -174,7 +174,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             false => Value::Undefined,
         };
 
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["private".to_string()]),
             private_field,
         )?;
@@ -190,7 +190,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
         packages_dir
             .fs_create_dir_all()?;
 
-        formatter.set_path(
+        document.set_path(
             &zpm_parsers::Path::from_segments(vec!["workspaces".to_string()]),
             Value::Array(vec![
                 Value::String("packages/*".to_string()),
@@ -199,10 +199,10 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     }
 
     manifest_path
-        .fs_change(&formatter.input, false)?;
+        .fs_change(&document.input, false)?;
 
     let manifest_json
-        = String::from_utf8_lossy(&formatter.input);
+        = String::from_utf8_lossy(&document.input);
     let manifest: Manifest
         = JsonDocument::hydrate_from_str(&manifest_json)?;
 
