@@ -187,7 +187,7 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
     let expected_registry_path
         = npm::registry_url_for_package_data(&registry_reference.ident, &registry_reference.version);
     let expected_registry_url
-        = format!("{}/{}", expected_registry_base, expected_registry_path);
+        = format!("{}{}", expected_registry_base, expected_registry_path);
 
     let locator = descriptor.resolve_with(match expected_registry_url == dist_manifest.tarball {
         true => registry_reference.into(),
