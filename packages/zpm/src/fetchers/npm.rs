@@ -62,7 +62,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .expect("The package cache is required for fetching npm packages");
 
     let package_subdir
-        = locator.ident.nm_subdir();
+        = params.ident.nm_subdir();
 
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
         let response

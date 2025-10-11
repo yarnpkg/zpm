@@ -64,7 +64,7 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
 
             let matching_type_dependency
                 = workspace.manifest.iter_hard_dependencies()
-                    .find(|dependency| dependency.descriptor.ident == descriptor.ident);
+                    .find(|dependency| dependency.descriptor.ident == type_ident);
 
             let Some(matching_type_dependency) = matching_type_dependency else {
                 continue;
