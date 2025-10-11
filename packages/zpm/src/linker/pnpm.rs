@@ -24,6 +24,8 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
 
     let mut packages_by_location
         = BTreeMap::new();
+    let mut locations_by_package
+        = BTreeMap::new();
 
     let mut all_build_entries
         = Vec::new();
@@ -67,6 +69,11 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             locator.clone(),
         );
 
+        locations_by_package.insert(
+            locator.clone(),
+            package_location_rel.clone(),
+        );
+
         // We don't create node_modules directories and we don't build
         // local packages that are not fully contained within the project
         if matches!(physical_package_data, PackageData::Local {package_directory, ..} if !project.project_cwd.contains(package_directory)) {
@@ -103,7 +110,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
     for (locator, resolution) in &tree.locator_resolutions {
         // <empty path, if we assume the root workspace>
         let package_location
-            = install.install_state.locations_by_package.get(locator)
+            = locations_by_package.get(locator)
                 .expect("Failed to find package location; it should have been registered a little earlier");
 
         // /path/to/project
@@ -127,7 +134,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 .expect("Failed to find dependency resolution");
 
             // node_modules/.store/@types-no-deps-npm-1.0.0-xyz/package
-            let dep_rel_location = install.install_state.locations_by_package
+            let dep_rel_location = locations_by_package
                 .get(dep_locator)
                 .expect("Failed to find dependency location; it should have been registered a little earlier");
 
