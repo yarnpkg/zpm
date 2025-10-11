@@ -28,10 +28,9 @@ pub fn registry_url_for_all_versions(registry_base: &str, ident: &Ident) -> Stri
     url
 }
 
-pub fn registry_url_for_one_version(registry_base: &str, ident: &Ident, version: &Version) -> String {
+pub fn registry_url_for_one_version(ident: &Ident, version: &Version) -> String {
     let mut url = String::new();
 
-    url.push_str(&registry_base);
     url.push('/');
     url.push_str(&ident.to_file_string());
     url.push('/');
@@ -40,10 +39,9 @@ pub fn registry_url_for_one_version(registry_base: &str, ident: &Ident, version:
     url
 }
 
-pub fn registry_url_for_package_data(registry_base: &str, ident: &Ident, version: &Version) -> String {
+pub fn registry_url_for_package_data(ident: &Ident, version: &Version) -> String {
     let mut url = String::new();
 
-    url.push_str(&registry_base);
     url.push('/');
     url.push_str(&ident.to_file_string());
     url.push_str("/-/");

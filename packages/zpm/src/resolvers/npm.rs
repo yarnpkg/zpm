@@ -182,8 +182,12 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
         version,
     };
 
+    let expected_registry_base
+        = project.config.registry_base_for(&registry_reference.ident);
+    let expected_registry_path
+        = npm::registry_url_for_package_data(&registry_reference.ident, &registry_reference.version);
     let expected_registry_url
-        = npm::registry_url_for_package_data(&project.config.registry_base_for(&registry_reference.ident), &registry_reference.ident, &registry_reference.version);
+        = format!("{}/{}", expected_registry_base, expected_registry_path);
 
     let locator = descriptor.resolve_with(match expected_registry_url == dist_manifest.tarball {
         true => registry_reference.into(),
@@ -308,16 +312,14 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
 
     let registry_base
         = project.config.registry_base_for(&params.ident);
-    let registry_url
-        = npm::registry_url_for_one_version(&registry_base, &params.ident, &params.version);
+    let registry_path
+        = npm::registry_url_for_one_version(&params.ident, &params.version);
 
-    let path
-        = registry_url.strip_prefix(&registry_base).unwrap_or(&registry_url);
     let response
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
-            path,
+            path: &registry_path,
             authorization: None,
         }).await?;
 
