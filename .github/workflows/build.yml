@@ -23,7 +23,7 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
 
-    name: 'Building ${{matrix.target}}'
+    name: "Building ${{matrix.target}}"
     runs-on: ${{matrix.os}}
 
     steps:
@@ -42,6 +42,13 @@ jobs:
           # named exactly "Build <version>" to allow the Cloudflare workers to detect
           # the version of the commit.
 
+      - name: "Generate an iso image for v86"
+        if: matrix.target == 'i686-unknown-linux-musl'
+        run: |
+          apt-get install libarchive-tools
+          cd target/${{matrix.target}}/release-lto-nodebug/
+          bsdtar -c -f yarn.iso {yarn,yarn-bin}
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -50,3 +57,10 @@ jobs:
             target/${{matrix.target}}/release-lto-nodebug/yarn-bin
             target/${{matrix.target}}/release-lto-nodebug/yarn
             target/${{matrix.target}}/release-lto-nodebug/LICENSE.md
+
+      - name: Upload iso image
+        if: matrix.target == 'i686-unknown-linux-musl'
+        uses: actions/upload-artifact@v4
+        with:
+          name: yarn-${{matrix.target}}-iso
+          path: target/${{matrix.target}}/release-lto-nodebug/yarn.iso
