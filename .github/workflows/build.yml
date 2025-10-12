@@ -45,7 +45,8 @@ jobs:
       - name: "Generate an iso image for v86"
         if: matrix.target == 'i686-unknown-linux-musl'
         run: |
-          apt-get install libarchive-tools
+          sudo apt-get update
+          sudo apt-get install libarchive-tools
           cd target/${{matrix.target}}/release-lto-nodebug/
           bsdtar -c -f yarn.iso {yarn,yarn-bin}
 
