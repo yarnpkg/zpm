@@ -12,8 +12,21 @@ impl<'a, T> NpmEntryExt<'a> for T where T: Iterator<Item = Entry<'a>> {
     fn prepare_npm_entries(self, subdir: &Path) -> impl Iterator<Item = Entry<'a>> {
         self
             .into_iter()
-            .sorted_by(|a, b| a.name.cmp(&b.name))
-            .move_to_front(|entry| entry.name.basename() == Some("package.json"))
+            .sorted_by(|a, b| {
+                let a_is_pkg = a.name.basename() == Some("package.json");
+                let b_is_pkg = b.name.basename() == Some("package.json");
+
+                match (a_is_pkg, b_is_pkg) {
+                    // Both are package.json: sort by path length (shortest first)
+                    (true, true) => a.name.as_str().len().cmp(&b.name.as_str().len()),
+                    // Only a is package.json: a comes first
+                    (true, false) => std::cmp::Ordering::Less,
+                    // Only b is package.json: b comes first
+                    (false, true) => std::cmp::Ordering::Greater,
+                    // Neither is package.json: sort alphabetically
+                    (false, false) => a.name.cmp(&b.name),
+                }
+            })
             .prefix_path(subdir)
     }
 }
