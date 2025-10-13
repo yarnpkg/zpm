@@ -138,21 +138,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         Ok(package_cache.bundle_entries(patched_entries)?)
     }).await?;
 
-    let first_entry
+    let package_json_entry
         = zpm_formats::zip::first_entry_from_zip(&cached_blob.data)?;
-
-    // Fallback: Handle old caches where the first entry might not be the root package.json
-    // This can happen if the cache was created before the fix in prepare_npm_entries
-    let package_json_entry = if first_entry.name.basename() == Some("package.json") {
-        first_entry
-    } else {
-        let entries = zpm_formats::zip::entries_from_zip(&cached_blob.data)?;
-        entries
-            .into_iter()
-            .filter(|entry| entry.name.basename() == Some("package.json"))
-            .min_by_key(|entry| entry.name.as_str().len())
-            .ok_or(Error::MissingPackageManifest)?
-    };
 
     let manifest: Manifest
         = JsonDocument::hydrate_from_slice(&package_json_entry.data)?;
