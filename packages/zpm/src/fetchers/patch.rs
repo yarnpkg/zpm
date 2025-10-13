@@ -139,11 +139,19 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         Ok(package_cache.bundle_entries(patched_entries)?)
     }).await?;
 
-    let first_entry
-        = zpm_formats::zip::first_entry_from_zip(&cached_blob.data)?;
+    // Find the root package.json (shortest path) from a list of entries.
+    // This handles packages with nested package.json files (e.g., gl-matrix).
+    let entries
+        = zpm_formats::zip::entries_from_zip(&cached_blob.data)?;
+    let package_json_entry
+        =  entries
+            .iter()
+            .filter(|entry| entry.name.basename() == Some("package.json"))
+            .min_by_key(|entry| entry.name.as_str().len())
+            .ok_or(Error::MissingPackageManifest)?;
 
     let manifest: Manifest
-        = JsonDocument::hydrate_from_slice(&first_entry.data)?;
+        = JsonDocument::hydrate_from_slice(&package_json_entry.data)?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
