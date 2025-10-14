@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::LazyLock};
+use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::{Arc, LazyLock}};
 
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -556,7 +556,8 @@ impl ScriptEnvironment {
         }
 
         let mut child
-            = cmd.spawn().unwrap();
+            = cmd.spawn()
+                .map_err(|e| Error::SpawnFailed(program.to_string(), self.cwd.clone(), Arc::new(Box::new(e))))?;
 
         if let Some(stdin) = &self.stdin {
             if let Some(mut child_stdin) = child.stdin.take() {

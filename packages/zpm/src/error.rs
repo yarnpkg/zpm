@@ -294,6 +294,9 @@ pub enum Error {
     #[error("Binary not found ({0})")]
     BinaryNotFound(String),
 
+    #[error("Binary failed to spawn ({}, started in {}): {2}", DataType::Code.colorize(.0), .1.to_print_string())]
+    SpawnFailed(String, Path, Arc<Box<dyn std::error::Error + Send + Sync>>),
+
     #[error("No binaries available in the dlx context")]
     MissingBinariesDlxContent,
 
