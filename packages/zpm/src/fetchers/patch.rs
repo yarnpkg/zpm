@@ -109,7 +109,6 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
         let package_json_entry
             = original_entries
-                // The cached files always have the package.json at the beginning of the archive
                 .first()
                 .ok_or(Error::MissingPackageManifest)?;
 
@@ -139,11 +138,11 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         Ok(package_cache.bundle_entries(patched_entries)?)
     }).await?;
 
-    let first_entry
+    let package_json_entry
         = zpm_formats::zip::first_entry_from_zip(&cached_blob.data)?;
 
     let manifest: Manifest
-        = JsonDocument::hydrate_from_slice(&first_entry.data)?;
+        = JsonDocument::hydrate_from_slice(&package_json_entry.data)?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);

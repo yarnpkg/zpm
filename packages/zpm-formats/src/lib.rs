@@ -77,6 +77,18 @@ pub struct Entry<'a> {
     pub compression: Option<Compression<'a>>,
 }
 
+impl<'a> Entry<'a> {
+    pub fn new(name: Path) -> Self {
+        Entry {
+            name,
+            mode: 0o644,
+            crc: 0,
+            data: Cow::Borrowed(b""),
+            compression: None,
+        }
+    }
+}
+
 pub fn entries_to_disk<'a>(entries: &[Entry<'a>], base: &Path) -> Result<(), Error> {
     for entry in entries {
         base.with_join(&entry.name)
