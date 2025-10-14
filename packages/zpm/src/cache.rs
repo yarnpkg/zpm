@@ -14,6 +14,8 @@ use crate::{
     error::Error,
 };
 
+pub const CACHE_VERSION: usize = 1;
+
 #[zpm_enum]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[derive_variants(Clone, Debug, PartialEq, Eq, Hash)]
@@ -166,7 +168,7 @@ impl DiskCache {
 
     pub fn key_path(&self, locator: &Locator, ext: &str) -> Path {
         let key_name
-            = format!("{}{}{}", locator.slug(), self.name_suffix, ext);
+            = format!("{}-{}{}{}", locator.slug(), CACHE_VERSION, self.name_suffix, ext);
 
         let key_path = self.cache_path
             .with_join_str(&key_name);
