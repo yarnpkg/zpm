@@ -26,13 +26,16 @@ jobs:
           script: |
             mkdir -p root
             echo '# Using http rather than https so v86 can forward requests' >> root/.yarnrc.yml
-            echo 'npmHttpServer: "http://registry.yarnpkg.com"' >> root/.yarnrc.yml
-            echo 'unsafeHttpWhitelist: ["registry.yarnpkg.com"]' >> root/.yarnrc.yml
+            echo 'enforceUnsafeHttp: true' >> root/.yarnrc.yml
 
-            mkdir -p root/proj
+            mkdir -p root/.yarn/v86/bin
+            ln -s media/cdrom/yarn-bin root/.yarn/v86/bin/yarn
+
             echo '{}' > root/proj/package.json
             touch root/proj/yarn.lock
           profile: |
+            clear
+
             # Unicode symbols
             PS_SYMBOL='$'
             SEP_SYMBOL=$'\xee\[\x82\xb0\]'
@@ -67,6 +70,7 @@ jobs:
             }
 
             PROMPT_COMMAND=ps1
+            PATH=/root/.yarn/v86/bin:"$PATH"
 
             cd /root/proj
 
