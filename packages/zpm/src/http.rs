@@ -18,6 +18,7 @@ static WARNED_HOSTNAMES: LazyLock<tokio::sync::Mutex<HashSet<String>>> = LazyLoc
 
 #[derive(Debug)]
 pub struct HttpConfig {
+    pub enforce_unsafe_http: bool,
     pub http_retry: usize,
     pub unsafe_http_whitelist: Vec<Setting<Glob>>,
     pub slow_network_timeout: u64,
@@ -367,6 +368,7 @@ impl HttpClient {
             .map_err(|err| Error::DnsResolutionError(Arc::new(err)))?;
 
         let config = HttpConfig {
+            enforce_unsafe_http: config.settings.enforce_unsafe_http.value,
             http_retry: config.settings.http_retry.value,
             unsafe_http_whitelist: config.settings.unsafe_http_whitelist.clone(),
             slow_network_timeout: config.settings.slow_network_timeout.value,
@@ -390,7 +392,7 @@ impl HttpClient {
         let url
             = url.as_ref();
 
-        let url
+        let mut url
             = Url::parse(url.as_ref())
                 .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
 
@@ -398,15 +400,19 @@ impl HttpClient {
             return Err(Error::NetworkDisabledError(url));
         }
 
-        if url.scheme() == "http" {
-            let is_explicitly_allowed
-                = self.config.unsafe_http_whitelist
-                    .iter()
-                    .any(|glob| glob.value.matcher().is_match(url.host_str().expect("\"http:\" URL should have a host")));
+        if !self.config.enforce_unsafe_http {
+            if url.scheme() == "http" {
+                let is_explicitly_allowed
+                    = self.config.unsafe_http_whitelist
+                        .iter()
+                        .any(|glob| glob.value.matcher().is_match(url.host_str().expect("\"http:\" URL should have a host")));
 
-            if !is_explicitly_allowed {
-                return Err(Error::UnsafeHttpError(url));
+                if !is_explicitly_allowed {
+                    return Err(Error::UnsafeHttpError(url));
+                }
             }
+        } else {
+            let _ = url.set_scheme("http");
         }
 
         Ok(HttpRequest::new(self, url, method))
