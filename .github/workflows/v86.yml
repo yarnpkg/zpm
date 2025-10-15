@@ -1,0 +1,77 @@
+name: V86 Buildroot Build
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/v86.yml'
+  workflow_dispatch:
+
+jobs:
+  build-image:
+    name: Build Basic Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build V86 Image
+        uses: ./
+        with:
+          output: yarn-v86-image.bzimage
+          config: |
+            BR2_PACKAGE_BASH=y
+            BR2_PACKAGE_GIT=y
+            BR2_SYSTEM_BIN_SH_BASH=y
+          script: |
+            mkdir -p root
+            echo '# Using http rather than https so v86 can forward requests' >> root/.yarnrc.yml
+            echo 'npmHttpServer: "http://registry.yarnpkg.com"' >> root/.yarnrc.yml
+            echo 'unsafeHttpWhitelist: ["registry.yarnpkg.com"]' >> root/.yarnrc.yml
+
+            mkdir -p root/proj
+            echo '{}' > root/proj/package.json
+            touch root/proj/yarn.lock
+          profile: |
+            # Unicode symbols
+            PS_SYMBOL='$'
+            SEP_SYMBOL=$'\xee\[\x82\xb0\]'
+
+            # Solarized colorscheme
+            FG_OK="\\[\\e[38;5;10m\\]"
+            BG_OK="\\[\\e[48;5;10m\\]"
+
+            FG_ERR="\\[\\e[38;5;9m\\]"
+            BG_ERR="\\[\\e[48;5;9m\\]"
+
+            FG_LINE="\\[\\e[38;5;31m\\]"
+            BG_LINE="\\[\\e[48;5;31m\\]"
+
+            FG_TEXT="\\[\\e[38;5;254m\\]"
+
+            RESET="\\[\\e[0m\\]"
+
+            ps1() {
+              if [ "$?" -eq 0 ]; then
+                local BG_EXIT="$BG_OK"
+                local FG_EXIT="$FG_OK"
+              else
+                local BG_EXIT="$BG_ERR"
+                local FG_EXIT="$FG_ERR"
+              fi
+
+              PS1="\n"
+              PS1+="${FG_EXIT}${BG_EXIT}${PS_SYMBOL}${RESET}${FG_EXIT}${BG_LINE}${SEP_SYMBOL}"
+              PS1+="${FG_TEXT}${BG_LINE} \\w "
+              PS1+="${RESET}${FG_LINE}${SEP_SYMBOL}${RESET} "
+            }
+
+            PROMPT_COMMAND=ps1
+
+            cd /root/proj
+
+      - name: Save as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yarn-v86-image
+          path: yarn-v86-image.bzimage
