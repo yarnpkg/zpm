@@ -1,6 +1,11 @@
 name: V86 Buildroot Build
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/v86.yml'
   pull_request:
     paths:
       - '.github/workflows/v86.yml'
@@ -25,11 +30,16 @@ jobs:
             BR2_SYSTEM_BIN_SH_BASH=y
           script: |
             mkdir -p root
+
             echo '# Using http rather than https so v86 can forward requests' >> root/.yarnrc.yml
-            echo 'enforceUnsafeHttp: true' >> root/.yarnrc.yml
+            echo 'enforceUnsafeHttp: true'                                    >> root/.yarnrc.yml
+
+            echo '[user]'                                                     >> root/.gitconfig
+            echo '    email = foo@example.org'                                >> root/.gitconfig
+            echo '    name = John Doe'                                        >> root/.gitconfig
 
             mkdir -p root/.yarn/v86/bin
-            ln -s media/cdrom/yarn-bin root/.yarn/v86/bin/yarn
+            ln -s /media/cdrom/yarn-bin root/.yarn/v86/bin/yarn
 
             mkdir -p root/proj
             echo '{}' > root/proj/package.json
