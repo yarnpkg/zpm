@@ -31,6 +31,7 @@ jobs:
             mkdir -p root/.yarn/v86/bin
             ln -s media/cdrom/yarn-bin root/.yarn/v86/bin/yarn
 
+            mkdir -p root/proj
             echo '{}' > root/proj/package.json
             touch root/proj/yarn.lock
           profile: |
