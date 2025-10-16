@@ -27,6 +27,7 @@ jobs:
           config: |
             BR2_PACKAGE_BASH=y
             BR2_PACKAGE_GIT=y
+            BR2_PACKAGE_NODEJS=y
             BR2_SYSTEM_BIN_SH_BASH=y
           script: |
             mkdir -p root
