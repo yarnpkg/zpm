@@ -52,7 +52,7 @@ function resizeRendererToDisplaySize(renderer: THREE.WebGLRenderer) {
 }
 
 function installSky(canvas: HTMLCanvasElement) {
-  const renderer = new THREE.WebGLRenderer({canvas, antialias: true, alpha: true});
+  const renderer = new THREE.WebGLRenderer({canvas, antialias: true, alpha: true, preserveDrawingBuffer: true});
   const scene = new THREE.Scene();
 
   // light source

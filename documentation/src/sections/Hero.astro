@@ -1,6 +1,7 @@
 ---
 import { Image } from "astro:assets";
 import SearchPackageInterface from "src/features/package/search/SearchPackageInterface.js";
+import {CatShader} from "@/components/CatShader.tsx";
 import Versions from "@/components/HeroVersions";
 import Headline from "@/components/Headline.astro";
 import Heading from "@/components/Heading";
@@ -11,32 +12,23 @@ import cat from "src/assets/image/logo-cat-nobg.png";
 import heroEllipse from "src/assets/svg/hero-ellipse.svg";
 ---
 
-<div class="-mt-32 overflow-hidden">
+<div class="-mt-32">
   <section class="relative not-content">
-    <Image
-      src={cat}
-      alt="Shine Background"
-      class="absolute right-0 w-[40%] object-cover h-full -z-30"
-      loading="eager"
-      decoding="sync"
-      fetchpriority="high"
-    />
+    <div class="absolute left-0 top-0 w-full aspect-square -z-30">
+      <div class="absolute inset-0">
+        <CatShader client:load/>
+      </div>
+    </div>
 
-    <div class="absolute inset-0 -z-30" style="
-      background-size: 100% 100%;
-      background-position: 0px 0px,0px 0px;
-      background-image: linear-gradient(0deg, #0C0E13 18%, #0C0E1300 34%),radial-gradient(100% 90% at 50% 100%, #2259FF 0%, #2259FF00 100%);
-    "/>
-
-    <div class="flex flex-col items-center min-h-[100vh] justify-around">
+    <div class="container flex flex-col items-start min-h-[100vh] justify-around">
       <div class="flex-none mt-0 h-8"/>
 
-      <div class="flex flex-col items-center my-auto">
-        <Heading size="h1" className="max-w-3xl text-center">
+      <div class="flex flex-col items-start my-auto">
+        <Heading size="h1" className="max-w-3xl">
           Safe, stable, <br /> reproducible projects
         </Heading>
 
-        <p class="text-white! pt-6 max-w-2xl text-center text-sm md:text-base">
+        <p class="text-white! pt-6 max-w-2xl text-sm md:text-base">
           Yarn is a package manager that doubles down as project manager. Whether
           you work on simple projects or industry monorepos.
         </p>
@@ -53,16 +45,7 @@ import heroEllipse from "src/assets/svg/hero-ellipse.svg";
         </div>
       </div>
 
-      <div class="flex flex-col items-center w-full relative">
-        <Image
-          src={heroEllipse}
-          alt="Shine Background"
-          class="absolute left-0 bottom-0 w-full max-h-64 -z-10"
-          loading="eager"
-          decoding="sync"
-          fetchpriority="high"
-        />
-
+      <div class="flex flex-col items-start w-full relative">
         <div class="mt-auto mb-0 max-w-2xl w-full min-h-28">
           <SearchPackageInterface client:only="preact" />
         </div>

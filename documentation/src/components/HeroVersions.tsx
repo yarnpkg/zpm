@@ -4,15 +4,32 @@ import {useYarnReleaseVersions}           from 'src/api/versions';
 
 const queryClient = new QueryClient();
 
+type BadgeProps = {
+  labelClass: string;
+  label: string;
+  value: string;
+};
+
+function Badge({labelClass, label, value}: BadgeProps) {
+  return (
+    <div class={`rounded-lg flex leading-5 text-xs border border-white/10`}>
+      <div class={`rounded-l-lg px-2 ${labelClass}`}>
+        {label}
+      </div>
+      <div class={`rounded-r-lg px-2 bg-linear-to-t from-gray-950 to-gray-800 `}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function Versions() {
   const {stable, canary} = useYarnReleaseVersions();
 
   return (
-    <div class={`flex items-center gap-x-2 divide-x divide-white`}>
-      <p class={`md:text-sm text-xs text-white! leading-5 pr-2`}>
-        stable {stable}
-      </p>
-      <p class={`md:text-sm text-xs text-white! leading-5`}>canary {canary}</p>
+    <div class={`flex items-center gap-x-2`}>
+      <Badge labelClass="bg-linear-to-t from-green-800 to-green-600 text-white" label="Stable" value={stable} />
+      <Badge labelClass="bg-linear-to-t from-orange-900 to-orange-800 text-white" label="Canary" value={canary} />
     </div>
   );
 }
