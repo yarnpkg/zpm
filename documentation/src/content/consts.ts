@@ -1,6 +1,6 @@
 export const NAVIGATION = [
   {href: `/getting-started`, title: `Get Started`},
-  {href: `/features/caching`, title: `Features`},
+  {href: `/concepts/workspaces`, title: `Concepts`},
   {href: `/cli`, title: `CLI`},
   {href: `/configuration/manifest`, title: `Configuration`},
   {href: `/advanced/error-codes`, title: `Advanced`},
