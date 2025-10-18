@@ -1,6 +1,11 @@
 {
   "name": "@yarnpkg/documentation",
   "type": "module",
+  "repository": {
+    "directory": "documentation",
+    "type": "git",
+    "url": "git+https://github.com/yarnpkg/zpm.git"
+  },
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",

@@ -12,6 +12,11 @@
     "lodash": "^4.17.21",
     "typescript": "^5.8.3"
   },
+  "repository": {
+    "directory": "",
+    "type": "git",
+    "url": "git+https://github.com/yarnpkg/zpm.git"
+  },
   "scripts": {
     "berry": "export TEST_BINARY=$PROJECT_CWD/local/yarn && export YARNSW_DEFAULT=local:$PROJECT_CWD/local/yarn-bin && export TEST_MAJOR=5 && cd ${BERRY_DIR:-../berry} && yarn"
   },
