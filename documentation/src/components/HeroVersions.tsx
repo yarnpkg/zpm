@@ -18,11 +18,11 @@ function Version({name}: {name: string}) {
 
 function Badge({labelClass, label, value}: BadgeProps) {
   return (
-    <div class={`rounded-lg flex leading-5 text-xs border border-white/10`}>
-      <div class={`rounded-l-lg px-2 ${labelClass}`}>
+    <div class={`rounded-xl flex leading-5 text-xs border border-white/10`}>
+      <div class={`rounded-l-xl px-2 ${labelClass}`}>
         {label}
       </div>
-      <div class={`rounded-r-lg w-16 px-2 bg-linear-to-t from-gray-950 to-gray-800 text-center`}>
+      <div class={`rounded-r-xl w-16 px-2 bg-linear-to-t from-gray-950 to-gray-800 text-center text-white`}>
         <Suspense fallback={<></>}>
           {value}
         </Suspense>

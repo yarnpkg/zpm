@@ -193,12 +193,13 @@
 
   /* Table styling */
   .sl-markdown-content table:not(:where(.not-content *)) {
-    display: block;
-    overflow: auto;
+    width: 100%;
     color: #d3d4d5;
     border-spacing: 0;
     border-radius: 16px;
     border: 1px solid var(--sl-color-gray-5);
+    border-collapse: separate;
+    overflow: hidden;
   }
 
   /* Table Head */
@@ -230,6 +231,10 @@
     padding: 12px 12px;
     vertical-align: middle;
     min-width: 280px;
+  }
+
+  .sl-markdown-content tr:last-child td:not(:where(.not-content *)) {
+    border-bottom: none;
   }
 
   .sl-markdown-content td:last-child:not(:where(.not-content *)) {

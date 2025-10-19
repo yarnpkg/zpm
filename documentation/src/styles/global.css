@@ -4,6 +4,7 @@
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
+@source "../content/**/*.{md,mdx}";                   /* include your markdown */
 
 @theme {
   /* Font families */
