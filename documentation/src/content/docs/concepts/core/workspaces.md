@@ -3,6 +3,8 @@ category: concepts
 slug: concepts/workspaces
 title: Workspaces
 description: A tour of what Yarn has to offer to monorepo projects.
+sidebar:
+  order: 8
 ---
 
 Workspaces are a core part of Yarn's design, making it easy to manage multiple packages within the same repository - a pattern you may already be familiar with under the name of "monorepo".

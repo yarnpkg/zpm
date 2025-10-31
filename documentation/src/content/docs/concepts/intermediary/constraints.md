@@ -3,6 +3,8 @@ category: concepts
 slug: concepts/constraints
 title: Constraints
 description: Yarn constraints, a way to enforce common rules across a project.
+sidebar:
+  order: 1
 ---
 
 Constraints are a powerful feature in Yarn that allow you to define and enforce rules across your project. They can be used to validate the structure of your `package.json` files, raise errors when they are not met, and even declare fixes to automatically apply.

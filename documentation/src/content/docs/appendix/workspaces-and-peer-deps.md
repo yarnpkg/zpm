@@ -1,7 +1,7 @@
 ---
 category: appendixes
-slug: appendix/nm-peer-deps
-title: The nm / peer deps issue
+slug: appendix/workspaces-and-peer-deps
+title: Workspaces & peer deps
 description: An overview of incompatibilities between workspaces and peer dependencies when using the node_modules or pnpm installation strategies.
 ---
 

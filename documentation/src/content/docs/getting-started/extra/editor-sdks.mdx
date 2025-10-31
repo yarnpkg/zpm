@@ -5,7 +5,7 @@ title: Editor SDKs
 description: An overview of the editor SDKs used to bring PnP compatibility to editors.
 ---
 
-Smart IDEs (such as VSCode or IntelliJ) require special configuration for TypeScript to work when using [Plug'n'Play installs](https://yarnpkg.com/features/pnp). This page is a collection of settings for each editor we've looked into.
+Smart IDEs (such as VSCode or IntelliJ) require special configuration for TypeScript to work when using [Yarn PnP](/concepts/pnp) installs. This page is a collection of settings for each editor we've looked into.
 
 The editor SDKs and settings can be generated using `yarn dlx @yarnpkg/sdks`. Its detailed documentation can be found on the [dedicated page](https://yarnpkg.com/cli/sdks/default).
 
@@ -21,19 +21,19 @@ The SDKs workaround that by generating indirection packages. When required, thes
 
 Generate both the base SDK and the editor settings:
 
-```
+```bash
 yarn dlx @yarnpkg/sdks vscode vim ...
 ```
 
 Generate the base SDK, but no editor settings:
 
-```
+```bash
 yarn dlx @yarnpkg/sdks base
 ```
 
 Update all installed SDKs & editor settings:
 
-```
+```bash
 yarn dlx @yarnpkg/sdks
 ```
 
@@ -42,6 +42,8 @@ yarn dlx @yarnpkg/sdks
 :::caution
 The `yarn dlx @yarnpkg/sdks` command will look at the content of your _root_ `package.json` to figure out the SDKs you need - it won't look at the dependencies from any other workspaces.
 :::
+
+<div class="[&_table]:table-fixed [&_th:first-child]:w-[350px]">
 
 | Supported extension                                                                           | Enabled if ... is found in your `package.json` dependencies |
 | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
@@ -52,6 +54,8 @@ The `yarn dlx @yarnpkg/sdks` command will look at the content of your _root_ `pa
 | [relay](https://marketplace.visualstudio.com/items?itemName=meta.relay)                       | [relay](https://relay.dev/)                                 |
 
 If you'd like to contribute more, [take a look here!](https://github.com/yarnpkg/berry/blob/master/packages/yarnpkg-sdks/sources/generateSdk.ts)
+
+</div>
 
 ## Editor setup
 
@@ -112,3 +116,7 @@ yarn dlx @yarnpkg/sdks vscode
    3. Pick "Use Workspace Version"
 
 Your VSCode project is now configured to use the exact same version of TypeScript as the one you usually use, except that it will be able to properly resolve the type definitions.
+
+### Zed
+
+Zed has [native support](https://zed.dev/docs/languages/yarn) for Yarn Plug'n'Play after the base SDK is installed.

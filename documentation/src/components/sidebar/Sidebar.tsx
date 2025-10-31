@@ -10,7 +10,7 @@ interface Props {
 export default function Sidebar({entries, defaultExpandedGroup}: Props) {
   return entries.map((entry, index) => (
     <SidebarEntryElement
-      initialCollapsed={index !== defaultExpandedGroup}
+      initialCollapsed={false}
       {...(entry as any)}
       key={index}
     />

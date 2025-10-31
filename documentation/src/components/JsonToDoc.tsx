@@ -19,7 +19,6 @@ const jsonTheme = {
     {
       types: [`string`],
       style: {
-        ...baseFont,
         color: `#FFB888`,
         alignItems: `center`,
       },
@@ -46,8 +45,8 @@ const jsonTheme = {
 };
 
 const extraTheme = {
+  baseSize: `calc(var(--spacing) * 4)`,
   head: {
-    padding: `24px`,
     background: `rgba(42, 87, 219, 0.05)`,
     border: `1px solid #7388FF`,
     backdropFilter: `blur(4px)`,
@@ -64,9 +63,6 @@ const extraTheme = {
     borderRadius: `16px`,
   },
   annotation: {
-    padding: `24px`,
-    gap: `16px`,
-    marginTop: `-6px`,
     background: `rgba(255, 255, 255, 0.03)`,
     border: `1.5px solid rgba(255, 255, 255, 0.05)`,
     borderRadius: `16px`,
@@ -75,7 +71,7 @@ const extraTheme = {
     scrollMarginTop: 60,
   },
   section: {
-    fontFamily: `Montserrat`,
+    fontFamily: `var(--font-mono)`,
     fontWeight: `500`,
   },
   identifier: {
@@ -85,57 +81,22 @@ const extraTheme = {
 };
 
 export default function JsonToDoc({json}: {json: string}) {
-  useEffect(() => {
-    const scrollToHash = () => {
-      const raw = typeof window !== `undefined`
-        ? window.location.hash.slice(1)
-        : ``;
-
-      if (!raw)
-        return;
-
-      const id = decodeURIComponent(raw);
-      const el = document.getElementById(id);
-      if (el) {
-        el.scrollIntoView({block: `start`});
-      }
-    };
-
-    // On initial mount after hydration
-    scrollToHash();
-
-    // Respond to in-page hash changes
-    window.addEventListener(`hashchange`, scrollToHash);
-    return () => {
-      window.removeEventListener(`hashchange`, scrollToHash);
-    };
-  }, []);
-
   return (
-    <JsonDoc
-      linkComponent={({
-        href,
-        children,
-      }: {
-        href: string;
-        children: ReactNode;
-      }) => (
-        <a href={href} className={`!no-underline`}>
-          {children}
-        </a>
-      )}
-      data={json}
-      theme={jsonTheme}
-      extraTheme={extraTheme}
-      descriptionRenderer={{
-        render: (description: string) => (
-          <div
-            dangerouslySetInnerHTML={{
-              __html: marked(description, {async: false}),
-            }}
-          />
-        ),
-      }}
-    />
+    <div class="not-content json-doc">
+      <JsonDoc
+        data={json}
+        theme={jsonTheme}
+        extraTheme={extraTheme}
+        descriptionRenderer={{
+          render: (description: string) => (
+            <div
+              dangerouslySetInnerHTML={{
+                __html: marked(description, {async: false}),
+              }}
+            />
+          ),
+        }}
+      />
+    </div>
   );
 }

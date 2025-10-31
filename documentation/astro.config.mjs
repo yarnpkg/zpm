@@ -19,72 +19,62 @@ export default defineConfig({
     : `https://yarnpkg.com`,
   base: `/`,
   output: `static`,
+  trailingSlash: `never`,
   prefetch: {
     prefetchAll: true,
   },
   integrations: [
     starlight({
       title: `Yarn`,
-      head: [
-        // Example: add Fathom analytics script tag.
-        {
-          tag: `meta`,
-          attrs: {
-            name: `robots`,
-            content: `noindex`,
-          },
+      head: [{
+        tag: `meta`,
+        attrs: {
+          name: `robots`,
+          content: `noindex`,
         },
-      ],
-      social: [
-        {
-          icon: `discord`,
-          label: `Discord`,
-          href: `https://discord.com/invite/yarnpkg`,
-        },
-        {
-          icon: `github`,
-          label: `GitHub`,
-          href: `https://github.com/yarnpkg/zpm`,
-        },
-      ],
-      sidebar: [
-        {
-          label: `Getting Started`,
+      }],
+      social: [{
+        icon: `discord`,
+        label: `Discord`,
+        href: `https://discord.com/invite/yarnpkg`,
+      }, {
+        icon: `github`,
+        label: `GitHub`,
+        href: `https://github.com/yarnpkg/zpm`,
+      }],
+      sidebar: [{
+        label: `Getting Started`,
+        collapsed: true,
+        autogenerate: {directory: `getting-started`},
+      }, {
+        label: `CLI`,
+        items: [{
+          label: ``,
           collapsed: true,
-          autogenerate: {directory: `getting-started`},
-        },
-        {
-          label: `CLI`,
-          items: [
-            {
-              label: ``,
-              collapsed: true,
-              autogenerate: {directory: `cli/cli`},
-            },
-            {
-              label: ``,
-              autogenerate: {directory: `cli/builder`},
-            },
-            {
-              label: ``,
-              autogenerate: {directory: `cli/pnpify`},
-            },
-            {
-              label: ``,
-              autogenerate: {directory: `cli/sdks`},
-            },
-          ],
-        },
-        {
-          label: `Advanced`,
-          autogenerate: {directory: `advanced`},
-        },
-        {label: `Features`, autogenerate: {directory: `features`}},
-        {
-          label: `Configuration`,
-          autogenerate: {directory: `configuration`},
-        },
-      ],
+          autogenerate: {directory: `cli/cli`},
+        }, {
+          label: ``,
+          autogenerate: {directory: `cli/builder`},
+        }, {
+          label: ``,
+          autogenerate: {directory: `cli/pnpify`},
+        }, {
+          label: ``,
+          autogenerate: {directory: `cli/sdks`},
+        }],
+      }, {
+        label: `Concepts`,
+        autogenerate: {directory: `concepts`},
+      }, {
+        label: `Appendix`,
+        autogenerate: {directory: `appendix`},
+      }, {
+        label: `Contributing`,
+        autogenerate: {directory: `contributing`},
+      }, {
+        label: `Configuration`,
+        autogenerate: {directory: `configuration`},
+      }],
       components: {
         SocialIcons: `./src/overrides/CustomSocialIcons.astro`,
         Header: `./src/overrides/navigation/index.astro`,

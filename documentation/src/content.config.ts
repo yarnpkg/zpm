@@ -6,9 +6,16 @@ import {autoSidebarLoader}              from 'starlight-auto-sidebar/loader';
 import {autoSidebarSchema}              from 'starlight-auto-sidebar/schema';
 
 export const collections = {
-  docs: defineCollection({loader: docsLoader(), schema: docsSchema()}),
+  docs: defineCollection({
+    loader: docsLoader(),
+    schema: docsSchema(),
+  }),
+
   blog: defineCollection({
-    loader: glob({pattern: `**/*.mdx`, base: `./src/content/blog`}),
+    loader: glob({
+      pattern: `**/*.mdx`,
+      base: `./src/content/blog`,
+    }),
     schema: z.object({
       title: z.string(),
       slug: z.string(),
@@ -21,7 +28,10 @@ export const collections = {
   }),
 
   protocols: defineCollection({
-    loader: glob({pattern: `**/*.mdx`, base: `./src/content/protocols`}),
+    loader: glob({
+      pattern: `**/*.mdx`,
+      base: `./src/content/protocols`,
+    }),
     schema: z.object({
       title: z.string().optional(),
       slug: z.string().optional(),

@@ -1,11 +1,11 @@
 ---
-category: features
-slug: features/patching
-title: Package patching
+category: concepts
+slug: concepts/patches
+title: Dependency patches
 description: How to fix your dependencies without having to fork them entirely while waiting for an update.
+sidebar:
+  order: 2
 ---
-
-## Overview
 
 It sometimes happen that you need to make small changes to a dependency, just to workaround some small issue. The recommended action is to make a PR upstream, but it may take time until your changes get through review and end up in a release; what to do in the meantime? You have two options:
 
@@ -17,9 +17,9 @@ No more waiting around for pull requests to be merged and published, no more for
 
 ## Making patches
 
-To create a patch, run the `yarn patch` command and pass it a package name to make Yarn extract the requested package in a temporary folder. You're then free to edit the files within the patch at your convenience.
+To create a patch, run the `yarn patch` command and pass it a package name. Yarn will extract the requested package to a temporary folder which you're then free to edit as you wish.
 
-Once you're done with your changes, run `yarn patch-commit -s` with the temporary folder as parameter: the patch will be generated in `.yarn/patches`, and applied to your project. Add it to Git, and you're set to go.
+Once you're done with your changes, all that remains is to run `yarn patch-commit -s` and pass it the path to the temporary folder Yarn generated: a patch file will be generated in `.yarn/patches` and applied to your project. Commit it, and you're set to go.
 
 ## Maintaining patches
 
@@ -27,6 +27,6 @@ By default, `yarn patch` will always reset the patch. If you wish to add new cha
 
 ## Limitations
 
-- Because they're currently computed at fetch time rather than resolution time, the package dependencies have already been resolved and patches won't be able to alter them. Instead, use the `packageExtensions` mechanism which is specifically made to add new runtime dependencies to packages.
+- Patches are computed at fetch time rather than resolution time, so package dependencies have already been extracted by the time Yarn reads your patched files. Prefer the `packageExtensions` mechanism to add new dependencies to a package.
 
-- Patches are ill-suited for modifying binary files. Minified files are problematic as well, although we could improve the feature to automatically process such files through a Prettier-like tool.
+- Patches are ill-suited for modifying binary files. Minified files are problematic as well, although we would welcome a PR improving the feature to automatically process such files through a file formatter.

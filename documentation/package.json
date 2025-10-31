@@ -41,7 +41,7 @@
     "preact-iso": "^2.9.2",
     "react-instantsearch": "^7.16.0",
     "react-is": "^19.1.1",
-    "react-json-doc": "^2.3.4",
+    "react-json-doc": "/Users/maeln/Repositories/react-json-doc/package.tgz",
     "react": "npm:@preact/compat@^18.3.1",
     "reading-time": "^1.5.0",
     "recharts": "^3.1.0",

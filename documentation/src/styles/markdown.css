@@ -133,6 +133,15 @@
     justify-content: center;
   }
 
+  .sl-markdown-content .rjd-annotation p,
+  .sl-markdown-content .rjd-annotation li {
+    margin-top: calc(var(--spacing) * 4);
+  }
+
+  .sl-markdown-content .rjd-annotation > div > :first-child {
+    margin-top: 0;
+  }
+
   .sl-markdown-content h2:not(:where(.not-content *)) {
     font-size: var(--sl-text-h2);
   }

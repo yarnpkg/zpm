@@ -4859,7 +4859,7 @@
           "react": "npm:@preact/compat@^18.3.1",
           "react-instantsearch": "^7.16.0",
           "react-is": "^19.1.1",
-          "react-json-doc": "^2.3.4",
+          "react-json-doc": "/Users/maeln/Repositories/react-json-doc/package.tgz",
           "reading-time": "^1.5.0",
           "recharts": "^3.1.0",
           "resolve": "^1.22.10",
@@ -12107,10 +12107,10 @@
         "version": "19.2.0"
       }
     },
-    "react-json-doc@npm:^2.3.4": {
-      "checksum": "101d96b40f32f96519c3068cc3e32a39cec68f20a80fe9bc2af217ba0b88284269e2267fb7e3a1b315c16e76465cbb2140f3a870fc66c8eb42c532d947db70d5",
+    "react-json-doc@/Users/maeln/Repositories/react-json-doc/package.tgz::parent=@yarnpkg/documentation@workspace:@yarnpkg/documentation": {
+      "checksum": "02d789a310a1880077b4a5fa0f5e7bb4106599cca4b0c65403bf6cafe5d67b12dda6582c96e6e15adb18e998d24ec21f868a5d68057b9882d8a104450d7918de",
       "resolution": {
-        "resolution": "react-json-doc@npm:2.3.4",
+        "resolution": "react-json-doc@file:/Users/maeln/Repositories/react-json-doc/package.tgz::parent=@yarnpkg/documentation@workspace:@yarnpkg/documentation",
         "version": "2.3.4",
         "peerDependencies": {
           "react": "*"

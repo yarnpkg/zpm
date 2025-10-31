@@ -7,4 +7,4 @@ slug: configuration/manifest
 import manifestSchema from "@/utils/configuration/manifest.json";
 import JsonToDoc from "@/components/JsonToDoc";
 
-<JsonToDoc client:only="preact" json={manifestSchema} />
+<JsonToDoc client:load="preact" json={manifestSchema} />

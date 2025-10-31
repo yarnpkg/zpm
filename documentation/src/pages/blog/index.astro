@@ -61,48 +61,47 @@ renderedEntries.sort((a, b) => b.rawDate.valueOf() - a.rawDate.valueOf());
                 <Content />
               </div>
 
-              <div class="flex xl:flex-row flex-col gap-6 lg:gap-8 justify-between pt-4 lg:pt-5">
-                {author && (
-                  <div class="flex items-center gap-x-3 md:gap-x-4 mb-2">
-                    {author?.image_url && (
-                      <Image
-                        src={author.image_url}
-                        alt={`${author.name} profile picture`}
-                        width={56}
-                        height={56}
-                        class="rounded-full object-cover"
-                      />
-                    )}
-                    <div>
-                      <a
-                        href={author?.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        <p class="leading-[22px] text-base font-medium underline text-white!">
-                          {author?.name}
-                        </p>
-                      </a>
-                      <p class="text-white/60 leading-[22px] text-base max-lg:text-sm pt-1.5">
+              <div class="pt-4 lg:pt-5">
+                <div class="flex items-center gap-x-3 md:gap-x-4 mb-2">
+                  {author?.image_url && (
+                    <Image
+                      src={author.image_url}
+                      alt={`${author.name} profile picture`}
+                      width={56}
+                      height={56}
+                      class="rounded-full object-cover"
+                    />
+                  )}
+                  <div class="flex-1">
+                    <a
+                      href={author?.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <p class="leading-[22px] text-base font-medium underline text-white!">
+                        {author?.name}
+                      </p>
+                    </a>
+                    <div class="flex items-baseline justify-between text-sm leading-[22px]">
+                      <p class="text-white/60">
                         {author?.title}
                       </p>
+                      <div class="flex items-baseline gap-x-2">
+                        <p class="text-white/60 inline-flex items-baseline gap-x-2">
+                          <Calendar class="relative top-[5px] size-6" />
+                          <span class="font-medium text-white">
+                            {date}
+                          </span>
+                        </p>
+                        <p class="text-white/60 inline-flex items-baseline gap-x-2">
+                          <Clock class="relative top-[5px] size-6" />
+                          <span class="font-medium text-white">
+                            {minutesRead}
+                          </span>
+                        </p>
+                      </div>
                     </div>
                   </div>
-                )}
-                <div class="flex items-center gap-x-3">
-                  <p class="text-white/60 leading-[22px] text-base inline-flex items-center gap-x-2">
-                    <Calendar class="size-6" />
-                    <span class="font-medium text-white text-xs lg:text-sm">
-                      {date}
-                    </span>
-                  </p>
-                  <div class="size-1 bg-white/80 rounded-full" />
-                  <p class="text-white/60 leading-[22px] text-base inline-flex items-center gap-x-2">
-                    <Clock class="size-6" />
-                    <span class="font-medium text-white text-xs lg:text-sm">
-                      {minutesRead}
-                    </span>
-                  </p>
                 </div>
               </div>
             </div>

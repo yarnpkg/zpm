@@ -10,7 +10,7 @@ const { hideBackground } = Astro.locals.starlightRoute;
 const { pathname } = Astro.url;
 ---
 
-<nav class="container flex items-center h-32 z-10">
+<nav class="relative container py-8 z-40">
   <div class="max-xl:hidden w-full">
     <DesktopNavigation pathname={pathname} />
   </div>
@@ -20,7 +20,7 @@ const { pathname } = Astro.url;
 </nav>
 
 {!hideBackground && (
-  <div class="absolute left-2/5 -ml-[400px] top-16 -mt-[200px] w-[800px] h-[400px] blur-xl" style="
+  <div class="absolute left-2/5 -ml-[400px] top-16 -mt-[200px] w-[800px] h-[400px] blur-xl -z-10" style="
 background-size: 100% 100%;
 background-position: 0px 0px,0px 0px;
 background-image: radial-gradient(50% 50% at 50% 50%, #FFFFFFFF 1%, #4251D700 44%),radial-gradient(50% 50% at 50% 50%, var(--color-blue-700) 0%, color-mix(in srgb, var(--color-blue-700) 0%, transparent) 100%);

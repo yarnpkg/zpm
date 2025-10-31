@@ -3,6 +3,8 @@ category: concepts
 slug: concepts/zero-installs
 title: Zero Installs
 description: A way to make a project install-free.
+sidebar:
+  order: 11
 ---
 
 Working on a high-velocity project comes with its own set of challenges. One of those is the constant need to reinstall dependencies whenever you change branches. Yarn came up with an opt-in pattern addressing this problem, which we call Zero Installs.
