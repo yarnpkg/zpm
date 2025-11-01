@@ -1,7 +1,9 @@
 import preact                       from '@astrojs/preact';
 import starlightDocSearch           from '@astrojs/starlight-docsearch';
 import starlight                    from '@astrojs/starlight';
+import {clipanionRemark}            from '@clipanion/remark';
 import tailwindcss                  from '@tailwindcss/vite';
+import path from 'path';
 // @ts-check
 import {defineConfig}               from 'astro/config';
 import starlightAutoSidebar         from 'starlight-auto-sidebar';
@@ -113,7 +115,7 @@ export default defineConfig({
           frames: {
             terminalTitlebarBackground: `rgba(255, 255, 255, 0.03)`,
           },
-        },
+        }
       },
       disable404Route: true,
       tableOfContents: false,
@@ -121,7 +123,6 @@ export default defineConfig({
       pagefind: false,
     }),
     preact({compat: true}),
-    yarnCliDocs(),
   ],
   vite: {
     plugins: [tailwindcss(), svgr()],
@@ -148,7 +149,15 @@ export default defineConfig({
     remarkPlugins: [
       remarkReadingTime,
       remarkModifiedTime,
-      remarkCommandLineHighlight,
+      [clipanionRemark, {
+        clis: {
+          yarn: {
+            baseUrl: `https://example.org/git`,
+            path: path.resolve(import.meta.dirname, `../target/release/yarn-bin`),
+          },
+        },
+        enableBlocks: false,
+      }],
     ],
   },
 });

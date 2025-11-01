@@ -990,6 +990,43 @@
         }
       }
     },
+    "@clipanion/expressive-code@github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fexpressive-code": {
+      "checksum": "1a1295d2bf6f64f02e5768640c56937de0b36c8439b9a884721b2b5a26eba47e803a98dc8d49b13bbb5828402c265b46fd666ac021f08e302594357e8229aa7c",
+      "resolution": {
+        "resolution": "@clipanion/expressive-code@git:github:arcanis/clipanion-rs#commit=8facdba670a3c70cbcbd00d42e1950ba0aa8f712&workspace=%40clipanion%2Fexpressive-code",
+        "version": "0.0.0",
+        "dependencies": {
+          "@clipanion/tools": "workspace:^"
+        },
+        "peerDependencies": {
+          "@expressive-code/core": "*"
+        }
+      }
+    },
+    "@clipanion/remark@github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fremark": {
+      "checksum": "5dcc71e0222047278f926d879930a3de42eac4d75c5bdee988bec17718b1b6687e357eb901313f5d51a427ce2574a65a935ec9aebde994322097bf351d388b53",
+      "resolution": {
+        "resolution": "@clipanion/remark@git:github:arcanis/clipanion-rs#commit=8facdba670a3c70cbcbd00d42e1950ba0aa8f712&workspace=%40clipanion%2Fremark",
+        "version": "0.0.0",
+        "dependencies": {
+          "@clipanion/tools": "workspace:^",
+          "@types/mdast": "^4.0.4",
+          "@types/unist": "^3.0.3",
+          "@yarnpkg/parsers": "^3.0.3",
+          "style-to-object": "^1.0.11",
+          "unified": "^11.0.5",
+          "unist": "^0.0.1",
+          "unist-util-visit": "^5.0.0"
+        }
+      }
+    },
+    "@clipanion/tools@github:arcanis/clipanion-rs#commit=8facdba670a3c70cbcbd00d42e1950ba0aa8f712&workspace=%40clipanion%2Ftools": {
+      "checksum": "30dddb1f01c8b47fceb99da062deb8c56b9af64b30837d73a25c1aec01ac60eff9affdb532affe4fde721049902faf2396732158d2e376143d41d3e27e3b169c",
+      "resolution": {
+        "resolution": "@clipanion/tools@git:github:arcanis/clipanion-rs#commit=8facdba670a3c70cbcbd00d42e1950ba0aa8f712&workspace=%40clipanion%2Ftools",
+        "version": "0.0.0"
+      }
+    },
     "@ctrl/tinycolor@npm:^4.0.4": {
       "checksum": "123319fde124195d0af6b4a118d3b3fd091770543f33b62d86f7c35d92b6034f58b323bb412e48a42a780a7fce17b838c6b9856c4c2d0a4a6af7458965202889",
       "resolution": {
@@ -4501,7 +4538,7 @@
         "version": "2.0.7"
       }
     },
-    "@types/unist@npm:*, @types/unist@npm:^3.0.0": {
+    "@types/unist@npm:*, @types/unist@npm:^3.0.0, @types/unist@npm:^3.0.3": {
       "checksum": "459edbc83e2c6eca6f3550f184e25b137fc7441b5926a1d54721c26b0aa819b10eb7db1f9c9e3f12f9766b7f6e44d2b84f8714567e71b5831c1920d71251d750",
       "resolution": {
         "resolution": "@types/unist@npm:3.0.3",
@@ -4820,6 +4857,8 @@
           "@astrojs/starlight-tailwind": "^4.0.1",
           "@babel/core": "^7.27.7",
           "@base-ui-components/react": "^1.0.0-beta.1",
+          "@clipanion/expressive-code": "github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fexpressive-code",
+          "@clipanion/remark": "github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fremark",
           "@docsearch/css": "^4.1.0",
           "@docsearch/react": "^4.1.0",
           "@fontsource/montserrat": "^5.2.6",
@@ -4837,6 +4876,7 @@
           "@yarnpkg/builder": "^4.2.2",
           "@yarnpkg/cli": "^4.9.2",
           "@yarnpkg/core": "^4.4.2",
+          "@yarnpkg/monorepo": "workspace:*",
           "@yarnpkg/parsers": "^3.0.3",
           "@yarnpkg/pnpify": "^4.1.5",
           "@yarnpkg/sdks": "^3.2.2",
@@ -4859,7 +4899,7 @@
           "react": "npm:@preact/compat@^18.3.1",
           "react-instantsearch": "^7.16.0",
           "react-is": "^19.1.1",
-          "react-json-doc": "/Users/maeln/Repositories/react-json-doc/package.tgz",
+          "react-json-doc": "github:arcanis/react-json-doc#head=HEAD",
           "reading-time": "^1.5.0",
           "recharts": "^3.1.0",
           "resolve": "^1.22.10",
@@ -4947,6 +4987,24 @@
         },
         "peerDependencies": {
           "@yarnpkg/fslib": "^3.1.3"
+        }
+      }
+    },
+    "@yarnpkg/monorepo@workspace:^, @yarnpkg/monorepo@workspace:*": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "@yarnpkg/monorepo@workspace:@yarnpkg/monorepo",
+        "version": "0.0.0",
+        "dependencies": {
+          "@types/lodash": "^4.17.17",
+          "@types/node": "^22.15.20",
+          "@yarnpkg/eslint-config": "^3.1.0",
+          "@yarnpkg/types": "^4.0.1",
+          "clipanion": "^4.0.0-rc.4",
+          "esbuild": "^0.25.5",
+          "eslint": "^9.36.0",
+          "lodash": "^4.17.21",
+          "typescript": "^5.8.3"
         }
       }
     },
@@ -9143,6 +9201,13 @@
         "version": "0.2.4"
       }
     },
+    "inline-style-parser@npm:0.2.6": {
+      "checksum": "58c80dd56c032a24d77a202423a967b0b07f5f4ddff48b07037a6c87051268d9d5bccf123b2feb5c82960fad4e44920b0b212b9a9b6b125c3571cbe3f59dc556",
+      "resolution": {
+        "resolution": "inline-style-parser@npm:0.2.6",
+        "version": "0.2.6"
+      }
+    },
     "instantsearch-ui-components@npm:0.11.2": {
       "checksum": "f683f5315ad740d69fea30cc1bce3affd02ec38790299bead1aef3fb1c53685e87948f68559afa0bb16c456ac9ce917b3be0d263c8c9f7909a5884f835654e41",
       "resolution": {
@@ -12107,10 +12172,10 @@
         "version": "19.2.0"
       }
     },
-    "react-json-doc@/Users/maeln/Repositories/react-json-doc/package.tgz::parent=@yarnpkg/documentation@workspace:@yarnpkg/documentation": {
+    "react-json-doc@github:arcanis/react-json-doc#head=HEAD": {
       "checksum": "02d789a310a1880077b4a5fa0f5e7bb4106599cca4b0c65403bf6cafe5d67b12dda6582c96e6e15adb18e998d24ec21f868a5d68057b9882d8a104450d7918de",
       "resolution": {
-        "resolution": "react-json-doc@file:/Users/maeln/Repositories/react-json-doc/package.tgz::parent=@yarnpkg/documentation@workspace:@yarnpkg/documentation",
+        "resolution": "react-json-doc@git:github:arcanis/react-json-doc#commit=ca5eb6f754a4c02de6dbdfd15f8c4d1ba056c982",
         "version": "2.3.4",
         "peerDependencies": {
           "react": "*"
@@ -12744,24 +12809,6 @@
           "@rollup/rollup-win32-x64-msvc",
           "fsevents"
         ]
-      }
-    },
-    "root-workspace@workspace:^": {
-      "checksum": null,
-      "resolution": {
-        "resolution": "root-workspace@workspace:root-workspace",
-        "version": "0.0.0",
-        "dependencies": {
-          "@types/lodash": "^4.17.17",
-          "@types/node": "^22.15.20",
-          "@yarnpkg/eslint-config": "^3.1.0",
-          "@yarnpkg/types": "^4.0.1",
-          "clipanion": "^4.0.0-rc.4",
-          "esbuild": "^0.25.5",
-          "eslint": "^9.36.0",
-          "lodash": "^4.17.21",
-          "typescript": "^5.8.3"
-        }
       }
     },
     "run-parallel@npm:^1.1.9": {
@@ -13533,6 +13580,16 @@
         }
       }
     },
+    "style-to-object@npm:^1.0.11": {
+      "checksum": "08d6f54dc116acf8059fb16327a45583efda2350e9166d5a3fa193bea058ca8617f80f86ec2b2ce16dbadd6ff64ed2d826173e0dc2c79beef9d5edcecb3e8eb8",
+      "resolution": {
+        "resolution": "style-to-object@npm:1.0.12",
+        "version": "1.0.12",
+        "dependencies": {
+          "inline-style-parser": "0.2.6"
+        }
+      }
+    },
     "supports-color@npm:^7.1.0": {
       "checksum": "a43a7b960a93ed957a20cf56f61ad05ae4988e1a73998ec86e55fd0facf3c83bd5793a75c2b21921b669cbe32a7cec659478067cc7d88df8cf97f02ddd4f0cf9",
       "resolution": {
@@ -14098,6 +14155,13 @@
         "dependencies": {
           "imurmurhash": "^0.1.4"
         }
+      }
+    },
+    "unist@npm:^0.0.1": {
+      "checksum": "242c95f369a857dfa34eaf14e80043900c2049f6e923cad732a9ce22b455b4bf298ef2d24cb6d91c2da4d29f68d1d64799f1209ce2af23fc75a59925a75cc31f",
+      "resolution": {
+        "resolution": "unist@npm:0.0.1",
+        "version": "0.0.1"
       }
     },
     "unist-util-find-after@npm:^5.0.0": {

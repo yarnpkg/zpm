@@ -1,4 +1,4 @@
-@layer base, starlight, theme, components, utilities;
+@layer base, starlight, theme, components, utilities, user;
 
 @import "@astrojs/starlight-tailwind";
 @import "tailwindcss/preflight.css" layer(base);
@@ -75,6 +75,14 @@
 :root {
   --sl-font: "Montserrat";
 
+  --cli-color-block-binary: var(--color-violet-400);
+  --cli-color-block-keyword: var(--color-blue-300);
+  --cli-color-block-positional: var(--color-slate-400);
+  --cli-color-block-syntax: var(--color-violet-400);
+  --cli-color-block-option: var(--color-indigo-500);
+  --cli-color-block-assign: var(--color-indigo-500);
+  --cli-color-block-value: var(--color-orange-400);
+
   body {
     @apply bg-gray-800;
   }
@@ -139,4 +147,10 @@
 
 input[type="search"]::-webkit-search-cancel-button {
   cursor: pointer;
+}
+
+@layer user {
+  .expressive-code .frame pre {
+    --code-background: rgba(255, 255, 255, 0.03);
+  }
 }

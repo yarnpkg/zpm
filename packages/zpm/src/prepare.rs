@@ -231,6 +231,14 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
     let pack_path = folder_path
         .with_join_str("package.tgz");
 
+    // TODO: Remove that hack once the clipanion-rs public repository
+    // is migrated to Yarn 6.
+    if let Some(workspace) = &params.workspace {
+        if workspace.starts_with("@clipanion/") {
+            pack_args.push("--preserve-workspaces");
+        }
+    }
+
     pack_args.push("--filename");
     pack_args.push(pack_path.as_str());
 
