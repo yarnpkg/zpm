@@ -601,11 +601,11 @@
         }
       }
     },
-    "@astrojs/starlight@npm:^0.34.4": {
-      "checksum": "55c4c313d77e04fcc0bda3f87804a5729767b87c5327307a4484459ace5f31c48fcf95586a5a1d14e69f384948f75940bcbfa1294d39f91d1e0caf1bf7936e3f",
+    "@astrojs/starlight@npm:^0.36.2": {
+      "checksum": "379604329750d97ac5c41fb6f999036d6a07924d26d3abd9425078cb0d66cbf5598dce8e1471403b7071f255a7d46caa040e2d818f1e5a0b8c15ce011c1aaf53",
       "resolution": {
-        "resolution": "@astrojs/starlight@npm:0.34.8",
-        "version": "0.34.8",
+        "resolution": "@astrojs/starlight@npm:0.36.2",
+        "version": "0.36.2",
         "dependencies": {
           "@astrojs/markdown-remark": "^6.3.1",
           "@astrojs/mdx": "^4.2.3",
@@ -990,10 +990,23 @@
         }
       }
     },
-    "@clipanion/expressive-code@github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fexpressive-code": {
-      "checksum": "1a1295d2bf6f64f02e5768640c56937de0b36c8439b9a884721b2b5a26eba47e803a98dc8d49b13bbb5828402c265b46fd666ac021f08e302594357e8229aa7c",
+    "@clipanion/astro@github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fastro": {
+      "checksum": "f2e1340e96590553103262829dbc01b69f6a956b3cebf9dc6570d8024a620f26748a503b95c5da4f1045c209e36bf5f52dcd46c38d7a2547c7c0100b1bcfe684",
       "resolution": {
-        "resolution": "@clipanion/expressive-code@git:github:arcanis/clipanion-rs#commit=8facdba670a3c70cbcbd00d42e1950ba0aa8f712&workspace=%40clipanion%2Fexpressive-code",
+        "resolution": "@clipanion/astro@git:github:arcanis/clipanion-rs#commit=64234744a04a72f9c0160a5e3444b6bf49669376&workspace=%40clipanion%2Fastro",
+        "version": "0.0.0",
+        "dependencies": {
+          "@clipanion/tools": "workspace:^"
+        },
+        "peerDependencies": {
+          "astro": "*"
+        }
+      }
+    },
+    "@clipanion/expressive-code@github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fexpressive-code": {
+      "checksum": "57d36b9c99d3e7feee8b4b90274cab472b68134ad40f19a0b8537b0cd114361935fc47a1649ebda12deb18a03d97e9730940f7e24b88ba606cfc97c8ed1920ea",
+      "resolution": {
+        "resolution": "@clipanion/expressive-code@git:github:arcanis/clipanion-rs#commit=64234744a04a72f9c0160a5e3444b6bf49669376&workspace=%40clipanion%2Fexpressive-code",
         "version": "0.0.0",
         "dependencies": {
           "@clipanion/tools": "workspace:^"
@@ -1004,9 +1017,9 @@
       }
     },
     "@clipanion/remark@github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fremark": {
-      "checksum": "5dcc71e0222047278f926d879930a3de42eac4d75c5bdee988bec17718b1b6687e357eb901313f5d51a427ce2574a65a935ec9aebde994322097bf351d388b53",
+      "checksum": "9d68aa65900318c7cce12b9e51bdf087d163b4a1ae7a287b44333310343c883f18dedffbe2df7d17b52480ff27eab7ccb80438b9492fc3d6ab14285da70aed0f",
       "resolution": {
-        "resolution": "@clipanion/remark@git:github:arcanis/clipanion-rs#commit=8facdba670a3c70cbcbd00d42e1950ba0aa8f712&workspace=%40clipanion%2Fremark",
+        "resolution": "@clipanion/remark@git:github:arcanis/clipanion-rs#commit=64234744a04a72f9c0160a5e3444b6bf49669376&workspace=%40clipanion%2Fremark",
         "version": "0.0.0",
         "dependencies": {
           "@clipanion/tools": "workspace:^",
@@ -1020,10 +1033,10 @@
         }
       }
     },
-    "@clipanion/tools@github:arcanis/clipanion-rs#commit=8facdba670a3c70cbcbd00d42e1950ba0aa8f712&workspace=%40clipanion%2Ftools": {
-      "checksum": "30dddb1f01c8b47fceb99da062deb8c56b9af64b30837d73a25c1aec01ac60eff9affdb532affe4fde721049902faf2396732158d2e376143d41d3e27e3b169c",
+    "@clipanion/tools@github:arcanis/clipanion-rs#commit=64234744a04a72f9c0160a5e3444b6bf49669376&workspace=%40clipanion%2Ftools": {
+      "checksum": "70ea5e19fdd670a309f24bed5f4937607a6e0386e0f8ab77cc96349cebc358ff8bbce23613d9760d205e99202a8f5857e46ed2f57affc792df788e2f2cddd2b5",
       "resolution": {
-        "resolution": "@clipanion/tools@git:github:arcanis/clipanion-rs#commit=8facdba670a3c70cbcbd00d42e1950ba0aa8f712&workspace=%40clipanion%2Ftools",
+        "resolution": "@clipanion/tools@git:github:arcanis/clipanion-rs#commit=64234744a04a72f9c0160a5e3444b6bf49669376&workspace=%40clipanion%2Ftools",
         "version": "0.0.0"
       }
     },
@@ -4852,15 +4865,17 @@
         "version": "0.0.0",
         "dependencies": {
           "@astrojs/preact": "^4.1.0",
-          "@astrojs/starlight": "^0.34.4",
+          "@astrojs/starlight": "^0.36.2",
           "@astrojs/starlight-docsearch": "^0.6.0",
           "@astrojs/starlight-tailwind": "^4.0.1",
           "@babel/core": "^7.27.7",
           "@base-ui-components/react": "^1.0.0-beta.1",
+          "@clipanion/astro": "github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fastro",
           "@clipanion/expressive-code": "github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fexpressive-code",
           "@clipanion/remark": "github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fremark",
           "@docsearch/css": "^4.1.0",
           "@docsearch/react": "^4.1.0",
+          "@expressive-code/core": "^0.41.3",
           "@fontsource/montserrat": "^5.2.6",
           "@mdx-js/preact": "^3.1.0",
           "@monaco-editor/react": "4.7.0-rc.0",
@@ -4885,6 +4900,7 @@
           "clipanion": "^4.0.0-rc.4",
           "clsx": "^2.1.1",
           "dayjs": "^1.11.13",
+          "dedent": "^1.7.0",
           "dompurify": "^3.2.6",
           "es-toolkit": "^1.39.10",
           "git-url-parse": "^16.1.0",
@@ -7037,6 +7053,19 @@
         "dependencies": {
           "mimic-response": "^3.1.0"
         }
+      }
+    },
+    "dedent@npm:^1.7.0": {
+      "checksum": "5ffc45361606ce5ac9649a4f846a0315b37e6b01548c659be801bd522051eadf01e621883386bf175020f871bd721b707155fef64f8c5fe05e316132444bc1f5",
+      "resolution": {
+        "resolution": "dedent@npm:1.7.0",
+        "version": "1.7.0",
+        "peerDependencies": {
+          "babel-plugin-macros": "^3.1.0"
+        },
+        "optionalPeerDependencies": [
+          "babel-plugin-macros"
+        ]
       }
     },
     "deep-extend@npm:^0.6.0": {

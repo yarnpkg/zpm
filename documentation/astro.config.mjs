@@ -12,7 +12,6 @@ import svgr                         from 'vite-plugin-svgr';
 import {remarkCommandLineHighlight} from './src/plugins/remark-command-line-highlight.mjs';
 import {remarkModifiedTime}         from './src/plugins/remark-modified-time.mjs';
 import {remarkReadingTime}          from './src/plugins/remark-reading-time.mjs';
-import yarnCliDocs                  from './src/plugins/yarn-cli-docs';
 
 // eslint-disable-next-line arca/no-default-export
 export default defineConfig({
@@ -74,8 +73,8 @@ export default defineConfig({
         label: `Contributing`,
         autogenerate: {directory: `contributing`},
       }, {
-        label: `Configuration`,
-        autogenerate: {directory: `configuration`},
+        label: `Reference`,
+        autogenerate: {directory: `reference`},
       }],
       components: {
         SocialIcons: `./src/overrides/CustomSocialIcons.astro`,
@@ -104,6 +103,8 @@ export default defineConfig({
         }),
       ],
       expressiveCode: {
+        useStarlightDarkModeSwitch: false,
+        useDarkModeMediaQuery: false,
         styleOverrides: {
           borderRadius: `16px`,
           borderWidth: `1.5px`,
@@ -114,6 +115,7 @@ export default defineConfig({
           codePaddingBlock: `16px`,
           frames: {
             terminalTitlebarBackground: `rgba(255, 255, 255, 0.03)`,
+            terminalTitlebarBorderBottomColor: `rgba(255, 255, 255, 0.05)`,
           },
         }
       },

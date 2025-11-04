@@ -8,13 +8,24 @@ use zpm_parsers::{document::Document, JsonDocument, Value};
 use crate::{constraints::{check_constraints, structs::{ConstraintsOutput, WorkspaceError, WorkspaceOperation}}, error::Error, project::Project};
 
 /// Check constraints
+///
+/// This command will run constraints on your project and emit errors for each one that is found but isn't met. If any error is emitted the process
+/// will exit with a non-zero exit code.
+///
+/// If the `--fix` flag is used, Yarn will attempt to automatically fix the issues the best it can, following a multi-pass process (with a maximum of
+/// 10 iterations). Some ambiguous patterns cannot be autofixed, in which case you'll have to manually specify the right resolution.
+///
+/// For more information as to how to write constraints, please consult our dedicated page on our website: https://yarnpkg.com/features/constraints.
+///
 #[cli::command]
 #[cli::path("constraints")]
 #[cli::category("Dependency management")]
 pub struct Constraints {
+    /// Attempt to automatically fix unambiguous issues, following a multi-pass process
     #[cli::option("-f,--fix", default = false)]
     fix: bool,
 
+    /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
     json: bool,
 }

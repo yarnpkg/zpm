@@ -206,7 +206,7 @@
     color: #d3d4d5;
     border-spacing: 0;
     border-radius: 16px;
-    border: 1px solid var(--sl-color-gray-5);
+    border: 1px solid var(--color-gray-800);
     border-collapse: separate;
     overflow: hidden;
   }
@@ -236,7 +236,7 @@
   }
 
   .sl-markdown-content :is(th, td):not(:where(.not-content *)) {
-    border-bottom: 1px solid var(--sl-color-gray-5);
+    border-bottom: 1px solid var(--color-gray-800);
     padding: 12px 12px;
     vertical-align: middle;
     min-width: 280px;
@@ -259,12 +259,12 @@
 
   /* Table Vertical borders between headers */
   .sl-markdown-content th:not(:last-child):not(:where(.not-content *)) {
-    border-right: 1px solid var(--sl-color-gray-5);
+    border-right: 1px solid var(--color-gray-800);
   }
 
   /* Table Vertical borders for all cells except last column */
   .sl-markdown-content td:not(:last-child):not(:where(.not-content *)) {
-    border-right: 1px solid var(--sl-color-gray-5);
+    border-right: 1px solid var(--color-gray-800);
   }
 
   .sl-markdown-content td:not(:where(.not-content *)) *,
@@ -273,7 +273,7 @@
   }
 
   .sl-markdown-content th:not(:where(.not-content *)) {
-    color: var(--sl-color-white);
+    color: #FFF;
     font-weight: 600;
   }
 
@@ -286,7 +286,7 @@
   .sl-markdown-content
     .starlight-aside
     :is(th, td, hr, blockquote):not(:where(.not-content *)) {
-    border-color: var(--sl-color-gray-4);
+    border-color: var(--color-gray-800);
   }
 
   @supports (

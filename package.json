@@ -6,7 +6,19 @@
     "packages/*"
   ],
   "dependenciesMeta": {
+    "@astro/starlight": {
+      "unplugged": true
+    },
+    "@astrojs/starlight": {
+      "unplugged": true
+    },
+    "@clipanion/astro": {
+      "unplugged": true
+    },
     "@clipanion/remark": {
+      "unplugged": true
+    },
+    "@withastro/starlight": {
       "unplugged": true
     }
   },
