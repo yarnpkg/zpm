@@ -98,7 +98,6 @@
     background: rgba(42, 87, 219, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
-    font-size: 14px;
     line-height: 150%;
     color: var(--color-indigo-300);
     text-decoration: inherit;
@@ -265,11 +264,6 @@
   /* Table Vertical borders for all cells except last column */
   .sl-markdown-content td:not(:last-child):not(:where(.not-content *)) {
     border-right: 1px solid var(--color-gray-800);
-  }
-
-  .sl-markdown-content td:not(:where(.not-content *)) *,
-  .sl-markdown-content td:not(:where(.not-content *)) {
-    font-size: 16px !important;
   }
 
   .sl-markdown-content th:not(:where(.not-content *)) {

@@ -14,29 +14,70 @@ use crate::{
 };
 
 /// Update dependencies to the latest versions
+///
+/// This command upgrades the packages matching the list of specified patterns to their latest available version across the whole project (regardless
+/// of whether they're part of `dependencies` or `devDependencies` - `peerDependencies` won't be affected). This is a project-wide command: all
+/// workspaces will be upgraded in the process.
+///
+/// If `-R,--recursive` is set the command will change behavior and no other switch will be allowed. When operating under this mode yarn up will
+/// force all ranges matching the selected packages to be resolved again (often to the highest available versions) before being stored in the
+/// lockfile. It however won't touch your manifests anymore, so depending on your needs you might want to run both `yarn up` and `yarn up -R` to
+/// cover all bases.
+///
+/// If `-i,--interactive` is set (or if the `preferInteractive` settings is toggled on) the command will offer various choices, depending on the
+/// detected upgrade paths. Some upgrades require this flag in order to resolve ambiguities.
+///
+/// The, -C,--caret, -E,--exact and -T,--tilde options have the same meaning as in the add command (they change the modifier used when the range is
+/// missing or a tag, and are ignored when the range is explicitly set).
+///
+/// If the --mode=<mode> option is set, Yarn will change which artifacts are generated. The modes currently supported are:
+///
+/// - `skip-build` will not run the build scripts at all. Note that this is different from setting `enableScripts` to false because the latter will
+///   disable build scripts, and thus affect the content of the artifacts generated on disk, whereas the former will just disable the build step but
+///   not the scripts themselves, which just won't run.
+///
+/// - `update-lockfile` will skip the link step altogether, and only fetch packages that are missing from the lockfile (or that have no associated
+///   checksums). This mode is typically used by tools like Renovate or Dependabot to keep a lockfile up-to-date without incurring the full install
+///   cost.
+///
+/// Generally you can see `yarn up` as a counterpart to what was `yarn upgrade --latest` in Yarn 1 (ie it ignores the ranges previously listed in
+/// your project's manifests), but unlike `yarn upgrade` which only upgraded dependencies in the current workspace, `yarn up` will upgrade all
+/// workspaces at the same time.
+///
+/// This command accepts glob patterns as arguments (if valid Descriptors and supported by micromatch). Make sure to escape the patterns, to prevent
+/// your own shell from trying to expand them.
+///
+/// **Note:** The ranges have to be static, only the package scopes and names can contain glob patterns.
+///
 #[cli::command]
 #[cli::path("up")]
 #[cli::category("Dependency management")]
 pub struct Up {
+    /// Store dependency tags as-is instead of resolving them
     #[cli::option("-F,--fixed", default = false)]
     fixed: bool,
 
+    /// Don't use any semver modifier on the resolved range
     #[cli::option("-E,--exact", default = false)]
     exact: bool,
 
+    /// Use the `~` semver modifier on the resolved range
     #[cli::option("-T,--tilde", default = false)]
     tilde: bool,
 
+    /// Use the `^` semver modifier on the resolved range
     #[cli::option("-C,--caret", default = false)]
     caret: bool,
 
     // ---
 
+    /// Change what artifacts this install will generate
     #[cli::option("--mode")]
     mode: Option<InstallMode>,
 
     // ---
 
+    /// The packages to update
     descriptors: Vec<LooseDescriptor>,
 }
 

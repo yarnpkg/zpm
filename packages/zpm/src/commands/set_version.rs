@@ -6,10 +6,16 @@ use zpm_utils::{Path, ToFileString, ToHumanString};
 use crate::error::Error;
 
 /// Set the version of Yarn to use with the local project
+///
+/// This command will update the `packageManager` field in the local project's top-level `package.json` file to the specified version.
+///
+/// Unlike in Yarn 2 to 4, it will never set the deprecated `yarnPath` field.
+///
 #[cli::command]
 #[cli::path("set", "version")]
 #[cli::category("Configuration commands")]
 pub struct SetVersion {
+    /// The version of Yarn to use with the local project
     version: zpm_switch::Selector,
 }
 

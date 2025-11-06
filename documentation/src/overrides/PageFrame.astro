@@ -27,12 +27,12 @@ const { hasSidebar } = Astro.locals.starlightRoute;
     <div
       class={clsx(
         "page",
-        hasSidebar && "flex gap-x-20 container"
+        hasSidebar && "flex gap-x-10 container"
       )}
     >
       {hasSidebar && (
         <nav
-          class="sidebar print:hidden w-full lg:w-1/3 xl:w-1/4 max-lg:hidden"
+          class="sidebar print:hidden w-full lg:w-auto max-lg:hidden"
           aria-label={Astro.locals.t("sidebarNav.accessibleLabel")}
         >
           <MobileMenuToggle />

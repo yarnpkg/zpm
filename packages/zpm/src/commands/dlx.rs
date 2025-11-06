@@ -15,17 +15,32 @@ use crate::{
 };
 
 /// Install a temporary package and run it
+///
+/// This command will install a package within a temporary environment, and run its binary script if it contains any. The binary will run within the
+/// current cwd.
+///
+/// By default Yarn will download the package named command, but this can be changed through the use of the `-p,--package` flag which will instruct
+/// Yarn to still run the same command but from a different package.
+///
+/// Using `yarn dlx` as a replacement of `yarn add` isn't recommended as it makes your project non-deterministic. Yarn doesn't keep track of the
+/// packages installed through dlx - neither their name, nor their version).
+///
 #[cli::command(proxy)]
 #[cli::path("dlx")]
 #[cli::category("Scripting commands")]
 pub struct DlxWithPackages {
+    /// Suppress the install unless it errors
     #[cli::option("-q,--quiet", default = false)]
     quiet: bool,
 
+    /// The package(s) to install before running the command
     #[cli::option("-p,--package", min_len = 1)]
     packages: Vec<LooseDescriptor>,
 
+    /// The name of the binary to run
     name: String,
+
+    /// The arguments to pass to the binary
     args: Vec<String>,
 }
 

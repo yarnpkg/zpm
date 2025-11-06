@@ -11,11 +11,16 @@ use crate::{
 use super::YarnCli;
 
 /// Run a command in a workspace
+///
+/// This command will run a given sub-command on a single workspace.
 #[cli::command(proxy)]
 #[cli::path("workspace")]
 #[cli::category("Workspace commands")]
 pub struct Workspace {
+    /// The workspace to run the command in
     workspace: Ident,
+
+    /// The sub-command to run
     args: Vec<String>,
 }
 

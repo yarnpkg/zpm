@@ -991,9 +991,9 @@
       }
     },
     "@clipanion/astro@github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fastro": {
-      "checksum": "f2e1340e96590553103262829dbc01b69f6a956b3cebf9dc6570d8024a620f26748a503b95c5da4f1045c209e36bf5f52dcd46c38d7a2547c7c0100b1bcfe684",
+      "checksum": "b7baffeb80b3e3432a88466a2faf22b1858115062a07889f910666669148ef8619b6c837d2bd9098fc2557241e97ce79736ae1ea7ae93d86a0ec36e35f37bfe2",
       "resolution": {
-        "resolution": "@clipanion/astro@git:github:arcanis/clipanion-rs#commit=64234744a04a72f9c0160a5e3444b6bf49669376&workspace=%40clipanion%2Fastro",
+        "resolution": "@clipanion/astro@git:github:arcanis/clipanion-rs#commit=c62a336c1f08cb922b8e145e5954c71f663a8839&workspace=%40clipanion%2Fastro",
         "version": "0.0.0",
         "dependencies": {
           "@clipanion/tools": "workspace:^"
@@ -1006,7 +1006,7 @@
     "@clipanion/expressive-code@github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fexpressive-code": {
       "checksum": "57d36b9c99d3e7feee8b4b90274cab472b68134ad40f19a0b8537b0cd114361935fc47a1649ebda12deb18a03d97e9730940f7e24b88ba606cfc97c8ed1920ea",
       "resolution": {
-        "resolution": "@clipanion/expressive-code@git:github:arcanis/clipanion-rs#commit=64234744a04a72f9c0160a5e3444b6bf49669376&workspace=%40clipanion%2Fexpressive-code",
+        "resolution": "@clipanion/expressive-code@git:github:arcanis/clipanion-rs#commit=c62a336c1f08cb922b8e145e5954c71f663a8839&workspace=%40clipanion%2Fexpressive-code",
         "version": "0.0.0",
         "dependencies": {
           "@clipanion/tools": "workspace:^"
@@ -1017,9 +1017,9 @@
       }
     },
     "@clipanion/remark@github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fremark": {
-      "checksum": "9d68aa65900318c7cce12b9e51bdf087d163b4a1ae7a287b44333310343c883f18dedffbe2df7d17b52480ff27eab7ccb80438b9492fc3d6ab14285da70aed0f",
+      "checksum": "506eb4bbdb2ee8952c5d3dd7dd458181044adba2ba772a928cb9b83ac360d121005e857a144367a2618b36f59adda1dde99a8857868e5f35c72e15200d6d8fc2",
       "resolution": {
-        "resolution": "@clipanion/remark@git:github:arcanis/clipanion-rs#commit=64234744a04a72f9c0160a5e3444b6bf49669376&workspace=%40clipanion%2Fremark",
+        "resolution": "@clipanion/remark@git:github:arcanis/clipanion-rs#commit=c62a336c1f08cb922b8e145e5954c71f663a8839&workspace=%40clipanion%2Fremark",
         "version": "0.0.0",
         "dependencies": {
           "@clipanion/tools": "workspace:^",
@@ -1033,10 +1033,10 @@
         }
       }
     },
-    "@clipanion/tools@github:arcanis/clipanion-rs#commit=64234744a04a72f9c0160a5e3444b6bf49669376&workspace=%40clipanion%2Ftools": {
-      "checksum": "70ea5e19fdd670a309f24bed5f4937607a6e0386e0f8ab77cc96349cebc358ff8bbce23613d9760d205e99202a8f5857e46ed2f57affc792df788e2f2cddd2b5",
+    "@clipanion/tools@github:arcanis/clipanion-rs#commit=c62a336c1f08cb922b8e145e5954c71f663a8839&workspace=%40clipanion%2Ftools": {
+      "checksum": "b215d8ddeefd5fa857610ab3739586524073861f29246f6c972c45e5dd63e3444d3765e3e14ec64cad6aec0e3153570ee3640ed8f9dcb191f4c4393399961fbc",
       "resolution": {
-        "resolution": "@clipanion/tools@git:github:arcanis/clipanion-rs#commit=64234744a04a72f9c0160a5e3444b6bf49669376&workspace=%40clipanion%2Ftools",
+        "resolution": "@clipanion/tools@git:github:arcanis/clipanion-rs#commit=c62a336c1f08cb922b8e145e5954c71f663a8839&workspace=%40clipanion%2Ftools",
         "version": "0.0.0"
       }
     },

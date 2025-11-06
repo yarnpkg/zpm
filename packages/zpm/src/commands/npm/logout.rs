@@ -9,11 +9,11 @@ use crate::{
 ///
 /// This command will log you out by modifying your local configuration (in your home folder, never in the project itself) to delete all credentials linked to a registry.
 ///
-/// Adding the \`-s,--scope\` flag will cause the deletion to be done against whatever registry is configured for the associated scope (see also \`npmScopes\`).
+/// Adding the `-s,--scope` flag will cause the deletion to be done against whatever registry is configured for the associated scope (see also `npmScopes`).
 ///
-/// Adding the \`--publish\` flag will cause the deletion to be done against the registry used when publishing the package (see also \`publishConfig.registry\` and \`npmPublishRegistry\`).
+/// Adding the `--publish` flag will cause the deletion to be done against the registry used when publishing the package (see also `publishConfig.registry` and `npmPublishRegistry`).
 ///
-/// Adding the \`-A,--all\` flag will cause the deletion to be done against all registries and scopes.
+/// Adding the `-A,--all` flag will cause the deletion to be done against all registries and scopes.
 ///
 #[cli::command]
 #[cli::path("npm", "logout")]

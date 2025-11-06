@@ -6,35 +6,59 @@ use clipanion::cli;
 use crate::{error::Error, project, script::ScriptEnvironment};
 
 /// Run a dependency binary or local script
+///
+/// This command will run a tool. The exact tool that will be executed will depend on the current state of your workspace:
+///
+/// - If the `scripts` field from your local package.json contains a matching script name, its definition will get executed.
+///
+/// - Otherwise, if one of the local workspace's dependencies exposes a binary with a matching name, this binary will get executed.
+///
+/// - Otherwise, if the specified name contains a colon character and if one of the workspaces in the project contains exactly one script with a
+///   matching name, then this script will get executed.
+///
+/// Whatever happens, the cwd of the spawned process will be the workspace that declares the script (which makes it possible to call commands
+/// cross-workspaces using the third syntax).
+///
 #[cli::command(default, proxy)]
 #[cli::path("run")]
 #[cli::category("Scripting commands")]
 pub struct Run {
+    /// If set, the script or binary used will be the one in the top-level workspace
     #[cli::option("-T,--top-level", default = false)]
     top_level: bool,
 
+    // If set, only binaries will be considered
     #[cli::option("-B,--binaries-only", default = false)]
     binaries_only: bool,
 
+    /// If set (the default), an error will be returned if the script or binary is not found
     #[cli::option("--error-if-missing", default = true)]
     error_if_missing: bool,
 
+    /// The directory in which to run the script or binary
     #[cli::option("--run-cwd")]
     run_cwd: Option<Path>,
 
+    /// Forwarded to the underlying Node process when executing a binary
     #[cli::option("--inspect")]
     inspect: Option<Option<String>>,
 
+    /// Forwarded to the underlying Node process when executing a binary
     #[cli::option("--inspect-brk")]
     inspect_brk: Option<Option<String>>,
 
+    /// Forwarded to the underlying Node process when executing a binary
     #[cli::option("--inspect-wait")]
     inspect_wait: Option<Option<String>>,
 
+    /// Forwarded to the underlying Node process when executing a binary
     #[cli::option("--require")]
     require: Option<String>,
 
+    /// Name of the script or binary to run
     name: String,
+
+    /// Arguments to pass to the script or binary
     args: Vec<String>,
 }
 

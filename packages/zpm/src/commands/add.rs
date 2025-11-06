@@ -112,7 +112,7 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
 
 /// Add new dependencies to the project
 ///
-/// This command adds a package to the package.json for the nearest workspace.
+/// This command adds a package to the package.json for the nearest workspace. -
 ///
 /// - If it didn't exist before, the package will by default be added to the regular `dependencies` field, but this behavior can be overriden thanks to the `-D,--dev` flag (which will cause the dependency to be added to the `devDependencies` field instead) and the `-P,--peer` flag (which will do the same but for `peerDependencies`).
 ///

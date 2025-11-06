@@ -5,7 +5,7 @@ import {type SidebarGroupProps}              from 'src/types/sidebar';
 
 import Badge                                 from '../Badge';
 
-import SidebarLink                           from './SidebarLink';
+import SidebarEntry                          from './SidebarEntry';
 
 export default function SidebarGroup({
   badge,
@@ -59,33 +59,17 @@ export default function SidebarGroup({
           className={`border-l pl-4 border-white/10 flex flex-col gap-y-3 font-montserrat`}
         >
           {entries
-            .filter((entry): entry is SidebarLinkType => {
+            ?.filter((entry): entry is SidebarLinkType => {
               return !entry.label.startsWith(`@yarnpkg/`);
             })
-            .map(({type: _, attrs, ...entry}, index) => {
-              if (!(`entries` in entry)) {
-                return (
-                  <li role={`listitem`} key={index}>
-                    <SidebarLink
-                      {...entry}
-                      {...(attrs as any)}
-                      variant={`sub-link`}
-                    />
-                  </li>
-                );
-              } else {
-                return (
-                  <li role={`listitem`} key={index}>
-                    <SidebarLink
-                      {...entry}
-                      {...(attrs as any)}
-                      href={`/${entry.label.toLowerCase()}`}
-                      variant={`sub-link`}
-                    />
-                  </li>
-                );
-              }
-            })}
+            .map((entry, index) => (
+              <li role={`listitem`} key={index}>
+                <SidebarEntry
+                  {...entry}
+                  variant={`sub-link`}
+                />
+              </li>
+            ))}
         </ul>
       </div>
     </div>

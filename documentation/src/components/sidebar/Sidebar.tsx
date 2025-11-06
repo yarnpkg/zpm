@@ -1,4 +1,4 @@
-import type {SidebarEntry} from 'node_modules/@astrojs/starlight/utils/routing/types';
+import type {SidebarEntry} from '@astrojs/starlight/utils/routing/types';
 
 import SidebarEntryElement from './SidebarEntry';
 

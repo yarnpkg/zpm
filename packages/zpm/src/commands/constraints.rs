@@ -19,7 +19,7 @@ use crate::{constraints::{check_constraints, structs::{ConstraintsOutput, Worksp
 ///
 #[cli::command]
 #[cli::path("constraints")]
-#[cli::category("Dependency management")]
+#[cli::category("Project management")]
 pub struct Constraints {
     /// Attempt to automatically fix unambiguous issues, following a multi-pass process
     #[cli::option("-f,--fix", default = false)]
