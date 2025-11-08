@@ -54,6 +54,7 @@ const yarnCliLoaders = clipanionLoaders({
       ...entry.data,
       slug: `cli/${entry.data.commandSpec.primaryPath.join(`/`)}`,
       title: `${entry.data.binaryName} ${entry.data.commandSpec.primaryPath.join(` `)}`,
+      draft: false,
       head: [],
       sidebar: {
         label: `${entry.data.binaryName} ${entry.data.commandSpec.primaryPath.join(` `)}`,
@@ -83,6 +84,7 @@ const yarnSwitchCliLoaders = clipanionLoaders({
       ...entry.data,
       slug: `cli/${entry.data.commandSpec.primaryPath.join(`/`)}`,
       title: `${entry.data.binaryName} ${entry.data.commandSpec.primaryPath.join(` `)}`,
+      draft: false,
       head: [],
       sidebar: {
         label: `${entry.data.binaryName} ${entry.data.commandSpec.primaryPath.join(` `)}`,
