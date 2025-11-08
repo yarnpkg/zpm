@@ -267,6 +267,9 @@ pub enum Error {
     #[error("Workspace path not found ({})", .0.to_print_string())]
     WorkspacePathNotFound(Path),
 
+    #[error("Constraints configuration file not found")]
+    ConstraintsConfigNotFound,
+
     #[error("Automatic constraints check failed; run {} to obtain details", DataType::Code.colorize("yarn constraints"))]
     AutoConstraintsError,
 

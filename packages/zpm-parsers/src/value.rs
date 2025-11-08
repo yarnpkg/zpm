@@ -162,7 +162,6 @@ impl Value {
     }
 }
 
-#[cfg(target_pointer_width = "32")]
 impl From<&serde_json::Value> for Value {
     fn from(value: &serde_json::Value) -> Self {
         match value {

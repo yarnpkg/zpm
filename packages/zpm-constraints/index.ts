@@ -337,9 +337,11 @@ function applyEngineReport(fix: boolean) {
 
 async function main() {
   const require = createRequire(CONFIG_PATH);
-  const config = require(CONFIG_PATH) as Yarn.Config;
 
-  await config.constraints?.(context);
+  const config = require(CONFIG_PATH) as Yarn.Config & {default?: Yarn.Config};
+
+  const defaultConfig = config?.default ?? config;
+  await defaultConfig.constraints?.(context);
 
   const output = applyEngineReport(FIX);
 

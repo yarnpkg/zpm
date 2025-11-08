@@ -8,7 +8,12 @@
   "devDependencies": {
     "@types/lodash": "^4.17.17"
   },
+  "repository": {
+    "directory": "packages/zpm-constraints",
+    "type": "git",
+    "url": "git+https://github.com/yarnpkg/zpm.git"
+  },
   "scripts": {
-    "build": "esbuild index.ts --bundle --platform=node --target=node20 --outfile=../zpm/src/commands/constraints.tpl.js"
+    "build": "esbuild index.ts --bundle --platform=node --target=node20 --outfile=../zpm/src/constraints/constraints.tpl.js"
   }
 }
