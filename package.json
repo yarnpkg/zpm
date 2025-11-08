@@ -28,5 +28,8 @@
     "@yarnpkg/eslint-config": "^3.1.0",
     "clipanion": "^4.0.0-rc.4",
     "eslint": "^9.36.0"
+  },
+  "resolutions": {
+    "@clipanion/tools": "file:scripts/@clipanion-tools.tgz"
   }
 }

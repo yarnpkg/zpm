@@ -63,9 +63,9 @@
     "algoliasearch": "^5.37.0",
     "instantsearch.js": "^4.80.0",
     "preact-render-to-string": "^6.6.1",
-    "@clipanion/astro": "github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fastro",
-    "@clipanion/expressive-code": "github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fexpressive-code",
-    "@clipanion/remark": "github:arcanis/clipanion-rs#head=HEAD&workspace=%40clipanion%2Fremark",
+    "@clipanion/astro": "file:../scripts/@clipanion-astro.tgz",
+    "@clipanion/expressive-code": "file:../scripts/@clipanion-expressive-code.tgz",
+    "@clipanion/remark": "file:../scripts/@clipanion-remark.tgz",
     "@docsearch/css": "^4.1.0"
   },
   "devDependencies": {
