@@ -78,6 +78,13 @@ impl ToHumanString for RawPath {
     }
 }
 
+#[macro_export]
+macro_rules! p {
+    ($str:expr) => {
+        $str.parse::<$crate::Path>().unwrap()
+    };
+}
+
 impl_file_string_from_str!(RawPath);
 impl_file_string_serialization!(RawPath);
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -163,14 +170,78 @@ impl Path {
         self.path.is_empty()
     }
 
-    /**
-     * Iterates over the subpaths, starting from the root. For example, for
-     * the path `/a/b/c`, this will yield the paths `/`, `/a`, `/a/b`, and
-     * finally `/a/b/c`.
-     *
-     * The stream is double ended, so you can also iterate in reverse by
-     * using `iter_path().rev()`.
-     */
+    /// ```
+    /// use zpm_utils::p;
+    ///
+    /// let path = p!("/a/b/c");
+    /// let mut iterator = path.iter_path();
+    ///
+    /// assert_eq!(iterator.next(), Some(p!("/")));
+    /// assert_eq!(iterator.next(), Some(p!("/a")));
+    /// assert_eq!(iterator.next(), Some(p!("/a/b")));
+    /// assert_eq!(iterator.next(), Some(p!("/a/b/c")));
+    /// assert_eq!(iterator.next(), None);
+    /// ```
+    ///
+    /// The iterator can also be used in reverse:
+    ///
+    /// ```
+    /// use zpm_utils::p;
+    ///
+    /// let path = p!("/a/b/c");
+    /// let mut iterator = path.iter_path().rev();
+    ///
+    /// assert_eq!(iterator.next(), Some(p!("/a/b/c")));
+    /// assert_eq!(iterator.next(), Some(p!("/a/b")));
+    /// assert_eq!(iterator.next(), Some(p!("/a")));
+    /// assert_eq!(iterator.next(), Some(p!("/")));
+    /// assert_eq!(iterator.next(), None);
+    /// ```
+    ///
+    /// The iterator will not include the trailing slash:
+    ///
+    /// ```
+    /// use zpm_utils::p;
+    ///
+    /// let path = p!("/a/b/c/");
+    /// let mut iterator = path.iter_path();
+    ///
+    /// assert_eq!(iterator.next(), Some(p!("/")));
+    /// assert_eq!(iterator.next(), Some(p!("/a")));
+    /// assert_eq!(iterator.next(), Some(p!("/a/b")));
+    /// assert_eq!(iterator.next(), Some(p!("/a/b/c")));
+    /// assert_eq!(iterator.next(), None);
+    /// ```
+    ///
+    /// It also works with relative paths:
+    ///
+    /// ```
+    /// use zpm_utils::p;
+    ///
+    /// let path = p!("a/b/c/");
+    /// let mut iterator = path.iter_path();
+    ///
+    /// assert_eq!(iterator.next(), Some(p!("")));
+    /// assert_eq!(iterator.next(), Some(p!("a")));
+    /// assert_eq!(iterator.next(), Some(p!("a/b")));
+    /// assert_eq!(iterator.next(), Some(p!("a/b/c")));
+    /// assert_eq!(iterator.next(), None);
+    /// ```
+    ///
+    /// And in reverse:
+    ///
+    /// ```
+    /// use zpm_utils::p;
+    ///
+    /// let path = p!("a/b/c");
+    /// let mut iterator = path.iter_path().rev();
+    ///
+    /// assert_eq!(iterator.next(), Some(p!("a/b/c")));
+    /// assert_eq!(iterator.next(), Some(p!("a/b")));
+    /// assert_eq!(iterator.next(), Some(p!("a")));
+    /// assert_eq!(iterator.next(), Some(p!("")));
+    /// assert_eq!(iterator.next(), None);
+    /// ```
     pub fn iter_path(&self) -> PathIterator {
         PathIterator::new(self)
     }
@@ -827,8 +898,47 @@ impl Path {
         self.join(&Path::from_str(other.as_ref()).unwrap())
     }
 
+    /// ```
+    /// use zpm_utils::p;
+
+    /// assert_eq!(p!("/a/b").contains(&p!("/a/b")), true);
+    /// assert_eq!(p!("/a/b").contains(&p!("/a/b/")), true);
+    /// assert_eq!(p!("/a/b").contains(&p!("/a/b/c")), true);
+
+    /// assert_eq!(p!("a/b").contains(&p!("a/b")), true);
+    /// assert_eq!(p!("a/b").contains(&p!("a/b/")), true);
+    /// assert_eq!(p!("a/b").contains(&p!("a/b/c")), true);
+
+    /// assert_eq!(p!("/a/b/").contains(&p!("a/b")), false);
+    /// assert_eq!(p!("/a/b").contains(&p!("a/bc")), false);
+
+    /// assert_eq!(p!("a/b/").contains(&p!("a/b")), false);
+    /// assert_eq!(p!("a/b").contains(&p!("a/bc")), false);
+    /// ```
     pub fn contains(&self, other: &Path) -> bool {
-        other.as_str().starts_with(self.as_str()) || other == self
+        let self_as_str
+            = self.as_str();
+        let other_as_str
+            = other.as_str();
+
+        if !other_as_str.starts_with(self_as_str) {
+            return false;
+        }
+
+        if other_as_str.len() == self_as_str.len() {
+            return true;
+        }
+
+        let self_as_bytes
+            = self_as_str.as_bytes();
+        let other_as_bytes
+            = other_as_str.as_bytes();
+
+        if other_as_bytes[self_as_bytes.len()] != b'/' {
+            return false;
+        }
+
+        true
     }
 
     pub fn forward_relative_to(&self, other: &Path) -> Option<Path> {

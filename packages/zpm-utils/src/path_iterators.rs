@@ -5,6 +5,7 @@ use crate::Path;
 pub struct PathIterator<'a> {
     path_str: &'a str,
     lookup_idx: Option<(usize, usize)>,
+    emit_empty_path: bool,
 }
 
 impl<'a> PathIterator<'a> {
@@ -13,10 +14,13 @@ impl<'a> PathIterator<'a> {
             = path.as_str();
         let lookup_idx
             = Some((0, path_str.len()));
+        let emit_empty_path
+            = path.is_relative();
 
         Self {
             path_str,
             lookup_idx,
+            emit_empty_path,
         }
     }
 }
@@ -28,6 +32,11 @@ impl<'a> Iterator for PathIterator<'a> {
         let Some((lookup_idx, back_idx)) = self.lookup_idx else {
             return None;
         };
+
+        if lookup_idx == 0 && self.emit_empty_path {
+            self.emit_empty_path = false;
+            return Some(Path::new());
+        }
 
         let next_slash_idx
             = self.path_str[lookup_idx..]
@@ -58,6 +67,12 @@ impl<'a> DoubleEndedIterator for PathIterator<'a> {
             return None;
         };
 
+        if back_idx == 0 && self.emit_empty_path {
+            self.emit_empty_path = false;
+            self.lookup_idx = None;
+            return Some(Path::new());
+        }
+
         let last_slash_idx
             = self.path_str[lookup_idx..back_idx]
                 .strip_suffix('/')
@@ -66,7 +81,7 @@ impl<'a> DoubleEndedIterator for PathIterator<'a> {
                 .map(|idx| idx + lookup_idx + 1)
                 .unwrap_or(lookup_idx);
 
-        self.lookup_idx = if lookup_idx < last_slash_idx {
+        self.lookup_idx = if lookup_idx < last_slash_idx || (lookup_idx == 0 && last_slash_idx == 0 && self.emit_empty_path) {
             Some((lookup_idx, last_slash_idx))
         } else {
             None

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use itertools::Itertools;
 use zpm_primitives::{Ident, Locator};
-use zpm_utils::{tree, ToHumanString};
+use zpm_utils::{Path, ToFileString, ToHumanString, tree};
 
 use crate::{
     algos,
@@ -10,248 +10,169 @@ use crate::{
     project::Project,
 };
 
-#[derive(Debug, Clone)]
-pub struct InputNode {
-    pub dependencies: BTreeMap<Ident, Locator>,
-}
-
-#[derive(Debug, Clone)]
-pub struct InputTree {
-    pub nodes: BTreeMap<Locator, InputNode>,
-    pub root: Locator,
-}
-
-impl InputTree {
-    pub fn from_install_state(project: &Project, install_state: &InstallState) -> Self {
-        let mut node_map
-            = BTreeMap::new();
-
-        for (locator, resolution) in &install_state.resolution_tree.locator_resolutions {
-            let dependencies
-                = resolution.dependencies.iter()
-                    .map(|(ident, descriptor)| (ident.clone(), install_state.resolution_tree.descriptor_to_locator[descriptor].clone()))
-                    .collect();
-
-            node_map.insert(locator.clone(), InputNode {dependencies});
-        }
-
-        Self {nodes: node_map, root: project.root_workspace().locator().clone()}
-    }
-
-    #[cfg(test)]
-    pub fn from_test_tree(spec: BTreeMap<Locator, Vec<Locator>>) -> Self {
-        use zpm_primitives::testing::l;
-
-        let mut node_map
-            = BTreeMap::new();
-
-        let all_locators
-            = spec.iter()
-                .flat_map(|(locator, dependency_vec)| dependency_vec.iter().chain(Some(locator)))
-                .collect::<Vec<_>>();
-
-        for locator in all_locators {
-            let dependencies
-                = spec.get(locator)
-                    .map(|dependencies| dependencies.iter().map(|l| (l.ident.clone(), l.clone())).collect())
-                    .unwrap_or_default();
-
-            node_map.insert(locator.clone(), InputNode {dependencies});
-        }
-
-        Self {nodes: node_map, root: l("root")}
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub struct WorkNode {
+    pub parent_idx: Option<usize>,
+    pub workspaces_idx: Vec<usize>,
     pub locator: Locator,
     pub dependencies: BTreeMap<Ident, Locator>,
-    pub children: BTreeMap<Ident, usize>,
+    pub children: Option<BTreeMap<Ident, usize>>,
+    pub updated: bool,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct WorkTree {
+pub struct WorkTree<'a> {
+    pub project: &'a Project,
+    pub install_state: &'a InstallState,
     pub nodes: Vec<WorkNode>,
 }
 
-impl WorkTree {
-    pub fn new() -> Self {
-        Self {
-            nodes: Vec::new(),
+impl<'a> WorkTree<'a> {
+    pub fn new(project: &'a Project, install_state: &'a InstallState) -> Self {
+        let mut tree = Self {
+            project,
+            install_state,
+            nodes: vec![],
+        };
+
+        let root_idx
+            = tree.create_node(project.root_workspace().locator(), None, false);
+
+        tree.expand_node(root_idx);
+        tree.import_workspaces(root_idx);
+
+        tree
+    }
+
+    fn import_workspaces(&mut self, root_idx: usize) {
+        let mut workspace_path_set
+            = BTreeSet::new();
+
+        for workspace in &self.project.workspaces {
+            workspace_path_set.insert(&workspace.rel_path);
         }
-    }
 
-    pub fn from_input_tree(input_tree: &InputTree) -> Self {
-        let mut work_tree
-            = Self::new();
+        let mut edges: BTreeMap<_, Vec<_>>
+            = BTreeMap::new();
 
-        work_tree.import_input_tree(input_tree);
-        work_tree
-    }
+        for workspace in &self.project.workspaces {
+            let parent = workspace.rel_path.iter_path().rev()
+                .skip(1)
+                .find(|path| workspace_path_set.contains(path));
 
-    #[cfg(test)]
-    fn accessible_nodes(&self) -> Vec<usize> {
-        let mut accessible_nodes
-            = vec![];
-
-        let mut stack
-            = vec![0];
-
-        while let Some(node_idx) = stack.pop() {
-            accessible_nodes.push(node_idx);
-
-            let node
-                = &self.nodes[node_idx];
-
-            for child_locator in node.children.values().rev() {
-                stack.push(*child_locator);
+            if let Some(parent) = parent {
+                edges.entry(parent).or_default().push(workspace);
             }
         }
 
-        accessible_nodes
+        let root_path
+            = Path::new();
+
+        let mut queue
+            = vec![(root_idx, &root_path)];
+
+        while let Some((parent_idx, prefix_path)) = queue.pop() {
+            let inner_workspaces
+                = edges.get(&prefix_path);
+
+            if let Some(inner_workspaces) = inner_workspaces {
+                for inner_workspace in inner_workspaces {
+                    let inner_workspace_locator
+                        = inner_workspace.locator();
+
+                    let inner_workspace_idx
+                        = self.create_node(inner_workspace_locator, Some(parent_idx), false);
+
+                    queue.push((inner_workspace_idx, &inner_workspace.rel_path));
+
+                    self.nodes[parent_idx].workspaces_idx
+                        .push(inner_workspace_idx);
+                }
+            }
+        }
     }
 
-    #[cfg(test)]
-    fn inspect(&self, locators_to_names: &BTreeMap<Locator, &'static str>) -> BTreeMap<String, BTreeSet<String>> {
-        let mut result: BTreeMap<_, BTreeSet<_>>
+    fn create_node(&mut self, locator: Locator, parent_idx: Option<usize>, terminal_workspaces: bool) -> usize {
+        let mut dependencies
             = BTreeMap::new();
+        let mut children
+            = None;
 
-        let accessible_nodes
-            = self.accessible_nodes();
+        let physical_locator
+            = locator.physical_locator();
 
-        let duplicate_names
-            = accessible_nodes.iter()
-                .map(|node_idx| locators_to_names[&self.nodes[*node_idx].locator])
-                .duplicates()
-                .collect::<BTreeSet<_>>();
+        if !physical_locator.reference.is_workspace_reference() || !terminal_workspaces {
+            let resolution
+                = &self.install_state.resolution_tree.locator_resolutions[&locator];
 
-        let mut locator_ids
-            = BTreeMap::new();
+            dependencies = resolution.dependencies.iter()
+                .map(|(ident, descriptor)| (ident.clone(), self.install_state.resolution_tree.descriptor_to_locator[descriptor].clone()))
+                .collect();
+        } else {
+            children = Some(BTreeMap::new());
+        }
 
-        let mut id_of = |node_idx: usize| {
-            let locator
-                = &self.nodes[node_idx].locator;
-
-            let counter = locator_ids.entry(locator.clone())
-                .or_insert(0);
-
-            *counter += 1;
-            *counter
+        let node = WorkNode {
+            parent_idx,
+            workspaces_idx: vec![],
+            locator,
+            dependencies,
+            children,
+            updated: true,
         };
 
-        let mut get_node_name = |node_idx: usize| {
-            let base_name
-                = locators_to_names[&self.nodes[node_idx].locator];
+        let node_idx = self.nodes.len();
+        self.nodes.push(node);
 
-            if duplicate_names.contains(base_name) {
-                format!("{}#{}", base_name, id_of(node_idx))
-            } else {
-                base_name.to_string()
-            }
-        };
+        node_idx
+    }
 
-        let nodes_to_names
-            = accessible_nodes.iter()
-                .map(|&node_idx| (node_idx, get_node_name(node_idx)))
+    fn expand_node(&mut self, node_idx: usize) {
+        let node
+            = &self.nodes[node_idx];
+
+        if node.children.is_some() {
+            return;
+        }
+
+        let mut parent_chain
+            = BTreeSet::new();
+        let mut parent_queue
+            = vec![node_idx];
+
+        while let Some(parent_idx) = parent_queue.pop() {
+            let parent_node
+                = &self.nodes[parent_idx];
+
+            parent_chain.insert(parent_node.locator.clone());
+            parent_queue.extend(parent_node.parent_idx.iter().copied());
+        }
+
+        let peer_dependencies
+            = &self.install_state.resolution_tree.locator_resolutions[&node.locator].peer_dependencies;
+
+        let children
+            = node.dependencies.clone()
+                .into_iter()
+                .filter(|(_, dependency)| !peer_dependencies.contains_key(&dependency.ident))
+                .filter(|(_, dependency)| !parent_chain.contains(&dependency))
+                .map(|(ident, dependency)| (ident, self.create_node(dependency, Some(node_idx), true)))
                 .collect::<BTreeMap<_, _>>();
 
-        for node_idx in accessible_nodes {
-            let node
-                = &self.nodes[node_idx];
+        let node
+            = &mut self.nodes[node_idx];
 
-            let node_name
-                = &nodes_to_names[&node_idx];
-
-            for &child_idx in node.children.values() {
-                let child_name
-                    = &nodes_to_names[&child_idx];
-
-                result.entry(node_name.clone()).or_default().insert(child_name.clone());
-            }
-        }
-
-        result
-    }
-
-    fn import_input_tree(&mut self, input_tree: &InputTree) {
-        let mut locator_to_idx
-            = BTreeMap::new();
-
-        let root_work_idx
-            = self.import_input_node(input_tree, &input_tree.root);
-
-        locator_to_idx.insert(input_tree.root.clone(), root_work_idx);
-
-        for child_locator in input_tree.nodes[&input_tree.root].dependencies.values() {
-            self.import_dfs(input_tree, child_locator, root_work_idx, &mut locator_to_idx);
-        }
-    }
-
-    fn import_input_node(&mut self, input_tree: &InputTree, node_locator: &Locator) -> usize {
-        let new_work_idx
-            = self.nodes.len();
-
-        self.nodes.push(WorkNode {
-            locator: node_locator.clone(),
-            dependencies: input_tree.nodes[node_locator].dependencies.clone(),
-            children: BTreeMap::new(),
-        });
-
-        new_work_idx
-    }
-
-    fn import_dfs(&mut self, input_tree: &InputTree, node_locator: &Locator, parent_work_idx: usize, locator_to_idx: &mut BTreeMap<Locator, usize>) {
-        let existing_work_idx
-            = locator_to_idx.get(node_locator);
-
-        if let Some(existing_work_idx) = existing_work_idx {
-            // We remove self-dependencies; they don't really make sense, as
-            // all packages have an implicit dependency on themselves anwyay.
-            if *existing_work_idx == parent_work_idx {
-                return;
-            }
-
-            let parent_node
-                = &mut self.nodes[parent_work_idx];
-
-            parent_node.children.insert(
-                node_locator.ident.clone(),
-                *existing_work_idx,
-            );
-        } else {
-            let node
-                = &input_tree.nodes[node_locator];
-
-            let new_work_idx
-                = self.import_input_node(input_tree, node_locator);
-
-            let parent_node
-                = &mut self.nodes[parent_work_idx];
-
-            parent_node.children.insert(
-                node_locator.ident.clone(),
-                new_work_idx,
-            );
-
-            locator_to_idx.insert(node_locator.clone(), new_work_idx);
-
-            for child_locator in node.dependencies.values() {
-                self.import_dfs(input_tree, child_locator, new_work_idx, locator_to_idx);
-            }
-
-            locator_to_idx.remove(node_locator);
-        }
+        node.children = Some(children);
+        node.updated = false;
     }
 }
 
-pub struct TreeRenderer<'a> {
-    tree: &'a WorkTree,
+pub struct TreeRenderer<'a, 'b> {
+    tree: &'a WorkTree<'b>,
     parent_stack: Vec<usize>,
 }
 
-impl<'a> TreeRenderer<'a> {
-    pub fn new(tree: &'a WorkTree) -> Self {
+impl<'a, 'b> TreeRenderer<'a, 'b> {
+    pub fn new(tree: &'a WorkTree<'b>) -> Self {
         Self {
             tree,
             parent_stack: vec![],
@@ -286,7 +207,7 @@ impl<'a> TreeRenderer<'a> {
             label.push_str(" (cycle)");
         }
 
-        let mut children
+        let mut tree_children
             = Vec::new();
 
         for &locator in &invalid_dependencies {
@@ -299,15 +220,24 @@ impl<'a> TreeRenderer<'a> {
                 locator.to_print_string(),
             );
 
-            children.push(tree::Node {
+            tree_children.push(tree::Node {
                 label: Some(label),
                 value: None,
                 children: None,
             });
         }
 
-        for &child_idx in self.tree.nodes[node_idx].children.values() {
-            children.push(self.convert_impl(child_idx, available_dependencies.clone()));
+        let node_children
+            = node.children
+                .as_ref()
+                .expect("Expected the children to be present since we just expanded this node")
+                .values()
+                .chain(node.workspaces_idx.iter())
+                .copied()
+                .collect_vec();
+
+        for child_idx in node_children {
+            tree_children.push(self.convert_impl(child_idx, available_dependencies.clone()));
         }
 
         self.parent_stack.pop();
@@ -315,7 +245,7 @@ impl<'a> TreeRenderer<'a> {
         tree::Node {
             label: Some(label),
             value: None,
-            children: Some(tree::TreeNodeChildren::Vec(children)),
+            children: Some(tree::TreeNodeChildren::Vec(tree_children)),
         }
     }
 
@@ -325,7 +255,7 @@ impl<'a> TreeRenderer<'a> {
 
         available_dependencies.insert(&node.locator.ident, &node.locator);
 
-        available_dependencies.extend(node.children.iter().map(|(ident, child_idx)| {
+        available_dependencies.extend(node.children.as_ref().unwrap().iter().map(|(ident, child_idx)| {
             let child_node
                 = &self.tree.nodes[*child_idx];
 
@@ -336,19 +266,17 @@ impl<'a> TreeRenderer<'a> {
     }
 }
 
-pub struct Hoister<'a> {
-    work_tree: &'a mut WorkTree,
-    seen: Vec<bool>,
+pub struct Hoister<'a, 'b> {
+    work_tree: &'a mut WorkTree<'b>,
     stack: Vec<usize>,
     has_changed: bool,
     print_logs: bool,
 }
 
-impl<'a> Hoister<'a> {
-    pub fn new(work_tree: &'a mut WorkTree) -> Self {
+impl<'a, 'b> Hoister<'a, 'b> {
+    pub fn new(work_tree: &'a mut WorkTree<'b>) -> Self {
         Self {
             work_tree,
-            seen: vec![],
             stack: vec![],
             has_changed: false,
             print_logs: false,
@@ -360,12 +288,15 @@ impl<'a> Hoister<'a> {
     }
 
     pub fn hoist(&mut self) {
-        self.seen = vec![false; self.work_tree.nodes.len()];
         self.stack.clear();
 
         self.has_changed = true;
 
         while self.has_changed {
+            if self.print_logs {
+                self.print("=== Hoisting pass ===\n");
+            }
+
             self.has_changed = false;
             self.process_node(0);
         }
@@ -383,34 +314,41 @@ impl<'a> Hoister<'a> {
             ));
         }
 
-        self.seen[node_idx] = true;
+        //self.seen[node_idx] = true;
         self.stack.push(node_idx);
 
-        // We need to clone it to please the borrow checker.
+        self.work_tree.expand_node(node_idx);
+
+        let node
+            = &self.work_tree.nodes[node_idx];
+
         let node_children
-            = &self.work_tree.nodes[node_idx]
-                .children.clone();
+            = node.children
+                .as_ref()
+                .expect("Expected the children to be present since we just expanded this node")
+                .values()
+                .chain(node.workspaces_idx.iter())
+                .copied()
+                .collect_vec();
 
         let mut hoist_candidates_with_parents: BTreeMap<Locator, Vec<usize>>
             = BTreeMap::new();
 
-        for &child_idx in node_children.values() {
-            if self.seen[child_idx] {
-                continue;
-            }
-
-            self.process_node(child_idx);
+        for &child_idx in node_children.iter() {
+            self.work_tree.expand_node(child_idx);
 
             let flattened_node
                 = &self.work_tree.nodes[child_idx];
 
             let transitive_children
-                = flattened_node.children.clone();
+                = flattened_node.children.clone().unwrap();
 
             for &transitive_node in transitive_children.values() {
                 let parents = hoist_candidates_with_parents
                     .entry(self.work_tree.nodes[transitive_node].locator.clone())
                         .or_default();
+
+                self.work_tree.expand_node(transitive_node);
 
                 parents.push(child_idx);
             }
@@ -425,7 +363,8 @@ impl<'a> Hoister<'a> {
             = hoist_candidates_with_parents.into_iter()
                 .partition(|(transitive_locator, _)| {
                     let existing_child_idx
-                        = self.work_tree.nodes[node_idx].children.get(&transitive_locator.ident);
+                        = self.work_tree.nodes[node_idx].children.as_ref().unwrap()
+                            .get(&transitive_locator.ident);
 
                     let existing_child_locator = existing_child_idx
                         .map(|&idx| &self.work_tree.nodes[idx].locator);
@@ -435,7 +374,7 @@ impl<'a> Hoister<'a> {
 
         for (transitive_locator, parents) in locators_to_meld {
             for parent_idx in parents {
-                self.work_tree.nodes[parent_idx].children.remove(&transitive_locator.ident).unwrap();
+                self.work_tree.nodes[parent_idx].children.as_mut().unwrap().remove(&transitive_locator.ident).unwrap();
             }
         }
 
@@ -470,8 +409,9 @@ impl<'a> Hoister<'a> {
                     = &self.work_tree.nodes[parents[0]];
 
                 let hoistable_idx
-                    = parent_node
-                        .children[&hoistable_locator.ident];
+                    = *parent_node
+                        .children.as_ref().unwrap().get(&hoistable_locator.ident)
+                        .unwrap_or_else(|| panic!("Failed to find ident [{}] in [{}]", hoistable_locator.to_file_string(), parent_node.locator.to_file_string()));
 
                 let hoistable_node
                     = &self.work_tree.nodes[hoistable_idx];
@@ -482,13 +422,13 @@ impl<'a> Hoister<'a> {
                 for dependency_locator in hoistable_node.dependencies.values() {
                     // This node already embed its own copy of its dependency, so we don't care about whatever
                     // else could conflict with the parent.
-                    if hoistable_node.children.contains_key(&dependency_locator.ident) {
+                    if hoistable_node.children.as_ref().unwrap().contains_key(&dependency_locator.ident) {
                         continue;
                     }
 
                     // The parent doesn't contain the dependency, which means hoisting the hoistable candidate
                     // into our package wouldn't break the dependency any more than it already is.
-                    if !parent_node.children.contains_key(&dependency_locator.ident) {
+                    if !parent_node.children.as_ref().unwrap().contains_key(&dependency_locator.ident) {
                         continue;
                     }
 
@@ -509,7 +449,7 @@ impl<'a> Hoister<'a> {
             let mut new_dependencies
                 = self.work_tree.nodes[node_idx].dependencies.clone();
             let mut new_children
-                = self.work_tree.nodes[node_idx].children.clone();
+                = self.work_tree.nodes[node_idx].children.clone().unwrap();
 
             // We can now start attempting to hoist the dependencies, set by set. For each set
             // we check the dependencies of each package in the set, making sure that they are
@@ -532,6 +472,23 @@ impl<'a> Hoister<'a> {
                     };
 
                     scc_hoisting_requirements.push((package, package_dependencies));
+                }
+
+                let is_workspace
+                    = scc.iter().any(|package| {
+                        package.reference.is_workspace_reference()
+                    });
+
+                if is_workspace {
+                    if self.print_logs {
+                        self.print(&format!(
+                            "Cannot hoist {} into {} because it's a workspace",
+                            scc.iter().map(|locator| locator.to_print_string()).join(", "),
+                            node.locator.to_print_string(),
+                        ));
+                    }
+
+                    continue;
                 }
 
                 let coherent_parent
@@ -658,7 +615,7 @@ impl<'a> Hoister<'a> {
                         = &self.work_tree.nodes[old_parent_idx];
 
                     let hoisting_idx
-                        = old_parent_node.children[&hoisting_locator.ident];
+                        = old_parent_node.children.as_ref().unwrap()[&hoisting_locator.ident];
 
                     new_dependencies.insert(
                         hoisting_locator.ident.clone(),
@@ -676,392 +633,32 @@ impl<'a> Hoister<'a> {
 
             for hoisted_dependency_to_remove in hoisted_dependencies_to_remove {
                 for parent_locator in &selected_hoist_candidates[&hoisted_dependency_to_remove] {
-                    self.work_tree.nodes[*parent_locator].children.remove(&hoisted_dependency_to_remove.ident);
+                    self.work_tree.nodes[*parent_locator].children.as_mut().unwrap().remove(&hoisted_dependency_to_remove.ident).unwrap();
                 }
             }
 
             self.work_tree.nodes[node_idx].dependencies = new_dependencies;
-            self.work_tree.nodes[node_idx].children = new_children;
+            self.work_tree.nodes[node_idx].children = Some(new_children);
         }
 
         let node_locator
             = &self.work_tree.nodes[node_idx].locator;
 
-        if let Some(self_child_idx) = self.work_tree.nodes[node_idx].children.get(&node_locator.ident) {
+        if let Some(self_child_idx) = self.work_tree.nodes[node_idx].children.as_ref().unwrap().get(&node_locator.ident) {
             let self_child_locator
                 = self.work_tree.nodes[*self_child_idx].locator
                     .clone();
 
             if &self_child_locator == node_locator {
-                self.work_tree.nodes[node_idx].children.remove(&self_child_locator.ident).unwrap();
+                self.work_tree.nodes[node_idx].children.as_mut().unwrap().remove(&self_child_locator.ident).unwrap();
             }
         }
 
-        self.seen[node_idx] = false;
+        for child_idx in node_children {
+            self.process_node(child_idx);
+        }
+
+        //self.seen[node_idx] = false;
         self.stack.pop();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use zpm_primitives::{testing::{i, l}, dependency_map};
-
-    use super::*;
-
-    #[test]
-    fn it_should_import_a_simple_tree_with_no_duplicates() {
-        let input_tree = InputTree::from_test_tree(BTreeMap::from_iter([
-            (l("root"), vec![l("a"), l("b")]),
-            (l("a"), vec![l("d")]),
-            (l("b"), vec![l("e")]),
-        ]));
-
-        let work_tree
-            = WorkTree::from_input_tree(&input_tree);
-
-        assert_eq!(work_tree, WorkTree {
-            nodes: vec![
-                WorkNode {
-                    locator: l("root"),
-                    dependencies: dependency_map![
-                        l("a"),
-                        l("b"),
-                    ],
-                    children: BTreeMap::from_iter([
-                        (i("a"), 1),
-                        (i("b"), 3),
-                    ]),
-                },
-                WorkNode {
-                    locator: l("a"),
-                    dependencies: dependency_map![
-                        l("d"),
-                    ],
-                    children: BTreeMap::from_iter([
-                        (i("d"), 2),
-                    ]),
-                },
-                WorkNode {
-                    locator: l("d"),
-                    dependencies: BTreeMap::new(),
-                    children: BTreeMap::new(),
-                },
-                WorkNode {
-                    locator: l("b"),
-                    dependencies: dependency_map![
-                        l("e"),
-                    ],
-                    children: BTreeMap::from_iter([
-                        (i("e"), 4),
-                    ]),
-                },
-                WorkNode {
-                    locator: l("e"),
-                    dependencies: BTreeMap::new(),
-                    children: BTreeMap::new(),
-                },
-            ],
-        });
-    }
-
-    #[test]
-    fn it_should_unfold_a_simple_tree_with_some_duplicates() {
-        let input_tree = InputTree::from_test_tree(BTreeMap::from_iter([
-            (l("root"), vec![l("a"), l("b")]),
-            (l("a"), vec![l("c")]),
-            (l("b"), vec![l("c")]),
-        ]));
-
-        let work_tree
-            = WorkTree::from_input_tree(&input_tree);
-
-        assert_eq!(work_tree, WorkTree {
-            nodes: vec![
-                WorkNode {
-                    locator: l("root"),
-                    dependencies: dependency_map![
-                        l("a"),
-                        l("b"),
-                    ],
-                    children: BTreeMap::from_iter([
-                        (i("a"), 1),
-                        (i("b"), 3),
-                    ]),
-                },
-                WorkNode {
-                    locator: l("a"),
-                    dependencies: dependency_map![
-                        l("c"),
-                    ],
-                    children: BTreeMap::from_iter([
-                        (i("c"), 2),
-                    ]),
-                },
-                WorkNode {
-                    locator: l("c"),
-                    dependencies: BTreeMap::new(),
-                    children: BTreeMap::new(),
-                },
-                WorkNode {
-                    locator: l("b"),
-                    dependencies: dependency_map![
-                        l("c"),
-                    ],
-                    children: BTreeMap::from_iter([
-                        (i("c"), 4),
-                    ]),
-                },
-                WorkNode {
-                    locator: l("c"),
-                    dependencies: BTreeMap::new(),
-                    children: BTreeMap::new(),
-                },
-            ],
-        });
-    }
-
-    fn test_hoisting(spec: BTreeMap<&'static str, Vec<&'static str>>, expected_hoisting: BTreeMap<&'static str, Vec<&'static str>>) {
-        let all_names
-            = spec.iter()
-                .flat_map(|(k, v)| v.iter().chain(Some(k)))
-                .cloned()
-                .collect::<Vec<_>>();
-
-        let name_to_locators
-            = all_names.iter()
-                .map(|&name| (name, l(name)))
-                .collect::<BTreeMap<_, _>>();
-
-        let locator_to_name
-            = name_to_locators.iter()
-                .map(|(&k, v)| (v.clone(), k))
-                .collect::<BTreeMap<_, _>>();
-
-        let input_tree
-            = InputTree::from_test_tree(spec.into_iter()
-                .map(|(k, v)| (name_to_locators[k].clone(), v.into_iter().map(|name| name_to_locators[name].clone()).collect()))
-                .collect());
-
-        let mut work_tree
-            = WorkTree::from_input_tree(&input_tree);
-
-        let mut hoister
-            = Hoister::new(&mut work_tree);
-
-        hoister.set_print_logs(true);
-        hoister.hoist();
-
-        let expected_hoisting
-            = expected_hoisting.into_iter()
-                .map(|(k, v)| (k.to_string(), v.into_iter().map(|s| s.to_string()).collect())).collect();
-
-        assert_eq!(work_tree.inspect(&locator_to_name), expected_hoisting);
-    }
-
-    #[test]
-    fn it_should_hoist_a_basic_tree() {
-        test_hoisting(
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b"]),
-                ("a", vec!["c"]),
-                ("b", vec!["c"]),
-            ]),
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b", "c"]),
-            ]),
-        );
-    }
-
-    #[test]
-    fn it_should_hoist_a_tree_with_a_simple_loop() {
-        test_hoisting(
-            BTreeMap::from_iter([
-                ("root", vec!["a"]),
-                ("a", vec!["b"]),
-                ("b", vec!["a"]),
-            ]),
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b"]),
-            ]),
-        );
-    }
-
-    #[test]
-    fn it_should_hoist_a_tree_with_a_deep_loop() {
-        test_hoisting(
-            BTreeMap::from_iter([
-                ("root", vec!["c"]),
-                ("a", vec!["b", "d"]),
-                ("b", vec!["a"]),
-                ("c", vec!["a"]),
-                ("d", vec!["e"]),
-            ]),
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b", "c", "d", "e"]),
-            ]),
-        );
-    }
-
-    #[test]
-    fn it_should_select_the_most_popular_version_of_a_package() {
-        test_hoisting(
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b", "c"]),
-                ("a", vec!["d@2"]),
-                ("b", vec!["d@1"]),
-                ("c", vec!["d@2"]),
-            ]),
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b", "c", "d@2"]),
-                ("b", vec!["d@1"]),
-            ]),
-        );
-    }
-
-
-    #[test]
-    fn it_should_select_the_most_popular_version_of_a_package_reverse() {
-        test_hoisting(
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b", "c"]),
-                ("a", vec!["d@1"]),
-                ("b", vec!["d@2"]),
-                ("c", vec!["d@1"]),
-            ]),
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b", "c", "d@1"]),
-                ("b", vec!["d@2"]),
-            ]),
-        );
-    }
-
-    #[test]
-    fn it_shouldnt_hoist_a_package_if_it_would_break_a_self_dependency() {
-        test_hoisting(
-            BTreeMap::from_iter([
-                ("root", vec!["a@1", "b@1"]),
-                ("a@1", vec!["b@2"]),
-                ("b@2", vec!["a@2"]),
-            ]),
-            BTreeMap::from_iter([
-                ("root", vec!["a@1", "b@1"]),
-                ("a@1", vec!["b@2"]),
-                ("b@2", vec!["a@2"]),
-            ]),
-        );
-    }
-
-    #[test]
-    fn it_shouldnt_hoist_a_package_if_its_dependencies_cannot_be_hoisted_either() {
-        test_hoisting(
-            BTreeMap::from_iter([
-                ("root", vec!["a", "c@1"]),
-                ("a", vec!["b"]),
-                ("b", vec!["c@2"]),
-            ]),
-            BTreeMap::from_iter([
-                ("root", vec!["a", "c@1"]),
-                ("a", vec!["b", "c@2"]),
-            ]),
-        );
-    }
-
-    #[test]
-    fn it_should_hoist_different_copies_of_a_package_independently() {
-        test_hoisting(
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b@2", "c@3", "d"]),
-                ("a", vec!["b@1", "c@2"]),
-                ("b@1", vec!["c@1"]),
-                ("d", vec!["b@1"]),
-            ]),
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b@2", "c@3", "d"]),
-                ("a", vec!["b@1#1", "c@2"]),
-                ("b@1#1", vec!["c@1#1"]),
-                ("d", vec!["b@1#2", "c@1#2"]),
-            ]),
-        );
-    }
-
-    #[test]
-    fn it_should_hoist_different_copies_of_a_package_independently_complex() {
-        // const tree = {
-        //     '.': {dependencies: [`A`, `E`, `F`, `B@Y`, `C@Z`, `D@Y`]},
-        //     A: {dependencies: [`B@X`, `C@Y`]},
-        //     'B@X': {dependencies: [`C@X`]},
-        //     'C@X': {dependencies: [`D@X`]},
-        //     E: {dependencies: [`B@X`]},
-        //     F: {dependencies: [`G`]},
-        //     G: {dependencies: [`B@X`, `D@Z`]},
-        //   };
-        test_hoisting(
-            BTreeMap::from_iter([
-                ("root", vec!["a", "e", "f", "b@2", "c@3", "d@2"]),
-                ("a", vec!["b@1", "c@2"]),
-                ("b@1", vec!["c@1"]),
-                ("c@1", vec!["d@1"]),
-                ("e", vec!["b@1"]),
-                ("f", vec!["g"]),
-                ("g", vec!["b@1", "d@3"]),
-            ]),
-            BTreeMap::from_iter([
-                ("root", vec!["a", "e", "f", "b@2", "c@3", "d@2"]),
-                ("a", vec!["b@1#1", "c@2", "d@1#1"]),
-                ("b@1#1", vec!["c@1#1"]),
-                ("b@1#3", vec!["c@1#3", "d@1#3"]),
-                ("e", vec!["b@1#2", "c@1#2", "d@1#2"]),
-                ("f", vec!["b@1#3", "d@3", "g"]),
-            ]),
-        );
-    }
-
-    #[test]
-    fn it_shouldnt_hoist_a_package_that_another_package_higher_up_in_the_tree_depends_on() {
-        test_hoisting(
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b@2", "c@2", "d@2"]),
-                ("a", vec!["b@1", "c@1", "d@1"]),
-                ("b@1", vec!["e@2"]),
-                ("c@1", vec!["e@1"]),
-                ("d@1", vec!["e@1"]),
-            ]),
-            BTreeMap::from_iter([
-                ("root", vec!["a", "b@2", "c@2", "d@2", "e@1"]),
-                ("a", vec!["b@1", "c@1", "d@1"]),
-                ("b@1", vec!["e@2"]),
-            ]),
-        );
-    }
-
-    // . -> @eslint/eslintrc@3
-    //   -> @typescript-eslint/parser -> @typescript-eslint/typescript-estree -> minimatch@2
-    //                                -> eslint -> @eslint/eslintrc -> minimatch@1
-    //   -> @typescript-eslint/typescript-estree@3
-    //   -> eslint@3
-    //   -> minimatch@1
-
-    // a <=> @eslint/eslintrc
-    // b <=> @typescript-eslint/parser
-    // c <=> @typescript-eslint/typescript-estree
-    // d <=> eslint
-    // e <=> minimatch
-
-    #[test]
-    fn it_should_toto() {
-        test_hoisting(
-            BTreeMap::from_iter([
-                ("root", vec!["a@3", "b", "c@3", "d@3", "e@1"]),
-                ("a@1", vec!["e@1"]),
-                ("b", vec!["c@1", "d@1"]),
-                ("c@1", vec!["e@2"]),
-                ("d@1", vec!["a@1"]),
-            ]),
-            BTreeMap::from_iter([
-                ("root", vec!["a@3", "b", "c@3", "d@3", "e@1#2"]),
-                ("b", vec!["c@1", "d@1", "e@2"]),
-                ("d@1", vec!["a@1", "e@1#1"]),
-            ]),
-        );
     }
 }

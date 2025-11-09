@@ -1,7 +1,7 @@
 use clipanion::cli;
 use zpm_utils::tree;
 
-use crate::{error::Error, linker::nm::hoist::{self, Hoister, InputTree, WorkTree}, project};
+use crate::{error::Error, linker::nm::hoist::{self, Hoister, WorkTree}, project};
 
 #[cli::command]
 #[cli::path("debug", "print-hoisting")]
@@ -24,11 +24,8 @@ impl PrintHoisting {
         let install_state
             = project.install_state.as_ref().unwrap();
 
-        let input_tree
-            = InputTree::from_install_state(&project, install_state);
-
         let mut work_tree
-            = WorkTree::from_input_tree(&input_tree);
+            = WorkTree::new(&project, &install_state);
 
         let mut hoister
             = Hoister::new(&mut work_tree);

@@ -92,7 +92,7 @@ impl DiffController for CachedManifestFinder {
 
     fn is_relevant_entry(path: &DirEntry, file_type: &FileType) -> bool {
         if file_type.is_dir() {
-            return path.file_name() != ".yarn";
+            return path.file_name() != ".yarn" && path.file_name() != "node_modules";
         }
 
         if file_type.is_file() {
