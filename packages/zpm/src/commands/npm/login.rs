@@ -11,17 +11,24 @@ use crate::{
     report::{current_report, with_report_result, PromptType, StreamReport, StreamReportConfig},
 };
 
-/// Store new login info to access the npm registry
+/// Login to the npm registry
+///
+/// This command will ask you for your username, password, and 2FA One-Time-Password (when it applies). It will then modify your local configuration (in your home folder, never in the project itself) to reference the new tokens thus generated.
+///
+/// Adding the `-s,--scope` flag will cause the authentication to be done against whatever registry is configured for the associated scope (see also `npmScopes`).
+///
+/// Adding the `--publish` flag will cause the authentication to be done against the registry used when publishing the package (see also `publishConfig.registry` and `npmPublishRegistry`).
+///
 #[cli::command]
 #[cli::path("npm", "login")]
 #[cli::category("Npm-related commands")]
 pub struct Login {
+    /// Login to the registry configured for a given scope
     #[cli::option("-s,--scope")]
-    #[cli::description("Login to the registry configured for a given scope")]
     scope: Option<String>,
 
+    /// Login to the publish registry
     #[cli::option("--publish", default = false)]
-    #[cli::description("Login to the publish registry")]
     publish: bool,
 }
 

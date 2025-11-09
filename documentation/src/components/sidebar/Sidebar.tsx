@@ -1,4 +1,4 @@
-import type {SidebarEntry} from 'node_modules/@astrojs/starlight/utils/routing/types';
+import type {SidebarEntry} from '@astrojs/starlight/utils/routing/types';
 
 import SidebarEntryElement from './SidebarEntry';
 
@@ -10,7 +10,7 @@ interface Props {
 export default function Sidebar({entries, defaultExpandedGroup}: Props) {
   return entries.map((entry, index) => (
     <SidebarEntryElement
-      initialCollapsed={index !== defaultExpandedGroup}
+      initialCollapsed={false}
       {...(entry as any)}
       key={index}
     />

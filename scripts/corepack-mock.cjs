@@ -58,6 +58,10 @@ function main() {
 
   const yarnResult = spawnSync(yarnSwitchPath, process.argv.slice(2), {
     stdio: `inherit`,
+    env: {
+      ...process.env,
+      PATH: `${path.dirname(yarnSwitchPath)}${path.delimiter}${process.env.PATH}`,
+    },
   });
 
   function sigintHandler() {

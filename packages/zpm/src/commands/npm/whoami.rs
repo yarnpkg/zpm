@@ -10,17 +10,22 @@ use crate::{
     project::Project,
 };
 
-/// Get the current user's npm token
+/// Print the username associated with the current authentication settings to the standard output.
+///
+/// When using `-s,--scope`, the username printed will be the one that matches the authentication settings of the registry associated with the given scope (those settings can be overriden using the `npmRegistries` map, and the registry associated with the scope is configured via the `npmScopes` map).
+///
+/// When using `--publish`, the registry we'll select will by default be the one used when publishing packages (`publishConfig.registry` or `npmPublishRegistry` if available, otherwise we'll fallback to the regular `npmRegistryServer`).
+///
 #[cli::command]
 #[cli::path("npm", "whoami")]
 #[cli::category("Npm-related commands")]
 pub struct Whoami {
+    /// Get the username for a given scope
     #[cli::option("-s,--scope")]
-    #[cli::description("Get the token for a given scope")]
     scope: Option<String>,
 
+    /// Get the username for the publish registry
     #[cli::option("--publish", default = false)]
-    #[cli::description("Login to the publish registry")]
     publish: bool,
 }
 

@@ -358,7 +358,7 @@ checksum = "aaa6b4b263a5d737e9bf6b7c09b72c41a5480aec4d7219af827f6564e950b6a5"
 [[package]]
 name = "clipanion"
 version = "0.8.1"
-source = "git+https://github.com/arcanis/clipanion-rs.git#876cddbeb9daa74d65e137364464f4d8aede6224"
+source = "git+https://github.com/arcanis/clipanion-rs.git#07eeda3f9aacf0130a8da23dc984c948376547af"
 dependencies = [
  "clipanion-core",
  "clipanion-derive",
@@ -370,7 +370,7 @@ dependencies = [
 [[package]]
 name = "clipanion-core"
 version = "0.8.1"
-source = "git+https://github.com/arcanis/clipanion-rs.git#876cddbeb9daa74d65e137364464f4d8aede6224"
+source = "git+https://github.com/arcanis/clipanion-rs.git#07eeda3f9aacf0130a8da23dc984c948376547af"
 dependencies = [
  "colored 2.2.0",
  "itertools 0.14.0",
@@ -382,7 +382,7 @@ dependencies = [
 [[package]]
 name = "clipanion-derive"
 version = "0.8.1"
-source = "git+https://github.com/arcanis/clipanion-rs.git#876cddbeb9daa74d65e137364464f4d8aede6224"
+source = "git+https://github.com/arcanis/clipanion-rs.git#07eeda3f9aacf0130a8da23dc984c948376547af"
 dependencies = [
  "indoc",
  "proc-macro2",

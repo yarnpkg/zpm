@@ -15,6 +15,7 @@ enum SwitchExecCli {
     CacheClearCommand(switch::cache_clear::CacheClearCommand),
     CacheInstallCommand(switch::cache_install::CacheInstallCommand),
     CacheListCommand(switch::cache_list::CacheListCommand),
+    ClipanionCommandsCommand(switch::clipanion_commands::ClipanionCommandsCommand),
     ExplicitCommand(switch::explicit::ExplicitCommand),
     LinksListCommand(switch::links_list::LinksListCommand),
     LinksClearCommand(switch::links_clear::LinksClearCommand),

@@ -6,6 +6,8 @@ use zpm_utils::ToHumanString;
 use crate::{error::Error, project::Project};
 
 /// List the project's configuration values
+///
+/// [unimplemented]
 #[cli::command]
 #[cli::path("config")]
 #[cli::path("config", "get")]

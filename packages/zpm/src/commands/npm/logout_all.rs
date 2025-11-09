@@ -12,7 +12,7 @@ use crate::{
 #[cli::category("Npm-related commands")]
 pub struct LogoutAll {
     #[cli::option("-A,--all")]
-    _publish: bool,
+    _all: bool,
 }
 
 impl LogoutAll {

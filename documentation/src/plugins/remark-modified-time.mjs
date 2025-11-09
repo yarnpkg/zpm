@@ -11,6 +11,9 @@ function getDateFromFilename(filename) {
 
 export function remarkModifiedTime() {
   return function (tree, file) {
+    if (!file.history[0])
+      return;
+
     const filename = file.history[0].split(`/`).pop(); // Get just the filename
     const dateFromFilename = getDateFromFilename(filename);
 

@@ -13,7 +13,7 @@ const { hasSidebar } = Astro.locals.starlightRoute;
 
 <div
   class="relative min-h-screen flex flex-col justify-between"
-  transition:animate={fade({ duration: "0.1s" })}
+  transition:animate={fade({ duration: "0.05s" })}
 >
   <div class="absolute inset-x-0 top-0 h-[100vh] -z-30" transition:persist>
     <StarrySky client:load/>
@@ -27,12 +27,12 @@ const { hasSidebar } = Astro.locals.starlightRoute;
     <div
       class={clsx(
         "page",
-        hasSidebar && "flex gap-x-20 container"
+        hasSidebar && "flex gap-x-10 container"
       )}
     >
       {hasSidebar && (
         <nav
-          class="sidebar print:hidden w-full lg:w-1/3 xl:w-1/4 max-lg:hidden"
+          class="sidebar print:hidden w-full lg:w-auto max-lg:hidden"
           aria-label={Astro.locals.t("sidebarNav.accessibleLabel")}
         >
           <MobileMenuToggle />

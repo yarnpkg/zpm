@@ -13,23 +13,40 @@ use crate::{
     script::ScriptEnvironment,
 };
 
+/// This command will setup a new package in your local directory.
+///
+/// If the `-p,--private` or `-w,--workspace` options are set, the package will be private by default.
+///
+/// If the `-w,--workspace` option is set, the package will be configured to accept a set of workspaces in the `packages/` directory.
+///
+/// If the `-i,--install` option is given a value, Yarn will first download it using `yarn set version` and only then forward the init call to the
+/// newly downloaded bundle. Without arguments, the downloaded bundle will be latest.
+///
+/// The initial settings of the manifest can be changed by using the `initScope` and `initFields` configuration values. Additionally, Yarn will
+/// generate an `.editorconfig` file whose rules can be altered via `initEditorConfig`, and will initialize a Git repository in the current directory.
+///
 #[cli::command(proxy)]
 #[cli::path("init")]
-#[derive(Debug)]
+#[cli::category("Project management")]
 pub struct InitWithTemplate {
+    /// Set the package to be private
     #[cli::option("-p,--private")]
     private: Option<bool>,
 
+    /// Set the package to be a workspace
     #[cli::option("-w,--workspace", default = false)]
     workspace: bool,
 
+    /// Set the name of the package
     #[cli::option("-n,--name")]
     name: Option<String>,
 
+    /// The template to use for the package
     template: LooseDescriptor,
+
+    /// The arguments to pass to the template
     args: Vec<String>,
 
-    // Hidden legacy options
     #[cli::option("-2", default = false)]
     usev2: bool,
 

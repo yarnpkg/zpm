@@ -111,43 +111,79 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
 }
 
 /// Add new dependencies to the project
+///
+/// This command adds a package to the package.json for the nearest workspace. -
+///
+/// - If it didn't exist before, the package will by default be added to the regular `dependencies` field, but this behavior can be overriden thanks to the `-D,--dev` flag (which will cause the dependency to be added to the `devDependencies` field instead) and the `-P,--peer` flag (which will do the same but for `peerDependencies`).
+///
+/// - If the package was already listed in your dependencies, it will by default be upgraded whether it's part of your `dependencies` or `devDependencies` (it won't ever update `peerDependencies`, though).
+///
+/// - If set, the `--prefer-dev` flag will operate as a more flexible `-D,--dev` in that it will add the package to your `devDependencies` if it isn't already listed in either `dependencies` or `devDependencies`, but it will also happily upgrade your `dependencies` if that's what you already use (whereas `-D,--dev` would throw an exception).
+///
+/// - If set, the `-O,--optional` flag will add the package to the `optionalDependencies` field and, in combination with the `-P,--peer` flag, it will add the package as an optional peer dependency. If the package was already listed in your `dependencies`, it will be upgraded to `optionalDependencies`. If the package was already listed in your `peerDependencies`, in combination with the `-P,--peer` flag, it will be upgraded to an optional peer dependency: `"peerDependenciesMeta": { "<package>": { "optional": true } }`
+///
+/// - If the added package doesn't specify a range at all its `latest` tag will be resolved and the returned version will be used to generate a new semver range (using the `^` modifier by default unless otherwise configured via the `defaultSemverRangePrefix` configuration, or the `~` modifier if `-T,--tilde` is specified, or no modifier at all if `-E,--exact` is specified). Two exceptions to this rule: the first one is that if the package is a workspace then its local version will be used, and the second one is that if you use `-P,--peer` the default range will be `*` and won't be resolved at all.
+///
+/// - If the added package specifies a range (such as `^1.0.0`, `latest`, or `rc`), Yarn will add this range as-is in the resulting package.json entry (in particular, tags such as `rc` will be encoded as-is rather than being converted into a semver range).
+///
+/// If the `--cached` option is used, Yarn will preferably reuse the highest version already used somewhere within the project, even if through a transitive dependency.
+///
+/// If the `-i,--interactive` option is used (or if the `preferInteractive` settings is toggled on) the command will first try to check whether other workspaces in the project use the specified package and, if so, will offer to reuse them.
+///
+/// If the `--mode=<mode>` option is set, Yarn will change which artifacts are generated. The modes currently supported are:
+///
+/// - `skip-build` will not run the build scripts at all. Note that this is different from setting `enableScripts` to false because the latter will disable build scripts, and thus affect the content of the artifacts generated on disk, whereas the former will just disable the build step - but not the scripts themselves, which just won't run.
+///
+/// - `update-lockfile` will skip the link step altogether, and only fetch packages that are missing from the lockfile (or that have no associated checksums). This mode is typically used by tools like Renovate or Dependabot to keep a lockfile up-to-date without incurring the full install cost.
+///
+/// For a compilation of all the supported protocols, please consult the dedicated page from our website: https://yarnpkg.com/protocols.
 #[cli::command]
 #[cli::path("add")]
 #[cli::category("Dependency management")]
 pub struct Add {
+    /// Store dependency tags as-is instead of resolving them
     #[cli::option("-F,--fixed", default = false)]
     fixed: bool,
 
+    /// Don't use any semver modifier on the resolved range
     #[cli::option("-E,--exact", default = false)]
     exact: bool,
 
+    /// Use the `~` semver modifier on the resolved range
     #[cli::option("-T,--tilde", default = false)]
     tilde: bool,
 
+    /// Use the `^` semver modifier on the resolved range
     #[cli::option("-C,--caret", default = false)]
     caret: bool,
 
     // ---
 
+    /// Add a package as a peer dependency
     #[cli::option("-P,--peer", default = false)]
     peer: bool,
 
+    /// Add a package as a dev dependency
     #[cli::option("-D,--dev", default = false)]
     dev: bool,
 
+    /// Add / upgrade a package to an optional regular / peer dependency
     #[cli::option("-O,--optional", default = false)]
     optional: bool,
 
+    /// Add / upgrade a package to a dev dependency
     #[cli::option("--prefer-dev", default = false)]
     prefer_dev: bool,
 
     // ---
 
+    /// Select the artifacts this install will generate
     #[cli::option("--mode")]
     mode: Option<InstallMode>,
 
     // ---
 
+    /// Packages to add
     descriptors: Vec<LooseDescriptor>,
 }
 

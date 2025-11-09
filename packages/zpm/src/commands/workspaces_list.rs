@@ -12,22 +12,41 @@ use crate::{
 };
 
 /// List the workspaces in the project
+///
+/// This command will print the list of all workspaces in the project.
+///
+/// - If `--since` is set, Yarn will only list workspaces that have been modified since the specified ref. By default Yarn will use the refs
+///   specified by the `changesetBaseRefs configuration option.
+///
+/// - If `-R,--recursive` is set along with `--since`, Yarn will also list workspaces that depend on workspaces that have been changed since the
+///   specified ref, recursively following `dependencies` and `devDependencies` fields.
+///
+/// - If `--no-private` is set, Yarn will not list any workspaces that have the `private` field set to true.
+///
+/// If both the `-v,--verbose` and `--json` options are set, Yarn will also return the cross-dependencies between each workspaces (useful when you
+/// wish to automatically generate Bazel rules).
+///
 #[cli::command]
 #[cli::path("workspaces", "list")]
 #[cli::category("Workspace commands")]
 pub struct WorkspacesList {
+    /// Also return the cross-dependencies between workspaces
     #[cli::option("-v,--verbose", default = false)]
     verbose: bool,
 
+    /// Also list private workspaces
     #[cli::option("--private", default = true)]
     private: bool,
 
+    /// Only include workspaces that have been changed since the specified ref
     #[cli::option("--since")]
     since: Option<Option<String>>,
 
+    /// Follow dependencies
     #[cli::option("-R,--recursive", default = false)]
     recursive: bool,
 
+    /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
     json: bool,
 }

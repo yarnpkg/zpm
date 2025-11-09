@@ -97,10 +97,10 @@
     padding: 4px 8px;
     background: rgba(42, 87, 219, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(3.35px);
     border-radius: 8px;
     line-height: 150%;
-    color: #c3d2ff;
+    color: var(--color-indigo-300);
+    text-decoration: inherit;
   }
 
   .sl-markdown-content
@@ -132,6 +132,15 @@
     justify-content: center;
   }
 
+  .sl-markdown-content .rjd-annotation p,
+  .sl-markdown-content .rjd-annotation li {
+    margin-top: calc(var(--spacing) * 4);
+  }
+
+  .sl-markdown-content .rjd-annotation > div > :first-child {
+    margin-top: 0;
+  }
+
   .sl-markdown-content h2:not(:where(.not-content *)) {
     font-size: var(--sl-text-h2);
   }
@@ -160,28 +169,28 @@
   }
 
   .sl-markdown-content a:not(:where(.not-content *)) {
-    color: #7388ff;
+    color: var(--color-indigo-200);
     text-decoration: underline;
+    text-decoration-color: currentColor;
     text-underline-offset: 2px;
-    font-weight: 500;
+    text-decoration-thickness: 1px;
     line-height: 160%;
   }
 
   .sl-markdown-content code:not(:where(.not-content *)) a {
-    color: #c3d2ff;
+    color: inherit;
   }
 
   .sl-markdown-content .custom-code-block {
     background: rgba(42, 87, 219, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(3.35px);
     border-radius: 16px;
     padding: 16px;
     line-height: 150%;
     color: #c3d2ff;
 
     a {
-      color: #c3d2ff;
+      color: inherit;
     }
   }
 
@@ -192,12 +201,13 @@
 
   /* Table styling */
   .sl-markdown-content table:not(:where(.not-content *)) {
-    display: block;
-    overflow: auto;
+    width: 100%;
     color: #d3d4d5;
     border-spacing: 0;
     border-radius: 16px;
-    border: 1px solid var(--sl-color-gray-5);
+    border: 1px solid var(--color-gray-800);
+    border-collapse: separate;
+    overflow: hidden;
   }
 
   /* Table Head */
@@ -225,10 +235,14 @@
   }
 
   .sl-markdown-content :is(th, td):not(:where(.not-content *)) {
-    border-bottom: 1px solid var(--sl-color-gray-5);
+    border-bottom: 1px solid var(--color-gray-800);
     padding: 12px 12px;
     vertical-align: middle;
     min-width: 280px;
+  }
+
+  .sl-markdown-content tr:last-child td:not(:where(.not-content *)) {
+    border-bottom: none;
   }
 
   .sl-markdown-content td:last-child:not(:where(.not-content *)) {
@@ -244,21 +258,16 @@
 
   /* Table Vertical borders between headers */
   .sl-markdown-content th:not(:last-child):not(:where(.not-content *)) {
-    border-right: 1px solid var(--sl-color-gray-5);
+    border-right: 1px solid var(--color-gray-800);
   }
 
   /* Table Vertical borders for all cells except last column */
   .sl-markdown-content td:not(:last-child):not(:where(.not-content *)) {
-    border-right: 1px solid var(--sl-color-gray-5);
-  }
-
-  .sl-markdown-content td:not(:where(.not-content *)) *,
-  .sl-markdown-content td:not(:where(.not-content *)) {
-    font-size: 16px !important;
+    border-right: 1px solid var(--color-gray-800);
   }
 
   .sl-markdown-content th:not(:where(.not-content *)) {
-    color: var(--sl-color-white);
+    color: #FFF;
     font-weight: 600;
   }
 
@@ -271,7 +280,7 @@
   .sl-markdown-content
     .starlight-aside
     :is(th, td, hr, blockquote):not(:where(.not-content *)) {
-    border-color: var(--sl-color-gray-4);
+    border-color: var(--color-gray-800);
   }
 
   @supports (
@@ -387,38 +396,6 @@
   .sl-markdown-content .starlight-aside details:not(:where(.not-content *)) {
     --sl-details-border-color: var(--sl-color-asides-border);
     --sl-details-border-color--hover: var(--sl-color-asides-text-accent);
-  }
-
-  .sl-markdown-content li,
-  ol,
-  p:has(code):not(:where(.not-content *)) {
-    code:not(a:has(code)) {
-      padding: 4px 8px;
-      background: rgba(42, 87, 219, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(3.35px);
-      border-radius: 8px;
-      line-height: 150%;
-      color: #c3d2ff;
-      font-size: 14px;
-    }
-
-    a:has(code) {
-      color: #ffb888;
-      text-decoration: underline !important;
-      font-size: 14px;
-
-      code {
-        padding: 4px 8px;
-        color: #7388ff;
-        text-decoration: underline !important;
-        text-underline-offset: 2px;
-        background: rgba(42, 87, 219, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(3.35px);
-        border-radius: 8px;
-      }
-    }
   }
 
   .expressive-code .frame.is-terminal .header::before {

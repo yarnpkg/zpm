@@ -2,7 +2,7 @@
 import type {
   SidebarGroup,
   SidebarEntry,
-} from "node_modules/@astrojs/starlight/utils/routing/types";
+} from "@astrojs/starlight/utils/routing/types";
 import DefaultSidebar from "@/components/sidebar/Sidebar";
 
 const currentBase = Astro.url.pathname.split("/").slice(0, 2).join("/");
@@ -55,7 +55,7 @@ function normalizeLink(link: string) {
     const defaultExpandedGroup = getDefaultExpandedGroup(group.entries);
 
     return (
-      <div class="flex flex-col gap-y-3 z-20 w-80">
+      <div class="flex flex-col gap-y-3 z-20 w-90">
         <DefaultSidebar
           entries={group.entries}
           defaultExpandedGroup={defaultExpandedGroup}

@@ -3,13 +3,21 @@ use clipanion::cli;
 use crate::{error::Error, project::Project};
 
 /// Get a configuration value
+///
+/// This command will print a configuration setting.
+///
+/// Secrets (such as tokens) will be redacted from the output by default. If this behavior isn't desired, set the `--no-redacted` to get the
+/// untransformed value.
+///
 #[cli::command]
 #[cli::path("config", "get")]
 #[cli::category("Configuration commands")]
 pub struct ConfigGet {
+    /// Format the output as a JSON value
     #[cli::option("--json", default = false)]
     json: bool,
 
+    /// The name of the configuration field to retrieve
     name: zpm_parsers::path::Path,
 }
 

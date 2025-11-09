@@ -10,9 +10,22 @@ use crate::{
 };
 
 /// See information related to packages
+///
+/// This command prints various information related to the specified packages, accepting glob patterns.
+///
+/// By default, if the locator reference is missing, Yarn will default to print the information about all the matching direct dependencies of the
+/// package for the active workspace. To instead print all versions of the package that are direct dependencies of any of your workspaces, use the
+/// `-A,--all` flag. Adding the `-R,--recursive` flag will also report transitive dependencies.
+///
+/// Some fields will be hidden by default in order to keep the output readable, but can be selectively displayed by using additional options
+/// (`--dependents`, `--manifest`, `--virtuals`, ...) described in the option descriptions.
+///
+/// Note that this command will only print the information directly related to the selected packages - if you wish to know why the package is there
+/// in the first place, use yarn why which will do just that (it also provides a -R,--recursive flag that may be of some help).
+///
 #[cli::command]
 #[cli::path("info")]
-#[cli::category("Package information")]
+#[cli::category("Dependency management")]
 #[cli::usage(r#"
 This command prints various information related to the specified packages, accepting glob patterns.
 
@@ -23,43 +36,43 @@ Some fields will be hidden by default in order to keep the output readable, but 
 Note that this command will only print the information directly related to the selected packages - if you wish to know why the package is there in the first place, use `yarn why` which will do just that (it also provides a `-R,--recursive` flag that may be of some help).
 "#)]
 pub struct Info {
+    /// Print versions of a package from the whole project
     #[cli::option("-A,--all", default = false)]
-    #[cli::description("Print versions of a package from the whole project")]
     all: bool,
 
+    /// Print information for all packages, including transitive dependencies
     #[cli::option("-R,--recursive", default = false)]
-    #[cli::description("Print information for all packages, including transitive dependencies")]
     recursive: bool,
 
+    /// An array of requests of extra data provided by plugins
     #[cli::option("-X,--extra", default = Vec::new())]
-    #[cli::description("An array of requests of extra data provided by plugins")]
     extra: Vec<String>,
 
+    /// Print information about the cache entry of a package (path, size, checksum)
     #[cli::option("--cache", default = false)]
-    #[cli::description("Print information about the cache entry of a package (path, size, checksum)")]
     cache: bool,
 
+    /// Print all dependents for each matching package
     #[cli::option("--dependents", default = false)]
-    #[cli::description("Print all dependents for each matching package")]
     dependents: bool,
 
+    /// Print data obtained by looking at the package archive (license, homepage, ...)
     #[cli::option("--manifest", default = false)]
-    #[cli::description("Print data obtained by looking at the package archive (license, homepage, ...)")]
     manifest: bool,
 
+    /// Only print the name for the matching packages
     #[cli::option("--name-only", default = false)]
-    #[cli::description("Only print the name for the matching packages")]
     name_only: bool,
 
+    /// Print each instance of the virtual packages
     #[cli::option("--virtuals", default = false)]
-    #[cli::description("Print each instance of the virtual packages")]
     virtuals: bool,
 
+    /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
-    #[cli::description("Format the output as an NDJSON stream")]
     json: bool,
 
-    #[cli::positional]
+    /// The patterns to match
     patterns: Vec<IdentGlob>,
 }
 

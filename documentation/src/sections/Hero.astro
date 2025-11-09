@@ -1,10 +1,10 @@
 ---
 import { Image } from "astro:assets";
 import SearchPackageInterface from "src/features/package/search/SearchPackageInterface.js";
-import {CatShader} from "@/components/CatShader.tsx";
 import Versions from "@/components/HeroVersions";
 import Headline from "@/components/Headline.astro";
 import Heading from "@/components/Heading";
+import {CatShader} from "@/components/CatShader.tsx";
 
 // Images
 import heroBg from "src/assets/image/shine-hero-bg.png";
@@ -12,14 +12,14 @@ import cat from "src/assets/image/logo-cat-nobg.png";
 import heroEllipse from "src/assets/svg/hero-ellipse.svg";
 ---
 
+<div class="absolute inset-0 overflow-hidden -z-40">
+  <div class="w-full aspect-square">
+    <CatShader client:load/>
+  </div>
+</div>
+
 <div class="-mt-32">
   <section class="relative not-content">
-    <div class="absolute left-0 top-0 w-full aspect-square -z-30">
-      <div class="absolute inset-0">
-        <CatShader client:load/>
-      </div>
-    </div>
-
     <div class="container flex flex-col items-start min-h-[100vh] justify-around">
       <div class="flex-none mt-0 h-8"/>
 
@@ -30,7 +30,7 @@ import heroEllipse from "src/assets/svg/hero-ellipse.svg";
 
         <p class="text-white! pt-6 max-w-2xl text-sm md:text-base">
           Yarn is a package manager that doubles down as project manager. Whether
-          you work on simple projects or industry monorepos.
+          you work on simple projects or industry monorepos, Yarn got it covered.
         </p>
 
         <div class="pt-6 lg:pt-8">

@@ -1,6 +1,11 @@
 {
   "name": "@yarnpkg/documentation",
   "type": "module",
+  "repository": {
+    "directory": "documentation",
+    "type": "git",
+    "url": "git+https://github.com/yarnpkg/zpm.git"
+  },
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
@@ -10,10 +15,11 @@
   },
   "dependencies": {
     "@astrojs/preact": "^4.1.0",
-    "@astrojs/starlight": "^0.34.4",
+    "@astrojs/starlight": "^0.36.2",
     "@astrojs/starlight-docsearch": "^0.6.0",
     "@astrojs/starlight-tailwind": "^4.0.1",
     "@base-ui-components/react": "^1.0.0-beta.1",
+    "@expressive-code/core": "^0.41.3",
     "@fontsource/montserrat": "^5.2.6",
     "@mdx-js/preact": "^3.1.0",
     "@monaco-editor/react": "4.7.0-rc.0",
@@ -30,6 +36,7 @@
     "clipanion": "^4.0.0-rc.4",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.13",
+    "dedent": "^1.7.0",
     "dompurify": "^3.2.6",
     "es-toolkit": "^1.39.10",
     "git-url-parse": "^16.1.0",
@@ -41,7 +48,7 @@
     "preact-iso": "^2.9.2",
     "react-instantsearch": "^7.16.0",
     "react-is": "^19.1.1",
-    "react-json-doc": "^2.3.4",
+    "react-json-doc": "arcanis/react-json-doc",
     "react": "npm:@preact/compat@^18.3.1",
     "reading-time": "^1.5.0",
     "recharts": "^3.1.0",
@@ -61,6 +68,9 @@
     "algoliasearch": "^5.37.0",
     "instantsearch.js": "^4.80.0",
     "preact-render-to-string": "^6.6.1",
+    "@clipanion/astro": "file:../scripts/@clipanion-astro.tgz",
+    "@clipanion/expressive-code": "file:../scripts/@clipanion-expressive-code.tgz",
+    "@clipanion/remark": "file:../scripts/@clipanion-remark.tgz",
     "@docsearch/css": "^4.1.0"
   },
   "devDependencies": {
@@ -70,6 +80,7 @@
     "@types/react-is": "^19",
     "@types/resolve": "^1",
     "@types/semver": "^7",
+    "@yarnpkg/monorepo": "workspace:*",
     "vite-plugin-svgr": "^4.3.0"
   }
 }

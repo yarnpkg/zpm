@@ -1,4 +1,5 @@
 {
+  "name": "@yarnpkg/monorepo",
   "packageManager": "yarn@6.0.0-git.20251007.hash-b589d4544f670cbe35ae229f7fedf919dd06af1c",
   "workspaces": [
     "documentation",
@@ -12,6 +13,11 @@
     "lodash": "^4.17.21",
     "typescript": "^5.8.3"
   },
+  "repository": {
+    "directory": "",
+    "type": "git",
+    "url": "git+https://github.com/yarnpkg/zpm.git"
+  },
   "scripts": {
     "berry": "export TEST_BINARY=$PROJECT_CWD/local/yarn && export YARNSW_DEFAULT=local:$PROJECT_CWD/local/yarn-bin && export TEST_MAJOR=5 && cd ${BERRY_DIR:-../berry} && yarn"
   },
@@ -19,5 +25,8 @@
     "@yarnpkg/eslint-config": "^3.1.0",
     "clipanion": "^4.0.0-rc.4",
     "eslint": "^9.36.0"
+  },
+  "resolutions": {
+    "@clipanion/tools": "file:scripts/@clipanion-tools.tgz"
   }
 }

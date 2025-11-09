@@ -8,14 +8,24 @@ use crate::{
 };
 
 /// Set a configuration value
+///
+/// This command will set a configuration setting, by default in the project configuration file unless the `-U,--user` flag is set.
+///
+/// The new value will be hydrated depending on the type of the field being set: primitives such as string will be hydrated directly, while complex
+/// types such as arrays and objects will be hydrated through JSON.
+///
 #[cli::command]
 #[cli::path("config", "set")]
 #[cli::category("Configuration commands")]
 pub struct ConfigSet {
+    // If set, the configuration will be set in the user configuration file
     #[cli::option("-U,--user", default = false)]
     user: bool,
 
+    /// The name of the configuration value to set
     name: zpm_parsers::Path,
+
+    /// The value to set the configuration value to
     value: String,
 }
 

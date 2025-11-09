@@ -1,7 +1,9 @@
 import preact                       from '@astrojs/preact';
 import starlightDocSearch           from '@astrojs/starlight-docsearch';
 import starlight                    from '@astrojs/starlight';
+import {clipanionRemark}            from '@clipanion/remark';
 import tailwindcss                  from '@tailwindcss/vite';
+import path from 'path';
 // @ts-check
 import {defineConfig}               from 'astro/config';
 import starlightAutoSidebar         from 'starlight-auto-sidebar';
@@ -10,7 +12,6 @@ import svgr                         from 'vite-plugin-svgr';
 import {remarkCommandLineHighlight} from './src/plugins/remark-command-line-highlight.mjs';
 import {remarkModifiedTime}         from './src/plugins/remark-modified-time.mjs';
 import {remarkReadingTime}          from './src/plugins/remark-reading-time.mjs';
-import yarnCliDocs                  from './src/plugins/yarn-cli-docs';
 
 // eslint-disable-next-line arca/no-default-export
 export default defineConfig({
@@ -19,72 +20,62 @@ export default defineConfig({
     : `https://yarnpkg.com`,
   base: `/`,
   output: `static`,
+  trailingSlash: `never`,
   prefetch: {
     prefetchAll: true,
   },
   integrations: [
     starlight({
       title: `Yarn`,
-      head: [
-        // Example: add Fathom analytics script tag.
-        {
-          tag: `meta`,
-          attrs: {
-            name: `robots`,
-            content: `noindex`,
-          },
+      head: [{
+        tag: `meta`,
+        attrs: {
+          name: `robots`,
+          content: `noindex`,
         },
-      ],
-      social: [
-        {
-          icon: `discord`,
-          label: `Discord`,
-          href: `https://discord.com/invite/yarnpkg`,
-        },
-        {
-          icon: `github`,
-          label: `GitHub`,
-          href: `https://github.com/yarnpkg/zpm`,
-        },
-      ],
-      sidebar: [
-        {
-          label: `Getting Started`,
+      }],
+      social: [{
+        icon: `discord`,
+        label: `Discord`,
+        href: `https://discord.com/invite/yarnpkg`,
+      }, {
+        icon: `github`,
+        label: `GitHub`,
+        href: `https://github.com/yarnpkg/zpm`,
+      }],
+      sidebar: [{
+        label: `Getting Started`,
+        collapsed: true,
+        autogenerate: {directory: `getting-started`},
+      }, {
+        label: `CLI`,
+        items: [{
+          label: ``,
           collapsed: true,
-          autogenerate: {directory: `getting-started`},
-        },
-        {
-          label: `CLI`,
-          items: [
-            {
-              label: ``,
-              collapsed: true,
-              autogenerate: {directory: `cli/cli`},
-            },
-            {
-              label: ``,
-              autogenerate: {directory: `cli/builder`},
-            },
-            {
-              label: ``,
-              autogenerate: {directory: `cli/pnpify`},
-            },
-            {
-              label: ``,
-              autogenerate: {directory: `cli/sdks`},
-            },
-          ],
-        },
-        {
-          label: `Advanced`,
-          autogenerate: {directory: `advanced`},
-        },
-        {label: `Features`, autogenerate: {directory: `features`}},
-        {
-          label: `Configuration`,
-          autogenerate: {directory: `configuration`},
-        },
-      ],
+          autogenerate: {directory: `cli/cli`},
+        }, {
+          label: ``,
+          autogenerate: {directory: `cli/builder`},
+        }, {
+          label: ``,
+          autogenerate: {directory: `cli/pnpify`},
+        }, {
+          label: ``,
+          autogenerate: {directory: `cli/sdks`},
+        }],
+      }, {
+        label: `Concepts`,
+        autogenerate: {directory: `concepts`},
+      }, {
+        label: `Appendix`,
+        autogenerate: {directory: `appendix`},
+      }, {
+        label: `Contributing`,
+        autogenerate: {directory: `contributing`},
+      }, {
+        label: `Reference`,
+        autogenerate: {directory: `reference`},
+      }],
       components: {
         SocialIcons: `./src/overrides/CustomSocialIcons.astro`,
         Header: `./src/overrides/navigation/index.astro`,
@@ -112,6 +103,8 @@ export default defineConfig({
         }),
       ],
       expressiveCode: {
+        useStarlightDarkModeSwitch: false,
+        useDarkModeMediaQuery: false,
         styleOverrides: {
           borderRadius: `16px`,
           borderWidth: `1.5px`,
@@ -122,8 +115,9 @@ export default defineConfig({
           codePaddingBlock: `16px`,
           frames: {
             terminalTitlebarBackground: `rgba(255, 255, 255, 0.03)`,
+            terminalTitlebarBorderBottomColor: `rgba(255, 255, 255, 0.05)`,
           },
-        },
+        }
       },
       disable404Route: true,
       tableOfContents: false,
@@ -131,7 +125,6 @@ export default defineConfig({
       pagefind: false,
     }),
     preact({compat: true}),
-    yarnCliDocs(),
   ],
   vite: {
     plugins: [tailwindcss(), svgr()],
@@ -158,7 +151,15 @@ export default defineConfig({
     remarkPlugins: [
       remarkReadingTime,
       remarkModifiedTime,
-      remarkCommandLineHighlight,
+      [clipanionRemark, {
+        clis: {
+          yarn: {
+            baseUrl: `https://example.org/git`,
+            path: path.resolve(import.meta.dirname, `../target/release/yarn-bin`),
+          },
+        },
+        enableBlocks: false,
+      }],
     ],
   },
 });

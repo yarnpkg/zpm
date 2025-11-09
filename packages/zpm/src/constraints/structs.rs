@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use zpm_parsers::RawJsonValue;
 use zpm_primitives::{Ident, Locator, Range};
 use zpm_utils::{ColoredJsonValue, DataType, Path, ToFileString, ToHumanString};
 
@@ -122,7 +121,7 @@ pub enum WorkspaceError {
 pub enum WorkspaceOperation {
     Set {
         path: Vec<String>,
-        value: RawJsonValue,
+        value: serde_json::Value,
     },
     Unset {
         path: Vec<String>,

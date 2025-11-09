@@ -10,16 +10,28 @@ use zpm_utils::{DataType, Path, ToFileString, ToHumanString};
 use crate::{error::Error, fetchers::PackageData, install::InstallResult, project::{self, Project, RunInstallOptions}};
 
 /// Start writing a patch for the package
+///
+/// This command will cause a package to be extracted in a temporary directory intended to be editable at will.
+///
+/// Once you're done with your changes, run `yarn patch-commit -s path` (with `path` being the temporary directory you received) to generate a
+/// patchfile and register it into your top-level manifest via the `patch:` protocol. Run `yarn patch-commit -h` for more details.
+///
+/// Calling the command when you already have a patch won't import it by default (in other words, the default behavior is to reset existing
+/// patches). However, adding the `-u,--update` flag will import any current patch.
+///
 #[cli::command]
 #[cli::path("patch")]
 #[cli::category("Dependency management")]
 pub struct Patch {
+    /// Reapply local patches that already apply to this packages
     #[cli::option("-u,--update", default = false)]
     update: bool,
 
+    /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
     json: bool,
 
+    /// Package to patch
     ident: Ident,
 }
 

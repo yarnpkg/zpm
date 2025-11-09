@@ -30,8 +30,11 @@ pub async fn check_constraints(project: &Project, fix: bool) -> Result<Constrain
         packages: constraints_packages,
     };
 
-    let config_path = project.project_cwd
-        .with_join_str("yarn.config.cjs");
+    let config_path =
+        [".ts", ".mjs", ".cjs"].iter()
+            .map(|ext| project.project_cwd.with_join_str(&format!("yarn.config{}", ext)))
+            .find(|path| path.fs_exists())
+            .ok_or(Error::ConstraintsConfigNotFound)?;
 
     let script
         = generate_constraints_adapter(&config_path, &constraints_context, fix);
@@ -58,8 +61,11 @@ pub async fn check_constraints(project: &Project, fix: bool) -> Result<Constrain
     let result_content = result_path
         .fs_read_prealloc()?;
 
+    // We can't use sonic_rs here (and thus JsonDocument) due to this bug:
+    // https://github.com/cloudwego/sonic-rs/issues/181
     let mut output
-        = JsonDocument::hydrate_from_slice::<ConstraintsOutput>(&result_content)?;
+        = serde_json::from_slice::<ConstraintsOutput>(&result_content)
+            .expect("Failed to deserialize ConstraintsOutput");
 
     output.raw_json = result_content;
 

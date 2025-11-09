@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "declaration": true,
     "esModuleInterop": true,
     "experimentalDecorators": true,
     "lib": ["DOM", "ES2022"],

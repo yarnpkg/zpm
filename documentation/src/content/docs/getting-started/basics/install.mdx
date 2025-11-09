@@ -1,52 +1,33 @@
 ---
 category: getting-started
-slug: getting-started/install
+slug: getting-started
 title: Installation
 description: Yarn's in-depth installation guide.
 sidebar_position: 2
 ---
 
-1. Install [Corepack](/corepack), an intermediary tool that will let you configure your package manager version on a per-project basis:
+Yarn is intended to be used with [Yarn Switch](/concepts/switch), a tool letting you use different Yarn versions depending on the project you're working on.
 
-```
-npm install -g corepack
+```bash
+curl -sS https://repo.yarnpkg.com/install | bash
 ```
 
-2. Then initialize a new project:
+:::caution
+You will likely have to restart your terminal session for the changes to take effect.
+:::
 
-```
-yarn init -2
+Once Yarn Switch is ready, just initialize a new project:
+
+```bash
+yarn init
 ```
 
 ## Updating Yarn
 
 Any time you'll want to update Yarn to the latest version, just run:
 
-```
-yarn set version stable
-yarn install
+```bash
+yarn set version latest
 ```
 
 Yarn will then configure your project to use the most recent stable binary.
-
-:::tip
-Yarn also frequently ships Release Candidate builds. Use `yarn set version canary` should you need a feature not released on the stable channel yet. Those builds are very stable, the only difference with the regular channel being a more staggered migration between major as we implement new breaking changes.
-:::
-
-## Installing the latest build fresh from master
-
-You may want to test a version of Yarn so recent it hasn't been released in a Release Candidate yet, or even not merged. The following command will clone, build, and install Yarn in your project, straight from our repository:
-
-```
-yarn set version from sources
-```
-
-It accepts a `--branch` flag which you can use to test specific PRs:
-
-```
-yarn set version from sources --branch 1211
-```
-
-:::caution
-Unlike the stable and canary channels, the `yarn set version from sources` command can't leverage Corepack and will need to store the Yarn binary inside the `.yarn/releases` folder and reference it from your project's `.yarnrc.yml` file.
-:::
