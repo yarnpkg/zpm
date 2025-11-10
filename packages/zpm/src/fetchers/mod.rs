@@ -61,6 +61,14 @@ pub enum PackageData {
 }
 
 impl PackageData {
+    pub fn symlink_target(&self) -> Option<&Path> {
+        if let PackageData::Local {package_directory, ..} = self {
+            Some(package_directory)
+        } else {
+            None
+        }
+    }
+
     /** Top-most context directory of the package */
     pub fn data_root(&self) -> &Path {
         match self {

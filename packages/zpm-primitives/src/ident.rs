@@ -17,6 +17,13 @@ impl Ident {
         Ident(full.as_ref().to_string())
     }
 
+    pub fn split(&self) -> (Option<&str>, &str) {
+        self.0.split_once('/').map_or(
+            (None, self.0.as_str()),
+            |(scope, name)| (Some(scope), name),
+        )
+    }
+
     pub fn scope(&self) -> Option<&str> {
         self.0.split_once('/').map(|(scope, _)| scope)
     }

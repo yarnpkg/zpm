@@ -1,31 +1,104 @@
 use std::collections::BTreeMap;
 
+use zpm_sync::{FileOp, SyncItem, SyncTemplate, SyncTree};
+use zpm_utils::{Path, ToHumanString};
+
 use crate::{
-    build::BuildRequests,
-    error::Error,
-    install::{Install, InstallState},
-    linker::{nm::hoist::{Hoister, InputTree, WorkTree}, LinkResult},
-    project::Project,
+    build::BuildRequests, error::Error, fetchers::PackageData, install::Install, linker::{LinkResult, nm::hoist::{Hoister, WorkTree}}, project::Project
 };
 
 pub mod hoist;
 
-pub fn hoist_install(project: &Project, install_state: &InstallState) -> Result<WorkTree, Error> {
-    let input_tree
-        = InputTree::from_install_state(project, install_state);
+const EXPECT_CHILDREN: &str = "All nodes should be expanded by the end of the hoisting process";
 
+pub async fn link_project_nm(project: &Project, install: &Install) -> Result<LinkResult, Error> {
     let mut work_tree
-        = WorkTree::from_input_tree(&input_tree);
+        = WorkTree::new(project, &install.install_state);
 
     let mut hoister
         = Hoister::new(&mut work_tree);
 
     hoister.hoist();
 
-    Ok(work_tree)
-}
+    let mut project_queue
+        = vec![0usize];
 
-pub async fn link_project_nm(_project: &Project, _install: &Install) -> Result<LinkResult, Error> {
+    while let Some(workspace_node_idx) = project_queue.pop() {
+        let workspace_node
+            = &work_tree.nodes[workspace_node_idx];
+
+        let workspace
+            = project.try_workspace_by_locator(&workspace_node.locator)?
+                .expect("We're only supposed to be dealing with workspaces here");
+
+        let workspace_abs_path
+            = project.project_cwd
+                .with_join(&workspace.rel_path)
+                .with_join_str("node_modules");
+
+        let mut workspace_nm_tree
+            = SyncTree::new();
+
+        workspace_nm_tree.dry_run = false;
+
+        let mut workspace_queue
+            = vec![(Path::new(), workspace_node_idx)];
+
+        while let Some((node_rel_path, node_idx)) = workspace_queue.pop() {
+            let node
+                = &work_tree.nodes[node_idx];
+
+            let children
+                = node.children.as_ref()
+                    .expect(EXPECT_CHILDREN);
+
+            for (ident, child_idx) in children {
+                let child_node
+                    = &work_tree.nodes[*child_idx];
+
+                let child_rel_path
+                    = node_rel_path.with_join_str(&ident.as_str());
+
+                workspace_queue.push((child_rel_path.with_join_str("node_modules"), *child_idx));
+
+                let package_data
+                    = &install.package_data[&child_node.locator.physical_locator()];
+
+                match package_data {
+                    PackageData::Local {package_directory, ..} => {
+                        let child_abs_path
+                            = workspace_abs_path.with_join(&child_rel_path);
+
+                        let target_path
+                            = package_directory.relative_to(&child_abs_path.dirname().unwrap());
+
+                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
+                            target_path: target_path.clone(),
+                        })?;
+                    },
+
+                    PackageData::Zip {archive_path, package_directory, ..} => {
+                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Folder {
+                            template: Some(SyncTemplate::Zip {
+                                archive_path: archive_path.clone(),
+                                inner_path: package_directory.relative_to(&archive_path),
+                            }),
+                        })?;
+                    },
+
+                    PackageData::MissingZip {..} => {
+                        // Nothing to do here
+                    },
+                }
+            }
+        }
+
+        workspace_nm_tree
+            .run(workspace_abs_path)?;
+
+        project_queue.extend_from_slice(&workspace_node.workspaces_idx);
+    }
+
     Ok(LinkResult {
         packages_by_location: BTreeMap::new(),
         build_requests: BuildRequests {

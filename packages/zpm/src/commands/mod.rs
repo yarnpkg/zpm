@@ -46,6 +46,7 @@ pub enum YarnCli {
     IterZip(debug::iter_zip::IterZip),
     PrintHoisting(debug::print_hoisting::PrintHoisting),
     PrintPlatform(debug::print_platform::PrintPlatform),
+    SyncFs(debug::sync_fs::SyncFs),
 
     Login(npm::login::Login),
     LogoutAll(npm::logout_all::LogoutAll),

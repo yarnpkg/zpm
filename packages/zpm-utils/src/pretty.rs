@@ -89,3 +89,20 @@ impl Serialize for TimeAgo {
         self.duration.serialize(serializer)
     }
 }
+
+#[derive(Debug)]
+pub struct Serialized<T> {
+    value: T,
+}
+
+impl<T> Serialized<T> {
+    pub fn new(value: T) -> Self {
+        Self {value}
+    }
+}
+
+impl<T: Serialize> ToHumanString for Serialized<T> {
+    fn to_print_string(&self) -> String {
+        DataType::String.colorize(&serde_json::to_string(&self.value).unwrap())
+    }
+}
