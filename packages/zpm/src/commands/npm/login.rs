@@ -174,17 +174,12 @@ impl Login {
     }
 
     async fn web_login_init(&self, http_client: &HttpClient, registry: &str) -> Result<Option<NpmWebLoginInitResponse>, Error> {
-        let headers = HeaderMap::from_iter([
-            (HeaderName::from_static("npm-auth-type"), HeaderValue::from_static("web")),
-        ]);
-
-        let response = http_npm::post(&NpmHttpParams {
-            http_client,
-            registry,
-            path: "/-/v1/login",
-            authorization: None,
-            headers: Some(headers),
-        }, "{}".to_string()).await?;
+        let response = http_client
+            .post(format!("{}/-/v1/login", registry))?
+            .header("npm-auth-type", Some("web"))
+            .enable_status_check(false)
+            .send()
+            .await?;
 
         if !response.status().is_success() {
             return Ok(None);
