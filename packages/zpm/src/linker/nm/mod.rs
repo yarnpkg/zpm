@@ -1,169 +1,15 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::collections::BTreeMap;
 
-use itertools::Itertools;
-use zpm_primitives::Locator;
-use zpm_utils::Path;
+use zpm_sync::{FileOp, SyncItem, SyncTemplate, SyncTree};
+use zpm_utils::{Path, ToHumanString};
 
 use crate::{
-    build::BuildRequests, error::Error, fetchers::PackageData, graph::{GraphIn, GraphOut}, install::Install, linker::{self, LinkResult, nm::hoist::{Hoister, WorkTree}}, project::Project
+    build::BuildRequests, error::Error, fetchers::PackageData, install::Install, linker::{LinkResult, nm::hoist::{Hoister, WorkTree}}, project::Project
 };
 
 pub mod hoist;
 
 const EXPECT_CHILDREN: &str = "All nodes should be expanded by the end of the hoisting process";
-
-struct LinkContext<'a> {
-    install: &'a Install,
-    work_tree: &'a WorkTree<'a>,
-}
-
-enum LinkOp<'a> {
-    #[allow(dead_code)]
-    Phantom(PhantomData<&'a ()>),
-
-    CreateContainer {
-        node_idx: usize,
-        path: Path,
-    },
-
-    ExtractPackage {
-        locator: Locator,
-        path: Path,
-    },
-}
-
-enum LinkOpResult {
-    ContainerCreated {
-        node_idx: usize,
-        path: Path,
-    },
-
-    PackageExtracted,
-}
-
-impl<'a> GraphOut<LinkContext<'a>, LinkOp<'a>> for LinkOpResult {
-    fn graph_follow_ups(&self, ctx: &LinkContext<'a>) -> Vec<LinkOp<'a>> {
-        match self {
-            LinkOpResult::ContainerCreated {node_idx, path} => {
-                let node
-                    = &ctx.work_tree.nodes[*node_idx];
-
-                let children = node.children
-                    .as_ref()
-                    .expect(EXPECT_CHILDREN);
-
-                let nm_ops = children.values()
-                    .map(|child_idx| (*child_idx, &ctx.work_tree.nodes[*child_idx]))
-                    .filter(|(_, child_node)| !child_node.children.as_ref().expect(EXPECT_CHILDREN).is_empty())
-                    .map(|(child_idx, child_node)| LinkOp::CreateContainer {node_idx: child_idx, path: path.with_join(&child_node.locator.ident.nm_subdir())});
-
-                let extract_ops = children.values()
-                    .map(|child_idx| ctx.work_tree.nodes[*child_idx].locator.physical_locator())
-                    .flat_map(|child_locator| ctx.install.package_data.get(&child_locator).map(|package_data| (child_locator, package_data)))
-                    .filter(|(_, package_data)| matches!(package_data, PackageData::Zip {..}))
-                    .map(|(child_locator, _)| LinkOp::ExtractPackage {locator: child_locator.clone(), path: path.with_join(&child_locator.ident.nm_subdir())});
-
-                nm_ops
-                    .chain(extract_ops)
-                    .collect_vec()
-            },
-
-            LinkOpResult::PackageExtracted => {
-                vec![]
-            },
-        }
-    }
-}
-
-impl<'a> GraphIn<'a, LinkContext<'a>, LinkOpResult, Error> for LinkOp<'a> {
-    fn graph_dependencies(&self, _ctx: &LinkContext<'a>, _resolved_dependencies: &[&LinkOpResult]) -> Vec<Self> {
-        vec![]
-    }
-
-    async fn graph_run(self, context: LinkContext<'a>, _dependencies: Vec<LinkOpResult>) -> Result<LinkOpResult, Error> {
-        match self {
-            LinkOp::Phantom(_) =>
-                unreachable!("PhantomData should never be instantiated"),
-
-            LinkOp::CreateContainer {node_idx, path} => {
-                let node
-                    = &context.work_tree.nodes[node_idx];
-
-                let children
-                    = node.children.as_ref()
-                        .expect(EXPECT_CHILDREN);
-
-                if !children.is_empty() {
-                    let nm_path
-                        = path.with_join_str("node_modules");
-
-                    nm_path.fs_create_dir();
-
-                    for &child_idx in children.values() {
-                        let child_node
-                            = &context.work_tree.nodes[child_idx];
-
-                        let (scope, name)
-                            = child_node.locator.ident.split();
-
-                        let mut current
-                            = nm_path.clone();
-
-                        if let Some(scope) = scope {
-                            current.join_str(scope);
-                            current.fs_create_dir();
-                        }
-
-                        let physical_locator
-                            = child_node.locator.physical_locator();
-
-                        let package_data
-                            = &context.install.package_data[&physical_locator];
-
-                        if let PackageData::Local {package_directory, ..} = package_data {
-                            let relative_path
-                                = package_directory.relative_to(&current);
-
-                            current.join_str(name);
-                            current.fs_symlink(&relative_path);
-                        } else {
-                            current.join_str(name);
-                            current.fs_create_dir();
-
-                            let has_own_children
-                                = !child_node.children.as_ref()
-                                    .expect(EXPECT_CHILDREN)
-                                    .is_empty();
-
-                            if has_own_children {
-                                current.join_str("node_modules");
-                                current.fs_create_dir();
-                            }
-                        }
-                    }
-                }
-
-                Ok(LinkOpResult::ContainerCreated {node_idx, path})
-            },
-
-            LinkOp::ExtractPackage {locator, path} => {
-                let physical_locator
-                    = locator.physical_locator();
-
-                let physical_package_data
-                    = &context.install.package_data[&physical_locator];
-
-                linker::helpers::fs_extract_archive(
-                    &path,
-                    physical_package_data,
-                )?;
-
-                Ok(LinkOpResult::PackageExtracted)
-            },
-        }
-    }
-}
-
 
 pub async fn link_project_nm(project: &Project, install: &Install) -> Result<LinkResult, Error> {
     let mut work_tree
@@ -174,14 +20,83 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
 
     hoister.hoist();
 
-    let mut workspace_queue
+    let mut project_queue
         = vec![0usize];
 
-    while let Some(node_idx) = workspace_queue.pop() {
-        let node
-            = &work_tree.nodes[node_idx];
+    while let Some(workspace_node_idx) = project_queue.pop() {
+        let workspace_node
+            = &work_tree.nodes[workspace_node_idx];
 
-        workspace_queue.extend_from_slice(&node.workspaces_idx);
+        let workspace
+            = project.try_workspace_by_locator(&workspace_node.locator)?
+                .expect("We're only supposed to be dealing with workspaces here");
+
+        let workspace_abs_path
+            = project.project_cwd
+                .with_join(&workspace.rel_path)
+                .with_join_str("node_modules");
+
+        let mut workspace_nm_tree
+            = SyncTree::new();
+
+        workspace_nm_tree.dry_run = false;
+
+        let mut workspace_queue
+            = vec![(Path::new(), workspace_node_idx)];
+
+        while let Some((node_rel_path, node_idx)) = workspace_queue.pop() {
+            let node
+                = &work_tree.nodes[node_idx];
+
+            let children
+                = node.children.as_ref()
+                    .expect(EXPECT_CHILDREN);
+
+            for (ident, child_idx) in children {
+                let child_node
+                    = &work_tree.nodes[*child_idx];
+
+                let child_rel_path
+                    = node_rel_path.with_join_str(&ident.as_str());
+
+                workspace_queue.push((child_rel_path.with_join_str("node_modules"), *child_idx));
+
+                let package_data
+                    = &install.package_data[&child_node.locator.physical_locator()];
+
+                match package_data {
+                    PackageData::Local {package_directory, ..} => {
+                        let child_abs_path
+                            = workspace_abs_path.with_join(&child_rel_path);
+
+                        let target_path
+                            = package_directory.relative_to(&child_abs_path.dirname().unwrap());
+
+                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
+                            target_path: target_path.clone(),
+                        })?;
+                    },
+
+                    PackageData::Zip {archive_path, package_directory, ..} => {
+                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Folder {
+                            template: Some(SyncTemplate::Zip {
+                                archive_path: archive_path.clone(),
+                                inner_path: package_directory.relative_to(&archive_path),
+                            }),
+                        })?;
+                    },
+
+                    PackageData::MissingZip {..} => {
+                        // Nothing to do here
+                    },
+                }
+            }
+        }
+
+        workspace_nm_tree
+            .run(workspace_abs_path)?;
+
+        project_queue.extend_from_slice(&workspace_node.workspaces_idx);
     }
 
     Ok(LinkResult {

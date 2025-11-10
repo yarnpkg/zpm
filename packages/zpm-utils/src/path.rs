@@ -170,6 +170,10 @@ impl Path {
         self.path.is_empty()
     }
 
+    pub fn segments(&self) -> Split<'_, char> {
+        self.path.split('/')
+    }
+
     /// ```
     /// use zpm_utils::p;
     ///
@@ -813,6 +817,10 @@ impl Path {
     pub fn fs_symlink(&self, target: &Path) -> Result<&Self, PathError> {
         std::os::unix::fs::symlink(&target.path, &self.path)?;
         Ok(self)
+    }
+
+    pub fn fs_read_link(&self) -> Result<Path, PathError> {
+        Ok(Path::try_from(std::fs::read_link(&self.to_path_buf())?)?)
     }
 
     pub fn without_ext(&self) -> Path {

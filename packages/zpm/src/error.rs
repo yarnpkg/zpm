@@ -48,6 +48,9 @@ pub enum Error {
     #[error(transparent)]
     SyncError(#[from] zpm_utils::SyncError),
 
+    #[error(transparent)]
+    SyncError2(#[from] zpm_sync::SyncError),
+
     #[error("Conflicting options: {0}")]
     ConflictingOptions(String),
 

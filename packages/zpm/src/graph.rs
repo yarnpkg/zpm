@@ -46,8 +46,8 @@ impl<TIn, TOut, TErr> GraphTaskResults<TIn, TOut, TErr> {
         }
     }
 
-    pub fn unwrap(self) -> HashMap<TIn, TOut> {
-        assert!(self.failed.is_empty());
+    pub fn unwrap(self) -> HashMap<TIn, TOut> where TIn: Debug + Eq + Hash, TOut: Debug, TErr: Debug {
+        assert!(self.failed.is_empty(), "Expected no failed tasks, got: {:?}", self.failed);
 
         self.success
     }

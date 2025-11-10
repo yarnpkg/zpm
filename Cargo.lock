@@ -4192,6 +4192,7 @@ dependencies = [
  "zpm-primitives",
  "zpm-semver",
  "zpm-switch",
+ "zpm-sync",
  "zpm-utils",
 ]
 
@@ -4345,6 +4346,18 @@ dependencies = [
  "zpm-macro-enum",
  "zpm-parsers",
  "zpm-semver",
+ "zpm-utils",
+]
+
+[[package]]
+name = "zpm-sync"
+version = "0.0.0"
+dependencies = [
+ "itertools 0.13.0",
+ "serde",
+ "serde_derive",
+ "thiserror 2.0.16",
+ "zpm-formats",
  "zpm-utils",
 ]
 

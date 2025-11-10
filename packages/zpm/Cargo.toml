@@ -36,6 +36,7 @@ zpm-parsers = { path = "../zpm-parsers" }
 zpm-primitives = { path = "../zpm-primitives" }
 zpm-semver = { path = "../zpm-semver" }
 zpm-switch = { path = "../zpm-switch" }
+zpm-sync = { path = "../zpm-sync" }
 zpm-utils = { path = "../zpm-utils" }
 pretty-duration = "0.1.1"
 convert_case = "0.8.0"
