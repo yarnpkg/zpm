@@ -122,7 +122,7 @@
       "description": "The username to use for authentication when querying the npm registry"
     },
     "npmAuthToken": {
-      "type": ["string", "null"],
+      "type": ["zpm_utils::Secret<String>", "null"],
       "description": "The token to use for authentication when querying the npm registry"
     },
     "npmPublishRegistry": {
@@ -145,7 +145,7 @@
             "description": "The username to use for authentication when querying the npm registry"
           },
           "npmAuthToken": {
-            "type": ["string", "null"],
+            "type": ["zpm_utils::Secret<String>", "null"],
             "description": "The token to use for authentication when querying the npm registry"
           }
         }
@@ -180,7 +180,7 @@
             "description": "The username to use for authentication when querying the npm registry"
           },
           "npmAuthToken": {
-            "type": ["string", "null"],
+            "type": ["zpm_utils::Secret<String>", "null"],
             "description": "The token to use for authentication when querying the npm registry"
           }
         }

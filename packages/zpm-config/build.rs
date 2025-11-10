@@ -291,7 +291,7 @@ impl Generator {
 
         for (struct_name, fields) in &self.structs {
             writeln!(writer).unwrap();
-            writeln!(writer, "#[derive(Debug, Clone, Deserialize)]").unwrap();
+            writeln!(writer, "#[derive(Debug, Clone, Serialize, Deserialize)]").unwrap();
             writeln!(writer, "#[serde(rename_all = \"camelCase\")]").unwrap();
             writeln!(writer, "pub struct {struct_name} {{").unwrap();
 

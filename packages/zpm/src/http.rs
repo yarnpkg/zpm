@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, net::SocketAddr, sync::{Arc, LazyLock, OnceLock}, time::Duration};
+use std::{collections::{BTreeMap, HashMap, HashSet}, net::SocketAddr, sync::{Arc, LazyLock, OnceLock}, time::Duration};
 
 use hickory_resolver::{config::LookupIpStrategy, TokioResolver};
 use http::HeaderMap;
@@ -310,6 +310,14 @@ impl<'a> HttpRequest<'a> {
     pub fn headers(&self) -> HeaderMap {
         // TODO: This is filthy
         self.builder.try_clone().unwrap().build().unwrap().headers().clone()
+    }
+
+    pub fn add_headers(mut self, headers: Option<HeaderMap>) -> Self {
+        if let Some(headers) = headers {
+            self.builder = self.builder.headers(headers);
+        }
+
+        self
     }
 
     pub fn header<K, V>(mut self, key: K, value: Option<V>) -> Self

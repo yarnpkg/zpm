@@ -1,5 +1,6 @@
-use std::sync::LazyLock;
+use std::{collections::BTreeMap, sync::LazyLock};
 
+use http::HeaderMap;
 use regex::{Captures, Regex};
 use reqwest::Response;
 use serde::Deserialize;
@@ -19,6 +20,7 @@ pub struct NpmHttpParams<'a> {
     pub registry: &'a str,
     pub path: &'a str,
     pub authorization: Option<&'a str>,
+    pub headers: Option<HeaderMap>,
 }
 
 pub enum AuthorizationMode {
@@ -132,7 +134,7 @@ pub fn get_authorization(config: &Configuration, registry: &str, ident: Option<&
             .or_else(|| config.settings.npm_auth_token.value.as_ref());
 
     if let Some(auth_token) = auth_token {
-        return Some(format!("Bearer {}", auth_token));
+        return Some(format!("Bearer {}", auth_token.value));
     }
 
     let auth_ident
@@ -159,6 +161,40 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Response, Error> {
             .header("authorization", params.authorization);
 
     Ok(request.send().await?)
+}
+
+pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {
+    let url
+        = format!("{}{}", params.registry, params.path);
+
+    let mut request
+        = params.http_client.post(url)?
+            .enable_status_check(false)
+            .add_headers(params.headers.clone())
+            .header("content-type", Some("application/json"))
+            .header("authorization", params.authorization)
+            .body(body);
+
+    let mut response
+        = request
+            .try_clone()
+            .expect("Failed to clone request")
+            .send()
+            .await?;
+
+    if is_otp_error(&response) {
+        render_otp_notice(&response).await;
+
+        let otp
+            = ask_for_otp().await?;
+
+        request = inject_otp_headers(request, otp);
+        response = request.send().await?;
+    }
+
+    handle_invalid_authentication_error(params, &response).await?;
+
+    Ok(response.error_for_status()?)
 }
 
 pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {

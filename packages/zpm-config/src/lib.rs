@@ -1,9 +1,9 @@
 use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc};
 
-use serde::{de, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use zpm_primitives::{Descriptor, Locator, PeerRange, Range, Reference};
 use zpm_semver::RangeKind;
-use zpm_utils::{AbstractValue, FromFileString, Glob, IoResultExt, Path};
+use zpm_utils::{AbstractValue, Container, FromFileString, Glob, IoResultExt, Path, Secret};
 
 #[derive(Debug, Clone)]
 pub struct ConfigurationContext {
@@ -21,6 +21,7 @@ pub enum Source {
     Project,
     Environment,
     Cli,
+    Mixed,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -38,6 +39,12 @@ impl<T> Setting<T> {
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for Setting<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(Self {value: T::deserialize(deserializer)?, source: Source::Default})
+    }
+}
+
+impl<T: Serialize> Serialize for Setting<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        self.value.serialize(serializer)
     }
 }
 
@@ -155,7 +162,7 @@ trait MergeSettings: Sized {
     ) -> Self;
 }
 
-impl<K: Ord + FromFileString, T: MergeSettings> MergeSettings for BTreeMap<K, T> {
+impl<K: Ord + FromFileString + Serialize + std::fmt::Debug, T: MergeSettings + Serialize + std::fmt::Debug> MergeSettings for BTreeMap<K, T> {
     type Intermediate = BTreeMap<K, T::Intermediate>;
 
     fn from_env_string(_value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
@@ -180,7 +187,10 @@ impl<K: Ord + FromFileString, T: MergeSettings> MergeSettings for BTreeMap<K, T>
 
     fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
         let Some(key_str) = path.first() else {
-            unimplemented!("Configuration maps cannot be returned directly just yet");
+            return Ok(ConfigurationEntry {
+                value: AbstractValue::new(Container::new(self)),
+                source: Source::Mixed,
+            });
         };
 
         let Ok(key) = K::from_file_string(key_str) else {
@@ -586,13 +596,17 @@ impl Configuration {
     }
 
     pub fn load(context: &ConfigurationContext) -> Result<Configuration, ConfigurationError> {
+        let rc_filename
+            = std::env::var("YARN_RC_FILENAME")
+                .unwrap_or_else(|_| ".yarnrc.yml".to_string());
+
         let user_config_path = context.user_cwd
             .as_ref()
-            .map(|path| path.with_join_str(".yarnrc.yml"));
+            .map(|path| path.with_join_str(&rc_filename));
 
         let project_config_path = context.project_cwd
             .as_ref()
-            .map(|path| path.with_join_str(".yarnrc.yml"));
+            .map(|path| path.with_join_str(&rc_filename));
 
         let mut intermediate_user_config
             = Partial::Missing;
@@ -653,6 +667,8 @@ merge_settings!(usize, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(u64, |s: &str| FromFileString::from_file_string(s).unwrap());
 
 merge_settings!(zpm_formats::CompressionAlgorithm, |s: &str| FromFileString::from_file_string(s).unwrap());
+
+merge_settings!(Secret<String>, |s: &str| FromFileString::from_file_string(s).unwrap());
 
 merge_settings!(crate::types::NodeLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());

@@ -1,5 +1,6 @@
 use bincode::{Decode, Encode};
 use zpm_macro_enum::zpm_enum;
+use zpm_utils::impl_file_string_serialization;
 
 use crate::ConfigurationError;
 

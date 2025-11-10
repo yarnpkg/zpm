@@ -1,4 +1,5 @@
 use clipanion::cli;
+use zpm_utils::set_redacted;
 
 use crate::{error::Error, project::Project};
 
@@ -17,6 +18,10 @@ pub struct ConfigGet {
     #[cli::option("--json", default = false)]
     json: bool,
 
+    /// Redact sensitive values
+    #[cli::option("--redacted", default = true)]
+    redacted: bool,
+
     /// The name of the configuration field to retrieve
     name: zpm_parsers::path::Path,
 }
@@ -25,6 +30,8 @@ impl ConfigGet {
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;
+
+        set_redacted(self.redacted);
 
         let segments
             = self.name.segments()

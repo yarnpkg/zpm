@@ -1,9 +1,9 @@
-use std::{fmt::Display, ops::{DivAssign, Rem}};
+use std::{fmt::Display, ops::{DivAssign, Rem}, sync::atomic::{AtomicBool, Ordering}};
 
 use num::NumCast;
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{DataType, ToHumanString};
+use crate::{DataType, FromFileString, ToFileString, ToHumanString};
 
 #[derive(Debug)]
 pub struct UnitDefinition {
@@ -34,6 +34,67 @@ impl<T> Unit<T> {
 
     pub fn duration(value: T) -> Self {
         Self {value, unit_definition: &DURATION}
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Secret<T> {
+    pub value: T,
+}
+
+static REDACTED: AtomicBool = AtomicBool::new(true);
+
+pub fn set_redacted(redacted: bool) {
+    REDACTED.store(redacted, Ordering::Relaxed);
+}
+
+impl<T> Secret<T> {
+    pub fn new(value: T) -> Self {
+        Self {value}
+    }
+}
+
+impl<T: FromFileString> FromFileString for Secret<T> {
+    type Error = <T as FromFileString>::Error;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        Ok(Self {value: T::from_file_string(s)?})
+    }
+}
+
+impl<T: ToFileString> ToFileString for Secret<T> {
+    fn to_file_string(&self) -> String {
+        if REDACTED.load(Ordering::Relaxed) {
+            "<redacted>".to_string()
+        } else {
+            self.value.to_file_string()
+        }
+    }
+}
+
+impl<T: ToHumanString> ToHumanString for Secret<T> {
+    fn to_print_string(&self) -> String {
+        if REDACTED.load(Ordering::Relaxed) {
+            DataType::Code.colorize("<redacted>")
+        } else {
+            self.value.to_print_string()
+        }
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Secret<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        Ok(Self {value: T::deserialize(deserializer)?})
+    }
+}
+
+impl<T: Serialize> Serialize for Secret<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+        if REDACTED.load(Ordering::Relaxed) {
+            serializer.serialize_str("<redacted>")
+        } else {
+            self.value.serialize(serializer)
+        }
     }
 }
 

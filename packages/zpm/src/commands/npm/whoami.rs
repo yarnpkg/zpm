@@ -49,6 +49,7 @@ impl Whoami {
             registry: &registry,
             path: "/-/whoami",
             authorization: authorization.as_deref(),
+            headers: None,
         }).await?;
 
         #[derive(Deserialize)]

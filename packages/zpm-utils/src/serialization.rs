@@ -72,6 +72,29 @@ impl<'a> ToHumanString for AbstractValue<'a> {
     }
 }
 
+#[derive(Debug)]
+pub struct Container<T> {
+    value: T,
+}
+
+impl<T> Container<T> {
+    pub fn new(value: T) -> Self {
+        Self {value}
+    }
+}
+
+impl<T: Serialize> Serialize for Container<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        self.value.serialize(serializer)
+    }
+}
+
+impl<T> ToHumanString for Container<T> {
+    fn to_print_string(&self) -> String {
+        String::from("container")
+    }
+}
+
 impl<T: FromFileString> FromFileString for Box<T> {
     type Error = <T as FromFileString>::Error;
 
@@ -230,13 +253,21 @@ impl<T: FromFileString> FromFileString for Option<T> {
 
 impl<T: ToFileString> ToFileString for Option<T> {
     fn to_file_string(&self) -> String {
-        "null".to_string()
+        if let Some(value) = self {
+            value.to_file_string()
+        } else {
+            "null".to_string()
+        }
     }
 }
 
-impl<T: ToFileString> ToHumanString for Option<T> {
+impl<T: ToHumanString> ToHumanString for Option<T> {
     fn to_print_string(&self) -> String {
-        self.to_file_string()
+        if let Some(value) = self {
+            value.to_print_string()
+        } else {
+            DataType::Null.colorize("null")
+        }
     }
 }
 
