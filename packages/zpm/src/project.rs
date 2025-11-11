@@ -457,6 +457,11 @@ impl Project {
         }
     }
 
+    pub fn workspace_by_locator(&self, locator: &Locator) -> Result<&Workspace, Error> {
+        self.try_workspace_by_locator(locator)?
+            .ok_or(Error::WorkspaceNotFound(locator.ident.clone()))
+    }
+
     pub fn try_workspace_by_descriptor(&self, descriptor: &Descriptor) -> Result<Option<&Workspace>, Error> {
         match &descriptor.range {
             Range::WorkspaceIdent(params) => {

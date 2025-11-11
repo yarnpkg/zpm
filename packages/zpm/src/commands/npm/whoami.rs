@@ -6,7 +6,7 @@ use zpm_utils::FromFileString;
 
 use crate::{
     error::Error,
-    http_npm::{self, get_authorization, get_registry, AuthorizationMode, NpmHttpParams},
+    http_npm::{self, AuthorizationMode, GetAuthorizationOptions, NpmHttpParams, get_authorization, get_registry},
     project::Project,
 };
 
@@ -42,14 +42,20 @@ impl Whoami {
             = self.scope.as_ref().map(|s| Ident::from_file_string(format!("@{}/*", s).as_str()).unwrap());
 
         let authorization
-            = get_authorization(&project.config, &registry, ident.as_ref(), AuthorizationMode::AlwaysAuthenticate);
+            = get_authorization(&GetAuthorizationOptions {
+                configuration: &project.config,
+                http_client: &project.http_client,
+                registry: &registry,
+                ident: ident.as_ref(),
+                auth_mode: AuthorizationMode::AlwaysAuthenticate,
+                allow_oidc: false,
+            }).await?;
 
         let response = http_npm::get(&NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry,
             path: "/-/whoami",
             authorization: authorization.as_deref(),
-            headers: None,
         }).await?;
 
         #[derive(Deserialize)]

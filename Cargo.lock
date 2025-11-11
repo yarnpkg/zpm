@@ -358,7 +358,7 @@ checksum = "aaa6b4b263a5d737e9bf6b7c09b72c41a5480aec4d7219af827f6564e950b6a5"
 [[package]]
 name = "clipanion"
 version = "0.8.1"
-source = "git+https://github.com/arcanis/clipanion-rs.git#07eeda3f9aacf0130a8da23dc984c948376547af"
+source = "git+https://github.com/arcanis/clipanion-rs.git#fc8c3c5489bd47fd1e30d60b01b0ec45ddeca10b"
 dependencies = [
  "clipanion-core",
  "clipanion-derive",
@@ -370,7 +370,7 @@ dependencies = [
 [[package]]
 name = "clipanion-core"
 version = "0.8.1"
-source = "git+https://github.com/arcanis/clipanion-rs.git#07eeda3f9aacf0130a8da23dc984c948376547af"
+source = "git+https://github.com/arcanis/clipanion-rs.git#fc8c3c5489bd47fd1e30d60b01b0ec45ddeca10b"
 dependencies = [
  "colored 2.2.0",
  "itertools 0.14.0",
@@ -382,7 +382,7 @@ dependencies = [
 [[package]]
 name = "clipanion-derive"
 version = "0.8.1"
-source = "git+https://github.com/arcanis/clipanion-rs.git#07eeda3f9aacf0130a8da23dc984c948376547af"
+source = "git+https://github.com/arcanis/clipanion-rs.git#fc8c3c5489bd47fd1e30d60b01b0ec45ddeca10b"
 dependencies = [
  "indoc",
  "proc-macro2",
@@ -404,7 +404,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -413,7 +413,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -761,7 +761,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2261,7 +2261,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2656,7 +2656,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2838,6 +2838,17 @@ dependencies = [
  "ryu",
  "serde",
  "unsafe-libyaml",
+]
+
+[[package]]
+name = "sha1"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
 ]
 
 [[package]]
@@ -3065,7 +3076,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3699,7 +3710,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4228,13 +4239,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zpm-ci"
-version = "0.0.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "zpm-config"
 version = "0.0.0"
 dependencies = [
@@ -4245,7 +4249,6 @@ dependencies = [
  "serde_yaml",
  "shellexpand",
  "thiserror 2.0.16",
- "zpm-ci",
  "zpm-formats",
  "zpm-macro-enum",
  "zpm-parsers",
@@ -4372,7 +4375,6 @@ dependencies = [
  "serde_with",
  "thiserror 2.0.16",
  "tokio",
- "zpm-ci",
  "zpm-formats",
  "zpm-macro-enum",
  "zpm-parsers",
@@ -4413,6 +4415,8 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "sha1",
+ "sha2",
  "shlex",
  "similar",
  "thiserror 2.0.16",

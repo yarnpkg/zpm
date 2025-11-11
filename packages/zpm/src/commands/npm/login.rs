@@ -274,7 +274,6 @@ impl Login {
             registry,
             path: user_url.as_str(),
             authorization: None,
-            headers: None,
         }, payload).await?;
 
         let body

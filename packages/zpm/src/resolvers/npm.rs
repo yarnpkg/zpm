@@ -233,7 +233,6 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
             registry: &registry_base,
             path,
             authorization: None,
-            headers: None,
         }).await?;
 
     let registry_text = response.text().await
@@ -275,7 +274,6 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
             registry: &registry_base,
             path,
             authorization: None,
-            headers: None,
         }).await?;
 
     let registry_text = response.text().await
@@ -323,7 +321,6 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
             registry: &registry_base,
             path: &registry_path,
             authorization: None,
-            headers: None,
     }).await?;
 
     let registry_text = response.text().await

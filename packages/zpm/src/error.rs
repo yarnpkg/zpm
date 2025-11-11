@@ -51,6 +51,18 @@ pub enum Error {
     #[error(transparent)]
     SyncError2(#[from] zpm_sync::SyncError),
 
+    #[error("Private packages cannot be published")]
+    CannotPublishPrivatePackage,
+
+    #[error("Cannot publish packages with a missing name or version")]
+    CannotPublishMissingNameOrVersion,
+
+    #[error("Invalid publish access: {0}")]
+    InvalidNpmPublishAccess(String),
+
+    #[error("Missing environment variable when creating the provenance payload: {0}")]
+    MissingEnvironmentVariableForProvenancePayload(String),
+
     #[error("Conflicting options: {0}")]
     ConflictingOptions(String),
 

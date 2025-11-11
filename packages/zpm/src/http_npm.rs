@@ -1,6 +1,5 @@
-use std::{collections::BTreeMap, sync::LazyLock};
+use std::sync::LazyLock;
 
-use http::HeaderMap;
 use regex::{Captures, Regex};
 use reqwest::Response;
 use serde::Deserialize;
@@ -20,7 +19,6 @@ pub struct NpmHttpParams<'a> {
     pub registry: &'a str,
     pub path: &'a str,
     pub authorization: Option<&'a str>,
-    pub headers: Option<HeaderMap>,
 }
 
 pub enum AuthorizationMode {
@@ -103,12 +101,20 @@ pub fn get_registry<'a>(config: &'a Configuration, scope: Option<&str>, publish:
     Ok(registry.strip_suffix('/').unwrap_or(registry))
 }
 
+pub struct GetAuthorizationOptions<'a> {
+    pub configuration: &'a Configuration,
+    pub http_client: &'a HttpClient,
+    pub registry: &'a str,
+    pub ident: Option<&'a Ident>,
+    pub auth_mode: AuthorizationMode,
+    pub allow_oidc: bool,
+}
 
-pub fn should_authenticate(config: &Configuration, registry: &str, ident: Option<&Ident>, auth_mode: AuthorizationMode) -> bool {
-    match auth_mode {
+pub fn should_authenticate(options: &GetAuthorizationOptions<'_>) -> bool {
+    match options.auth_mode {
         AuthorizationMode::RespectConfiguration => {
-            *scope_registry_setting!(config, registry, ident, npm_always_auth)
-                .unwrap_or(&config.settings.npm_always_auth.value)
+            *scope_registry_setting!(options.configuration, options.registry, options.ident, npm_always_auth)
+                .unwrap_or(&options.configuration.settings.npm_always_auth.value)
         },
 
         AuthorizationMode::AlwaysAuthenticate | AuthorizationMode::BestEffort => {
@@ -121,35 +127,120 @@ pub fn should_authenticate(config: &Configuration, registry: &str, ident: Option
     }
 }
 
-pub fn get_authorization(config: &Configuration, registry: &str, ident: Option<&Ident>, auth_mode: AuthorizationMode) -> Option<String> {
+async fn get_id_token(options: &GetAuthorizationOptions<'_>) -> Result<Option<String>, Error> {
+    if let Ok(oidc_token) = std::env::var("NPM_ID_TOKEN") {
+        return Ok(Some(oidc_token));
+    }
+
+    let Ok(actions_id_token_request_url) = std::env::var("ACTIONS_ID_TOKEN_REQUEST_URL") else {
+        return Ok(None);
+    };
+
+    let Ok(actions_id_token_request_token) = std::env::var("ACTIONS_ID_TOKEN_REQUEST_TOKEN") else {
+        return Ok(None);
+    };
+
+    let response
+        = options.http_client.get(actions_id_token_request_url)?
+            .header("authorization", Some(format!("Bearer {}", actions_id_token_request_token)))
+            .send()
+            .await?;
+
+    let body
+        = response.text().await?;
+
+    #[derive(Deserialize)]
+    struct ActionsIdTokenResponse {
+        token: String,
+    }
+
+    let data: ActionsIdTokenResponse
+        = JsonDocument::hydrate_from_str(&body)?;
+
+    Ok(Some(data.token))
+}
+
+fn get_ident_url(ident: &Ident) -> String {
+    let (scope, name)
+        = ident.split();
+
+    if let Some(scope) = scope {
+        format!("{}%2f{}", scope, name)
+    } else {
+        name.to_string()
+    }
+}
+
+async fn get_oidc_token(options: &GetAuthorizationOptions<'_>) -> Result<Option<String>, Error> {
+    let Some(ident) = options.ident else {
+        return Ok(None);
+    };
+
+    let id_token
+        = get_id_token(options).await?;
+
+    let Some(id_token) = id_token else {
+        return Ok(None);
+    };
+
+    let response
+        = options.http_client.post(format!("{}/-/npm/v1/oidc/token/exchange/package/{}", options.registry, get_ident_url(ident)))?
+            .header("authorization", Some(format!("Bearer {}", id_token)))
+            .send()
+            .await?;
+
+    #[derive(Deserialize)]
+    struct OidcTokenResponse {
+        token: String,
+    }
+
+    let body
+        = response.text().await?;
+
+    let data: OidcTokenResponse
+        = JsonDocument::hydrate_from_str(&body)?;
+
+    Ok(Some(data.token))
+}
+
+pub async fn get_authorization(options: &GetAuthorizationOptions<'_>) -> Result<Option<String>, Error> {
     let should_authenticate
-        = should_authenticate(config, registry, ident, auth_mode);
+        = should_authenticate(options);
 
     if !should_authenticate {
-        return None;
+        return Ok(None);
     }
 
     let auth_token
-        = scope_registry_setting!(config, registry, ident, npm_auth_token)
-            .or_else(|| config.settings.npm_auth_token.value.as_ref());
+        = scope_registry_setting!(options.configuration, options.registry, options.ident, npm_auth_token)
+            .or_else(|| options.configuration.settings.npm_auth_token.value.as_ref());
 
     if let Some(auth_token) = auth_token {
-        return Some(format!("Bearer {}", auth_token.value));
+        return Ok(Some(format!("Bearer {}", auth_token.value)));
     }
 
     let auth_ident
-        = scope_registry_setting!(config, registry, ident, npm_auth_ident)
-            .or_else(|| config.settings.npm_auth_ident.value.as_ref());
+        = scope_registry_setting!(options.configuration, options.registry, options.ident, npm_auth_ident)
+            .or_else(|| options.configuration.settings.npm_auth_ident.value.as_ref());
 
     if let Some(auth_ident) = auth_ident {
         if auth_ident.contains(':') {
-            return Some(format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, auth_ident.as_bytes())));
+            return Ok(Some(format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, auth_ident.as_bytes()))));
         } else {
-            return Some(format!("Basic {}", auth_ident));
+            return Ok(Some(format!("Basic {}", auth_ident)));
         }
     }
 
-    None
+    if options.allow_oidc {
+        let oidc_token
+            = get_oidc_token(options).await?;
+
+        if let Some(oidc_token) = oidc_token {
+            return Ok(Some(format!("Bearer {}", oidc_token)));
+        }
+    }
+
+    Ok(None)
 }
 
 pub async fn get(params: &NpmHttpParams<'_>) -> Result<Response, Error> {
@@ -170,7 +261,6 @@ pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, 
     let mut request
         = params.http_client.post(url)?
             .enable_status_check(false)
-            .add_headers(params.headers.clone())
             .header("content-type", Some("application/json"))
             .header("authorization", params.authorization)
             .body(body);
