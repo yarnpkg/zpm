@@ -49,4 +49,4 @@ sha2 = "0.10.8"
 hex = "0.4.3"
 p256 = "0.13.2"
 spki = "0.7.3"
-aws-lc-rs = "1.14.1"
+aws-lc-rs = { version = "1.14.1", "features" = ["bindgen"] }
