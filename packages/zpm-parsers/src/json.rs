@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, ops::Range};
 
 use serde::{Deserialize, Serialize};
-use sonic_rs::{JsonContainerTrait, JsonValueMutTrait};
 
 use crate::{document::Document, value::Indent, Error, Path, Value};
 
@@ -82,6 +81,8 @@ impl JsonDocument {
 
     #[cfg(not(target_pointer_width = "32"))]
     pub fn merge_json(a: &str, b: &str) -> Result<json_provider::Value, Error> {
+        use sonic_rs::{JsonContainerTrait, JsonValueMutTrait};
+
         let mut obj_a: json_provider::Value =
             JsonDocument::hydrate_from_str(a)?;
 
