@@ -39,10 +39,9 @@ impl<'a, T> NpmEntryExt<'a> for T where T: Iterator<Item = Entry<'a>> {
     }
 }
 
-pub fn registry_url_for_all_versions(registry_base: &str, ident: &Ident) -> String {
+pub fn registry_url_for_all_versions(ident: &Ident) -> String {
     let mut url = String::new();
 
-    url.push_str(&registry_base);
     url.push('/');
     url.push_str(&ident.to_file_string());
 

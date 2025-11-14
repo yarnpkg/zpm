@@ -317,6 +317,13 @@ pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<Response, E
 
     handle_invalid_authentication_error(params, &response).await?;
 
+    if !response.status().is_success() {
+        let body
+            = response.text().await?;
+
+        panic!("body: {}", body);
+    }
+
     Ok(response.error_for_status()?)
 }
 

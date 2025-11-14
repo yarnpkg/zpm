@@ -4705,6 +4705,7 @@ dependencies = [
 name = "zpm-utils"
 version = "0.0.0"
 dependencies = [
+ "base64",
  "bincode",
  "bincode_derive",
  "blake2",

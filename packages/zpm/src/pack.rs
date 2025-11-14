@@ -239,6 +239,7 @@ impl PackList {
 }
 
 pub struct PackResult {
+    pub pack_manifest_content: String,
     pub pack_manifest: Manifest,
     pub pack_list: Vec<Path>,
     pub pack_file: Vec<u8>,
@@ -346,7 +347,7 @@ async fn gen_archive(project: &Project, pack_locator: &Locator, options: &PackOp
         .find(|entry| entry.name.basename() == Some("package.json"));
 
     if let Some(manifest_entry) = manifest_entry {
-        manifest_entry.data = pack_manifest_content.into_bytes().into();
+        manifest_entry.data = pack_manifest_content.as_bytes().into();
     }
 
     let pack_file = entries
@@ -356,6 +357,7 @@ async fn gen_archive(project: &Project, pack_locator: &Locator, options: &PackOp
         .to_tgz()?;
 
     Ok(PackResult {
+        pack_manifest_content,
         pack_manifest,
         pack_list,
         pack_file,

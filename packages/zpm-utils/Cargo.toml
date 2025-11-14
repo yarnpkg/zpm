@@ -3,6 +3,7 @@ name = "zpm-utils"
 edition = "2021"
 
 [dependencies]
+base64 = "0.22.0"
 bincode_derive = { version = "2.0.0-rc.3" }
 bincode = { version = "2.0.0-rc.3" }
 blake2 = { version = "0.10.6" }

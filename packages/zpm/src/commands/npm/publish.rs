@@ -7,7 +7,7 @@ use zpm_parsers::{JsonDocument, json_provider::json};
 use zpm_utils::{IoResultExt, Provider, Sha1, Sha512, ToFileString, is_ci};
 
 use crate::{
-    error::Error, http::HttpClient, http_npm::{self, AuthorizationMode, NpmHttpParams}, pack::{PackOptions, pack_workspace}, project::Project, provenance::attest, script::ScriptEnvironment
+    error::Error, http::HttpClient, http_npm::{self, AuthorizationMode, NpmHttpParams}, npm, pack::{PackOptions, pack_workspace}, project::Project, provenance::attest, script::ScriptEnvironment
 };
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidNpmPublishAccess(s.to_string())))]
@@ -83,19 +83,19 @@ impl Publish {
         let published_workspace
             = project.workspace_by_locator(&published_workspace_locator)?;
 
-        let (Some(name), Some(version)) = (pack_result.pack_manifest.name.as_ref(), pack_result.pack_manifest.remote.version.as_ref()) else {
+        let (Some(ident), Some(version)) = (pack_result.pack_manifest.name.as_ref(), pack_result.pack_manifest.remote.version.as_ref()) else {
             return Err(Error::CannotPublishMissingNameOrVersion);
         };
 
-        let registry
-            = http_npm::get_registry(&project.config, name.scope(), true)?;
+        let registry_base
+            = http_npm::get_registry(&project.config, ident.scope(), true)?;
 
         let authorization
             = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
                 configuration: &project.config,
                 http_client: &project.http_client,
-                registry: &registry,
-                ident: Some(name),
+                registry: &registry_base,
+                ident: Some(ident),
                 auth_mode: AuthorizationMode::AlwaysAuthenticate,
                 allow_oidc: true,
             }).await?;
@@ -103,10 +103,10 @@ impl Publish {
         let sha1_digest
             = Sha1::new(&pack_result.pack_file).to_hex();
         let sha512_digest
-            = Sha512::new(&pack_result.pack_file).to_hex();
+            = format!("sha512-{}", Sha512::new(&pack_result.pack_file).to_base64());
 
         let tarball_name
-            = format!("{}-{}.tgz", name.to_file_string(), version.to_file_string());
+            = format!("{}-{}.tgz", ident.to_file_string(), version.to_file_string());
 
         let mut attachments = BTreeMap::from_iter([
             (tarball_name.clone(), AttachmentInfo::from_raw("application/octet-stream".to_string(), &pack_result.pack_file)),
@@ -123,7 +123,7 @@ impl Publish {
 
             let provenance_file = ProvenanceSubject {
                 // Adapted from https://github.com/npm/npm-package-arg/blob/fbbf22ef99ece449428fee761ae8950c08bc2cbf/lib/npa.js#L118
-                name: format!("pkg:npm/{}@{}", name.to_file_string().replace("@", "%40"), version.to_file_string()),
+                name: format!("pkg:npm/{}@{}", ident.to_file_string().replace("@", "%40"), version.to_file_string()),
                 digest: provenance_digest,
             };
 
@@ -138,7 +138,7 @@ impl Publish {
 
             if let Some(provenance_payload) = provenance_payload {
                 attachments.insert(
-                    format!("{}-{}.sigstore", name.to_file_string(), version.to_file_string()),
+                    format!("{}-{}.sigstore", ident.to_file_string(), version.to_file_string()),
                     AttachmentInfo::from_str("application/json".to_string(), &provenance_payload),
                 );
             }
@@ -157,46 +157,62 @@ impl Publish {
             = published_workspace.path.with_join_str("README.md")
                 .fs_read_text()
                 .ok_missing()?
-                .unwrap_or_else(|| format!("# {}\n", name.to_file_string()));
+                .unwrap_or_else(|| format!("# {}\n", ident.to_file_string()));
 
         // While the npm registry ignores the provided tarball URL, it's used by
         // other registries such as verdaccio.
+        let tarball_path
+            = npm::registry_url_for_package_data(&ident, &version);
         let tarball_url
-            = format!("{}/{}/-/{}", project.config.settings.npm_registry_server.value, name.to_file_string(), tarball_name);
+            = format!("{}{}", project.config.settings.npm_registry_server.value, tarball_path);
 
         let version_string
             = version.to_file_string();
 
+        let version_payload = json!({
+            "_id": format!("{}@{}", ident.to_file_string(), version_string),
+            "name": ident,
+            "version": version,
+            "gitHead": git_head,
+            "dist": {
+                "shasum": sha1_digest,
+                "integrity": sha512_digest,
+
+                // the npm registry requires a tarball path, but it seems useless 🤷
+                "tarball": tarball_url,
+            },
+        });
+
+        let version_payload_merged = JsonDocument::merge_json(
+            &pack_result.pack_manifest_content,
+            &version_payload.to_string(),
+        )?;
+
         let publish_body = json!({
-            "_id": name,
-            "name": name,
+            "_id": ident,
+            "_attachments": attachments,
+
+            "name": ident,
             "access": self.access,
-            "attachments": attachments,
             "dist-tags": {
                 self.tag: version,
             },
             "versions": {
-                version_string: {
-                    "_id": format!("{}@{}", name.to_file_string(), version_string),
-                    "name": name,
-                    "version": version,
-                    "git_head": git_head,
-                    "dist": {
-                        "shasum": sha1_digest,
-                        "integrity": sha512_digest,
-
-                        // the npm registry requires a tarball path, but it seems useless 🤷
-                        "tarball": tarball_url,
-                    },
-                },
+                version_string: version_payload_merged,
             },
             "readme": readme,
         }).to_string();
 
+        println!("{}", publish_body);
+        panic!();
+
+        let registry_url
+            = npm::registry_url_for_all_versions(&ident);
+
         http_npm::put(&NpmHttpParams {
             http_client: &project.http_client,
-            registry: &registry,
-            path: &format!("/{}/-/{}/{}", name.to_file_string(), version_string, tarball_name),
+            registry: &registry_base,
+            path: &registry_url,
             authorization: authorization.as_deref(),
         }, publish_body).await?;
 

@@ -94,6 +94,10 @@ impl Sha1 {
     pub fn to_hex(&self) -> String {
         hex::encode(&self.data)
     }
+
+    pub fn to_base64(&self) -> String {
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &self.data)
+    }
 }
 
 pub struct Sha256 {
@@ -118,6 +122,10 @@ impl Sha256 {
     pub fn to_hex(&self) -> String {
         hex::encode(&self.data)
     }
+
+    pub fn to_base64(&self) -> String {
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &self.data)
+    }
 }
 
 pub struct Sha512 {
@@ -141,5 +149,9 @@ impl Sha512 {
 
     pub fn to_hex(&self) -> String {
         hex::encode(&self.data)
+    }
+
+    pub fn to_base64(&self) -> String {
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &self.data)
     }
 }

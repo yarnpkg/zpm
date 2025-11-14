@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, ops::Range};
 
 use serde::{Deserialize, Serialize};
+use sonic_rs::{JsonContainerTrait, JsonValueMutTrait};
 
 use crate::{document::Document, value::Indent, Error, Path, Value};
 
@@ -63,6 +64,34 @@ impl JsonDocument {
 
     pub fn to_string_pretty<T: Serialize>(input: &T) -> Result<String, Error> {
         Ok(json_provider::to_string_pretty(input)?)
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    pub fn merge_json(a: &str, b: &str) -> Result<json_provider::Value, Error> {
+        let mut obj_a: json_provider::Value =
+            JsonDocument::hydrate_from_str(a)?;
+
+        let obj_b: json_provider::Map<String, json_provider::Value> =
+            JsonDocument::hydrate_from_str(b)?;
+
+        // Extend `a` with keys from `b` (b overwrites a on collision)
+        obj_a.as_object_mut().unwrap().extend(obj_b.into_iter());
+
+        Ok(obj_a)
+    }
+
+    #[cfg(not(target_pointer_width = "32"))]
+    pub fn merge_json(a: &str, b: &str) -> Result<json_provider::Value, Error> {
+        let mut obj_a: json_provider::Value =
+            JsonDocument::hydrate_from_str(a)?;
+
+        let obj_b: json_provider::Value =
+            JsonDocument::hydrate_from_str(b)?;
+
+        // Extend `a` with keys from `b` (b overwrites a on collision)
+        obj_a.as_object_mut().unwrap().extend(obj_b.as_object().unwrap().into_iter());
+
+        Ok(obj_a)
     }
 
     pub fn new(input: Vec<u8>) -> Result<Self, Error> {
