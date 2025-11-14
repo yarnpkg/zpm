@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use regex::{Captures, Regex};
 use reqwest::Response;
@@ -19,6 +19,7 @@ pub struct NpmHttpParams<'a> {
     pub registry: &'a str,
     pub path: &'a str,
     pub authorization: Option<&'a str>,
+    pub otp: Option<&'a str>,
 }
 
 pub enum AuthorizationMode {
@@ -273,10 +274,8 @@ pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, 
             .await?;
 
     if is_otp_error(&response) {
-        render_otp_notice(&response).await;
-
         let otp
-            = ask_for_otp().await?;
+            = ask_for_otp(params, &response).await?;
 
         request = inject_otp_headers(request, otp);
         response = request.send().await?;
@@ -306,10 +305,8 @@ pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<Response, E
             .await?;
 
     if is_otp_error(&response) {
-        render_otp_notice(&response).await;
-
         let otp
-            = ask_for_otp().await?;
+            = ask_for_otp(params, &response).await?;
 
         request = inject_otp_headers(request, otp);
         response = request.send().await?;
@@ -317,14 +314,24 @@ pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<Response, E
 
     handle_invalid_authentication_error(params, &response).await?;
 
-    if !response.status().is_success() {
+    if let Err(error) = response.error_for_status_ref() {
         let body
             = response.text().await?;
 
-        panic!("body: {}", body);
+        #[derive(Deserialize)]
+        struct ErrorResponse {
+            error: String,
+        }
+
+        let message
+            = JsonDocument::hydrate_from_str::<ErrorResponse>(&body)
+                .ok()
+                .map(|data| data.error);
+
+        return Err(Error::HttpError(Arc::new(error), message));
     }
 
-    Ok(response.error_for_status()?)
+    Ok(response)
 }
 
 fn inject_otp_headers(request: HttpRequest<'_>, otp: String) -> HttpRequest<'_> {
@@ -423,10 +430,16 @@ async fn render_otp_notice(response: &Response) {
     }
 }
 
-async fn ask_for_otp() -> Result<String, Error> {
+async fn ask_for_otp(params: &NpmHttpParams<'_>, response: &Response) -> Result<String, Error> {
+    if let Some(otp) = params.otp {
+        return Ok(otp.to_owned());
+    }
+
     if std::env::var("YARN_IS_TEST_ENV").is_ok() {
         return Ok(std::env::var("YARN_INJECT_NPM_2FA_TOKEN").unwrap_or_default());
     }
+
+    render_otp_notice(&response).await;
 
     let otp = current_report().await.as_mut()
         .map(|report| report.prompt(PromptType::Input("One-time password".to_string())))

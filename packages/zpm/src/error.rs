@@ -39,8 +39,8 @@ pub enum Error {
     #[error(transparent)]
     SwitchError(#[from] zpm_switch::Error),
 
-    #[error("Network error: {0}")]
-    HttpError(#[from] Arc<reqwest::Error>),
+    #[error("Network error: {0}{}", .1.as_deref().map(|s| format!(" ({})", s)).unwrap_or_default())]
+    HttpError(Arc<reqwest::Error>, Option<String>),
 
     #[error(transparent)]
     PathError(#[from] zpm_utils::PathError),
@@ -466,6 +466,6 @@ impl From<std::convert::Infallible> for Error {
 
 impl From<reqwest::Error> for Error {
     fn from(error: reqwest::Error) -> Self {
-        Arc::new(error).into()
+        Error::HttpError(Arc::new(error), None)
     }
 }

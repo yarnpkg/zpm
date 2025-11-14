@@ -1,10 +1,11 @@
 use std::{collections::BTreeMap, env::VarError};
 
 use clipanion::cli;
+use http::StatusCode;
 use serde::Serialize;
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::{JsonDocument, json_provider::json};
-use zpm_utils::{IoResultExt, Provider, Sha1, Sha512, ToFileString, is_ci};
+use zpm_utils::{IoResultExt, Provider, Sha1, Sha512, ToFileString, ToHumanString, is_ci};
 
 use crate::{
     error::Error, http::HttpClient, http_npm::{self, AuthorizationMode, NpmHttpParams}, npm, pack::{PackOptions, pack_workspace}, project::Project, provenance::attest, script::ScriptEnvironment
@@ -32,8 +33,8 @@ enum NpmPublishAccess {
 #[cli::category("Npm-related commands")]
 pub struct Publish {
     /// The access for the published package (public or restricted)
-    #[cli::option("-a,--access", default = NpmPublishAccess::Public)]
-    access: NpmPublishAccess,
+    #[cli::option("-a,--access")]
+    access: Option<NpmPublishAccess>,
 
     /// The tag on the registry that the package should be attached to
     #[cli::option("--tag", default = "latest".to_string())]
@@ -100,6 +101,48 @@ impl Publish {
                 allow_oidc: true,
             }).await?;
 
+        if self.tolerate_republish {
+            let check_url
+                = npm::registry_url_for_one_version(&ident, &version);
+
+            let check_result = http_npm::get(&NpmHttpParams {
+                http_client: &project.http_client,
+                registry: &registry_base,
+                path: &check_url,
+                authorization: authorization.as_deref(),
+                otp: self.otp.as_ref().map(|s| s.as_str()),
+            }).await;
+
+            match check_result {
+                Ok(_) => {
+                    let warning
+                        = format!("Registry already knows about version ${}; skipping.", version.to_print_string());
+
+                    if self.json {
+                        println!("{}", json!({
+                            "name": ident,
+                            "version": version,
+                            "registry": registry_base,
+                            "warning": warning,
+                            "skipped": true,
+                        }));
+                    } else {
+                        println!("{}", warning);
+                    }
+
+                    return Ok(());
+                },
+
+                Err(Error::HttpError(e, _)) if e.status() == Some(StatusCode::NOT_FOUND) => {
+                    // Nothing to do, the package doesn't exist yet so we're good to go
+                },
+
+                Err(e) => {
+                    return Err(e);
+                },
+            }
+        }
+
         let sha1_digest
             = Sha1::new(&pack_result.pack_file).to_hex();
         let sha512_digest
@@ -144,15 +187,6 @@ impl Publish {
             }
         }
 
-        let git_head
-            = ScriptEnvironment::new()?
-                .with_cwd(published_workspace.path.clone())
-                .run_exec("git", &["rev-parse", "HEAD"])
-                .await
-                .ok()
-                .map(|r| r.stdout_text())
-                .transpose()?;
-
         let readme
             = published_workspace.path.with_join_str("README.md")
                 .fs_read_text()
@@ -169,19 +203,29 @@ impl Publish {
         let version_string
             = version.to_file_string();
 
-        let version_payload = json!({
+        let mut version_payload = json!({
             "_id": format!("{}@{}", ident.to_file_string(), version_string),
             "name": ident,
             "version": version,
-            "gitHead": git_head,
             "dist": {
                 "shasum": sha1_digest,
                 "integrity": sha512_digest,
-
-                // the npm registry requires a tarball path, but it seems useless 🤷
                 "tarball": tarball_url,
             },
         });
+
+        let git_head
+            = ScriptEnvironment::new()?
+                .with_cwd(published_workspace.path.clone())
+                .run_exec("git", &["rev-parse", "HEAD"])
+                .await
+                .ok()
+                .and_then(|r| r.ok().ok().map(|r| r.stdout_text()))
+                .transpose()?;
+
+        if let Some(git_head) = git_head {
+            version_payload["gitHead"] = json!(git_head);
+        }
 
         let version_payload_merged = JsonDocument::merge_json(
             &pack_result.pack_manifest_content,
@@ -191,7 +235,6 @@ impl Publish {
         let publish_body = json!({
             "_id": ident,
             "_attachments": attachments,
-
             "name": ident,
             "access": self.access,
             "dist-tags": {
@@ -203,18 +246,41 @@ impl Publish {
             "readme": readme,
         }).to_string();
 
-        println!("{}", publish_body);
-        panic!();
-
         let registry_url
             = npm::registry_url_for_all_versions(&ident);
 
-        http_npm::put(&NpmHttpParams {
-            http_client: &project.http_client,
-            registry: &registry_base,
-            path: &registry_url,
-            authorization: authorization.as_deref(),
-        }, publish_body).await?;
+        if !self.dry_run {
+            http_npm::put(&NpmHttpParams {
+                http_client: &project.http_client,
+                registry: &registry_base,
+                path: &registry_url,
+                authorization: authorization.as_deref(),
+                otp: self.otp.as_ref().map(|s| s.as_str()),
+            }, publish_body).await?;
+        }
+
+        let message = if self.dry_run {
+            format!("Package would be published to {} with tag {}", registry_url, self.tag)
+        } else {
+            format!("Published package to {} with tag {}", registry_url, self.tag)
+        };
+
+        if self.json {
+            println!("{}", json!({
+                "name": ident,
+                "version": version,
+                "registry": registry_base,
+                "tag": self.tag,
+                "files": pack_result.pack_list,
+                "access": self.access,
+                "dryRun": self.dry_run,
+                "published": !self.dry_run,
+                "message": message,
+                "provenance": provenance,
+            }));
+        } else {
+            println!("{}", message);
+        }
 
         Ok(())
     }
