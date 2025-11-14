@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::env;
 use std::sync::LazyLock;
 
-use aws_lc_rs::rand::SystemRandom;
-use aws_lc_rs::signature::EcdsaKeyPair;
-use aws_lc_rs::signature::KeyPair;
+use ring::rand::SystemRandom;
+use ring::signature::EcdsaKeyPair;
+use ring::signature::KeyPair;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::prelude::BASE64_STANDARD;
@@ -159,8 +159,8 @@ static DEFAULT_FULCIO_URL: LazyLock<String> = LazyLock::new(|| {
         .unwrap_or_else(|_| "https://fulcio.sigstore.dev".to_string())
 });
 
-static ALGORITHM: &aws_lc_rs::signature::EcdsaSigningAlgorithm =
-    &aws_lc_rs::signature::ECDSA_P256_SHA256_ASN1_SIGNING;
+static ALGORITHM: &ring::signature::EcdsaSigningAlgorithm =
+    &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING;
 
 struct KeyMaterial {
     pub _case: &'static str,
@@ -230,7 +230,7 @@ impl<'a> FulcioSigner<'a> {
                 .map_err(|e| Error::ProvenanceError(format!("Failed to generate key pair: {}", e)))?;
 
         let ephemeral_signer =
-            EcdsaKeyPair::from_pkcs8(ALGORITHM, document.as_ref())
+            EcdsaKeyPair::from_pkcs8(ALGORITHM, document.as_ref(), &rng)
                 .map_err(|e| Error::ProvenanceError(format!("Failed to create key pair from PKCS8: {}", e)))?;
 
         Ok(Self {
@@ -244,7 +244,7 @@ impl<'a> FulcioSigner<'a> {
         self,
         data: &[u8],
         oidc_token: &str,
-    ) -> Result<(aws_lc_rs::signature::Signature, KeyMaterial), Error> {
+    ) -> Result<(ring::signature::Signature, KeyMaterial), Error> {
         // Extract the subject from the token
         let subject
             = extract_jwt_subject(oidc_token)?;
@@ -292,7 +292,7 @@ impl<'a> FulcioSigner<'a> {
         &self,
         token: &str,
         public_key: String,
-        challenge: aws_lc_rs::signature::Signature,
+        challenge: ring::signature::Signature,
     ) -> Result<Vec<String>, Error> {
         let url = format!("{}/api/v2/signingCert", *DEFAULT_FULCIO_URL);
         let request_body = CreateSigningCertificateRequest {
