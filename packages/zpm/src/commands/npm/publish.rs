@@ -3,11 +3,11 @@ use std::{collections::BTreeMap, env::VarError};
 use clipanion::cli;
 use serde::Serialize;
 use zpm_macro_enum::zpm_enum;
-use zpm_parsers::json_provider::json;
+use zpm_parsers::{JsonDocument, json_provider::json};
 use zpm_utils::{IoResultExt, Provider, Sha1, Sha512, ToFileString, is_ci};
 
 use crate::{
-    error::Error, http_npm::{self, AuthorizationMode, NpmHttpParams}, pack::{PackOptions, pack_workspace}, project::Project, script::ScriptEnvironment
+    error::Error, http::HttpClient, http_npm::{self, AuthorizationMode, NpmHttpParams}, pack::{PackOptions, pack_workspace}, project::Project, provenance::attest, script::ScriptEnvironment
 };
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidNpmPublishAccess(s.to_string())))]
@@ -87,6 +87,19 @@ impl Publish {
             return Err(Error::CannotPublishMissingNameOrVersion);
         };
 
+        let registry
+            = http_npm::get_registry(&project.config, name.scope(), true)?;
+
+        let authorization
+            = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+                configuration: &project.config,
+                http_client: &project.http_client,
+                registry: &registry,
+                ident: Some(name),
+                auth_mode: AuthorizationMode::AlwaysAuthenticate,
+                allow_oidc: true,
+            }).await?;
+
         let sha1_digest
             = Sha1::new(&pack_result.pack_file).to_hex();
         let sha512_digest
@@ -114,9 +127,14 @@ impl Publish {
                 digest: provenance_digest,
             };
 
+            let oidc_token
+                = authorization.as_deref()
+                    .ok_or(Error::ProvenanceRequiresAuthentication)?
+                    .strip_prefix("Bearer ")
+                    .ok_or(Error::ProvenanceRequiresAuthentication)?;
+
             let provenance_payload
-                = create_provenance_payload(&provenance_file)
-                    .map_err(|e| Error::MissingEnvironmentVariableForProvenancePayload(e.to_string()))?;
+                = create_provenance_payload(&project.http_client, &provenance_file, &oidc_token).await?;
 
             if let Some(provenance_payload) = provenance_payload {
                 attachments.insert(
@@ -174,19 +192,6 @@ impl Publish {
             },
             "readme": readme,
         }).to_string();
-
-        let registry
-            = http_npm::get_registry(&project.config, name.scope(), true)?;
-
-        let authorization
-            = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
-                configuration: &project.config,
-                http_client: &project.http_client,
-                registry: &registry,
-                ident: Some(name),
-                auth_mode: AuthorizationMode::AlwaysAuthenticate,
-                allow_oidc: true,
-            }).await?;
 
         http_npm::put(&NpmHttpParams {
             http_client: &project.http_client,
@@ -249,23 +254,30 @@ const INTOTO_STATEMENT_V1_TYPE: &str = "https://in-toto.io/Statement/v1";
 const SLSA_PREDICATE_V02_TYPE: &str = "https://slsa.dev/provenance/v0.2";
 const SLSA_PREDICATE_V1_TYPE: &str = "https://slsa.dev/provenance/v1";
 
-fn create_provenance_payload(subject: &ProvenanceSubject) -> Result<Option<String>, VarError> {
+async fn create_provenance_payload(http_client: &HttpClient, subject: &ProvenanceSubject, oidc_token: &str) -> Result<Option<String>, Error> {
     let Some(provider) = is_ci() else {
         return Ok(None);
     };
 
     let payload = match provider {
         Provider::GitHubActions
-            => Ok(Some(create_github_provenance_payload(subject)?)),
+            => Some(create_github_provenance_payload(subject)),
 
         Provider::GitLab
-            => Ok(Some(create_gitlab_provenance_payload(subject)?)),
+            => Some(create_gitlab_provenance_payload(subject)),
 
         Provider::Unknown
-            => Ok(None),
+            => None,
     };
 
+    let Some(payload) = payload else {
+        return Ok(None);
+    };
 
+    let payload = payload
+        .map_err(|e| Error::MissingEnvironmentVariableForProvenancePayload(e.to_string()))?;
+
+    Ok(Some(JsonDocument::to_string(&attest(http_client, &payload, INTOTO_PAYLOAD_TYPE, oidc_token).await?)?))
 }
 
 const GITHUB_BUILDER_ID_PREFIX: &str = "https://github.com/actions/runner";

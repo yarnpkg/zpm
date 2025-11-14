@@ -63,6 +63,15 @@ pub enum Error {
     #[error("Missing environment variable when creating the provenance payload: {0}")]
     MissingEnvironmentVariableForProvenancePayload(String),
 
+    #[error("Provenance error: {0}")]
+    ProvenanceError(String),
+
+    #[error("Publishing a package with provenance requires authentication")]
+    ProvenanceRequiresAuthentication,
+
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+
     #[error("Conflicting options: {0}")]
     ConflictingOptions(String),
 
