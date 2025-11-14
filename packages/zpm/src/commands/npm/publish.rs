@@ -4,7 +4,7 @@ use clipanion::cli;
 use http::StatusCode;
 use serde::Serialize;
 use zpm_macro_enum::zpm_enum;
-use zpm_parsers::{JsonDocument, json_provider::json};
+use zpm_parsers::{JsonDocument, json_provider};
 use zpm_utils::{IoResultExt, Provider, Sha1, Sha512, ToFileString, ToHumanString, is_ci};
 
 use crate::{
@@ -119,13 +119,25 @@ impl Publish {
                         = format!("Registry already knows about version ${}; skipping.", version.to_print_string());
 
                     if self.json {
-                        println!("{}", json!({
-                            "name": ident,
-                            "version": version,
-                            "registry": registry_base,
-                            "warning": warning,
-                            "skipped": true,
-                        }));
+                        #[derive(Serialize)]
+                        #[serde(rename_all = "camelCase")]
+                        struct SkippedPublishOutput<'a> {
+                            name: &'a zpm_primitives::Ident,
+                            version: &'a zpm_semver::Version,
+                            registry: &'a str,
+                            warning: String,
+                            skipped: bool,
+                        }
+
+                        let output = SkippedPublishOutput {
+                            name: ident,
+                            version: version,
+                            registry: &registry_base,
+                            warning: warning.clone(),
+                            skipped: true,
+                        };
+
+                        println!("{}", serde_json::to_string(&output).unwrap());
                     } else {
                         println!("{}", warning);
                     }
@@ -203,17 +215,6 @@ impl Publish {
         let version_string
             = version.to_file_string();
 
-        let mut version_payload = json!({
-            "_id": format!("{}@{}", ident.to_file_string(), version_string),
-            "name": ident,
-            "version": version,
-            "dist": {
-                "shasum": sha1_digest,
-                "integrity": sha512_digest,
-                "tarball": tarball_url,
-            },
-        });
-
         let git_head
             = ScriptEnvironment::new()?
                 .with_cwd(published_workspace.path.clone())
@@ -223,28 +224,42 @@ impl Publish {
                 .and_then(|r| r.ok().ok().map(|r| r.stdout_text()))
                 .transpose()?;
 
-        if let Some(git_head) = git_head {
-            version_payload["gitHead"] = json!(git_head);
-        }
+        let extra_manifest
+            = json_provider::from_str(&pack_result.pack_manifest_content).unwrap();
 
-        let version_payload_merged = JsonDocument::merge_json(
-            &pack_result.pack_manifest_content,
-            &version_payload.to_string(),
-        )?;
+        let version_payload = VersionPayload {
+            id: format!("{}@{}", ident.to_file_string(), version_string),
 
-        let publish_body = json!({
-            "_id": ident,
-            "_attachments": attachments,
-            "name": ident,
-            "access": self.access,
-            "dist-tags": {
-                self.tag: version,
+            name: ident,
+            version: version,
+
+            dist: VersionDist {
+                shasum: sha1_digest,
+                integrity: sha512_digest,
+                tarball: tarball_url,
             },
-            "versions": {
-                version_string: version_payload_merged,
-            },
-            "readme": readme,
-        }).to_string();
+
+            git_head: git_head,
+            extra: extra_manifest,
+        };
+
+        let mut dist_tags = BTreeMap::new();
+        dist_tags.insert(self.tag.clone(), version);
+
+        let mut versions = BTreeMap::new();
+        versions.insert(version_string.clone(), version_payload);
+
+        let publish_body_struct = PublishBody {
+            id: ident,
+            attachments: attachments,
+            name: ident,
+            access: self.access.as_ref(),
+            dist_tags: dist_tags,
+            versions: versions,
+            readme: readme,
+        };
+
+        let publish_body = serde_json::to_string(&publish_body_struct).unwrap();
 
         let registry_url
             = npm::registry_url_for_all_versions(&ident);
@@ -266,18 +281,35 @@ impl Publish {
         };
 
         if self.json {
-            println!("{}", json!({
-                "name": ident,
-                "version": version,
-                "registry": registry_base,
-                "tag": self.tag,
-                "files": pack_result.pack_list,
-                "access": self.access,
-                "dryRun": self.dry_run,
-                "published": !self.dry_run,
-                "message": message,
-                "provenance": provenance,
-            }));
+            #[derive(Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct PublishOutput<'a> {
+                name: &'a zpm_primitives::Ident,
+                version: &'a zpm_semver::Version,
+                registry: &'a str,
+                tag: &'a str,
+                files: Vec<String>,
+                access: Option<&'a NpmPublishAccess>,
+                dry_run: bool,
+                published: bool,
+                message: String,
+                provenance: bool,
+            }
+
+            let output = PublishOutput {
+                name: ident,
+                version: version,
+                registry: &registry_base,
+                tag: &self.tag,
+                files: pack_result.pack_list.iter().map(|p| p.to_file_string()).collect(),
+                access: self.access.as_ref(),
+                dry_run: self.dry_run,
+                published: !self.dry_run,
+                message: message.clone(),
+                provenance: provenance,
+            };
+
+            println!("{}", serde_json::to_string(&output).unwrap());
         } else {
             println!("{}", message);
         }
@@ -329,6 +361,52 @@ impl AttachmentInfo {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VersionDist {
+    shasum: String,
+    integrity: String,
+    tarball: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VersionPayload<'a> {
+    #[serde(rename = "_id")]
+    id: String,
+
+    name: &'a zpm_primitives::Ident,
+    version: &'a zpm_semver::Version,
+
+    dist: VersionDist,
+
+    #[serde(rename = "gitHead", skip_serializing_if = "Option::is_none")]
+    git_head: Option<String>,
+
+    #[serde(flatten)]
+    extra: json_provider::Value,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PublishBody<'a> {
+    #[serde(rename = "_id")]
+    id: &'a zpm_primitives::Ident,
+    #[serde(rename = "_attachments")]
+    attachments: BTreeMap<String, AttachmentInfo>,
+
+    name: &'a zpm_primitives::Ident,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    access: Option<&'a NpmPublishAccess>,
+
+    #[serde(rename = "dist-tags")]
+    dist_tags: BTreeMap<String, &'a zpm_semver::Version>,
+    versions: BTreeMap<String, VersionPayload<'a>>,
+
+    readme: String,
+}
+
 const INTOTO_PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
 const INTOTO_STATEMENT_V01_TYPE: &str = "https://in-toto.io/Statement/v0.1";
 const INTOTO_STATEMENT_V1_TYPE: &str = "https://in-toto.io/Statement/v1";
@@ -367,6 +445,93 @@ const GITHUB_BUILD_TYPE: &str = "https://slsa-framework.github.io/github-actions
 const GITLAB_BUILD_TYPE_PREFIX: &str = "https://github.com/npm/cli/gitlab";
 const GITLAB_BUILD_TYPE_VERSION: &str = "v0alpha1";
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenanceWorkflow {
+    #[serde(rename = "ref")]
+    ref_: String,
+    repository: String,
+    path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenanceGitHub {
+    event_name: String,
+    repository_id: String,
+    repository_owner: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenanceBuildDefinition {
+    build_type: String,
+    external_parameters: GitHubProvenanceExternalParameters,
+    internal_parameters: GitHubProvenanceInternalParameters,
+    resolved_dependencies: Vec<GitHubProvenanceResolvedDependency>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenanceExternalParameters {
+    workflow: GitHubProvenanceWorkflow,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenanceInternalParameters {
+    github: GitHubProvenanceGitHub,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenanceResolvedDependency {
+    uri: String,
+    digest: GitHubProvenanceDigest,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenanceDigest {
+    git_commit: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenanceBuilder {
+    id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenanceMetadata {
+    invocation_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenanceRunDetails {
+    builder: GitHubProvenanceBuilder,
+    metadata: GitHubProvenanceMetadata,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenancePredicate {
+    build_definition: GitHubProvenanceBuildDefinition,
+    run_details: GitHubProvenanceRunDetails,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubProvenancePayload<'a> {
+    #[serde(rename = "_type")]
+    type_: &'static str,
+    subject: &'a [ProvenanceSubject],
+    predicate_type: &'static str,
+    predicate: GitHubProvenancePredicate,
+}
+
 fn create_github_provenance_payload(subject: &ProvenanceSubject) -> Result<String, VarError> {
     let github_repository
         = std::env::var("GITHUB_REPOSITORY")?;
@@ -385,46 +550,46 @@ fn create_github_provenance_payload(subject: &ProvenanceSubject) -> Result<Strin
     let workflow_repository
         = format!("{}/{}", github_server_url, github_repository);
 
-    let value = json!({
-        "_type": INTOTO_STATEMENT_V1_TYPE,
-        "subject": [subject],
-        "predicate_type": SLSA_PREDICATE_V1_TYPE,
-        "predicate": {
-            "buildDefinition": {
-                "buildType": GITHUB_BUILD_TYPE,
-                "externalParameters": {
-                    "workflow": {
-                        "ref": workflow_ref,
-                        "repository": workflow_repository,
-                        "path": workflow_path,
+    let payload = GitHubProvenancePayload {
+        type_: INTOTO_STATEMENT_V1_TYPE,
+        subject: std::slice::from_ref(subject),
+        predicate_type: SLSA_PREDICATE_V1_TYPE,
+        predicate: GitHubProvenancePredicate {
+            build_definition: GitHubProvenanceBuildDefinition {
+                build_type: GITHUB_BUILD_TYPE.to_string(),
+                external_parameters: GitHubProvenanceExternalParameters {
+                    workflow: GitHubProvenanceWorkflow {
+                        ref_: workflow_ref.to_string(),
+                        repository: workflow_repository,
+                        path: workflow_path.to_string(),
                     },
                 },
-                "internalParameters": {
-                    "github": {
-                        "event_name": std::env::var("GITHUB_EVENT_NAME")?,
-                        "repository_id": std::env::var("GITHUB_REPOSITORY_ID")?,
-                        "repository_owner": std::env::var("GITHUB_REPOSITORY_OWNER")?,
+                internal_parameters: GitHubProvenanceInternalParameters {
+                    github: GitHubProvenanceGitHub {
+                        event_name: std::env::var("GITHUB_EVENT_NAME")?,
+                        repository_id: std::env::var("GITHUB_REPOSITORY_ID")?,
+                        repository_owner: std::env::var("GITHUB_REPOSITORY_OWNER")?,
                     },
                 },
-                "resolvedDependencies": [{
-                    "uri": format!("git+{}/{}@{}", std::env::var("GITHUB_SERVER_URL")?, std::env::var("GITHUB_REPOSITORY")?, std::env::var("GITHUB_REF")?),
-                    "digest": {
-                        "gitCommit": std::env::var("GITHUB_SHA")?,
+                resolved_dependencies: vec![GitHubProvenanceResolvedDependency {
+                    uri: format!("git+{}/{}@{}", std::env::var("GITHUB_SERVER_URL")?, std::env::var("GITHUB_REPOSITORY")?, std::env::var("GITHUB_REF")?),
+                    digest: GitHubProvenanceDigest {
+                        git_commit: std::env::var("GITHUB_SHA")?,
                     },
                 }],
             },
-            "runDetails": {
-                "builder": {
-                    "id": format!("{}{}", GITHUB_BUILDER_ID_PREFIX, std::env::var("RUNNER_ENVIRONMENT")?),
+            run_details: GitHubProvenanceRunDetails {
+                builder: GitHubProvenanceBuilder {
+                    id: format!("{}{}", GITHUB_BUILDER_ID_PREFIX, std::env::var("RUNNER_ENVIRONMENT")?),
                 },
-                "metadata": {
-                    "invocationId": format!("{}/{}/actions/runs/{}/attempts/{}", std::env::var("GITHUB_SERVER_URL")?, std::env::var("GITHUB_REPOSITORY")?, std::env::var("GITHUB_RUN_ID")?, std::env::var("GITHUB_RUN_ATTEMPT")?),
+                metadata: GitHubProvenanceMetadata {
+                    invocation_id: format!("{}/{}/actions/runs/{}/attempts/{}", std::env::var("GITHUB_SERVER_URL")?, std::env::var("GITHUB_REPOSITORY")?, std::env::var("GITHUB_RUN_ID")?, std::env::var("GITHUB_RUN_ATTEMPT")?),
                 },
             },
         },
-    });
+    };
 
-    Ok(value.to_string())
+    Ok(serde_json::to_string(&payload).unwrap())
 }
 
 const GITLAB_CI_PARAMETERS: &[&str] = &[
@@ -506,60 +671,160 @@ const GITLAB_CI_PARAMETERS: &[&str] = &[
     "RUNNER_GENERATE_ARTIFACTS_METADATA",
 ];
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenanceBuilder {
+    id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenanceConfigSource {
+    uri: String,
+    digest: GitLabProvenanceSha1Digest,
+    entry_point: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenanceSha1Digest {
+    sha1: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenanceInvocation {
+    config_source: GitLabProvenanceConfigSource,
+    parameters: BTreeMap<String, String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenanceJob {
+    id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenancePipeline {
+    id: String,
+    #[serde(rename = "ref")]
+    ref_: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenanceEnvironment {
+    name: String,
+    architecture: String,
+    server: String,
+    project: String,
+    job: GitLabProvenanceJob,
+    pipeline: GitLabProvenancePipeline,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenanceCompleteness {
+    parameters: bool,
+    environment: bool,
+    materials: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenanceMetadata {
+    build_invocation_id: String,
+    completeness: GitLabProvenanceCompleteness,
+    reproducible: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenanceMaterial {
+    uri: String,
+    digest: GitLabProvenanceSha1Digest,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenancePredicate {
+    build_type: String,
+    builder: GitLabProvenanceBuilder,
+    invocation: GitLabProvenanceInvocation,
+    environment: GitLabProvenanceEnvironment,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLabProvenancePayload<'a> {
+    #[serde(rename = "_type")]
+    type_: &'static str,
+    subject: &'a [ProvenanceSubject],
+    predicate_type: &'static str,
+    predicate: GitLabProvenancePredicate,
+    metadata: GitLabProvenanceMetadata,
+    materials: Vec<GitLabProvenanceMaterial>,
+}
+
 fn create_gitlab_provenance_payload(subject: &ProvenanceSubject) -> Result<String, VarError> {
     let parameters = GITLAB_CI_PARAMETERS.iter()
-        .filter_map(|&key| std::env::var(key).ok().map(|value| (key, value)))
+        .filter_map(|&key| std::env::var(key).ok().map(|value| (key.to_string(), value)))
         .collect::<BTreeMap<_, _>>();
 
-    let value = json!({
-        "_type": INTOTO_STATEMENT_V01_TYPE,
-        "subject": [subject],
-        "predicate_type": SLSA_PREDICATE_V02_TYPE,
-        "predicate": {
-            "buildType": format!("{}/{}", GITLAB_BUILD_TYPE_PREFIX, GITLAB_BUILD_TYPE_VERSION),
-            "builder": {
-                "id": format!("{}/-/runners/{}", std::env::var("CI_PROJECT_URL")?, std::env::var("CI_RUNNER_ID")?),
+    let ci_commit_sha = std::env::var("CI_COMMIT_SHA")?;
+    let ci_project_url = std::env::var("CI_PROJECT_URL")?;
+    let ci_pipeline_id = std::env::var("CI_PIPELINE_ID")?;
+
+    let payload = GitLabProvenancePayload {
+        type_: INTOTO_STATEMENT_V01_TYPE,
+        subject: std::slice::from_ref(subject),
+        predicate_type: SLSA_PREDICATE_V02_TYPE,
+        predicate: GitLabProvenancePredicate {
+            build_type: format!("{}/{}", GITLAB_BUILD_TYPE_PREFIX, GITLAB_BUILD_TYPE_VERSION),
+            builder: GitLabProvenanceBuilder {
+                id: format!("{}/-/runners/{}", ci_project_url, std::env::var("CI_RUNNER_ID")?),
             },
-            "invocation": {
-                "configSource": {
-                    "uri": format!("git+{}", std::env::var("CI_PROJECT_URL")?),
-                    "digest": {
-                        "sha1": std::env::var("CI_COMMIT_SHA")?,
+            invocation: GitLabProvenanceInvocation {
+                config_source: GitLabProvenanceConfigSource {
+                    uri: format!("git+{}", ci_project_url),
+                    digest: GitLabProvenanceSha1Digest {
+                        sha1: ci_commit_sha.clone(),
                     },
-                    "entryPoint": std::env::var("CI_JOB_NAME")?,
+                    entry_point: std::env::var("CI_JOB_NAME")?,
                 },
-                "parameters": parameters,
+                parameters: parameters,
             },
-            "environment": {
-                "name": std::env::var("CI_RUNNER_DESCRIPTION")?,
-                "architecture": std::env::var("CI_RUNNER_EXECUTABLE_ARCH")?,
-                "server": std::env::var("CI_SERVER_URL")?,
-                "project": std::env::var("CI_PROJECT_PATH")?,
-                "job": {
-                    "id": std::env::var("CI_JOB_ID")?,
+            environment: GitLabProvenanceEnvironment {
+                name: std::env::var("CI_RUNNER_DESCRIPTION")?,
+                architecture: std::env::var("CI_RUNNER_EXECUTABLE_ARCH")?,
+                server: std::env::var("CI_SERVER_URL")?,
+                project: std::env::var("CI_PROJECT_PATH")?,
+                job: GitLabProvenanceJob {
+                    id: std::env::var("CI_JOB_ID")?,
                 },
-                "pipeline": {
-                    "id": std::env::var("CI_PIPELINE_ID")?,
-                    "ref": std::env::var("CI_CONFIG_PATH")?,
+                pipeline: GitLabProvenancePipeline {
+                    id: ci_pipeline_id.clone(),
+                    ref_: std::env::var("CI_CONFIG_PATH")?,
                 },
             },
         },
-        "metadata": {
-            "buildInvocationId": std::env::var("CI_PIPELINE_ID")?,
-            "completeness": {
-                "parameters": true,
-                "environment": true,
-                "materials": false,
+        metadata: GitLabProvenanceMetadata {
+            build_invocation_id: ci_pipeline_id,
+            completeness: GitLabProvenanceCompleteness {
+                parameters: true,
+                environment: true,
+                materials: false,
             },
-            "reproducible": false,
+            reproducible: false,
         },
-        "materials": [{
-            "uri": format!("git+{}", std::env::var("CI_PROJECT_URL")?),
-            "digest": {
-                "sha1": std::env::var("CI_COMMIT_SHA")?,
+        materials: vec![GitLabProvenanceMaterial {
+            uri: format!("git+{}", ci_project_url),
+            digest: GitLabProvenanceSha1Digest {
+                sha1: ci_commit_sha,
             },
         }],
-    });
+    };
 
-    Ok(value.to_string())
+    Ok(serde_json::to_string(&payload).unwrap())
 }

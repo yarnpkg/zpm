@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{document::Document, value::Indent, Error, Path, Value};
 
-#[cfg(target_pointer_width = "32")]
+#[cfg(not(sonic_rs))]
 pub use serde_json as json_provider;
 
-#[cfg(not(target_pointer_width = "32"))]
+#[cfg(sonic_rs)]
 pub use sonic_rs as json_provider;
 
 pub type RawJsonDeserializer<R> = json_provider::Deserializer<R>;
@@ -65,7 +65,7 @@ impl JsonDocument {
         Ok(json_provider::to_string_pretty(input)?)
     }
 
-    #[cfg(target_pointer_width = "32")]
+    #[cfg(not(sonic_rs))]
     pub fn merge_json(a: &str, b: &str) -> Result<json_provider::Value, Error> {
         let mut obj_a: json_provider::Value =
             JsonDocument::hydrate_from_str(a)?;
@@ -79,7 +79,7 @@ impl JsonDocument {
         Ok(obj_a)
     }
 
-    #[cfg(not(target_pointer_width = "32"))]
+    #[cfg(sonic_rs)]
     pub fn merge_json(a: &str, b: &str) -> Result<json_provider::Value, Error> {
         use sonic_rs::{JsonContainerTrait, JsonValueMutTrait};
 
