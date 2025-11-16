@@ -1,18 +1,19 @@
 use clipanion::cli;
-use zpm_utils::{DataType, Path, ToHumanString};
+use zpm_utils::{DataType, ToHumanString};
 
 use crate::{cwd::get_final_cwd, errors::Error, links::{Link, LinkTarget, set_link}, manifest::find_closest_package_manager};
 
-/// Link a local Yarn binary to the current project
+/// Opt-in to a Yarn migration
 #[cli::command]
 #[cli::path("switch", "link")]
 #[cli::category("Local Yarn development")]
 #[derive(Debug)]
-pub struct LinkCommand {
-    path: Path,
+pub struct LinkMigrationCommand {
+    #[cli::option("--migration")]
+    _migration: bool,
 }
 
-impl LinkCommand {
+impl LinkMigrationCommand {
     pub async fn execute(&self) -> Result<(), Error> {
         let lookup_path
             = get_final_cwd()?;
@@ -26,13 +27,13 @@ impl LinkCommand {
 
         set_link(&Link {
             project_cwd: detected_root_path.clone(),
-            link_target: LinkTarget::Local {bin_path: self.path.fs_canonicalize()?},
+            link_target: LinkTarget::Migration,
         })?;
 
         println!(
-            "Link successful; running Yarn commands in {} will now execute the binary at {}.",
+            "Link successful; running Yarn commands in {} will now execute the version referenced by {}.",
             detected_root_path.to_print_string(),
-            self.path.to_print_string(),
+            DataType::Code.colorize("packageManagerMigration")
         );
 
         println!();

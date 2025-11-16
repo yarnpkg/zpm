@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
-use zpm_utils::{Hash64, IoResultExt, Path, ToFileString};
+use zpm_utils::{DataType, Hash64, IoResultExt, Path, ToFileString, ToHumanString};
 
 use crate::errors::Error;
 
@@ -10,7 +10,30 @@ use crate::errors::Error;
 #[serde(rename_all = "camelCase")]
 pub struct Link {
     pub project_cwd: Path,
-    pub bin_path: Path,
+    pub link_target: LinkTarget,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "type")]
+pub enum LinkTarget {
+    Local {
+        bin_path: Path,
+    },
+
+    Migration,
+}
+
+impl ToHumanString for LinkTarget {
+    fn to_print_string(&self) -> String {
+        match self {
+            Self::Local {bin_path}
+                => bin_path.to_print_string(),
+
+            Self::Migration
+                => DataType::Code.colorize("Project migration"),
+        }
+    }
 }
 
 pub fn links_dir() -> Result<Path, Error> {

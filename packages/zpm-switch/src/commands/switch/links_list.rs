@@ -22,9 +22,9 @@ impl LinksListCommand {
                     label: None,
                     value: Some(AbstractValue::new(link.project_cwd.clone())),
                     children: Some(tree::TreeNodeChildren::Map(tree::Map::from([
-                        ("binaryPath".to_string(), tree::Node {
+                        ("linkTarget".to_string(), tree::Node {
                             label: Some("Binary path".to_string()),
-                            value: Some(AbstractValue::new(link.bin_path)),
+                            value: Some(AbstractValue::new(link.link_target)),
                             children: None,
                         }),
                     ]))),

@@ -45,6 +45,11 @@
       "description": "Whether to report errors when a package would be added or removed from the cache",
       "default": false
     },
+    "enableMigrationMode": {
+      "type": "boolean",
+      "description": "Change various settings in Yarn to make it easier to use. This setting is NOT meant to be manually set; Yarn Switch will automatically apply it when necessary. See [Migration Mode](/getting-started/migration-mode) for details.",
+      "default": false
+    },
     "enableNetwork": {
       "type": "boolean",
       "description": "Whether to allow Yarn to perform network queries or not",

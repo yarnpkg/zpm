@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use clipanion::cli;
-use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use zpm_parsers::JsonDocument;

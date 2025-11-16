@@ -602,7 +602,7 @@
       }
     },
     "@astrojs/starlight@npm:^0.36.2": {
-      "checksum": "379604329750d97ac5c41fb6f999036d6a07924d26d3abd9425078cb0d66cbf5598dce8e1471403b7071f255a7d46caa040e2d818f1e5a0b8c15ce011c1aaf53",
+      "checksum": "820ba31b592504bf8a1ff5dee88512be0ba8e204f9a7f5cb121775d2d9158e945fcfdfda6a2bd863aa1e054f0bcbbe7cb75c70ff436ca27f53078c1c8c9697f0",
       "resolution": {
         "resolution": "@astrojs/starlight@npm:0.36.2",
         "version": "0.36.2",
@@ -7056,7 +7056,7 @@
       }
     },
     "dedent@npm:^1.7.0": {
-      "checksum": "5ffc45361606ce5ac9649a4f846a0315b37e6b01548c659be801bd522051eadf01e621883386bf175020f871bd721b707155fef64f8c5fe05e316132444bc1f5",
+      "checksum": "db3a07b7905e7338600e49e26ad4559ed8c6d0e4014e245da61a46b2b6858d39b255c8cbc23be5201c5ecde4dd05b33c08ab17535f0d34ac79d942339cd63f25",
       "resolution": {
         "resolution": "dedent@npm:1.7.0",
         "version": "1.7.0",
@@ -9231,7 +9231,7 @@
       }
     },
     "inline-style-parser@npm:0.2.6": {
-      "checksum": "58c80dd56c032a24d77a202423a967b0b07f5f4ddff48b07037a6c87051268d9d5bccf123b2feb5c82960fad4e44920b0b212b9a9b6b125c3571cbe3f59dc556",
+      "checksum": "849d8b9772001aaf6fce97306006335612c63af8de13741ddb5518fe0ca44ee513eba343178010c5c9653e6e4cd38160d187820fa8dcc69c03c4a3fb6aad144d",
       "resolution": {
         "resolution": "inline-style-parser@npm:0.2.6",
         "version": "0.2.6"
@@ -12647,7 +12647,7 @@
       }
     },
     "resolve@patch:resolve%40npm%3A%5E1.22.10#<builtin>": {
-      "checksum": "91c1b39ec837f66372df3c6fd44e4349faabc59681a9c163e5e711899b98552b790b89acdf43968f43368b6b3be06ab9a03510b20a248489fceed45ade961d6c",
+      "checksum": "f12907cc91f1b8e7d9f6fe6e04b5ef5e8de3fed2bbc7a51137e28ae5ebce86c6654db14eb72da228c66e5efd9b86f28dac34f18c4fb4173ad3b6dbc807836a4c",
       "resolution": {
         "resolution": "resolve@patch:resolve%40npm%3A1.22.10#<builtin>&checksum=0710b472d66db91acddd307fe7c3b9587f321c6b6fd04cbe76511e55dfec85e2606caefb6aa6391c325a4a16470d6969f897066c790556a4d3dbda09b1005b87",
         "version": "1.22.10",
@@ -12659,7 +12659,7 @@
       }
     },
     "resolve@patch:resolve%40npm%3A%5E2.0.0-next.5#<builtin>": {
-      "checksum": "8bf0749417415a26af633d6a190d5dd5cdfe645baaf0a6e1bf91e44e4036fa7a28c67e1e70ca8c52294e0ad69f73c199b216b790049c21e9cfab3a4c658ac07e",
+      "checksum": "b48c2010816d71cd4917275f5bcc170988984b770001ae060010963be4733ddee72c8403fb4b28a67de6d1d56b77a1cdf125e98c8b7d6b7a7f5bd595a9e90aa7",
       "resolution": {
         "resolution": "resolve@patch:resolve%40npm%3A2.0.0-next.5#<builtin>&checksum=0710b472d66db91acddd307fe7c3b9587f321c6b6fd04cbe76511e55dfec85e2606caefb6aa6391c325a4a16470d6969f897066c790556a4d3dbda09b1005b87",
         "version": "2.0.0-next.5",
@@ -14055,7 +14055,7 @@
       }
     },
     "typescript@patch:typescript%40npm%3A%5E5.8.3#<builtin>": {
-      "checksum": "56ac42d2138bc17fc0635934dadaac46de9609329088eea6dc41e496e5fca7e54ca3443b96069212496646c0f7d9af16bd08b6477ad9a437605468e1f1af8007",
+      "checksum": "04e0920acfce8d9cdbb2256209c2d8d202081ed3864798967a8778dfd5d1fd62bcb27e759fbaadc9da873818bba42b21ffa1517a4632843ea95d2c9a490e709d",
       "resolution": {
         "resolution": "typescript@patch:typescript%40npm%3A5.9.2#<builtin>&checksum=112fa7c8f2b0a70cad690e274067371ec56b5b10b3563ccb108397127d71ae1ba42d51780238b6c7e517cc2b6710a106f89dd53ede004418a9a818b06656546a",
         "version": "5.9.2"

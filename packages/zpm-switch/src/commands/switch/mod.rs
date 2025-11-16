@@ -6,6 +6,7 @@ pub mod clipanion_commands;
 pub mod explicit;
 pub mod links_clear;
 pub mod links_list;
+pub mod link_migration;
 pub mod link;
 pub mod postinstall;
 pub mod unlink;

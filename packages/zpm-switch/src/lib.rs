@@ -13,7 +13,6 @@ pub use manifest::{
     PackageManagerReference,
     VersionPackageManagerReference,
     find_closest_package_manager,
-    validate_package_manager,
 };
 
 pub use yarn_enums::{
