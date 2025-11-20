@@ -32,6 +32,7 @@ mod up;
 mod workspaces_focus;
 mod workspaces_list;
 mod workspace;
+mod why;
 
 #[cli::program(async)]
 pub enum YarnCli {
@@ -82,6 +83,7 @@ pub enum YarnCli {
     WorkspacesFocus(workspaces_focus::WorkspacesFocus),
     WorkspacesList(workspaces_list::WorkspacesList),
     Workspace(workspace::Workspace),
+    Why(why::Why),
 }
 
 pub async fn run_default() -> ExitCode {
