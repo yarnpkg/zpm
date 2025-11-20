@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use clipanion::cli;
 use indexmap::IndexMap;
 use serde::Serialize;
-use zpm_primitives::{DescriptorResolution, Ident, IdentGlob, Locator, Reference};
+use zpm_primitives::{DescriptorResolution, Ident, IdentGlob, Locator, Reference, WorkspacePathReference};
 use zpm_utils::{tree, AbstractValue, DataType, Path, ToFileString, ToHumanString};
 
 use crate::{
@@ -13,10 +13,20 @@ use crate::{
 };
 
 /// A wrapper for displaying workspace locators with their actual paths
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 struct WorkspaceLocatorDisplay {
     ident: String,
     path: Path,
+}
+
+impl Serialize for WorkspaceLocatorDisplay {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Serialize as a string for JSON output
+        serializer.serialize_str(&format!("{}@workspace:{}", self.ident, self.path.to_file_string()))
+    }
 }
 
 impl ToHumanString for WorkspaceLocatorDisplay {
@@ -157,7 +167,7 @@ impl Why {
                             tree::Node {
                                 label: None,
                                 value: Some(AbstractValue::new(descriptor_resolution)),
-                                children: None,
+                                children: Some(tree::TreeNodeChildren::Map(IndexMap::new())),
                             },
                         );
                     }
@@ -220,7 +230,7 @@ impl Why {
 
         // Phase 2: Build the tree by printing all dependents
         let mut printed = BTreeSet::new();
-        let mut root_children = vec![];
+        let mut root_children = IndexMap::new();
 
         for workspace in &project.workspaces {
             let workspace_locator = workspace.locator();
@@ -235,10 +245,13 @@ impl Why {
             );
         }
 
+        // Convert the map to a vec for the root node
+        let root_children_vec: Vec<_> = root_children.into_iter().map(|(_, node)| node).collect();
+
         Ok(tree::Node {
             label: None,
             value: None,
-            children: Some(tree::TreeNodeChildren::Vec(root_children)),
+            children: Some(tree::TreeNodeChildren::Vec(root_children_vec)),
         })
     }
 
@@ -307,7 +320,7 @@ impl Why {
         project: &Project,
         dependents: &BTreeSet<Locator>,
         printed: &mut BTreeSet<Locator>,
-        parent_children: &mut Vec<tree::Node<'_>>,
+        parent_children: &mut IndexMap<String, tree::Node<'_>>,
     ) {
         // Only print if this is a dependent
         if !dependents.contains(locator) {
@@ -325,7 +338,7 @@ impl Why {
             .iter()
             .any(|ws| ws.locator() == *locator);
 
-        let mut node_children = vec![];
+        let mut node_children = IndexMap::new();
 
         // If already printed and not a workspace root, skip printing children
         // Don't print children of transitive workspace dependencies
@@ -360,24 +373,57 @@ impl Why {
 
         // Create the node value based on whether this has a descriptor (non-root) or not (root)
         let node_value = if let Some(desc) = descriptor {
-            // Non-root nodes use DescriptorResolution
-            AbstractValue::new(DescriptorResolution::new(desc.clone(), locator.clone()))
+            // Non-root nodes: create DescriptorResolution with potentially workspace-aware locator
+            let locator_display = if matches!(&locator.reference, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_)) {
+                // For workspace dependencies, use WorkspaceLocatorDisplay in the DescriptorResolution
+                if let Some(workspace) = project.workspaces.iter().find(|ws| ws.locator() == *locator) {
+                    // Use the workspace's locator_path() method to get a locator with the path
+                    let workspace_locator = workspace.locator_path();
+                    AbstractValue::new(DescriptorResolution::new(desc.clone(), workspace_locator))
+                } else {
+                    AbstractValue::new(DescriptorResolution::new(desc.clone(), locator.clone()))
+                }
+            } else {
+                AbstractValue::new(DescriptorResolution::new(desc.clone(), locator.clone()))
+            };
+            locator_display
         } else {
             // Root nodes (workspaces) use the locator_display_value helper
             Self::locator_display_value(locator, project)
         };
 
+        // Use the locator's display string as the key
+        let key = if descriptor.is_some() {
+            // For dependencies, use the workspace path if it's a workspace
+            if matches!(&locator.reference, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_)) {
+                if let Some(workspace) = project.workspaces.iter().find(|ws| ws.locator() == *locator) {
+                    format!("{}@workspace:{}", locator.ident.to_file_string(), workspace.rel_path.to_file_string())
+                } else {
+                    locator.to_file_string()
+                }
+            } else {
+                locator.to_file_string()
+            }
+        } else {
+            // For root nodes, use the display value's string representation
+            if matches!(&locator.reference, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_)) {
+                if let Some(workspace) = project.workspaces.iter().find(|ws| ws.locator() == *locator) {
+                    format!("{}@workspace:{}", locator.ident.to_file_string(), workspace.rel_path.to_file_string())
+                } else {
+                    locator.to_file_string()
+                }
+            } else {
+                locator.to_file_string()
+            }
+        };
+
         let node = tree::Node {
             label: None,
             value: Some(node_value),
-            children: if node_children.is_empty() {
-                None
-            } else {
-                Some(tree::TreeNodeChildren::Vec(node_children))
-            },
+            children: Some(tree::TreeNodeChildren::Map(node_children)),
         };
 
-        parent_children.push(node);
+        parent_children.insert(key, node);
     }
 }
 
