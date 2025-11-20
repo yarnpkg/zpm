@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use clipanion::cli;
 use indexmap::IndexMap;
-use zpm_primitives::{Ident, IdentGlob, Locator};
-use zpm_utils::{tree, AbstractValue};
+use zpm_primitives::{DescriptorResolution, Ident, IdentGlob, Locator};
+use zpm_utils::{tree, AbstractValue, ToFileString};
 
 use crate::{
     error::Error,
@@ -85,7 +85,7 @@ impl Why {
 
         for locator in sorted_locators {
             let resolution = &install_state.resolution_tree.locator_resolutions[locator];
-            let mut dependency_children = vec![];
+            let mut children_map = IndexMap::new();
 
             for (ident, descriptor) in &resolution.dependencies {
                 // Skip peer dependencies unless --peers flag is set
@@ -102,27 +102,28 @@ impl Why {
                 if let Some(dep_locator) = dep_locator {
                     // Check if this dependency matches our search pattern
                     if self.pattern.check(&dep_locator.ident) {
-                        dependency_children.push(tree::Node {
-                            label: None,
-                            value: Some(AbstractValue::new(dep_locator.clone())),
-                            children: None,
-                        });
+                        // Create a DescriptorResolution to match Berry's format
+                        let descriptor_resolution = DescriptorResolution::new(
+                            descriptor.clone(),
+                            dep_locator.clone(),
+                        );
+
+                        // Use the locator as the key (e.g., "react@npm:18.3.1")
+                        let key = dep_locator.to_file_string();
+                        children_map.insert(
+                            key,
+                            tree::Node {
+                                label: None,
+                                value: Some(AbstractValue::new(descriptor_resolution)),
+                                children: None,
+                            },
+                        );
                     }
                 }
             }
 
             // Only add this locator to the tree if it has matching dependencies
-            if !dependency_children.is_empty() {
-                let mut children_map = IndexMap::new();
-                children_map.insert(
-                    "Dependencies".to_string(),
-                    tree::Node {
-                        label: Some("Dependencies".to_string()),
-                        value: None,
-                        children: Some(tree::TreeNodeChildren::Vec(dependency_children)),
-                    },
-                );
-
+            if !children_map.is_empty() {
                 root_children.push(tree::Node {
                     label: None,
                     value: Some(AbstractValue::new(locator.clone())),
@@ -183,6 +184,7 @@ impl Why {
             let workspace_locator = workspace.locator();
             self.print_all_dependents(
                 &workspace_locator,
+                None,  // Root workspaces don't have a descriptor
                 install_state,
                 project,
                 &dependents,
@@ -258,6 +260,7 @@ impl Why {
     fn print_all_dependents(
         &self,
         locator: &Locator,
+        descriptor: Option<&zpm_primitives::Descriptor>,
         install_state: &InstallState,
         project: &Project,
         dependents: &BTreeSet<Locator>,
@@ -283,23 +286,26 @@ impl Why {
         let mut node_children = vec![];
 
         // If already printed and not a workspace root, skip printing children
-        let should_print_children = !printed.contains(locator) || is_workspace;
+        // Don't print children of transitive workspace dependencies
+        let should_print_children = (!printed.contains(locator) || is_workspace)
+            && !(descriptor.is_some() && is_workspace);
 
         if should_print_children {
             printed.insert(locator.clone());
 
             // Print dependencies that are also dependents
-            for (ident, descriptor) in &resolution.dependencies {
+            for (ident, dep_descriptor) in &resolution.dependencies {
                 // Skip peer dependencies unless --peers flag is set
                 if !self.peers && resolution.peer_dependencies.contains_key(ident) {
                     continue;
                 }
 
                 if let Some(dep_locator) =
-                    install_state.resolution_tree.descriptor_to_locator.get(descriptor)
+                    install_state.resolution_tree.descriptor_to_locator.get(dep_descriptor)
                 {
                     self.print_all_dependents(
                         dep_locator,
+                        Some(dep_descriptor),
                         install_state,
                         project,
                         dependents,
@@ -310,9 +316,18 @@ impl Why {
             }
         }
 
+        // Create the node value based on whether this has a descriptor (non-root) or not (root)
+        let node_value = if let Some(desc) = descriptor {
+            // Non-root nodes use DescriptorResolution
+            AbstractValue::new(DescriptorResolution::new(desc.clone(), locator.clone()))
+        } else {
+            // Root nodes (workspaces) use just the Locator
+            AbstractValue::new(locator.clone())
+        };
+
         let node = tree::Node {
             label: None,
-            value: Some(AbstractValue::new(locator.clone())),
+            value: Some(node_value),
             children: if node_children.is_empty() {
                 None
             } else {
