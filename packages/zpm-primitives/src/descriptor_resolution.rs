@@ -20,6 +20,6 @@ impl DescriptorResolution {
 
 impl ToHumanString for DescriptorResolution {
     fn to_print_string(&self) -> String {
-        format!("{} → {}", self.descriptor.to_print_string(), self.locator.to_print_string())
+        format!("{} (via {})", self.locator.to_print_string(), self.descriptor.range.to_print_string())
     }
 }

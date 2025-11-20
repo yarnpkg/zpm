@@ -1,15 +1,40 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use clipanion::cli;
 use indexmap::IndexMap;
-use zpm_primitives::{DescriptorResolution, Ident, IdentGlob, Locator};
-use zpm_utils::{tree, AbstractValue, ToFileString};
+use serde::Serialize;
+use zpm_primitives::{DescriptorResolution, Ident, IdentGlob, Locator, Reference};
+use zpm_utils::{tree, AbstractValue, DataType, Path, ToFileString, ToHumanString};
 
 use crate::{
     error::Error,
     install::InstallState,
     project::Project,
 };
+
+/// A wrapper for displaying workspace locators with their actual paths
+#[derive(Clone, Debug, Serialize)]
+struct WorkspaceLocatorDisplay {
+    ident: String,
+    path: Path,
+}
+
+impl ToHumanString for WorkspaceLocatorDisplay {
+    fn to_print_string(&self) -> String {
+        format!(
+            "{}{}{}",
+            self.ident,
+            DataType::Custom(135, 175, 255).colorize("@"),
+            DataType::Reference.colorize(&format!("workspace:{}", self.path.to_file_string()))
+        )
+    }
+}
+
+impl ToFileString for WorkspaceLocatorDisplay {
+    fn to_file_string(&self) -> String {
+        format!("{}@workspace:{}", self.ident, self.path.to_file_string())
+    }
+}
 
 /// Display the reason why a package is needed
 ///
@@ -62,7 +87,7 @@ impl Why {
         let root_node = if self.recursive {
             self.why_recursive(&project, install_state)?
         } else {
-            self.why_simple(install_state)?
+            self.why_simple(&project, install_state)?
         };
 
         let rendering = tree::TreeRenderer::new().render(&root_node, self.json);
@@ -72,7 +97,24 @@ impl Why {
         Ok(())
     }
 
-    fn why_simple(&self, install_state: &InstallState) -> Result<tree::Node<'_>, Error> {
+    /// Creates an AbstractValue for displaying a locator, using workspace path if applicable
+    fn locator_display_value(locator: &Locator, project: &Project) -> AbstractValue<'static> {
+        // Check if this is a workspace locator
+        if matches!(&locator.reference, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_)) {
+            // Find the workspace by locator to get its path
+            if let Some(workspace) = project.workspaces.iter().find(|ws| ws.locator() == *locator) {
+                return AbstractValue::new(WorkspaceLocatorDisplay {
+                    ident: locator.ident.to_file_string(),
+                    path: workspace.rel_path.clone(),
+                });
+            }
+        }
+
+        // For non-workspace locators, use the locator directly
+        AbstractValue::new(locator.clone())
+    }
+
+    fn why_simple(&self, project: &Project, install_state: &InstallState) -> Result<tree::Node<'_>, Error> {
         let mut root_children = vec![];
 
         // Sort locators for deterministic output
@@ -126,7 +168,7 @@ impl Why {
             if !children_map.is_empty() {
                 root_children.push(tree::Node {
                     label: None,
-                    value: Some(AbstractValue::new(locator.clone())),
+                    value: Some(Self::locator_display_value(locator, project)),
                     children: Some(tree::TreeNodeChildren::Map(children_map)),
                 });
             }
@@ -321,8 +363,8 @@ impl Why {
             // Non-root nodes use DescriptorResolution
             AbstractValue::new(DescriptorResolution::new(desc.clone(), locator.clone()))
         } else {
-            // Root nodes (workspaces) use just the Locator
-            AbstractValue::new(locator.clone())
+            // Root nodes (workspaces) use the locator_display_value helper
+            Self::locator_display_value(locator, project)
         };
 
         let node = tree::Node {
