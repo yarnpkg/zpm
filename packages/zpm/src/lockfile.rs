@@ -8,6 +8,7 @@ use zpm_utils::{FromFileString, Hash64, ToFileString};
 
 use crate::{
     error::Error,
+    primitives_exts::RangeExt,
     resolvers::Resolution,
 };
 
@@ -65,6 +66,11 @@ impl Serialize for Lockfile {
 
         let mut descriptors_to_resolutions: BTreeMap<Locator, MultiKeyLockfileEntry> = BTreeMap::new();
         for (descriptor, locator) in self.resolutions.iter().sorted_by_key(|(descriptor, _)| (*descriptor).clone()) {
+            // Skip descriptors with transient_resolution set to true
+            if descriptor.range.details().transient_resolution {
+                continue;
+            }
+
             let entry = self.entries.get(locator)
                 .expect("Expected a matching resolution to be found in the lockfile for any resolved locator.");
 
@@ -271,4 +277,75 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
     }
 
     Ok(lockfile)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zpm_utils::FromFileString;
+
+    #[test]
+    fn test_transient_resolutions_are_omitted_from_serialization() {
+        // Create a lockfile with both transient and non-transient descriptors
+        let mut lockfile = Lockfile::new();
+        
+        // Create a non-transient descriptor (npm registry package - has transient_resolution = false)
+        let non_transient_descriptor = Descriptor::from_file_string("package-a@npm:^1.0.0")
+            .expect("Failed to parse non-transient descriptor");
+        
+        // Create a transient descriptor (file: - has transient_resolution = true)
+        let transient_descriptor = Descriptor::from_file_string("package-b@file:./path/to/folder")
+            .expect("Failed to parse transient descriptor");
+        
+        // Create locators for both
+        let non_transient_locator = Locator::from_file_string("package-a@npm:1.0.0")
+            .expect("Failed to parse non-transient locator");
+        
+        let transient_locator = Locator::from_file_string("package-b@file:./path/to/folder")
+            .expect("Failed to parse transient locator");
+        
+        // Create resolution entries
+        let non_transient_entry = LockfileEntry {
+            checksum: None,
+            resolution: Resolution {
+                locator: non_transient_locator.clone(),
+                version: Default::default(),
+                requirements: Default::default(),
+                dependencies: Default::default(),
+                peer_dependencies: Default::default(),
+                optional_dependencies: Default::default(),
+                optional_peer_dependencies: Default::default(),
+                missing_peer_dependencies: Default::default(),
+            },
+        };
+        
+        let transient_entry = LockfileEntry {
+            checksum: None,
+            resolution: Resolution {
+                locator: transient_locator.clone(),
+                version: Default::default(),
+                requirements: Default::default(),
+                dependencies: Default::default(),
+                peer_dependencies: Default::default(),
+                optional_dependencies: Default::default(),
+                optional_peer_dependencies: Default::default(),
+                missing_peer_dependencies: Default::default(),
+            },
+        };
+        
+        // Add both to the lockfile
+        lockfile.resolutions.insert(non_transient_descriptor.clone(), non_transient_locator.clone());
+        lockfile.resolutions.insert(transient_descriptor.clone(), transient_locator.clone());
+        lockfile.entries.insert(non_transient_locator.clone(), non_transient_entry);
+        lockfile.entries.insert(transient_locator.clone(), transient_entry);
+        
+        // Serialize the lockfile
+        let serialized = serde_yaml::to_string(&lockfile).unwrap();
+        
+        // The serialized output should include the non-transient descriptor
+        assert!(serialized.contains("package-a"), "Non-transient descriptor should be in serialized output");
+        
+        // The serialized output should NOT include the transient descriptor
+        assert!(!serialized.contains("package-b"), "Transient descriptor should NOT be in serialized output");
+    }
 }
