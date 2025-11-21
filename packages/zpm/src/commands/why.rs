@@ -167,7 +167,8 @@ impl Why {
                             tree::Node {
                                 label: None,
                                 value: Some(AbstractValue::new(descriptor_resolution)),
-                                children: Some(tree::TreeNodeChildren::Map(IndexMap::new())),
+                                // In simple mode, leaf nodes have no children so they serialize directly
+                                children: None,
                             },
                         );
                     }
