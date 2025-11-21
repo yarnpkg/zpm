@@ -348,4 +348,67 @@ mod tests {
         // The serialized output should NOT include the transient descriptor
         assert!(!serialized.contains("package-b"), "Transient descriptor should NOT be in serialized output");
     }
+
+    #[test]
+    fn test_workspace_and_link_ranges_are_transient() {
+        // Create a lockfile with workspace and link descriptors
+        let mut lockfile = Lockfile::new();
+        
+        // Create a workspace descriptor (has transient_resolution = true)
+        let workspace_descriptor = Descriptor::from_file_string("my-pkg@workspace:*")
+            .expect("Failed to parse workspace descriptor");
+        
+        // Create a link descriptor (has transient_resolution = true)
+        let link_descriptor = Descriptor::from_file_string("linked-pkg@link:../linked")
+            .expect("Failed to parse link descriptor");
+        
+        // Create locators for both
+        let workspace_locator = Locator::from_file_string("my-pkg@workspace:packages/my-pkg")
+            .expect("Failed to parse workspace locator");
+        
+        let link_locator = Locator::from_file_string("linked-pkg@link:../linked")
+            .expect("Failed to parse link locator");
+        
+        // Create resolution entries
+        let workspace_entry = LockfileEntry {
+            checksum: None,
+            resolution: Resolution {
+                locator: workspace_locator.clone(),
+                version: Default::default(),
+                requirements: Default::default(),
+                dependencies: Default::default(),
+                peer_dependencies: Default::default(),
+                optional_dependencies: Default::default(),
+                optional_peer_dependencies: Default::default(),
+                missing_peer_dependencies: Default::default(),
+            },
+        };
+        
+        let link_entry = LockfileEntry {
+            checksum: None,
+            resolution: Resolution {
+                locator: link_locator.clone(),
+                version: Default::default(),
+                requirements: Default::default(),
+                dependencies: Default::default(),
+                peer_dependencies: Default::default(),
+                optional_dependencies: Default::default(),
+                optional_peer_dependencies: Default::default(),
+                missing_peer_dependencies: Default::default(),
+            },
+        };
+        
+        // Add both to the lockfile
+        lockfile.resolutions.insert(workspace_descriptor.clone(), workspace_locator.clone());
+        lockfile.resolutions.insert(link_descriptor.clone(), link_locator.clone());
+        lockfile.entries.insert(workspace_locator.clone(), workspace_entry);
+        lockfile.entries.insert(link_locator.clone(), link_entry);
+        
+        // Serialize the lockfile
+        let serialized = serde_yaml::to_string(&lockfile).unwrap();
+        
+        // Neither workspace nor link descriptors should be in the serialized output
+        assert!(!serialized.contains("my-pkg"), "Workspace descriptor should NOT be in serialized output");
+        assert!(!serialized.contains("linked-pkg"), "Link descriptor should NOT be in serialized output");
+    }
 }
