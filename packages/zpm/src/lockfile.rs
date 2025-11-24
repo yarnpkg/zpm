@@ -8,6 +8,7 @@ use zpm_utils::{FromFileString, Hash64, ToFileString};
 
 use crate::{
     error::Error,
+    primitives_exts::RangeExt,
     resolvers::Resolution,
 };
 
@@ -65,6 +66,11 @@ impl Serialize for Lockfile {
 
         let mut descriptors_to_resolutions: BTreeMap<Locator, MultiKeyLockfileEntry> = BTreeMap::new();
         for (descriptor, locator) in self.resolutions.iter().sorted_by_key(|(descriptor, _)| (*descriptor).clone()) {
+            // Skip descriptors with transient_resolution set to true
+            if descriptor.range.details().transient_resolution {
+                continue;
+            }
+
             let entry = self.entries.get(locator)
                 .expect("Expected a matching resolution to be found in the lockfile for any resolved locator.");
 

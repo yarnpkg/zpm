@@ -39,8 +39,8 @@ pub enum Error {
     #[error(transparent)]
     SwitchError(#[from] zpm_switch::Error),
 
-    #[error("Network error: {0}")]
-    HttpError(#[from] Arc<reqwest::Error>),
+    #[error("Network error: {0}{}", .1.as_deref().map(|s| format!(" ({})", s)).unwrap_or_default())]
+    HttpError(Arc<reqwest::Error>, Option<String>),
 
     #[error(transparent)]
     PathError(#[from] zpm_utils::PathError),
@@ -50,6 +50,27 @@ pub enum Error {
 
     #[error(transparent)]
     SyncError2(#[from] zpm_sync::SyncError),
+
+    #[error("Private packages cannot be published")]
+    CannotPublishPrivatePackage,
+
+    #[error("Cannot publish packages with a missing name or version")]
+    CannotPublishMissingNameOrVersion,
+
+    #[error("Invalid publish access: {0}")]
+    InvalidNpmPublishAccess(String),
+
+    #[error("Missing environment variable when creating the provenance payload: {0}")]
+    MissingEnvironmentVariableForProvenancePayload(String),
+
+    #[error("Provenance error: {0}")]
+    ProvenanceError(String),
+
+    #[error("Publishing a package with provenance requires authentication")]
+    ProvenanceRequiresAuthentication,
+
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
 
     #[error("Conflicting options: {0}")]
     ConflictingOptions(String),
@@ -445,6 +466,6 @@ impl From<std::convert::Infallible> for Error {
 
 impl From<reqwest::Error> for Error {
     fn from(error: reqwest::Error) -> Self {
-        Arc::new(error).into()
+        Error::HttpError(Arc::new(error), None)
     }
 }

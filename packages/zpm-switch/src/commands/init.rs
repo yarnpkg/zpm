@@ -3,7 +3,7 @@ use std::process::ExitStatus;
 use clipanion::cli;
 use zpm_utils::ToFileString;
 
-use crate::{cwd::get_final_cwd, errors::Error, manifest::{find_closest_package_manager, validate_package_manager}, yarn::get_default_yarn_version};
+use crate::{cwd::get_final_cwd, errors::Error, manifest::find_closest_package_manager, yarn::get_default_yarn_version};
 
 use super::switch::explicit::ExplicitCommand;
 
@@ -28,7 +28,7 @@ impl InitCommand {
         }
 
         let reference = match find_result.detected_package_manager {
-            Some(package_manager) => validate_package_manager(package_manager, "yarn"),
+            Some(package_manager) => package_manager.into_reference("yarn"),
             None => get_default_yarn_version(None).await,
         }?;
 

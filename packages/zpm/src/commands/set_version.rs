@@ -44,11 +44,8 @@ impl SetVersion {
             version: resolved_version.clone(),
         }.into();
 
-        let package_manager = PackageManagerField {
-            name: "yarn".to_string(),
-            reference,
-            checksum: None,
-        };
+        let package_manager
+            = PackageManagerField::new_yarn(reference);
 
         document.set_path(
             &zpm_parsers::Path::from_segments(vec!["packageManager".to_string()]),

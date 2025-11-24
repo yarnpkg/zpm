@@ -1,6 +1,7 @@
 use std::sync::LazyLock;
 
 use reqwest::Client;
+use zpm_utils::is_ci;
 
 use crate::errors::Error;
 
@@ -21,7 +22,7 @@ pub async fn fetch(url: &str) -> Result<Vec<u8>, Error> {
         = http_client()?;
 
     let is_ci_header
-        = zpm_ci::is_ci()
+        = is_ci()
             .map_or_else(
                 || "n/a".to_string(),
                 |provider| serde_plain::to_string(&provider).unwrap()

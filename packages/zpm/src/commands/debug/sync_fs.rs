@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use clipanion::cli;
 use zpm_parsers::JsonDocument;
-use zpm_sync::{FileOp, SyncItem, SyncTree};
-use zpm_utils::{Path, ToHumanString};
+use zpm_sync::{SyncItem, SyncTree};
+use zpm_utils::Path;
 
 use crate::error::Error;
 

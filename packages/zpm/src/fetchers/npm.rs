@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use zpm_config::ConfigExt;
 use zpm_formats::iter_ext::IterExt;
@@ -74,7 +74,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
                 registry: &registry_base,
                 path: &registry_path,
                 authorization: None,
-                headers: None,
+                otp: None,
             }).await?;
         let tgz_data = response.bytes().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;

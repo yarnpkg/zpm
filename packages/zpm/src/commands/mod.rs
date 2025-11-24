@@ -52,6 +52,7 @@ pub enum YarnCli {
     Login(npm::login::Login),
     LogoutAll(npm::logout_all::LogoutAll),
     Logout(npm::logout::Logout),
+    Publish(npm::publish::Publish),
     Whoami(npm::whoami::Whoami),
 
     Add(add::Add),

@@ -222,18 +222,16 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
 
     let registry_base
         = project.config.registry_base_for(package_ident);
-    let registry_url
-        = npm::registry_url_for_all_versions(&registry_base, package_ident);
+    let registry_path
+        = npm::registry_url_for_all_versions(&package_ident);
 
-    let path
-        = registry_url.strip_prefix(&registry_base).unwrap_or(&registry_url);
     let response
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
-            path,
+            path: &registry_path,
             authorization: None,
-            headers: None,
+            otp: None,
         }).await?;
 
     let registry_text = response.text().await
@@ -264,18 +262,16 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
 
     let registry_base
         = project.config.registry_base_for(package_ident);
-    let registry_url
-        = npm::registry_url_for_all_versions(&registry_base, package_ident);
+    let registry_path
+        = npm::registry_url_for_all_versions(&package_ident);
 
-    let path
-        = registry_url.strip_prefix(&registry_base).unwrap_or(&registry_url);
     let response
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
-            path,
+            path: &registry_path,
             authorization: None,
-            headers: None,
+            otp: None,
         }).await?;
 
     let registry_text = response.text().await
@@ -323,7 +319,7 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
             registry: &registry_base,
             path: &registry_path,
             authorization: None,
-            headers: None,
+            otp: None,
     }).await?;
 
     let registry_text = response.text().await

@@ -8,7 +8,6 @@ serde_yaml = "0.9.34"
 serde = { version = "1.0.207", features = ["derive"] }
 shellexpand = "3.1.1"
 thiserror = "2.0.16"
-zpm-ci = { path = "../zpm-ci" }
 zpm-formats = { path = "../zpm-formats" }
 zpm-macro-enum = { path = "../zpm-macro-enum" }
 zpm-primitives = { path = "../zpm-primitives" }

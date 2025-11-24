@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, fmt::Debug, str::FromStr};
 use zpm_semver::{Range, Version, VersionRc};
 use zpm_utils::{ExplicitPath, FromFileString, Path, ToFileString};
 
-use crate::{errors::Error, http::fetch, manifest::{PackageManagerReference, VersionPackageManagerReference}, yarn_enums::{ChannelSelector, Selector}};
+use crate::{errors::Error, http::fetch, manifest::{LocalPackageManagerReference, PackageManagerReference, VersionPackageManagerReference}, yarn_enums::{ChannelSelector, Selector}};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,7 +22,9 @@ struct TagsPayload {
 
 pub async fn get_default_yarn_version(release_line: Option<crate::yarn_enums::ReleaseLine>) -> Result<PackageManagerReference, Error> {
     if let Ok(env) = std::env::var("YARNSW_DEFAULT") {
-        return Ok(PackageManagerReference::from_file_string(&env)?);
+        if let Some(bin_path) = env.strip_prefix("local:") {
+            return Ok(LocalPackageManagerReference {path: Path::from_file_string(bin_path)?}.into());
+        }
     }
 
     let channel_selector

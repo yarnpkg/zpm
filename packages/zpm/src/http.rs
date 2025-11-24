@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap, HashSet}, net::SocketAddr, sync::{Arc, LazyLock, OnceLock}, time::Duration};
+use std::{collections::{HashMap, HashSet}, net::SocketAddr, sync::{Arc, LazyLock, OnceLock}, time::Duration};
 
 use hickory_resolver::{config::LookupIpStrategy, TokioResolver};
 use http::HeaderMap;

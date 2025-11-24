@@ -84,12 +84,16 @@ impl Project {
         let mut farthest_pkg = None;
 
         loop {
-            let lock_p = p.with_join_str(LOCKFILE_NAME);
+            let lock_p
+                = p.with_join_str(LOCKFILE_NAME);
+
             if lock_p.fs_exists() {
                 return Ok((p.clone(), closest_pkg.unwrap_or(p)));
             }
 
-            let pkg_p = p.with_join_str(MANIFEST_NAME);
+            let pkg_p
+                = p.with_join_str(MANIFEST_NAME);
+
             if pkg_p.fs_exists() {
                 farthest_pkg = Some(p.clone());
 
@@ -122,7 +126,7 @@ impl Project {
         let (project_cwd, package_cwd)
             = Project::find_closest_project(shell_cwd.clone())?;
 
-        let config = Configuration::load(
+        let mut config = Configuration::load(
             &ConfigurationContext {
                 env: std::env::vars().collect(),
                 user_cwd: user_cwd.clone(),
@@ -130,6 +134,11 @@ impl Project {
                 package_cwd: Some(package_cwd.clone()),
             },
         ).unwrap();
+
+        if config.settings.enable_migration_mode.value {
+            config.settings.enable_global_cache.value = true;
+            config.settings.enable_global_cache.source = config.settings.enable_migration_mode.source;
+        }
 
         let root_workspace
             = Workspace::from_root_path(&project_cwd)?;
@@ -174,7 +183,11 @@ impl Project {
     }
 
     pub fn lockfile_path(&self) -> Path {
-        self.project_cwd.with_join_str(LOCKFILE_NAME)
+        if self.config.settings.enable_migration_mode.value {
+            self.migration_path().with_join_str(LOCKFILE_NAME)
+        } else {
+            self.project_cwd.with_join_str(LOCKFILE_NAME)
+        }
     }
 
     pub fn pnp_path(&self) -> Path {
@@ -195,6 +208,10 @@ impl Project {
 
     pub fn ignore_path(&self) -> Path {
         self.project_cwd.with_join_str(".yarn/ignore")
+    }
+
+    pub fn migration_path(&self) -> Path {
+        self.ignore_path().with_join_str("migration")
     }
 
     pub fn unplugged_path(&self) -> Path {
@@ -232,6 +249,23 @@ impl Project {
         let lockfile_path
             = self.lockfile_path();
 
+        let mut lockfile
+            = Project::lockfile_from(&lockfile_path)?;
+
+        if self.config.settings.enable_migration_mode.value {
+            let source_lockfile_path
+                = self.project_cwd.with_join_str(LOCKFILE_NAME);
+
+            let source_lockfile
+                = Project::lockfile_from(&source_lockfile_path)?;
+
+            lockfile.resolutions.extend(source_lockfile.resolutions.into_iter());
+        }
+
+        Ok(lockfile)
+    }
+
+    fn lockfile_from(lockfile_path: &Path) -> Result<Lockfile, Error> {
         if !lockfile_path.fs_exists() {
             return Ok(Lockfile::new());
         }
@@ -455,6 +489,11 @@ impl Project {
                 Ok(None)
             },
         }
+    }
+
+    pub fn workspace_by_locator(&self, locator: &Locator) -> Result<&Workspace, Error> {
+        self.try_workspace_by_locator(locator)?
+            .ok_or(Error::WorkspaceNotFound(locator.ident.clone()))
     }
 
     pub fn try_workspace_by_descriptor(&self, descriptor: &Descriptor) -> Result<Option<&Workspace>, Error> {

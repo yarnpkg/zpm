@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use reqwest::StatusCode;
-use zpm_utils::{DataType, PathError, ToHumanString};
+use zpm_utils::{DataType, Path, PathError, ToHumanString};
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum Error {
@@ -74,8 +74,11 @@ pub enum Error {
     #[error("Volta's platform.json file is invalid; expected an object")]
     VoltaPlatformJsonInvalid,
 
-    #[error("This package manager cannot be used to interact on project configured for use with {0}")]
-    UnsupportedProject(String),
+    #[error("You opted-in to a package manager migration, but the manifest in {} doesn't list a {} field", .0.to_print_string(), DataType::Code.colorize("packageManagerMigration"))]
+    MissingMigration(Path),
+
+    #[error("Yarn cannot be used on project configured for use with {0}")]
+    UnsupportedProject(&'static str),
 }
 
 impl From<std::str::Utf8Error> for Error {
