@@ -2,49 +2,15 @@ use std::collections::BTreeSet;
 
 use clipanion::cli;
 use indexmap::IndexMap;
-use serde::Serialize;
-use zpm_primitives::{DescriptorResolution, Ident, IdentGlob, Locator, Reference, WorkspacePathReference};
-use zpm_utils::{tree, AbstractValue, DataType, Path, ToFileString, ToHumanString};
+use itertools::Itertools;
+use zpm_primitives::{DescriptorResolution, Ident, IdentGlob, Locator};
+use zpm_utils::{AbstractValue, ToFileString, tree};
 
 use crate::{
     error::Error,
     install::InstallState,
     project::Project,
 };
-
-/// A wrapper for displaying workspace locators with their actual paths
-#[derive(Clone, Debug)]
-struct WorkspaceLocatorDisplay {
-    ident: String,
-    path: Path,
-}
-
-impl Serialize for WorkspaceLocatorDisplay {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        // Serialize as a string for JSON output
-        serializer.serialize_str(&format!("{}@workspace:{}", self.ident, self.path.to_file_string()))
-    }
-}
-
-impl ToHumanString for WorkspaceLocatorDisplay {
-    fn to_print_string(&self) -> String {
-        format!(
-            "{}{}{}",
-            self.ident,
-            DataType::Custom(135, 175, 255).colorize("@"),
-            DataType::Reference.colorize(&format!("workspace:{}", self.path.to_file_string()))
-        )
-    }
-}
-
-impl ToFileString for WorkspaceLocatorDisplay {
-    fn to_file_string(&self) -> String {
-        format!("{}@workspace:{}", self.ident, self.path.to_file_string())
-    }
-}
 
 /// Display the reason why a package is needed
 ///
@@ -59,13 +25,6 @@ impl ToFileString for WorkspaceLocatorDisplay {
 #[cli::command]
 #[cli::path("why")]
 #[cli::category("Dependency management")]
-#[cli::usage(r#"
-This command prints the exact reasons why a package appears in the dependency tree.
-
-By default, it will print all packages that directly depend on the specified package. If you want to see all transitive paths that lead to the package (going through all workspaces), use the `-R,--recursive` flag.
-
-Note that the recursive display is optimized to avoid printing the same package subtree multiple times. If you see a package without children in one branch, it means its subtree was already printed elsewhere in the tree.
-"#)]
 pub struct Why {
     /// List all dependency paths from each workspace
     #[cli::option("-R,--recursive", default = false)]
@@ -85,7 +44,8 @@ pub struct Why {
 
 impl Why {
     pub async fn execute(&self) -> Result<(), Error> {
-        let mut project = Project::new(None).await?;
+        let mut project
+            = Project::new(None).await?;
 
         project.lazy_install().await?;
 
@@ -97,89 +57,61 @@ impl Why {
         let root_node = if self.recursive {
             self.why_recursive(&project, install_state)?
         } else {
-            self.why_simple(&project, install_state)?
+            self.why_simple(install_state)?
         };
 
-        let rendering = tree::TreeRenderer::new().render(&root_node, self.json);
+        let rendering
+            = tree::TreeRenderer::new()
+                .render(&root_node, self.json);
 
         print!("{}", rendering);
 
         Ok(())
     }
 
-    /// Creates an AbstractValue for displaying a locator, using workspace path if applicable
-    fn locator_display_value(locator: &Locator, project: &Project) -> AbstractValue<'static> {
-        // Check if this is a workspace locator
-        if matches!(&locator.reference, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_)) {
-            // Find the workspace by locator to get its path
-            if let Some(workspace) = project.workspaces.iter().find(|ws| ws.locator() == *locator) {
-                return AbstractValue::new(WorkspaceLocatorDisplay {
-                    ident: locator.ident.to_file_string(),
-                    path: workspace.rel_path.clone(),
-                });
-            }
-        }
+    fn why_simple(&self, install_state: &InstallState) -> Result<tree::Node<'_>, Error> {
+        let mut root_children
+            = vec![];
 
-        // For non-workspace locators, use the locator directly
-        AbstractValue::new(locator.clone())
-    }
+        let mut sorted_locators
+            = install_state.resolution_tree.locator_resolutions.keys()
+                .collect_vec();
 
-    fn why_simple(&self, project: &Project, install_state: &InstallState) -> Result<tree::Node<'_>, Error> {
-        let mut root_children = vec![];
-
-        // Sort locators for deterministic output
-        let mut sorted_locators: Vec<_> = install_state
-            .resolution_tree
-            .locator_resolutions
-            .keys()
-            .collect();
         sorted_locators.sort();
 
         for locator in sorted_locators {
-            let resolution = &install_state.resolution_tree.locator_resolutions[locator];
-            let mut children_map = IndexMap::new();
+            let resolution
+                = &install_state.resolution_tree.locator_resolutions[locator];
+
+            let mut children_map
+                = IndexMap::new();
 
             for (ident, descriptor) in &resolution.dependencies {
-                // Skip peer dependencies unless --peers flag is set
                 if !self.peers && resolution.peer_dependencies.contains_key(ident) {
                     continue;
                 }
 
-                // Get the resolved locator for this dependency
-                let dep_locator = install_state
-                    .resolution_tree
-                    .descriptor_to_locator
-                    .get(descriptor);
+                let dep_locator
+                    = install_state.resolution_tree.descriptor_to_locator
+                        .get(descriptor);
 
                 if let Some(dep_locator) = dep_locator {
-                    // Check if this dependency matches our search pattern
                     if self.pattern.check(&dep_locator.ident) {
-                        // Create a DescriptorResolution to match Berry's format
-                        let descriptor_resolution = DescriptorResolution::new(
-                            descriptor.clone(),
-                            dep_locator.clone(),
-                        );
+                        let descriptor_resolution
+                            = DescriptorResolution::new(descriptor.clone(), dep_locator.clone());
 
-                        // Use the locator as the key (e.g., "react@npm:18.3.1")
-                        let key = dep_locator.to_file_string();
                         children_map.insert(
-                            key,
-                            tree::Node {
-                                label: None,
-                                value: Some(AbstractValue::new(descriptor_resolution)),
-                                // In simple mode, leaf nodes have no children so they serialize directly
-                                children: None,
-                            },
+                            dep_locator.to_file_string(),
+                            tree::Node::new_value(descriptor_resolution),
                         );
                     }
                 }
             }
 
-            // Only add this locator to the tree if it has matching dependencies
             if !children_map.is_empty() {
                 root_children.push(tree::Node {
                     label: None,
-                    value: Some(Self::locator_display_value(locator, project)),
+                    value: Some(AbstractValue::new(locator.clone())),
                     children: Some(tree::TreeNodeChildren::Map(children_map)),
                 });
             }
@@ -192,16 +124,12 @@ impl Why {
         })
     }
 
-    fn why_recursive(
-        &self,
-        project: &Project,
-        install_state: &InstallState,
-    ) -> Result<tree::Node<'_>, Error> {
-        // Phase 1: Mark all packages that depend (directly or transitively) on the target
-        let mut seen = BTreeSet::new();
-        let mut dependents = BTreeSet::new();
+    fn why_recursive(&self, project: &Project, install_state: &InstallState) -> Result<tree::Node<'_>, Error> {
+        let mut seen
+            = BTreeSet::new();
+        let mut dependents
+            = BTreeSet::new();
 
-        // Get all matching target locators
         let target_idents: BTreeSet<Ident> = install_state
             .resolution_tree
             .locator_resolutions
@@ -218,7 +146,6 @@ impl Why {
             });
         }
 
-        // Start from all workspaces
         for workspace in &project.workspaces {
             self.mark_all_dependents(
                 &workspace.locator(),
@@ -229,15 +156,18 @@ impl Why {
             );
         }
 
-        // Phase 2: Build the tree by printing all dependents
-        let mut printed = BTreeSet::new();
-        let mut root_children = IndexMap::new();
+        let mut printed
+            = BTreeSet::new();
+        let mut root_children
+            = IndexMap::new();
 
         for workspace in &project.workspaces {
-            let workspace_locator = workspace.locator();
+            let workspace_locator
+                = workspace.locator();
+
             self.print_all_dependents(
                 &workspace_locator,
-                None,  // Root workspaces don't have a descriptor
+                None,
                 install_state,
                 project,
                 &dependents,
@@ -247,7 +177,10 @@ impl Why {
         }
 
         // Convert the map to a vec for the root node
-        let root_children_vec: Vec<_> = root_children.into_iter().map(|(_, node)| node).collect();
+        let root_children_vec
+            = root_children.into_iter()
+                .map(|(_, node)| node)
+                .collect_vec();
 
         Ok(tree::Node {
             label: None,
@@ -256,22 +189,13 @@ impl Why {
         })
     }
 
-    fn mark_all_dependents(
-        &self,
-        locator: &Locator,
-        install_state: &InstallState,
-        target_idents: &BTreeSet<Ident>,
-        seen: &mut BTreeSet<Locator>,
-        dependents: &mut BTreeSet<Locator>,
-    ) -> bool {
-        // If already processed, return whether it's a dependent
+    fn mark_all_dependents(&self, locator: &Locator, install_state: &InstallState, target_idents: &BTreeSet<Ident>, seen: &mut BTreeSet<Locator>, dependents: &mut BTreeSet<Locator>) -> bool {
         if seen.contains(locator) {
             return dependents.contains(locator);
         }
 
         seen.insert(locator.clone());
 
-        // Check if this locator is itself a target
         if target_idents.contains(&locator.ident) {
             dependents.insert(locator.clone());
             return true;
@@ -282,25 +206,19 @@ impl Why {
             None => return false,
         };
 
-        let mut depends = false;
+        let mut depends
+            = false;
 
-        // Check all dependencies
         for (ident, descriptor) in &resolution.dependencies {
-            // Skip peer dependencies unless --peers flag is set
             if !self.peers && resolution.peer_dependencies.contains_key(ident) {
                 continue;
             }
 
-            if let Some(dep_locator) =
-                install_state.resolution_tree.descriptor_to_locator.get(descriptor)
-            {
-                if self.mark_all_dependents(
-                    dep_locator,
-                    install_state,
-                    target_idents,
-                    seen,
-                    dependents,
-                ) {
+            let dep_locator =
+                install_state.resolution_tree.descriptor_to_locator.get(descriptor);
+
+            if let Some(dep_locator) = dep_locator {
+                if self.mark_all_dependents(dep_locator, install_state, target_idents, seen, dependents) {
                     depends = true;
                 }
             }
@@ -313,121 +231,57 @@ impl Why {
         depends
     }
 
-    fn print_all_dependents(
-        &self,
-        locator: &Locator,
-        descriptor: Option<&zpm_primitives::Descriptor>,
-        install_state: &InstallState,
-        project: &Project,
-        dependents: &BTreeSet<Locator>,
-        printed: &mut BTreeSet<Locator>,
-        parent_children: &mut IndexMap<String, tree::Node<'_>>,
-    ) {
-        // Only print if this is a dependent
+    fn print_all_dependents(&self, locator: &Locator, descriptor: Option<&zpm_primitives::Descriptor>, install_state: &InstallState, project: &Project, dependents: &BTreeSet<Locator>, printed: &mut BTreeSet<Locator>, parent_children: &mut IndexMap<String, tree::Node<'_>>) {
         if !dependents.contains(locator) {
             return;
         }
 
-        let resolution = match install_state.resolution_tree.locator_resolutions.get(locator) {
-            Some(res) => res,
-            None => return,
-        };
+        let resolution
+            = install_state.resolution_tree.locator_resolutions
+                .get(locator)
+                .expect("Locator not found in resolution tree; where does it come from?");
 
-        // Check if this is a workspace by looking for it in project.workspaces
-        let is_workspace = project
-            .workspaces
-            .iter()
-            .any(|ws| ws.locator() == *locator);
+        let is_workspace
+            = project.workspaces.iter()
+                .any(|ws| ws.locator() == *locator);
 
-        let mut node_children = IndexMap::new();
+        let mut node_children
+            = IndexMap::new();
 
-        // If already printed and not a workspace root, skip printing children
-        // Don't print children of transitive workspace dependencies
         let should_print_children = (!printed.contains(locator) || is_workspace)
             && !(descriptor.is_some() && is_workspace);
 
         if should_print_children {
             printed.insert(locator.clone());
 
-            // Print dependencies that are also dependents
             for (ident, dep_descriptor) in &resolution.dependencies {
-                // Skip peer dependencies unless --peers flag is set
                 if !self.peers && resolution.peer_dependencies.contains_key(ident) {
                     continue;
                 }
 
-                if let Some(dep_locator) =
-                    install_state.resolution_tree.descriptor_to_locator.get(dep_descriptor)
-                {
-                    self.print_all_dependents(
-                        dep_locator,
-                        Some(dep_descriptor),
-                        install_state,
-                        project,
-                        dependents,
-                        printed,
-                        &mut node_children,
-                    );
+                let dep_locator
+                    = install_state.resolution_tree.descriptor_to_locator
+                        .get(dep_descriptor);
+
+                if let Some(dep_locator) = dep_locator {
+                    self.print_all_dependents(dep_locator, Some(dep_descriptor), install_state, project, dependents, printed, &mut node_children);
                 }
             }
         }
 
-        // Create the node value based on whether this has a descriptor (non-root) or not (root)
         let node_value = if let Some(desc) = descriptor {
-            // Non-root nodes: create DescriptorResolution with potentially workspace-aware locator
-            let locator_display = if matches!(&locator.reference, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_)) {
-                // For workspace dependencies, use WorkspaceLocatorDisplay in the DescriptorResolution
-                if let Some(workspace) = project.workspaces.iter().find(|ws| ws.locator() == *locator) {
-                    // Use the workspace's locator_path() method to get a locator with the path
-                    let workspace_locator = workspace.locator_path();
-                    AbstractValue::new(DescriptorResolution::new(desc.clone(), workspace_locator))
-                } else {
-                    AbstractValue::new(DescriptorResolution::new(desc.clone(), locator.clone()))
-                }
-            } else {
-                AbstractValue::new(DescriptorResolution::new(desc.clone(), locator.clone()))
-            };
-            locator_display
+            AbstractValue::new(DescriptorResolution::new(desc.clone(), locator.clone()))
         } else {
-            // Root nodes (workspaces) use the locator_display_value helper
-            Self::locator_display_value(locator, project)
+            AbstractValue::new(locator.clone())
         };
 
-        // Use the locator's display string as the key
-        let key = if descriptor.is_some() {
-            // For dependencies, use the workspace path if it's a workspace
-            if matches!(&locator.reference, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_)) {
-                if let Some(workspace) = project.workspaces.iter().find(|ws| ws.locator() == *locator) {
-                    format!("{}@workspace:{}", locator.ident.to_file_string(), workspace.rel_path.to_file_string())
-                } else {
-                    locator.to_file_string()
-                }
-            } else {
-                locator.to_file_string()
-            }
-        } else {
-            // For root nodes, use the display value's string representation
-            if matches!(&locator.reference, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_)) {
-                if let Some(workspace) = project.workspaces.iter().find(|ws| ws.locator() == *locator) {
-                    format!("{}@workspace:{}", locator.ident.to_file_string(), workspace.rel_path.to_file_string())
-                } else {
-                    locator.to_file_string()
-                }
-            } else {
-                locator.to_file_string()
-            }
-        };
-
-        let node = tree::Node {
-            label: None,
-            value: Some(node_value),
-            children: Some(tree::TreeNodeChildren::Map(node_children)),
-        };
-
-        parent_children.insert(key, node);
+        parent_children.insert(
+            locator.to_file_string(),
+            tree::Node {
+                label: None,
+                value: Some(node_value),
+                children: Some(tree::TreeNodeChildren::Map(node_children)),
+            },
+        );
     }
 }
-
-#[cfg(test)]
-#[path = "why.test.rs"]
-mod tests;

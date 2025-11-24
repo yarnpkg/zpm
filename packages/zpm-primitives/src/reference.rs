@@ -256,17 +256,11 @@ impl ToFileString for Reference {
 
 impl ToHumanString for Reference {
     fn to_print_string(&self) -> String {
-        let mut stringified
-            = self.to_file_string();
-
-        if let Reference::Virtual(_) = self {
-            let hash_idx
-                = stringified.find('#').unwrap_or(stringified.len());
-
-            stringified.truncate(hash_idx + 1 + 8);
+        if let Reference::Virtual(params) = self {
+            return format!("{} {}", params.inner.to_print_string(), DataType::Reference.colorize(&format!("[{}]", params.hash.mini())));
+        } else {
+            DataType::Reference.colorize(&self.to_file_string())
         }
-
-        DataType::Reference.colorize(&stringified)
     }
 }
 

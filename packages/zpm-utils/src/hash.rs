@@ -27,6 +27,10 @@ impl Hash64 {
         Hash64 {state: hasher.finalize().to_vec()}
     }
 
+    pub fn mini(&self) -> String {
+        hex::encode(&self.state[0..3])
+    }
+
     pub fn short(&self) -> String {
         hex::encode(&self.state[0..16])
     }

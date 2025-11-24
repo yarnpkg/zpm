@@ -270,7 +270,11 @@ impl ToFileString for Range {
 
 impl ToHumanString for Range {
     fn to_print_string(&self) -> String {
-        DataType::Custom(0, 175, 175).colorize(&self.to_file_string())
+        if let Range::Virtual(params) = self {
+            format!("{} {}", params.inner.to_print_string(), DataType::Range.colorize(&format!("[{}]", params.hash.mini())))
+        } else {
+            DataType::Range.colorize(&self.to_file_string())
+        }
     }
 }
 

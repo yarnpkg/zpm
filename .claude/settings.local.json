@@ -7,7 +7,6 @@
       "Bash(curl:*)",
       "Bash(cargo build:*)",
       "Bash(./local/yarn-bin:*)",
-      "Bash(/Users/rui.martinslacerda/go/src/github.com/DataDog/zpm/target/release/yarn-bin:*)",
       "Bash(git commit:*)",
       "Bash(gh pr create:*)",
       "Bash(cargo test:*)",

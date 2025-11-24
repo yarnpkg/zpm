@@ -33,6 +33,9 @@ const PATH_COLOR: Color
 const URL_COLOR: Color
     = Color::TrueColor { r: 215, g: 130, b: 215 };
 
+const RANGE_COLOR: Color
+    = Color::TrueColor { r: 0, g: 175, b: 175 };
+
 const REFERENCE_COLOR: Color
     = Color::TrueColor { r: 135, g: 175, b: 255 };
 
@@ -48,6 +51,7 @@ pub enum DataType {
     Code,
     Path,
     Url,
+    Range,
     Reference,
     Custom(u8, u8, u8),
 }
@@ -66,6 +70,7 @@ impl DataType {
             DataType::Code => CODE_COLOR,
             DataType::Path => PATH_COLOR,
             DataType::Url => URL_COLOR,
+            DataType::Range => RANGE_COLOR,
             DataType::Reference => REFERENCE_COLOR,
             DataType::Custom(r, g, b) => Color::TrueColor {r: *r, g: *g, b: *b},
         }
