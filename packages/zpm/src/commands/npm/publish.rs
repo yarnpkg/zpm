@@ -259,7 +259,8 @@ impl Publish {
             readme: readme,
         };
 
-        let publish_body = serde_json::to_string(&publish_body_struct).unwrap();
+        let publish_body
+            = serde_json::to_string(&publish_body_struct).unwrap();
 
         let registry_url
             = npm::registry_url_for_all_versions(&ident);
