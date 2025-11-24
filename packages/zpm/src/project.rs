@@ -191,27 +191,15 @@ impl Project {
     }
 
     pub fn pnp_path(&self) -> Path {
-        if self.config.settings.enable_migration_mode.value {
-            self.migration_path().with_join_str(PNP_CJS_NAME)
-        } else {
-            self.project_cwd.with_join_str(PNP_CJS_NAME)
-        }
+        self.project_cwd.with_join_str(PNP_CJS_NAME)
     }
 
     pub fn pnp_data_path(&self) -> Path {
-        if self.config.settings.enable_migration_mode.value {
-            self.migration_path().with_join_str(PNP_DATA_NAME)
-        } else {
-            self.project_cwd.with_join_str(PNP_DATA_NAME)
-        }
+        self.project_cwd.with_join_str(PNP_DATA_NAME)
     }
 
     pub fn pnp_loader_path(&self) -> Path {
-        if self.config.settings.enable_migration_mode.value {
-            self.migration_path().with_join_str(PNP_ESM_NAME)
-        } else {
-            self.project_cwd.with_join_str(PNP_ESM_NAME)
-        }
+        self.project_cwd.with_join_str(PNP_ESM_NAME)
     }
 
     pub fn nm_path(&self) -> Path {
