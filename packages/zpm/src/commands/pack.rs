@@ -64,7 +64,7 @@ impl Pack {
                 }
             } else {
                 for path in pack_result.pack_list {
-                    path.to_file_string();
+                    println!("{}", path.to_file_string());
                 }
             }
         } else {
