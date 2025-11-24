@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
-use zpm_utils::{Hash64, Path, ToFileString};
+use zpm_utils::{DataType, Hash64, Path, ToFileString};
 use clipanion::cli;
 
 use crate::{error::Error, git_utils::get_commit_hash, script::ScriptEnvironment};
@@ -28,7 +28,7 @@ pub struct SetVersionFromSources {
     #[cli::option("--path")]
     install_path: Option<String>,
 
-    #[cli::option("--repository", default = "https://github.com/yarnpkg/zpm.git".to_string())]
+    #[cli::option("--repository", default = "git@github.com/yarnpkg/zpm.git".to_string())]
     repository: String,
 
     #[cli::option("--branch", default = "main".to_string())]
@@ -43,6 +43,8 @@ pub struct SetVersionFromSources {
 
 impl SetVersionFromSources {
     pub async fn execute(&self) -> Result<(), Error> {
+        check_rustup().await?;
+
         let target = if let Some(install_path) = &self.install_path {
             Path::try_from(install_path.as_str())?
         } else {
@@ -63,7 +65,7 @@ impl SetVersionFromSources {
             = get_commit_hash(&target, "HEAD").await?;
 
         let bundle_path
-            = target.with_join_str(format!("target/release/yarn-{}", commit_hash));
+            = target.with_join_str("target/release/yarn-bin");
 
         if !bundle_path.fs_exists() {
             run_build(&target).await?;
@@ -76,10 +78,9 @@ impl SetVersionFromSources {
         }
 
         let mut env
-            = ScriptEnvironment::new()?
-                .enable_shell_forwarding();
+            = ScriptEnvironment::new()?;
 
-        env.run_exec("yarn", ["switch", "link", bundle_path.as_str()]).await?.ok()?;
+        run_command(&mut env, "yarn", &["switch", "link", bundle_path.as_str()]).await?;
 
         Ok(())
     }
@@ -122,16 +123,22 @@ async fn prepare_repo(spec: &SetVersionFromSources, target: &Path) -> Result<(),
     Ok(())
 }
 
+async fn run_command(env: &mut ScriptEnvironment, command: &str, args: &[&str]) -> Result<(), Error> {
+    println!("{}", DataType::Code.colorize(&format!("  $ {} {}", command, args.join(" "))));
+    env.run_exec(command, args).await?.ok()?;
+
+    Ok(())
+}
+
 async fn run_clone(spec: &SetVersionFromSources, target: &Path) -> Result<(), Error> {
     let mut env
         = ScriptEnvironment::new()?
-            .with_cwd(target.clone())
-            .enable_shell_forwarding();
+            .with_cwd(target.clone());
 
-    env.run_exec("git", vec!["init", target.as_str()]).await?.ok()?;
-    env.run_exec("git", vec!["remote", "add", "origin", spec.repository.as_str()]).await?.ok()?;
-    env.run_exec("git", vec!["fetch", "origin", "--depth=1", get_branch_ref(&spec.branch).as_str()]).await?.ok()?;
-    env.run_exec("git", vec!["reset", "--hard", "FETCH_HEAD"]).await?.ok()?;
+    run_command(&mut env, "git", &["init", target.as_str()]).await?;
+    run_command(&mut env, "git", &["remote", "add", "origin", spec.repository.as_str()]).await?;
+    run_command(&mut env, "git", &["fetch", "origin", "--depth=1", get_branch_ref(&spec.branch).as_str()]).await?;
+    run_command(&mut env, "git", &["reset", "--hard", "FETCH_HEAD"]).await?;
 
     Ok(())
 }
@@ -139,12 +146,11 @@ async fn run_clone(spec: &SetVersionFromSources, target: &Path) -> Result<(), Er
 async fn run_update(spec: &SetVersionFromSources, target: &Path) -> Result<(), Error> {
     let mut env
         = ScriptEnvironment::new()?
-            .with_cwd(target.clone())
-            .enable_shell_forwarding();
+            .with_cwd(target.clone());
 
-    env.run_exec("git", vec!["fetch", "origin", "--depth=1", get_branch_ref(&spec.branch).as_str(), "--force"]).await?.ok()?;
-    env.run_exec("git", vec!["reset", "--hard", "FETCH_HEAD"]).await?.ok()?;
-    env.run_exec("git", vec!["clean", "-dfx", "-e", "target"]).await?.ok()?;
+    run_command(&mut env, "git", &["fetch", "origin", "--depth=1", get_branch_ref(&spec.branch).as_str(), "--force"]).await?;
+    run_command(&mut env, "git", &["reset", "--hard", "FETCH_HEAD"]).await?;
+    run_command(&mut env, "git", &["clean", "-dfx", "-e", "target"]).await?;
 
     Ok(())
 }
@@ -152,10 +158,26 @@ async fn run_update(spec: &SetVersionFromSources, target: &Path) -> Result<(), E
 async fn run_build(target: &Path) -> Result<(), Error> {
     let mut env
         = ScriptEnvironment::new()?
-            .with_cwd(target.clone())
-            .enable_shell_forwarding();
+            .with_cwd(target.clone());
 
-    env.run_exec("cargo", vec!["build", "--release"]).await?.ok()?;
+    run_command(&mut env, "cargo", &["build", "--release"]).await?;
+
+    Ok(())
+}
+
+async fn check_rustup() -> Result<(), Error> {
+    let mut env
+        = ScriptEnvironment::new()?;
+
+    let result = env
+        .run_exec("rustup", ["--version"]).await;
+
+    let success
+        = result.map_or(false, |result| result.success());
+
+    if !success {
+        return Err(Error::MissingRustup);
+    }
 
     Ok(())
 }

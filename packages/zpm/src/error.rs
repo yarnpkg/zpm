@@ -417,6 +417,9 @@ pub enum Error {
     #[error("The following options of the run command cannot be used when running scripts: {}", .0.join(", "))]
     InvalidRunScriptOptions(Vec<String>),
 
+    #[error("Rustup doesn't seem to be installed; first install it by running {}", DataType::Code.colorize("curl https://sh.rustup.rs | bash"))]
+    MissingRustup,
+
     // Silent error; no particular message, just exit with an exit code 1
     #[error("")]
     SilentError,
