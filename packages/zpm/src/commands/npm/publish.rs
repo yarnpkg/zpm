@@ -116,7 +116,7 @@ impl Publish {
             match check_result {
                 Ok(_) => {
                     let warning
-                        = format!("Registry already knows about version ${}; skipping.", version.to_print_string());
+                        = format!("Registry already knows about version {}; skipping.", version.to_print_string());
 
                     if self.json {
                         #[derive(Serialize)]
