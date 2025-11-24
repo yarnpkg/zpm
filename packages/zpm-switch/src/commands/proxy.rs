@@ -1,7 +1,7 @@
-use std::process::ExitStatus;
+use std::{io::IsTerminal, process::ExitStatus};
 
 use clipanion::cli;
-use zpm_utils::ToFileString;
+use zpm_utils::{DataType, Note, ToFileString};
 
 use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, links::{LinkTarget, get_link, unset_link}, manifest::{LocalPackageManagerReference, PackageManagerField, find_closest_package_manager}, yarn::get_default_yarn_version, yarn_enums::ReleaseLine};
 
@@ -29,6 +29,11 @@ impl ProxyCommand {
             if let Some(link) = get_link(&detected_root_path)? {
                 match link.link_target {
                     LinkTarget::Local {bin_path} => {
+                        if std::io::stdout().is_terminal() {
+                            Note::Warning(format!("This command runs a local development version of Yarn. Use {} to remove the link.", DataType::Code.colorize("yarn switch unlink"))).print();
+                            println!();
+                        }
+
                         find_result.detected_package_manager
                             = Some(PackageManagerField::new_yarn(LocalPackageManagerReference {path: bin_path}.into()));
                     },
@@ -36,6 +41,11 @@ impl ProxyCommand {
                     LinkTarget::Migration => {
                         if let Some(migration) = find_result.detected_package_manager_migration {
                             std::env::set_var("YARN_ENABLE_MIGRATION_MODE", "1");
+
+                            if std::io::stdout().is_terminal() {
+                                Note::Warning(format!("This command runs the checked-in migration version of Yarn. Use {} to opt-out of the migration.", DataType::Code.colorize("yarn switch unlink"))).print();
+                                println!();
+                            }
 
                             find_result.detected_package_manager
                                 = Some(PackageManagerField::new_yarn(migration.into_reference("yarn")?));
