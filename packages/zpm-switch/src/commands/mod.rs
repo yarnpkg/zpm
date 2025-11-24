@@ -19,6 +19,7 @@ enum SwitchExecCli {
     ExplicitCommand(switch::explicit::ExplicitCommand),
     LinksListCommand(switch::links_list::LinksListCommand),
     LinksClearCommand(switch::links_clear::LinksClearCommand),
+    LinkMigrationCommand(switch::link_migration::LinkMigrationCommand),
     LinkCommand(switch::link::LinkCommand),
     PostinstallCommand(switch::postinstall::PostinstallCommand),
     UnlinkCommand(switch::unlink::UnlinkCommand),

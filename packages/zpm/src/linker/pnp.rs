@@ -190,6 +190,7 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
     ].join("");
 
     project.pnp_path()
+        .fs_create_parent()?
         .fs_change(script, true)?;
 
     Ok(())
@@ -212,9 +213,11 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
     ].join("");
 
     project.pnp_path()
+        .fs_create_parent()?
         .fs_change(script, true)?;
 
     project.pnp_data_path()
+        .fs_create_parent()?
         .fs_change(JsonDocument::to_string(&state)?, false)?;
 
     Ok(())

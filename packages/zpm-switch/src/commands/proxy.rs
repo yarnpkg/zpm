@@ -3,7 +3,7 @@ use std::process::ExitStatus;
 use clipanion::cli;
 use zpm_utils::ToFileString;
 
-use crate::{links::get_link, cwd::{get_fake_cwd, get_final_cwd}, errors::Error, manifest::{find_closest_package_manager, validate_package_manager, LocalPackageManagerReference, PackageManagerField}, yarn::get_default_yarn_version, yarn_enums::ReleaseLine};
+use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, links::{LinkTarget, get_link, unset_link}, manifest::{LocalPackageManagerReference, PackageManagerField, find_closest_package_manager}, yarn::get_default_yarn_version, yarn_enums::ReleaseLine};
 
 use super::switch::explicit::ExplicitCommand;
 
@@ -27,22 +27,29 @@ impl ProxyCommand {
             std::env::set_var("YARNSW_DETECTED_ROOT", detected_root_path.to_file_string());
 
             if let Some(link) = get_link(&detected_root_path)? {
-                find_result.detected_package_manager = Some(PackageManagerField {
-                    name: "yarn".to_string(),
-                    reference: LocalPackageManagerReference {path: link.bin_path}.into(),
-                    checksum: None,
-                });
+                match link.link_target {
+                    LinkTarget::Local {bin_path} => {
+                        find_result.detected_package_manager
+                            = Some(PackageManagerField::new_yarn(LocalPackageManagerReference {path: bin_path}.into()));
+                    },
+
+                    LinkTarget::Migration => {
+                        if let Some(migration) = find_result.detected_package_manager_migration {
+                            std::env::set_var("YARN_ENABLE_MIGRATION_MODE", "1");
+
+                            find_result.detected_package_manager
+                                = Some(PackageManagerField::new_yarn(migration.into_reference("yarn")?));
+                        } else {
+                            unset_link(&detected_root_path)?;
+                        }
+                    },
+                };
             }
         }
 
         let reference = match find_result.detected_package_manager {
-            Some(package_manager) => {
-                validate_package_manager(package_manager, "yarn")
-            },
-
-            None => {
-                get_default_yarn_version(Some(ReleaseLine::Classic)).await
-            },
+            Some(package_manager) => package_manager.into_reference("yarn"),
+            None => get_default_yarn_version(Some(ReleaseLine::Classic)).await,
         }?;
 
         let mut args

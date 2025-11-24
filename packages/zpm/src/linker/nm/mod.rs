@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use zpm_sync::{FileOp, SyncItem, SyncTemplate, SyncTree};
-use zpm_utils::{Path, ToHumanString};
+use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
+use zpm_utils::Path;
 
 use crate::{
     build::BuildRequests, error::Error, fetchers::PackageData, install::Install, linker::{LinkResult, nm::hoist::{Hoister, WorkTree}}, project::Project

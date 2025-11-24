@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::LazyLock};
+use std::sync::LazyLock;
 
 use http::HeaderMap;
 use regex::{Captures, Regex};
