@@ -7,7 +7,7 @@ use crate::{error::Error, script::ScriptEnvironment};
 pub fn find_root(initial_cwd: &Path) -> Result<Path, Error> {
     // Note: We can't just use `git rev-parse --show-toplevel`, because on Windows
     // it may return long paths even when the cwd uses short paths.
-  
+
     for parent in initial_cwd.iter_path().rev() {
         let git_path = parent
             .with_join_str(".git");
@@ -29,6 +29,19 @@ pub async fn get_commit_title(root: &Path, hash: &str) -> Result<String, Error> 
         .stdout_text()?;
 
     Ok(title)
+}
+
+pub async fn get_commit_hash(target: &Path, hash: &str) -> Result<String, Error> {
+    let mut env
+        = ScriptEnvironment::new()?
+            .with_cwd(target.clone());
+
+    let result = env
+        .run_exec("git", ["rev-parse", "--short", hash]).await?
+        .ok()?
+        .stdout_text()?;
+
+    Ok(result)
 }
 
 pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error> {

@@ -27,6 +27,7 @@ mod remove;
 mod run;
 mod set_resolution;
 mod set_version;
+mod set_version_from_sources;
 mod unplug;
 mod up;
 mod workspaces_focus;
@@ -71,6 +72,7 @@ pub enum YarnCli {
     Install(install::Install),
     SetResolution(set_resolution::SetResolution),
     SetVersion(set_version::SetVersion),
+    SetVersionFromSources(set_version_from_sources::SetVersionFromSources),
     Node(node::Node),
     Pack(pack::Pack),
     PatchCommit(patch_commit::PatchCommit),
