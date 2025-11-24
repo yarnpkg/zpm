@@ -1,4 +1,5 @@
 mod colors;
+mod ci;
 mod errors;
 mod glob;
 mod hash;
@@ -19,6 +20,7 @@ mod url;
 pub mod tree;
 
 pub use crate::colors::*;
+pub use crate::ci::*;
 pub use crate::errors::*;
 pub use crate::glob::*;
 pub use crate::hash::*;

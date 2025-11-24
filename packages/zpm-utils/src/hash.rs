@@ -71,3 +71,87 @@ impl ToHumanString for Hash64 {
 
 impl_file_string_from_str!(Hash64);
 impl_file_string_serialization!(Hash64);
+
+pub struct Sha1 {
+    data: Vec<u8>,
+}
+
+impl Sha1 {
+    pub fn new(data: &[u8]) -> Self {
+        let mut hasher
+            = sha1::Sha1::new();
+
+        hasher.update(data);
+
+        let data
+            = hasher.finalize().to_vec();
+
+        Self {
+            data,
+        }
+    }
+
+    pub fn to_hex(&self) -> String {
+        hex::encode(&self.data)
+    }
+
+    pub fn to_base64(&self) -> String {
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &self.data)
+    }
+}
+
+pub struct Sha256 {
+    data: Vec<u8>,
+}
+
+impl Sha256 {
+    pub fn new(data: &[u8]) -> Self {
+        let mut hasher
+            = sha2::Sha256::new();
+
+        hasher.update(data);
+
+        let data
+            = hasher.finalize().to_vec();
+
+        Self {
+            data,
+        }
+    }
+
+    pub fn to_hex(&self) -> String {
+        hex::encode(&self.data)
+    }
+
+    pub fn to_base64(&self) -> String {
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &self.data)
+    }
+}
+
+pub struct Sha512 {
+    data: Vec<u8>,
+}
+
+impl Sha512 {
+    pub fn new(data: &[u8]) -> Self {
+        let mut hasher
+            = sha2::Sha512::new();
+
+        hasher.update(data);
+
+        let data
+            = hasher.finalize().to_vec();
+
+        Self {
+            data,
+        }
+    }
+
+    pub fn to_hex(&self) -> String {
+        hex::encode(&self.data)
+    }
+
+    pub fn to_base64(&self) -> String {
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &self.data)
+    }
+}

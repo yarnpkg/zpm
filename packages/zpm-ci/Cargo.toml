@@ -1,6 +1,0 @@
-[package]
-name = "zpm-ci"
-edition = "2021"
-
-[dependencies]
-serde = "1.0.219"

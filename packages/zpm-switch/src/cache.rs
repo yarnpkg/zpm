@@ -2,7 +2,7 @@ use std::{future::Future, io::Write};
 
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
-use zpm_utils::{DataType, Hash64, Path, ToFileString, ToHumanString, Unit};
+use zpm_utils::{DataType, Hash64, Path, ToFileString, ToHumanString, Unit, is_terminal};
 
 use crate::errors::Error;
 
@@ -52,7 +52,7 @@ pub fn cache_last_used(p: &Path) -> Result<std::time::SystemTime, Error> {
 }
 
 async fn pretty_download<F: Future<Output = Result<(), Error>>>(key_data: &CacheKey, f: F) -> Result<(), Error> {
-    if zpm_ci::is_terminal() {
+    if is_terminal() {
         print!(
             "{} · Downloading Yarn {} …",
             DataType::Info.colorize("➤"),
@@ -73,7 +73,7 @@ async fn pretty_download<F: Future<Output = Result<(), Error>>>(key_data: &Cache
     let duration
         = std::time::Instant::now() - start_time;
 
-    if zpm_ci::is_terminal() {
+    if is_terminal() {
         if result.is_ok() {
             println!(
                 "\x1b[2K\r{} · Downloaded Yarn {} in {}.",

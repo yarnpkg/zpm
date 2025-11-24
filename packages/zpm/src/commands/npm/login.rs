@@ -15,6 +15,11 @@ use crate::{
     report::{current_report, with_report_result, PromptType, StreamReport, StreamReportConfig},
 };
 
+const WEB_LOGIN_REGISTRIES: &[&str] = &[
+    "https://registry.npmjs.org",
+    "https://registry.yarnpkg.com",
+];
+
 /// Login to the npm registry
 ///
 /// This command will ask you for your username, password, and 2FA One-Time-Password (when it applies). It will then modify your local configuration (in your home folder, never in the project itself) to reference the new tokens thus generated.
@@ -34,6 +39,10 @@ pub struct Login {
     /// Login to the publish registry
     #[cli::option("--publish", default = false)]
     publish: bool,
+
+    /// Enable web-based login
+    #[cli::option("--web-login")]
+    web_login: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -142,13 +151,19 @@ impl Login {
     }
 
     async fn authenticate(&self, http_client: &HttpClient, registry: &str) -> Result<String, Error> {
-        let token = self.login_via_web(
-            &http_client,
-            &registry,
-        ).await?;
+        let enable_web_login
+            = self.web_login
+                .unwrap_or_else(|| WEB_LOGIN_REGISTRIES.contains(&registry));
 
-        if let Some(token) = token {
-            return Ok(token);
+        if enable_web_login {
+            let token = self.login_via_web(
+                &http_client,
+                &registry,
+            ).await?;
+
+            if let Some(token) = token {
+                return Ok(token);
+            }
         }
 
         let is_github
@@ -274,7 +289,7 @@ impl Login {
             registry,
             path: user_url.as_str(),
             authorization: None,
-            headers: None,
+            otp: None,
         }, payload).await?;
 
         let body

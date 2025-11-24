@@ -122,6 +122,10 @@ pub struct PublishConfig {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub typings: Option<String>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Encode, Decode)]

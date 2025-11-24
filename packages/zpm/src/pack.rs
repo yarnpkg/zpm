@@ -1,12 +1,17 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::str::FromStr;
 use std::sync::LazyLock;
 
+use zpm_formats::iter_ext::IterExt;
+use zpm_formats::tar::ToTar;
 use zpm_parsers::document::Document;
 use zpm_parsers::JsonDocument;
 use zpm_parsers::Value;
 use zpm_primitives::AnonymousSemverRange;
 use zpm_primitives::Descriptor;
+use zpm_primitives::Locator;
 use zpm_primitives::PeerRange;
 use zpm_primitives::Range;
 use zpm_utils::Path;
@@ -15,6 +20,7 @@ use globset::GlobMatcher;
 use regex::Regex;
 use zpm_utils::ToFileString;
 
+use crate::script::ScriptEnvironment;
 use crate::{
     error::Error,
     manifest::helpers::parse_manifest,
@@ -232,11 +238,133 @@ impl PackList {
     }
 }
 
-pub struct PackManifestOptions {
+pub struct PackResult {
+    pub pack_manifest_content: String,
+    pub pack_manifest: Manifest,
+    pub pack_list: Vec<Path>,
+    pub pack_file: Vec<u8>,
+}
+
+impl PackResult {
+    pub fn resolve_out_path(&self, out_pattern: &Path) -> Result<Path, Error> {
+        let package_name
+            = self.pack_manifest.name.as_ref()
+                .map_or_else(|| "package".to_string(), |name| name.slug());
+
+        let package_version
+            = self.pack_manifest.remote.version.as_ref()
+                .map_or_else(|| "0.0.0".to_string(), |v| v.to_file_string());
+
+        let out_str = out_pattern.to_file_string();
+
+        let out_str = out_str.replace("%s", &package_name);
+        let out_str = out_str.replace("%v", &package_version);
+
+        Ok(Path::current_dir()?.with_join_str(&out_str))
+    }
+}
+
+pub struct PackOptions {
     pub preserve_workspaces: bool,
 }
 
-pub fn pack_manifest(project: &Project, workspace: &Workspace, options: PackManifestOptions) -> Result<String, Error> {
+// TODO: That doesn't seem a great API; feels like `find_package_script` should return a `Script` struct instead with a `run` method.
+async fn run_script(project: &Project, locator: &Locator, script: &str) -> Result<(), Error> {
+    ScriptEnvironment::new()?
+        .with_project(&project)
+        .with_package(&project, &locator)?
+        .run_script(&script, &Vec::<&str>::new())
+        .await?
+        .ok()?;
+
+    Ok(())
+}
+
+pub async fn pack_workspace(project: &mut Project, pack_locator: &Locator, options: &PackOptions) -> Result<PackResult, Error> {
+    let prepack_script
+        = project.find_package_script(pack_locator, "prepack")
+            .map(Some).or_else(|e| e.ignore(|e| matches!(e, Error::ScriptNotFound(_))))?;
+
+    let postpack_script
+        = project.find_package_script(pack_locator, "postpack")
+            .map(Some).or_else(|e| e.ignore(|e| matches!(e, Error::ScriptNotFound(_))))?;
+
+    if prepack_script.is_some() || postpack_script.is_some() {
+        project.lazy_install().await?;
+    }
+
+    if let Some((locator, script)) = prepack_script {
+        run_script(&project, &locator, &script).await?;
+    }
+
+    let gen_result
+        = gen_archive(&project, pack_locator, options).await?;
+
+    if let Some((locator, script)) = postpack_script {
+        run_script(&project, &locator, &script).await?;
+    }
+
+    Ok(gen_result)
+}
+
+async fn gen_archive(project: &Project, pack_locator: &Locator, options: &PackOptions) -> Result<PackResult, Error> {
+    let active_workspace
+        = project.workspace_by_locator(pack_locator)?;
+
+    let pack_manifest_content
+        = pack_manifest(project, active_workspace, options)?;
+
+    let pack_manifest
+        = parse_manifest(&pack_manifest_content)?;
+
+    let pack_list
+        = pack_list(&project, active_workspace, &pack_manifest)?;
+
+    let mut entries
+        = zpm_formats::entries_from_files(&active_workspace.path, &pack_list)?;
+
+    let mut executable_files
+        = pack_manifest.publish_config.executable_files
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+
+    if let Some(bin) = &pack_manifest.bin {
+        executable_files.extend(bin.paths().cloned());
+    }
+
+    for entry in entries.iter_mut() {
+        if executable_files.contains(&entry.name) {
+            entry.mode = 0o755;
+        } else {
+            entry.mode = 0o644;
+        }
+    }
+
+    let manifest_entry = entries
+        .iter_mut()
+        .find(|entry| entry.name.basename() == Some("package.json"));
+
+    if let Some(manifest_entry) = manifest_entry {
+        manifest_entry.data = pack_manifest_content.as_bytes().into();
+    }
+
+    let pack_file = entries
+        .into_iter()
+        .prefix_path(&Path::from_str("package")?)
+        .collect::<Vec<_>>()
+        .to_tgz()?;
+
+    Ok(PackResult {
+        pack_manifest_content,
+        pack_manifest,
+        pack_list,
+        pack_file,
+    })
+}
+
+pub fn pack_manifest(project: &Project, workspace: &Workspace, options: &PackOptions) -> Result<String, Error> {
     let manifest_path = workspace.path
         .with_join_str("package.json");
 
