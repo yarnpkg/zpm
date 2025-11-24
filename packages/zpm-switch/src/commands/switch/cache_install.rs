@@ -1,6 +1,6 @@
 use clipanion::cli;
 
-use crate::{cwd::get_final_cwd, errors::Error, install::install_package_manager, manifest::{find_closest_package_manager, validate_package_manager, PackageManagerReference, VersionPackageManagerReference}};
+use crate::{cwd::get_final_cwd, errors::Error, install::install_package_manager, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}};
 
 /// Install the current project's Yarn version, or specific Yarn releases
 #[cli::command]
@@ -28,7 +28,7 @@ impl CacheInstallCommand {
                     .ok_or_else(|| Error::ProjectNotFound)?;
 
             let reference
-                = validate_package_manager(package_manager_field, "yarn")?;
+                = package_manager_field.into_reference("yarn")?;
 
             if let PackageManagerReference::Version(params) = reference {
                 install_package_manager(&params).await?;

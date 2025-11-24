@@ -4393,7 +4393,6 @@ dependencies = [
  "chrono",
  "clipanion",
  "colored 3.0.0",
- "convert_case 0.8.0",
  "dialoguer",
  "env_logger",
  "futures",

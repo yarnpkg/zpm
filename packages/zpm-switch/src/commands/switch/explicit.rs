@@ -22,7 +22,7 @@ impl ExplicitCommand {
                 => install_package_manager(params).await?,
 
             PackageManagerReference::Local(params)
-                => Command::new(params.path.to_path_buf()),
+                => Command::new(params.path.to_file_string()),
         };
 
         binary.stdout(Stdio::inherit());

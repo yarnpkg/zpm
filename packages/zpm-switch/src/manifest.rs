@@ -44,7 +44,7 @@ pub enum PackageManagerReference {
         version: Version,
     },
 
-    #[pattern(spec = r"local:(?<path>.*)")]
+    #[no_pattern]
     Local {
         path: Path,
     },
@@ -66,10 +66,10 @@ impl ToHumanString for PackageManagerReference {
     fn to_print_string(&self) -> String {
         match self {
             PackageManagerReference::Version(params)
-                => format!("{}", params.version.to_print_string()),
+                => params.version.to_print_string(),
 
             PackageManagerReference::Local(params)
-                => format!("local:{}", params.path.to_print_string()),
+                => params.path.to_print_string(),
         }
     }
 }
@@ -80,8 +80,34 @@ impl_file_string_serialization!(PackageManagerReference);
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq)]
 pub struct PackageManagerField {
     pub name: String,
-    pub reference: PackageManagerReference,
-    pub checksum: Option<String>,
+
+    // Not public so we can force usage to use either `reference()` or `into_reference()`
+    reference: PackageManagerReference,
+}
+
+impl PackageManagerField {
+    pub fn new_yarn(reference: PackageManagerReference) -> PackageManagerField {
+        PackageManagerField {
+            name: "yarn".to_string(),
+            reference,
+        }
+    }
+
+    pub fn into_reference(self, expected_name: &'static str) -> Result<PackageManagerReference, Error> {
+        if self.name == expected_name {
+            Ok(self.reference)
+        } else {
+            Err(Error::UnsupportedProject(expected_name))
+        }
+    }
+
+    pub fn reference(&self, expected_name: &'static str) -> Result<&PackageManagerReference, Error> {
+        if self.name == expected_name {
+            Ok(&self.reference)
+        } else {
+            Err(Error::UnsupportedProject(expected_name))
+        }
+    }
 }
 
 impl FromFileString for PackageManagerField {
@@ -98,7 +124,9 @@ impl FromFileString for PackageManagerField {
         let reference
             = PackageManagerReference::from_file_string(&s[at_index + 1..])?;
 
-        Ok(PackageManagerField { name, reference, checksum: None })
+
+
+        Ok(PackageManagerField {name, reference})
     }
 }
 
@@ -121,12 +149,14 @@ impl_file_string_serialization!(PackageManagerField);
 #[serde(rename_all = "camelCase")]
 struct Manifest {
     package_manager: Option<PackageManagerField>,
+    package_manager_migration: Option<PackageManagerField>,
 }
 
 #[derive(Debug)]
 pub struct FindResult {
     pub detected_root_path: Option<Path>,
     pub detected_package_manager: Option<PackageManagerField>,
+    pub detected_package_manager_migration: Option<PackageManagerField>,
 }
 
 const ROOT_FILES: &[&'static str] = &[
@@ -149,13 +179,10 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
                 .map_err(|err| Error::FailedToParseManifest(err))?;
 
             if let Some(package_manager) = parsed_manifest.package_manager {
-                if matches!(package_manager.reference, PackageManagerReference::Local(_)) {
-                    return Err(Error::PackageManifestsCannotReferenceLocalBinaries(package_manager.to_print_string()));
-                }
-
                 return Ok(FindResult {
                     detected_root_path: Some(parent),
                     detected_package_manager: Some(package_manager),
+                    detected_package_manager_migration: parsed_manifest.package_manager_migration,
                 });
             }
         }
@@ -168,6 +195,7 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
                 return Ok(FindResult {
                     detected_root_path: Some(parent),
                     detected_package_manager: None,
+                    detected_package_manager_migration: None,
                 });
             }
         }
@@ -180,13 +208,6 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
     Ok(FindResult {
         detected_root_path: last_package_folder,
         detected_package_manager: None,
+        detected_package_manager_migration: None,
     })
-}
-
-pub fn validate_package_manager(package_manager: PackageManagerField, expected: &str) -> Result<PackageManagerReference, Error> {
-    if package_manager.name == expected {
-        Ok(package_manager.reference)
-    } else {
-        Err(Error::UnsupportedProject(package_manager.name))
-    }
 }
