@@ -9,6 +9,7 @@ dist
 node_modules
 
 flamegraph.svg
+profile.json.gz
 
 .pnp.*
 .yarn/install-state.gz

@@ -5,6 +5,7 @@ pub mod check_range;
 pub mod check_reference;
 pub mod check_requirements;
 pub mod check_semver_version;
+pub mod flamegraph;
 pub mod http;
 pub mod iter_zip;
 pub mod print_hoisting;

@@ -43,6 +43,7 @@ pub enum YarnCli {
     CheckReference(debug::check_reference::CheckReference),
     CheckRequirements(debug::check_requirements::CheckRequirements),
     CheckSemverVersion(debug::check_semver_version::CheckSemverVersion),
+    Flamegraph(debug::flamegraph::Flamegraph),
     Http(debug::http::Http),
     IterZip(debug::iter_zip::IterZip),
     PrintHoisting(debug::print_hoisting::PrintHoisting),
