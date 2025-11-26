@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, ops::Range};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{document::Document, value::Indent, Error, Path, Value};
 
@@ -49,8 +49,12 @@ impl Document for JsonDocument {
 }
 
 impl JsonDocument {
-    pub fn hydrate_from_value<'de, T: Deserialize<'de>>(input: &'de RawJsonValue) -> Result<T, Error> {
-        Ok(json_provider::from_value(input)?)
+    pub fn hydrate_from_value<'de, T: DeserializeOwned>(input: &'de RawJsonValue) -> Result<T, Error> {
+        #[cfg(not(sonic_rs))]
+        return Ok(json_provider::from_value(input.clone())?);
+
+        #[cfg(sonic_rs)]
+        return Ok(json_provider::from_value(input)?);
     }
 
     pub fn hydrate_from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
@@ -67,36 +71,6 @@ impl JsonDocument {
 
     pub fn to_string_pretty<T: Serialize>(input: &T) -> Result<String, Error> {
         Ok(json_provider::to_string_pretty(input)?)
-    }
-
-    #[cfg(not(sonic_rs))]
-    pub fn merge_json(a: &str, b: &str) -> Result<json_provider::Value, Error> {
-        let mut obj_a: json_provider::Value =
-            JsonDocument::hydrate_from_str(a)?;
-
-        let obj_b: json_provider::Map<String, json_provider::Value> =
-            JsonDocument::hydrate_from_str(b)?;
-
-        // Extend `a` with keys from `b` (b overwrites a on collision)
-        obj_a.as_object_mut().unwrap().extend(obj_b.into_iter());
-
-        Ok(obj_a)
-    }
-
-    #[cfg(sonic_rs)]
-    pub fn merge_json(a: &str, b: &str) -> Result<json_provider::Value, Error> {
-        use sonic_rs::{JsonContainerTrait, JsonValueMutTrait};
-
-        let mut obj_a: json_provider::Value =
-            JsonDocument::hydrate_from_str(a)?;
-
-        let obj_b: json_provider::Value =
-            JsonDocument::hydrate_from_str(b)?;
-
-        // Extend `a` with keys from `b` (b overwrites a on collision)
-        obj_a.as_object_mut().unwrap().extend(obj_b.as_object().unwrap().into_iter());
-
-        Ok(obj_a)
     }
 
     pub fn new(input: Vec<u8>) -> Result<Self, Error> {
