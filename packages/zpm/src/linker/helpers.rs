@@ -1,10 +1,9 @@
-use std::{collections::{BTreeMap, BTreeSet, HashMap}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
+use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
 
 use zpm_formats::iter_ext::IterExt;
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Descriptor, FilterDescriptor, Ident, Locator};
+use zpm_primitives::{Descriptor, FilterDescriptor, Locator};
 use zpm_utils::{Path, PathError};
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -29,7 +28,7 @@ pub struct PackageMeta {
 }
 
 #[serde_as]
-#[derive(Debug, Default, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopLevelConfiguration {
     #[serde(default)]
@@ -38,14 +37,11 @@ pub struct TopLevelConfiguration {
 }
 
 impl TopLevelConfiguration {
-    pub fn from_project(project: &Project) -> HashMap<Ident, Vec<(FilterDescriptor, PackageMeta)>> {
+    pub fn from_project(project: &Project) -> Vec<(FilterDescriptor, PackageMeta)> {
         project.manifest_path()
             .if_exists()
             .and_then(|path| path.fs_read_text().ok()).map(|data| JsonDocument::hydrate_from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta)
             .unwrap_or_default()
-            .into_iter()
-            .map(|(filter, meta)| (filter.ident().clone(), (filter, meta)))
-            .into_group_map()
     }
 }
 
@@ -173,20 +169,16 @@ pub struct PackageBuildInfo {
     pub build_commands: Option<Vec<build::Command>>,
 }
 
-pub fn get_package_internal_info(project: &Project, install: &Install, dependencies_meta: &HashMap<Ident, Vec<(FilterDescriptor, PackageMeta)>>, locator: &Locator, resolution: &Resolution, physical_package_data: &PackageData) -> PackageBuildInfo {
+pub fn get_package_internal_info(project: &Project, install: &Install, dependencies_meta: &Vec<(FilterDescriptor, PackageMeta)>, locator: &Locator, resolution: &Resolution, physical_package_data: &PackageData) -> PackageBuildInfo {
     // The package meta is based on the top-level configuration extracted
     // from the `dependenciesMeta` field.
     //
-    let package_meta = dependencies_meta
-        .get(&locator.ident)
-        .and_then(|meta_list| {
-            meta_list.iter().find_map(|(selector, meta)| match selector {
-                FilterDescriptor::Range(params) => params.range.check(&resolution.version).then_some(meta),
-                FilterDescriptor::Ident(_) => Some(meta),
-            })
-        })
-        .cloned()
-        .unwrap_or_default();
+    let package_meta
+        = dependencies_meta.iter()
+            .find(|(selector, _)| selector.check(&locator.ident, &resolution.version))
+            .map(|(_, meta)| meta)
+            .cloned()
+            .unwrap_or_default();
 
     // The package flags are based on the actual package content. The flags
     // should always be the same for the same package, so we keep them in

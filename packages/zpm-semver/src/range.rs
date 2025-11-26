@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use bincode::{Decode, Encode};
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{DataType, FromFileString, ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
 
 use crate::{Error, VersionRc};
 
@@ -96,6 +96,13 @@ impl Range {
             tokens: vec![
                 Token::Operation(OperatorType::GreaterThanOrEqual, Version::new_from_components(0, 0, 0, Some(vec![VersionRc::Number(0)]))),
             ],
+        }
+    }
+
+    pub fn lte(version: Version) -> Range {
+        Range {
+            source: format!("<={}", version.to_file_string()),
+            tokens: vec![Token::Operation(OperatorType::LessThanOrEqual, version)],
         }
     }
 
@@ -305,7 +312,7 @@ impl ToFileString for Range {
 
 impl ToHumanString for Range {
     fn to_print_string(&self) -> String {
-        self.to_file_string()
+        DataType::Range.colorize(&self.to_file_string())
     }
 }
 

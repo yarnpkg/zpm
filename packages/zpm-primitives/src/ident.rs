@@ -5,7 +5,7 @@ use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataT
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum IdentError {
-    #[error("Invalixd ident: {0}")]
+    #[error("Invalid ident: {0}")]
     SyntaxError(String),
 }
 
@@ -82,7 +82,7 @@ impl ToFileString for Ident {
 
 impl ToHumanString for Ident {
     fn to_print_string(&self) -> String {
-        DataType::Custom(215, 135, 95).colorize(&self.as_str())
+        DataType::Ident.colorize(&self.as_str())
     }
 }
 

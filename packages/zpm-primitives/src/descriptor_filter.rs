@@ -1,36 +1,36 @@
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, ToFileString, ToHumanString};
+use zpm_utils::{ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
 
 use crate::{
     DescriptorError,
-    Ident,
+    Ident, IdentGlob,
 };
 
 #[zpm_enum(error = DescriptorError, or_else = |s| Err(DescriptorError::SyntaxError(s.to_string())))]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone,)]
+#[derive_variants(Debug, Clone)]
 pub enum FilterDescriptor {
     #[pattern(spec = "(?<ident>@?[^@]+)")]
     Ident {
-        ident: Ident,
+        ident: IdentGlob,
     },
 
     #[pattern(spec = "(?<ident>@?[^@]+)@(?<range>.*)")]
     Range {
-        ident: Ident,
+        ident: IdentGlob,
         range: zpm_semver::Range,
     },
 }
 
 impl FilterDescriptor {
-    pub fn ident(&self) -> &Ident {
+    pub fn check(&self, ident: &Ident, version: &zpm_semver::Version) -> bool {
         match self {
             FilterDescriptor::Ident(params) => {
-                &params.ident
+                params.ident.check(ident)
             },
 
             FilterDescriptor::Range(params) => {
-                &params.ident
+                params.ident.check(ident) && params.range.check(version)
             },
         }
     }
@@ -44,7 +44,7 @@ impl ToFileString for FilterDescriptor {
             },
 
             FilterDescriptor::Range(params) => {
-                params.ident.to_file_string()
+                format!("{}@{}", params.ident.to_file_string(), params.range.to_file_string())
             },
         }
     }
@@ -58,7 +58,7 @@ impl ToHumanString for FilterDescriptor {
             },
 
             FilterDescriptor::Range(params) => {
-                params.ident.to_print_string()
+                format!("{}{}", params.ident.to_print_string(), format!("@{}", params.range.to_print_string()))
             },
         }
     }

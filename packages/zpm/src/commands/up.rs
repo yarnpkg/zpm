@@ -119,7 +119,7 @@ impl Up {
             .with_package_cache(Some(&package_cache))
             .with_project(Some(&project));
 
-        let descriptors
+        let loose_resolutions
             = LooseDescriptor::resolve_all(&install_context, &resolve_options, &expanded_descriptors).await?;
 
         for workspace in &project.workspaces {
@@ -132,20 +132,20 @@ impl Up {
             let mut document
                 = JsonDocument::new(manifest_content)?;
 
-            for descriptor in descriptors.iter() {
+            for resolution in loose_resolutions.iter() {
                 document.update_path(
-                    &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), descriptor.ident.to_file_string()]),
-                    Value::String(descriptor.range.to_file_string()),
+                    &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
+                    Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
                 )?;
 
                 document.update_path(
-                    &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), descriptor.ident.to_file_string()]),
-                    Value::String(descriptor.range.to_file_string()),
+                    &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
+                    Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
                 )?;
 
                 document.update_path(
-                    &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()]),
-                    Value::String(descriptor.range.to_file_string()),
+                    &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
+                    Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
                 )?;
             }
 
@@ -156,8 +156,14 @@ impl Up {
         let mut project
             = Project::new(None).await?;
 
+        let enforced_resolutions
+            = loose_resolutions.into_iter()
+                .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, locator)))
+                .collect();
+
         project.run_install(RunInstallOptions {
             mode: self.mode,
+            enforced_resolutions,
             ..Default::default()
         }).await?;
 

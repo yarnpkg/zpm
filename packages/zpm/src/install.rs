@@ -1,5 +1,6 @@
 use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sync::LazyLock};
 
+use chrono::{DateTime, Utc};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
@@ -34,6 +35,7 @@ pub struct InstallContext<'a> {
     pub prune_dev_dependencies: bool,
     pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
     pub refresh_lockfile: bool,
+    pub install_time: DateTime<Utc>,
     pub mode: Option<InstallMode>,
 }
 
@@ -48,6 +50,7 @@ impl<'a> Default for InstallContext<'a> {
             prune_dev_dependencies: false,
             enforced_resolutions: BTreeMap::new(),
             refresh_lockfile: false,
+            install_time: Utc::now(),
             mode: None,
         }
     }

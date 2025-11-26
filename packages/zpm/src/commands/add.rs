@@ -30,7 +30,8 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
         return Ok(requests);
     }
 
-    let mut type_requests = requests.clone();
+    let mut type_requests
+        = requests.clone();
 
     let ident_set = requests.iter()
         .map(|(descriptor, _)| descriptor.ident.clone())
@@ -217,7 +218,7 @@ impl Add {
             .with_package_cache(Some(&package_cache))
             .with_project(Some(&project));
 
-        let descriptors
+        let resolutions
             = LooseDescriptor::resolve_all(&install_context, &resolve_options, &self.descriptors).await?;
 
         let mut requests = vec![];
@@ -225,7 +226,7 @@ impl Add {
         let active_workspace
             = project.active_workspace()?;
 
-        for descriptor in descriptors {
+        for resolution in &resolutions {
             let mut dev = self.dev;
             let mut optional = self.optional;
             let mut prod = false;
@@ -237,10 +238,10 @@ impl Add {
             let peer = self.peer;
 
             if !dev && !optional && !peer {
-                if active_workspace.manifest.dev_dependencies.contains_key(&descriptor.ident) {
+                if active_workspace.manifest.dev_dependencies.contains_key(&resolution.descriptor.ident) {
                     dev = true;
                 }
-                if active_workspace.manifest.remote.optional_dependencies.contains_key(&descriptor.ident) {
+                if active_workspace.manifest.remote.optional_dependencies.contains_key(&resolution.descriptor.ident) {
                     optional = true;
                 }
                 if !dev && !optional && !peer {
@@ -248,7 +249,7 @@ impl Add {
                 }
             }
 
-            requests.push((descriptor, AddRequest {
+            requests.push((resolution.descriptor.clone(), AddRequest {
                 prod, peer, dev, optional
             }));
         }
@@ -285,14 +286,14 @@ impl Add {
             if request.dev {
                 document.set_path(
                     &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), descriptor.ident.to_file_string()]),
-                    Value::String(descriptor.range.to_file_string()),
+                    Value::String(descriptor.range.to_anonymous_range().to_file_string()),
                 )?;
             }
 
             if request.optional {
                 document.set_path(
                     &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()]),
-                    Value::String(descriptor.range.to_file_string()),
+                    Value::String(descriptor.range.to_anonymous_range().to_file_string()),
                 )?;
             }
 
@@ -306,7 +307,7 @@ impl Add {
             if request.prod {
                 document.set_path(
                     &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), descriptor.ident.to_file_string()]),
-                    Value::String(descriptor.range.to_file_string()),
+                    Value::String(descriptor.range.to_anonymous_range().to_file_string()),
                 )?;
             }
         }
@@ -317,8 +318,17 @@ impl Add {
         let mut project
             = project::Project::new(None).await?;
 
+        let enforced_resolutions
+            = resolutions.into_iter()
+                .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, locator)))
+                .map(|(descriptor, locator)| (descriptor.clone(), locator.clone()))
+                .collect();
+
+        println!("enforced_resolutions: {:?}", enforced_resolutions);
+
         project.run_install(project::RunInstallOptions {
             mode: self.mode,
+            enforced_resolutions,
             ..Default::default()
         }).await?;
 

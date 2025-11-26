@@ -1,9 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-use zpm_primitives::{Descriptor, Locator, PeerRange, Range, Reference};
-use zpm_semver::RangeKind;
-use zpm_utils::{AbstractValue, Container, FromFileString, Glob, IoResultExt, Path, Secret};
+use zpm_utils::{AbstractValue, Container, FromFileString, IoResultExt, Path};
 
 #[derive(Debug, Clone)]
 pub struct ConfigurationContext {
@@ -661,6 +659,8 @@ pub use types::*;
 
 // Rust doesn't support specialization, so we can't have a blanket implementation for FromStr
 // and a different one for Option<T: FromStr>; instead we manually generate whatever we need.
+merge_settings!(std::time::Duration, |s: &str| FromFileString::from_file_string(s).unwrap());
+
 merge_settings!(String, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(bool, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(usize, |s: &str| FromFileString::from_file_string(s).unwrap());
@@ -668,18 +668,21 @@ merge_settings!(u64, |s: &str| FromFileString::from_file_string(s).unwrap());
 
 merge_settings!(zpm_formats::CompressionAlgorithm, |s: &str| FromFileString::from_file_string(s).unwrap());
 
-merge_settings!(Secret<String>, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_primitives::Descriptor, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_primitives::FilterDescriptor, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_primitives::Ident, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_primitives::Locator, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_primitives::PeerRange, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_primitives::Range, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_primitives::Reference, |s: &str| FromFileString::from_file_string(s).unwrap());
+
+merge_settings!(zpm_semver::RangeKind, |s: &str| FromFileString::from_file_string(s).unwrap());
+
+merge_settings!(zpm_utils::Secret<String>, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_utils::Glob, |s: &str| FromFileString::from_file_string(s).unwrap());
 
 merge_settings!(crate::types::NodeLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::Cpu, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::Libc, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::Os, |s: &str| FromFileString::from_file_string(s).unwrap());
-
-merge_settings!(Descriptor, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(Glob, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(Locator, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(PeerRange, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(RangeKind, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(Range, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(Reference, |s: &str| FromFileString::from_file_string(s).unwrap());

@@ -122,6 +122,17 @@
       "description": "Whether to always send authentication headers when querying the npm registry",
       "default": false
     },
+    "npmMinimalAgeGate": {
+      "type": ["std::time::Duration", "null"],
+      "description": "Minimum age of a package version in minutes to be considered for installation. Can be used to prevent installing very new packages, either because they tend to be more likely to include accidental bugs, or because of supply-chain security concerns."
+    },
+    "npmPreapprovedPackages": {
+      "type": "array",
+      "description": "List of package descriptors (package@range) that bypass the minimum age check. Use this for packages that you trust or that need to be installed immediately.",
+      "items": {
+        "type": "zpm_primitives::FilterDescriptor"
+      }
+    },
     "npmAuthIdent": {
       "type": ["string", "null"],
       "description": "The username to use for authentication when querying the npm registry"

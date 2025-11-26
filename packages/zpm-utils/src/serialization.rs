@@ -2,6 +2,7 @@ use std::fmt;
 
 use colored::Colorize;
 use erased_serde::serialize_trait_object;
+use fundu::parse_duration;
 use serde::{Serialize, Serializer};
 use thiserror::Error;
 
@@ -188,10 +189,10 @@ impl ToHumanString for u64 {
 }
 
 impl FromFileString for std::time::Duration {
-    type Error = std::num::ParseIntError;
+    type Error = fundu::ParseError;
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        s.parse::<u64>().map(|s| std::time::Duration::from_secs(s as u64))
+        parse_duration(s)
     }
 }
 

@@ -7,6 +7,7 @@ base64 = "0.22.0"
 bincode_derive = { version = "2.0.0-rc.3" }
 bincode = { version = "2.0.0-rc.3" }
 blake2 = { version = "0.10.6" }
+chrono = "0.4.38"
 clean-path = "0.2.1"
 colored = "3.0.0"
 hex = "0.4.3"
@@ -30,3 +31,4 @@ num = "0.4.3"
 rstest = "0.26.1"
 indexmap = {version = "2.11.0", features = ["serde"]}
 timeago = "0.5.0"
+fundu = "2.0.1"

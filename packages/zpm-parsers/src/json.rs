@@ -49,6 +49,10 @@ impl Document for JsonDocument {
 }
 
 impl JsonDocument {
+    pub fn hydrate_from_value<'de, T: Deserialize<'de>>(input: &'de RawJsonValue) -> Result<T, Error> {
+        Ok(json_provider::from_value(input)?)
+    }
+
     pub fn hydrate_from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
         Ok(json_provider::from_str(input)?)
     }

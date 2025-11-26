@@ -1,9 +1,9 @@
 use globset::{Glob, GlobBuilder, GlobMatcher};
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{DataType, FromFileString, ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
 
 use crate::Ident;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IdentGlob {
     pub glob: Glob,
     pub matcher: GlobMatcher,
@@ -42,7 +42,7 @@ impl ToFileString for IdentGlob {
 
 impl ToHumanString for IdentGlob {
     fn to_print_string(&self) -> String {
-        self.glob.glob().to_string()
+        DataType::Ident.colorize(&self.to_file_string())
     }
 }
 

@@ -5,7 +5,7 @@ use futures::{future::BoxFuture, FutureExt};
 use wax::{Glob, Program};
 use zpm_formats::{iter_ext::IterExt, tar, tar_iter};
 use zpm_macro_enum::zpm_enum;
-use zpm_primitives::{AnonymousSemverRange, AnonymousTagRange, Descriptor, FolderRange, Ident, Range, RegistrySemverRange, RegistryTagRange, TarballRange, WorkspaceMagicRange};
+use zpm_primitives::{AnonymousSemverRange, AnonymousTagRange, Descriptor, FolderRange, Ident, Locator, Range, RegistrySemverRange, RegistryTagRange, TarballRange, WorkspaceMagicRange};
 use zpm_semver::RangeKind;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString, ToHumanString};
 
@@ -16,6 +16,12 @@ pub struct ResolveOptions {
     pub active_workspace_ident: Ident,
     pub range_kind: RangeKind,
     pub resolve_tags: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LooseResolution {
+    pub descriptor: Descriptor,
+    pub locator: Option<Locator>,
 }
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidRange(s.to_string())))]
@@ -82,8 +88,8 @@ impl LooseDescriptor {
         idents
     }
 
-    pub async fn resolve_all<'a>(context: &'a InstallContext<'a>, options: &'a ResolveOptions, loose_descriptors: &[LooseDescriptor]) -> Result<Vec<Descriptor>, Error> {
-        let mut futures: Vec<BoxFuture<'a, Result<Descriptor, Error>>> = vec![];
+    pub async fn resolve_all<'a>(context: &'a InstallContext<'a>, options: &'a ResolveOptions, loose_descriptors: &[LooseDescriptor]) -> Result<Vec<LooseResolution>, Error> {
+        let mut futures: Vec<BoxFuture<'a, Result<LooseResolution, Error>>> = vec![];
 
         for loose_descriptor in loose_descriptors {
             let loose_descriptor
@@ -108,7 +114,7 @@ impl LooseDescriptor {
         Ok(descriptors)
     }
 
-    pub async fn resolve(&self, context: &InstallContext<'_>, options: &ResolveOptions) -> Result<Descriptor, Error> {
+    pub async fn resolve(&self, context: &InstallContext<'_>, options: &ResolveOptions) -> Result<LooseResolution, Error> {
         match self {
             LooseDescriptor::Range(RangeLooseDescriptor {range: Range::Tarball(params)}) => {
                 let path
@@ -136,14 +142,13 @@ impl LooseDescriptor {
                 let ident = manifest.name
                     .ok_or_else(|| Error::MissingPackageName)?;
 
-                let descriptor = Descriptor::new(
-                    ident,
-                    TarballRange {
-                        path: params.path.clone(),
-                    }.into(),
-                );
+                let descriptor
+                    = Descriptor::new(ident, TarballRange {path: params.path.clone()}.into());
 
-                Ok(descriptor)
+                Ok(LooseResolution {
+                    descriptor,
+                    locator: None,
+                })
             }
 
             LooseDescriptor::Range(RangeLooseDescriptor {range: Range::Folder(params)}) => {
@@ -158,14 +163,13 @@ impl LooseDescriptor {
                 let ident = manifest.name
                     .ok_or_else(|| Error::MissingPackageName)?;
 
-                let descriptor = Descriptor::new(
-                    ident,
-                    FolderRange {
-                        path: params.path.clone(),
-                    }.into(),
-                );
+                let descriptor
+                    = Descriptor::new(ident, FolderRange {path: params.path.clone()}.into());
 
-                Ok(descriptor)
+                Ok(LooseResolution {
+                    descriptor,
+                    locator: None,
+                })
             },
 
             LooseDescriptor::Range(RangeLooseDescriptor {range}) => {
@@ -173,114 +177,26 @@ impl LooseDescriptor {
             },
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::AnonymousSemver(AnonymousSemverRange {range}), ..}}) => {
-                let descriptor = Descriptor::new(
-                    ident.clone(),
-                    RegistrySemverRange {
-                        ident: None,
-                        range: range.clone(),
-                    }.into(),
-                );
+                LooseDescriptor::resolve_registry_semver(context, ident, None, range).await
+            },
 
-                let Range::RegistrySemver(range_params) = &descriptor.range else {
-                    panic!("Invalid range");
-                };
-
-                let Some(range_kind) = range_params.range.kind() else {
-                    return Ok(Descriptor::new(
-                        ident.clone(),
-                        AnonymousSemverRange {
-                            range: range.clone(),
-                        }.into(),
-                    ));
-                };
-
-                let resolution_result
-                    = resolvers::npm::resolve_semver_descriptor(context, &descriptor, &range_params).await?;
-
-                let range = resolution_result.resolution.version
-                    .to_range(range_kind);
-
-                Ok(Descriptor::new(
-                    ident.clone(),
-                    AnonymousSemverRange {
-                        range,
-                    }.into(),
-                ))
+            LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::RegistrySemver(RegistrySemverRange {ident: ident_range, range}), ..}}) => {
+                LooseDescriptor::resolve_registry_semver(context, ident, ident_range.as_ref(), range).await
             }
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::AnonymousTag(AnonymousTagRange {tag}), ..}}) => {
-                if !options.resolve_tags {
-                    return Ok(Descriptor::new(
-                        ident.clone(),
-                        AnonymousTagRange {
-                            tag: tag.clone(),
-                        }.into(),
-                    ));
-                }
+                LooseDescriptor::resolve_registry_tag(context, options, ident, None, tag).await
+            },
 
-                let descriptor = Descriptor::new(
-                    ident.clone(),
-                    RegistryTagRange {
-                        ident: None,
-                        tag: tag.clone(),
-                    }.into(),
-                );
-
-                let Range::RegistryTag(range_params) = &descriptor.range else {
-                    panic!("Invalid range");
-                };
-
-                let resolution_result
-                    = resolvers::npm::resolve_tag_descriptor(context, &descriptor, &range_params).await?;
-
-                let range = resolution_result.resolution.version
-                    .to_range(options.range_kind);
-
-                let descriptor = Descriptor::new(
-                    ident.clone(),
-                    RegistrySemverRange {
-                        ident: None,
-                        range: range.clone(),
-                    }.into(),
-                );
-
-                let Range::RegistrySemver(range_params) = &descriptor.range else {
-                    panic!("Invalid range");
-                };
-
-                // We must check whether resolving the range would yield a
-                // different version than the one we just resolved (this can
-                // happen if, say, we have `rc: 1.0.0-rc.1`, and there's a
-                // release version `1.1.0`).
-                //
-                // In that case we force the descriptor to use a fixed version
-                // rather than the requested range_kind.
-
-                let resolution_check_result
-                    = resolvers::npm::resolve_semver_descriptor(context, &descriptor, &range_params).await?;
-
-                if resolution_check_result.resolution.version == resolution_result.resolution.version {
-                    Ok(Descriptor::new(
-                        ident.clone(),
-                        Range::AnonymousSemver(AnonymousSemverRange {
-                            range,
-                        }),
-                    ))
-                } else {
-                    let fixed_range = resolution_result.resolution.version
-                        .to_range(RangeKind::Exact);
-
-                    Ok(Descriptor::new(
-                        ident.clone(),
-                        Range::AnonymousSemver(AnonymousSemverRange {
-                            range: fixed_range,
-                        }),
-                    ))
-                }
+            LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::RegistryTag(RegistryTagRange {ident: ident_range, tag}), ..}}) => {
+                LooseDescriptor::resolve_registry_tag(context, options, ident, ident_range.as_ref(), tag).await
             },
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor}) => {
-                Ok(descriptor.clone())
+                Ok(LooseResolution {
+                    descriptor: descriptor.clone(),
+                    locator: None,
+                })
             },
 
             LooseDescriptor::Ident(IdentLooseDescriptor {ident}) => {
@@ -288,45 +204,125 @@ impl LooseDescriptor {
                     .expect("Project is required for resolving loose identifiers");
 
                 if ident != &options.active_workspace_ident && project.workspace_by_ident(&ident).is_ok() {
-                    return Ok(Descriptor::new(
-                        ident.clone(),
-                        WorkspaceMagicRange {
-                            magic: options.range_kind,
-                        }.into(),
-                    ));
+                    let descriptor
+                        = Descriptor::new(ident.clone(), WorkspaceMagicRange {magic: options.range_kind}.into());
+
+                    return Ok(LooseResolution {
+                        descriptor,
+                        locator: None,
+                    });
                 }
 
                 if project.config.settings.prefer_reuse.value {
                     if let Some(descriptor) = find_project_descriptor(project, ident.clone())? {
-                        return Ok(descriptor);
+                        return Ok(LooseResolution {
+                            descriptor: descriptor.clone(),
+                            locator: None,
+                        });
                     }
                 }
 
-                let descriptor = Descriptor::new(
-                    ident.clone(),
-                    RegistryTagRange {
-                        ident: None,
-                        tag: "latest".to_string(),
-                    }.into(),
-                );
-
-                let Range::RegistryTag(range_params) = &descriptor.range else {
-                    unreachable!("Invalid range");
-                };
-
-                let resolution_result
-                    = resolvers::npm::resolve_tag_descriptor(context, &descriptor, &range_params).await?;
-
-                let range = resolution_result.resolution.version
-                    .to_range(options.range_kind);
-
-                Ok(Descriptor::new(
-                    ident.clone(),
-                    Range::AnonymousSemver(AnonymousSemverRange {
-                        range,
-                    }),
-                ))
+                LooseDescriptor::resolve_registry_tag(context, options, ident, None, "latest").await
             },
+        }
+    }
+
+    async fn resolve_registry_semver(context: &InstallContext<'_>, ident: &Ident, range_ident: Option<&Ident>, range: &zpm_semver::Range) -> Result<LooseResolution, Error> {
+        let descriptor
+            = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
+
+        let Range::RegistrySemver(range_params) = &descriptor.range else {
+            panic!("Invalid range");
+        };
+
+        // We use as-is ranges declared using a prefix (ie `^x.y.w`, `~x.y.z`, etc)
+        let Some(range_kind) = range_params.range.kind() else {
+            let descriptor
+                = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
+
+            return Ok(LooseResolution {
+                descriptor,
+                locator: None,
+            });
+        };
+
+        // Otherwise we resolve them
+        let resolution_result
+            = resolvers::npm::resolve_semver_descriptor(context, &descriptor, &range_params).await?;
+
+        let range = resolution_result.resolution.version
+            .to_range(range_kind);
+
+        let descriptor
+            = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
+
+        Ok(LooseResolution {
+            descriptor,
+            locator: Some(resolution_result.resolution.locator),
+        })
+    }
+
+    async fn resolve_registry_tag(context: &InstallContext<'_>, options: &ResolveOptions, ident: &Ident, range_ident: Option<&Ident>, tag: &str) -> Result<LooseResolution, Error> {
+        if !options.resolve_tags {
+            let descriptor
+                = Descriptor::new(ident.clone(), RegistryTagRange {ident: range_ident.cloned(), tag: tag.to_string()}.into());
+
+            return Ok(LooseResolution {
+                descriptor,
+                locator: None,
+            });
+        }
+
+        let descriptor
+            = Descriptor::new(ident.clone(), RegistryTagRange {ident: range_ident.cloned(), tag: tag.to_string()}.into());
+
+        let Range::RegistryTag(range_params) = &descriptor.range else {
+            panic!("Invalid range");
+        };
+
+        let resolution_result
+            = resolvers::npm::resolve_tag_descriptor(context, &descriptor, &range_params).await?;
+
+        let range = resolution_result.resolution.version
+            .to_range(options.range_kind);
+
+        let descriptor
+            = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
+
+        let Range::RegistrySemver(range_params) = &descriptor.range else {
+            panic!("Invalid range");
+        };
+
+        // We must check whether resolving the range would yield a
+        // different version than the one we just resolved (this can
+        // happen if, say, we have `rc: 1.0.0-rc.1`, and there's a
+        // release version `1.1.0`).
+        //
+        // In that case we force the descriptor to use a fixed version
+        // rather than the requested range_kind.
+
+        let resolution_check_result
+            = resolvers::npm::resolve_semver_descriptor(context, &descriptor, &range_params).await?;
+
+        if resolution_check_result.resolution.version == resolution_result.resolution.version {
+            let descriptor
+                = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
+
+            Ok(LooseResolution {
+                descriptor,
+                locator: Some(resolution_check_result.resolution.locator),
+            })
+        } else {
+            let fixed_range = resolution_result.resolution.version
+                .to_range(RangeKind::Exact);
+
+            let descriptor
+                = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: fixed_range.clone()}.into());
+
+            Ok(LooseResolution {
+                descriptor,
+                locator: Some(resolution_result.resolution.locator),
+            })
         }
     }
 }

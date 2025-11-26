@@ -1,11 +1,12 @@
-use std::{collections::BTreeMap, fmt, marker::PhantomData, str::FromStr, sync::{Arc, LazyLock}};
+use std::{collections::BTreeMap, str::FromStr, sync::{Arc, LazyLock}};
 
+use chrono::{DateTime, Utc};
 use regex::Regex;
-use serde::{de::{self, DeserializeOwned, DeserializeSeed, IgnoredAny, Visitor}, Deserialize, Deserializer};
+use serde::Deserialize;
+use serde_with::{serde_as, MapSkipError};
 use zpm_config::ConfigExt;
-use zpm_parsers::{JsonDocument, RawJsonDeserializer, RawJsonValue};
-use zpm_primitives::{Descriptor, Ident, Locator, RegistryReference, RegistrySemverRange, RegistryTagRange, UrlReference};
-use zpm_utils::ToFileString;
+use zpm_parsers::{JsonDocument, RawJsonValue};
+use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, RegistryReference, RegistrySemverRange, RegistryTagRange, UrlReference};
 
 use crate::{
     error::Error,
@@ -18,125 +19,6 @@ use crate::{
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
-
-/**
- * Deserializer that only deserializes the requested field and skips all others.
- */
-pub struct FindFieldNested<'a, T> {
-    field: &'a str,
-    nested: T,
-}
-
-impl<'de, T> Visitor<'de> for FindFieldNested<'_, T> where T: DeserializeSeed<'de> + Clone {
-    type Value = T::Value;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a map with a matching field")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
-        let mut selected = None;
-
-        while let Some(key) = map.next_key::<String>()? {
-            if key == self.field {
-                selected = Some(map.next_value_seed(self.nested.clone())?);
-            } else {
-                let _ = map.next_value::<IgnoredAny>();
-            }
-        }
-
-        selected
-            .ok_or(de::Error::missing_field(""))
-    }
-}
-
-/**
- * Deserializer that only deserializes the value for the highest key matching the provided semver range.
- */
-#[derive(Clone)]
-pub struct FindHighestCompatibleVersion<T> {
-    range: zpm_semver::Range,
-    phantom: PhantomData<T>,
-}
-
-impl<'de, T> DeserializeSeed<'de> for FindHighestCompatibleVersion<T> where T: DeserializeOwned {
-    type Value = Option<(zpm_semver::Version, T)>;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error> where D: Deserializer<'de> {
-        deserializer.deserialize_map(self)
-    }
-}
-
-impl<'de, T> Visitor<'de> for FindHighestCompatibleVersion<T> where T: DeserializeOwned {
-    type Value = Option<(zpm_semver::Version, T)>;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a map with a matching version")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
-        let mut selected = None;
-
-        while let Some(key) = map.next_key::<String>()? {
-            let version
-                = zpm_semver::Version::from_str(key.as_str()).unwrap();
-
-            if self.range.check(&version) && selected.as_ref().map(|(current_version, _)| *current_version < version).unwrap_or(true) {
-                selected = Some((version, map.next_value::<RawJsonValue>()?));
-            } else {
-                map.next_value::<IgnoredAny>()?;
-            }
-        }
-
-        let Some((version, version_payload)) = selected else {
-            return Ok(None);
-        };
-
-        let deserialized_payload
-            = T::deserialize(&version_payload).unwrap();
-
-        Ok(Some((version, deserialized_payload)))
-    }
-}
-
-/**
- * Deserializer that only deserializes the value for the highest key matching the provided semver range.
- */
-#[derive(Clone)]
-pub struct FindField<'a, TVal> {
-    value: &'a str,
-    phantom: PhantomData<TVal>,
-}
-
-impl<'de, TVal> DeserializeSeed<'de> for FindField<'de, TVal> where TVal: Deserialize<'de> + std::fmt::Debug {
-    type Value = Option<TVal>;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error> where D: Deserializer<'de> {
-        deserializer.deserialize_map(self)
-    }
-}
-
-impl<'de, TVal> Visitor<'de> for FindField<'de, TVal> where TVal: Deserialize<'de> + std::fmt::Debug {
-    type Value = Option<TVal>;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a map with a matching version")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error> where A: de::MapAccess<'de> {
-        let mut res = None;
-
-        while let Some(key) = map.next_key::<String>()? {
-            if self.value == key {
-                res = Some(map.next_value::<TVal>()?);
-            } else {
-                map.next_value::<IgnoredAny>()?;
-            }
-        }
-
-        Ok(res)
-    }
-}
 
 /**
  * We need to read the scripts to figure out whether the package has an implicit node-gyp dependency.
@@ -213,6 +95,22 @@ pub async fn resolve_semver_or_workspace_descriptor(context: &InstallContext<'_>
     resolve_semver_descriptor(context, descriptor, params).await
 }
 
+fn is_package_approved(context: &InstallContext<'_>, ident: &Ident, version: &zpm_semver::Version, release_time: Option<&DateTime<Utc>>) -> bool {
+    let project = context.project
+        .expect("The project is required for resolving a workspace package");
+
+    let check_config
+        = || project.config.settings.npm_preapproved_packages.iter().any(|setting| setting.value.check(ident, version));
+
+    if let Some(minimal_age_gate) = project.config.settings.npm_minimal_age_gate.value {
+        if release_time.map_or(false, |time| context.install_time < *time + minimal_age_gate) {
+            return check_config();
+        }
+    }
+
+    true
+}
+
 pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistrySemverRange) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
@@ -237,20 +135,41 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
-    let mut deserializer
-        = RawJsonDeserializer::from_str(registry_text.as_str());
+    #[serde_as]
+    #[derive(Deserialize)]
+    struct RegistryMetadata {
+        #[serde_as(as = "Option<MapSkipError<_, _>>")]
+        time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
+        versions: BTreeMap<zpm_semver::Version, RawJsonValue>,
+    }
 
-    let (version, manifest) = deserializer.deserialize_map(FindFieldNested {
-        field: "versions",
-        nested: FindHighestCompatibleVersion {
-            range: params.range.clone(),
-            phantom: PhantomData::<RemoteManifestWithScripts>,
-        },
-    }).map_err(zpm_parsers::Error::from)?.ok_or_else(|| {
-        Error::NoCandidatesFound(descriptor.range.clone())
-    })?;
+    let registry_data: RegistryMetadata
+        = JsonDocument::hydrate_from_str(registry_text.as_str())?;
 
-    Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
+    // Iterate in reverse order as we assume that users will most likely use newer versions.
+    for (version, manifest) in registry_data.versions.iter().rev() {
+        // Skip if the version is not in the range
+        if !params.range.check(version) {
+            continue;
+        }
+
+        // Skip if the version is more recent than the minimum age gate
+        let time
+            = project.config.settings.npm_minimal_age_gate.value
+                .and_then(|_| registry_data.time.as_ref())
+                .and_then(|map| map.get(version));
+
+        if !is_package_approved(context, package_ident, version, time) {
+            continue;
+        }
+
+        let manifest
+            = JsonDocument::hydrate_from_value(manifest)?;
+
+        return Ok(build_resolution_result(context, descriptor, package_ident, version.clone(), manifest));
+    }
+
+    Err(Error::NoCandidatesFound(descriptor.range.clone()))
 }
 
 pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistryTagRange) -> Result<ResolutionResult, Error> {
@@ -277,29 +196,37 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
+    #[serde_as]
     #[derive(Deserialize)]
     struct RegistryMetadata {
         #[serde(rename(deserialize = "dist-tags"))]
-        dist_tags: RawJsonValue,
-        versions: RawJsonValue,
+        dist_tags: BTreeMap<String, zpm_semver::Version>,
+        #[serde_as(as = "Option<MapSkipError<_, _>>")]
+        time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
+        versions: BTreeMap<zpm_semver::Version, RawJsonValue>,
     }
 
     let registry_data: RegistryMetadata
         = JsonDocument::hydrate_from_str(registry_text.as_str())?;
 
-    let version = registry_data.dist_tags.deserialize_map(FindField {
-        value: params.tag.as_str(),
-        phantom: PhantomData::<zpm_semver::Version>,
-    }).map_err(zpm_parsers::Error::from)?.ok_or_else(|| {
-        Error::TagNotFound(params.tag.clone())
-    })?;
+    let latest_version
+        = registry_data.dist_tags
+        .get(params.tag.as_str())
+        .ok_or_else(|| Error::TagNotFound(params.tag.clone()))?;
 
-    let manifest = registry_data.versions.deserialize_map(FindField {
-        value: &version.to_file_string(),
-        phantom: PhantomData::<RemoteManifestWithScripts>,
-    }).map_err(zpm_parsers::Error::from)?.ok_or_else(|| {
-        Error::NoCandidatesFound(descriptor.range.clone())
-    })?;
+    let time
+        = registry_data.time;
+
+    let (version, manifest)
+        = registry_data.versions.into_iter()
+            .rev()
+            .filter(|(version, _)| version <= &latest_version)
+            .filter(|(version, _)| !version.rc.is_some() || latest_version.rc.is_some())
+            .find(|(version, _)| is_package_approved(context, package_ident, version, time.as_ref().and_then(|map| map.get(version))))
+            .ok_or_else(|| Error::NoCandidatesFound(AnonymousSemverRange {range: zpm_semver::Range::lte(latest_version.clone())}.into()))?;
+
+    let manifest
+        = JsonDocument::hydrate_from_value(&manifest)?;
 
     Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
 }
@@ -320,7 +247,7 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
             path: &registry_path,
             authorization: None,
             otp: None,
-    }).await?;
+        }).await?;
 
     let registry_text = response.text().await
         .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
@@ -331,7 +258,7 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     fix_manifest(&mut manifest);
 
     let resolution
-        = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
+        = Resolution::from_remote_manifest(locator.clone(), manifest.remote.clone());
 
     Ok(resolution.into_resolution_result(context))
 }

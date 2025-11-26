@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use clipanion::cli;
 use zpm_parsers::{document::Document, JsonDocument, Value};
 use zpm_primitives::Ident;
@@ -84,7 +86,16 @@ impl InitWithTemplate {
         let template
             = self.template.resolve(&install_context, &resolve_options).await?;
 
+        let preferred_name
+            = template.descriptor.ident.name().to_string();
+
+        let enforced_resolutions
+            = vec![template.clone()].into_iter()
+                .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, locator)))
+                .collect();
+
         project.run_install(RunInstallOptions {
+            enforced_resolutions,
             ..Default::default()
         }).await?;
 
@@ -93,9 +104,9 @@ impl InitWithTemplate {
         let dlx_project
             = dlx::setup_project().await?;
         let dlx_project
-            = dlx::install_dependencies(&dlx_project.project_cwd, vec![template.clone()], false).await?;
+            = dlx::install_dependencies(&dlx_project.project_cwd, vec![template], false).await?;
         let bin
-            = dlx::find_binary(&dlx_project, template.ident.name(), true)?;
+            = dlx::find_binary(&dlx_project, &preferred_name, true)?;
 
         println!();
         dlx::run_binary(&dlx_project, bin, self.args.clone(), init_cwd.clone()).await?;

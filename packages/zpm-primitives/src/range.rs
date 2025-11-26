@@ -153,6 +153,20 @@ impl Range {
         matches!(self, Range::WorkspaceMagic(_) | Range::WorkspaceSemver(_) | Range::WorkspaceIdent(_) | Range::WorkspacePath(_))
     }
 
+    pub fn to_anonymous_range(&self) -> Range {
+        match self {
+            Range::RegistrySemver(params) => {
+                Range::AnonymousSemver(AnonymousSemverRange {range: params.range.clone()})
+            },
+
+            Range::RegistryTag(params) => {
+                Range::AnonymousTag(AnonymousTagRange {tag: params.tag.clone()})
+            },
+
+            _ => self.clone(),
+        }
+    }
+
     pub fn to_semver_range(&self) -> Option<zpm_semver::Range> {
         match self {
             Range::AnonymousSemver(params) => {
