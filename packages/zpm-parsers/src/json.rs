@@ -376,6 +376,60 @@ impl JsonDocument {
         self.insert_into_empty(offset, new_key, indent, value)
     }
 
+    /// Sort the keys of an object at the given path alphabetically.
+    /// Returns Ok(true) if sorting was performed, Ok(false) if already sorted or path not found.
+    pub fn sort_object_keys(&mut self, parent_path: &Path) -> Result<bool, Error> {
+        // Collect keys with their byte offsets, sorted by document position
+        let mut keys_by_position: Vec<_>
+            = self.paths.iter()
+                .filter(|(path, _)| path.is_direct_child_of(parent_path))
+                .map(|(path, &offset)| (path.last().unwrap(), offset))
+                .collect();
+
+        if keys_by_position.len() <= 1 {
+            return Ok(false);
+        }
+
+        keys_by_position.sort_by_key(|(_, offset)| *offset);
+
+        // Check if already sorted alphabetically
+        if keys_by_position.windows(2).all(|w| w[0].0 <= w[1].0) {
+            return Ok(false);
+        }
+
+        // Extract each "key": value as raw bytes
+        let mut key_value_pairs: Vec<(&str, Vec<u8>)> = vec![];
+        let mut content_end_offset = 0usize;
+
+        for (key_name, offset) in &keys_by_position {
+            let mut scanner = Scanner::new(&self.input, *offset);
+            scanner.skip_string()?;
+            scanner.skip_whitespace();
+            scanner.skip_char(b':')?;
+            scanner.skip_whitespace();
+            scanner.skip_value()?;
+
+            key_value_pairs.push((key_name, self.input[*offset..scanner.offset].to_vec()));
+            content_end_offset = scanner.offset;
+        }
+
+        // Detect separator pattern (e.g., ", " or ",\n  ")
+        let separator
+            = self.input[key_value_pairs[0].1.len() + keys_by_position[0].1..keys_by_position[1].1].to_vec();
+
+        // Sort by key name and rebuild content
+        key_value_pairs.sort_by_key(|(key_name, _)| *key_name);
+
+        let mut sorted_content = key_value_pairs[0].1.clone();
+        for (_, entry_bytes) in key_value_pairs.iter().skip(1) {
+            sorted_content.extend_from_slice(&separator);
+            sorted_content.extend_from_slice(entry_bytes);
+        }
+
+        self.replace_range(keys_by_position[0].1..content_end_offset, &sorted_content)?;
+        Ok(true)
+    }
+
     /**
      * Return the indent level at the given offset. Return None if the given
      * offset is inline (i.e. not at the beginning of a line).
@@ -868,6 +922,53 @@ mod tests {
             = JsonDocument::new(document.to_vec()).unwrap();
 
         document.set_path(&Path::from_segments(path.into_iter().map(|s| s.to_string()).collect()), value).unwrap();
+        assert_eq!(String::from_utf8(document.input).unwrap(), String::from_utf8(expected.to_vec()).unwrap());
+    }
+
+    // ===== sort_object_keys tests =====
+
+    #[rstest]
+    // Sort unsorted keys at top level
+    #[case(b"{\"zebra\": \"z\", \"apple\": \"a\", \"mango\": \"m\"}", vec![], b"{\"apple\": \"a\", \"mango\": \"m\", \"zebra\": \"z\"}", true)]
+
+    // Sort unsorted keys with newlines
+    #[case(b"{\n  \"zebra\": \"z\",\n  \"apple\": \"a\",\n  \"mango\": \"m\"\n}", vec![], b"{\n  \"apple\": \"a\",\n  \"mango\": \"m\",\n  \"zebra\": \"z\"\n}", true)]
+
+    // Already sorted - no change
+    #[case(b"{\"apple\": \"a\", \"mango\": \"m\", \"zebra\": \"z\"}", vec![], b"{\"apple\": \"a\", \"mango\": \"m\", \"zebra\": \"z\"}", false)]
+
+    // Already sorted with newlines - no change
+    #[case(b"{\n  \"apple\": \"a\",\n  \"mango\": \"m\",\n  \"zebra\": \"z\"\n}", vec![], b"{\n  \"apple\": \"a\",\n  \"mango\": \"m\",\n  \"zebra\": \"z\"\n}", false)]
+
+    // Empty object - no change
+    #[case(b"{}", vec![], b"{}", false)]
+
+    // Single key - no change
+    #[case(b"{\"only\": \"key\"}", vec![], b"{\"only\": \"key\"}", false)]
+
+    // Sort nested object keys
+    #[case(b"{\"deps\": {\"zebra\": \"1.0\", \"apple\": \"2.0\"}}", vec!["deps"], b"{\"deps\": {\"apple\": \"2.0\", \"zebra\": \"1.0\"}}", true)]
+
+    // Sort nested object with newlines
+    #[case(b"{\n  \"deps\": {\n    \"zebra\": \"1.0\",\n    \"apple\": \"2.0\"\n  }\n}", vec!["deps"], b"{\n  \"deps\": {\n    \"apple\": \"2.0\",\n    \"zebra\": \"1.0\"\n  }\n}", true)]
+
+    // Non-existent path - no change
+    #[case(b"{\"foo\": \"bar\"}", vec!["nonexistent"], b"{\"foo\": \"bar\"}", false)]
+
+    // Complex values preserved during sort
+    #[case(b"{\"z\": {\"nested\": true}, \"a\": [1, 2, 3]}", vec![], b"{\"a\": [1, 2, 3], \"z\": {\"nested\": true}}", true)]
+
+    // Scoped package names sort correctly
+    #[case(b"{\"deps\": {\"@types/node\": \"1.0\", \"@babel/core\": \"2.0\", \"lodash\": \"3.0\"}}", vec!["deps"], b"{\"deps\": {\"@babel/core\": \"2.0\", \"@types/node\": \"1.0\", \"lodash\": \"3.0\"}}", true)]
+
+    fn test_sort_object_keys(#[case] document: &[u8], #[case] path: Vec<&str>, #[case] expected: &[u8], #[case] expected_sorted: bool) {
+        let mut document
+            = JsonDocument::new(document.to_vec()).unwrap();
+
+        let sorted
+            = document.sort_object_keys(&Path::from_segments(path.into_iter().map(|s| s.to_string()).collect())).unwrap();
+
+        assert_eq!(sorted, expected_sorted, "sort_object_keys return value mismatch");
         assert_eq!(String::from_utf8(document.input).unwrap(), String::from_utf8(expected.to_vec()).unwrap());
     }
 }

@@ -3,6 +3,7 @@ use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sy
 use chrono::{DateTime, Utc};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
 use zpm_utils::{Hash64, IoResultExt, Path, ToHumanString, UrlEncoded};
 use bincode::{Decode, Encode};
@@ -521,6 +522,11 @@ impl Install {
             project.write_lockfile(&self.lockfile)?;
         }
 
+        // Sort package.json dependencies for consistency (Yarn Berry behavior)
+        if !self.skip_lockfile_update && !project.config.settings.enable_immutable_installs.value {
+            sort_workspace_dependencies(project)?;
+        }
+
         if !self.skip_build && !link_result.build_requests.entries.is_empty() {
             let build_future
                 = build::BuildManager::new(link_result.build_requests).run(project);
@@ -978,4 +984,45 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     }
 
     (dependencies, peer_dependencies)
+}
+
+/// Sort dependency fields in all workspace package.json files alphabetically.
+/// This matches Yarn Berry behavior where dependencies are automatically sorted during install.
+fn sort_workspace_dependencies(project: &Project) -> Result<(), Error> {
+    const DEPENDENCY_FIELDS: &[&str] = &[
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "peerDependencies",
+    ];
+
+    for workspace in &project.workspaces {
+        let manifest_path = workspace.path
+            .with_join_str("package.json");
+
+        let manifest_content = manifest_path
+            .fs_read_prealloc()?;
+
+        let mut document
+            = JsonDocument::new(manifest_content)?;
+
+        let mut any_sorted
+            = false;
+
+        for field_name in DEPENDENCY_FIELDS {
+            let field_path
+                = zpm_parsers::Path::from_segments(vec![field_name.to_string()]);
+
+            if document.sort_object_keys(&field_path)? {
+                any_sorted = true;
+            }
+        }
+
+        if any_sorted {
+            manifest_path
+                .fs_change(&document.input, false)?;
+        }
+    }
+
+    Ok(())
 }
