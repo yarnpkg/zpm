@@ -4552,7 +4552,7 @@ dependencies = [
 
 [[package]]
 name = "zpm-switch"
-version = "6.0.0-rc.5"
+version = "6.0.0-rc.6"
 dependencies = [
  "assert_cmd",
  "bincode",
