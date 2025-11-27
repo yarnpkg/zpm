@@ -4,7 +4,7 @@ use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
-use zpm_utils::{shell_escape, to_shell_line, FromFileString, Hash64, Path, ToFileString};
+use zpm_utils::{to_shell_line, FromFileString, Hash64, Path, ToFileString};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -601,19 +601,15 @@ impl ScriptEnvironment {
     }
 
     pub async fn run_script<I, S>(&mut self, script: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
-        let mut final_script
-            = script.to_string();
-
-        for arg in args {
-            final_script.push(' ');
-            final_script.push_str(&shell_escape(arg.to_string().as_str()));
-        }
-
         let mut bash_args = vec![];
 
         bash_args.push("-c".to_string());
-        bash_args.push(final_script);
+        bash_args.push(script.to_string());
         bash_args.push("yarn-script".to_string());
+
+        for arg in args {
+            bash_args.push(arg.to_string());
+        }
 
         self.run_exec("bash", bash_args).await
     }
