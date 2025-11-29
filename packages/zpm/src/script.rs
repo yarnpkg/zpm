@@ -538,14 +538,15 @@ impl ScriptEnvironment {
             .as_ref()
             .map(|p| Self::escape_sandbox_path(&p.to_file_string()));
 
+        // Base sandbox profile: deny all by default, then allow specific operations needed for script execution
         let mut profile = String::from(r#"(version 1)
 (deny default)
-(allow process-fork)
-(allow process-exec)
-(allow sysctl-read)
-(allow mach-lookup)
-(allow signal)
-(allow ipc-posix*)
+(allow process-fork)   ; Allow forking child processes (required for running scripts)
+(allow process-exec)   ; Allow executing programs (required for running binaries)
+(allow sysctl-read)    ; Allow reading system configuration (required by Node.js)
+(allow mach-lookup)    ; Allow Mach IPC service lookups (required for system services on macOS)
+(allow signal)         ; Allow sending/receiving POSIX signals between processes
+(allow ipc-posix*)     ; Allow POSIX IPC: pipes, shared memory, semaphores (required for process communication)
 "#);
 
         // Allow read-write access to project folder
