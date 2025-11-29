@@ -515,31 +515,39 @@ impl ScriptEnvironment {
         // Get home directory for cache access
         let home_dir = Path::home_dir()
             .ok()
-            .flatten()
-            .map(|p| p.to_file_string())
-            .unwrap_or_default();
+            .and_then(|opt| opt)
+            .map(|p| p.to_file_string());
 
         // Get temp directory
         let temp_dir = std::env::temp_dir()
             .to_string_lossy()
             .to_string();
 
+        // Build the list of allowed write paths
+        let mut write_paths = vec![
+            format!("    (subpath \"{cwd}\")"),
+            format!("    (subpath \"{bin_dir}\")"),
+            format!("    (subpath \"{temp_dir}\")"),
+            "    (subpath \"/private/var/folders\")".to_string(),
+            "    (subpath \"/var/folders\")".to_string(),
+        ];
+
+        // Only add home directory paths if home_dir is valid
+        if let Some(ref home) = home_dir {
+            write_paths.push(format!("    (subpath \"{home}/.yarn\")"));
+            write_paths.push(format!("    (subpath \"{home}/.npm\")"));
+            write_paths.push(format!("    (subpath \"{home}/.cache\")"));
+        }
+
         format!(r#"(version 1)
 (allow default)
 (deny file-write*)
 (allow file-write*
-    (subpath "{cwd}")
-    (subpath "{bin_dir}")
-    (subpath "{temp_dir}")
-    (subpath "{home_dir}/.yarn")
-    (subpath "{home_dir}/.npm")
-    (subpath "{home_dir}/.cache")
-    (subpath "/private/var/folders")
-    (subpath "/var/folders")
+{}
 )
 (allow process-fork)
 (allow process-exec)
-"#)
+"#, write_paths.join("\n"))
     }
 
     pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
