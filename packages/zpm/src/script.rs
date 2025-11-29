@@ -285,6 +285,8 @@ pub struct ScriptEnvironment {
     shell_forwarding: bool,
     stdin: Option<String>,
     enable_sandbox: bool,
+    project_cwd: Option<Path>,
+    global_folder: Option<Path>,
 }
 
 impl ScriptEnvironment {
@@ -297,6 +299,8 @@ impl ScriptEnvironment {
             shell_forwarding: false,
             stdin: None,
             enable_sandbox: false,
+            project_cwd: None,
+            global_folder: None,
         };
 
         if let Ok(val) = std::env::var("YARNSW_DETECTED_ROOT") {
@@ -389,6 +393,8 @@ impl ScriptEnvironment {
         self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_file_string()));
 
         self.enable_sandbox = project.config.settings.enable_sandbox.value;
+        self.project_cwd = Some(project.project_cwd.clone());
+        self.global_folder = Some(project.config.settings.global_folder.value.clone());
 
         self
     }
@@ -506,48 +512,49 @@ impl ScriptEnvironment {
     }
 
     /// Generates a sandbox profile for macOS seatbelt.
-    /// The profile allows network access and restricts file system writes to specific directories.
+    /// The profile is restrictive by default:
+    /// - Project folder (project_cwd) is allowed read-write
+    /// - Yarn global folder is allowed read-only
+    /// - All other file operations are denied by default
     #[cfg(target_os = "macos")]
-    fn generate_sandbox_profile(&self, bin_dir: &Path) -> String {
-        let cwd = self.cwd.to_file_string();
-        let bin_dir = bin_dir.to_file_string();
+    fn generate_sandbox_profile(&self) -> String {
+        // Get project_cwd for read-write access
+        let project_cwd = self.project_cwd
+            .as_ref()
+            .map(|p| p.to_file_string())
+            .unwrap_or_else(|| self.cwd.to_file_string());
 
-        // Get home directory for cache access
-        let home_dir = Path::home_dir()
-            .ok()
-            .and_then(|opt| opt)
+        // Get global_folder for read-only access
+        let global_folder = self.global_folder
+            .as_ref()
             .map(|p| p.to_file_string());
 
-        // Get temp directory
-        let temp_dir = std::env::temp_dir()
-            .to_string_lossy()
-            .to_string();
-
-        // Build the list of allowed write paths
-        let mut write_paths = vec![
-            format!("    (subpath \"{cwd}\")"),
-            format!("    (subpath \"{bin_dir}\")"),
-            format!("    (subpath \"{temp_dir}\")"),
-            "    (subpath \"/private/var/folders\")".to_string(),
-            "    (subpath \"/var/folders\")".to_string(),
-        ];
-
-        // Only add home directory paths if home_dir is valid
-        if let Some(ref home) = home_dir {
-            write_paths.push(format!("    (subpath \"{home}/.yarn\")"));
-            write_paths.push(format!("    (subpath \"{home}/.npm\")"));
-            write_paths.push(format!("    (subpath \"{home}/.cache\")"));
-        }
-
-        format!(r#"(version 1)
-(allow default)
-(deny file-write*)
-(allow file-write*
-{}
-)
+        let mut profile = String::from(r#"(version 1)
+(deny default)
 (allow process-fork)
 (allow process-exec)
-"#, write_paths.join("\n"))
+(allow sysctl-read)
+(allow mach-lookup)
+(allow signal)
+(allow ipc-posix*)
+"#);
+
+        // Allow read-write access to project folder
+        profile.push_str(&format!(r#"
+; Allow read-write access to project folder
+(allow file-read* (subpath "{}"))
+(allow file-write* (subpath "{}"))
+"#, project_cwd, project_cwd));
+
+        // Allow read-only access to Yarn global folder
+        if let Some(ref global) = global_folder {
+            profile.push_str(&format!(r#"
+; Allow read-only access to Yarn global folder
+(allow file-read* (subpath "{}"))
+"#, global));
+        }
+
+        profile
     }
 
     pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
@@ -561,7 +568,7 @@ impl ScriptEnvironment {
         // On macOS, wrap with sandbox-exec if sandbox is enabled
         #[cfg(target_os = "macos")]
         let (actual_program, actual_args) = if self.enable_sandbox {
-            let profile = self.generate_sandbox_profile(&bin_dir);
+            let profile = self.generate_sandbox_profile();
             let mut sandbox_args = vec![
                 "-p".to_string(),
                 profile,
