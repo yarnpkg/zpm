@@ -511,6 +511,13 @@ impl ScriptEnvironment {
         Ok(dir)
     }
 
+    /// Escapes a path for use in a seatbelt sandbox profile.
+    /// Escapes backslashes and double quotes to prevent profile syntax errors.
+    #[cfg(target_os = "macos")]
+    fn escape_sandbox_path(path: &str) -> String {
+        path.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
     /// Generates a sandbox profile for macOS seatbelt.
     /// The profile is restrictive by default:
     /// - Project folder (project_cwd) is allowed read-write
@@ -519,15 +526,17 @@ impl ScriptEnvironment {
     #[cfg(target_os = "macos")]
     fn generate_sandbox_profile(&self) -> String {
         // Get project_cwd for read-write access
+        // Falls back to cwd if project_cwd is not set (e.g., when running outside a project context)
         let project_cwd = self.project_cwd
             .as_ref()
             .map(|p| p.to_file_string())
             .unwrap_or_else(|| self.cwd.to_file_string());
+        let project_cwd = Self::escape_sandbox_path(&project_cwd);
 
         // Get global_folder for read-only access
         let global_folder = self.global_folder
             .as_ref()
-            .map(|p| p.to_file_string());
+            .map(|p| Self::escape_sandbox_path(&p.to_file_string()));
 
         let mut profile = String::from(r#"(version 1)
 (deny default)
