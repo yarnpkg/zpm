@@ -1,5 +1,11 @@
 use crate::ConfigurationContext;
 
+/// Returns true if the current operating system is macOS.
+/// Used as default value for the enableSandbox setting.
+pub fn is_macos() -> bool {
+    cfg!(target_os = "macos")
+}
+
 pub fn check_tsconfig(context: &ConfigurationContext) -> bool {
     if let Some(project_cwd) = &context.project_cwd {
         let root_has_tsconfig = project_cwd

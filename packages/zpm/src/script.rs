@@ -284,6 +284,7 @@ pub struct ScriptEnvironment {
     node_args: Vec<String>,
     shell_forwarding: bool,
     stdin: Option<String>,
+    enable_sandbox: bool,
 }
 
 impl ScriptEnvironment {
@@ -295,6 +296,7 @@ impl ScriptEnvironment {
             node_args: Vec::new(),
             shell_forwarding: false,
             stdin: None,
+            enable_sandbox: false,
         };
 
         if let Ok(val) = std::env::var("YARNSW_DETECTED_ROOT") {
@@ -385,6 +387,8 @@ impl ScriptEnvironment {
         self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
         self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
         self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_file_string()));
+
+        self.enable_sandbox = project.config.settings.enable_sandbox.value;
 
         self
     }
@@ -501,13 +505,71 @@ impl ScriptEnvironment {
         Ok(dir)
     }
 
-    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
-        let mut cmd
-            = Command::new(program);
+    /// Generates a sandbox profile for macOS seatbelt.
+    /// The profile allows network access and restricts file system writes to specific directories.
+    #[cfg(target_os = "macos")]
+    fn generate_sandbox_profile(&self, bin_dir: &Path) -> String {
+        let cwd = self.cwd.to_file_string();
+        let bin_dir = bin_dir.to_file_string();
 
+        // Get home directory for cache access
+        let home_dir = Path::home_dir()
+            .ok()
+            .flatten()
+            .map(|p| p.to_file_string())
+            .unwrap_or_default();
+
+        // Get temp directory
+        let temp_dir = std::env::temp_dir()
+            .to_string_lossy()
+            .to_string();
+
+        format!(r#"(version 1)
+(allow default)
+(deny file-write*)
+(allow file-write*
+    (subpath "{cwd}")
+    (subpath "{bin_dir}")
+    (subpath "{temp_dir}")
+    (subpath "{home_dir}/.yarn")
+    (subpath "{home_dir}/.npm")
+    (subpath "{home_dir}/.cache")
+    (subpath "/private/var/folders")
+    (subpath "/var/folders")
+)
+(allow process-fork)
+(allow process-exec)
+"#)
+    }
+
+    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
         let args = args.into_iter()
             .map(|arg| arg.as_ref().to_string())
             .collect::<Vec<_>>();
+
+        let bin_dir
+            = self.install_binaries()?;
+
+        // On macOS, wrap with sandbox-exec if sandbox is enabled
+        #[cfg(target_os = "macos")]
+        let (actual_program, actual_args) = if self.enable_sandbox {
+            let profile = self.generate_sandbox_profile(&bin_dir);
+            let mut sandbox_args = vec![
+                "-p".to_string(),
+                profile,
+                program.to_string(),
+            ];
+            sandbox_args.extend(args);
+            ("sandbox-exec".to_string(), sandbox_args)
+        } else {
+            (program.to_string(), args)
+        };
+
+        #[cfg(not(target_os = "macos"))]
+        let (actual_program, actual_args) = (program.to_string(), args);
+
+        let mut cmd
+            = Command::new(&actual_program);
 
         cmd.current_dir(self.cwd.to_path_buf());
 
@@ -522,9 +584,6 @@ impl ScriptEnvironment {
                 },
             };
         }
-
-        let bin_dir
-            = self.install_binaries()?;
 
         let env_path = self.env.get("PATH")
             .cloned()
@@ -544,7 +603,7 @@ impl ScriptEnvironment {
         cmd.env("PATH", next_env_path);
         cmd.env("BERRY_BIN_FOLDER", bin_dir.to_file_string());
 
-        cmd.args(&args);
+        cmd.args(&actual_args);
 
         if self.stdin.is_some() {
             cmd.stdin(std::process::Stdio::piped());
@@ -557,7 +616,7 @@ impl ScriptEnvironment {
 
         let mut child
             = cmd.spawn()
-                .map_err(|e| Error::SpawnFailed(program.to_string(), self.cwd.clone(), Arc::new(Box::new(e))))?;
+                .map_err(|e| Error::SpawnFailed(actual_program.clone(), self.cwd.clone(), Arc::new(Box::new(e))))?;
 
         if let Some(stdin) = &self.stdin {
             if let Some(mut child_stdin) = child.stdin.take() {
