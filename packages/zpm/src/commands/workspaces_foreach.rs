@@ -376,6 +376,10 @@ impl WorkspacesForeach {
                 }
 
                 if !binaries_only && project.find_package_script(&locator, &script_name).is_ok() {
+                    if std::env::var("npm_lifecycle_event") == Ok(script_name.clone()) && project.active_package().ok() == Some(locator) {
+                        return false;
+                    }
+
                     return true;
                 }
 

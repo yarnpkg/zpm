@@ -149,6 +149,7 @@ impl Run {
                 Ok(ScriptEnvironment::new()?
                     .with_project(&project)
                     .with_package(&project, &locator)?
+                    .with_env_variable("npm_lifecycle_event", &self.name)
                     .enable_shell_forwarding()
                     .run_script(&script, &self.args)
                     .await?
