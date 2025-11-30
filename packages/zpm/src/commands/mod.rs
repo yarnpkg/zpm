@@ -31,6 +31,7 @@ mod set_version_from_sources;
 mod unplug;
 mod up;
 mod workspaces_focus;
+mod workspaces_foreach;
 mod workspaces_list;
 mod workspace;
 mod why;
@@ -85,6 +86,7 @@ pub enum YarnCli {
     Unplug(unplug::Unplug),
     Up(up::Up),
     WorkspacesFocus(workspaces_focus::WorkspacesFocus),
+    WorkspacesForeach(workspaces_foreach::WorkspacesForeach),
     WorkspacesList(workspaces_list::WorkspacesList),
     Workspace(workspace::Workspace),
     Why(why::Why),

@@ -14,6 +14,7 @@
     "url": "git+https://github.com/yarnpkg/zpm.git"
   },
   "scripts": {
+    "foo": "echo zpm-constraints",
     "build": "esbuild index.ts --bundle --platform=node --target=node20 --outfile=../zpm/src/constraints/constraints.tpl.js"
   }
 }

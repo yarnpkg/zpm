@@ -155,7 +155,8 @@ impl Run {
                     .into())
             },
 
-            Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_)) => execute_binary(true).await,
+            Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_))
+                => execute_binary(true).await,
 
             Err(err) => Err(err),
         }

@@ -542,11 +542,25 @@ impl Project {
         }
     }
 
-    pub fn workspace_by_rel_path(&self, rel_path: &Path) -> Result<&Workspace, Error> {
-        let idx = self.workspaces_by_rel_path.get(rel_path)
-            .ok_or_else(|| Error::WorkspacePathNotFound(rel_path.clone()))?;
+    pub fn try_workspace_by_rel_path(&self, rel_path: &Path) -> Result<Option<&Workspace>, Error> {
+        let workspace
+            = self.workspaces_by_rel_path.get(rel_path)
+                .map(|idx| &self.workspaces[*idx]);
 
-        Ok(&self.workspaces[*idx])
+        Ok(workspace)
+    }
+
+    pub fn workspace_by_rel_path(&self, rel_path: &Path) -> Result<&Workspace, Error> {
+        self.try_workspace_by_rel_path(rel_path)?
+            .ok_or(Error::WorkspacePathNotFound(rel_path.clone()))
+    }
+
+    pub fn try_workspace_by_file_path(&self, rel_path: &Path) -> Result<Option<&Workspace>, Error> {
+        let workspace
+            = self.workspaces.iter()
+                .find(|w| w.rel_path.contains(rel_path));
+
+        Ok(workspace)
     }
 
     pub fn package_self_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
@@ -619,8 +633,14 @@ impl Project {
             pub scripts: Option<BTreeMap<String, String>>,
         }
 
+        let install_state = self.install_state.as_ref()
+            .ok_or(Error::InstallStateNotFound)?;
+
+        let package_location = install_state.locations_by_package.get(locator)
+            .unwrap_or_else(|| panic!("Expected {} to have a package location", locator.to_print_string()));
+
         let manifest_text = self.project_cwd
-            .with_join(&self.package_cwd)
+            .with_join(&package_location)
             .with_join_str(MANIFEST_NAME)
             .fs_read_text_with_zip()?;
 

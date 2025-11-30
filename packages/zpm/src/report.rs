@@ -120,7 +120,7 @@ impl StreamReportConfig {
     pub fn from_config(config: &Configuration) -> Self {
         Self {
             enable_progress_bars: config.settings.enable_progress_bars.value,
-            enable_timers: true,
+            enable_timers: config.settings.enable_timers.value,
             include_version: false,
             silent_or_error: false,
         }

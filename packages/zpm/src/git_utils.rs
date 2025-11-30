@@ -1,8 +1,9 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use zpm_primitives::Ident;
 use zpm_utils::Path;
 
-use crate::{error::Error, script::ScriptEnvironment};
+use crate::{error::Error, project::Project, script::ScriptEnvironment};
 
 pub fn find_root(initial_cwd: &Path) -> Result<Path, Error> {
     // Note: We can't just use `git rev-parse --show-toplevel`, because on Windows
@@ -79,6 +80,29 @@ pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error
         .stdout_text()?;
 
     Ok(merge_base)
+}
+
+pub async fn fetch_changed_workspaces(project: &Project, base: &str) -> Result<BTreeMap<Ident, BTreeSet<Path>>, Error> {
+    let changed_files
+        = fetch_changed_files(&project.project_cwd, base).await?;
+
+    let mut changed_workspaces: BTreeMap<_, BTreeSet<_>>
+        = BTreeMap::new();
+
+    for file in changed_files {
+        let workspace
+            = project.workspaces.iter().find(|w| w.rel_path.contains(&file));
+
+        if let Some(workspace) = workspace {
+            let entry
+                = changed_workspaces.entry(workspace.name.clone())
+                    .or_default();
+
+            entry.insert(file);
+        }
+    }
+
+    Ok(changed_workspaces)
 }
 
 pub async fn fetch_changed_files(root: &Path, base: &str) -> Result<BTreeSet<Path>, Error> {

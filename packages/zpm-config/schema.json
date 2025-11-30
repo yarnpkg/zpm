@@ -65,6 +65,11 @@
       "description": "Whether to run postinstall scripts",
       "default": true
     },
+    "enableTimers": {
+      "type": "boolean",
+      "description": "Whether to show timers in the output",
+      "default": true
+    },
     "enableTransparentWorkspaces": {
       "type": "boolean",
       "description": "Whether to allow workspaces to depend on other workspaces through classic semver ranges",

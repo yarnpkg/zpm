@@ -28,8 +28,7 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
             = &work_tree.nodes[workspace_node_idx];
 
         let workspace
-            = project.try_workspace_by_locator(&workspace_node.locator)?
-                .expect("We're only supposed to be dealing with workspaces here");
+            = project.workspace_by_locator(&workspace_node.locator)?;
 
         let workspace_abs_path
             = project.project_cwd

@@ -4,7 +4,7 @@ use regex::Regex;
 use zpm_utils::{DataType, Hash64, Path, ToFileString};
 use clipanion::cli;
 
-use crate::{error::Error, git_utils::get_commit_hash, script::ScriptEnvironment};
+use crate::{error::Error, script::ScriptEnvironment};
 
 static PR_REGEXP: LazyLock<Regex>
     = LazyLock::new(|| Regex::new(r"^[0-9]+$").unwrap());
@@ -60,9 +60,6 @@ impl SetVersionFromSources {
         println!();
         println!("Building a fresh bundle");
         println!();
-
-        let commit_hash
-            = get_commit_hash(&target, "HEAD").await?;
 
         let bundle_path
             = target.with_join_str("target/release/yarn-bin");

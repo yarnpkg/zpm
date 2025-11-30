@@ -370,7 +370,7 @@ checksum = "aaa6b4b263a5d737e9bf6b7c09b72c41a5480aec4d7219af827f6564e950b6a5"
 [[package]]
 name = "clipanion"
 version = "0.8.1"
-source = "git+https://github.com/arcanis/clipanion-rs.git#fc8c3c5489bd47fd1e30d60b01b0ec45ddeca10b"
+source = "git+https://github.com/arcanis/clipanion-rs.git#9bb2fd91e12c060e84322832c1a80019c3c61773"
 dependencies = [
  "clipanion-core",
  "clipanion-derive",
@@ -382,7 +382,7 @@ dependencies = [
 [[package]]
 name = "clipanion-core"
 version = "0.8.1"
-source = "git+https://github.com/arcanis/clipanion-rs.git#fc8c3c5489bd47fd1e30d60b01b0ec45ddeca10b"
+source = "git+https://github.com/arcanis/clipanion-rs.git#9bb2fd91e12c060e84322832c1a80019c3c61773"
 dependencies = [
  "colored 2.2.0",
  "itertools 0.14.0",
@@ -394,7 +394,7 @@ dependencies = [
 [[package]]
 name = "clipanion-derive"
 version = "0.8.1"
-source = "git+https://github.com/arcanis/clipanion-rs.git#fc8c3c5489bd47fd1e30d60b01b0ec45ddeca10b"
+source = "git+https://github.com/arcanis/clipanion-rs.git#9bb2fd91e12c060e84322832c1a80019c3c61773"
 dependencies = [
  "indoc",
  "proc-macro2",
@@ -416,7 +416,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -425,7 +425,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3901,7 +3901,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
