@@ -60,22 +60,9 @@ impl WorkspacesList {
         workspaces
     }
 
-    async fn get_since_list<'a>(&self, project: &'a Project, merge_base: Option<&str>) -> Result<Vec<&'a Workspace>, Error> {
-        let git_root
-            = git_utils::find_root(&project.project_cwd)?;
-
-        let merge_base = match merge_base {
-            Some(merge_base) => {
-                merge_base.to_string()
-            },
-
-            None => {
-                git_utils::fetch_base(&git_root, &["master"]).await?
-            },
-        };
-
+    async fn get_since_list<'a>(&self, project: &'a Project, since: Option<&str>) -> Result<Vec<&'a Workspace>, Error> {
         let changed_files
-            = git_utils::fetch_changed_files(&git_root, &merge_base).await?;
+            = git_utils::fetch_changed_files(project, since).await?;
 
         let mut workspace_set
             = BTreeSet::new();
@@ -173,7 +160,7 @@ impl WorkspacesList {
 
         let workspaces = match &self.since {
             Some(since) => {
-                self.get_since_list(&project, since.as_ref().map(|s| s.as_str())).await?
+                self.get_since_list(&project, since.as_deref()).await?
             },
 
             None => {

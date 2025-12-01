@@ -91,7 +91,7 @@ impl<T: Serialize> Serialize for Container<T> {
 
 impl<T> ToHumanString for Container<T> {
     fn to_print_string(&self) -> String {
-        String::from("container")
+        String::from("unimplemented; use --json to display container contents for now")
     }
 }
 
@@ -344,8 +344,7 @@ macro_rules! impl_file_string_from_str(($type:ty) => {
 macro_rules! impl_file_string_serialization(($type:ty) => {
     impl serde::Serialize for $type {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
-            use $crate::ToFileString;
-            serializer.serialize_str(&self.to_file_string())
+            serializer.serialize_str(&$crate::ToFileString::to_file_string(self))
         }
     }
 

@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, io::{StdoutLock, Write}, process::{ExitStatus, Stdio}, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Instant};
+use std::{collections::{BTreeMap, BTreeSet}, io::{StdoutLock, Write}, process::{ExitCode, ExitStatus, Stdio}, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Instant};
 
 use clipanion::{cli, prelude::*};
 use futures::{StreamExt, stream::FuturesUnordered};
@@ -6,10 +6,10 @@ use itertools::Itertools;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::Ident;
-use zpm_utils::{DataType, Path, ToFileString, ToHumanString, Unit};
+use zpm_utils::{DataType, Path, ToFileString, ToHumanString, Unit, impl_file_string_from_str, impl_file_string_serialization};
 
 use crate::{
-    algos::scc_tarjan_pearce, commands::{PartialYarnCli, YarnCli}, error::Error, git_utils::fetch_changed_workspaces, project::{Project, Workspace}, workspace_glob::WorkspaceGlob
+    algos::scc_tarjan_pearce, commands::{PartialYarnCli, YarnCli}, error::Error, git_utils, project::{Project, Workspace}, workspace_glob::WorkspaceGlob
 };
 
 /// An SCC island containing workspaces that can be run together,
@@ -40,6 +40,31 @@ pub enum FollowedDependencies {
     #[literal("prod")]
     Prod,
 }
+
+#[zpm_enum]
+#[derive(Debug)]
+#[derive_variants(Debug)]
+pub enum Limit {
+    #[pattern(spec = r"^(?<limit>\d+)$")]
+    Fixed {
+        limit: usize,
+    },
+
+    #[literal("unlimited")]
+    Unlimited,
+}
+
+impl ToFileString for Limit {
+    fn to_file_string(&self) -> String {
+        match self {
+            Limit::Fixed(params) => params.limit.to_string(),
+            Limit::Unlimited => "unlimited".to_string(),
+        }
+    }
+}
+
+impl_file_string_from_str!(Limit);
+impl_file_string_serialization!(Limit);
 
 #[cli::command(proxy)]
 #[cli::path("workspaces", "foreach")]
@@ -77,8 +102,8 @@ pub struct WorkspacesForeach {
     #[cli::option("-i,--interlaced", default = false)]
     is_interlaced: bool,
 
-    #[cli::option("-j,--jobs", default = 10)]
-    jobs: usize,
+    #[cli::option("-j,--jobs", default = FixedLimit {limit: 10}.into())]
+    jobs: Limit,
 
     #[cli::option("--topological", default = false)]
     is_topological: bool,
@@ -86,13 +111,16 @@ pub struct WorkspacesForeach {
     #[cli::option("-v,--verbose", default = if zpm_utils::is_terminal() {2} else {0}, counter)]
     verbose_level: u8,
 
+    #[cli::option("--private", default = true)]
+    private: bool,
+
     command: String,
 
     args: Vec<String>,
 }
 
 impl WorkspacesForeach {
-    pub async fn execute(&self) -> Result<(), Error> {
+    pub async fn execute(&self) -> Result<ExitCode, Error> {
         let mut project
             = Project::new(None).await?;
 
@@ -135,7 +163,10 @@ impl WorkspacesForeach {
 
     fn jobs(&self) -> usize {
         if self.is_parallel {
-            self.jobs.max(1)
+            match &self.jobs {
+                Limit::Fixed(params) => params.limit.max(1),
+                Limit::Unlimited => usize::MAX,
+            }
         } else {
             1
         }
@@ -163,7 +194,7 @@ impl WorkspacesForeach {
         }
     }
 
-    async fn execute_list(&self, project: &Project, idents: Vec<Ident>, args: Vec<String>) -> Result<(), Error> {
+    async fn execute_list(&self, project: &Project, idents: Vec<Ident>, args: Vec<String>) -> Result<ExitCode, Error> {
         let mut color_it
             = Self::prefix_colors();
 
@@ -206,16 +237,21 @@ impl WorkspacesForeach {
             futs.push(handle);
         }
 
+        let mut exit_code
+            = ExitCode::SUCCESS;
+
         while let Some(result) = futs.next().await {
-            result??;
+            if !result??.success() {
+                exit_code = ExitCode::FAILURE;
+            }
         }
 
         self.print_epilogue(project, start_time, task_count);
 
-        Ok(())
+        Ok(exit_code)
     }
 
-    async fn execute_topological(&self, project: &Project, mut islands: Vec<TopologicalIsland>, args: Vec<String>) -> Result<(), Error> {
+    async fn execute_topological(&self, project: &Project, mut islands: Vec<TopologicalIsland>, args: Vec<String>) -> Result<ExitCode, Error> {
         let start_time
             = Instant::now();
 
@@ -232,11 +268,14 @@ impl WorkspacesForeach {
         let mut completed: BTreeSet<Ident>
             = BTreeSet::new();
 
-        let mut in_flight: FuturesUnordered<tokio::task::JoinHandle<Result<Ident, Error>>>
+        let mut in_flight: FuturesUnordered<tokio::task::JoinHandle<Result<_, Error>>>
             = FuturesUnordered::new();
 
         let mut processing: BTreeSet<Ident>
             = BTreeSet::new();
+
+        let mut exit_code
+            = ExitCode::SUCCESS;
 
         loop {
             while in_flight.len() < self.jobs() {
@@ -265,8 +304,7 @@ impl WorkspacesForeach {
                 };
 
                 let handle = tokio::spawn(async move {
-                    task.run().await?;
-                    Ok(ident)
+                    Ok((task.run().await?, ident))
                 });
 
                 in_flight.push(handle);
@@ -279,20 +317,24 @@ impl WorkspacesForeach {
 
             // Wait for at least one job to complete
             if let Some(result) = in_flight.next().await {
-                let ident
+                let (status, ident)
                     = result??;
 
-                processing.remove(&ident);
-                completed.insert(ident.clone());
+                if status.success() {
+                    processing.remove(&ident);
+                    completed.insert(ident.clone());
 
-                // Remove completed ident from islands to speed up future searches
-                self.remove_completed_from_islands(&mut islands, &ident);
+                    // Remove completed ident from islands to speed up future searches
+                    self.remove_completed_from_islands(&mut islands, &ident);
+                } else {
+                    exit_code = ExitCode::FAILURE;
+                }
             }
         }
 
         self.print_epilogue(project, start_time, task_count);
 
-        Ok(())
+        Ok(exit_code)
     }
 
     /// Find the next schedulable ident from ready islands.
@@ -327,13 +369,20 @@ impl WorkspacesForeach {
         });
     }
 
+    async fn select_changed_workspaces(&self, project: &Project, since: Option<&str>) -> Result<BTreeSet<Ident>, Error> {
+        let changed_workspaces
+            = git_utils::fetch_changed_workspaces(&project, since).await?;
+
+        Ok(changed_workspaces.keys().cloned().collect())
+    }
+
     async fn selection(&self, project: &Project, args: Vec<String>) -> Result<Selection, Error> {
         let mut selection: BTreeSet<Ident> = if self.all {
             project.workspaces_by_ident.keys().cloned().collect()
         } else if self.from.len() > 0 {
             project.workspaces.iter().filter(|w| self.from.iter().any(|f| f.check(w))).map(|w| w.name.clone()).collect()
         } else if let Some(since) = &self.since {
-            fetch_changed_workspaces(&project, since.as_deref().unwrap_or("HEAD")).await?.keys().cloned().collect()
+            self.select_changed_workspaces(project, since.as_deref()).await?
         } else if self.follow_dependencies() || self.follow_dependents() {
             BTreeSet::from_iter([project.active_workspace()?.name.clone()])
         } else {
@@ -355,12 +404,6 @@ impl WorkspacesForeach {
 
             !self.should_exclude(workspace)
         });
-
-        for workspace in project.workspaces.iter() {
-            if self.should_include(workspace) {
-                selection.insert(workspace.name.clone());
-            }
-        }
 
         if let Some((script_name, binaries_only)) = self.script_name(args) {
             selection.retain(|ident| {
@@ -472,14 +515,18 @@ impl WorkspacesForeach {
     }
 
     fn should_exclude(&self, workspace: &Workspace) -> bool {
+        if !self.private && workspace.manifest.private == Some(true) {
+            return true;
+        }
+
+        if self.include.len() > 0 {
+            if !self.include.iter().any(|include| include.check(workspace)) {
+                return true;
+            }
+        }
+
         self.exclude.iter().any(|exclude| {
             exclude.check(workspace)
-        })
-    }
-
-    fn should_include(&self, workspace: &Workspace) -> bool {
-        self.include.iter().any(|include| {
-            include.check(workspace)
         })
     }
 
@@ -602,20 +649,27 @@ impl Task {
         }
     }
 
-    fn write_epilogue(&mut self, writer: &mut StdoutLock<'_>, start: Instant, status: ExitStatus) {
+    fn write_epilogue(&mut self, writer: &mut StdoutLock<'_>, start: Instant, status: ExitStatus) -> Result<ExitStatus, Error> {
         let duration
             = start.elapsed();
 
+        let status_string = match status.code() {
+            Some(code) => format!("exit code {}", DataType::Number.colorize(&format!("{}", code))),
+            None => "exit code unknown".to_string(),
+        };
+
         if self.verbose_level >= 2 {
             if self.enable_timers {
-                self.write_ln(writer, &format!("Process exited ({status}), completed in {duration}", duration = Unit::duration(duration.as_secs_f64()).to_print_string()));
+                self.write_ln(writer, &format!("Process exited ({status_string}), completed in {duration}", duration = Unit::duration(duration.as_secs_f64()).to_print_string()));
             } else {
-                self.write_ln(writer, &format!("Process exited ({status})", status = status.to_string()));
+                self.write_ln(writer, &format!("Process exited ({status_string})"));
             }
         }
+
+        Ok(status)
     }
 
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(mut self) -> Result<ExitStatus, Error> {
         let start
             = Instant::now();
 
@@ -644,7 +698,7 @@ impl Task {
             let status
                 = child.wait().await?;
 
-            self.write_epilogue(&mut std::io::stdout().lock(), start, status);
+            self.write_epilogue(&mut std::io::stdout().lock(), start, status)
         } else {
             let mut lines
                 = Vec::new();
@@ -669,9 +723,7 @@ impl Task {
                 self.write_ln(&mut writer, &line);
             }
 
-            self.write_epilogue(&mut writer, start, status);
+            self.write_epilogue(&mut writer, start, status)
         }
-
-        Ok(())
     }
 }

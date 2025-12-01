@@ -6,8 +6,8 @@ use crate::{error::Error, git_utils::fetch_changed_workspaces, project};
 #[cli::command]
 #[cli::path("debug", "print-changed-workspaces")]
 pub struct PrintChangedWorkspaces {
-    #[cli::option("--base", default = "HEAD".to_string())]
-    base: String,
+    #[cli::option("--since")]
+    since: Option<String>,
 }
 
 impl PrintChangedWorkspaces {
@@ -16,7 +16,7 @@ impl PrintChangedWorkspaces {
             = project::Project::new(None).await?;
 
         let changed_workspaces
-            = fetch_changed_workspaces(&project, &self.base).await?;
+            = fetch_changed_workspaces(&project, self.since.as_deref()).await?;
 
         for ident in changed_workspaces.keys() {
             println!("{}", ident.to_print_string());

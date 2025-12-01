@@ -241,7 +241,7 @@ impl<K: Ord + FromFileString + Serialize + std::fmt::Debug, T: MergeSettings + S
     }
 }
 
-impl<T: MergeSettings> MergeSettings for Vec<T> {
+impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
     type Intermediate = Vec<T::Intermediate>;
 
     fn from_env_string(value: &str, from_config: Option<Self>) -> Result<Self, HydrateError> {
@@ -282,7 +282,10 @@ impl<T: MergeSettings> MergeSettings for Vec<T> {
 
     fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
         let Some(key_str) = path.first() else {
-            unimplemented!("Configuration maps cannot be returned directly just yet");
+            return Ok(ConfigurationEntry {
+                value: AbstractValue::new(Container::new(self)),
+                source: Source::Mixed,
+            });
         };
 
         let Ok(key) = usize::from_file_string(key_str) else {
@@ -296,9 +299,13 @@ impl<T: MergeSettings> MergeSettings for Vec<T> {
         self[key].get(&path[1..])
     }
 
-    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, _default: F) -> Self {
+    fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
         let mut result
             = Vec::new();
+
+        if matches!(user, Partial::Missing) && matches!(project, Partial::Missing) {
+            return default();
+        }
 
         if let Partial::Value(user) = user {
             result.extend(user.into_iter().map(|v| {

@@ -6,6 +6,14 @@
     "enableAutoTypes": ["tsEnableAutoTypes"]
   },
   "properties": {
+    "changesetBaseRefs": {
+      "type": "array",
+      "description": "The list of git refs to use as base for changeset detection. Defaults to [\"main\", \"master\"] if not set.",
+      "items": {
+        "type": "string"
+      },
+      "default": ["main", "master"]
+    },
     "compressionLevel": {
       "type": ["zpm_formats::CompressionAlgorithm", "null"],
       "description": "The compression level to use for the packed file"

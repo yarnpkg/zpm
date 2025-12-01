@@ -15,6 +15,11 @@ pub enum WorkspaceGlobError {
 #[derive(Debug)]
 #[derive_variants(Debug)]
 pub enum WorkspaceGlob {
+    #[pattern(spec = r"^(?<path>(?:\.{0,2}|[^@{}*/]+)/.*)$")]
+    Path {
+        path: zpm_utils::Glob,
+    },
+
     #[pattern(spec = r"^(?<ident>.*)$")]
     Ident {
         ident: IdentGlob,
@@ -26,6 +31,9 @@ impl WorkspaceGlob {
         match self {
             WorkspaceGlob::Ident(params)
                 => params.ident.check(&workspace.name),
+
+            WorkspaceGlob::Path(params)
+                => params.path.is_match(&workspace.rel_path.as_str()),
         }
     }
 }

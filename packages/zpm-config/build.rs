@@ -92,6 +92,7 @@ enum Expression {
     String(String),
     Bool(bool),
     Number(usize),
+    Array(Vec<String>),
 }
 
 #[serde_as]
@@ -138,8 +139,14 @@ impl Field {
                         Some(Expression::Number(default))
                             => format!("|| Setting::new({}, Source::Default)", default),
 
+                        Some(Expression::Array(default))
+                            => format!("|| [{}].iter().map(|s| Setting::new(s.to_string(), Source::Default)).collect()", default.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(", ")),
+
                         None if field.types.contains(&Type::Null)
                             => "|| Setting::new(None, Source::Default)".to_string(),
+
+                        None if field.types == vec![Type::Array]
+                            => "|| Default::default()".to_string(),
 
                         None
                             => "|| panic!(\"No default value available\")".to_string(),

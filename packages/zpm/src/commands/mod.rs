@@ -48,6 +48,7 @@ pub enum YarnCli {
     Flamegraph(debug::flamegraph::Flamegraph),
     Http(debug::http::Http),
     IterZip(debug::iter_zip::IterZip),
+    PrintBranchBase(debug::print_branch_base::PrintBranchBase),
     PrintChangedFiles(debug::print_changed_files::PrintChangedFiles),
     PrintChangedWorkspaces(debug::print_changed_workspaces::PrintChangedWorkspaces),
     PrintHoisting(debug::print_hoisting::PrintHoisting),

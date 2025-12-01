@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use itertools::Itertools;
 use zpm_primitives::Ident;
 use zpm_utils::Path;
 
@@ -45,6 +46,89 @@ pub async fn get_commit_hash(target: &Path, hash: &str) -> Result<String, Error>
     Ok(result)
 }
 
+pub async fn fetch_remotes(root: &Path) -> Result<Vec<String>, Error> {
+    let result = ScriptEnvironment::new()?
+        .with_cwd(root.clone())
+        .run_exec("git", ["remote"])
+        .await?
+        .ok()?
+        .stdout_text()?;
+
+    let remotes = result
+        .lines()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    Ok(remotes)
+}
+
+pub async fn fetch_branch_base(project: &Project) -> Result<String, Error> {
+    let base_refs
+        = project.config.settings.changeset_base_refs.iter()
+            .map(|s| s.value.to_string())
+            .collect_vec();
+
+    let remotes
+        = fetch_remotes(&project.project_cwd).await?;
+
+    let mut branches
+        = base_refs.clone();
+
+    for remote in &remotes {
+        for base_ref in &base_refs {
+            branches.push(format!("{}/{}", remote, base_ref));
+        }
+    }
+
+    loop {
+        if branches.is_empty() {
+            return Err(Error::NoMergeBaseFound(base_refs));
+        }
+
+        let mut args
+            = vec!["merge-base".to_string(), "HEAD".to_string()];
+
+        args.extend(branches.clone());
+
+        let result = ScriptEnvironment::new()?
+            .with_cwd(project.project_cwd.clone())
+            .with_env_variable("LANG", "en_US")
+            .run_exec("git", &args)
+            .await?;
+
+        if result.success() {
+            return Ok(result.stdout_text()?);
+        }
+
+        let output
+            = result.output();
+        let stderr
+            = String::from_utf8_lossy(&output.stderr);
+
+        if let Some(invalid_branch) = parse_invalid_object_name(&stderr) {
+            branches.retain(|b| b != &invalid_branch);
+        } else {
+            return Err(Error::NoMergeBaseFound(base_refs.clone()));
+        }
+    }
+}
+
+fn parse_invalid_object_name(stderr: &str) -> Option<String> {
+    for line in stderr.lines() {
+        let line
+            = line.trim();
+
+        for prefix in ["fatal: Not a valid object name ", "error: Not a valid object name "] {
+            if let Some(rest) = line.strip_prefix(prefix) {
+                return Some(rest.trim().to_string());
+            }
+        }
+    }
+
+    None
+}
+
 pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error> {
     let mut ancestor_bases
         = Vec::new();
@@ -82,16 +166,18 @@ pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error
     Ok(merge_base)
 }
 
-pub async fn fetch_changed_workspaces(project: &Project, base: &str) -> Result<BTreeMap<Ident, BTreeSet<Path>>, Error> {
+pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) -> Result<BTreeMap<Ident, BTreeSet<Path>>, Error> {
     let changed_files
-        = fetch_changed_files(&project.project_cwd, base).await?;
+        = fetch_changed_files(&project, since).await?;
 
     let mut changed_workspaces: BTreeMap<_, BTreeSet<_>>
         = BTreeMap::new();
 
     for file in changed_files {
         let workspace
-            = project.workspaces.iter().find(|w| w.rel_path.contains(&file));
+            = project.workspaces.iter()
+                .filter(|w| w.path.contains(&file))
+                .max_by_key(|w| w.path.as_str().len());
 
         if let Some(workspace) = workspace {
             let entry
@@ -105,25 +191,30 @@ pub async fn fetch_changed_workspaces(project: &Project, base: &str) -> Result<B
     Ok(changed_workspaces)
 }
 
-pub async fn fetch_changed_files(root: &Path, base: &str) -> Result<BTreeSet<Path>, Error> {
+pub async fn fetch_changed_files(project: &Project, since: Option<&str>) -> Result<BTreeSet<Path>, Error> {
+    let since = match since {
+        Some(since) => since.to_string(),
+        None => fetch_branch_base(project).await?,
+    };
+
     let local_stdout = ScriptEnvironment::new()?
-        .with_cwd(root.clone())
-        .run_exec("git", ["diff", "--name-only", base])
+        .with_cwd(project.project_cwd.clone())
+        .run_exec("git", ["diff", "--name-only", &since])
         .await?
         .ok()?
         .stdout_text()?
         .lines()
-        .map(|s| root.with_join_str(s))
+        .map(|s| project.project_cwd.with_join_str(s))
         .collect::<Vec<_>>();
 
     let untracked_stdout = ScriptEnvironment::new()?
-        .with_cwd(root.clone())
+        .with_cwd(project.project_cwd.clone())
         .run_exec("git", ["ls-files", "--others", "--exclude-standard"])
         .await?
         .ok()?
         .stdout_text()?
         .lines()
-        .map(|s| root.with_join_str(s))
+        .map(|s| project.project_cwd.with_join_str(s))
         .collect::<Vec<_>>();
 
     let changed_files
