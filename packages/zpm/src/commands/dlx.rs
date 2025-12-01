@@ -152,7 +152,7 @@ pub async fn install_dependencies(workspace_path: &Path, loose_resolutions: Vec<
     for resolution in &loose_resolutions {
         formatter.set_path(
             &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
-            Value::String(resolution.descriptor.range.to_file_string()),
+            Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
         )?;
     }
 

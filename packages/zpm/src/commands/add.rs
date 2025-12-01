@@ -324,8 +324,6 @@ impl Add {
                 .map(|(descriptor, locator)| (descriptor.clone(), locator.clone()))
                 .collect();
 
-        println!("enforced_resolutions: {:?}", enforced_resolutions);
-
         project.run_install(project::RunInstallOptions {
             mode: self.mode,
             enforced_resolutions,
