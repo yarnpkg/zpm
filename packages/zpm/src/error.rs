@@ -168,9 +168,6 @@ pub enum Error {
     #[error("No candidates found for {}", .0.to_print_string())]
     NoCandidatesFound(Range),
 
-    #[error("[YN0096] All candidates for {} have been rejected due to being newer than the configured npmMinimalAgeGate ({} minutes). Consider adding an exception via npmPreapprovedPackages if you trust this package.", .0.to_print_string(), .1)]
-    NoCandidatesDueToAgeGate(Range, u64),
-
     #[error("I/O error ({inner})\n\n{}", render_backtrace(backtrace))]
     IoError {
         inner: Arc<std::io::Error>,
