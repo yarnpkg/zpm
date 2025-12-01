@@ -204,8 +204,11 @@ impl WorkspacesForeach {
         let task_count
             = idents.len();
 
-        let mut futs
+        let mut futs: FuturesUnordered<tokio::task::JoinHandle<Result<ExitStatus, Error>>>
             = FuturesUnordered::new();
+
+        let mut exit_code
+            = ExitCode::SUCCESS;
 
         let is_first_printed_task
             = Arc::new(AtomicBool::new(true));
@@ -226,7 +229,9 @@ impl WorkspacesForeach {
 
             if futs.len() == self.jobs() {
                 if let Some(result) = futs.next().await {
-                    result??;
+                    if !result??.success() {
+                        exit_code = ExitCode::FAILURE;
+                    }
                 }
             }
 
@@ -236,9 +241,6 @@ impl WorkspacesForeach {
 
             futs.push(handle);
         }
-
-        let mut exit_code
-            = ExitCode::SUCCESS;
 
         while let Some(result) = futs.next().await {
             if !result??.success() {
@@ -678,7 +680,7 @@ impl Task {
                 .args(self.args.clone())
                 .current_dir(self.cwd.to_path_buf())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
+                .stderr(Stdio::null())
                 .spawn()?;
 
         let child_stdout
