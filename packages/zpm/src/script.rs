@@ -520,8 +520,10 @@ impl ScriptEnvironment {
 
     /// Generates a sandbox profile for macOS seatbelt.
     /// The profile is restrictive by default:
+    /// - System directories are allowed read-only (for binaries and libraries)
     /// - Project folder (project_cwd) is allowed read-write
     /// - Yarn global folder is allowed read-only
+    /// - User's .yarn directory is allowed read-only (for wrapper scripts in bin_dir)
     /// - All other file operations are denied by default
     #[cfg(target_os = "macos")]
     fn generate_sandbox_profile(&self) -> String {
@@ -538,6 +540,12 @@ impl ScriptEnvironment {
             .as_ref()
             .map(|p| Self::escape_sandbox_path(&p.to_file_string()));
 
+        // Get home directory for .yarn folder access (bin_dir is under ~/.yarn/zpm/binaries/)
+        let home_yarn_folder = Path::home_dir()
+            .ok()
+            .flatten()
+            .map(|p| Self::escape_sandbox_path(&p.with_join_str(".yarn").to_file_string()));
+
         // Base sandbox profile: deny all by default, then allow specific operations needed for script execution
         let mut profile = String::from(r#"(version 1)
 (deny default)
@@ -547,6 +555,24 @@ impl ScriptEnvironment {
 (allow mach-lookup)    ; Allow Mach IPC service lookups (required for system services on macOS)
 (allow signal)         ; Allow sending/receiving POSIX signals between processes
 (allow ipc-posix*)     ; Allow POSIX IPC: pipes, shared memory, semaphores (required for process communication)
+
+; Allow reading root directory (required for path resolution during process startup)
+(allow file-read* (literal "/"))
+
+; Allow read-only access to system directories (required for binaries, libraries, and shebang processing)
+(allow file-read* (subpath "/bin"))
+(allow file-read* (subpath "/usr/bin"))
+(allow file-read* (subpath "/usr/lib"))
+(allow file-read* (subpath "/usr/local"))
+(allow file-read* (subpath "/usr/share"))
+(allow file-read* (subpath "/System"))
+(allow file-read* (subpath "/Library"))
+(allow file-read* (subpath "/private/var"))
+(allow file-read* (subpath "/var"))
+(allow file-read* (subpath "/private/tmp"))
+(allow file-read* (subpath "/tmp"))
+(allow file-read* (subpath "/dev"))
+(allow file-write* (subpath "/dev"))
 "#);
 
         // Allow read-write access to project folder
@@ -562,6 +588,14 @@ impl ScriptEnvironment {
 ; Allow read-only access to Yarn global folder
 (allow file-read* (subpath "{}"))
 "#, global));
+        }
+
+        // Allow read-only access to ~/.yarn for wrapper scripts (bin_dir is under ~/.yarn/zpm/binaries/)
+        if let Some(ref yarn_folder) = home_yarn_folder {
+            profile.push_str(&format!(r#"
+; Allow read-only access to user's .yarn folder (for wrapper scripts in bin_dir)
+(allow file-read* (subpath "{}"))
+"#, yarn_folder));
         }
 
         profile
