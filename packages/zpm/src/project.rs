@@ -563,6 +563,20 @@ impl Project {
         Ok(workspace)
     }
 
+    pub fn package_location(&self, locator: &Locator) -> Result<&Path, Error> {
+        if let Some(locator_workspace) = self.try_workspace_by_locator(locator)? {
+            return Ok(&locator_workspace.path);
+        }
+
+        let install_state = self.install_state.as_ref()
+            .ok_or(Error::InstallStateNotFound)?;
+
+        let package_location = install_state.locations_by_package.get(locator)
+            .unwrap_or_else(|| panic!("Expected {} to have a package location", locator.to_print_string()));
+
+        Ok(package_location)
+    }
+
     pub fn package_self_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
         // Link dependencies never have any package.json, so we mustn't even try to read them.
         if matches!(locator.reference, Reference::Link(_)) {
@@ -633,11 +647,8 @@ impl Project {
             pub scripts: Option<BTreeMap<String, String>>,
         }
 
-        let install_state = self.install_state.as_ref()
-            .ok_or(Error::InstallStateNotFound)?;
-
-        let package_location = install_state.locations_by_package.get(locator)
-            .unwrap_or_else(|| panic!("Expected {} to have a package location", locator.to_print_string()));
+        let package_location
+            = self.package_location(locator)?;
 
         let manifest_text = self.project_cwd
             .with_join(&package_location)
