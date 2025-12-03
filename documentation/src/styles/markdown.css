@@ -68,6 +68,18 @@
     margin-bottom: 1.25rem;
   }
 
+  .sl-markdown-content sup {
+    margin-left: 0.5em;
+  }
+
+  .sl-markdown-content sup a {
+    text-decoration: none;
+  }
+
+  .sl-markdown-content .footnotes {
+    font-size: 0.8rem;
+  }
+
   .sl-markdown-content ol:not(:where(.not-content *)) {
     list-style: decimal;
     padding-left: 1.5rem;
@@ -313,8 +325,9 @@
   }
 
   .sl-markdown-content hr:not(:where(.not-content *)) {
+    margin: 2rem 0 !important;
     border: 0;
-    border-bottom: 1px solid var(--sl-color-hairline);
+    border-bottom: 1px solid var(--color-gray-600);
   }
 
   /* <details> and <summary> styles */

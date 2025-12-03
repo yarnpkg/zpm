@@ -7,6 +7,10 @@ description: A detailed explanation of the breaking changes between two versions
 
 ## Yarn 4 → Yarn 6
 
+:::caution
+This document lists the **intended breaking changes**. Yarn 6 being still in development, some features are still missing and will be implemented before we publish the first stable release.
+:::
+
 ### Lockfile
 
 - The lockfile (`yarn.lock`) is now formatted in JSON to benefit from heavily optimized JSON parsers. Some of its layout has slightly changed:
@@ -19,9 +23,9 @@ description: A detailed explanation of the breaking changes between two versions
 
 ### Features
 
-- The Prolog constraints engine has been fully removed. Constraints must be migrated to the [JavaScript engine](/concepts/constraints).
+- Support for the legacy Prolog constraints engine has been dropped. Constraints must be migrated to the [JavaScript engine](/concepts/constraints) introduced in Yarn 4.
 
-- Support for the `yarnPath` field has been removed. Use [Yarn Switch](/concepts/switch) to manage Yarn versions in your repository. Use `yarn switch link` should you need to use a local binary.
+- Support for the `yarnPath` field has been dropped. Use [Yarn Switch](/concepts/switch) to manage Yarn versions in your repository. Use `yarn switch link` should you need to use a local binary.
 
 ### Internal design
 
@@ -29,4 +33,6 @@ description: A detailed explanation of the breaking changes between two versions
 
 - Yarn will now prioritize referencing workspaces by their name rather than their path when serializing their locators (ie you'll see `foo@workspace:foo` rather than `foo@workspace:packages/foo`).
 
-- Yarn doesn't overwrite your `package.json` formatting anymore. This include the sorting of the keys in the `dependencies` field.
+- Yarn won't overwrite your `package.json` formatting anymore. This currently includes the sorting of the keys in the `dependencies` / `devDependencies` / `peerDependencies` fields.
+
+- Yarn will automatically run transparent installs when it detects your project changed since the last time an install was run.
