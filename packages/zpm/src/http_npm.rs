@@ -1,5 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
+use bytes::Bytes;
 use regex::{Captures, Regex};
 use reqwest::Response;
 use serde::Deserialize;
@@ -244,15 +245,25 @@ pub async fn get_authorization(options: &GetAuthorizationOptions<'_>) -> Result<
     Ok(None)
 }
 
-pub async fn get(params: &NpmHttpParams<'_>) -> Result<Response, Error> {
+pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
     let url
         = format!("{}{}", params.registry, params.path);
 
-    let request
-        = params.http_client.get(&url)?
-            .header("authorization", params.authorization);
+    let bytes = match params.authorization {
+        Some(authorization) => {
+            params.http_client.get(&url)?
+                .header("authorization", Some(authorization))
+                .send().await?
+                .error_for_status()?
+                .bytes().await?
+        },
 
-    Ok(request.send().await?)
+        None => {
+            params.http_client.cached_get(&url).await?
+        },
+    };
+
+    Ok(bytes)
 }
 
 pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {

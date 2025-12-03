@@ -123,7 +123,7 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     let registry_path
         = npm::registry_url_for_all_versions(&package_ident);
 
-    let response
+    let bytes
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
@@ -131,9 +131,6 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
             authorization: None,
             otp: None,
         }).await?;
-
-    let registry_text = response.text().await
-        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
     #[serde_as]
     #[derive(Deserialize)]
@@ -144,7 +141,7 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     }
 
     let registry_data: RegistryMetadata
-        = JsonDocument::hydrate_from_str(registry_text.as_str())?;
+        = JsonDocument::hydrate_from_slice(&bytes[..])?;
 
     // Iterate in reverse order as we assume that users will most likely use newer versions.
     for (version, manifest) in registry_data.versions.iter().rev() {
@@ -184,7 +181,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let registry_path
         = npm::registry_url_for_all_versions(&package_ident);
 
-    let response
+    let bytes
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
@@ -192,9 +189,6 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
             authorization: None,
             otp: None,
         }).await?;
-
-    let registry_text = response.text().await
-        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
     #[serde_as]
     #[derive(Deserialize)]
@@ -207,7 +201,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     }
 
     let registry_data: RegistryMetadata
-        = JsonDocument::hydrate_from_str(registry_text.as_str())?;
+        = JsonDocument::hydrate_from_slice(&bytes[..])?;
 
     let latest_version
         = registry_data.dist_tags
@@ -240,7 +234,7 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     let registry_path
         = npm::registry_url_for_one_version(&params.ident, &params.version);
 
-    let response
+    let bytes
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
@@ -249,11 +243,8 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
             otp: None,
         }).await?;
 
-    let registry_text = response.text().await
-        .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
-
     let mut manifest: RemoteManifestWithScripts
-        = JsonDocument::hydrate_from_str(registry_text.as_str())?;
+        = JsonDocument::hydrate_from_slice(&bytes[..])?;
 
     fix_manifest(&mut manifest);
 

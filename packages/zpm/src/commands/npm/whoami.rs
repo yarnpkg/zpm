@@ -64,10 +64,8 @@ impl Whoami {
             username: String,
         }
 
-        let body
-            = response.text().await?;
         let whoami: WhoamiResponse
-            = JsonDocument::hydrate_from_str(&body)?;
+            = JsonDocument::hydrate_from_slice(&response[..])?;
 
         println!("{}", whoami.username);
 

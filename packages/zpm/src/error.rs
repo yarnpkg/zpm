@@ -348,6 +348,9 @@ pub enum Error {
     #[error("Invalid url ({0})")]
     InvalidUrl(String),
 
+    #[error("Cached GET request failed ({0})")]
+    CachedGetError(String),
+
     #[error("Invalid git url ({0})")]
     InvalidGitUrl(String),
 

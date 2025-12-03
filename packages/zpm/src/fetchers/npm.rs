@@ -68,7 +68,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         = params.ident.nm_subdir();
 
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
-        let response
+        let bytes
             = http_npm::get(&http_npm::NpmHttpParams {
                 http_client: &project.http_client,
                 registry: &registry_base,
@@ -76,11 +76,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
                 authorization: None,
                 otp: None,
             }).await?;
-        let tgz_data = response.bytes().await
-            .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
 
         let tar_data
-            = zpm_formats::tar::unpack_tgz(&tgz_data)?;
+            = zpm_formats::tar::unpack_tgz(&bytes)?;
 
         let entries
             = zpm_formats::tar::entries_from_tar(&tar_data)?
