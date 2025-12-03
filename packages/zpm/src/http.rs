@@ -1,12 +1,12 @@
-use std::{collections::{HashMap, HashSet}, net::SocketAddr, sync::{Arc, LazyLock, OnceLock}, time::Duration};
+use std::{collections::HashSet, net::SocketAddr, sync::{Arc, LazyLock, OnceLock}, time::Duration};
 
+use bytes::Bytes;
 use dashmap::DashMap;
 use hickory_resolver::{config::LookupIpStrategy, TokioResolver};
 use http::HeaderMap;
 use itertools::Itertools;
-use bytes::Bytes;
 use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Client, Method, RequestBuilder, Response, Url};
-use tokio::sync::{Mutex, OnceCell, broadcast};
+use tokio::sync::OnceCell;
 use wax::Program;
 use zpm_config::{Configuration, NetworkSettings, Setting};
 use zpm_utils::Glob;
@@ -48,23 +48,17 @@ impl HttpConfig {
     }
 }
 
-enum DnsEntry {
-    Cached(Vec<SocketAddr>),
-    InProgress(broadcast::Receiver<Result<Vec<SocketAddr>, String>>),
-}
-
 #[derive(Clone)]
 struct HickoryDnsResolver {
     state: Arc<OnceLock<TokioResolver>>,
-    /// Cache for DNS resolution results to avoid concurrent lookups for the same domain
-    cache: Arc<Mutex<HashMap<String, DnsEntry>>>,
+    cache: DashMap<String, Arc<OnceCell<Vec<SocketAddr>>>>,
 }
 
 impl Default for HickoryDnsResolver {
     fn default() -> Self {
         Self {
             state: Arc::new(OnceLock::new()),
-            cache: Arc::new(Mutex::new(HashMap::new())),
+            cache: DashMap::new(),
         }
     }
 }
@@ -78,120 +72,38 @@ impl dns::Resolve for HickoryDnsResolver {
             let name_str
                 = name.as_str().to_string();
 
-            // Check cache and handle in-progress lookups
-            let receiver = {
-                let mut cache
-                    = resolver.cache.lock().await;
+            let cell
+                = resolver.cache
+                    .entry(name_str)
+                    .or_insert_with(|| Arc::new(OnceCell::new()))
+                    .clone();
 
-                match cache.get_mut(&name_str) {
-                    Some(DnsEntry::Cached(addrs)) => {
-                        // Return cached result
-                        let addrs: Addrs
-                            = Box::new(addrs.clone().into_iter());
+            let result = cell.get_or_try_init(|| async {
+                let resolver_instance
+                    = resolver.state.get_or_init(new_resolver);
 
-                        return Ok(addrs);
-                    },
+                let lookup
+                    = resolver_instance
+                        .lookup_ip(name.as_str())
+                        .await
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
-                    Some(DnsEntry::InProgress(receiver)) => {
-                        // Another lookup is in progress, wait for it
-                        Some(receiver.resubscribe())
-                    },
+                let addrs
+                    = lookup.into_iter()
+                        .map(|ip_addr| SocketAddr::new(ip_addr, 0))
+                        .collect::<Vec<_>>();
 
-                    None => {
-                        let (tx, rx)
-                            = broadcast::channel(1);
+                Ok::<_, std::io::Error>(addrs)
+            }).await?;
 
-                        cache.insert(name_str.clone(), DnsEntry::InProgress(rx));
-                        drop(cache); // Release lock before doing DNS resolution
+            let addrs: Addrs
+                = Box::new(result.clone().into_iter());
 
-                        // Perform DNS resolution
-                        let resolver_instance
-                            = resolver.state.get_or_init(new_resolver);
-
-                        let result = resolver_instance
-                            .lookup_ip(name.as_str()).await
-                            .map(|lookup| lookup.into_iter().map(|ip_addr| SocketAddr::new(ip_addr, 0)).collect_vec())
-                            .map_err(|e| e.to_string());
-
-                        // Update cache with result
-                        let mut cache
-                            = resolver.cache.lock().await;
-
-                        match &result {
-                            Ok(addrs) => {
-                                cache.insert(name_str.clone(), DnsEntry::Cached(addrs.clone()));
-                            },
-
-                            Err(_) => {
-                                // Remove failed entry so it can be retried
-                                cache.remove(&name_str);
-                            }
-                        }
-
-                        // Notify any waiting tasks
-                        let _ = tx.send(result.clone());
-
-                        // Return the result
-                        match result {
-                            Ok(addrs) => {
-                                return Ok(Box::new(addrs.into_iter()));
-                            },
-
-                            Err(e) => {
-                                return Err(std::io::Error::new(std::io::ErrorKind::Other, e).into());
-                            },
-                        }
-                    },
-                }
-            };
-
-            // Wait for in-progress lookup
-            if let Some(mut receiver) = receiver {
-                match receiver.recv().await {
-                    Ok(Ok(addrs)) => {
-                        Ok(Box::new(addrs.into_iter()))
-                    },
-
-                    Ok(Err(e)) => {
-                        Err(std::io::Error::new(std::io::ErrorKind::Other, e).into())
-                    },
-
-                    Err(_) => {
-                        // Broadcast channel closed unexpectedly, retry the lookup
-                        // This is a fallback that shouldn't normally happen
-                        let resolver_instance
-                            = resolver.state.get_or_init(new_resolver);
-
-                        let lookup
-                            = resolver_instance.lookup_ip(name.as_str()).await?;
-
-                        let addrs_vec: Vec<SocketAddr> = lookup
-                            .into_iter()
-                            .map(|ip_addr| SocketAddr::new(ip_addr, 0))
-                            .collect();
-
-                        // Try to cache the result
-                        let mut cache
-                            = resolver.cache.lock().await;
-
-                        cache.insert(name_str, DnsEntry::Cached(addrs_vec.clone()));
-
-                        Ok(Box::new(addrs_vec.into_iter()))
-                    },
-                }
-            } else {
-                unreachable!("Should have a receiver when an in-progress lookup is found");
-            }
+            Ok(addrs)
         })
     }
 }
 
-
-
-/// Create a new resolver with the default configuration,
-/// which reads from `/etc/resolve.conf`. The options are
-/// overridden to look up for both IPv4 and IPv6 addresses
-/// to work with "happy eyeballs" algorithm.
 fn new_resolver() -> TokioResolver {
     let mut builder
         = TokioResolver::builder_tokio()
