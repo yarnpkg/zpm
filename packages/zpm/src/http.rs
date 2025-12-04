@@ -120,7 +120,7 @@ pub struct HttpClient {
 
     /// Cache for GET requests to avoid duplicate network calls for the same URL.
     /// Uses OnceCell for each URL to handle concurrent requests to the same URL.
-    get_cache: DashMap<String, Arc<OnceCell<Result<Bytes, String>>>>,
+    get_cache: DashMap<String, Arc<OnceCell<Result<Bytes, Error>>>>,
 }
 
 impl std::fmt::Debug for HttpClient {
@@ -362,7 +362,8 @@ impl HttpClient {
     /// returns the cached response bytes. Concurrent requests to the same URL
     /// will wait for the first request to complete and share the result.
     pub async fn cached_get(&self, url: impl AsRef<str>) -> Result<Bytes, Error> {
-        let url_str = url.as_ref().to_string();
+        let url_str
+            = url.as_ref().to_string();
 
         let cell = self.get_cache
             .entry(url_str.clone())
@@ -370,26 +371,19 @@ impl HttpClient {
             .clone();
 
         let result = cell.get_or_init(|| async {
-            match self.get(&url_str) {
-                Ok(request) => {
-                    match request.send().await {
-                        Ok(response) => {
-                            match response.bytes().await {
-                                Ok(bytes) => Ok(bytes),
-                                Err(e) => Err(e.to_string()),
-                            }
-                        }
-                        Err(e) => Err(e.to_string()),
-                    }
-                }
-                Err(e) => Err(e.to_string()),
-            }
+            let request
+                = self.get(&url_str)?;
+
+            let result
+                = request.send().await?;
+
+            let bytes
+                = result.bytes().await?;
+
+            Ok(bytes)
         }).await;
 
-        match result {
-            Ok(bytes) => Ok(bytes.clone()),
-            Err(e) => Err(Error::CachedGetError(e.clone())),
-        }
+        result.clone()
     }
 
     pub fn post(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
