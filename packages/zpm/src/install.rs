@@ -381,12 +381,12 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
             },
 
             InstallOp::Resolve {descriptor} => {
-                let dependencies = match try_resolve_descriptor_sync(context.clone(), descriptor.clone(), dependencies)? {
-                    SyncResolutionAttempt::Success(result) => return Ok(InstallOpResult::Resolved(result)),
-                    SyncResolutionAttempt::Failure(dependencies) => dependencies,
-                };
-
                 with_context_result(ReportContext::Descriptor(descriptor.clone()), async {
+                    let dependencies = match try_resolve_descriptor_sync(context.clone(), descriptor.clone(), dependencies)? {
+                        SyncResolutionAttempt::Success(result) => return Ok(InstallOpResult::Resolved(result)),
+                        SyncResolutionAttempt::Failure(dependencies) => dependencies,
+                    };
+
                     let future = tokio::time::timeout(
                         timeout,
                         resolve_descriptor(context.clone(), descriptor.clone(), dependencies)
@@ -397,12 +397,12 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
             },
 
             InstallOp::Fetch {locator, is_mock_request} => {
-                let dependencies = match try_fetch_locator_sync(context.clone(), &locator, is_mock_request, dependencies)? {
-                    SyncFetchAttempt::Success(result) => return Ok(InstallOpResult::Fetched(result)),
-                    SyncFetchAttempt::Failure(dependencies) => dependencies,
-                };
-
                 with_context_result(ReportContext::Locator(locator.clone()), async {
+                    let dependencies = match try_fetch_locator_sync(context.clone(), &locator, is_mock_request, dependencies)? {
+                        SyncFetchAttempt::Success(result) => return Ok(InstallOpResult::Fetched(result)),
+                        SyncFetchAttempt::Failure(dependencies) => dependencies,
+                    };
+
                     let future = tokio::time::timeout(
                         timeout,
                         fetch_locator(context.clone(), &locator.clone(), is_mock_request, dependencies)
