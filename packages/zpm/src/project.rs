@@ -782,9 +782,9 @@ impl Project {
         };
 
         // Check if node dependency already exists in the root workspace
-        let root_workspace = &self.workspaces[0];
+        let root_workspace = self.root_workspace();
         let node_ident = Ident::from_file_string("node")
-            .expect("Failed to create node ident");
+            .unwrap();
         
         if root_workspace.manifest.remote.dependencies.contains_key(&node_ident) {
             return Ok(());
@@ -801,8 +801,8 @@ impl Project {
 
         // Load the manifest document for editing
         let manifest_path = self.manifest_path();
-        let manifest_text = manifest_path.fs_read_text()?;
-        let mut document = zpm_parsers::JsonDocument::new(manifest_text.into_bytes())?;
+        let manifest_bytes = manifest_path.fs_read()?;
+        let mut document = zpm_parsers::JsonDocument::new(manifest_bytes)?;
 
         // Add the dependency
         document.set_path(
@@ -813,13 +813,9 @@ impl Project {
         // Write the modified manifest
         manifest_path.fs_change(&document.input, false)?;
 
-        // Reload the project to get the updated manifest
-        let new_cwd = if self.shell_cwd == Path::new() {
-            None
-        } else {
-            Some(self.project_cwd.with_join(&self.shell_cwd))
-        };
-        *self = Project::new(new_cwd).await?;
+        // Reload only the root workspace manifest to get the updated dependency
+        let root_workspace_mut = self.root_workspace_mut();
+        root_workspace_mut.manifest = read_manifest_with_size(&manifest_path, manifest_path.fs_metadata()?.len())?;
 
         Ok(())
     }
