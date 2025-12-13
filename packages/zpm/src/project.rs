@@ -726,7 +726,7 @@ impl Project {
             return None;
         }
 
-        let content = node_version_path.fs_read_text().ok()?;
+        let content = node_version_path.fs_read_text_prealloc().ok()?;
         let version = content.trim();
         
         if version.is_empty() {
@@ -740,7 +740,8 @@ impl Project {
     fn construct_node_url(version: &str) -> Option<String> {
         let system = System::current();
         
-        let os_str = match system.os()? {
+        let os = system.os()?;
+        let os_str = match os {
             zpm_config::Os::MacOS => "darwin",
             zpm_config::Os::Linux => "linux",
             zpm_config::Os::Windows => "win",
@@ -762,7 +763,7 @@ impl Project {
         };
 
         // Windows uses .zip, others use .tar.gz
-        let extension = if matches!(system.os()?, zpm_config::Os::Windows) {
+        let extension = if matches!(os, zpm_config::Os::Windows) {
             "zip"
         } else {
             "tar.gz"
@@ -784,7 +785,7 @@ impl Project {
         // Check if node dependency already exists in the root workspace
         let root_workspace = self.root_workspace();
         let node_ident = Ident::from_file_string("node")
-            .unwrap();
+            .expect("'node' should be a valid identifier");
         
         if root_workspace.manifest.remote.dependencies.contains_key(&node_ident) {
             return Ok(());
