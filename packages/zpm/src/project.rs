@@ -814,7 +814,12 @@ impl Project {
         manifest_path.fs_change(&document.input, false)?;
 
         // Reload the project to get the updated manifest
-        *self = Project::new(Some(self.shell_cwd.with_join(&self.project_cwd))).await?;
+        let new_cwd = if self.shell_cwd == Path::new() {
+            None
+        } else {
+            Some(self.project_cwd.with_join(&self.shell_cwd))
+        };
+        *self = Project::new(new_cwd).await?;
 
         Ok(())
     }
