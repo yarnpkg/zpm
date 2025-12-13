@@ -87,6 +87,18 @@ impl System {
         }
     }
 
+    pub fn arch(&self) -> Option<&zpm_config::Cpu> {
+        self.arch.as_ref()
+    }
+
+    pub fn os(&self) -> Option<&zpm_config::Os> {
+        self.os.as_ref()
+    }
+
+    pub fn libc(&self) -> Option<&zpm_config::Libc> {
+        self.libc.as_ref()
+    }
+
     pub fn from_supported_architectures(supported_architectures: &SupportedArchitectures) -> Vec<Self> {
         let mut systems
             = Vec::new();

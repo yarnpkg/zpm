@@ -3,9 +3,9 @@ use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, time::UNIX_
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
-use zpm_parsers::JsonDocument;
+use zpm_parsers::{document::Document, JsonDocument};
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString, ToHumanString};
+use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, Path, ToFileString, ToHumanString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -29,6 +29,7 @@ pub const MANIFEST_NAME: &str = "package.json";
 pub const PNP_CJS_NAME: &str = ".pnp.cjs";
 pub const PNP_ESM_NAME: &str = ".pnp.loader.mjs";
 pub const PNP_DATA_NAME: &str = ".pnp.data.json";
+pub const NODE_VERSION_NAME: &str = ".node-version";
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidInstallMode(s.to_string())))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -717,7 +718,111 @@ impl Project {
         Ok(())
     }
 
+    /// Reads the .node-version file from the project root if it exists
+    fn read_node_version(&self) -> Option<String> {
+        let node_version_path = self.project_cwd.with_join_str(NODE_VERSION_NAME);
+        
+        if !node_version_path.fs_exists() {
+            return None;
+        }
+
+        let content = node_version_path.fs_read_text().ok()?;
+        let version = content.trim();
+        
+        if version.is_empty() {
+            return None;
+        }
+
+        Some(version.to_string())
+    }
+
+    /// Constructs the Node.js download URL for the current platform
+    fn construct_node_url(version: &str) -> Option<String> {
+        let system = System::current();
+        
+        let os_str = match system.os()? {
+            zpm_config::Os::MacOS => "darwin",
+            zpm_config::Os::Linux => "linux",
+            zpm_config::Os::Windows => "win",
+            _ => return None,
+        };
+
+        let arch_str = match system.arch()? {
+            zpm_config::Cpu::X86_64 => "x64",
+            zpm_config::Cpu::Aarch64 => "arm64",
+            zpm_config::Cpu::I386 => "x86",
+            _ => return None,
+        };
+
+        // Ensure version starts with 'v'
+        let version_with_v = if version.starts_with('v') {
+            version.to_string()
+        } else {
+            format!("v{}", version)
+        };
+
+        // Windows uses .zip, others use .tar.gz
+        let extension = if matches!(system.os()?, zpm_config::Os::Windows) {
+            "zip"
+        } else {
+            "tar.gz"
+        };
+
+        Some(format!(
+            "https://nodejs.org/dist/{}/node-{}-{}-{}.{}",
+            version_with_v, version_with_v, os_str, arch_str, extension
+        ))
+    }
+
+    /// Adds node dependency to the root manifest if .node-version exists and no node dependency is present
+    async fn ensure_node_dependency(&mut self) -> Result<(), Error> {
+        // Check if .node-version file exists
+        let Some(version) = self.read_node_version() else {
+            return Ok(());
+        };
+
+        // Check if node dependency already exists in the root workspace
+        let root_workspace = &self.workspaces[0];
+        let node_ident = Ident::from_file_string("node")
+            .expect("Failed to create node ident");
+        
+        if root_workspace.manifest.remote.dependencies.contains_key(&node_ident) {
+            return Ok(());
+        }
+
+        // Construct the Node.js download URL
+        let Some(url) = Self::construct_node_url(&version) else {
+            return Ok(());
+        };
+
+        // Create a URL range descriptor
+        let url_range = Range::Url(zpm_primitives::UrlRange { url: url.clone() });
+        let descriptor = Descriptor::new(node_ident.clone(), url_range);
+
+        // Load the manifest document for editing
+        let manifest_path = self.manifest_path();
+        let manifest_text = manifest_path.fs_read_text()?;
+        let mut document = zpm_parsers::JsonDocument::new(manifest_text.into_bytes())?;
+
+        // Add the dependency
+        document.set_path(
+            &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), descriptor.ident.to_file_string()]),
+            zpm_parsers::Value::String(descriptor.range.to_file_string()),
+        )?;
+
+        // Write the modified manifest
+        manifest_path.fs_change(&document.input, false)?;
+
+        // Reload the project to get the updated manifest
+        *self = Project::new(Some(self.shell_cwd.with_join(&self.project_cwd))).await?;
+
+        Ok(())
+    }
+
     pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<InstallResult, Error> {
+        // Check for .node-version file and add node dependency if needed
+        self.ensure_node_dependency().await?;
+
         // Useful for optimization purposes as we can reuse some information such as content flags.
         // Discard errors; worst case scenario we just recompute the whole state from scratch.
         if self.install_state.is_none() {
