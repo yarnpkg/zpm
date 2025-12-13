@@ -11,6 +11,12 @@ description: A detailed explanation of the breaking changes between two versions
 This document lists the **intended breaking changes**. Yarn 6 being still in development, some features are still missing and will be implemented before we publish the first stable release.
 :::
 
+### Plugins
+
+A special note for plugins, which aren't implemented **yet**.
+
+Various other projects (Biome, Oxc, etc) are experimenting on that topic, and we prefer to wait before focusing on that so we can leverage their researches before building our own solutions.
+
 ### Lockfile
 
 - The lockfile (`yarn.lock`) is now formatted in JSON to benefit from heavily optimized JSON parsers. Some of its layout has slightly changed:
@@ -36,3 +42,7 @@ This document lists the **intended breaking changes**. Yarn 6 being still in dev
 - Yarn won't overwrite your `package.json` formatting anymore. This currently includes the sorting of the keys in the `dependencies` / `devDependencies` / `peerDependencies` fields.
 
 - Yarn will automatically run transparent installs when it detects your project changed since the last time an install was run.
+
+### Deprecations
+
+- The `.pnp.cjs` file isn't generated with the `+x` flag anymore.
