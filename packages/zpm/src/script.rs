@@ -284,6 +284,9 @@ pub struct ScriptEnvironment {
     node_args: Vec<String>,
     shell_forwarding: bool,
     stdin: Option<String>,
+    enable_sandbox: bool,
+    project_cwd: Option<Path>,
+    global_folder: Option<Path>,
 }
 
 impl ScriptEnvironment {
@@ -295,6 +298,9 @@ impl ScriptEnvironment {
             node_args: Vec::new(),
             shell_forwarding: false,
             stdin: None,
+            enable_sandbox: false,
+            project_cwd: None,
+            global_folder: None,
         };
 
         if let Ok(val) = std::env::var("YARNSW_DETECTED_ROOT") {
@@ -385,6 +391,10 @@ impl ScriptEnvironment {
         self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
         self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
         self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_file_string()));
+
+        self.enable_sandbox = project.config.settings.enable_sandbox.value;
+        self.project_cwd = Some(project.project_cwd.clone());
+        self.global_folder = Some(project.config.settings.global_folder.value.clone());
 
         self
     }
@@ -501,13 +511,124 @@ impl ScriptEnvironment {
         Ok(dir)
     }
 
-    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
-        let mut cmd
-            = Command::new(program);
+    /// Escapes a path for use in a seatbelt sandbox profile.
+    /// Escapes backslashes and double quotes to prevent profile syntax errors.
+    #[cfg(target_os = "macos")]
+    fn escape_sandbox_path(path: &str) -> String {
+        path.replace('\\', "\\\\").replace('"', "\\\"")
+    }
 
+    /// Generates a sandbox profile for macOS seatbelt.
+    /// The profile is restrictive by default:
+    /// - System directories are allowed read-only (for binaries and libraries)
+    /// - Project folder (project_cwd) is allowed read-write
+    /// - Yarn global folder is allowed read-only
+    /// - User's .yarn directory is allowed read-only (for wrapper scripts in bin_dir)
+    /// - All other file operations are denied by default
+    #[cfg(target_os = "macos")]
+    fn generate_sandbox_profile(&self) -> String {
+        // Get project_cwd for read-write access
+        // Falls back to cwd if project_cwd is not set (e.g., when running outside a project context)
+        let project_cwd = self.project_cwd
+            .as_ref()
+            .map(|p| p.to_file_string())
+            .unwrap_or_else(|| self.cwd.to_file_string());
+        let project_cwd = Self::escape_sandbox_path(&project_cwd);
+
+        // Get global_folder for read-only access
+        let global_folder = self.global_folder
+            .as_ref()
+            .map(|p| Self::escape_sandbox_path(&p.to_file_string()));
+
+        // Get home directory for .yarn folder access (bin_dir is under ~/.yarn/zpm/binaries/)
+        let home_yarn_folder = Path::home_dir()
+            .ok()
+            .flatten()
+            .map(|p| Self::escape_sandbox_path(&p.with_join_str(".yarn").to_file_string()));
+
+        // Base sandbox profile: deny all by default, then allow specific operations needed for script execution
+        let mut profile = String::from(r#"(version 1)
+(deny default)
+(allow process-fork)   ; Allow forking child processes (required for running scripts)
+(allow process-exec)   ; Allow executing programs (required for running binaries)
+(allow sysctl-read)    ; Allow reading system configuration (required by Node.js)
+(allow mach-lookup)    ; Allow Mach IPC service lookups (required for system services on macOS)
+(allow signal)         ; Allow sending/receiving POSIX signals between processes
+(allow ipc-posix*)     ; Allow POSIX IPC: pipes, shared memory, semaphores (required for process communication)
+
+; Allow reading root directory (required for path resolution during process startup)
+(allow file-read* (literal "/"))
+
+; Allow read-only access to system directories (required for binaries, libraries, and shebang processing)
+(allow file-read* (subpath "/bin"))
+(allow file-read* (subpath "/usr/bin"))
+(allow file-read* (subpath "/usr/lib"))
+(allow file-read* (subpath "/usr/local"))
+(allow file-read* (subpath "/usr/share"))
+(allow file-read* (subpath "/System"))
+(allow file-read* (subpath "/Library"))
+(allow file-read* (subpath "/private/var"))
+(allow file-read* (subpath "/var"))
+(allow file-read* (subpath "/private/tmp"))
+(allow file-read* (subpath "/tmp"))
+(allow file-read* (subpath "/dev"))
+(allow file-write* (subpath "/dev"))
+"#);
+
+        // Allow read-write access to project folder
+        profile.push_str(&format!(r#"
+; Allow read-write access to project folder
+(allow file-read* (subpath "{}"))
+(allow file-write* (subpath "{}"))
+"#, project_cwd, project_cwd));
+
+        // Allow read-only access to Yarn global folder
+        if let Some(ref global) = global_folder {
+            profile.push_str(&format!(r#"
+; Allow read-only access to Yarn global folder
+(allow file-read* (subpath "{}"))
+"#, global));
+        }
+
+        // Allow read-only access to ~/.yarn for wrapper scripts (bin_dir is under ~/.yarn/zpm/binaries/)
+        if let Some(ref yarn_folder) = home_yarn_folder {
+            profile.push_str(&format!(r#"
+; Allow read-only access to user's .yarn folder (for wrapper scripts in bin_dir)
+(allow file-read* (subpath "{}"))
+"#, yarn_folder));
+        }
+
+        profile
+    }
+
+    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
         let args = args.into_iter()
             .map(|arg| arg.as_ref().to_string())
             .collect::<Vec<_>>();
+
+        let bin_dir
+            = self.install_binaries()?;
+
+        // On macOS, wrap with sandbox-exec if sandbox is enabled
+        #[cfg(target_os = "macos")]
+        let (actual_program, actual_args) = if self.enable_sandbox {
+            let profile = self.generate_sandbox_profile();
+            let mut sandbox_args = vec![
+                "-p".to_string(),
+                profile,
+                program.to_string(),
+            ];
+            sandbox_args.extend(args);
+            ("sandbox-exec".to_string(), sandbox_args)
+        } else {
+            (program.to_string(), args)
+        };
+
+        #[cfg(not(target_os = "macos"))]
+        let (actual_program, actual_args) = (program.to_string(), args);
+
+        let mut cmd
+            = Command::new(&actual_program);
 
         cmd.current_dir(self.cwd.to_path_buf());
 
@@ -522,9 +643,6 @@ impl ScriptEnvironment {
                 },
             };
         }
-
-        let bin_dir
-            = self.install_binaries()?;
 
         let env_path = self.env.get("PATH")
             .cloned()
@@ -544,7 +662,7 @@ impl ScriptEnvironment {
         cmd.env("PATH", next_env_path);
         cmd.env("BERRY_BIN_FOLDER", bin_dir.to_file_string());
 
-        cmd.args(&args);
+        cmd.args(&actual_args);
 
         if self.stdin.is_some() {
             cmd.stdin(std::process::Stdio::piped());
@@ -557,7 +675,7 @@ impl ScriptEnvironment {
 
         let mut child
             = cmd.spawn()
-                .map_err(|e| Error::SpawnFailed(program.to_string(), self.cwd.clone(), Arc::new(Box::new(e))))?;
+                .map_err(|e| Error::SpawnFailed(actual_program.clone(), self.cwd.clone(), Arc::new(Box::new(e))))?;
 
         if let Some(stdin) = &self.stdin {
             if let Some(mut child_stdin) = child.stdin.take() {
