@@ -191,7 +191,7 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
 
     project.pnp_path()
         .fs_create_parent()?
-        .fs_change(script, true)?;
+        .fs_change(script, false)?;
 
     Ok(())
 }
@@ -214,7 +214,7 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
 
     project.pnp_path()
         .fs_create_parent()?
-        .fs_change(script, true)?;
+        .fs_change(script, false)?;
 
     project.pnp_data_path()
         .fs_create_parent()?
