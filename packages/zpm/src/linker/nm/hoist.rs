@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use itertools::Itertools;
-use zpm_primitives::{Ident, Locator};
+use zpm_primitives::{Ident, LinkReference, Locator, Reference};
 use zpm_utils::{Path, ToFileString, ToHumanString, tree};
 
 use crate::{
@@ -9,6 +9,23 @@ use crate::{
     install::InstallState,
     project::Project,
 };
+
+fn convert_workspace_to_link(project: &Project, locator: Locator) -> Locator {
+    let physical_locator
+        = locator.physical_locator();
+
+    if physical_locator.reference.is_workspace_reference() {
+        let workspace_location
+            = project.package_location(&physical_locator)
+                .expect("Expected the workspace to have a package location");
+
+        Locator::new(locator.ident.clone(), LinkReference {
+            path: workspace_location.to_file_string(),
+        }.into())
+    } else {
+        locator
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct WorkNode {
@@ -100,7 +117,10 @@ impl<'a> WorkTree<'a> {
         let physical_locator
             = locator.physical_locator();
 
-        if !physical_locator.reference.is_workspace_reference() || !terminal_workspaces {
+        let may_have_dependencies
+            = (!physical_locator.reference.is_workspace_reference() || !terminal_workspaces) && !matches!(physical_locator.reference, Reference::Link(_));
+
+        if may_have_dependencies {
             let resolution
                 = &self.install_state.resolution_tree.locator_resolutions[&locator];
 
@@ -155,6 +175,7 @@ impl<'a> WorkTree<'a> {
                 .into_iter()
                 .filter(|(_, dependency)| !peer_dependencies.contains_key(&dependency.ident))
                 .filter(|(_, dependency)| !parent_chain.contains(&dependency))
+                .map(|(ident, dependency)| (ident, convert_workspace_to_link(self.project, dependency)))
                 .map(|(ident, dependency)| (ident, self.create_node(dependency, Some(node_idx), true)))
                 .collect::<BTreeMap<_, _>>();
 
@@ -195,10 +216,15 @@ impl<'a, 'b> TreeRenderer<'a, 'b> {
         let node
             = &self.tree.nodes[node_idx];
 
+        let is_dependency_valid
+            = |expected_locator: &Locator|
+                available_dependencies.get(&expected_locator.ident)
+                    .map_or(false, |&available_locator| available_locator == expected_locator);
+
         let invalid_dependencies
             = node.dependencies.values()
-                .filter(|locator| available_dependencies.get(&locator.ident) != Some(locator))
-                .collect::<Vec<_>>();
+                .filter(|&expected_locator| !is_dependency_valid(expected_locator))
+                .collect_vec();
 
         let mut label
             = node.locator.to_print_string();
@@ -426,12 +452,6 @@ impl<'a, 'b> Hoister<'a, 'b> {
                         continue;
                     }
 
-                    // The parent doesn't contain the dependency, which means hoisting the hoistable candidate
-                    // into our package wouldn't break the dependency any more than it already is.
-                    if !parent_node.children.as_ref().unwrap().contains_key(&dependency_locator.ident) {
-                        continue;
-                    }
-
                     candidate_dependencies.insert(dependency_locator);
                 }
 
@@ -474,9 +494,14 @@ impl<'a, 'b> Hoister<'a, 'b> {
                     scc_hoisting_requirements.push((package, package_dependencies));
                 }
 
+                // The SCC cannot be hoisted if the dependency is a workspace. Note that we will only
+                // ever encounter this situation for workspaces under their top-level view - if a
+                // package depends on a workspace, we will have turned that dependency into a link
+                // prior to hoisting.
+
                 let is_workspace
-                    = scc.iter().any(|package| {
-                        package.reference.is_workspace_reference()
+                    = scc.iter().any(|&scc_locator| {
+                        scc_locator.reference.is_workspace_reference()
                     });
 
                 if is_workspace {
@@ -491,9 +516,14 @@ impl<'a, 'b> Hoister<'a, 'b> {
                     continue;
                 }
 
+                // Here we make sure that hoisting the SCC wouldn't break the parent's self
+                // dependency. This may happen in very rare cases where a package A@1 depends on
+                // package B which depends on a different version of package A@2. In that case we
+                // could end up hoisting A@2 into B then A@1, breaking A@1's self-dependency.
+
                 let coherent_parent
-                    = scc.iter().all(|package| {
-                        package.ident != node.locator.ident || *package == &node.locator
+                    = scc.iter().all(|&scc_locator| {
+                        scc_locator.ident != node.locator.ident || scc_locator == &node.locator
                     });
 
                 if !coherent_parent {
@@ -508,68 +538,104 @@ impl<'a, 'b> Hoister<'a, 'b> {
                     continue;
                 }
 
-                let no_dependency_conflicts
-                    = scc.iter().all(|package| {
-                        let start_dependency
-                            = node.dependencies.get(&package.ident);
+                // In this section we check if the entries of the SCC are compatible with
+                // the parent node dependencies. They are compatible in the following cases:
+                //
+                // - The parent node doesn't have these entries in its dependencies; in that case
+                //   we can just hoist them.
+                //
+                // - The parent node has exactly the same entry in its dependencies; in that case
+                //   the requirement will be fulfilled even after hoisting the SCC.
+                //
+                // - The parent node has a different entry in its dependencies that shares the
+                //   same physical locator. In that case we optimistically allow merging the two
+                //   entries, hoping that the dependencies of those two entries are compatible. We
+                //   don't check it here, we rely on the follow-up requirement check to confirm it.
 
-                        start_dependency.map_or(true, |existing_locator| {
-                            &existing_locator == package
-                        })
-                    });
+                let mut dependency_conflicts
+                    = scc.iter()
+                        .filter(|&&scc_locator| new_dependencies.get(&scc_locator.ident).map_or(false, |existing_locator| existing_locator != scc_locator))
+                        .peekable();
 
-                if !no_dependency_conflicts {
+                if dependency_conflicts.peek().is_some() {
                     if self.print_logs {
                         self.print(&format!(
                             "Cannot hoist {} into {} because the former conflicts with the dependencies of the latter",
                             scc.iter().map(|locator| locator.to_print_string()).join(", "),
                             node.locator.to_print_string(),
                         ));
+
+                        while let Some(dependency_conflict) = dependency_conflicts.next() {
+                            let existing_locator
+                                = new_dependencies.get(&dependency_conflict.ident)
+                                    .expect("Expected the dependency to be present since otherwise there would be no conflict");
+
+                            self.print(&format!(
+                                "  - {} required {} but parent requires {} instead",
+                                node.locator.to_print_string(), dependency_conflict.to_print_string(), existing_locator.to_print_string(),
+                            ));
+                        }
                     }
 
                     continue;
                 }
 
-                let no_overrides
-                    = scc.iter().all(|&package| {
-                        new_children.get(&package.ident).map_or(true, |&existing_node| {
-                            &self.work_tree.nodes[existing_node].locator == package
-                        })
-                    });
+                // We check here that the parent node doesn't already host children with the same
+                // name as the entries in the SCC, or that they are identical.
+                //
+                // We also tolerate other virtual instances in the same package in this check, as
+                // their requirements will be checked in the very next step.
 
-                if !no_overrides {
+                let mut overrides
+                    = scc.iter()
+                        .filter(|&&scc_locator| new_children.get(&scc_locator.ident).map_or(false, |&existing_node| &self.work_tree.nodes[existing_node].locator != scc_locator))
+                        .peekable();
+
+                if overrides.peek().is_some() {
                     if self.print_logs {
                         self.print(&format!(
                             "Cannot hoist {} into {} because the latter already hosts children with the same name",
                             scc.iter().map(|locator| locator.to_print_string()).join(", "),
                             node.locator.to_print_string(),
                         ));
+
+                        while let Some(scc_locator) = overrides.next() {
+                            let overridden_locator
+                                = new_children.get(&scc_locator.ident)
+                                    .map(|&idx| &self.work_tree.nodes[idx].locator)
+                                    .expect("Expected the child to be present since otherwise there would be no override");
+
+                            self.print(&format!(
+                                "  - {} required {} but parent requires {} instead",
+                                node.locator.to_print_string(), overridden_locator.to_print_string(), scc_locator.to_print_string(),
+                            ));
+                        }
                     }
 
                     continue;
                 }
 
+                // Now is the time to check if the requirements of the SCC are fulfilled by the
+                // parent node. If they are not we can't hoist the SCC.
+
                 let invalid_requirements = scc_hoisting_requirements.iter()
                     .flat_map(|(package, package_dependencies)| {
-                        package_dependencies.iter().filter_map(|dependency| {
+                        package_dependencies.iter().filter_map(|&dependency| {
                             // If the dependency is in the hoisting set it means it'll be hoisted atomatically with the
                             // current package, so it's all good.
                             if scc.contains(&dependency) {
                                 return None;
                             }
 
-                            let current_resolution
-                                = new_dependencies.get(&dependency.ident);
+                            let Some(current_resolution) = new_dependencies.get(&dependency.ident) else {
+                                return Some((*package, dependency, None));
+                            };
 
-                            let is_existing_requirement = current_resolution.map_or(false, |existing_requirement| {
-                                &existing_requirement == dependency
-                            });
-
-                            if is_existing_requirement {
-                                return None;
+                            if current_resolution != dependency {
+                                return Some((*package, dependency, Some(current_resolution)));
                             }
 
-                            Some((*package, *dependency, current_resolution))
+                            None
                         })
                     }).collect_vec();
 

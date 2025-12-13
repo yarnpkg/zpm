@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
+use zpm_primitives::Reference;
 use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
-use zpm_utils::Path;
+use zpm_utils::{FromFileString, Path, ToHumanString};
 
 use crate::{
     build::BuildRequests, error::Error, fetchers::PackageData, install::Install, linker::{LinkResult, nm::hoist::{Hoister, WorkTree}}, project::Project
@@ -61,10 +62,10 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
                 workspace_queue.push((child_rel_path.with_join_str("node_modules"), *child_idx));
 
                 let package_data
-                    = &install.package_data[&child_node.locator.physical_locator()];
+                    = install.package_data.get(&child_node.locator.physical_locator());
 
                 match package_data {
-                    PackageData::Local {package_directory, ..} => {
+                    Some(PackageData::Local {package_directory, ..}) => {
                         let child_abs_path
                             = workspace_abs_path.with_join(&child_rel_path);
 
@@ -76,7 +77,7 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
                         })?;
                     },
 
-                    PackageData::Zip {archive_path, package_directory, ..} => {
+                    Some(PackageData::Zip {archive_path, package_directory, ..}) => {
                         workspace_nm_tree.register_entry(child_rel_path, SyncItem::Folder {
                             template: Some(SyncTemplate::Zip {
                                 archive_path: archive_path.clone(),
@@ -85,8 +86,23 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
                         })?;
                     },
 
-                    PackageData::MissingZip {..} => {
+                    Some(PackageData::MissingZip {..}) => {
                         // Nothing to do here
+                    },
+
+                    None => match &child_node.locator.reference {
+                        Reference::Link(params) if params.path.starts_with('/') => {
+                            let target_path
+                                = Path::from_file_string(&params.path)?;
+
+                            workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
+                                target_path,
+                            })?;
+                        },
+
+                        _ => {
+                            unreachable!("Expected package data for {}", ToHumanString::to_print_string(&child_node.locator.physical_locator()));
+                        },
                     },
                 }
             }

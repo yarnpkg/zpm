@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, str::FromStr, sync::{Arc, LazyLock}};
+use std::{collections::BTreeMap, str::FromStr, sync::LazyLock};
 
 use chrono::{DateTime, Utc};
 use regex::Regex;

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use zpm_config::ConfigExt;
 use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Locator, RegistryReference};

@@ -140,6 +140,13 @@ impl<'a> SyncTree<'a> {
         Ok(())
     }
 
+    pub fn is_node_filtered_out(&self, node_idx: usize) -> bool {
+        let node
+            = &self.nodes[node_idx];
+
+        matches!(node, SyncNode::Folder {template: None, children} if children.is_empty())
+    }
+
     pub fn register_entry(&mut self, rel_path: Path, entry: SyncItem<'a>) -> Result<(), SyncError> {
         if !rel_path.is_forward() {
             return Err(SyncError::ForwardPathRequired(rel_path.clone()));
@@ -293,6 +300,10 @@ impl<'a> SyncTree<'a> {
     }
 
     fn process_node(&self, path: Path, node_idx: usize, file_ops: &mut Vec<FileOp>) -> Result<Vec<(Path, usize)>, SyncError> {
+        if self.is_node_filtered_out(node_idx) {
+            return Ok(vec![]);
+        }
+
         let node
             = &self.nodes[node_idx];
 
@@ -313,7 +324,7 @@ impl<'a> SyncTree<'a> {
                 Ok(vec![])
             },
 
-            SyncNode::Folder {template, children} => {
+            SyncNode::Folder {template, children, ..} => {
                 if check.must_create {
                     if self.dry_run {
                         file_ops.push(FileOp::CreateFolder(path.clone()));
@@ -360,7 +371,7 @@ impl<'a> SyncTree<'a> {
                             .unwrap_or_default()
                             .into_iter()
                             .flat_map(|entry| entry.file_name().into_string().ok())
-                            .filter(|file_name| !children.contains_key(file_name))
+                            .filter(|file_name| children.get(file_name).map_or(true, |&child_idx| self.is_node_filtered_out(child_idx)))
                             .collect_vec();
 
                         for entry in extraneous_entries {
