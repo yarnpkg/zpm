@@ -3,9 +3,9 @@ import starlightDocSearch           from '@astrojs/starlight-docsearch';
 import starlight                    from '@astrojs/starlight';
 import {clipanionRemark}            from '@clipanion/remark';
 import tailwindcss                  from '@tailwindcss/vite';
-import path from 'path';
 // @ts-check
 import {defineConfig}               from 'astro/config';
+import path                         from 'path';
 import starlightAutoSidebar         from 'starlight-auto-sidebar';
 import svgr                         from 'vite-plugin-svgr';
 
@@ -117,7 +117,7 @@ export default defineConfig({
             terminalTitlebarBackground: `rgba(255, 255, 255, 0.03)`,
             terminalTitlebarBorderBottomColor: `rgba(255, 255, 255, 0.05)`,
           },
-        }
+        },
       },
       disable404Route: true,
       tableOfContents: false,
@@ -161,5 +161,8 @@ export default defineConfig({
         enableBlocks: false,
       }],
     ],
+    remarkRehype: {
+      footnoteBackContent: `↑`,
+    },
   },
 });
