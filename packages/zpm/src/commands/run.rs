@@ -55,6 +55,10 @@ pub struct Run {
     #[cli::option("--require")]
     require: Option<String>,
 
+    /// If set, wrap the command in macOS's seatbelt sandbox (macOS only)
+    #[cli::option("-s,--sandbox", default = false)]
+    sandbox: bool,
+
     /// Name of the script or binary to run
     name: String,
 
@@ -110,12 +114,17 @@ impl Run {
                 = project.find_binary(&self.name);
 
             if let Ok(binary) = maybe_binary {
-                Ok(ScriptEnvironment::new()?
+                let mut env = ScriptEnvironment::new()?
                     .with_project(&project)
                     .with_package(&project, &project.active_package()?)?
                     .with_node_args(get_node_args())
-                    .enable_shell_forwarding()
-                    .run_binary(&binary, &self.args)
+                    .enable_shell_forwarding();
+                
+                if self.sandbox {
+                    env = env.enable_sandbox();
+                }
+                
+                Ok(env.run_binary(&binary, &self.args)
                     .await?
                     .into())
             } else if let Err(Error::BinaryNotFound(name)) = maybe_binary {
@@ -146,11 +155,16 @@ impl Run {
                     return Err(Error::InvalidRunScriptOptions(node_args));
                 }
 
-                Ok(ScriptEnvironment::new()?
+                let mut env = ScriptEnvironment::new()?
                     .with_project(&project)
                     .with_package(&project, &locator)?
-                    .enable_shell_forwarding()
-                    .run_script(&script, &self.args)
+                    .enable_shell_forwarding();
+                
+                if self.sandbox {
+                    env = env.enable_sandbox();
+                }
+                
+                Ok(env.run_script(&script, &self.args)
                     .await?
                     .into())
             },

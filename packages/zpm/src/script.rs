@@ -372,6 +372,11 @@ impl ScriptEnvironment {
         self
     }
 
+    pub fn enable_sandbox(mut self) -> Self {
+        self.enable_sandbox = true;
+        self
+    }
+
     pub fn with_stdin(mut self, stdin: Option<String>) -> Self {
         self.stdin = stdin;
         self
