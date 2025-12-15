@@ -8,7 +8,7 @@
   "properties": {
     "changesetBaseRefs": {
       "type": "array",
-      "description": "The list of git refs to use as base for changeset detection. Defaults to [\"main\", \"master\"] if not set.",
+      "description": "The list of git refs to use as base for changeset detection. Defaults to ['main', 'master'] if not set.",
       "items": {
         "type": "string"
       },
@@ -293,6 +293,7 @@
     "supportedArchitectures": {
       "type": "object",
       "title": "SupportedArchitectures",
+      "description": "The list of architectures we need to download in the cache.",
       "properties": {
         "cpu": {
           "type": "array",
