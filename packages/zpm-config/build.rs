@@ -103,6 +103,7 @@ struct Field {
     #[serde_as(as = "OneOrMany<_>")]
     types: Vec<Type>,
     title: Option<String>,
+    description: Option<String>,
     default: Option<Expression>,
     property_aliases: Option<BTreeMap<String, Vec<String>>>,
     properties: Option<BTreeMap<String, Field>>,
@@ -154,6 +155,7 @@ impl Field {
 
                     fields.push(GeneratorField {
                         name: name.to_string(),
+                        description: field.description.clone().unwrap_or_else(|| panic!("Field {} must have a description", name)),
                         type_: field.get_type(),
                         aliases: field_aliases,
                         default: field_default,
@@ -249,6 +251,7 @@ impl Field {
 
 struct GeneratorField {
     name: String,
+    description: String,
     type_: InternalType,
     aliases: Vec<String>,
     default: String,
@@ -424,6 +427,53 @@ impl Generator {
                 }
             }
 
+            writeln!(writer, "        }}").unwrap();
+            writeln!(writer, "    }}").unwrap();
+            writeln!(writer).unwrap();
+            writeln!(writer, "    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {{").unwrap();
+            writeln!(writer, "        let mut children = tree::Map::new();").unwrap();
+
+            for field in fields {
+                let name = &field.name;
+                let description = &field.description;
+
+                let lc_snake_name
+                    = name.to_case(Case::Snake);
+
+                let description_lit
+                    = format!("\"{description}\"");
+
+                writeln!(writer, "").unwrap();
+                writeln!(writer, "        children.insert(\"{name}\".to_string(), MergeSettings::tree_node(&self.{lc_snake_name}, Some(zpm_utils::DataType::Code.colorize(\"{name}\")), Some({description_lit}.to_string())));").unwrap();
+            }
+
+            writeln!(writer, "").unwrap();
+            writeln!(writer, "        if let Some(description) = description {{").unwrap();
+            writeln!(writer, "            let mut fields = tree::Map::new();").unwrap();
+            writeln!(writer, "").unwrap();
+            writeln!(writer, "            fields.insert(\"description\".to_string(), tree::Node {{").unwrap();
+            writeln!(writer, "                label: Some(\"Description\".to_string()),").unwrap();
+            writeln!(writer, "                value: Some(AbstractValue::new(RawString::new(description.clone()))),").unwrap();
+            writeln!(writer, "                children: None,").unwrap();
+            writeln!(writer, "            }});").unwrap();
+            writeln!(writer, "").unwrap();
+            writeln!(writer, "            fields.insert(\"fields\".to_string(), tree::Node {{").unwrap();
+            writeln!(writer, "                label: Some(\"Fields\".to_string()),").unwrap();
+            writeln!(writer, "                value: None,").unwrap();
+            writeln!(writer, "                children: Some(tree::TreeNodeChildren::Map(children)),").unwrap();
+            writeln!(writer, "            }});").unwrap();
+            writeln!(writer, "").unwrap();
+            writeln!(writer, "            tree::Node {{").unwrap();
+            writeln!(writer, "                label,").unwrap();
+            writeln!(writer, "                value: None,").unwrap();
+            writeln!(writer, "                children: Some(tree::TreeNodeChildren::Map(fields)),").unwrap();
+            writeln!(writer, "            }}").unwrap();
+            writeln!(writer, "        }} else {{").unwrap();
+            writeln!(writer, "            tree::Node {{").unwrap();
+            writeln!(writer, "                label,").unwrap();
+            writeln!(writer, "                value: None,").unwrap();
+            writeln!(writer, "                children: Some(tree::TreeNodeChildren::Map(children)),").unwrap();
+            writeln!(writer, "            }}").unwrap();
             writeln!(writer, "        }}").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer, "}}").unwrap();

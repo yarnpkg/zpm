@@ -167,3 +167,26 @@ impl<T: Serialize> ToHumanString for Serialized<T> {
         DataType::String.colorize(&serde_json::to_string(&self.value).unwrap())
     }
 }
+
+#[derive(Debug)]
+pub struct RawString {
+    value: String,
+}
+
+impl RawString {
+    pub fn new(value: String) -> Self {
+        Self {value}
+    }
+}
+
+impl Serialize for RawString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+        serializer.serialize_str(&self.value)
+    }
+}
+
+impl ToHumanString for RawString {
+    fn to_print_string(&self) -> String {
+        self.value.clone()
+    }
+}

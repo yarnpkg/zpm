@@ -43,6 +43,8 @@ Various other projects (Biome, Oxc, etc) are experimenting on that topic, and we
 
 - Yarn will automatically run transparent installs when it detects your project changed since the last time an install was run.
 
+- The `yarn config` command, when called with no arguments, has a different output.
+
 ### Deprecations
 
 - The `.pnp.cjs` file isn't generated with the `+x` flag anymore.

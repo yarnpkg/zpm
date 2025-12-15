@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-use zpm_utils::{AbstractValue, Container, FromFileString, IoResultExt, Path};
+use zpm_utils::{AbstractValue, Container, DataType, FromFileString, IoResultExt, Path, RawString, Serialized, ToFileString, ToHumanString, tree};
 
 #[derive(Debug, Clone)]
 pub struct ConfigurationContext {
@@ -158,9 +158,15 @@ trait MergeSettings: Sized {
         project: Partial<Self::Intermediate>,
         default: F,
     ) -> Self;
+
+    fn tree_node(
+        &self,
+        label: Option<String>,
+        description: Option<String>,
+    ) -> tree::Node;
 }
 
-impl<K: Ord + FromFileString + Serialize + std::fmt::Debug, T: MergeSettings + Serialize + std::fmt::Debug> MergeSettings for BTreeMap<K, T> {
+impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::fmt::Debug, T: MergeSettings + Serialize + std::fmt::Debug> MergeSettings for BTreeMap<K, T> {
     type Intermediate = BTreeMap<K, T::Intermediate>;
 
     fn from_env_string(_value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
@@ -236,6 +242,44 @@ impl<K: Ord + FromFileString + Serialize + std::fmt::Debug, T: MergeSettings + S
         }
 
         result
+    }
+
+    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+        let mut children
+            = tree::Map::new();
+
+        for (k, v) in self {
+            children.insert(Serialized::new(k).to_print_string(), v.tree_node(Some(k.to_print_string()), None));
+        }
+
+        if let Some(description) = description {
+            let mut fields
+                = tree::Map::new();
+
+            fields.insert("description".to_string(), tree::Node {
+                label: Some("Description".to_string()),
+                value: Some(AbstractValue::new(RawString::new(description))),
+                children: None,
+            });
+
+            fields.insert("entries".to_string(), tree::Node {
+                label: Some("Entries".to_string()),
+                value: None,
+                children: Some(tree::TreeNodeChildren::Map(children)),
+            });
+
+            tree::Node {
+                label,
+                value: None,
+                children: Some(tree::TreeNodeChildren::Map(fields)),
+            }
+        } else {
+            tree::Node {
+                label,
+                value: None,
+                children: Some(tree::TreeNodeChildren::Map(children)),
+            }
+        }
     }
 }
 
@@ -329,6 +373,44 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
 
         result
     }
+
+    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+        let mut children
+            = Vec::new();
+
+        for (i, v) in self.iter().enumerate() {
+            children.push(v.tree_node(Some(DataType::Number.colorize(&i.to_string())), None));
+        }
+
+        if let Some(description) = description {
+            let mut fields
+                = tree::Map::new();
+
+            fields.insert("description".to_string(), tree::Node {
+                label: Some("Description".to_string()),
+                value: Some(AbstractValue::new(RawString::new(description))),
+                children: None,
+            });
+
+            fields.insert("entries".to_string(), tree::Node {
+                label: Some("Entries".to_string()),
+                value: None,
+                children: Some(tree::TreeNodeChildren::Vec(children)),
+            });
+
+            tree::Node {
+                label,
+                value: None,
+                children: Some(tree::TreeNodeChildren::Map(fields)),
+            }
+        } else {
+            tree::Node {
+                label,
+                value: None,
+                children: Some(tree::TreeNodeChildren::Vec(children)),
+            }
+        }
+    }
 }
 
 impl MergeSettings for Setting<Path> {
@@ -397,6 +479,31 @@ impl MergeSettings for Setting<Path> {
 
         default()
     }
+
+    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+        let mut fields
+            = tree::Map::new();
+
+        if let Some(description) = description {
+            fields.insert("description".to_string(), tree::Node {
+                label: Some("Description".to_string()),
+                value: Some(AbstractValue::new(RawString::new(description))),
+                children: None,
+            });
+        }
+
+        fields.insert("value".to_string(), tree::Node {
+            label: Some("Value".to_string()),
+            value: Some(AbstractValue::new(self.value.clone())),
+            children: None,
+        });
+
+        tree::Node {
+            label,
+            value: None,
+            children: Some(tree::TreeNodeChildren::Map(fields)),
+        }
+    }
 }
 
 macro_rules! merge_settings_impl {
@@ -454,6 +561,31 @@ macro_rules! merge_settings_impl {
                 }
 
                 default()
+            }
+
+            fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+                let mut fields
+                    = tree::Map::new();
+
+                if let Some(description) = description {
+                    fields.insert("description".to_string(), tree::Node {
+                        label: Some("Description".to_string()),
+                        value: Some(AbstractValue::new(RawString::new(description))),
+                        children: None,
+                    });
+                }
+
+                fields.insert("value".to_string(), tree::Node {
+                    label: Some("Value".to_string()),
+                    value: Some(AbstractValue::new(self.value.clone())),
+                    children: None,
+                });
+
+                tree::Node {
+                    label,
+                    value: None,
+                    children: Some(tree::TreeNodeChildren::Map(fields)),
+                }
             }
         }
 
@@ -529,6 +661,31 @@ macro_rules! merge_settings_impl {
 
                 default()
             }
+
+            fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+                let mut fields
+                    = tree::Map::new();
+
+                if let Some(description) = description {
+                    fields.insert("description".to_string(), tree::Node {
+                        label: Some("Description".to_string()),
+                        value: Some(AbstractValue::new(RawString::new(description))),
+                        children: None,
+                    });
+                }
+
+                fields.insert("value".to_string(), tree::Node {
+                    label: Some("Value".to_string()),
+                    value: Some(AbstractValue::new(self.value.clone())),
+                    children: None,
+                });
+
+                tree::Node {
+                    label,
+                    value: Some(AbstractValue::new(self.value.clone())),
+                    children: None,
+                }
+            }
         }
     };
 }
@@ -592,6 +749,10 @@ pub enum HydrateError {
 }
 
 impl Configuration {
+    pub fn tree_node(&self) -> tree::Node {
+        self.settings.tree_node(None, None)
+    }
+
     pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
         self.settings.hydrate(path, value_str)
     }
