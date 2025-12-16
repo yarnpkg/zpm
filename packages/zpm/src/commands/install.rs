@@ -84,6 +84,12 @@ impl Install {
             ..Default::default()
         }).await?;
 
+        // Sort workspace dependencies for consistency (Yarn Berry behavior)
+        // Only run when immutable mode is disabled
+        if !project.config.settings.enable_immutable_installs.value {
+            crate::install::sort_workspace_dependencies(&project)?;
+        }
+
         Ok(())
     }
 }

@@ -522,11 +522,6 @@ impl Install {
             project.write_lockfile(&self.lockfile)?;
         }
 
-        // Sort package.json dependencies for consistency (Yarn Berry behavior)
-        if !self.skip_lockfile_update && !project.config.settings.enable_immutable_installs.value {
-            sort_workspace_dependencies(project)?;
-        }
-
         if !self.skip_build && !link_result.build_requests.entries.is_empty() {
             let build_future
                 = build::BuildManager::new(link_result.build_requests).run(project);
@@ -988,7 +983,7 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
 
 /// Sort dependency fields in all workspace package.json files alphabetically.
 /// This matches Yarn Berry behavior where dependencies are automatically sorted during install.
-fn sort_workspace_dependencies(project: &Project) -> Result<(), Error> {
+pub fn sort_workspace_dependencies(project: &Project) -> Result<(), Error> {
     const DEPENDENCY_FIELDS: &[&str] = &[
         "dependencies",
         "devDependencies",
