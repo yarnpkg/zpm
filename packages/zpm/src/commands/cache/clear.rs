@@ -17,9 +17,7 @@ pub struct Clear {}
 
 impl Clear {
     pub async fn execute(&self) -> Result<(), Error> {
-        let project
-            = Project::new(None).await?;
-
+        let project = Project::new(None).await?;
         let cache_path = project.preferred_cache_path();
 
         if cache_path.fs_exists() {
