@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, ops::Range};
 
+use itertools::Itertools;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{document::Document, value::Indent, Error, Path, Value};
@@ -376,15 +377,12 @@ impl JsonDocument {
         self.insert_into_empty(offset, new_key, indent, value)
     }
 
-    /// Sort the keys of an object at the given path alphabetically.
-    /// Returns Ok(true) if sorting was performed, Ok(false) if already sorted or path not found.
     pub fn sort_object_keys(&mut self, parent_path: &Path) -> Result<bool, Error> {
-        // Collect keys with their byte offsets, sorted by document position
-        let mut keys_by_position: Vec<_>
+        let mut keys_by_position
             = self.paths.iter()
                 .filter(|(path, _)| path.is_direct_child_of(parent_path))
                 .map(|(path, &offset)| (path.last().unwrap(), offset))
-                .collect();
+                .collect_vec();
 
         if keys_by_position.len() <= 1 {
             return Ok(false);
@@ -402,7 +400,9 @@ impl JsonDocument {
         let mut content_end_offset = 0usize;
 
         for (key_name, offset) in &keys_by_position {
-            let mut scanner = Scanner::new(&self.input, *offset);
+            let mut scanner
+                = Scanner::new(&self.input, *offset);
+
             scanner.skip_string()?;
             scanner.skip_whitespace();
             scanner.skip_char(b':')?;
@@ -420,13 +420,16 @@ impl JsonDocument {
         // Sort by key name and rebuild content
         key_value_pairs.sort_by_key(|(key_name, _)| *key_name);
 
-        let mut sorted_content = key_value_pairs[0].1.clone();
+        let mut sorted_content
+            = key_value_pairs[0].1.clone();
+
         for (_, entry_bytes) in key_value_pairs.iter().skip(1) {
             sorted_content.extend_from_slice(&separator);
             sorted_content.extend_from_slice(entry_bytes);
         }
 
         self.replace_range(keys_by_position[0].1..content_end_offset, &sorted_content)?;
+
         Ok(true)
     }
 

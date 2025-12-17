@@ -1,6 +1,6 @@
 {
   "name": "@yarnpkg/monorepo",
-  "packageManager": "yarn@6.0.0-git.20251007.hash-b589d4544f670cbe35ae229f7fedf919dd06af1c",
+  "packageManager": "yarn@6.0.0-rc.6",
   "workspaces": [
     "documentation",
     "packages/*"
