@@ -21,7 +21,7 @@ use crate::{
     lockfile::{Lockfile, LockfileEntry, LockfileMetadata},
     primitives_exts::RangeExt,
     project::{InstallMode, Project},
-    report::{async_section, current_report, with_context_result, ProgressLabelSender, ReportContext},
+    report::{async_section, current_report, with_context_result, ReportContext},
     resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver},
 };
 
@@ -621,7 +621,7 @@ impl<'a> InstallManager<'a> {
         let fetched_count_clone = fetched_count.clone();
 
         // Get a progress label sender from the current report for use in the synchronous callback
-        let progress_label_sender: Option<ProgressLabelSender> = current_report().await
+        let progress_label_sender = current_report().await
             .as_ref()
             .map(|r| r.progress_label_sender());
 
