@@ -79,6 +79,8 @@ pub struct  GraphTasks<'a, TCtx, TIn, TOut, TErr, TCache> {
 
     tasks: HashMap<TIn, (usize, Vec<TIn>)>,
     dependents: HashMap<TIn, Vec<TIn>>,
+
+    on_accept: Option<Box<dyn Fn(&TIn, &TOut) + Send>>,
 }
 
 impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TCache> where
@@ -98,7 +100,14 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
 
             tasks: HashMap::new(),
             dependents: HashMap::new(),
+
+            on_accept: None,
         }
+    }
+
+    pub fn with_on_accept<F: Fn(&TIn, &TOut) + Send + 'static>(mut self, f: F) -> Self {
+        self.on_accept = Some(Box::new(f));
+        self
     }
 
     pub fn register(&mut self, op: TIn) {
@@ -216,6 +225,10 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
 
     pub fn accept(&mut self, op: TIn, out: TOut) {
         let follow_ups = out.graph_follow_ups(&self.context);
+
+        if let Some(ref on_accept) = self.on_accept {
+            on_accept(&op, &out);
+        }
 
         self.results.success.insert(op.clone(), out);
 

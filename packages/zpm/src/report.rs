@@ -163,6 +163,7 @@ pub enum ReportMessage {
     PushSection(String),
     PopSection,
     Prompt(PromptType),
+    SetProgressLabel(String),
 }
 
 struct Reporter {
@@ -176,6 +177,7 @@ struct Reporter {
     buffered_lines: Option<Vec<String>>,
     log_paths: Vec<Path>,
     spinner_idx: Option<usize>,
+    progress_label: String,
     prompt_tx: mpsc::Sender<String>,
 }
 
@@ -193,6 +195,7 @@ impl Reporter {
             buffered_lines,
             log_paths: Vec::new(),
             spinner_idx: None,
+            progress_label: String::new(),
             prompt_tx,
         }
     }
@@ -209,7 +212,11 @@ impl Reporter {
         if let Some(spinner_idx) = self.spinner_idx {
             if !self.config.silent_or_error && self.config.enable_progress_bars {
                 let chars = "◐◓◑◒".chars().collect::<Vec<_>>();
-                write!(writer, "{}", chars[spinner_idx]).unwrap();
+                if self.progress_label.is_empty() {
+                    write!(writer, "{}", chars[spinner_idx]).unwrap();
+                } else {
+                    write!(writer, "{} {}", chars[spinner_idx], self.progress_label).unwrap();
+                }
 
                 self.spinner_idx = Some((spinner_idx + 1) % chars.len());
             }
@@ -236,6 +243,10 @@ impl Reporter {
 
             ReportMessage::Prompt(prompt) => {
                 self.on_prompt(writer, prompt);
+            },
+
+            ReportMessage::SetProgressLabel(label) => {
+                self.progress_label = label;
             },
         }
     }
@@ -331,6 +342,7 @@ impl Reporter {
         self.indent -= 1;
 
         self.spinner_idx = None;
+        self.progress_label.clear();
 
         if let Some(start_time) = self.start_time && let Ok(elapsed) = start_time.elapsed() {
             self.write_line(writer, &format!("└ Completed in {}", pretty_duration::pretty_duration(&elapsed, None)), Severity::Info);
@@ -380,6 +392,18 @@ impl Reporter {
                 writeln!(writer, "{}", line).unwrap();
             }
         }
+    }
+}
+
+/// A sender that can be used to update the progress label from synchronous contexts.
+#[derive(Clone)]
+pub struct ProgressLabelSender {
+    msg_queue_tx: mpsc::Sender<ReportMessage>,
+}
+
+impl ProgressLabelSender {
+    pub fn set_label(&self, label: String) {
+        let _ = self.msg_queue_tx.send(ReportMessage::SetProgressLabel(label));
     }
 }
 
@@ -477,6 +501,16 @@ impl StreamReport {
 
     pub fn pop_section(&self) {
         self.report(ReportMessage::PopSection);
+    }
+
+    pub fn set_progress_label(&self, label: String) {
+        self.report(ReportMessage::SetProgressLabel(label));
+    }
+
+    pub fn progress_label_sender(&self) -> ProgressLabelSender {
+        ProgressLabelSender {
+            msg_queue_tx: self.msg_queue_tx.clone(),
+        }
     }
 
     fn with_content_prefix(&self, mut message: String) -> String {

@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sync::LazyLock};
+use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sync::{atomic::{AtomicUsize, Ordering}, Arc, LazyLock}};
 
 use chrono::{DateTime, Utc};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -21,7 +21,7 @@ use crate::{
     lockfile::{Lockfile, LockfileEntry, LockfileMetadata},
     primitives_exts::RangeExt,
     project::{InstallMode, Project},
-    report::{async_section, with_context_result, ReportContext},
+    report::{async_section, current_report, with_context_result, ProgressLabelSender, ReportContext},
     resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver},
 };
 
@@ -614,8 +614,37 @@ impl<'a> InstallManager<'a> {
         let cache
             = InstallCache::new(self.initial_lockfile.clone());
 
-        let mut graph
-            = GraphTasks::new(self.context.clone(), cache);
+        let resolved_count = Arc::new(AtomicUsize::new(0));
+        let fetched_count = Arc::new(AtomicUsize::new(0));
+
+        let resolved_count_clone = resolved_count.clone();
+        let fetched_count_clone = fetched_count.clone();
+
+        // Get a progress label sender from the current report for use in the synchronous callback
+        let progress_label_sender: Option<ProgressLabelSender> = current_report().await
+            .as_ref()
+            .map(|r| r.progress_label_sender());
+
+        let mut graph = GraphTasks::new(self.context.clone(), cache)
+            .with_on_accept(move |op: &InstallOp, _out: &InstallOpResult| {
+                match op {
+                    InstallOp::Resolve { .. } | InstallOp::Refresh { .. } => {
+                        resolved_count_clone.fetch_add(1, Ordering::SeqCst);
+                    },
+                    InstallOp::Fetch { .. } => {
+                        fetched_count_clone.fetch_add(1, Ordering::SeqCst);
+                    },
+                    _ => {},
+                }
+
+                let resolved = resolved_count_clone.load(Ordering::SeqCst);
+                let fetched = fetched_count_clone.load(Ordering::SeqCst);
+                let label = format!("{} packages resolved, {} packages fetched", resolved, fetched);
+
+                if let Some(sender) = &progress_label_sender {
+                    sender.set_label(label);
+                }
+            });
 
         for descriptor in self.result.roots.clone() {
             graph.register(InstallOp::Resolve {
