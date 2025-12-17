@@ -52,6 +52,10 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
                 = node.children.as_ref()
                     .expect(EXPECT_CHILDREN);
 
+            // Determine if we're at the top level (direct children of node_modules)
+            let is_top_level
+                = node_rel_path == Path::new();
+
             for (ident, child_idx) in children {
                 let child_node
                     = &work_tree.nodes[*child_idx];
@@ -72,18 +76,38 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
                         let target_path
                             = package_directory.relative_to(&child_abs_path.dirname().unwrap());
 
-                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
+                        workspace_nm_tree.register_entry(child_rel_path.clone(), SyncItem::Symlink {
                             target_path: target_path.clone(),
                         })?;
+
+                        // Register .bin entries for top-level packages
+                        if is_top_level {
+                            register_bin_entries(
+                                &mut workspace_nm_tree,
+                                install,
+                                &child_node.locator.physical_locator(),
+                                &child_rel_path,
+                            )?;
+                        }
                     },
 
                     Some(PackageData::Zip {archive_path, package_directory, ..}) => {
-                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Folder {
+                        workspace_nm_tree.register_entry(child_rel_path.clone(), SyncItem::Folder {
                             template: Some(SyncTemplate::Zip {
                                 archive_path: archive_path.clone(),
                                 inner_path: package_directory.relative_to(&archive_path),
                             }),
                         })?;
+
+                        // Register .bin entries for top-level packages
+                        if is_top_level {
+                            register_bin_entries(
+                                &mut workspace_nm_tree,
+                                install,
+                                &child_node.locator.physical_locator(),
+                                &child_rel_path,
+                            )?;
+                        }
                     },
 
                     Some(PackageData::MissingZip {..}) => {
@@ -95,9 +119,19 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
                             let target_path
                                 = Path::from_file_string(&params.path)?;
 
-                            workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
+                            workspace_nm_tree.register_entry(child_rel_path.clone(), SyncItem::Symlink {
                                 target_path,
                             })?;
+
+                            // Register .bin entries for top-level packages
+                            if is_top_level {
+                                register_bin_entries(
+                                    &mut workspace_nm_tree,
+                                    install,
+                                    &child_node.locator.physical_locator(),
+                                    &child_rel_path,
+                                )?;
+                            }
                         },
 
                         _ => {
@@ -121,4 +155,35 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
             dependencies: BTreeMap::new(),
         },
     })
+}
+
+fn register_bin_entries(
+    workspace_nm_tree: &mut SyncTree<'_>,
+    install: &Install,
+    physical_locator: &zpm_primitives::Locator,
+    package_rel_path: &Path,
+) -> Result<(), Error> {
+    let Some(content_flags) = install.install_state.content_flags.get(physical_locator) else {
+        return Ok(());
+    };
+
+    for (bin_name, bin_path) in &content_flags.binaries {
+        // The symlink target is relative from .bin/ to the package binary
+        // e.g., from node_modules/.bin/eslint to node_modules/eslint/bin/eslint.js
+        // which would be ../eslint/bin/eslint.js
+        let target_path
+            = Path::from_file_string("..")?
+                .with_join(package_rel_path)
+                .with_join(bin_path);
+
+        let bin_entry_path
+            = Path::from_file_string(".bin")?
+                .with_join_str(bin_name);
+
+        workspace_nm_tree.register_entry(bin_entry_path, SyncItem::Symlink {
+            target_path,
+        })?;
+    }
+
+    Ok(())
 }
