@@ -297,6 +297,8 @@ impl HttpClient {
             // Enable connection keep-alive
             .tcp_keepalive(Duration::from_secs(60))
 
+            .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(config.settings.network_concurrency.value))
+
             .use_rustls_tls()
             .dns_resolver(Arc::new(HickoryDnsResolver::default()))
             .build()
