@@ -33,6 +33,8 @@ Various other projects (Biome, Oxc, etc) are experimenting on that topic, and we
 
 - Support for the `yarnPath` field has been dropped. Use [Yarn Switch](/concepts/switch) to manage Yarn versions in your repository. Use `yarn switch link` should you need to use a local binary.
 
+- Support for the `--cwd` flag has been dropped. Instead, pass the cwd path as first argument on the CLI (for example `yarn ./packages/foo add lodash`, or `yarn /path/to/project install`). As long as it contains a slash, it'll be interpreted as a path (this syntax works with both Yarn Berry and Yarn ZPM).
+
 ### Internal design
 
 - Yarn doesn't support anymore having multiple workspaces in the same project sharing the same name but with different version. If set, workspace names must be unique across the project.
