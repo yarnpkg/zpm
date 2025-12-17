@@ -54,7 +54,7 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
 
             // Determine if we're at the top level (direct children of node_modules)
             let is_top_level
-                = node_rel_path == Path::new();
+                = node_rel_path.is_empty();
 
             for (ident, child_idx) in children {
                 let child_node
@@ -171,7 +171,7 @@ fn register_bin_entries(
         // The symlink target is relative from .bin/ to the package binary
         // e.g., from node_modules/.bin/eslint to node_modules/eslint/bin/eslint.js
         // which would be ../eslint/bin/eslint.js
-        let target_path
+        let relative_target_path
             = Path::from_file_string("..")?
                 .with_join(package_rel_path)
                 .with_join(bin_path);
@@ -181,7 +181,7 @@ fn register_bin_entries(
                 .with_join_str(bin_name);
 
         workspace_nm_tree.register_entry(bin_entry_path, SyncItem::Symlink {
-            target_path,
+            target_path: relative_target_path,
         })?;
     }
 
