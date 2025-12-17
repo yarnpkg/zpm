@@ -1,5 +1,6 @@
 use clipanion::cli;
 use zpm_config::Source;
+use zpm_parsers::JsonDocument;
 
 use crate::{error::Error, project::{self, InstallMode, RunInstallOptions}};
 
@@ -76,6 +77,8 @@ impl Install {
             project.config.settings.enable_immutable_cache.source = Source::Cli;
         }
 
+        sort_workspace_dependencies(&project)?;
+
         project.run_install(RunInstallOptions {
             check_checksums: self.check_checksums,
             check_resolutions: self.check_resolutions,
@@ -86,4 +89,49 @@ impl Install {
 
         Ok(())
     }
+}
+
+/// Sort dependency fields in all workspace package.json files alphabetically.
+/// This matches Yarn Berry behavior where dependencies are automatically sorted during install.
+fn sort_workspace_dependencies(project: &project::Project) -> Result<(), Error> {
+    const DEPENDENCY_FIELDS: &[&str] = &[
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "peerDependencies",
+    ];
+
+    for workspace in &project.workspaces {
+        let manifest_path = workspace.path
+            .with_join_str("package.json");
+
+        let manifest_content = manifest_path
+            .fs_read_prealloc()?;
+
+        let mut document
+            = JsonDocument::new(manifest_content)?;
+
+        let mut any_sorted
+            = false;
+
+        for field_name in DEPENDENCY_FIELDS {
+            let field_path
+                = zpm_parsers::Path::from_segments(vec![field_name.to_string()]);
+
+            if document.sort_object_keys(&field_path)? {
+                any_sorted = true;
+            }
+        }
+
+        if any_sorted && project.config.settings.enable_immutable_installs.value {
+            return Err(Error::ImmutablePackageManifest(manifest_path));
+        }
+
+        if any_sorted {
+            manifest_path
+                .fs_change(&document.input, false)?;
+        }
+    }
+
+    Ok(())
 }

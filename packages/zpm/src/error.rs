@@ -87,6 +87,9 @@ pub enum Error {
     #[error("Cannot autofix a lockfile when running an immutable install.")]
     ImmutableLockfileAutofix,
 
+    #[error("Found an incorrectly formatted package manifest when running an immutable install ({})", .0.to_print_string())]
+    ImmutablePackageManifest(Path),
+
     #[error("Git returned an error when attempting to autofix the lockfile: {0}")]
     LockfileAutofixGitError(String),
 

@@ -1,9 +1,9 @@
 {
   "dependencies": {
-    "lodash": "^4.17.21",
     "@types/node": "^24.0.10",
+    "@yarnpkg/types": "^4.0.1",
     "esbuild": "^0.25.5",
-    "@yarnpkg/types": "^4.0.1"
+    "lodash": "^4.17.21"
   },
   "devDependencies": {
     "@types/lodash": "^4.17.17"
