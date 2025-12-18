@@ -62,7 +62,7 @@ impl Logout {
             config_path
                 .fs_write_text(&updated_content)?;
 
-            current_report().await.as_mut().map(|report| {
+            current_report().await.as_ref().map(|report| {
                 report.info(format!("Successfully logged out from {}", DataType::Url.colorize(&registry)));
             });
 

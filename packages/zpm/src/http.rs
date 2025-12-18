@@ -192,7 +192,7 @@ impl<'a> HttpRequest<'a> {
                             .insert(hostname.clone());
 
                     if should_warn {
-                        current_report().await.as_mut().map(|report| {
+                        current_report().await.as_ref().map(|report| {
                             report.warn(format!("Requests to {} are taking suspiciously long...", hostname));
                         });
                     }

@@ -1,10 +1,7 @@
-use colored::{Color, Colorize};
+use colored::Colorize;
 
-const INFO_COLOR: Color
-    = Color::TrueColor { r: 87, g: 163, b: 255 };
+use crate::DataType;
 
-const WARNING_COLOR: Color
-    = Color::TrueColor { r: 255, g: 87, b: 51 };
 
 pub enum Note {
     Warning(String),
@@ -15,16 +12,16 @@ impl Note {
     pub fn print(&self) {
         match self {
             Note::Info(message) => {
-                print_message("info", INFO_COLOR, message);
+                print_message("info", DataType::Info, message);
             },
             Note::Warning(message) => {
-                print_message("warning", WARNING_COLOR, message);
+                print_message("warning", DataType::Warning, message);
             },
         }
     }
 }
 
-fn print_message(label: &str, color: Color, message: &str) {
+fn print_message(label: &str, data_type: DataType, message: &str) {
     println!("");
 
     let mut lines
@@ -35,7 +32,7 @@ fn print_message(label: &str, color: Color, message: &str) {
     let indent
         = " ".repeat(prefix.len());
 
-    println!("{}{}", prefix.bold().color(color), lines.next().unwrap().bold());
+    println!("{}{}", data_type.colorize(&prefix).bold(), lines.next().unwrap().bold());
 
     for line in lines {
         println!("{}{}", indent, line.trim());

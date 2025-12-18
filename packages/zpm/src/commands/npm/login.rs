@@ -103,7 +103,7 @@ impl Login {
         });
 
         with_report_result(report, async {
-            current_report().await.as_mut().map(|report| {
+            current_report().await.as_ref().map(|report| {
                 report.info(format!("Logging in to {}", DataType::Url.colorize(&registry)));
             });
 
@@ -142,7 +142,7 @@ impl Login {
             config_path
                 .fs_write_text(&updated_content)?;
 
-            current_report().await.as_mut().map(|report| {
+            current_report().await.as_ref().map(|report| {
                 report.info("Successfully logged in".to_string());
             });
 
@@ -312,11 +312,11 @@ async fn get_credentials(is_token: bool) -> Result<Credentials, Error> {
         });
     }
 
-    let mut report_guard
+    let report_guard
         = current_report().await;
 
     let report
-        = report_guard.as_mut()
+        = report_guard.as_ref()
             .expect("No report set");
 
     let username

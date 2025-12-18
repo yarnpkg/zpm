@@ -436,7 +436,7 @@ async fn render_otp_notice(response: &Response) {
             DataType::Url.colorize(caps.get(0).unwrap().as_str()).to_string()
         });
 
-        current_report().await.as_mut()
+        current_report().await.as_ref()
             .map(|report| report.info(formatted_notice.to_string()));
     }
 }
@@ -452,7 +452,7 @@ async fn ask_for_otp(params: &NpmHttpParams<'_>, response: &Response) -> Result<
 
     render_otp_notice(&response).await;
 
-    let otp = current_report().await.as_mut()
+    let otp = current_report().await.as_ref()
         .map(|report| report.prompt(PromptType::Input("One-time password".to_string())))
         .unwrap()
         .await;

@@ -400,11 +400,11 @@ impl Project {
         let local_cache = (!enable_global_cache)
             .then(|| DiskCache::new(local_cache_path, name_suffix, enable_immutable_cache));
 
-        Ok(CompositeCache {
+        Ok(CompositeCache::new(
             compression_algorithm,
             global_cache,
             local_cache,
-        })
+        ))
     }
 
     pub fn root_workspace(&self) -> &Workspace {

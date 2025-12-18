@@ -2256,12 +2256,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pretty-duration"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8868e7264af614b3634ff0abbe37b178e61000611b8a75221aea40221924aba"
-
-[[package]]
 name = "pretty_assertions"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4353,7 +4347,6 @@ dependencies = [
  "itertools 0.13.0",
  "open",
  "p256",
- "pretty-duration",
  "rayon",
  "regex",
  "reqwest",
