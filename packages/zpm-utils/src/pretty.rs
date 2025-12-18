@@ -128,10 +128,10 @@ impl<T: Serialize> Serialize for Secret<T> {
 
 impl<T: DivAssign + Rem + PartialOrd + Display + Copy + NumCast> ToHumanString for Unit<T> {
     fn to_print_string(&self) -> String {
-        let mut value: f64
-            = NumCast::from(self.value).unwrap();
-
         if self.unit_definition.use_remainder {
+            let mut value: u128
+                = NumCast::from(self.value).unwrap();
+
             let mut current_unit
                 = self.unit_definition.initial;
 
@@ -139,15 +139,25 @@ impl<T: DivAssign + Rem + PartialOrd + Display + Copy + NumCast> ToHumanString f
                 = vec![];
 
             for (factor, unit) in self.unit_definition.units.iter().cloned() {
+                let factor
+                    = factor as u128;
+
                 let remainder
                     = value % factor;
 
-                if remainder > 0.0 {
-                    segments.push(format!("{:.0}{}", remainder, current_unit));
+                if remainder > 0 {
+                    segments.push(format!("{}{}", remainder, current_unit));
                 }
 
                 value = (value - remainder) / factor;
                 current_unit = unit;
+            }
+
+            // After exhausting all factors, whatever remains is the largest unit (e.g. years).
+            // Without this, `1y` would incorrectly format as `0ms`, and durations > 52w would
+            // drop the year component entirely.
+            if value > 0 {
+                segments.push(format!("{}{}", value, current_unit));
             }
 
             if segments.is_empty() {
@@ -165,6 +175,9 @@ impl<T: DivAssign + Rem + PartialOrd + Display + Copy + NumCast> ToHumanString f
                 joined
             }
         } else {
+            let mut value: f64
+                = NumCast::from(self.value).unwrap();
+
             let mut current_unit
                 = self.unit_definition.initial;
 

@@ -26,7 +26,6 @@ pub enum CacheEntry {
     Info {
         path: Path,
         checksum: Option<Hash64>,
-        is_newly_cached: bool,
     },
 
     #[no_pattern]
@@ -220,7 +219,6 @@ impl DiskCache {
         Ok(InfoCacheEntry {
             path: key_path,
             checksum: None,
-            is_newly_cached: false,
         })
     }
 
@@ -232,7 +230,6 @@ impl DiskCache {
             InfoCacheEntry {
                 path,
                 checksum: None,
-                is_newly_cached: false,
             }
         }))
     }
@@ -255,7 +252,6 @@ impl DiskCache {
                 InfoCacheEntry {
                     path: key_path,
                     checksum: None,
-                    is_newly_cached: false,
                 }.into()
             },
 
@@ -274,7 +270,6 @@ impl DiskCache {
                     InfoCacheEntry {
                         path: key_path,
                         checksum: Some(checksum),
-                        is_newly_cached: true,
                     }.into()
                 }).await.unwrap()
             },
@@ -300,7 +295,6 @@ impl DiskCache {
                     info: InfoCacheEntry {
                         path: key_path,
                         checksum: None,
-                        is_newly_cached: false,
                     },
                     data,
                 }
@@ -326,7 +320,6 @@ impl DiskCache {
                         info: InfoCacheEntry {
                             path: key_path,
                             checksum: Some(checksum),
-                            is_newly_cached: true,
                         },
                         data,
                     }
