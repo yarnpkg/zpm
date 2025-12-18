@@ -41,7 +41,7 @@ impl CacheClearCommand {
                 };
 
                 if entry_last_used.elapsed().unwrap() > std::time::Duration::from_secs(60 * 60 * 24 * 7) {
-                    entry_path.fs_rm()?;
+                    entry_path.fs_rm().ok_missing()?;
                 }
             }
         } else {
