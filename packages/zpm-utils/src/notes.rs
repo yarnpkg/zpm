@@ -32,7 +32,7 @@ fn print_message(label: &str, data_type: DataType, message: &str) {
     let indent
         = " ".repeat(prefix.len());
 
-    println!("{}{}", data_type.colorize(&prefix.bold()), lines.next().unwrap().bold());
+    println!("{}{}", data_type.colorize(&prefix).bold(), lines.next().unwrap().bold());
 
     for line in lines {
         println!("{}{}", indent, line.trim());
