@@ -23,14 +23,25 @@ struct TagsPayload {
 /// npm registry package metadata for @yarnpkg/yarn-<target>
 #[derive(Deserialize)]
 struct NpmPackageMetadata {
-    versions: BTreeMap<String, NpmVersionInfo>,
+    versions: BTreeMap<String, serde::de::IgnoredAny>,
     #[serde(rename = "dist-tags")]
     dist_tags: BTreeMap<String, String>,
 }
 
-#[derive(Deserialize)]
-struct NpmVersionInfo {
-    version: String,
+/// Returns the npm registry URL for the yarn package for the current platform.
+/// The platform string comes from the compile-time TARGET env var (e.g., "x86_64-unknown-linux-musl"),
+/// which is a well-defined set of Rust target triples and safe to interpolate into URLs.
+fn npm_package_metadata_url() -> String {
+    let platform = get_system_string();
+    format!("https://registry.npmjs.org/@yarnpkg/yarn-{}", platform)
+}
+
+/// Fetches and parses npm registry metadata for the yarn package.
+async fn fetch_npm_metadata() -> Result<NpmPackageMetadata, Error> {
+    let npm_url = npm_package_metadata_url();
+    let response = fetch(&npm_url).await?;
+    let data: NpmPackageMetadata = JsonDocument::hydrate_from_slice(&response)?;
+    Ok(data)
 }
 
 pub async fn get_default_yarn_version(release_line: Option<crate::yarn_enums::ReleaseLine>) -> Result<PackageManagerReference, Error> {
@@ -84,14 +95,7 @@ pub async fn resolve_semver_range(range: &Range) -> Result<Version, Error> {
         Ok(highest.clone())
     } else {
         // New behavior: use npm registry
-        let platform = get_system_string();
-        let npm_url = format!("https://registry.npmjs.org/@yarnpkg/yarn-{}", platform);
-
-        let response
-            = fetch(&npm_url).await?;
-
-        let data: NpmPackageMetadata
-            = JsonDocument::hydrate_from_slice(&response)?;
+        let data = fetch_npm_metadata().await?;
 
         let highest = data.versions.keys()
             .filter_map(|v| Version::from_str(v).ok())
@@ -141,14 +145,7 @@ pub async fn resolve_channel_selector(channel_selector: &ChannelSelector) -> Res
         Version::from_str(version_str)?
     } else {
         // New behavior: use npm registry dist-tags
-        let platform = get_system_string();
-        let npm_url = format!("https://registry.npmjs.org/@yarnpkg/yarn-{}", platform);
-
-        let response
-            = fetch(&npm_url).await?;
-
-        let data: NpmPackageMetadata
-            = JsonDocument::hydrate_from_slice(&response)?;
+        let data = fetch_npm_metadata().await?;
 
         // Map channel to npm dist-tag
         // "stable" -> "latest", "canary" -> "canary"
