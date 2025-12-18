@@ -8,6 +8,7 @@ mod npm;
 
 mod add;
 mod bin;
+mod cache_clear;
 mod config;
 mod config_get;
 mod config_set;
@@ -64,6 +65,8 @@ pub enum YarnCli {
     Add(add::Add),
     BinList(bin::BinList),
     Bin(bin::Bin),
+    CacheClear(cache_clear::CacheClear),
+    CacheClear2(cache_clear::CacheClear2),
     Config(config::Config),
     ConfigGet(config_get::ConfigGet),
     ConfigSet(config_set::ConfigSet),

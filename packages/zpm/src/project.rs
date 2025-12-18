@@ -697,9 +697,17 @@ impl Project {
             },
         };
 
-        if let Some(install_state) = &self.install_state {
-            if self.last_changed_at <= install_state.last_installed_at {
-                return Ok(());
+        let cache_exists = if self.config.settings.enable_global_cache.value {
+            self.global_cache_path().fs_exists()
+        } else {
+            self.local_cache_path().fs_exists()
+        };
+
+        if cache_exists {
+            if let Some(install_state) = &self.install_state {
+                if self.last_changed_at <= install_state.last_installed_at {
+                    return Ok(());
+                }
             }
         }
 
