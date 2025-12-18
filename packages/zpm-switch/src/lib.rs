@@ -1,8 +1,11 @@
+mod cache;
 mod errors;
 mod http;
 mod manifest;
 mod yarn_enums;
 mod yarn;
+
+pub use cache::use_yarnpkg_endpoints;
 
 pub use errors::{
   Error,

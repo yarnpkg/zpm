@@ -71,12 +71,21 @@ jobs:
         run: |
           zip -jX yarn-${{matrix.target}}.zip target/${{matrix.target}}/release-lto-nodebug/{yarn-bin,yarn,LICENSE.md}
 
-      - name: Upload artifacts
+      - name: Upload zip artifact
         uses: actions/upload-artifact@v4
         with:
           name: yarn-${{matrix.target}}
           path: |
             yarn-${{matrix.target}}.zip
+
+      - name: Upload binary artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yarn-${{matrix.target}}-binaries
+          path: |
+            target/${{matrix.target}}/release-lto-nodebug/yarn-bin
+            target/${{matrix.target}}/release-lto-nodebug/yarn
+            target/${{matrix.target}}/release-lto-nodebug/LICENSE.md
 
   release:
     if: needs.check.outputs.needs-release == 'true'
@@ -96,6 +105,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: yarn-*
           merge-multiple: true
 
       - name: Create GitHub Release
@@ -111,6 +121,106 @@ jobs:
             --notes "Release of v${{needs.check.outputs.version}}" \
             --target ${{github.ref}} \
             $PRERELEASE_OPTIONS \
-            artifacts/*
+            artifacts/*.zip
         env:
           GH_TOKEN: ${{github.token}}
+
+  npm-publish:
+    if: needs.check.outputs.needs-release == 'true'
+    needs: [check, build]
+
+    name: 'Publishing to npm'
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - aarch64-apple-darwin
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
+      - name: Download binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: yarn-${{matrix.target}}-binaries
+          path: binaries
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Create and publish @yarnpkg/yarn-switch-${{matrix.target}}
+        run: |
+          PKG_DIR="npm-yarn-switch-${{matrix.target}}"
+          mkdir -p "$PKG_DIR"
+
+          # Copy the yarn binary (Yarn Switch)
+          cp binaries/yarn "$PKG_DIR/yarn"
+          chmod +x "$PKG_DIR/yarn"
+
+          # Copy LICENSE
+          cp binaries/LICENSE.md "$PKG_DIR/"
+
+          # Create package.json
+          cat > "$PKG_DIR/package.json" << EOF
+          {
+            "name": "@yarnpkg/yarn-switch-${{matrix.target}}",
+            "version": "${{needs.check.outputs.version}}",
+            "description": "Yarn Switch binary for ${{matrix.target}}",
+            "license": "BSD-2-Clause",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/yarnpkg/zpm.git"
+            },
+            "bin": {
+              "yarn": "./yarn"
+            }
+          }
+          EOF
+
+          # Publish
+          cd "$PKG_DIR"
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
+
+      - name: Create and publish @yarnpkg/yarn-${{matrix.target}}
+        run: |
+          PKG_DIR="npm-yarn-${{matrix.target}}"
+          mkdir -p "$PKG_DIR"
+
+          # Copy the yarn-bin binary as yarn (the actual Yarn binary without Switch)
+          cp binaries/yarn-bin "$PKG_DIR/yarn"
+          chmod +x "$PKG_DIR/yarn"
+
+          # Copy LICENSE
+          cp binaries/LICENSE.md "$PKG_DIR/"
+
+          # Create package.json
+          cat > "$PKG_DIR/package.json" << EOF
+          {
+            "name": "@yarnpkg/yarn-${{matrix.target}}",
+            "version": "${{needs.check.outputs.version}}",
+            "description": "Yarn binary for ${{matrix.target}}",
+            "license": "BSD-2-Clause",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/yarnpkg/zpm.git"
+            },
+            "bin": {
+              "yarn": "./yarn"
+            }
+          }
+          EOF
+
+          # Publish
+          cd "$PKG_DIR"
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}

@@ -18,8 +18,20 @@ pub struct CacheKey {
 
 impl CacheKey {
     pub fn to_url(&self) -> String {
-        format!("https://repo.yarnpkg.com/releases/{}/{}", self.version.to_file_string(), self.platform)
+        if use_yarnpkg_endpoints() {
+            format!("https://repo.yarnpkg.com/releases/{}/{}", self.version.to_file_string(), self.platform)
+        } else {
+            format!("https://registry.npmjs.org/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", self.platform, self.platform, self.version.to_file_string())
+        }
     }
+}
+
+/// Check if the YARNSW_YARNPKG_ENDPOINTS environment variable is set
+/// to use the old repo.yarnpkg.com endpoints instead of npm registry
+pub fn use_yarnpkg_endpoints() -> bool {
+    std::env::var("YARNSW_YARNPKG_ENDPOINTS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
 }
 
 pub fn cache_dir() -> Result<Path, Error> {

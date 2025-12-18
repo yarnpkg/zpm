@@ -3,9 +3,9 @@ use serde_with::serde_as;
 use zpm_parsers::JsonDocument;
 use std::{collections::BTreeMap, fmt::Debug, str::FromStr};
 use zpm_semver::{Range, Version, VersionRc};
-use zpm_utils::{ExplicitPath, FromFileString, Path, ToFileString};
+use zpm_utils::{ExplicitPath, FromFileString, Path, ToFileString, get_system_string};
 
-use crate::{errors::Error, http::fetch, manifest::{LocalPackageManagerReference, PackageManagerReference, VersionPackageManagerReference}, yarn_enums::{ChannelSelector, Selector}};
+use crate::{cache::use_yarnpkg_endpoints, errors::Error, http::fetch, manifest::{LocalPackageManagerReference, PackageManagerReference, VersionPackageManagerReference}, yarn_enums::{ChannelSelector, Selector}};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +18,19 @@ struct ReleaseLine {
 #[serde(rename_all = "camelCase")]
 struct TagsPayload {
     release_lines: BTreeMap<String, ReleaseLine>,
+}
+
+/// npm registry package metadata for @yarnpkg/yarn-<target>
+#[derive(Deserialize)]
+struct NpmPackageMetadata {
+    versions: BTreeMap<String, NpmVersionInfo>,
+    #[serde(rename = "dist-tags")]
+    dist_tags: BTreeMap<String, String>,
+}
+
+#[derive(Deserialize)]
+struct NpmVersionInfo {
+    version: String,
 }
 
 pub async fn get_default_yarn_version(release_line: Option<crate::yarn_enums::ReleaseLine>) -> Result<PackageManagerReference, Error> {
@@ -54,19 +67,40 @@ pub async fn resolve_selector(selector: &Selector) -> Result<Version, Error> {
 }
 
 pub async fn resolve_semver_range(range: &Range) -> Result<Version, Error> {
-    let response
-        = fetch("https://repo.yarnpkg.com/releases").await?;
+    if use_yarnpkg_endpoints() {
+        // Old behavior: use repo.yarnpkg.com
+        let response
+            = fetch("https://repo.yarnpkg.com/releases").await?;
 
-    let data: TagsPayload
-        = JsonDocument::hydrate_from_slice(&response)?;
+        let data: TagsPayload
+            = JsonDocument::hydrate_from_slice(&response)?;
 
-    let highest = data.release_lines.values()
-        .flat_map(|release_line| &release_line.tags)
-        .filter(|v| range.check(*v))
-        .max()
-        .ok_or(Error::FailedToResolveYarnRange(range.clone()))?;
+        let highest = data.release_lines.values()
+            .flat_map(|release_line| &release_line.tags)
+            .filter(|v| range.check(*v))
+            .max()
+            .ok_or(Error::FailedToResolveYarnRange(range.clone()))?;
 
-    Ok(highest.clone())
+        Ok(highest.clone())
+    } else {
+        // New behavior: use npm registry
+        let platform = get_system_string();
+        let npm_url = format!("https://registry.npmjs.org/@yarnpkg/yarn-{}", platform);
+
+        let response
+            = fetch(&npm_url).await?;
+
+        let data: NpmPackageMetadata
+            = JsonDocument::hydrate_from_slice(&response)?;
+
+        let highest = data.versions.keys()
+            .filter_map(|v| Version::from_str(v).ok())
+            .filter(|v| range.check(v))
+            .max()
+            .ok_or(Error::FailedToResolveYarnRange(range.clone()))?;
+
+        Ok(highest)
+    }
 }
 
 pub async fn resolve_channel_selector(channel_selector: &ChannelSelector) -> Result<Version, Error> {
@@ -92,21 +126,42 @@ pub async fn resolve_channel_selector(channel_selector: &ChannelSelector) -> Res
         return Ok(version);
     }
 
-    let channel_url
-        = format!("https://repo.yarnpkg.com/channels/{}/{}", release_line, channel);
+    let version = if use_yarnpkg_endpoints() {
+        // Old behavior: use repo.yarnpkg.com channels
+        let channel_url
+            = format!("https://repo.yarnpkg.com/channels/{}/{}", release_line, channel);
 
-    let response
-        = fetch(&channel_url).await?;
+        let response
+            = fetch(&channel_url).await?;
 
-    let version_str
-        = std::str::from_utf8(&response)?
-            .trim();
+        let version_str
+            = std::str::from_utf8(&response)?
+                .trim();
 
-    let version
-        = Version::from_str(version_str)?;
+        Version::from_str(version_str)?
+    } else {
+        // New behavior: use npm registry dist-tags
+        let platform = get_system_string();
+        let npm_url = format!("https://registry.npmjs.org/@yarnpkg/yarn-{}", platform);
+
+        let response
+            = fetch(&npm_url).await?;
+
+        let data: NpmPackageMetadata
+            = JsonDocument::hydrate_from_slice(&response)?;
+
+        // Map channel to npm dist-tag
+        // "stable" -> "latest", "canary" -> "canary"
+        let dist_tag = if channel == "stable" { "latest" } else { &channel };
+
+        let version_str = data.dist_tags.get(dist_tag)
+            .ok_or(Error::FailedToRetrieveLatestYarnTag)?;
+
+        Version::from_str(version_str)?
+    };
 
     channel_path
-        .fs_write_text(&version_str)?;
+        .fs_write_text(&version.to_file_string())?;
 
     Ok(version)
 }

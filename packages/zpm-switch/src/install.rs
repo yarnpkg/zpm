@@ -7,23 +7,48 @@ use crate::{cache, errors::Error, http::fetch, manifest::VersionPackageManagerRe
 
 async fn install_native_from_zip(source: &cache::CacheKey, binary_name: &str) -> Result<Command, Error> {
     let cache_path = cache::ensure(source, |p| async move {
-        let zip
+        let data
             = fetch(&source.to_url()).await?;
-
-        let entries
-            = zpm_formats::zip::entries_from_zip(&zip)?;
 
         let target_dir = p
             .with_join_str("bin");
 
-        entries_to_disk(&entries, &target_dir)?;
+        if cache::use_yarnpkg_endpoints() {
+            // Old format: zip file from repo.yarnpkg.com
+            let entries
+                = zpm_formats::zip::entries_from_zip(&data)?;
+
+            entries_to_disk(&entries, &target_dir)?;
+        } else {
+            // New format: tgz from npm registry
+            // npm packages have structure: package/{yarn,LICENSE.md}
+            // After stripping first segment: {yarn,LICENSE.md}
+            let tar_data
+                = zpm_formats::tar::unpack_tgz(&data)?;
+
+            let entries
+                = zpm_formats::tar::entries_from_tar(&tar_data)?
+                    .into_iter()
+                    .strip_first_segment()
+                    .collect::<Vec<_>>();
+
+            entries_to_disk(&entries, &target_dir)?;
+        }
 
         Ok(())
     }).await?;
 
-    let main_file_abs = cache_path
-        .with_join_str("bin")
-        .with_join_str(binary_name);
+    let main_file_abs = if cache::use_yarnpkg_endpoints() {
+        // Old format: binary is at bin/yarn-bin
+        cache_path
+            .with_join_str("bin")
+            .with_join_str(binary_name)
+    } else {
+        // New format: binary is at bin/yarn (copied from yarn-bin)
+        cache_path
+            .with_join_str("bin")
+            .with_join_str("yarn")
+    };
 
     let command
         = Command::new(main_file_abs.to_path_buf());
