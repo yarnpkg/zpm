@@ -1,12 +1,13 @@
-use std::{cell::RefCell, future::Future, io::{self, Write}, sync::{mpsc, LazyLock}, thread::JoinHandle, time::{Duration, SystemTime}};
+use std::{cell::RefCell, future::Future, io::{self, Write}, sync::{Arc, LazyLock, atomic::AtomicU32, mpsc}, thread::JoinHandle, time::{Duration, SystemTime}};
 
 use colored::{Color, Colorize};
 use dialoguer::{Input, Password};
-use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
+use itertools::Itertools;
+use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
 use zpm_config::Configuration;
 use zpm_primitives::{Descriptor, Locator};
 use zpm_switch::get_bin_version;
-use zpm_utils::{DataType, Path, ToHumanString};
+use zpm_utils::{DataType, Path, ToHumanString, Unit};
 
 use crate::error::Error;
 
@@ -18,19 +19,19 @@ pub async fn set_current_report(report: StreamReport) {
     REPORT.write().await.replace(report);
 }
 
-pub async fn current_report() -> RwLockWriteGuard<'static, Option<StreamReport>> {
-    REPORT.write().await
+pub async fn current_report() -> RwLockReadGuard<'static, Option<StreamReport>> {
+    REPORT.read().await
 }
 
 pub async fn async_section<F: Future>(name: &str, f: F) -> F::Output {
-    current_report().await.as_mut().map(|r| {
+    current_report().await.as_ref().map(|r| {
         r.push_section(name.to_string());
     });
 
     let res
         = f.await;
 
-    current_report().await.as_mut().map(|r| {
+    current_report().await.as_ref().map(|r| {
         r.pop_section();
     });
 
@@ -41,7 +42,7 @@ pub async fn error_handler<T, F: Future<Output = Result<(), Error>>>(f: F) -> ()
     let res = f.await;
 
     if let Err(e) = &res {
-        current_report().await.as_mut().map(|r| {
+        current_report().await.as_ref().map(|r| {
             r.error(e.clone());
         });
     }
@@ -79,7 +80,7 @@ pub async fn with_report_result<F, R>(report: StreamReport, f: F) -> Result<R, E
             = f.await;
 
         if let Err(e) = &res {
-            current_report().await.as_mut().map(|r| {
+            current_report().await.as_ref().map(|r| {
                 r.error(e.clone());
             });
 
@@ -99,7 +100,7 @@ pub async fn with_context_result<F, R>(context: ReportContext, f: F) -> Result<R
         let res = f.await;
 
         if let Err(e) = &res {
-            current_report().await.as_mut().map(|r| {
+            current_report().await.as_ref().map(|r| {
                 r.error(e.clone());
             });
         }
@@ -156,6 +157,13 @@ pub enum LastMessageType {
     Line,
 }
 
+#[derive(Debug, Default)]
+pub struct ReportCounters {
+    pub resolution_count: AtomicU32,
+    pub fetch_count: AtomicU32,
+    pub fetch_size: AtomicU32,
+}
+
 #[derive(Debug)]
 pub enum ReportMessage {
     Line(Severity, String),
@@ -170,6 +178,7 @@ struct Reporter {
 
     level: usize,
     indent: usize,
+    counters: Arc<ReportCounters>,
 
     last_message_type: Option<LastMessageType>,
     start_time: Option<SystemTime>,
@@ -180,7 +189,7 @@ struct Reporter {
 }
 
 impl Reporter {
-    pub fn new(config: StreamReportConfig, prompt_tx: mpsc::Sender<String>) -> Self {
+    pub fn new(config: StreamReportConfig, counters: Arc<ReportCounters>, prompt_tx: mpsc::Sender<String>) -> Self {
         let buffered_lines
             = config.silent_or_error.then_some(Vec::new());
 
@@ -188,6 +197,7 @@ impl Reporter {
             config,
             level: 0,
             indent: 0,
+            counters,
             last_message_type: None,
             start_time: None,
             buffered_lines,
@@ -208,11 +218,62 @@ impl Reporter {
     pub fn write_spinner<T: Write>(&mut self, writer: &mut T) {
         if let Some(spinner_idx) = self.spinner_idx {
             if !self.config.silent_or_error && self.config.enable_progress_bars {
-                let chars = "◐◓◑◒".chars().collect::<Vec<_>>();
-                write!(writer, "{}", chars[spinner_idx]).unwrap();
+                let prefix
+                    = Severity::Info.color().colorize("➤");
+                let indent
+                    = "  ".repeat(self.indent.saturating_sub(1));
+
+                let chars = "◴◷◶◵".chars().collect_vec();
+                write!(writer, "{} {}{} {}", prefix, indent, chars[spinner_idx], self.get_spinner_label()).unwrap();
 
                 self.spinner_idx = Some((spinner_idx + 1) % chars.len());
             }
+        }
+    }
+
+    fn get_plural_packages(count: u32) -> &'static str {
+        if count == 1 {
+            "package"
+        } else {
+            "packages"
+        }
+    }
+
+    fn get_spinner_label(&self) -> String {
+        let resolution_count
+            = self.counters.resolution_count.load(std::sync::atomic::Ordering::Relaxed);
+        let fetch_count
+            = self.counters.fetch_count.load(std::sync::atomic::Ordering::Relaxed);
+        let fetch_size
+            = self.counters.fetch_size.load(std::sync::atomic::Ordering::Relaxed);
+
+        let color
+            = DataType::Custom(144, 144, 144);
+
+        if resolution_count > 0 && fetch_count > 0 {
+            color.colorize(&format!(
+                "Resolved {} {}, fetched {} {} ({})",
+                DataType::Number.colorize(&resolution_count.to_string()),
+                Self::get_plural_packages(resolution_count),
+                DataType::Number.colorize(&fetch_count.to_string()),
+                Self::get_plural_packages(fetch_count),
+                Unit::bytes(fetch_size).to_print_string(),
+            ))
+        } else if resolution_count > 0 {
+            color.colorize(&format!(
+                "Resolved {} {}",
+                DataType::Number.colorize(&resolution_count.to_string()),
+                Self::get_plural_packages(resolution_count),
+            ))
+        } else if fetch_count > 0 {
+            color.colorize(&format!(
+                "Fetched {} {} ({})",
+                DataType::Number.colorize(&fetch_count.to_string()),
+                Self::get_plural_packages(fetch_count),
+                Unit::bytes(fetch_size).to_print_string(),
+            ))
+        } else {
+            String::new()
         }
     }
 
@@ -328,12 +389,23 @@ impl Reporter {
             panic!("Cannot pop section when no sections are pushed");
         }
 
-        self.indent -= 1;
-
         self.spinner_idx = None;
 
+        let spinner_label
+            = self.get_spinner_label();
+
+        self.counters.resolution_count.store(0, std::sync::atomic::Ordering::Relaxed);
+        self.counters.fetch_count.store(0, std::sync::atomic::Ordering::Relaxed);
+        self.counters.fetch_size.store(0, std::sync::atomic::Ordering::Relaxed);
+
+        if !spinner_label.is_empty() {
+            self.write_line(writer, &spinner_label, Severity::Info);
+        }
+
+        self.indent -= 1;
+
         if let Some(start_time) = self.start_time && let Ok(elapsed) = start_time.elapsed() {
-            self.write_line(writer, &format!("└ Completed in {}", pretty_duration::pretty_duration(&elapsed, None)), Severity::Info);
+            self.write_line(writer, &format!("└ Completed in {}", Unit::duration_ms_raw(elapsed.as_millis()).to_print_string()), Severity::Info);
         } else {
             self.write_line(writer, "└ Completed", Severity::Info);
         }
@@ -384,6 +456,8 @@ impl Reporter {
 }
 
 pub struct StreamReport {
+    pub counters: Arc<ReportCounters>,
+
     handle: JoinHandle<()>,
     break_request_tx: mpsc::Sender<bool>,
     msg_queue_tx: mpsc::Sender<ReportMessage>,
@@ -392,6 +466,9 @@ pub struct StreamReport {
 
 impl StreamReport {
     pub fn new(config: StreamReportConfig) -> Self {
+        let counters
+            = Arc::new(ReportCounters::default());
+
         let (break_request_tx, break_request_rx)
             = mpsc::channel::<bool>();
         let (msg_queue_tx, msg_queue_rx)
@@ -400,11 +477,9 @@ impl StreamReport {
             = mpsc::channel::<String>();
 
         let mut reporter
-            = Reporter::new(config, prompt_tx);
+            = Reporter::new(config, counters.clone(), prompt_tx);
 
         let handle = std::thread::spawn(move || {
-            let chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".chars().collect::<Vec<_>>();
-
             if reporter.config.enable_progress_bars {
                 let mut stdout = io::stdout();
                 reporter.on_start(&mut stdout);
@@ -415,7 +490,6 @@ impl StreamReport {
                 reporter.write_line(&mut io::stdout(), &format!("Yarn {}", get_bin_version()).bold().to_string(), Severity::Info);
             }
 
-            let mut idx = 0;
             loop {
                 let break_request
                     = break_request_rx.recv_timeout(Duration::from_millis(50));
@@ -423,8 +497,6 @@ impl StreamReport {
                 if break_request == Ok(true) {
                     break;
                 }
-
-                idx = (idx + 1) % chars.len();
 
                 let mut stdout
                     = io::stdout();
@@ -446,6 +518,7 @@ impl StreamReport {
         });
 
         Self {
+            counters,
             handle,
             break_request_tx,
             msg_queue_tx,
@@ -461,7 +534,7 @@ impl StreamReport {
         self.report(ReportMessage::Line(Severity::Warning, self.with_content_prefix(message)));
     }
 
-    pub fn error(&mut self, error: Error) {
+    pub fn error(&self, error: Error) {
         if !matches!(error, Error::SilentError) {
             self.report(ReportMessage::Line(Severity::Error, self.with_content_prefix(error.to_string())));
         }

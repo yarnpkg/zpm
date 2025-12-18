@@ -9,16 +9,36 @@ use crate::{DataType, FromFileString, ToFileString, ToHumanString};
 pub struct UnitDefinition {
     initial: &'static str,
     units: &'static [(f64, &'static str)],
+    data_type: Option<DataType>,
+    use_remainder: bool,
 }
 
 const BYTES: UnitDefinition = UnitDefinition {
     initial: " B",
     units: &[(1024.0, " KiB"), (1024.0, " MiB"), (1024.0, " GiB"), (1024.0, " TiB")],
+    data_type: Some(DataType::Size),
+    use_remainder: false,
 };
 
 const DURATION: UnitDefinition = UnitDefinition {
     initial: "s",
     units: &[(60.0, "m"), (60.0, "h"), (24.0, "d"), (7.0, "w"), (52.0, "y")],
+    data_type: Some(DataType::Duration),
+    use_remainder: false,
+};
+
+const DURATION_MS: UnitDefinition = UnitDefinition {
+    initial: "ms",
+    units: &[(1000.0, "s"), (60.0, "m"), (60.0, "h"), (24.0, "d"), (7.0, "w"), (52.0, "y")],
+    data_type: Some(DataType::Number),
+    use_remainder: true,
+};
+
+const DURATION_MS_RAW: UnitDefinition = UnitDefinition {
+    initial: "ms",
+    units: &[(1000.0, "s"), (60.0, "m"), (60.0, "h"), (24.0, "d"), (7.0, "w"), (52.0, "y")],
+    data_type: None,
+    use_remainder: true,
 };
 
 #[derive(Debug)]
@@ -34,6 +54,14 @@ impl<T> Unit<T> {
 
     pub fn duration(value: T) -> Self {
         Self {value, unit_definition: &DURATION}
+    }
+
+    pub fn duration_ms(value: T) -> Self {
+        Self {value, unit_definition: &DURATION_MS}
+    }
+
+    pub fn duration_ms_raw(value: T) -> Self {
+        Self {value, unit_definition: &DURATION_MS_RAW}
     }
 }
 
@@ -103,19 +131,61 @@ impl<T: DivAssign + Rem + PartialOrd + Display + Copy + NumCast> ToHumanString f
         let mut value: f64
             = NumCast::from(self.value).unwrap();
 
-        let mut current_unit
-            = self.unit_definition.initial;
+        if self.unit_definition.use_remainder {
+            let mut current_unit
+                = self.unit_definition.initial;
 
-        for (factor, unit) in self.unit_definition.units.iter().cloned() {
-            if value < factor {
-                break;
+            let mut segments
+                = vec![];
+
+            for (factor, unit) in self.unit_definition.units.iter().cloned() {
+                let remainder
+                    = value % factor;
+
+                if remainder > 0.0 {
+                    segments.push(format!("{:.0}{}", remainder, current_unit));
+                }
+
+                value = (value - remainder) / factor;
+                current_unit = unit;
             }
 
-            value /= factor;
-            current_unit = unit;
-        }
+            if segments.is_empty() {
+                segments.push(format!("0{}", self.unit_definition.initial));
+            }
 
-        DataType::Number.colorize(&format!("{:.2}{}", value, current_unit))
+            segments.reverse();
+
+            let joined
+                = segments.join(" ");
+
+            if let Some(data_type) = self.unit_definition.data_type {
+                data_type.colorize(&joined)
+            } else {
+                joined
+            }
+        } else {
+            let mut current_unit
+                = self.unit_definition.initial;
+
+            for (factor, unit) in self.unit_definition.units.iter().cloned() {
+                if value < factor {
+                    break;
+                }
+
+                value /= factor;
+                current_unit = unit;
+            }
+
+            let formatted
+                = format!("{:.2}{}", value, current_unit);
+
+            if let Some(data_type) = self.unit_definition.data_type {
+                data_type.colorize(&formatted)
+            } else {
+                formatted
+            }
+        }
     }
 }
 

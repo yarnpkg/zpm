@@ -1,10 +1,10 @@
 use colored::{Color, Colorize};
 
 const INFO_COLOR: Color
-    = Color::BrightBlue;
+    = Color::TrueColor { r: 87, g: 163, b: 255 };
 
 const WARNING_COLOR: Color
-    = Color::BrightYellow;
+    = Color::TrueColor { r: 255, g: 87, b: 51 };
 
 const ERROR_COLOR: Color
     = Color::TrueColor { r: 200, g: 100, b: 100 };
@@ -17,6 +17,12 @@ const STRING_COLOR: Color
 
 const NUMBER_COLOR: Color
     = Color::TrueColor { r: 255, g: 215, b: 0 };
+
+const SIZE_COLOR: Color
+    = Color::TrueColor { r: 120, g: 100, b: 200 };
+
+const DURATION_COLOR: Color
+    = Color::TrueColor { r: 180, g: 180, b: 180 };
 
 const BOOLEAN_COLOR: Color
     = Color::TrueColor { r: 250, g: 160, b: 35 };
@@ -42,6 +48,7 @@ const RANGE_COLOR: Color
 const REFERENCE_COLOR: Color
     = Color::TrueColor { r: 135, g: 175, b: 255 };
 
+#[derive(Debug, Clone, Copy)]
 pub enum DataType {
     Info,
     Warning,
@@ -49,6 +56,8 @@ pub enum DataType {
     Success,
     String,
     Number,
+    Size,
+    Duration,
     Boolean,
     Null,
     Code,
@@ -69,6 +78,8 @@ impl DataType {
             DataType::Success => SUCCESS_COLOR,
             DataType::String => STRING_COLOR,
             DataType::Number => NUMBER_COLOR,
+            DataType::Size => SIZE_COLOR,
+            DataType::Duration => DURATION_COLOR,
             DataType::Boolean => BOOLEAN_COLOR,
             DataType::Null => NULL_COLOR,
             DataType::Code => CODE_COLOR,

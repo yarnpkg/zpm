@@ -15,14 +15,14 @@ use crate::{
     constraints::check_constraints,
     content_flags::ContentFlags,
     error::Error,
-    fetchers::{fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync, PackageData, SyncFetchAttempt},
+    fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync},
     graph::{GraphCache, GraphIn, GraphOut, GraphTasks},
     linker,
     lockfile::{Lockfile, LockfileEntry, LockfileMetadata},
     primitives_exts::RangeExt,
     project::{InstallMode, Project},
-    report::{async_section, with_context_result, ReportContext},
-    resolvers::{resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution, Resolution, SyncResolutionAttempt}, system, tree_resolver::{ResolutionTree, TreeResolver},
+    report::{ReportContext, async_section, current_report, with_context_result},
+    resolvers::{Resolution, SyncResolutionAttempt, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution}, system, tree_resolver::{ResolutionTree, TreeResolver},
 };
 
 #[derive(Clone)]
@@ -359,6 +359,10 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                 unreachable!("PhantomData should never be instantiated"),
 
             InstallOp::Validate {descriptor, locator} => {
+                current_report().await.as_ref().map(|report| {
+                    report.counters.resolution_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                });
+
                 with_context_result(ReportContext::Descriptor(descriptor.clone()), async {
                     tokio::time::timeout(
                         timeout,
@@ -370,6 +374,10 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
             },
 
             InstallOp::Refresh {locator} => {
+                current_report().await.as_ref().map(|report| {
+                    report.counters.resolution_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                });
+
                 with_context_result(ReportContext::Locator(locator.clone()), async {
                     let future = tokio::time::timeout(
                         timeout,
@@ -381,6 +389,12 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
             },
 
             InstallOp::Resolve {descriptor} => {
+                if !descriptor.range.details().transient_resolution {
+                    current_report().await.as_ref().map(|report| {
+                        report.counters.resolution_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    });
+                }
+
                 with_context_result(ReportContext::Descriptor(descriptor.clone()), async {
                     let dependencies = match try_resolve_descriptor_sync(context.clone(), descriptor.clone(), dependencies)? {
                         SyncResolutionAttempt::Success(result) => return Ok(InstallOpResult::Resolved(result)),
