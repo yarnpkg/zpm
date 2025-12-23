@@ -1,0 +1,48 @@
+{
+  "name": "pkg-tests-core",
+  "private": true,
+  "license": "BSD-2-Clause",
+  "main": "./sources/index.ts",
+  "exports": {
+    ".": "./sources/index.ts",
+    "./package.json": "./package.json"
+  },
+  "devDependencies": {
+    "@types/finalhandler": "1.1.0",
+    "@types/invariant": "^2.2.30",
+    "@types/pem": "^1",
+    "@types/semver": "^7.1.0",
+    "@types/serve-static": "1.13.3",
+    "@types/tar-fs": "^1.16.1",
+    "@types/uuid": "^8",
+    "@yarnpkg/cli": "^4.12.0",
+    "@yarnpkg/core": "^4.5.0",
+    "@yarnpkg/fslib": "^3.1.4",
+    "@yarnpkg/parsers": "^3.0.3",
+    "@yarnpkg/plugin-npm-cli": "^4.4.0",
+    "@yarnpkg/plugin-npm": "^3.4.0",
+    "@yarnpkg/plugin-pack": "^4.0.3",
+    "finalhandler": "^1.1.2",
+    "invariant": "^2.2.4",
+    "pem": "dexus/pem",
+    "pkg-tests-fixtures": "workspace:^",
+    "semver": "^7.1.2",
+    "serve-static": "^1.14.1",
+    "sigstore": "^3.1.0",
+    "super-resolve": "^1.0.0",
+    "tar-fs": "^1.16.0",
+    "tslib": "^2.4.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yarnpkg/berry.git",
+    "directory": "packages/acceptance-tests/pkg-tests-core"
+  },
+  "engines": {
+    "node": ">=18.12.0"
+  },
+  "dependencies": {
+    "typanion": "^3.14.0",
+    "uuid": "^8.3.2"
+  }
+}

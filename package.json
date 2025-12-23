@@ -3,7 +3,11 @@
   "packageManager": "yarn@6.0.0-rc.6",
   "workspaces": [
     "documentation",
-    "packages/*"
+    "packages/*",
+    "tests/acceptance-tests",
+    "tests/acceptance-tests/pkg-tests-core",
+    "tests/acceptance-tests/pkg-tests-fixtures",
+    "tests/acceptance-tests/pkg-tests-specs"
   ],
   "devDependencies": {
     "@types/lodash": "^4.17.17",
