@@ -5,17 +5,13 @@ use serde_with::{serde_as, DefaultOnError};
 use zpm_parsers::{document::Document, Value};
 use zpm_primitives::{Descriptor, Ident, PeerRange, descriptor_map_deserializer, descriptor_map_serializer};
 use zpm_switch::PackageManagerField;
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::{Path, Requirements, ToFileString};
 use bin::BinField;
 use bincode::{Decode, Encode};
 use exports::ExportsField;
 use imports::ImportsField;
 use resolutions::ResolutionsField;
 use serde::{Deserialize, Serialize};
-
-use crate::{
-    system,
-};
 
 pub mod bin;
 pub mod browser;
@@ -51,7 +47,7 @@ pub struct RemoteManifest {
     pub version: Option<zpm_semver::Version>,
 
     #[serde(flatten)]
-    pub requirements: system::Requirements,
+    pub requirements: Requirements,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]

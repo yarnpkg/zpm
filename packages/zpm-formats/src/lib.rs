@@ -87,6 +87,16 @@ impl<'a> Entry<'a> {
             compression: None,
         }
     }
+
+    pub fn new_file(name: Path, data: Cow<'a, [u8]>) -> Self {
+        Entry {
+            name,
+            mode: 0o644,
+            crc: 0,
+            data,
+            compression: None,
+        }
+    }
 }
 
 pub fn entries_to_disk<'a>(entries: &[Entry<'a>], base: &Path) -> Result<(), Error> {

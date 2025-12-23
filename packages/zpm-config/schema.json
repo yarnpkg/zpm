@@ -299,21 +299,21 @@
           "type": "array",
           "description": "List of CPU architectures to cover.",
           "items": {
-            "type": "crate::Cpu"
+            "type": "zpm_utils::Cpu"
           }
         },
         "libc": {
           "type": "array",
           "description": "The list of standard C libraries to cover.",
           "items": {
-            "type": "crate::Libc"
+            "type": "zpm_utils::Libc"
           }
         },
         "os": {
           "type": "array",
           "description": "The list of operating systems to cover.",
           "items": {
-            "type": "crate::Os"
+            "type": "zpm_utils::Os"
           }
         }
       }

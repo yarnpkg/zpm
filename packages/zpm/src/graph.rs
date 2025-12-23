@@ -16,7 +16,7 @@ pub trait GraphIn<'a, TCtx, TOut, TErr> where Self: Sized, TCtx: Send {
 }
 
 pub trait GraphOut<TCtx, TIn> where Self: Sized {
-    fn graph_follow_ups(&self, ctx: &TCtx) -> Vec<TIn>;
+    fn graph_follow_ups(&self, op: &TIn, ctx: &TCtx) -> Vec<TIn>;
 }
 
 pub struct GraphTaskResults<TIn, TOut, TErr> {
@@ -215,7 +215,7 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
     }
 
     pub fn accept(&mut self, op: TIn, out: TOut) {
-        let follow_ups = out.graph_follow_ups(&self.context);
+        let follow_ups = out.graph_follow_ups(&op, &self.context);
 
         self.results.success.insert(op.clone(), out);
 

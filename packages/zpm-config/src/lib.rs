@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-use zpm_utils::{AbstractValue, Container, DataType, FromFileString, IoResultExt, Path, RawString, Serialized, ToFileString, ToHumanString, tree};
+use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, IoResultExt, Libc, Os, Path, RawString, Serialized, System, ToFileString, ToHumanString, tree};
 
 #[derive(Debug, Clone)]
 pub struct ConfigurationContext {
@@ -698,6 +698,66 @@ macro_rules! merge_settings {
 
 include!(concat!(env!("OUT_DIR"), "/schema.rs"));
 
+impl SupportedArchitectures {
+    pub fn to_systems(&self) -> Vec<System> {
+        let mut systems
+            = Vec::new();
+
+        let current
+            = System::from_current();
+
+        let cpus = if self.cpu.is_empty() {
+            vec![&Cpu::Current]
+        } else {
+            self.cpu.iter().map(|c| &c.value).collect()
+        };
+
+        let os = if self.os.is_empty() {
+            vec![&Os::Current]
+        } else {
+            self.os.iter().map(|o| &o.value).collect()
+        };
+
+        let libc = if self.libc.is_empty() {
+            vec![&Libc::Current]
+        } else {
+            self.libc.iter().map(|l| &l.value).collect()
+        };
+
+        for &cpu in &cpus {
+            for &os in &os {
+                for &libc in &libc {
+                    let arch = if cpu == &Cpu::Current {
+                        current.arch.clone()
+                    } else {
+                        Some(cpu.clone())
+                    };
+
+                    let os = if os == &Os::Current {
+                        current.os.clone()
+                    } else {
+                        Some(os.clone())
+                    };
+
+                    let libc = if libc == &Libc::Current {
+                        current.libc.clone()
+                    } else {
+                        Some(libc.clone())
+                    };
+
+                    systems.push(System {
+                        arch,
+                        os,
+                        libc,
+                    });
+                }
+            }
+        }
+
+        systems
+    }
+}
+
 pub struct Configuration {
     pub settings: Settings,
     pub user_config_path: Option<Path>,
@@ -846,11 +906,11 @@ merge_settings!(zpm_primitives::Reference, |s: &str| FromFileString::from_file_s
 
 merge_settings!(zpm_semver::RangeKind, |s: &str| FromFileString::from_file_string(s).unwrap());
 
-merge_settings!(zpm_utils::Secret<String>, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_utils::Cpu, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_utils::Glob, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_utils::Libc, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_utils::Os, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_utils::Secret<String>, |s: &str| FromFileString::from_file_string(s).unwrap());
 
 merge_settings!(crate::types::NodeLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(crate::types::Cpu, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(crate::types::Libc, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_settings!(crate::types::Os, |s: &str| FromFileString::from_file_string(s).unwrap());

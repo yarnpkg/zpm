@@ -1,5 +1,5 @@
 use zpm_primitives::{Locator, Reference, RegistryReference};
-use zpm_utils::{Hash64, Path};
+use zpm_utils::{Hash64, Path, ToHumanString};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -7,6 +7,7 @@ use crate::{
     install::{FetchResult, InstallContext, InstallOpResult},
 };
 
+pub mod builtin;
 pub mod folder;
 pub mod git;
 pub mod link;
@@ -15,6 +16,7 @@ pub mod patch;
 pub mod portal;
 pub mod tarball;
 pub mod url;
+pub mod variants;
 pub mod workspace;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -26,6 +28,9 @@ pub enum PackageLinking {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PackageData {
+    /** An abstract package must not be fetched; it'll be replaced in the tree by a concrete variant */
+    Abstract,
+
     Local {
         /** Directory that contains the package.json file */
         package_directory: Path,
@@ -72,6 +77,7 @@ impl PackageData {
     /** Top-most context directory of the package */
     pub fn data_root(&self) -> &Path {
         match self {
+            PackageData::Abstract => panic!("Invalid package data"),
             PackageData::Local {package_directory, ..} => package_directory,
             PackageData::MissingZip {archive_path, ..} => archive_path,
             PackageData::Zip {archive_path, ..} => archive_path,
@@ -81,6 +87,7 @@ impl PackageData {
     /** Directory from which relative links from link:/file:/portal: dependencies will be resolved */
     pub fn context_directory(&self) -> &Path {
         match self {
+            PackageData::Abstract => panic!("Invalid package data"),
             PackageData::Local {package_directory, ..} => package_directory,
             PackageData::MissingZip {context_directory, ..} => context_directory,
             PackageData::Zip {context_directory, ..} => context_directory,
@@ -90,6 +97,7 @@ impl PackageData {
     /** Directory that contains the package.json file */
     pub fn package_directory(&self) -> &Path {
         match self {
+            PackageData::Abstract => panic!("Invalid package data"),
             PackageData::Local {package_directory, ..} => package_directory,
             PackageData::MissingZip {package_directory, ..} => package_directory,
             PackageData::Zip {package_directory, ..} => package_directory,
@@ -103,6 +111,7 @@ impl PackageData {
 
     pub fn checksum(&self) -> Option<Hash64> {
         match self {
+            PackageData::Abstract => None,
             PackageData::Local {..} => None,
             PackageData::MissingZip {..} => None,
             PackageData::Zip {checksum, ..} => checksum.clone(),
@@ -111,6 +120,7 @@ impl PackageData {
 
     pub fn link_type(&self) -> PackageLinking {
         match self {
+            PackageData::Abstract => panic!("Invalid package data"),
             PackageData::Local {..} => PackageLinking::Soft,
             PackageData::MissingZip {..} => PackageLinking::Hard,
             PackageData::Zip {..} => PackageLinking::Hard,
@@ -155,6 +165,9 @@ pub fn try_fetch_locator_sync(context: InstallContext, locator: &Locator, is_moc
 
 pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     match &locator.reference {
+        Reference::Builtin(params)
+            => builtin::fetch_builtin_locator(&context, locator, params).await,
+
         Reference::Link(params)
             => link::fetch_locator(&context, locator, params, dependencies),
 
@@ -188,6 +201,6 @@ pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, i
         Reference::WorkspacePath(params)
             => workspace::fetch_locator_path(&context, locator, params),
 
-        _ => Err(Error::Unsupported),
+        _ => panic!("This reference ({}) should never end up being passed to a fetcher", locator.reference.to_print_string()),
     }
 }

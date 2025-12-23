@@ -65,6 +65,10 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
                     = install.package_data.get(&child_node.locator.physical_locator());
 
                 match package_data {
+                    Some(PackageData::Abstract) => {
+                        return Err(Error::Unsupported);
+                    },
+
                     Some(PackageData::Local {package_directory, ..}) => {
                         let child_abs_path
                             = workspace_abs_path.with_join(&child_rel_path);

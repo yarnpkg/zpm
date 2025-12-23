@@ -32,3 +32,4 @@ rstest = "0.26.1"
 indexmap = {version = "2.11.0", features = ["serde"]}
 timeago = "0.5.0"
 fundu = "2.0.1"
+zpm-macro-enum = { path = "../zpm-macro-enum" }

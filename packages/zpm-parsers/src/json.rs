@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::Range};
+use std::{collections::BTreeMap, ops::Range, str::FromStr};
 
 use itertools::Itertools;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -13,6 +13,19 @@ pub use sonic_rs as json_provider;
 
 pub type RawJsonDeserializer<R> = json_provider::Deserializer<R>;
 pub type RawJsonValue = json_provider::Value;
+
+#[derive(Debug)]
+pub struct JsonSource<T> {
+    pub value: T,
+}
+
+impl<T: DeserializeOwned> FromStr for JsonSource<T> {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self { value: JsonDocument::hydrate_from_str(s)? })
+    }
+}
 
 pub struct JsonDocument {
     pub input: Vec<u8>,

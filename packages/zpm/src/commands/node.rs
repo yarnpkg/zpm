@@ -19,11 +19,15 @@ pub struct Node {
 
 impl Node {
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let project
+        let mut project
             = project::Project::new(None).await?;
+
+        project
+            .lazy_install().await?;
 
         Ok(ScriptEnvironment::new()?
             .with_project(&project)
+            .with_package(&project, &project.active_package()?)?
             .enable_shell_forwarding()
             .run_exec("node", &self.args)
             .await?

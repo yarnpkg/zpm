@@ -2,7 +2,7 @@ use std::hash::Hash;
 
 use bincode::{Decode, Encode};
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, Hash64, Path, ToFileString, ToHumanString, UrlEncoded};
+use zpm_utils::{DataType, Hash64, Path, ToFileString, ToHumanString, UrlEncoded, impl_file_string_from_str, impl_file_string_serialization};
 
 use super::{Ident, Locator};
 
@@ -16,6 +16,11 @@ pub enum ReferenceError {
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Reference {
+    #[pattern(spec = r"builtin:(?<version>.*)")]
+    Builtin {
+        version: zpm_semver::Version,
+    },
+
     #[pattern(spec = r"npm:(?<version>.*)")]
     Shorthand {
         version: zpm_semver::Version,
@@ -80,11 +85,6 @@ pub enum Reference {
     Url {
         url: String,
     },
-
-    #[no_pattern]
-    Synthetic {
-        nonce: usize,
-    },
 }
 
 impl Reference {
@@ -134,6 +134,10 @@ impl Reference {
 
     pub fn slug(&self) -> String {
         match self {
+            Reference::Builtin(params) => {
+                format!("builtin-{}", params.version.to_file_string())
+            },
+
             Reference::Shorthand(params) => {
                 format!("npm-{}", params.version.to_file_string())
             },
@@ -181,10 +185,6 @@ impl Reference {
             Reference::WorkspacePath(_) => {
                 "workspace".to_string()
             },
-
-            Reference::Synthetic(_) => {
-                "synthetic".to_string()
-            },
         }
     }
 }
@@ -192,6 +192,10 @@ impl Reference {
 impl ToFileString for Reference {
     fn to_file_string(&self) -> String {
         match self {
+            Reference::Builtin(params) => {
+                format!("builtin:{}", params.version.to_file_string())
+            },
+
             Reference::Shorthand(params) => {
                 format!("npm:{}", params.version.to_file_string())
             },
@@ -245,10 +249,6 @@ impl ToFileString for Reference {
                     true => ".".to_string(),
                     false => params.path.to_file_string(),
                 })
-            },
-
-            Reference::Synthetic(params) => {
-                format!("synthetic:{}", params.nonce)
             },
         }
     }

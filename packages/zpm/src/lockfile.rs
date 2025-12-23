@@ -263,16 +263,7 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
 
         lockfile.entries.insert(entry.resolution.clone(), LockfileEntry {
             checksum: None,
-            resolution: Resolution {
-                locator: entry.resolution,
-                version: Default::default(),
-                requirements: Default::default(),
-                dependencies: Default::default(),
-                peer_dependencies: Default::default(),
-                optional_dependencies: Default::default(),
-                optional_peer_dependencies: Default::default(),
-                missing_peer_dependencies: Default::default(),
-            },
+            resolution: Resolution::new_empty(entry.resolution, Default::default()),
         });
     }
 

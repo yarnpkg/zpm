@@ -11,7 +11,7 @@ use serde::ser::SerializeMap;
 use serde::Deserializer;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, Hash64, ToFileString, ToHumanString};
 
-use crate::{IdentError, LocatorError, RangeError};
+use crate::{BuiltinRange, IdentError, LocatorError, RangeError};
 
 use super::range::VirtualRange;
 use super::{reference, Ident, Locator, Range, Reference};
@@ -107,6 +107,39 @@ impl Descriptor {
     }
 }
 
+fn extract_descriptor(ident_str: &str, range_str: &str) -> Result<Descriptor, DescriptorError> {
+    let parent_marker
+        = "::parent=";
+    let parent_split
+        = range_str.find(parent_marker);
+
+    let ident
+        = Ident::from_file_string(ident_str)?;
+    let mut range
+        = Range::from_file_string(&range_str[..parent_split.map_or(range_str.len(), |idx| idx)])?;
+
+    if ident.scope() == Some("@builtin") {
+        if !matches!(range, Range::Builtin(_)) {
+            let Range::AnonymousSemver(params) = range else {
+                return Err(DescriptorError::SyntaxError(range_str.to_string()));
+            };
+
+            range = Range::Builtin(BuiltinRange {
+                range: params.range.clone(),
+            });
+        }
+    }
+
+    let parent = parent_split
+        .map(|idx| Locator::from_file_string(&range_str[idx + parent_marker.len()..]))
+        .transpose()?;
+
+    let descriptor
+        = Descriptor::new_bound(ident.clone(), range, parent);
+
+    Ok(descriptor)
+}
+
 pub fn descriptor_map_serializer<S>(value: &BTreeMap<Ident, Descriptor>, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
     let mut map
         = serializer.serialize_map(Some(value.len()))?;
@@ -146,23 +179,11 @@ pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<BTreeMap<I
                 = BTreeMap::new();
 
             while let Some((key, value)) = access.next_entry::<&str, &str>()? {
-                let parent_marker = "::parent=";
-                let parent_split = value.find(parent_marker);
-
-                let ident = Ident::from_file_string(key)
-                    .map_err(serde::de::Error::custom)?;
-                let range = Range::from_file_string(&value[..parent_split.map_or(value.len(), |idx| idx)])
-                    .map_err(serde::de::Error::custom)?;
-
-                let parent = parent_split
-                    .map(|idx| Locator::from_file_string(&value[idx + parent_marker.len()..]))
-                    .transpose()
-                    .map_err(serde::de::Error::custom)?;
-
                 let descriptor
-                    = Descriptor::new_bound(ident.clone(), range, parent);
+                    = extract_descriptor(key, value)
+                        .map_err(|e| serde::de::Error::custom(e.to_string()))?;
 
-                map.insert(ident, descriptor);
+                map.insert(descriptor.ident.clone(), descriptor);
             }
 
             Ok(map)
@@ -180,21 +201,15 @@ impl FromFileString for Descriptor {
             .map_or_else(|| src.find('@'), |rest| rest.find('@').map(|x| x + 1))
             .ok_or_else(|| DescriptorError::SyntaxError(src.to_string()))?;
 
-        let parent_marker
-            = "::parent=";
-        let parent_split
-            = src.find(parent_marker);
+        let ident_str
+            = &src[..at_split];
+        let range_str
+            = &src[at_split + 1..];
 
-        let ident
-            = Ident::from_file_string(&src[..at_split])?;
-        let range
-            = Range::from_file_string(&src[at_split + 1..parent_split.map_or(src.len(), |idx| idx)])?;
+        let descriptor
+            = extract_descriptor(ident_str, range_str)?;
 
-        let parent = parent_split
-            .map(|idx| Locator::from_file_string(&src[idx + parent_marker.len()..]))
-            .transpose()?;
-
-        Ok(Descriptor::new_bound(ident, range, parent))
+        Ok(descriptor)
     }
 }
 

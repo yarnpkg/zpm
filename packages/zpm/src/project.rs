@@ -21,7 +21,6 @@ use crate::{
     manifest_finder::CachedManifestFinder,
     report::{with_report_result, StreamReport, StreamReportConfig},
     script::{Binary, ScriptEnvironment},
-    system::System,
 };
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
@@ -739,7 +738,7 @@ impl Project {
         });
 
         let systems
-            = System::from_supported_architectures(&self.config.settings.supported_architectures);
+            = self.config.settings.supported_architectures.to_systems();
 
         with_report_result(report, async {
             let package_cache

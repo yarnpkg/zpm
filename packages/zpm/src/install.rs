@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
-use zpm_utils::{Hash64, IoResultExt, Path, ToHumanString, UrlEncoded};
+use zpm_utils::{Hash64, IoResultExt, Path, System, ToHumanString, UrlEncoded};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
@@ -22,14 +22,14 @@ use crate::{
     primitives_exts::RangeExt,
     project::{InstallMode, Project},
     report::{ReportContext, async_section, current_report, with_context_result},
-    resolvers::{Resolution, SyncResolutionAttempt, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution}, system, tree_resolver::{ResolutionTree, TreeResolver},
+    resolvers::{Resolution, SyncResolutionAttempt, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution}, tree_resolver::{ResolutionTree, TreeResolver},
 };
 
 #[derive(Clone)]
 pub struct InstallContext<'a> {
     pub package_cache: Option<&'a CompositeCache>,
     pub project: Option<&'a Project>,
-    pub systems: Option<&'a Vec<system::System>>,
+    pub systems: Option<&'a Vec<System>>,
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub prune_dev_dependencies: bool,
@@ -97,7 +97,7 @@ impl<'a> InstallContext<'a> {
         self
     }
 
-    pub fn with_systems(mut self, systems: Option<&'a Vec<system::System>>) -> Self {
+    pub fn with_systems(mut self, systems: Option<&'a Vec<System>>) -> Self {
         self.systems = systems;
         self
     }
@@ -230,7 +230,7 @@ impl InstallOpResult {
 }
 
 impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
-    fn graph_follow_ups(&self, ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
+    fn graph_follow_ups(&self, op: &InstallOp<'a>, ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
         match self {
             InstallOpResult::Validated => {
                 vec![]
@@ -254,7 +254,8 @@ impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
                 let transitive_dependencies = resolution.dependencies
                     .values()
                     .cloned()
-                    .map(|dependency| InstallOp::Resolve {descriptor: dependency});
+                    .map(|dependency| InstallOp::Resolve {descriptor: dependency})
+                    .chain(resolution.variants.iter().map(|variant| InstallOp::Refresh {locator: variant.locator.clone()}));
 
                 follow_ups.extend(transitive_dependencies);
                 follow_ups

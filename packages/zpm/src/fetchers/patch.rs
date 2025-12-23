@@ -102,7 +102,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
                     .collect::<Vec<_>>()
             },
 
-            PackageData::MissingZip {..} => {
+            PackageData::Abstract | PackageData::MissingZip {..} => {
                 return Err(Error::Unsupported);
             },
         };

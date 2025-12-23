@@ -3,11 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use zpm_primitives::{Descriptor, Ident, Locator, PeerRange, Range, Reference, RegistryReference, SemverPeerRange, WorkspaceIdentRange, descriptor_map_serializer, descriptor_map_deserializer};
+use zpm_utils::Requirements;
 
 use crate::{
-    error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest, system
+    error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest
 };
 
+pub mod builtin;
 pub mod folder;
 pub mod git;
 pub mod link;
@@ -19,6 +21,13 @@ pub mod tag;
 pub mod tarball;
 pub mod url;
 pub mod workspace;
+
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Variant {
+    pub requirements: Requirements,
+    pub locator: Locator,
+}
 
 /**
  * Contains the information we keep in the lockfile for a given package.
@@ -32,7 +41,7 @@ pub struct Resolution {
 
     #[serde(default)]
     #[serde(skip_serializing_if = "zpm_utils::is_default")]
-    pub requirements: system::Requirements,
+    pub requirements: Requirements,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -55,9 +64,27 @@ pub struct Resolution {
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeSet::is_empty")]
     pub missing_peer_dependencies: BTreeSet<Ident>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<Variant>,
 }
 
 impl Resolution {
+    pub fn new_empty(locator: Locator, version: zpm_semver::Version) -> Resolution {
+        Resolution {
+            locator,
+            version,
+            requirements: Requirements::default(),
+            dependencies: BTreeMap::new(),
+            peer_dependencies: BTreeMap::new(),
+            optional_dependencies: BTreeSet::new(),
+            optional_peer_dependencies: BTreeSet::new(),
+            missing_peer_dependencies: BTreeSet::new(),
+            variants: Vec::new(),
+        }
+    }
+
     pub fn from_remote_manifest(locator: Locator, manifest: RemoteManifest) -> Resolution {
         let optional_dependencies
             = BTreeSet::from_iter(manifest.optional_dependencies.keys().cloned());
@@ -94,6 +121,7 @@ impl Resolution {
             optional_peer_dependencies,
             missing_peer_dependencies: BTreeSet::new(),
             requirements: manifest.requirements,
+            variants: Vec::new(),
         }
     }
 }
@@ -152,6 +180,9 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
     }
 
     match &descriptor.range {
+        Range::Builtin(params)
+            => builtin::resolve_builtin_descriptor(&context, &descriptor, params).await,
+
         Range::AnonymousSemver(params)
             => semver::resolve_descriptor(&context, &descriptor, params).await,
 
@@ -200,6 +231,9 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
 
 pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     match &locator.reference {
+        Reference::Builtin(params)
+            => builtin::resolve_builtin_locator(&context, &locator, &params.version).await,
+
         Reference::Link(params)
             => link::resolve_locator(&context, &locator, params),
 
@@ -235,9 +269,6 @@ pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, depe
 
         Reference::WorkspacePath(params)
             => workspace::resolve_locator_path(&context, &locator, params),
-
-        Reference::Synthetic(_)
-            => Err(Error::Unsupported)?,
     }
 }
 

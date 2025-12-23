@@ -4562,4 +4562,5 @@ dependencies = [
  "tokio",
  "urlencoding",
  "wax",
+ "zpm-macro-enum",
 ]

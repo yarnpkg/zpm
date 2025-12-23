@@ -6,6 +6,7 @@
     "packages/*"
   ],
   "devDependencies": {
+    "@builtin/node": "24.10.0",
     "@types/lodash": "^4.17.17",
     "@types/node": "^22.15.20",
     "@yarnpkg/types": "^4.0.1",

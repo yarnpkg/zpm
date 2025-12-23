@@ -3,7 +3,7 @@ use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::Perm
 use zpm_formats::iter_ext::IterExt;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, FilterDescriptor, Locator};
-use zpm_utils::{Path, PathError};
+use zpm_utils::{Path, PathError, System};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -14,7 +14,6 @@ use crate::{
     install::Install,
     project::Project,
     resolvers::Resolution,
-    system,
 };
 
 #[derive(Debug, Default, Clone, Deserialize, PartialEq, Eq, Serialize)]
@@ -213,7 +212,7 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     // incompatible with the current system (even if the package isn't
     // marked as optional).
     let is_compatible = resolution.requirements
-        .validate_system(&system::System::from_current());
+        .validate_system(&System::from_current());
 
     let must_build
         = should_build_if_compatible && is_compatible;

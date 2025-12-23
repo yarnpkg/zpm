@@ -30,6 +30,7 @@ impl RangeExt for Range {
     #[inline]
     fn details(&self) -> RangeDetails {
         match self {
+            Range::Builtin(_) |
             Range::AnonymousSemver(_) |
             Range::AnonymousTag(_) |
             Range::RegistrySemver(_) |

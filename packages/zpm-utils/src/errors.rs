@@ -13,6 +13,12 @@ pub fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
 }
 
 #[derive(Error, Clone, Debug)]
+pub enum EnumError {
+    #[error("Enum not found: {0}")]
+    NotFound(String),
+}
+
+#[derive(Error, Clone, Debug)]
 pub enum PathError {
     #[error("Immutable paths cannot be modified (when modifying {path}; current mode: {current_mode:?}, expected mode: {expected_mode:?})", path = path.to_print_string())]
     ImmutablePermissions {

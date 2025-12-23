@@ -1,12 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use zpm_primitives::{Descriptor, LinkRange, LinkReference, Locator, Reference};
 
 use crate::{
     error::Error,
     install::{InstallContext, IntoResolutionResult, ResolutionResult},
     resolvers::Resolution,
-    system,
 };
 
 pub fn resolve_descriptor(ctx: &InstallContext<'_>, descriptor: &Descriptor, params: &LinkRange) -> Result<ResolutionResult, Error> {
@@ -25,16 +22,8 @@ pub fn resolve_descriptor(ctx: &InstallContext<'_>, descriptor: &Descriptor, par
 }
 
 pub fn resolve_locator(ctx: &InstallContext<'_>, locator: &Locator, _params: &LinkReference) -> Result<ResolutionResult, Error> {
-    let resolution = Resolution {
-        version: zpm_semver::Version::new(),
-        locator: locator.clone(),
-        dependencies: BTreeMap::new(),
-        peer_dependencies: BTreeMap::new(),
-        optional_dependencies: BTreeSet::new(),
-        optional_peer_dependencies: BTreeSet::new(),
-        missing_peer_dependencies: BTreeSet::new(),
-        requirements: system::Requirements::default(),
-    };
+    let resolution
+        = Resolution::new_empty(locator.clone(), zpm_semver::Version::new());
 
     Ok(resolution.into_resolution_result(ctx))
 }

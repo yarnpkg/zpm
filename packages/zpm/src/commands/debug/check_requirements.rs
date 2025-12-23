@@ -1,11 +1,13 @@
 use clipanion::cli;
+use zpm_parsers::JsonSource;
+use zpm_utils::Requirements;
 
-use crate::{error::Error, project::Project, system::{Requirements, System}};
+use crate::{error::Error, project::Project};
 
 #[cli::command]
 #[cli::path("debug", "check-requirements")]
 pub struct CheckRequirements {
-    requirements: Requirements,
+    requirements: JsonSource<Requirements>,
 }
 
 impl CheckRequirements {
@@ -14,13 +16,13 @@ impl CheckRequirements {
             = Project::new(None).await?;
 
         let systems
-            = System::from_supported_architectures(&project.config.settings.supported_architectures);
+            = project.config.settings.supported_architectures.to_systems();
 
         println!("Systems: {:#?}", systems);
         println!();
-        println!("Requirements: {:#?}", self.requirements);
+        println!("Requirements: {:#?}", self.requirements.value);
         println!();
-        println!("Is valid system? {}", self.requirements.validate_any(&systems));
+        println!("Is valid system? {}", self.requirements.value.validate_any(&systems));
 
         Ok(())
     }

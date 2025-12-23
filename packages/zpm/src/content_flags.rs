@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DefaultOnError, serde_as};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Ident, Locator, Reference};
-use zpm_utils::Path;
+use zpm_utils::{Path, Requirements};
 
 use crate::{
-    build, error::Error, fetchers::PackageData, manifest::bin::BinField, system
+    build, error::Error, fetchers::PackageData, manifest::bin::BinField
 };
 
 static UNPLUG_SCRIPTS: &[&str] = &["preinstall", "install", "postinstall"];
@@ -79,7 +79,7 @@ struct Manifest {
     bin: Option<BinField>,
 
     #[serde(default)]
-    requirements: system::Requirements,
+    requirements: Requirements,
 
     #[serde(default)]
     prefer_unplugged: Option<bool>,

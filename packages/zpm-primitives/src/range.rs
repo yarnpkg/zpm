@@ -35,6 +35,11 @@ pub enum Range {
     #[no_pattern]
     MissingPeerDependency,
 
+    #[pattern(spec = r"builtin:(?<range>.*)")]
+    Builtin {
+        range: zpm_semver::Range,
+    },
+
     #[pattern(spec = r"(?<range>.*)")]
     AnonymousSemver {
         range: zpm_semver::Range,
@@ -201,6 +206,10 @@ impl Range {
 impl ToFileString for Range {
     fn to_file_string(&self) -> String {
         match self {
+            Range::Builtin(params) => {
+                format!("builtin:{}", params.range.to_file_string())
+            },
+
             Range::AnonymousSemver(params) => {
                 params.range.to_file_string()
             },
