@@ -4,7 +4,7 @@ slug: concepts/peer-dependencies
 title: Peer dependencies
 description: A primer on peer dependencies, when to use them, and how to manage them.
 sidebar:
-  order: 5
+  order: 3
 ---
 
 Peer dependencies are often a feared tool due to subtle differences in how different package managers treat them. But they're also a powerful tool that addresses a very common problem: singleton packages. How to use them effectively is what we'll cover in this article.
