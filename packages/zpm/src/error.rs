@@ -171,6 +171,9 @@ pub enum Error {
     #[error("Package not found ({})", .0.to_print_string())]
     PackageNotFound(Ident),
 
+    #[error("No matching variant found for {}", .0.to_print_string())]
+    NoMatchingVariantFound(Locator),
+
     #[error("No candidates found for {}", .0.to_print_string())]
     NoCandidatesFound(Range),
 

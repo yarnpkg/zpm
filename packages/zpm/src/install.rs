@@ -755,7 +755,7 @@ impl<'a> InstallManager<'a> {
         }
 
         self.result.install_state.resolution_tree = TreeResolver::default()
-            .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)
+            .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)?
             .with_roots(self.result.roots.clone())
             .run();
 

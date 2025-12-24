@@ -7,7 +7,7 @@ use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference};
 use zpm_utils::{System, ToHumanString};
 
 use crate::{
-    resolvers::Resolution,
+    error::Error, resolvers::Resolution
 };
 
 #[derive(Clone, Debug, Default, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
@@ -33,7 +33,7 @@ pub struct TreeResolver {
 }
 
 impl TreeResolver {
-    pub fn with_resolutions(mut self, descriptor_to_locators: &BTreeMap<Descriptor, Locator>, normalized_resolutions: &BTreeMap<Locator, Resolution>) -> Self {
+    pub fn with_resolutions(mut self, descriptor_to_locators: &BTreeMap<Descriptor, Locator>, normalized_resolutions: &BTreeMap<Locator, Resolution>) -> Result<Self, Error> {
         self.resolution_tree.descriptor_to_locator.clear();
         self.resolution_tree.locator_resolutions.clear();
 
@@ -54,6 +54,8 @@ impl TreeResolver {
                 if let Some(matching_variant) = matching_variant {
                     locator = &matching_variant.locator;
                     resolution = &normalized_resolutions[locator];
+                } else {
+                    return Err(Error::NoMatchingVariantFound(locator.clone()));
                 }
             }
 
@@ -66,7 +68,7 @@ impl TreeResolver {
             }
         }
 
-        self
+        Ok(self)
     }
 
     pub fn with_roots(mut self, roots: BTreeSet<Descriptor>) -> Self {
