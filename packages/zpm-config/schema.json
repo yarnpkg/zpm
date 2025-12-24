@@ -33,6 +33,11 @@
       "description": "Whether to check constraints when performing explicit installs",
       "default": false
     },
+    "enableGitIgnoreExclusions": {
+      "type": "boolean",
+      "description": "Whether to skip directories matching .gitignore patterns when discovering workspaces. This can significantly speed up project initialization in repositories with large build outputs or test fixtures.",
+      "default": false
+    },
     "enableGlobalCache": {
       "type": "boolean",
       "description": "Whether to keep the packages in a global cache rather than inside the project",

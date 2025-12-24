@@ -18,7 +18,7 @@ use crate::{
     install::{InstallContext, InstallManager, InstallResult, InstallState},
     lockfile::{from_legacy_berry_lockfile, Lockfile},
     manifest::{helpers::read_manifest_with_size, Manifest},
-    manifest_finder::CachedManifestFinder,
+    manifest_finder::{CachedManifestFinder, GitignoreFilter},
     report::{with_report_result, StreamReport, StreamReportConfig},
     script::{Binary, ScriptEnvironment},
     system::System,
@@ -143,8 +143,10 @@ impl Project {
         let root_workspace
             = Workspace::from_root_path(&project_cwd)?;
 
+        let enable_gitignore_exclusions = config.settings.enable_git_ignore_exclusions.value;
+
         let (mut workspaces, last_changed_at) = root_workspace
-            .workspaces().await?;
+            .workspaces(enable_gitignore_exclusions).await?;
 
         // Add root workspace to the beginning
         workspaces.insert(0, root_workspace);
@@ -892,18 +894,28 @@ impl Workspace {
         self.path.with_join_str(MANIFEST_NAME)
     }
 
-    pub async fn workspaces(&self) -> Result<(Vec<Workspace>, u128), Error> {
+    pub async fn workspaces(&self, enable_gitignore_exclusions: bool) -> Result<(Vec<Workspace>, u128), Error> {
         let mut workspaces = vec![];
         let mut project_last_changed_at = self.last_changed_at;
 
         if let Some(patterns) = &self.manifest.workspaces {
-            let mut manifest_finder
-                = CachedManifestFinder::new(self.path.clone());
-
-            manifest_finder.rsync()?;
-
-            let lookup_state
-                = manifest_finder.into_state();
+            // Create the manifest finder, optionally with gitignore support
+            let lookup_state = if enable_gitignore_exclusions {
+                if let Some(gitignore_filter) = GitignoreFilter::from_project_root(&self.path) {
+                    let mut manifest_finder = CachedManifestFinder::new_with_gitignore(self.path.clone(), gitignore_filter);
+                    manifest_finder.rsync()?;
+                    manifest_finder.into_state()
+                } else {
+                    // No .gitignore found, fall back to default behavior
+                    let mut manifest_finder = CachedManifestFinder::new(self.path.clone());
+                    manifest_finder.rsync()?;
+                    manifest_finder.into_state()
+                }
+            } else {
+                let mut manifest_finder = CachedManifestFinder::new(self.path.clone());
+                manifest_finder.rsync()?;
+                manifest_finder.into_state()
+            };
 
             let mut workspace_queue = vec![
                 (Path::new(), patterns.clone()),

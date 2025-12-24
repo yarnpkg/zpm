@@ -1,10 +1,26 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs::{DirEntry, FileType, Metadata}, fmt::Debug, io::ErrorKind, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, BTreeSet}, fs::{DirEntry, FileType, Metadata}, fmt::Debug, io::ErrorKind, sync::Arc, time::UNIX_EPOCH};
 
 use bincode::{Decode, Encode};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use zpm_utils::Path;
 
 use crate::error::Error;
+
+/// A trait for filtering paths during directory traversal.
+/// Returns `true` if the path should be excluded (skipped).
+pub trait PathFilter: Send + Sync {
+    fn is_excluded(&self, rel_path: &Path) -> bool;
+}
+
+/// A no-op filter that never excludes any paths.
+#[derive(Debug, Default)]
+pub struct NoFilter;
+
+impl PathFilter for NoFilter {
+    fn is_excluded(&self, _rel_path: &Path) -> bool {
+        false
+    }
+}
 
 #[derive(Debug)]
 enum CacheCheck<T> {
@@ -85,13 +101,27 @@ pub trait DiffController {
  * only need to compare the cached mtime for each directory with the current
  * mtime to figure out whether they need perform the costly readdir syscall.
  */
-#[derive(Default, Debug)]
-pub struct DiffFinder<TController: DiffController> {
+#[derive(Debug)]
+pub struct DiffFinder<TController: DiffController, TFilter: PathFilter = NoFilter> {
     pub root_path: Path,
     pub save_state: SaveState<TController::Data>,
+    pub path_filter: Arc<TFilter>,
 }
 
-impl<TController: DiffController> DiffFinder<TController> {
+impl<TController: DiffController> Default for DiffFinder<TController, NoFilter>
+where
+    TController::Data: Default,
+{
+    fn default() -> Self {
+        Self {
+            root_path: Path::new(),
+            save_state: SaveState::default(),
+            path_filter: Arc::new(NoFilter),
+        }
+    }
+}
+
+impl<TController: DiffController> DiffFinder<TController, NoFilter> {
     pub fn new(root_path: Path, mut save_state: SaveState<TController::Data>) -> Self {
         let roots = vec![
             Path::new(),
@@ -104,6 +134,25 @@ impl<TController: DiffController> DiffFinder<TController> {
         Self {
             root_path,
             save_state,
+            path_filter: Arc::new(NoFilter),
+        }
+    }
+}
+
+impl<TController: DiffController, TFilter: PathFilter> DiffFinder<TController, TFilter> {
+    pub fn new_with_filter(root_path: Path, mut save_state: SaveState<TController::Data>, path_filter: Arc<TFilter>) -> Self {
+        let roots = vec![
+            Path::new(),
+        ];
+
+        if save_state.roots != roots {
+            save_state = SaveState::new(roots);
+        }
+
+        Self {
+            root_path,
+            save_state,
+            path_filter,
         }
     }
 
@@ -130,6 +179,11 @@ impl<TController: DiffController> DiffFinder<TController> {
 
             let entry_rel_path = rel_path
                 .with_join_str(entry.file_name().to_str().unwrap());
+
+            // Check if the path should be excluded by the optional path filter
+            if file_type.is_dir() && self.path_filter.is_excluded(&entry_rel_path) {
+                continue;
+            }
 
             if self.save_state.cache.contains_key(&entry_rel_path) {
                 continue;
