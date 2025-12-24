@@ -7,23 +7,37 @@ use crate::{
     error::Error, install::{InstallContext, IntoResolutionResult, ResolutionResult}, manifest::Manifest, resolvers::Resolution
 };
 
-fn resolve_extends<'a>(settings: &'a zpm_config::Settings, mut extends_list: Vec<&'a str>) -> Result<BTreeSet<&'a str>, Error> {
+fn resolve_extends<'a>(settings: &'a zpm_config::Settings, mut extends_queue: Vec<&'a str>) -> Result<Vec<&'a str>, Error> {
+    let mut extends_list
+        = vec![];
+
     let mut extends_seen
         = BTreeSet::new();
 
-    while let Some(extend) = extends_list.pop() {
+    if settings.workspace_profiles.contains_key("default") {
+        extends_queue.push("default");
+    }
+
+    while let Some(extend) = extends_queue.pop() {
         if extends_seen.insert(extend) {
+            extends_list.push(extend);
+
             let profile
                 = settings.workspace_profiles.get(extend)
                     .ok_or_else(|| Error::WorkspaceProfileNotFound(extend.to_string()))?;
 
-            extends_list.extend(profile.extends.iter().map(|s| s.value.as_str()));
+            let followup_extends
+                = profile.extends.iter()
+                    .map(|s| s.value.as_str())
+                    .chain(extends_queue.into_iter())
+                    .collect_vec();
+
+            extends_queue
+                = followup_extends;
         }
     }
 
-    extends_seen.insert("default");
-
-    Ok(extends_seen)
+    Ok(extends_list)
 }
 
 fn resolve_workspace(context: &InstallContext<'_>, locator: Locator, mut manifest: Manifest) -> Result<ResolutionResult, Error> {
