@@ -5,7 +5,7 @@ import {formatPackageLink, getDownloadBucket} from '@/utils/helpers';
 import {useInfiniteHits}                      from 'react-instantsearch';
 
 export default function PackageSearchResults() {
-  const {hits} = useInfiniteHits().results;
+  const {hits} = useInfiniteHits().results!;
 
   return (
     <div className={`grid md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 !mt-10 md:!mt-8`}>
@@ -76,8 +76,9 @@ const PackageCard = ({hit}: {hit: any}) => {
   );
 };
 
-const TypeBadge = ({types}) => {
-  if (!types) return null;
+const TypeBadge = ({types}: any) => {
+  if (!types)
+    return null;
 
   if (types.ts === `included`) {
     return (
@@ -102,10 +103,13 @@ const TypeBadge = ({types}) => {
   );
 };
 
-const DownloadBadge = ({downloadsLast30Days, humanDownloadsLast30Days}) => {
-  if (!downloadsLast30Days) return null;
+const DownloadBadge = ({downloadsLast30Days, humanDownloadsLast30Days}: any) => {
+  if (!downloadsLast30Days)
+    return null;
 
   const downloadBucket = getDownloadBucket(downloadsLast30Days);
+  if (!downloadBucket)
+    return null;
 
   return (
     <div className={`inline-flex items-center gap-2`}>

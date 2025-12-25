@@ -1,31 +1,53 @@
 {
-  "extends": "astro/tsconfigs/strict",
-  "composite": true,
-  "include": [
-    ".astro/types.d.ts",
-    "**/*"
-  ],
-  "exclude": [
-    "dist"
-  ],
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
     "jsxImportSource": "preact",
-    "strictNullChecks": true,
-    "baseUrl": ".",
+    "lib": ["ES2023", "dom.iterable"],
+    "skipLibCheck": true,
     "paths": {
+      "@/styles/*": [
+        "./src/styles/*"
+      ],
+      "@/fonts/*": [
+        "./src/fonts/*"
+      ],
+      "@/assets/*": [
+        "./src/assets/*"
+      ],
       "@/components/*": [
-        "src/components/*"
+        "./src/components/*"
+      ],
+      "@/features/*": [
+        "./src/features/*"
       ],
       "@/layouts/*": [
-        "src/features/package/layouts/*"
+        "./src/layouts/*"
+      ],
+      "@/pages/*": [
+        "./src/pages/*"
       ],
       "@/utils/*": [
-        "src/utils/*"
+        "./src/utils/*"
       ],
       "@/sections/*": [
-        "src/sections/*"
-      ]
+        "./src/sections/*"
+      ],
+      "@/api/*": [
+        "./src/api/*"
+      ],
+      "@/content/*": [
+        "./src/content/*"
+      ],
+      "@/types/*": [
+        "./src/types/*"
+      ],
+      "@/overrides/*": [
+        "./src/overrides/*"
+      ],
+      "@/utils/configuration/*": [
+        "./src/utils/configuration/*"
+      ],
     }
   }
 }

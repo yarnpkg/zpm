@@ -1,11 +1,11 @@
-import hotT1              from '/src/assets/img/ico-hot-t1.svg?url';
-import hotT2              from '/src/assets/img/ico-hot-t2.svg?url';
-import hotT3              from '/src/assets/img/ico-hot-t3.svg?url';
-import hotT4              from '/src/assets/img/ico-hot-t4.svg?url';
+import hotT1              from '@/assets/img/ico-hot-t1.svg?url';
+import hotT2              from '@/assets/img/ico-hot-t2.svg?url';
+import hotT3              from '@/assets/img/ico-hot-t3.svg?url';
+import hotT4              from '@/assets/img/ico-hot-t4.svg?url';
+import type {ReleaseInfo} from '@/types/package';
 import relativeTime       from 'dayjs/plugin/relativeTime';
 import dayjs              from 'dayjs';
 import resolve            from 'resolve';
-import type {ReleaseInfo} from 'src/types/package';
 
 export const STANDARD_EXTENSIONS = [`.js`, `.cjs`, `.mjs`];
 

@@ -1,0 +1,41 @@
+name: JavaScript
+
+on:
+  push:
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Yarn
+        uses: yarnpkg/setup-action@main
+
+      - name: Running TypeScript
+        run: |
+          yarn tsc --build
+
+  lint:
+    name: Linting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Yarn
+        uses: yarnpkg/setup-action@main
+
+      - name: Running Eslint
+        run: |
+          yarn eslint

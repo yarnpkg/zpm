@@ -11,7 +11,7 @@ const chromeEvalRe = /\((\S*)(?::(\d+))(?::(\d+))\)/;
 
 // https://github.com/errwischt/stacktrace-parser/blob/f70768a12579de3469f3fdfdc423657ee6609c7c/src/stack-trace-parser.js
 function parseStackLine(line: string): Caller | null {
-  const parts = chromeRe.exec(line);
+  const parts = chromeRe.exec(line) as [string, string, string, string, string] | null;
   if (!parts)
     return null;
 
@@ -21,9 +21,9 @@ function parseStackLine(line: string): Caller | null {
   const submatch = chromeEvalRe.exec(parts[2]);
   if (isEval && submatch != null) {
     // throw out eval line/column and use top-most line/column number
-    parts[2] = submatch[1]; // url
-    parts[3] = submatch[2]; // line
-    parts[4] = submatch[3]; // column
+    parts[2] = submatch[1]!; // url
+    parts[3] = submatch[2]!; // line
+    parts[4] = submatch[3]!; // column
   }
 
   return {
@@ -37,7 +37,7 @@ function parseStackLine(line: string): Caller | null {
 
 export function getCaller() {
   const err = new Error();
-  const line = err.stack!.split(`\n`)[3];
+  const line = err.stack!.split(`\n`)[3]!;
 
   return parseStackLine(line);
 }

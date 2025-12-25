@@ -1,6 +1,7 @@
-import {defineConfig} from "@yarnpkg/types";
+import {type Yarn} from '@yarnpkg/types';
 
-export default defineConfig({
+// eslint-disable-next-line arca/no-default-export
+export default {
   constraints: async ({Yarn}) => {
     for (const workspace of Yarn.workspaces()) {
       workspace.set(`repository.type`, `git`);
@@ -8,4 +9,4 @@ export default defineConfig({
       workspace.set(`repository.directory`, workspace.cwd);
     }
   },
-});
+} satisfies Yarn.Config;

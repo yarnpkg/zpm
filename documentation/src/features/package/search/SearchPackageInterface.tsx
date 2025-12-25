@@ -61,9 +61,16 @@ const searchClient = {
           ),
         );
 
-        const hits = defaultPackageResults
-          .map(result => result.results[0].hits[0] ?? [])
-          .filter(Boolean);
+        const hits = defaultPackageResults.map(({results}) => {
+          const result = results[0];
+          if (!result)
+            return null;
+
+          if (!(`hits` in result))
+            return null;
+
+          return result.hits[0];
+        }).filter(Boolean);
 
         return {
           results: requests.map(() => ({

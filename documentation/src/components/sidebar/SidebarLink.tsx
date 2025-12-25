@@ -1,5 +1,5 @@
+import {type SidebarLinkProps} from '@/types/sidebar';
 import cn                      from '@/utils/cn';
-import {type SidebarLinkProps} from 'src/types/sidebar';
 
 import Badge                   from '../Badge';
 
@@ -11,14 +11,13 @@ export default function SidebarLink({
   className,
   attrs,
   type,
-  initialCollapsed,
   ...props
 }: SidebarLinkProps) {
   if (`entries` in props && (props.entries as Array<SidebarLinkProps>).some(entry => entry.isCurrent))
     isCurrent = true;
 
   return (
-    <a {...props} aria-label={label} {...attrs} className={`size-full`}>
+    <a {...props} aria-label={label} {...attrs as any} className={`size-full`}>
       <div
         className={cn(
           `leading-[1.4em] text-start size-full transition-all font-medium hover:text-blue-50 font-montserrat text-white/60`,

@@ -1,0 +1,954 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Commands constraints source test (empty project / empty constraints) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "",
+}
+`;
+
+exports[`Commands constraints source test (empty project / empty constraints) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (empty project / gen_enforced_dependency (extraneous)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (empty project / gen_enforced_dependency (extraneous)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (empty project / gen_enforced_dependency (incompatible)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (empty project / gen_enforced_dependency (incompatible)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (empty project / gen_enforced_dependency (missing)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (empty project / gen_enforced_dependency (missing)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (multiple workspaces / empty constraints) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "",
+}
+`;
+
+exports[`Commands constraints source test (multiple workspaces / empty constraints) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace('packages/workspace-a').
+workspace_ident('packages/workspace-a', 'workspace-a').
+workspace_version('packages/workspace-a', []).
+workspace_has_dependency('packages/workspace-a', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps-bins', '1.0.0', devDependencies).
+workspace('packages/workspace-b').
+workspace_ident('packages/workspace-b', 'workspace-b').
+workspace_version('packages/workspace-b', []).
+workspace_has_dependency('packages/workspace-b', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (multiple workspaces / gen_enforced_dependency (extraneous)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (multiple workspaces / gen_enforced_dependency (extraneous)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace('packages/workspace-a').
+workspace_ident('packages/workspace-a', 'workspace-a').
+workspace_version('packages/workspace-a', []).
+workspace_has_dependency('packages/workspace-a', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps-bins', '1.0.0', devDependencies).
+workspace('packages/workspace-b').
+workspace_ident('packages/workspace-b', 'workspace-b').
+workspace_version('packages/workspace-b', []).
+workspace_has_dependency('packages/workspace-b', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (multiple workspaces / gen_enforced_dependency (incompatible)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (multiple workspaces / gen_enforced_dependency (incompatible)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace('packages/workspace-a').
+workspace_ident('packages/workspace-a', 'workspace-a').
+workspace_version('packages/workspace-a', []).
+workspace_has_dependency('packages/workspace-a', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps-bins', '1.0.0', devDependencies).
+workspace('packages/workspace-b').
+workspace_ident('packages/workspace-b', 'workspace-b').
+workspace_version('packages/workspace-b', []).
+workspace_has_dependency('packages/workspace-b', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (multiple workspaces / gen_enforced_dependency (missing)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (multiple workspaces / gen_enforced_dependency (missing)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace('packages/workspace-a').
+workspace_ident('packages/workspace-a', 'workspace-a').
+workspace_version('packages/workspace-a', []).
+workspace_has_dependency('packages/workspace-a', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('packages/workspace-a', 'no-deps-bins', '1.0.0', devDependencies).
+workspace('packages/workspace-b').
+workspace_ident('packages/workspace-b', 'workspace-b').
+workspace_version('packages/workspace-b', []).
+workspace_has_dependency('packages/workspace-b', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('packages/workspace-b', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (one regular dependency / empty constraints) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "",
+}
+`;
+
+exports[`Commands constraints source test (one regular dependency / empty constraints) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (one regular dependency / gen_enforced_dependency (extraneous)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (one regular dependency / gen_enforced_dependency (extraneous)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (one regular dependency / gen_enforced_dependency (incompatible)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (one regular dependency / gen_enforced_dependency (incompatible)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (one regular dependency / gen_enforced_dependency (missing)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (one regular dependency / gen_enforced_dependency (missing)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two development dependencies / empty constraints) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "",
+}
+`;
+
+exports[`Commands constraints source test (two development dependencies / empty constraints) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two development dependencies / gen_enforced_dependency (extraneous)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (two development dependencies / gen_enforced_dependency (extraneous)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two development dependencies / gen_enforced_dependency (incompatible)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (two development dependencies / gen_enforced_dependency (incompatible)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two development dependencies / gen_enforced_dependency (missing)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (two development dependencies / gen_enforced_dependency (missing)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies / empty constraints) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies / empty constraints) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', dependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies / gen_enforced_dependency (extraneous)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies / gen_enforced_dependency (extraneous)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', dependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies / gen_enforced_dependency (incompatible)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies / gen_enforced_dependency (incompatible)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', dependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies / gen_enforced_dependency (missing)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies / gen_enforced_dependency (missing)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', dependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies, two development dependencies / empty constraints) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies, two development dependencies / empty constraints) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies, two development dependencies / gen_enforced_dependency (extraneous)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies, two development dependencies / gen_enforced_dependency (extraneous)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies, two development dependencies / gen_enforced_dependency (incompatible)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies, two development dependencies / gen_enforced_dependency (incompatible)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies, two development dependencies / gen_enforced_dependency (missing)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (two regular dependencies, two development dependencies / gen_enforced_dependency (missing)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'root-workspace-0b6124').
+workspace_version('.', []).
+workspace_has_dependency('.', 'no-deps', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', dependencies).
+workspace_has_dependency('.', 'no-deps', '1.0.0', devDependencies).
+workspace_has_dependency('.', 'no-deps-bins', '1.0.0', devDependencies).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (various field types / empty constraints) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "",
+}
+`;
+
+exports[`Commands constraints source test (various field types / empty constraints) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'foo').
+workspace_version('.', []).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (various field types / gen_enforced_dependency (extraneous)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (various field types / gen_enforced_dependency (extraneous)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'foo').
+workspace_version('.', []).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', null, _).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (various field types / gen_enforced_dependency (incompatible)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (various field types / gen_enforced_dependency (incompatible)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'foo').
+workspace_version('.', []).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'no-deps', '2.0.0', dependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;
+
+exports[`Commands constraints source test (various field types / gen_enforced_dependency (missing)) 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).<no line return>
+",
+}
+`;
+
+exports[`Commands constraints source test (various field types / gen_enforced_dependency (missing)) 2`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "dependency_type(dependencies).
+dependency_type(devDependencies).
+dependency_type(peerDependencies).
+workspace('.').
+workspace_ident('.', 'foo').
+workspace_version('.', []).
+workspace(_) :- false.
+workspace_ident(_, _) :- false.
+workspace_version(_, _) :- false.
+workspace_has_dependency(_, _, _, _) :- false.
+
+gen_enforced_dependency(WorkspaceCwd, 'one-fixed-dep', '1.0.0', peerDependencies).
+gen_enforced_dependency(_, _, _, _) :- false.
+gen_enforced_field(_, _, _) :- false.
+",
+}
+`;

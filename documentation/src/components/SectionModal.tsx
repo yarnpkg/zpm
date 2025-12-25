@@ -1,6 +1,6 @@
+import CloseIcon             from '@/assets/svg/close.svg?react';
 import {Dialog}              from '@base-ui-components/react/dialog';
 import {useState, useEffect} from 'preact/hooks';
-import CloseIcon             from 'src/assets/svg/close.svg?react';
 
 const DialogRoot = Dialog.Root as any;
 const DialogPortal = Dialog.Portal as any;
@@ -48,7 +48,6 @@ function findSectionFromHash(): string | null {
   while (startWrapper && !isHeadingWrapper(startWrapper))
     startWrapper = startWrapper.previousElementSibling as HTMLElement | null;
 
-
   if (!startWrapper) {
     const allWrappers = Array.from(document.querySelectorAll(`.sl-heading-wrapper`))
       .filter(el => isHeadingWrapper(el as HTMLElement)) as Array<HTMLElement>;
@@ -60,9 +59,9 @@ function findSectionFromHash(): string | null {
       (h.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
     );
 
-    startWrapper = preceding.length
-      ? preceding[preceding.length - 1]
-      : allWrappers[0];
+    startWrapper = preceding.length > 0
+      ? preceding[preceding.length - 1]!
+      : allWrappers[0]!;
   }
 
   return collectSectionContentFromHeadingWrapper(startWrapper);

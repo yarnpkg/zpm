@@ -1,12 +1,12 @@
+import {usePackageInfo} from '@/api/package';
+import VersionDropdown  from '@/features/package/views/VersionDropdown';
 import semver           from 'semver';
-import {usePackageInfo} from 'src/api/package';
-import VersionDropdown  from 'src/features/package/views/VersionDropdown';
 
 import type {
   VersionSelectorProps,
   PkgInfo,
   VersionChoice,
-} from 'src/types/package';
+} from '@/types/package';
 
 export default function VersionSelector({
   name,

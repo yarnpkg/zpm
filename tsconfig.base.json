@@ -1,0 +1,33 @@
+{
+  "include": [
+    "${configDir}/.astro/types.d.ts",
+    "${configDir}/**/*.d.ts",
+    "${configDir}/**/*.json",
+    "${configDir}/**/*"
+  ],
+  "exclude": [
+    "${configDir}/dist",
+    "./tests/acceptance-tests/pkg-tests-fixtures/**/*.js"
+  ],
+  "compilerOptions": {
+    "allowJs": true,
+    "target": "ES2023",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023"],
+    "composite": true,
+    "outDir": "${configDir}/dist/types",
+    "emitDeclarationOnly": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "rootDir": "${configDir}",
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+  }
+}

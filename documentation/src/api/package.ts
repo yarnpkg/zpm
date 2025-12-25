@@ -10,7 +10,7 @@ import type {
   ReleaseFile,
   ReleaseJsDelivrInfo,
   ReleaseNpmInfo,
-} from 'src/types/package';
+} from '@/types/package';
 
 export function usePackageInfo(name: string) {
   return useSuspenseQuery({
