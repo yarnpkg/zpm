@@ -1,13 +1,13 @@
-import '@splidejs/react-splide/css';
 import '@/styles/splide.css';
-import cn                            from '@/utils/cn';
-import {Splide, SplideSlide}         from '@splidejs/react-splide';
-import {useRef, useEffect, useState} from 'preact/hooks';
+import '@splidejs/react-splide/css';
 // Images
 import EllipseBlue                   from '@/assets/svg/ellipse-blue.svg?react';
 import InlineSkeleton                from '@/assets/svg/inline-skeleton.svg?react';
 import PolygonBlue                   from '@/assets/svg/polygon-blue.svg?react';
 import ThreeRowSkeleton              from '@/assets/svg/three-row-skeleton.svg?react';
+import cn                            from '@/utils/cn';
+import {Splide, SplideSlide}         from '@splidejs/react-splide';
+import {useRef, useEffect, useState} from 'preact/hooks';
 
 import type {CommandSlideProps}      from '../types/command';
 

@@ -1,6 +1,6 @@
-import semver           from 'semver';
 import {usePackageInfo} from '@/api/package';
 import VersionDropdown  from '@/features/package/views/VersionDropdown';
+import semver           from 'semver';
 
 import type {
   VersionSelectorProps,

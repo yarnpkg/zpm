@@ -1,8 +1,8 @@
-import cn                   from '@/utils/cn';
-import {Suspense}           from 'preact/compat';
 import {checks}             from '@/api/packageChecks';
 import GearIcon             from '@/assets/svg/gear.svg?react';
 import CheckList            from '@/features/package/views/Checklist';
+import cn                   from '@/utils/cn';
+import {Suspense}           from 'preact/compat';
 
 import VersionSelector      from './VersionSelector';
 import {PackageBreadcrumbs} from '.';

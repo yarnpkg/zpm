@@ -1,17 +1,16 @@
-import preact                       from '@astrojs/preact';
-import starlightDocSearch           from '@astrojs/starlight-docsearch';
-import starlight                    from '@astrojs/starlight';
-import {clipanionRemark}            from '@clipanion/remark';
-import tailwindcss                  from '@tailwindcss/vite';
+import preact               from '@astrojs/preact';
+import starlightDocSearch   from '@astrojs/starlight-docsearch';
+import starlight            from '@astrojs/starlight';
+import {clipanionRemark}    from '@clipanion/remark';
+import tailwindcss          from '@tailwindcss/vite';
 // @ts-check
-import {defineConfig}               from 'astro/config';
-import path                         from 'path';
-import starlightAutoSidebar         from 'starlight-auto-sidebar';
-import svgr                         from 'vite-plugin-svgr';
+import {defineConfig}       from 'astro/config';
+import path                 from 'path';
+import starlightAutoSidebar from 'starlight-auto-sidebar';
+import svgr                 from 'vite-plugin-svgr';
 
-import {remarkCommandLineHighlight} from './src/plugins/remark-command-line-highlight.mjs';
-import {remarkModifiedTime}         from './src/plugins/remark-modified-time.mjs';
-import {remarkReadingTime}          from './src/plugins/remark-reading-time.mjs';
+import {remarkModifiedTime} from './src/plugins/remark-modified-time.mjs';
+import {remarkReadingTime}  from './src/plugins/remark-reading-time.mjs';
 
 // eslint-disable-next-line arca/no-default-export
 export default defineConfig({

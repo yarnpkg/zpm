@@ -1,10 +1,10 @@
-import {formatPackageLink} from '@/utils/helpers';
-import gitUrlParse         from 'git-url-parse';
 import {usePackageInfo}    from '@/api/package';
 import GithubIcon          from '@/assets/svg/github-icon.svg?react';
 import InformationIcon     from '@/assets/svg/information-icon.svg?react';
 import RunkitIcon          from '@/assets/svg/runkit-icon.svg?react';
 import WebsiteIcon         from '@/assets/svg/website-icon.svg?react';
+import {formatPackageLink} from '@/utils/helpers';
+import gitUrlParse         from 'git-url-parse';
 
 interface PackageEntryProps {
   name: string;

@@ -1,5 +1,5 @@
-import {Filename, npath, ppath, xfs}                                                                                            from '@yarnpkg/fslib';
-import {pathToFileURL}                                                                                                          from 'url';
+import {Filename, npath, ppath, xfs} from '@yarnpkg/fslib';
+import {pathToFileURL}               from 'url';
 
 // !Begin copy-pasted code from https://github.com/yarnpkg/berry/blob/master/packages/yarnpkg-pnp/sources/esm-loader/loaderFlags.ts
 // !Make sure to keep it up to date with the original file.

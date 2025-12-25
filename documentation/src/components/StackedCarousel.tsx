@@ -1,6 +1,6 @@
+import LeftChevron from '@/assets/svg/left-chevron.svg?react';
 import cn          from '@/utils/cn';
 import {useState}  from 'preact/hooks';
-import LeftChevron from '@/assets/svg/left-chevron.svg?react';
 
 interface Testimonial {
   id: number;

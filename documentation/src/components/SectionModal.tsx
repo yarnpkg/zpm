@@ -1,6 +1,6 @@
+import CloseIcon             from '@/assets/svg/close.svg?react';
 import {Dialog}              from '@base-ui-components/react/dialog';
 import {useState, useEffect} from 'preact/hooks';
-import CloseIcon             from '@/assets/svg/close.svg?react';
 
 const DialogRoot = Dialog.Root as any;
 const DialogPortal = Dialog.Portal as any;

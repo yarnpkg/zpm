@@ -1,14 +1,14 @@
-import type { StarlightRouteData } from "@astrojs/starlight/route-data";
-import {type SidebarGroupProps}              from '@/types/sidebar';
-import cn                                    from '@/utils/cn';
-import {Fragment, useState}                  from 'preact/compat';
+import {type SidebarGroupProps}  from '@/types/sidebar';
+import cn                        from '@/utils/cn';
+import type {StarlightRouteData} from '@astrojs/starlight/route-data';
+import {Fragment, useState}      from 'preact/compat';
 
-import Badge                                 from '../Badge';
+import Badge                     from '../Badge';
 
-import SidebarEntry                          from './SidebarEntry';
+import SidebarEntry              from './SidebarEntry';
 
-type SidebarEntry = StarlightRouteData["sidebar"][number];
-type SidebarLink = Extract<SidebarEntry, { type: "link" }>;
+type SidebarEntry = StarlightRouteData[`sidebar`][number];
+type SidebarLink = Extract<SidebarEntry, {type: `link`}>;
 
 export default function SidebarGroup({
   badge,

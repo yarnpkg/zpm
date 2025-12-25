@@ -1,7 +1,7 @@
+import SearchIcon                             from '@/assets/svg/search.svg?react';
 import {navigate}                             from 'astro:transitions/client';
 import {useEffect, useRef, useState}          from 'preact/hooks';
 import {useSearchBox, type UseSearchBoxProps} from 'react-instantsearch';
-import SearchIcon                             from '@/assets/svg/search.svg?react';
 
 export default function PackageSearchInput(props: UseSearchBoxProps) {
   const isHomePage = location.pathname === `/`;

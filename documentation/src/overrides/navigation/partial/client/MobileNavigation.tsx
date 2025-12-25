@@ -10,6 +10,7 @@ import {isActivePath}                from '@/utils/helpers';
 import * as DocSearchReact           from '@docsearch/react';
 import {useEffect, useRef, useState} from 'preact/hooks';
 import {createElement, render}       from 'preact';
+
 // Images
 import CollapsibleNavigation         from './CollapsibleNavigation';
 
@@ -93,8 +94,8 @@ export default function MobileNavigation({pathname}: {pathname: string}) {
   }, [isSearchOpen]);
 
   return (
-    <div className="relative">
-      <div className="h-12"/>
+    <div className={`relative`}>
+      <div className={`h-12`}/>
       <div
         className={cn(
           `absolute inset-x-0 top-0 bg-linear-to-b from-white/15 to-white/5 p-px rounded-3xl`,

@@ -1,8 +1,8 @@
-import type { StarlightRouteData } from "@astrojs/starlight/route-data";
+import type {StarlightRouteData} from '@astrojs/starlight/route-data';
 
-import SidebarEntryElement from './SidebarEntry';
+import SidebarEntryElement       from './SidebarEntry';
 
-type SidebarEntry = StarlightRouteData["sidebar"][number];
+type SidebarEntry = StarlightRouteData[`sidebar`][number];
 
 interface Props {
   entries: Array<SidebarEntry>;

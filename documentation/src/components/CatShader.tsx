@@ -1,8 +1,9 @@
+import {useEffect, useRef}  from 'preact/hooks';
+
+import catSdfUrl            from './cat-shader/cat-sdf.png?url';
+import catShapeUrl          from './cat-shader/cat-shape.png?url';
 import fragmentShaderSource from './cat-shader/fragment.glsl?raw';
-import vertexShaderSource from './cat-shader/vertex.glsl?raw';
-import catSdfUrl from './cat-shader/cat-sdf.png?url';
-import catShapeUrl from './cat-shader/cat-shape.png?url';
-import { useEffect, useRef } from 'preact/hooks';
+import vertexShaderSource   from './cat-shader/vertex.glsl?raw';
 
 class ShaderController {
   canvas: HTMLCanvasElement;
@@ -67,34 +68,34 @@ class ShaderController {
   }
 
   createShader(gl: WebGL2RenderingContext, type: GLenum, source: string) {
-      const shader = gl.createShader(type);
-      if (!shader)
-        throw new Error('Failed to create shader');
+    const shader = gl.createShader(type);
+    if (!shader)
+      throw new Error(`Failed to create shader`);
 
-      gl.shaderSource(shader, source);
-      gl.compileShader(shader);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
 
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        const info = gl.getShaderInfoLog(shader);
-        gl.deleteShader(shader);
-        throw new Error(`Error compiling shader: ${info}`);
-      }
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      const info = gl.getShaderInfoLog(shader);
+      gl.deleteShader(shader);
+      throw new Error(`Error compiling shader: ${info}`);
+    }
 
-      return shader;
+    return shader;
   }
 
   setupGeometry() {
     if (!this.program)
-      throw new Error('WebGL context not initialized');
+      throw new Error(`WebGL context not initialized`);
 
     // Create a full-screen quad
     const positions = new Float32Array([
       -1, -1,
-       1, -1,
+      1, -1,
       -1,  1,
       -1,  1,
-       1, -1,
-       1,  1
+      1, -1,
+      1,  1,
     ]);
 
     const texCoords = new Float32Array([
@@ -103,7 +104,7 @@ class ShaderController {
       0, 0,
       0, 0,
       1, 1,
-      1, 0
+      1, 0,
     ]);
 
     // Position buffer
@@ -111,7 +112,7 @@ class ShaderController {
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, positionBuffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, positions, this.gl.STATIC_DRAW);
 
-    const positionLocation = this.gl.getAttribLocation(this.program, 'a_position');
+    const positionLocation = this.gl.getAttribLocation(this.program, `a_position`);
     this.gl.enableVertexAttribArray(positionLocation);
     this.gl.vertexAttribPointer(positionLocation, 2, this.gl.FLOAT, false, 0, 0);
 
@@ -120,7 +121,7 @@ class ShaderController {
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, texCoordBuffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, texCoords, this.gl.STATIC_DRAW);
 
-    const texCoordLocation = this.gl.getAttribLocation(this.program, 'a_texCoord');
+    const texCoordLocation = this.gl.getAttribLocation(this.program, `a_texCoord`);
     this.gl.enableVertexAttribArray(texCoordLocation);
     this.gl.vertexAttribPointer(texCoordLocation, 2, this.gl.FLOAT, false, 0, 0);
   }
@@ -160,8 +161,8 @@ class ShaderController {
     // Load the SDF image
     const image = new Image();
     image.onload = () => {
-        this.gl.bindTexture(this.gl.TEXTURE_2D, this.distanceField);
-        this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, image);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, this.distanceField);
+      this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, image);
     };
 
     image.src = catSdfUrl;
@@ -181,33 +182,33 @@ class ShaderController {
     this.gl.clear(this.gl.COLOR_BUFFER_BIT);
 
     // Set uniforms
-    const timeLocation = this.gl.getUniformLocation(this.program, 'time');
+    const timeLocation = this.gl.getUniformLocation(this.program, `time`);
     this.gl.uniform1f(timeLocation, time);
 
-    const resolutionLocation = this.gl.getUniformLocation(this.program, 'resolution');
+    const resolutionLocation = this.gl.getUniformLocation(this.program, `resolution`);
     this.gl.uniform2f(resolutionLocation, this.canvas.width, this.canvas.height);
 
-    const textureSizeLocation = this.gl.getUniformLocation(this.program, 'textureSize');
+    const textureSizeLocation = this.gl.getUniformLocation(this.program, `textureSize`);
     this.gl.uniform2f(textureSizeLocation, this.textureWidth, this.textureHeight);
 
-    const falloffLocation = this.gl.getUniformLocation(this.program, 'falloff');
+    const falloffLocation = this.gl.getUniformLocation(this.program, `falloff`);
     this.gl.uniform1f(falloffLocation, this.falloff);
 
-    const fbmsubstractLocation = this.gl.getUniformLocation(this.program, 'fbmsubstract');
+    const fbmsubstractLocation = this.gl.getUniformLocation(this.program, `fbmsubstract`);
     this.gl.uniform1f(fbmsubstractLocation, this.fbmsubstract);
 
     // Bind textures
     if (this.texture) {
       this.gl.activeTexture(this.gl.TEXTURE0);
       this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
-      const textureLocation = this.gl.getUniformLocation(this.program, 'tex');
+      const textureLocation = this.gl.getUniformLocation(this.program, `tex`);
       this.gl.uniform1i(textureLocation, 0);
     }
 
     if (this.distanceField) {
       this.gl.activeTexture(this.gl.TEXTURE1);
       this.gl.bindTexture(this.gl.TEXTURE_2D, this.distanceField);
-      const distanceFieldLocation = this.gl.getUniformLocation(this.program, 'distanceField');
+      const distanceFieldLocation = this.gl.getUniformLocation(this.program, `distanceField`);
       this.gl.uniform1i(distanceFieldLocation, 1);
     }
 
@@ -222,11 +223,11 @@ export function CatShader() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas)
-      return;
+      return () => {};
 
-    const gl = canvas.getContext('webgl2', {alpha: true, premultipliedAlpha: true});
+    const gl = canvas.getContext(`webgl2`, {alpha: true, premultipliedAlpha: true});
     if (!gl)
-      return;
+      return () => {};
 
     const shader = new ShaderController(canvas, gl);
 
@@ -247,5 +248,5 @@ export function CatShader() {
 
   return (
     <canvas ref={canvasRef} className={`w-full h-full`} />
-  )
+  );
 }
