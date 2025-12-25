@@ -22,7 +22,7 @@
         "./src/features/*"
       ],
       "@/layouts/*": [
-        "./src/features/package/layouts/*"
+        "./src/layouts/*"
       ],
       "@/pages/*": [
         "./src/pages/*"
