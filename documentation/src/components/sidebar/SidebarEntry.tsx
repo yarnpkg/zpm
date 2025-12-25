@@ -1,16 +1,16 @@
-import {type SidebarEntryProps} from 'src/types/sidebar';
+import {type SidebarEntryProps} from '@/types/sidebar';
 
 import SidebarGroup             from './SidebarGroup';
 import SidebarLink              from './SidebarLink';
 
-export default function SidebarEntry({variant = `link`, ...props}: SidebarEntryProps & {variant?: `link` | `sub-link`}) {
+export default function SidebarEntry(props: SidebarEntryProps) {
   return props.type === `link` ? (
     <div className={`size-full`}>
-      <SidebarLink {...props} variant={variant} />
+      <SidebarLink {...props} variant={props.variant}/>
     </div>
   ) : (
     <div>
-      <SidebarGroup {...props} variant={variant} />
+      <SidebarGroup {...props}/>
     </div>
   );
 }

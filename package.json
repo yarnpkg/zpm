@@ -32,6 +32,7 @@
     "eslint": "^9.36.0"
   },
   "resolutions": {
-    "@clipanion/tools": "file:scripts/@clipanion-tools.tgz"
+    "@clipanion/tools": "file:scripts/@clipanion-tools.tgz",
+    "@types/node": "^24.10.4"
   }
 }

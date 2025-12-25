@@ -527,7 +527,7 @@ describe(`Scripts tests`, () => {
 
             const listing = await xfs.readdirPromise(ppath.join(path, `.yarn/unplugged`));
             expect(listing).toHaveLength(1);
-            const itemPath = ppath.join(path, `.yarn/unplugged`, listing[0], `node_modules/binding-gyp-scripts/build.node`);
+            const itemPath = ppath.join(path, `.yarn/unplugged`, listing[0]!, `node_modules/binding-gyp-scripts/build.node`);
 
             await expect(xfs.readFilePromise(itemPath, `utf8`)).resolves.toEqual(npath.fromPortablePath(itemPath));
           },

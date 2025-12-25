@@ -1,6 +1,6 @@
 import {formatDate, formatPackageLink} from '@/utils/helpers';
 import {Menu as BaseMenu}              from '@base-ui-components/react/menu';
-import ChevronDown                     from 'src/assets/svg/chevron-down.svg?react';
+import ChevronDown                     from '@/assets/svg/chevron-down.svg?react';
 
 interface VersionChoice {
   value: string;

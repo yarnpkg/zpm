@@ -453,7 +453,7 @@ describe(`Commands`, () => {
 
           // Just a sanity check, since this test is quite complex
           expect(zipFiles1).toHaveLength(1);
-          archiveName1 = zipFiles1[0];
+          archiveName1 = zipFiles1[0]!;
         }
 
         await xfs.writeJsonPromise(ppath.join(path, Filename.manifest), {
@@ -471,7 +471,7 @@ describe(`Commands`, () => {
 
           // Just a sanity check, since this test is quite complex
           expect(zipFiles2).toHaveLength(1);
-          archiveName2 = zipFiles2[0];
+          archiveName2 = zipFiles2[0]!;
         }
 
         // We need to replace the hash in the cache filename, otherwise the cache just won't find the archive

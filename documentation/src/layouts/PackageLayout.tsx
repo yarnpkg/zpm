@@ -1,5 +1,5 @@
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import NotFound                           from 'src/pages/_404';
+import NotFound                           from '@/pages/_404';
 
 import {
   ErrorBoundary,

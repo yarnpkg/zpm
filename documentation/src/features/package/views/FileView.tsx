@@ -1,6 +1,6 @@
 import {Editor}         from '@monaco-editor/react';
 import {Suspense}       from 'preact/compat';
-import {useReleaseFile} from 'src/api/package';
+import {useReleaseFile} from '@/api/package';
 
 interface FileViewProps {
   name: string;

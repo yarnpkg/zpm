@@ -89,10 +89,10 @@ export default defineConfig({
         Head: `./src/overrides/Head.astro`,
       },
       customCss: [
-        `./src/styles/global.css`,
+        `@/styles/global.css`,
         `@fontsource/montserrat/400.css`,
         `@fontsource/montserrat/500.css`,
-        `./src/fonts/font-face.css`,
+        `@/fonts/font-face.css`,
       ],
       plugins: [
         starlightAutoSidebar(),

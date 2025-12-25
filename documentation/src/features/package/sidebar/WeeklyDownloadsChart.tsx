@@ -1,7 +1,7 @@
 import 'preact/compat';
 import {AreaChart, Area, ResponsiveContainer, Tooltip} from 'recharts';
-import {useWeeklyDownloads}                            from 'src/api/package';
-import DownloadIcon                                    from 'src/assets/svg/download-icon.svg?react';
+import {useWeeklyDownloads}                            from '@/api/package';
+import DownloadIcon                                    from '@/assets/svg/download-icon.svg?react';
 
 const formatter = Intl.NumberFormat(`en-US`, {
   compactDisplay: `long`,

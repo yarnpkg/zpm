@@ -70,17 +70,20 @@ function installSky(canvas: HTMLCanvasElement) {
   const camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
 
   // Geometry
+  const closeParticleGeometry = new THREE.BufferGeometry();
+  const farParticleGeometry = new THREE.BufferGeometry();
+
   const geometrys = [
-    new THREE.BufferGeometry(),
-    new THREE.BufferGeometry(),
+    closeParticleGeometry,
+    farParticleGeometry,
   ];
 
-  geometrys[0].setAttribute(
+  closeParticleGeometry.setAttribute(
     `position`,
     new THREE.BufferAttribute(getRandomParticelPos(350 * FACTOR), 3),
   );
 
-  geometrys[1].setAttribute(
+  farParticleGeometry.setAttribute(
     `position`,
     new THREE.BufferAttribute(getRandomParticelPos(1500 * FACTOR), 3),
   );

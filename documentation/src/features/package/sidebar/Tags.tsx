@@ -1,7 +1,7 @@
+import {usePackageInfo}    from '@/api/package';
 import cn                  from '@/utils/cn';
 import {formatPackageLink} from '@/utils/helpers';
 import semver              from 'semver';
-import {usePackageInfo}    from 'src/api/package';
 
 import Collapsable         from './Collapsable';
 

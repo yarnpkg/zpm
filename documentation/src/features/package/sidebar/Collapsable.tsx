@@ -1,4 +1,4 @@
-import ArrowDownIcon              from '/src/assets/svg/arrow-down.svg?react';
+import ArrowDownIcon              from '@/assets/svg/arrow-down.svg?react';
 import cn                         from '@/utils/cn';
 import {useState, type ReactNode} from 'preact/compat';
 

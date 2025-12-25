@@ -1,6 +1,8 @@
-import type {SidebarEntry} from '@astrojs/starlight/utils/routing/types';
+import type { StarlightRouteData } from "@astrojs/starlight/route-data";
 
 import SidebarEntryElement from './SidebarEntry';
+
+type SidebarEntry = StarlightRouteData["sidebar"][number];
 
 interface Props {
   entries: Array<SidebarEntry>;
@@ -9,10 +11,6 @@ interface Props {
 
 export default function Sidebar({entries, defaultExpandedGroup}: Props) {
   return entries.map((entry, index) => (
-    <SidebarEntryElement
-      initialCollapsed={false}
-      {...(entry as any)}
-      key={index}
-    />
+    <SidebarEntryElement key={index} {...entry}/>
   ));
 }

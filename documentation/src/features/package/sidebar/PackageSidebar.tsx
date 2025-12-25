@@ -1,5 +1,5 @@
 import {Suspense, lazy}     from 'preact/compat';
-import ArrowDownIcon        from 'src/assets/svg/arrow-down.svg?react';
+import ArrowDownIcon        from '@/assets/svg/arrow-down.svg?react';
 
 import {PackageBreadcrumbs} from '../views';
 

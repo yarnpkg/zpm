@@ -1,4 +1,4 @@
-import ArrowDownIcon              from '/src/assets/svg/arrow-down.svg?react';
+import ArrowDownIcon              from '@/assets/svg/arrow-down.svg?react';
 import cn                         from '@/utils/cn';
 import {formatPackageLink}        from '@/utils/helpers';
 import {useState, type ReactNode} from 'preact/compat';
@@ -21,7 +21,7 @@ export class FileTree {
     let folder: TreeFolder = this.tree;
 
     for (let i = 0; i < pathParts.length; i++) {
-      const part = pathParts[i];
+      const part = pathParts[i]!;
       const isLast = i === pathParts.length - 1;
 
       if (isLast) {

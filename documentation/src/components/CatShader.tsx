@@ -211,13 +211,6 @@ class ShaderController {
       this.gl.uniform1i(distanceFieldLocation, 1);
     }
 
-    if (this.stars) {
-      this.gl.activeTexture(this.gl.TEXTURE2);
-      this.gl.bindTexture(this.gl.TEXTURE_2D, this.stars);
-      const starsLocation = this.gl.getUniformLocation(this.program, 'stars');
-      this.gl.uniform1i(starsLocation, 2);
-    }
-
     // Draw
     this.gl.drawArrays(this.gl.TRIANGLES, 0, 6);
   }

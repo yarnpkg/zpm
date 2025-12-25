@@ -1,5 +1,8 @@
-import type {SidebarEntry}   from 'node_modules/@astrojs/starlight/utils/routing/types';
+import type { StarlightRouteData } from "@astrojs/starlight/route-data";
+
 import type {HTMLAttributes} from 'preact/compat';
+
+type SidebarEntry = StarlightRouteData["sidebar"][number];
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: `tip` | `note` | `success` | `danger` | `caution` | `package` | `author` | `default`;
@@ -7,26 +10,7 @@ export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   className?: string;
 }
 
-export interface SidebarLinkProps extends HTMLAttributes<HTMLAnchorElement> {
-  badge: BadgeProps | undefined;
-  label: string;
-  isCurrent: boolean;
-  attrs?: HTMLAttributes<HTMLAnchorElement>;
-  className?: string;
-  variant: `link` | `sub-link`;
-  type: `link`;
-  initialCollapsed?: boolean; // SidebarGroup requires it
-}
-
-export interface SidebarGroupProps extends HTMLAttributes<HTMLDivElement> {
-  badge: BadgeProps | undefined;
-  label: string;
-  collapsed: boolean;
-  initialCollapsed: boolean;
-  entries: Array<SidebarEntry>;
-  className?: string;
-  type: `group`;
-  variant?: string;
-}
+export type SidebarLinkProps = Extract<SidebarEntry, { type: "link" }> & {className?: string; variant?: `link` | `sub-link`};
+export type SidebarGroupProps = Extract<SidebarEntry, { type: "group" }> & {className?: string; initialCollapsed?: boolean};
 
 export type SidebarEntryProps = SidebarLinkProps | SidebarGroupProps;

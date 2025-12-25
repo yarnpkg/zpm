@@ -34,7 +34,7 @@ const mte = generatePkgDriver({
       ? [process.execPath, yarnBinary]
       : [yarnBinary];
 
-    const res = await execFile(yarnBinaryArgs[0], [...execArgv, ...yarnBinaryArgs.slice(1), ...cwdArgs, command, ...args], {
+    const res = await execFile(yarnBinaryArgs[0]!, [...execArgv, ...yarnBinaryArgs.slice(1), ...cwdArgs, command, ...args], {
       cwd: cwd || path,
       stdin,
       env: {

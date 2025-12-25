@@ -3,6 +3,7 @@
   "private": true,
   "license": "BSD-2-Clause",
   "devDependencies": {
+    "@types/jest": "^29.0.0",
     "@yarnpkg/monorepo": "workspace:^",
     "esbuild": "npm:esbuild-wasm@^0.23.0",
     "jest": "^29.2.1",

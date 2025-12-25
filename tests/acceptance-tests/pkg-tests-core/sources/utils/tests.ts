@@ -600,10 +600,10 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
           return processError(response, 400, `Missing readme`);
 
         const [version] = Object.keys(body.versions);
-        if (!body.versions[version].gitHead && name === `githead-required`)
+        if (!body.versions[version!].gitHead && name === `githead-required`)
           return processError(response, 400, `Missing gitHead`);
 
-        if (typeof body.versions[version].gitHead !== `undefined` && name === `githead-forbidden`)
+        if (typeof body.versions[version!].gitHead !== `undefined` && name === `githead-forbidden`)
           return processError(response, 400, `Unexpected gitHead`);
 
         if (name === `provenance-required`) {
@@ -681,7 +681,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       let registry: {registry: string} | undefined;
       if ((match = url.match(/^\/registry\/([a-z]+)\//))) {
         url = url.slice(match[0].length - 1);
-        registry = {registry: match[1]};
+        registry = {registry: match[1]!};
       }
 
       if ((match = url.match(/^\/-\/user\/org\.couchdb\.user:(.+)/))) {
@@ -690,7 +690,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
         return {
           ...registry,
           type: RequestType.Login,
-          username,
+          username: username!,
         };
       } else if (url === `/-/whoami`) {
         return {
@@ -711,7 +711,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
           ...registry,
           type: RequestType.Publish,
           scope,
-          localName,
+          localName: localName!,
         };
       } else if ((match = url.match(/^\/(?:(@[^/]+)\/)?([^@/][^/]*)$/))) {
         const [, scope, localName] = match;
@@ -720,7 +720,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
           ...registry,
           type: RequestType.PackageInfo,
           scope,
-          localName,
+          localName: localName!,
         };
       } else if ((match = url.match(/^\/(?:(@[^/]+)\/)?([^@/][^/]*)\/([0-9]+\.[0-9]+\.[0-9]+(?:-[^/]+)?)$/))) {
         const [, scope, localName, version] = match;
@@ -729,8 +729,8 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
           ...registry,
           type: RequestType.PackageVersion,
           scope,
-          localName,
-          version,
+          localName: localName!,
+          version: version!,
         };
       } else if ((match = url.match(/^\/(?:(@[^/]+)\/)?([^@/][^/]*)\/(-|tralala)\/\2-(.*)\.tgz(\?.*)?$/))) {
         const [, scope, localName, split, version] = match;
@@ -742,8 +742,8 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
           ...registry,
           type: RequestType.PackageTarball,
           scope,
-          localName,
-          version,
+          localName: localName!,
+          version: version!,
         };
       }
     }
@@ -812,7 +812,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
           }
 
           await processors[parsedRequest.type](parsedRequest, req, res);
-        } catch (error) {
+        } catch (error: any) {
           processError(res, 500, error.stack);
         }
       })();
@@ -891,7 +891,7 @@ export const startProxyServer = ({type = `http`}: {type?: keyof typeof proxyServ
           proxyReq.on(`error`, err => {
             sendError(res, 502, `Proxy error: ${err.message}`);
           });
-        } catch (error) {
+        } catch (error: any) {
           sendError(res, 500, `Proxy server error: ${error.message}`);
         }
       })();
@@ -916,7 +916,7 @@ export const startProxyServer = ({type = `http`}: {type?: keyof typeof proxyServ
       server.on(`connect`, (req, clientSocket, head) => {
         // Parse the target and establish the connection
         const [targetHost, targetPort] = (req.url || ``).split(`:`);
-        const port = parseInt(targetPort) || 443;
+        const port = parseInt(targetPort!) || 443;
 
         const serverSocket = net.connect(port, targetHost, () => {
           clientSocket.write(
@@ -1089,7 +1089,7 @@ export const generatePkgDriver = ({
             return;
           }
           await fn!({path, run, source});
-        } catch (error) {
+        } catch (error: any) {
           error.message = `Temporary fixture folder: ${npath.fromPortablePath(path)}\n\n${error.message}`;
           throw error;
         }

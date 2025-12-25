@@ -1,4 +1,5 @@
 import reactEslintConfig from '@yarnpkg/eslint-config/react';
+import tsEslintConfig    from '@yarnpkg/eslint-config/typescript';
 import eslintConfig      from '@yarnpkg/eslint-config';
 
 // eslint-disable-next-line arca/no-default-export
@@ -14,6 +15,7 @@ export default [
   },
   ...eslintConfig,
   ...reactEslintConfig,
+  ...tsEslintConfig,
   {
     files: [
       `documentation/src/**/*.tsx`,

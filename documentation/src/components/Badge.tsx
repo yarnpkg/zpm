@@ -1,5 +1,5 @@
 import cn                from '@/utils/cn';
-import {type BadgeProps} from 'src/types/sidebar';
+import {type BadgeProps} from '@/types/sidebar';
 
 const variants = {
   note: `bg-blue-950 border-blue-500`,

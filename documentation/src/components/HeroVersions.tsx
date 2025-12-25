@@ -1,6 +1,6 @@
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {Suspense}                         from 'preact/compat';
-import {useYarnReleaseVersions}           from 'src/api/versions';
+import {useYarnReleaseVersions}           from '@/api/versions';
 
 const queryClient = new QueryClient();
 
