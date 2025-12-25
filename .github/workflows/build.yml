@@ -29,6 +29,8 @@ jobs:
     steps:
       - name: Checkout the repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{github.event.pull_request.head.sha || github.sha}}
 
       - uses: ./.github/actions/build
         id: build
@@ -65,3 +67,67 @@ jobs:
         with:
           name: yarn-${{matrix.target}}-iso
           path: target/${{matrix.target}}/release-lto-nodebug/yarn.iso
+
+  test:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+
+    name: "Testing ${{matrix.target}}"
+    needs: [build]
+    runs-on: ${{matrix.os}}
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{github.event.pull_request.head.sha || github.sha}}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: yarn-${{matrix.target}}
+          path: artifacts
+
+      - name: Prepare Node
+        uses: ./.github/actions/prepare-node
+        with:
+          link: artifacts/yarn-bin
+
+      - name: Generate the test report
+        run: |
+          yarn ./tests/acceptance-tests jest --json --outputFile=$(pwd)/report.json || true
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: yarn-${{matrix.target}}-test-report
+          path: report.json
+
+  report:
+    name: Reporting test results
+    needs: [test]
+    runs-on: ubuntu-latest
+
+    environment:
+      name: test-reports
+      url: |
+        ${{
+          github.event_name == 'pull_request' &&
+          format('https://iteratum.ai/examples/jest-ui/?url=https%3A%2F%2Frepo.yarnpkg.com%2Fbuilds%2Fzpm%2Fcommits%2F{0}%2Ftests&compareUrl=https%3A%2F%2Frepo.yarnpkg.com%2Fbuilds%2Fzpm%2Fcommits%2F{1}%2Ftests', github.event.pull_request.head.sha, steps.fork-point.outputs.result) ||
+          format('https://iteratum.ai/examples/jest-ui/?url=https%3A%2F%2Frepo.yarnpkg.com%2Fbuilds%2Fzpm%2Fcommits%2F{0}%2Ftests', github.sha)
+        }}
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{github.event.pull_request.head.sha || github.sha}}
+
+      - name: Retrieve the fork point for the pull request
+        id: fork-point
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "result=$(git merge-base ${{github.event.pull_request.base.sha}} ${{github.event.pull_request.head.sha}})" >> $GITHUB_OUTPUT

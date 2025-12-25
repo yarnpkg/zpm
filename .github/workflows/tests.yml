@@ -1,4 +1,4 @@
-name: Tests
+name: Integration Tests
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ env:
 
 jobs:
   test-tracker:
-    name: 'Running the test tracker'
+    name: Test report
     runs-on: ubuntu-latest
 
     permissions:
@@ -39,12 +39,6 @@ jobs:
       - name: Copy files to the standard local path
         run: |
           ln -s target/x86_64-unknown-linux-musl/release local
-
-      - name: Clone the berry repo
-        uses: actions/checkout@v4
-        with:
-          repository: yarnpkg/berry
-          path: berry
 
       - name: Prepare Node
         uses: ./.github/actions/prepare-node

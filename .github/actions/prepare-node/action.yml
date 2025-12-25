@@ -1,6 +1,11 @@
 name: Prepare Node
 description: 'Prepares the Node environment for the repository'
 
+inputs:
+  link:
+    description: 'The link to the local path'
+    required: false
+
 runs:
   using: composite
   steps:
@@ -9,6 +14,13 @@ runs:
         node-version: '22'
 
     - uses: yarnpkg/setup-action@main
+
+    - name: Add link to the local path
+      if: inputs.link != ''
+      shell: bash
+      run: |
+        chmod +x ${{inputs.link}}
+        yarn switch link ${{inputs.link}}
 
     - name: Install dependencies
       shell: bash

@@ -1,3 +1,6 @@
+name: Build
+description: 'Builds the project for the given target and profile'
+
 inputs:
   target:
     description: 'The target to build for'
