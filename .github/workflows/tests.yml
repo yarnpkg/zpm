@@ -1,9 +1,9 @@
 name: Tests
 
 on:
+  pull_request:
   push:
     branches: [main]
-  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,7 +20,12 @@ jobs:
 
     environment:
       name: test-reports
-      url: "https://iteratum.ai/examples/jest-ui/?url=https%3A%2F%2Frepo.yarnpkg.com%2Fbuilds%2Fzpm%2Fcommits%2F${{github.sha}}%2Ftests"
+      url: |
+        ${{
+          github.event_name == 'pull_request' &&
+          format('https://iteratum.ai/examples/jest-ui/?url=https%3A%2F%2Frepo.yarnpkg.com%2Fbuilds%2Fzpm%2Fcommits%2F{0}%2Ftests&compareUrl=https%3A%2F%2Frepo.yarnpkg.com%2Fbuilds%2Fzpm%2Fcommits%2F{1}%2Ftests', github.sha, github.event.pull_request.base.sha) ||
+          format('https://iteratum.ai/examples/jest-ui/?url=https%3A%2F%2Frepo.yarnpkg.com%2Fbuilds%2Fzpm%2Fcommits%2F{0}%2Ftests', github.sha)
+        }}
 
     steps:
       - name: Checkout the repo
@@ -46,8 +51,7 @@ jobs:
 
       - name: Generate the test report
         run: |
-          export BERRY_DIR=$GITHUB_WORKSPACE/berry
-          yarn berry test:integration --json --outputFile=$(pwd)/report.json || true
+          yarn ./tests/acceptance-tests jest --json --outputFile=$(pwd)/report.json || true
 
       - name: Upload test report
         uses: actions/upload-artifact@v4

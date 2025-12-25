@@ -1,3 +1,6 @@
+name: Prepare Node
+description: 'Prepares the Node environment for the repository'
+
 runs:
   using: composite
   steps:
@@ -5,10 +8,7 @@ runs:
       with:
         node-version: '22'
 
-    - name: Install Yarn Switch
-      shell: bash
-      run: |
-        bash install-script.sh
+    - uses: yarnpkg/setup-action@main
 
     - name: Install dependencies
       shell: bash
