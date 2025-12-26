@@ -17,6 +17,12 @@ A special note for plugins, which aren't implemented **yet**.
 
 Various other projects (Biome, Oxc, etc) are experimenting on that topic, and we prefer to wait before focusing on that so we can leverage their researches before building our own solutions.
 
+### Important features
+
+Some new features have been implemented. They are not "breaking changes" per se, but may make some of your existing tooling obsolete, so be sure to take a look at them:
+
+- [Workspace profiles](/concepts/profiles), which let you definite set of dependencies to reuse in your workspaces
+
 ### Lockfile
 
 - The lockfile (`yarn.lock`) is now formatted in JSON to benefit from heavily optimized JSON parsers. Some of its layout has slightly changed:
