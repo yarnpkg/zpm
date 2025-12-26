@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, fs::{DirEntry, FileType, Metadata}};
+use std::{collections::BTreeSet, fs::{FileType, Metadata}};
 
 use zpm_utils::Path;
 
@@ -90,13 +90,13 @@ impl CachedManifestFinder {
 impl DiffController for CachedManifestFinder {
     type Data = Manifest;
 
-    fn is_relevant_entry(path: &DirEntry, file_type: &FileType) -> bool {
+    fn is_relevant_entry(file_name: &str, file_type: &FileType) -> bool {
         if file_type.is_dir() {
-            return path.file_name() != ".yarn" && path.file_name() != "node_modules";
+            return file_name != ".yarn" && file_name != "node_modules";
         }
 
         if file_type.is_file() {
-            return path.file_name() == "package.json";
+            return file_name == "package.json";
         }
 
         false
