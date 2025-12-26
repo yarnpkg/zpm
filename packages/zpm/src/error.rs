@@ -144,6 +144,9 @@ pub enum Error {
     #[error("Invalid ident ({0})")]
     InvalidIdent(String),
 
+    #[error("Workspace profile not found ({0})")]
+    WorkspaceProfileNotFound(String),
+
     #[error("Package manifest not found ({})", .0.to_print_string())]
     ManifestNotFound(Path),
 

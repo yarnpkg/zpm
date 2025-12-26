@@ -1,23 +1,21 @@
 .DS_Store
-.astro
 .idea
+
+/documentation/.astro/*
+!/documentation/.astro/content.d.ts
+!/documentation/.astro/types.d.ts
 
 /artifacts
 /target
+/local
 
 dist
 node_modules
+.pnp.*
 
 flamegraph.svg
 profile.json.gz
 
-.pnp.*
-.yarn/install-state.gz
-
 /.yarn/ignore
 /.yarn/cache
 /.yarn/unplugged
-
-/local
-
-.DS_Store

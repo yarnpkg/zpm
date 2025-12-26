@@ -8,6 +8,8 @@ export default [
       `.pnp.*`,
       `.yarn/**`,
       `**/*.rs`,
+      `**/dist`,
+      `tests/acceptance-tests/pkg-tests-fixtures`,
       `documentation/.astro`,
       `packages/zpm/src/constraints/constraints.tpl.js`,
     ],
@@ -20,6 +22,15 @@ export default [
     ],
     rules: {
       [`arca/no-default-export`]: `off`,
+    },
+  },
+  {
+    files: [`tests/acceptance-tests/pkg-tests-specs/**/*.test.{js,ts}`],
+    languageOptions: {
+      globals: {
+        makeTemporaryEnv: `readonly`,
+        makeTemporaryMonorepoEnv: `readonly`,
+      },
     },
   },
 ];

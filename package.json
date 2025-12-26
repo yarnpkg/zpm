@@ -3,10 +3,13 @@
   "packageManager": "yarn@6.0.0-rc.6",
   "workspaces": [
     "documentation",
-    "packages/*"
+    "packages/*",
+    "tests/acceptance-tests",
+    "tests/acceptance-tests/pkg-tests-core",
+    "tests/acceptance-tests/pkg-tests-fixtures",
+    "tests/acceptance-tests/pkg-tests-specs"
   ],
   "devDependencies": {
-    "@builtin/node": "24.10.0",
     "@types/lodash": "^4.17.17",
     "@types/node": "^22.15.20",
     "@yarnpkg/types": "^4.0.1",
@@ -29,6 +32,7 @@
     "eslint": "^9.36.0"
   },
   "resolutions": {
-    "@clipanion/tools": "file:scripts/@clipanion-tools.tgz"
+    "@clipanion/tools": "file:scripts/@clipanion-tools.tgz",
+    "@types/node": "^24.10.4"
   }
 }

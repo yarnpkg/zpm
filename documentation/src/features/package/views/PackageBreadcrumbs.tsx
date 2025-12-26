@@ -1,4 +1,4 @@
-import Arrow               from '/src/assets/svg/right-arrow.svg?react';
+import Arrow               from '@/assets/svg/right-arrow.svg?react';
 import {formatPackageLink} from '@/utils/helpers';
 
 interface PackageBreadcrumbsProps {

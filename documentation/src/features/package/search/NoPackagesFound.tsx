@@ -1,4 +1,4 @@
-import NoPackages from 'src/assets/svg/no-packages-found.svg?react';
+import NoPackages from '@/assets/svg/no-packages-found.svg?react';
 
 export default function NoPackagesFound() {
   return (

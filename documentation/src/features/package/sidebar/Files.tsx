@@ -1,5 +1,5 @@
 // import cn from "@/utils/cn";
-import {useReleaseInfo}             from 'src/api/package';
+import {useReleaseInfo}             from '@/api/package';
 
 import Collapsable                  from './Collapsable';
 import {FileTreeRenderer, FileTree} from './FileTree';

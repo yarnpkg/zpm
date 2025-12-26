@@ -4,7 +4,7 @@ slug: concepts/pnp
 title: Yarn Plug'n'Play
 description: An overview of Yarn Plug'n'Play, a powerful and innovative installation strategy for Node.js.
 sidebar:
-  order: 9
+  order: 5
 ---
 
 Yarn Plug'n'Play, also known as Yarn PnP, is the default installation strategy in modern releases of Yarn. While it can be swapped out for more traditional strategies such as `node_modules` or pnpm-style symlink-based installs, we recommend it when creating new projects.

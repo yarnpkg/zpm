@@ -76,7 +76,7 @@ declare const SERIALIZED_CONTEXT: string;
 declare const CONFIG_PATH: string;
 declare const FIX: boolean;
 
-const RESULT_PATH = process.argv[2];
+const RESULT_PATH = process.argv[2]!;
 
 type InputDependency = {
   ident: string;
@@ -278,9 +278,11 @@ function applyEngineReport(fix: boolean) {
     const workspaceOperations: Array<Operation> = [];
 
     for (const {fieldPath, values} of workspaceActions.updates.values()) {
-      if (values.size > 1) {
-        const valuesArray = [...values];
+      const valuesArray = [...values];
+      if (valuesArray.length === 0)
+        continue;
 
+      if (valuesArray.length > 1) {
         const unsetValues = valuesArray
           .filter(([value]) => typeof value === `undefined`)
           ?.[0]?.[1] ?? null;
@@ -295,7 +297,7 @@ function applyEngineReport(fix: boolean) {
           unsetValues,
         });
       } else {
-        const [[newValue]] = values;
+        const newValue = valuesArray[0]!;
 
         const currentValue = get(manifest, fieldPath);
         if (JSON.stringify(currentValue) === JSON.stringify(newValue))

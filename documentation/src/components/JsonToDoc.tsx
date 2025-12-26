@@ -1,7 +1,5 @@
-import {marked}         from 'marked';
-import type {ReactNode} from 'preact/compat';
-import {useEffect}      from 'preact/hooks';
-import {JsonDoc}        from 'react-json-doc';
+import {marked}  from 'marked';
+import {JsonDoc} from 'react-json-doc';
 
 const baseFont = {
   fontFamily: `Montserrat`,
@@ -82,7 +80,7 @@ const extraTheme = {
 
 export default function JsonToDoc({json}: {json: string}) {
   return (
-    <div class="not-content json-doc">
+    <div class={`not-content json-doc`}>
       <JsonDoc
         data={json}
         theme={jsonTheme}
