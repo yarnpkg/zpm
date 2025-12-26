@@ -1,6 +1,6 @@
 {
   "name": "@yarnpkg/monorepo",
-  "packageManager": "yarn@6.0.0-rc.6",
+  "packageManager": "yarn@6.0.0-rc.8",
   "workspaces": [
     "documentation",
     "packages/*",
