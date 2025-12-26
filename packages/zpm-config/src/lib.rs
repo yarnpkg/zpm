@@ -1,7 +1,7 @@
-use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc};
+use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc, time::UNIX_EPOCH};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, IoResultExt, Libc, Os, Path, RawString, Serialized, System, ToFileString, ToHumanString, tree};
+use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, IoResultExt, LastModifiedAt, Libc, Os, Path, RawString, Serialized, System, ToFileString, ToHumanString, tree};
 
 #[derive(Debug, Clone)]
 pub struct ConfigurationContext {
@@ -766,6 +766,9 @@ pub struct Configuration {
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum ConfigurationError {
+    #[error(transparent)]
+    IoError(Arc<std::io::Error>),
+
     #[error("Invalid enum value ({0})")]
     EnumError(String),
 
@@ -774,6 +777,12 @@ pub enum ConfigurationError {
 
     #[error(transparent)]
     SerdeError(#[from] Arc<serde_yaml::Error>),
+}
+
+impl From<std::io::Error> for ConfigurationError {
+    fn from(error: std::io::Error) -> Self {
+        ConfigurationError::IoError(Arc::new(error))
+    }
 }
 
 impl From<serde_yaml::Error> for ConfigurationError {
@@ -821,7 +830,7 @@ impl Configuration {
         self.settings.get(path)
     }
 
-    pub fn load(context: &ConfigurationContext) -> Result<Configuration, ConfigurationError> {
+    pub fn load(context: &ConfigurationContext, last_modified_at: &mut LastModifiedAt) -> Result<Configuration, ConfigurationError> {
         let rc_filename
             = std::env::var("YARN_RC_FILENAME")
                 .unwrap_or_else(|_| ".yarnrc.yml".to_string());
@@ -840,23 +849,43 @@ impl Configuration {
             = Partial::Missing;
 
         if let Some(user_config_path) = user_config_path.as_ref() {
-            let user_config_text
-                = user_config_path
-                    .fs_read_text()
+            let metadata
+                = user_config_path.fs_metadata()
                     .ok_missing()?;
 
-            if let Some(user_config_text) = user_config_text {
+            if let Some(metadata) = metadata {
+                let user_last_changed_at
+                    = metadata.modified()?
+                        .duration_since(UNIX_EPOCH).unwrap()
+                        .as_nanos();
+
+                last_modified_at.update(user_last_changed_at);
+
+                let user_config_text
+                    = user_config_path
+                        .fs_read_text_with_size(metadata.len())?;
+
                 intermediate_user_config = Partial::Value(serde_yaml::from_str::<intermediate::Settings>(&user_config_text)?);
             }
         }
 
         if let Some(project_config_path) = project_config_path.as_ref() {
-            let project_config_text
-                = project_config_path
-                    .fs_read_text()
+            let metadata
+                = project_config_path.fs_metadata()
                     .ok_missing()?;
 
-            if let Some(project_config_text) = project_config_text {
+            if let Some(metadata) = metadata {
+                let project_last_changed_at
+                    = metadata.modified()?
+                        .duration_since(UNIX_EPOCH).unwrap()
+                        .as_nanos();
+
+                last_modified_at.update(project_last_changed_at);
+
+                let project_config_text
+                    = project_config_path
+                        .fs_read_text_with_size(metadata.len())?;
+
                 intermediate_project_config = Partial::Value(serde_yaml::from_str::<intermediate::Settings>(&project_config_text)?);
             }
         }

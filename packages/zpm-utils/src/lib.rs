@@ -15,6 +15,7 @@ mod serialization_builtins;
 mod serialization;
 mod shell;
 mod system;
+mod time;
 mod url;
 
 pub mod tree;
@@ -34,4 +35,5 @@ pub use crate::serialization_builtins::*;
 pub use crate::serialization::*;
 pub use crate::shell::*;
 pub use crate::system::*;
+pub use crate::time::*;
 pub use crate::url::*;

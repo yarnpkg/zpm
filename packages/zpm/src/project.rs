@@ -5,7 +5,7 @@ use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString, ToHumanString};
+use zpm_utils::{LastModifiedAt, Path, ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -13,13 +13,13 @@ use crate::{
     cache::{CompositeCache, DiskCache},
     diff_finder::SaveEntry,
     error::Error,
-    git::{detect_git_operation, GitOperation},
+    git::{GitOperation, detect_git_operation},
     http::HttpClient,
     install::{InstallContext, InstallManager, InstallResult, InstallState},
-    lockfile::{from_legacy_berry_lockfile, Lockfile},
-    manifest::{helpers::read_manifest_with_size, Manifest},
+    lockfile::{Lockfile, from_legacy_berry_lockfile},
+    manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
-    report::{with_report_result, StreamReport, StreamReportConfig},
+    report::{StreamReport, StreamReportConfig, with_report_result},
     script::{Binary, ScriptEnvironment},
 };
 
@@ -70,7 +70,7 @@ pub struct Project {
     pub workspaces_by_ident: BTreeMap<Ident, usize>,
     pub workspaces_by_rel_path: BTreeMap<Path, usize>,
 
-    pub last_changed_at: u128,
+    pub last_modified_at: LastModifiedAt,
     pub install_state: Option<InstallState>,
     pub http_client: std::sync::Arc<HttpClient>,
 }
@@ -125,6 +125,9 @@ impl Project {
         let (project_cwd, package_cwd)
             = Project::find_closest_project(shell_cwd.clone())?;
 
+        let mut last_modified_at
+            = LastModifiedAt::new();
+
         let mut config = Configuration::load(
             &ConfigurationContext {
                 env: std::env::vars().collect(),
@@ -132,6 +135,7 @@ impl Project {
                 project_cwd: Some(project_cwd.clone()),
                 package_cwd: Some(package_cwd.clone()),
             },
+            &mut last_modified_at,
         ).unwrap();
 
         if config.settings.enable_migration_mode.value {
@@ -142,7 +146,7 @@ impl Project {
         let root_workspace
             = Workspace::from_root_path(&project_cwd)?;
 
-        let (mut workspaces, last_changed_at) = root_workspace
+        let mut workspaces = root_workspace
             .workspaces().await?;
 
         // Add root workspace to the beginning
@@ -156,6 +160,8 @@ impl Project {
         for (idx, workspace) in workspaces.iter().enumerate() {
             workspaces_by_ident.insert(workspace.locator().ident.clone(), idx);
             workspaces_by_rel_path.insert(workspace.rel_path.clone(), idx);
+
+            last_modified_at.update(workspace.last_changed_at);
         }
 
         let http_client
@@ -171,7 +177,7 @@ impl Project {
             workspaces_by_ident,
             workspaces_by_rel_path,
 
-            last_changed_at,
+            last_modified_at,
             install_state: None,
             http_client,
         })
@@ -704,7 +710,7 @@ impl Project {
 
         if cache_exists {
             if let Some(install_state) = &self.install_state {
-                if self.last_changed_at <= install_state.last_installed_at {
+                if !self.last_modified_at.has_changed_since(install_state.last_installed_at) {
                     return Ok(());
                 }
             }
@@ -891,9 +897,8 @@ impl Workspace {
         self.path.with_join_str(MANIFEST_NAME)
     }
 
-    pub async fn workspaces(&self) -> Result<(Vec<Workspace>, u128), Error> {
+    pub async fn workspaces(&self) -> Result<Vec<Workspace>, Error> {
         let mut workspaces = vec![];
-        let mut project_last_changed_at = self.last_changed_at;
 
         if let Some(patterns) = &self.manifest.workspaces {
             let mut manifest_finder
@@ -926,9 +931,9 @@ impl Workspace {
                                 = base_path.with_join_str(pattern);
 
                             GlobBuilder::new(pattern_path.as_str())
-                                    .literal_separator(true)
-                                    .build()
-                                    .map(|glob| (glob, is_positive))
+                                .literal_separator(true)
+                                .build()
+                                .map(|glob| (glob, is_positive))
                         })
                         .collect::<Result<Vec<_>, _>>()?;
 
@@ -974,21 +979,15 @@ impl Workspace {
                         let workspace_rel_path = manifest_rel_path.dirname().unwrap();
 
                         // Skip if we've already processed this workspace
-                        if processed_workspaces.contains(&workspace_rel_path) {
+                        if !processed_workspaces.insert(workspace_rel_path.clone()) {
                             continue;
                         }
-
-                        processed_workspaces.insert(workspace_rel_path.clone());
 
                         workspaces.push(Workspace::from_info(&self.path, WorkspaceInfo {
                             rel_path: workspace_rel_path.clone(),
                             manifest: manifest.clone(),
                             last_changed_at: *last_changed_at,
                         })?);
-
-                        if *last_changed_at > project_last_changed_at {
-                            project_last_changed_at = *last_changed_at;
-                        }
 
                         // If this workspace has its own workspaces field, add it to the queue
                         if let Some(nested_patterns) = &manifest.workspaces {
@@ -1003,6 +1002,6 @@ impl Workspace {
             });
         }
 
-        Ok((workspaces, project_last_changed_at))
+        Ok(workspaces)
     }
 }

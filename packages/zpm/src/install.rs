@@ -533,7 +533,7 @@ pub struct InstallResult {
 
 impl Install {
     pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
-        self.install_state.last_installed_at = project.last_changed_at;
+        self.install_state.last_installed_at = project.last_modified_at.as_nanos();
 
         let link_future
             = linker::link_project(project, &mut self);
