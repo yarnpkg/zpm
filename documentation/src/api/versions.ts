@@ -49,7 +49,7 @@ function useRegistryMetadata() {
   }).data!;
 }
 
-export function useYarnVersions(): Array<YarnVersion> {
+export function useYarnVersions(): [YarnVersion, YarnVersion, YarnVersion] {
   const {npm, repo} = useRegistryMetadata();
 
   const foundV3 = repo.tags.find((v: string) => v.startsWith(`v3`));

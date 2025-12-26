@@ -1,9 +1,9 @@
+import {useYarnVersions}                  from '@/api/versions';
+import ChevronDown                        from '@/assets/svg/chevron-down.svg?react';
 import {Menu as BaseMenu}                 from '@base-ui-components/react/menu';
 import {Separator}                        from '@base-ui-components/react/separator';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {Suspense}                         from 'preact/compat';
-import {useYarnVersions}                  from 'src/api/versions';
-import ChevronDown                        from 'src/assets/svg/chevron-down.svg?react';
 
 const queryClient = new QueryClient();
 

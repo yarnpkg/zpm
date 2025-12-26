@@ -146,9 +146,13 @@ export const checks: Array<Check> = [
       if (dtPackageName && dtPackage?.data) {
         const result = usePackageInfo(dtPackageName);
 
+        const latest = result[`dist-tags`]?.latest;
+        if (!latest)
+          return {ok: false};
+
         const href = formatPackageLink(
           dtPackageName,
-          result[`dist-tags`].latest,
+          latest,
         );
 
         return {

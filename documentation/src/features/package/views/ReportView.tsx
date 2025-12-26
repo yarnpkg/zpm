@@ -1,4 +1,4 @@
-import {usePackageInfo, useReleaseReadme} from 'src/api/package';
+import {usePackageInfo, useReleaseReadme} from '@/api/package';
 
 interface ReportViewProps {
   name: string;

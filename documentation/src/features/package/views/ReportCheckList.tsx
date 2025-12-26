@@ -1,6 +1,6 @@
+import type {Check}       from '@/api/packageChecks';
 import clsx               from 'clsx';
 import type {ChangeEvent} from 'preact/compat';
-import type {Check}       from 'src/api/packageChecks';
 import {useLocalStorage}  from 'usehooks-ts';
 
 export default function ReportCheckList({

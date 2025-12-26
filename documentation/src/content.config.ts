@@ -154,7 +154,7 @@ export function unionLoader(...loaders: Array<Loader>): Loader {
       const awaitedSchemas = await Promise.all(schemas.map(schema => (typeof schema === `function` ? schema() : schema)));
       const filteredSchemas = awaitedSchemas.filter(schema => schema !== undefined);
 
-      return z.union([filteredSchemas[0], filteredSchemas[1], ...filteredSchemas.slice(2)]);
+      return z.union(filteredSchemas as any);
     },
 
     load: async ctx => {

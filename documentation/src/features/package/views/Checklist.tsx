@@ -1,9 +1,9 @@
+import type {Check}      from '@/api/packageChecks';
+import {usePackageInfo}  from '@/api/package';
+import CheckIcon         from '@/assets/svg/check-icon.svg?react';
+import HourglassIcon     from '@/assets/svg/hourglass-icon.svg?react';
+import WarningIcon       from '@/assets/svg/warning-icon.svg?react';
 import cn                from '@/utils/cn';
-import type {Check}      from 'src/api/packageChecks';
-import {usePackageInfo}  from 'src/api/package';
-import CheckIcon         from 'src/assets/svg/check-icon.svg?react';
-import HourglassIcon     from 'src/assets/svg/hourglass-icon.svg?react';
-import WarningIcon       from 'src/assets/svg/warning-icon.svg?react';
 import {useLocalStorage} from 'usehooks-ts';
 
 interface UseCheckDataProps {

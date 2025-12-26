@@ -1,18 +1,18 @@
-import cn                            from '@/utils/cn.ts';
+import Close                         from '@/assets/svg/close.svg?react';
+import Discord                       from '@/assets/svg/discord.svg?react';
+import GitHub                        from '@/assets/svg/github.svg?react';
+import BrandLogo                     from '@/assets/svg/logo.svg?react';
+import Menu                          from '@/assets/svg/menu.svg?react';
+import SearchIcon                    from '@/assets/svg/search-icon.svg?react';
+import {NAVIGATION}                  from '@/content/consts';
+import cn                            from '@/utils/cn';
 import {isActivePath}                from '@/utils/helpers';
 import * as DocSearchReact           from '@docsearch/react';
 import {useEffect, useRef, useState} from 'preact/hooks';
 import {createElement, render}       from 'preact';
-import Close                         from 'src/assets/svg/close.svg?react';
-import Discord                       from 'src/assets/svg/discord.svg?react';
-import GitHub                        from 'src/assets/svg/github.svg?react';
-import BrandLogo                     from 'src/assets/svg/logo.svg?react';
-import Menu                          from 'src/assets/svg/menu.svg?react';
-// Images
-import SearchIcon                    from 'src/assets/svg/search-icon.svg?react';
-import {NAVIGATION}                  from 'src/content/consts.ts';
 
-import CollapsibleNavigation         from './CollapsibleNavigation.tsx';
+// Images
+import CollapsibleNavigation         from './CollapsibleNavigation';
 
 const {DocSearchModal} = DocSearchReact;
 
@@ -94,8 +94,8 @@ export default function MobileNavigation({pathname}: {pathname: string}) {
   }, [isSearchOpen]);
 
   return (
-    <div className="relative">
-      <div className="h-12"/>
+    <div className={`relative`}>
+      <div className={`h-12`}/>
       <div
         className={cn(
           `absolute inset-x-0 top-0 bg-linear-to-b from-white/15 to-white/5 p-px rounded-3xl`,

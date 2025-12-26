@@ -1,20 +1,22 @@
-import cn                                    from '@/utils/cn';
-import type {SidebarLink as SidebarLinkType} from 'node_modules/@astrojs/starlight/utils/routing/types';
-import {Fragment, useState}                  from 'preact/compat';
-import {type SidebarGroupProps}              from 'src/types/sidebar';
+import {type SidebarGroupProps}  from '@/types/sidebar';
+import cn                        from '@/utils/cn';
+import type {StarlightRouteData} from '@astrojs/starlight/route-data';
+import {Fragment, useState}      from 'preact/compat';
 
-import Badge                                 from '../Badge';
+import Badge                     from '../Badge';
 
-import SidebarEntry                          from './SidebarEntry';
+import SidebarEntry              from './SidebarEntry';
+
+type SidebarEntry = StarlightRouteData[`sidebar`][number];
+type SidebarLink = Extract<SidebarEntry, {type: `link`}>;
 
 export default function SidebarGroup({
   badge,
   label,
   collapsed,
-  initialCollapsed,
+  initialCollapsed = false,
   entries,
   className,
-  variant,
   type: _,
   ...props
 }: SidebarGroupProps) {
@@ -59,7 +61,7 @@ export default function SidebarGroup({
           className={`border-l pl-4 border-white/10 flex flex-col gap-y-3 font-montserrat`}
         >
           {entries
-            ?.filter((entry): entry is SidebarLinkType => {
+            ?.filter((entry): entry is SidebarLink => {
               return !entry.label.startsWith(`@yarnpkg/`);
             })
             .map((entry, index) => (
