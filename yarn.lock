@@ -1275,6 +1275,79 @@
         "version": "0.2.3"
       }
     },
+    "@builtin/node@builtin:^24.12.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "@builtin/node@builtin:24.12.0",
+        "version": "24.12.0",
+        "variants": [
+          "@builtin/node-linux-x64@builtin:24.12.0",
+          "@builtin/node-linux-arm64@builtin:24.12.0",
+          "@builtin/node-darwin-x64@builtin:24.12.0",
+          "@builtin/node-darwin-arm64@builtin:24.12.0"
+        ]
+      }
+    },
+    "@builtin/node-darwin-arm64@builtin:24.12.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "@builtin/node-darwin-arm64@builtin:24.12.0",
+        "version": "24.12.0",
+        "requirements": {
+          "cpu": [
+            "arm64"
+          ],
+          "os": [
+            "darwin"
+          ]
+        }
+      }
+    },
+    "@builtin/node-darwin-x64@builtin:24.12.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "@builtin/node-darwin-x64@builtin:24.12.0",
+        "version": "24.12.0",
+        "requirements": {
+          "cpu": [
+            "x64"
+          ],
+          "os": [
+            "darwin"
+          ]
+        }
+      }
+    },
+    "@builtin/node-linux-arm64@builtin:24.12.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "@builtin/node-linux-arm64@builtin:24.12.0",
+        "version": "24.12.0",
+        "requirements": {
+          "cpu": [
+            "arm64"
+          ],
+          "os": [
+            "linux"
+          ]
+        }
+      }
+    },
+    "@builtin/node-linux-x64@builtin:24.12.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "@builtin/node-linux-x64@builtin:24.12.0",
+        "version": "24.12.0",
+        "requirements": {
+          "cpu": [
+            "x64"
+          ],
+          "os": [
+            "linux"
+          ]
+        }
+      }
+    },
     "@capsizecss/unpack@npm:^2.4.0": {
       "checksum": "ef1b39128cc88cde87f086f3a49831e46fa22b5c95704c8e5426ec63c4e81df8bb2de2958c8ec584e1e3e303112014fc439bf5e979950e0212d5d036b757ba1b",
       "resolution": {
