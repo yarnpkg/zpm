@@ -55,4 +55,6 @@ Yarn puts various tools at your disposal to help you manage your project. These 
 
 - Our CLI accepts a path as optional first argument, provided it contains a `/`. As an example, running `yarn ./documentation vite` would run the `vite` binary in the `documentation` workspace.
 
+- [Workspace profiles](/concepts/profiles), which let you declare in your configuration dependencies that should be automatically added to your workspaces' dependencies.
+
 Plus various workspace-related commands which you can find in our [CLI reference](http://localhost:4321/cli).

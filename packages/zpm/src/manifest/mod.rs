@@ -144,6 +144,10 @@ pub struct Manifest {
     pub type_: Option<String>,
 
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extends: Vec<String>,
+
+    #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub private: Option<bool>,
 

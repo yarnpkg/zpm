@@ -329,6 +329,33 @@
       "type": "zpm_utils::Path",
       "description": "The folder to use for the virtual folder",
       "default": ".yarn/__virtual__"
+    },
+    "workspaceProfiles": {
+      "type": "object",
+      "description": "Configuration specific to each workspace profile",
+      "additionalProperties": {
+        "type": "object",
+        "title": "WorkspaceProfile",
+        "properties": {
+          "extends": {
+            "type": "array",
+            "description": "The extends to add to the workspace profile",
+            "items": {
+              "type": "string"
+            }
+          },
+          "devDependencies": {
+            "type": "object",
+            "description": "The dev dependencies to add to the workspace profile",
+            "additionalKeys": {
+              "type": "zpm_primitives::Ident"
+            },
+            "additionalProperties": {
+              "type": "zpm_primitives::Range"
+            }
+          }
+        }
+      }
     }
   }
 }
