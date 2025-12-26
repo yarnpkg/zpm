@@ -166,7 +166,7 @@ pub fn try_fetch_locator_sync(context: InstallContext, locator: &Locator, is_moc
 pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     match &locator.reference {
         Reference::Builtin(params)
-            => builtin::fetch_builtin_locator(&context, locator, params).await,
+            => builtin::fetch_builtin_locator(&context, locator, params, is_mock_request).await,
 
         Reference::Link(params)
             => link::fetch_locator(&context, locator, params, dependencies),

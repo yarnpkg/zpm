@@ -137,6 +137,14 @@ impl FetchResult {
             package_data,
         }
     }
+
+    pub fn new_mock(archive_path: Path, package_directory: Path) -> Self {
+        Self::new(PackageData::MissingZip {
+            archive_path,
+            context_directory: package_directory.clone(),
+            package_directory,
+        })
+    }
 }
 
 impl IntoResolutionResult for FetchResult {
@@ -230,7 +238,7 @@ impl InstallOpResult {
 }
 
 impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
-    fn graph_follow_ups(&self, op: &InstallOp<'a>, ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
+    fn graph_follow_ups(&self, _op: &InstallOp<'a>, ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
         match self {
             InstallOpResult::Validated => {
                 vec![]
@@ -255,7 +263,7 @@ impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
                     .values()
                     .cloned()
                     .map(|dependency| InstallOp::Resolve {descriptor: dependency})
-                    .chain(resolution.variants.iter().map(|variant| InstallOp::Refresh {locator: variant.locator.clone()}));
+                    .chain(resolution.variants.iter().map(|variant| InstallOp::Resolve {descriptor: variant.clone()}));
 
                 follow_ups.extend(transitive_dependencies);
                 follow_ups
@@ -422,6 +430,16 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                         timeout,
                         fetch_locator(context.clone(), &locator.clone(), is_mock_request, dependencies)
                     ).await.map_err(|_| Error::TaskTimeout)?;
+
+                    if is_mock_request {
+                        if let Ok(result) = future.as_ref() {
+                            if let FetchResult {package_data: PackageData::Zip {..}, ..} = result {
+                                current_report().await.as_ref().map(|report| {
+                                    report.warn(format!("Mock request for {} returned a zip package; this should not happen.", locator.to_print_string()));
+                                });
+                            }
+                        }
+                    }
 
                     Ok(InstallOpResult::Fetched(future?))
                 }).await

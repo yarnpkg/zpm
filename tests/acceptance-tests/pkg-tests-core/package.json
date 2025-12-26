@@ -14,6 +14,7 @@
     "@types/semver": "^7.1.0",
     "@types/serve-static": "1.13.3",
     "@types/tar-fs": "^1.16.1",
+    "@types/tar-stream": "^3.1.4",
     "@types/uuid": "^8",
     "@yarnpkg/cli": "^4.12.0",
     "@yarnpkg/core": "^4.5.0",
@@ -31,6 +32,7 @@
     "sigstore": "^4.1.0",
     "super-resolve": "^1.0.0",
     "tar-fs": "^1.16.0",
+    "tar-stream": "^1.1.2",
     "tslib": "^2.4.0"
   },
   "repository": {

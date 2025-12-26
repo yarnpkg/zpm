@@ -11,15 +11,19 @@ description: A detailed explanation of the breaking changes between two versions
 This document lists the **intended breaking changes**. Yarn 6 being still in development, some features are still missing and will be implemented before we publish the first stable release.
 :::
 
-### Plugins
+### Not implemented
 
-A special note for plugins, which aren't implemented **yet**.
+Reimplementing a codebase comes with challenges, and the two following features haven't been implemented **yet**. We plan to address them before the first stable release:
 
-Various other projects (Biome, Oxc, etc) are experimenting on that topic, and we prefer to wait before focusing on that so we can leverage their researches before building our own solutions.
+- Plugins; various other projects (Biome, Oxc, etc) are experimenting on that topic, and we prefer to let them clear the way before building our own solutions.
+
+- Windows support; we already have a path abstraction to prepare for this task, but no tests haven't been run on Windows yet and various things are likely broken. We recommend WSL as a workaround.
 
 ### Important features
 
 Some new features have been implemented. They are not "breaking changes" per se, but may make some of your existing tooling obsolete, so be sure to take a look at them:
+
+- [Native Node.js version management](/concepts/nvm), which allows Yarn to treat Node.js as any other dependency, removing the need for third-party tools like nvm / fnm / volta / ...
 
 - [Workspace profiles](/concepts/profiles), which let you definite set of dependencies to reuse in your workspaces
 
@@ -56,3 +60,9 @@ Some new features have been implemented. They are not "breaking changes" per se,
 ### Deprecations
 
 - The `.pnp.cjs` file isn't generated with the `+x` flag anymore.
+
+- Behavior inherited from npm, packages are currently allowed to omit listing dependencies on `node-gyp` if the package happens to contain a `binding.gyp` file.
+
+  This behavior is unsafe as the only reasonable thing the package manager can do is to imply a dependency on `*`, meaning there are no guarantees as to the version of `node-gyp` projects would end up using.
+
+  This undocumented behavior is now **deprecated** and will be removed in a future release. Popular packages that already rely on it will get an hardcoded package extension so they keep working, but the implicit `node-gyp` dependency won't be applied to any other package going forward.

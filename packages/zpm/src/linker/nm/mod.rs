@@ -19,6 +19,9 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
     let mut hoister
         = Hoister::new(&mut work_tree);
 
+    let mut packages_by_location
+        = BTreeMap::new();
+
     hoister.hoist();
 
     let mut project_queue
@@ -30,6 +33,8 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
 
         let workspace
             = project.workspace_by_locator(&workspace_node.locator)?;
+
+        packages_by_location.insert(workspace.rel_path.clone(), workspace_node.locator.clone());
 
         let workspace_abs_path
             = project.project_cwd
@@ -60,6 +65,17 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
                     = node_rel_path.with_join_str(&ident.as_str());
 
                 workspace_queue.push((child_rel_path.with_join_str("node_modules"), *child_idx));
+
+                let abs_path
+                    = workspace_abs_path
+                        .with_join(&node_rel_path)
+                        .with_join(&child_rel_path);
+
+                let rel_path
+                    = abs_path
+                        .relative_to(&project.project_cwd);
+
+                packages_by_location.insert(rel_path, child_node.locator.clone());
 
                 let package_data
                     = install.package_data.get(&child_node.locator.physical_locator());
@@ -119,7 +135,7 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
     }
 
     Ok(LinkResult {
-        packages_by_location: BTreeMap::new(),
+        packages_by_location,
         build_requests: BuildRequests {
             entries: vec![],
             dependencies: BTreeMap::new(),

@@ -16,10 +16,11 @@ import semver                                      from 'semver';
 import serveStatic                                 from 'serve-static';
 import * as sigstore                               from 'sigstore';
 import stream                                      from 'stream';
+import tarStream                                   from 'tar-stream';
 import * as t                                      from 'typanion';
 import {promisify}                                 from 'util';
 import {v5 as uuidv5}                              from 'uuid';
-import {Gzip}                                      from 'zlib';
+import zlib, {Gzip}                                from 'zlib';
 
 import {ExecResult}                                from './exec';
 import * as fsUtils                                from './fs';
@@ -74,6 +75,8 @@ export enum RequestType {
   Repository = `repository`,
   Publish = `publish`,
   BulkAdvisories = `bulkAdvisories`,
+  NodeDistIndex = `nodeDistIndex`,
+  NodeDistTarball = `nodeDistTarball`,
 }
 
 export type Request = {
@@ -111,6 +114,11 @@ export type Request = {
 } | {
   registry?: string;
   type: RequestType.BulkAdvisories;
+} | {
+  type: RequestType.NodeDistIndex;
+} | {
+  type: RequestType.NodeDistTarball;
+  name: string;
 };
 
 export class Login {
@@ -654,6 +662,35 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
         return response.end(JSON.stringify(result));
       });
     },
+
+    async [RequestType.NodeDistIndex](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.NodeDistIndex)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const data = [
+        {version: `22.0.0`},
+        {version: `21.0.0`},
+        {version: `20.0.0`},
+      ];
+
+      response.writeHead(200, {[`Content-Type`]: `application/json`});
+      response.end(JSON.stringify(data));
+    },
+
+    async [RequestType.NodeDistTarball](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.NodeDistTarball)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      response.writeHead(200, {[`Content-Type`]: `application/octet-stream`});
+
+      const tar = tarStream.pack();
+      tar.entry({name: `${parsedRequest.name}/bin/node`, mode: 0o755}, `#!/usr/bin/env bash\necho "${parsedRequest.name}"\n`);
+      tar.finalize();
+
+      const gzip = zlib.createGzip();
+
+      stream.pipeline(tar, gzip, response, () => {});
+    },
   };
 
   const sendError = (res: ServerResponse, statusCode: number, errorMessage: string): void => {
@@ -676,6 +713,15 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
     if ((match = url.match(/^\/repositories\//))) {
       return {
         type: RequestType.Repository,
+      };
+    } else if ((match = url.match(/^\/node\/dist\/index.json$/))) {
+      return {
+        type: RequestType.NodeDistIndex,
+      };
+    } else if ((match = url.match(/^\/node\/dist\/v([0-9]+\.[0-9]+\.[0-9]+)\/(node-v(\1)-[a-z0-9-]+)\.tar\.gz$/))) {
+      return {
+        type: RequestType.NodeDistTarball,
+        name: match[2]!,
       };
     } else {
       let registry: {registry: string} | undefined;

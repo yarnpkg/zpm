@@ -232,6 +232,18 @@ impl Range {
         }
     }
 
+    pub fn exact_version(&self) -> Option<Version> {
+        if self.tokens.len() == 1 {
+            if let Token::Operation(OperatorType::Equal, operand) = &self.tokens[0] {
+                Some(operand.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn range_min(&self) -> Option<Version> {
         let mut n = 0;
 

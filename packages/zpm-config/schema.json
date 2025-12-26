@@ -125,6 +125,11 @@
         }
       }
     },
+    "nodeDistUrl": {
+      "type": "string",
+      "description": "The URL to use for downloading Node.js distributions",
+      "default": "https://nodejs.org/dist"
+    },
     "nodeLinker": {
       "type": "crate::NodeLinker",
       "description": "The linker to use for node_modules",

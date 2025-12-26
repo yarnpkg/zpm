@@ -49,7 +49,9 @@ impl TreeResolver {
             if !resolution.variants.is_empty() {
                 let matching_variant
                     = resolution.variants.iter()
-                        .find(|variant| variant.requirements.validate_system(&system))
+                        .map(|variant| &descriptor_to_locators[variant])
+                        .map(|locator| &normalized_resolutions[locator])
+                        .find(|resolution| resolution.requirements.validate_system(&system))
                         .ok_or_else(|| Error::NoMatchingVariantFound(locator.clone()))?;
 
                 locator = &matching_variant.locator;

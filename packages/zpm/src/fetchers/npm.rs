@@ -11,23 +11,15 @@ use crate::{
 
 use super::PackageData;
 
-fn get_mock_fetch_result(context: &InstallContext, locator: &Locator, params: &RegistryReference) -> Result<FetchResult, Error> {
-    let archive_path = context.package_cache.unwrap()
-        .key_path(locator, ".zip");
-
-    let package_directory = archive_path
-        .with_join(&params.ident.nm_subdir());
-
-    Ok(FetchResult::new(PackageData::MissingZip {
-        archive_path,
-        context_directory: package_directory.clone(),
-        package_directory,
-    }))
-}
-
 pub fn try_fetch_locator_sync(context: &InstallContext, locator: &Locator, params: &RegistryReference, is_mock_request: bool) -> Result<Option<FetchResult>, Error> {
     if is_mock_request {
-        return Ok(Some(get_mock_fetch_result(context, locator, params)?));
+        let archive_path = context.package_cache.unwrap()
+            .key_path(locator, ".zip");
+
+        let package_directory = archive_path
+            .with_join(&params.ident.nm_subdir());
+
+        return Ok(Some(FetchResult::new_mock(archive_path, package_directory)));
     }
 
     let cache_entry = context.package_cache.unwrap()
@@ -47,12 +39,18 @@ pub fn try_fetch_locator_sync(context: &InstallContext, locator: &Locator, param
 }
 
 pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &RegistryReference, is_mock_request: bool) -> Result<FetchResult, Error> {
+    if is_mock_request {
+        let archive_path = context.package_cache.unwrap()
+            .key_path(locator, ".zip");
+
+        let package_directory = archive_path
+            .with_join(&params.ident.nm_subdir());
+
+        return Ok(FetchResult::new_mock(archive_path, package_directory));
+    }
+
     let project = context.project
         .expect("The project is required for resolving a workspace package");
-
-    if is_mock_request {
-        return Ok(get_mock_fetch_result(context, locator, params)?);
-    }
 
     let registry_base
         = project.config.registry_base_for(&params.ident);

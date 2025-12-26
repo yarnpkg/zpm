@@ -5304,7 +5304,7 @@
         }
       }
     },
-    "@types/tar-stream@npm:*": {
+    "@types/tar-stream@npm:*, @types/tar-stream@npm:^3.1.4": {
       "checksum": "6164425a05205d3013fe6e997e0e9dfc08b6bfcf41b51cb6c99dd11b61e79829433830c8f6267d4ef86c06ecb07edb6e2e3cf0ddeefd9da86d863fe8d2627a33",
       "resolution": {
         "resolution": "@types/tar-stream@npm:3.1.4",

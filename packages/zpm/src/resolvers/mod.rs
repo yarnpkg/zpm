@@ -22,13 +22,6 @@ pub mod tarball;
 pub mod url;
 pub mod workspace;
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Variant {
-    pub requirements: Requirements,
-    pub locator: Locator,
-}
-
 /**
  * Contains the information we keep in the lockfile for a given package.
  */
@@ -67,7 +60,7 @@ pub struct Resolution {
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub variants: Vec<Variant>,
+    pub variants: Vec<Descriptor>,
 }
 
 impl Resolution {

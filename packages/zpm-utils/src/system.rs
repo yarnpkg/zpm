@@ -69,6 +69,14 @@ pub struct System {
 }
 
 impl System {
+    pub const fn new(arch: Option<Cpu>, os: Option<Os>, libc: Option<Libc>) -> Self {
+        Self {
+            arch,
+            os,
+            libc,
+        }
+    }
+
     pub fn without_libc(&self) -> Self {
         Self {
             arch: self.arch.clone(),

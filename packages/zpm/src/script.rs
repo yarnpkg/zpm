@@ -46,35 +46,57 @@ fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &Vec<String>
 }
 
 fn is_node_script(p: Path) -> bool {
-    let ext = p.extname().unwrap_or_default();
+    if let Some(ext) = p.extname() {
+        return JS_EXTENSION.is_match(ext);
+    }
 
-    if JS_EXTENSION.is_match(ext) {
+    let Ok(file) = std::fs::File::open(p.to_path_buf()) else {
+        return true;
+    };
+
+    let mut buf
+        = Vec::with_capacity(64);
+
+    let read_result
+        = file.take(buf.capacity() as u64)
+            .read_to_end(&mut buf);
+
+    if read_result.is_err() {
         return true;
     }
 
-    if ext == ".exe" || ext == ".bin" {
-        return false;
+    let magic_bytes = buf.get(0..4)
+        .and_then(|data| data.try_into().ok())
+        .map(|bytes| u32::from_be_bytes(bytes));
+
+    if let Some(magic) = magic_bytes {
+        match magic {
+            // OSX Universal Binary
+            // Mach-O
+            // ELF
+            0xcafebabe | 0xcffaedfe | 0x7f454c46
+                => return false,
+
+            // DOS MZ Executable
+            n if (n & 0xffff0000) == 0x4d5a0000
+                => return false,
+
+            _ => (),
+        }
     }
 
-    let mut buf = [0u8; 4];
+    if buf.starts_with(b"#!") {
+        let shebang_line
+            = buf.iter()
+                .position(|&b| b == b'\n')
+                .map(|pos| &buf[..pos]);
 
-    let magic = std::fs::File::open(p.to_path_buf())
-        .and_then(|mut fd| fd.read_exact(&mut buf))
-        .map(|_| u32::from_be_bytes(buf));
-
-    match magic {
-        Err(_) => true,
-
-        // OSX Universal Binary
-        // Mach-O
-        // ELF
-        Ok(0xcafebabe | 0xcffaedfe | 0x7f454c46) => false,
-
-        // DOS MZ Executable
-        Ok(n) if (n & 0xffff0000) == 0x4d5a0000 => false,
-
-        _ => true,
+        if let Some(line) = shebang_line {
+            return line.ends_with(b"node");
+        }
     }
+
+    true
 }
 
 fn get_self_path() -> Result<Path, Error> {
