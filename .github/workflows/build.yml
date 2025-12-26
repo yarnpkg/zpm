@@ -98,6 +98,7 @@ jobs:
 
       - name: Generate the test report
         run: |
+          export TEST_BINARY=$(pwd)/artifacts/yarn-bin
           yarn ./tests/acceptance-tests jest --json --outputFile=$(pwd)/report.json || true
 
       - name: Upload test report
