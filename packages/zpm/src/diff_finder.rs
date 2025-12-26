@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, ffi::OsStr, fs::{FileType, Metadata}, fmt::Debug, io::ErrorKind, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, BTreeSet}, fs::{FileType, Metadata}, fmt::Debug, io::ErrorKind, time::UNIX_EPOCH};
 
 use bincode::{Decode, Encode};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -71,7 +71,7 @@ impl<T> SaveState<T> {
 pub trait DiffController {
     type Data: Debug + Send + Sync;
 
-    fn is_relevant_entry(file_name: &OsStr, file_type: &FileType) -> bool;
+    fn is_relevant_entry(file_name: &str, file_type: &FileType) -> bool;
     fn get_file_data(path: &Path, metadata: &Metadata) -> Result<Self::Data, Error>;
 }
 
@@ -123,8 +123,14 @@ impl<TController: DiffController> DiffFinder<TController> {
         for entry in directory_entries {
             let file_type
                 = entry.file_type()?;
+            let file_name_os
+                = entry.file_name();
 
-            if !TController::is_relevant_entry(&entry.file_name(), &file_type) {
+            let Some(file_name) = file_name_os.to_str() else {
+                continue;
+            };
+
+            if !TController::is_relevant_entry(file_name, &file_type) {
                 continue;
             }
 
@@ -177,10 +183,9 @@ impl<TController: DiffController> DiffFinder<TController> {
                     }
                 } else {
                     if mtime > save_entry.mtime() {
-                        let file_name
-                            = std::path::Path::new(rel_path.as_str())
-                                .file_name()
-                                .unwrap_or_default();
+                        let Some(file_name) = rel_path.basename() else {
+                            return Ok(CacheCheck::Skip);
+                        };
 
                         if !TController::is_relevant_entry(file_name, &metadata.file_type()) {
                             return Ok(CacheCheck::NotFound(rel_path.clone()));

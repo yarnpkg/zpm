@@ -39,7 +39,7 @@ impl DiffController for ArtifactFinder {
         Ok(())
     }
 
-    fn is_relevant_entry(file_name: &std::ffi::OsStr, file_type: &std::fs::FileType) -> bool {
+    fn is_relevant_entry(file_name: &str, file_type: &std::fs::FileType) -> bool {
         if file_type.is_dir() {
             return file_name != "node_modules";
         }
