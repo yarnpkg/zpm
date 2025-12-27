@@ -30,6 +30,22 @@ impl RangeExt for Range {
     #[inline]
     fn details(&self) -> RangeDetails {
         match self {
+            Range::RegistrySemver(params) if params.ident.is_some() => {
+                RangeDetails {
+                    require_binding: false,
+                    fetch_before_resolve: false,
+                    transient_resolution: true,
+                }
+            },
+
+            Range::RegistryTag(params) if params.ident.is_some() => {
+                RangeDetails {
+                    require_binding: false,
+                    fetch_before_resolve: false,
+                    transient_resolution: true,
+                }
+            },
+
             Range::Builtin(_) |
             Range::AnonymousSemver(_) |
             Range::AnonymousTag(_) |

@@ -136,11 +136,16 @@ impl Range {
         Ok(Range::AnonymousSemver(AnonymousSemverRange {range}.into()))
     }
 
-    pub fn inner_descriptor(&self) -> Option<&Descriptor> {
+    pub fn inner_descriptor(&self) -> Option<Descriptor> {
         match self {
-            Range::Patch(params) => {
-                Some(&params.inner.0)
-            },
+            Range::RegistrySemver(params) if params.ident.is_some()
+                => Some(Descriptor::new(params.ident.clone().unwrap(), RegistrySemverRange {ident: None, range: params.range.clone()}.into())),
+
+            Range::RegistryTag(params) if params.ident.is_some()
+                => Some(Descriptor::new(params.ident.clone().unwrap(), RegistryTagRange {ident: None, tag: params.tag.clone()}.into())),
+
+            Range::Patch(params)
+                => Some(params.inner.0.clone()),
 
             _ => None,
         }

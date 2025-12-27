@@ -144,6 +144,12 @@ pub enum SyncResolutionAttempt {
 
 pub fn try_resolve_descriptor_sync(context: InstallContext<'_>, descriptor: Descriptor, dependencies: Vec<InstallOpResult>) -> Result<SyncResolutionAttempt, Error> {
     match &descriptor.range {
+        Range::RegistrySemver(params) if params.ident.is_some()
+            => Ok(SyncResolutionAttempt::Success(npm::resolve_aliased(&descriptor, dependencies)?)),
+
+        Range::RegistryTag(params) if params.ident.is_some()
+            => Ok(SyncResolutionAttempt::Success(npm::resolve_aliased(&descriptor, dependencies)?)),
+
         Range::Link(params)
             => Ok(SyncResolutionAttempt::Success(link::resolve_descriptor(&context, &descriptor, params)?)),
 
@@ -185,9 +191,6 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
         Range::Git(params)
             => git::resolve_descriptor(&context, &descriptor, params).await,
 
-        Range::RegistrySemver(params)
-            => npm::resolve_semver_descriptor(&context, &descriptor, params).await,
-
         Range::Link(params)
             => link::resolve_descriptor(&context, &descriptor, params),
 
@@ -206,8 +209,15 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
         Range::Portal(params)
             => portal::resolve_descriptor(&context, &descriptor, params, dependencies),
 
-        Range::RegistryTag(params)
-            => npm::resolve_tag_descriptor(&context, &descriptor, params).await,
+        Range::RegistrySemver(params) => match params.ident.is_some() {
+            true => npm::resolve_aliased(&descriptor, dependencies),
+            false => npm::resolve_semver_descriptor(&context, &descriptor, params).await,
+        },
+
+        Range::RegistryTag(params) => match params.ident.is_some() {
+            true => npm::resolve_aliased(&descriptor, dependencies),
+            false => npm::resolve_tag_descriptor(&context, &descriptor, params).await,
+        },
 
         Range::WorkspacePath(params)
             => workspace::resolve_path_descriptor(&context, &descriptor, params),
