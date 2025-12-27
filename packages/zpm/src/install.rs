@@ -332,7 +332,7 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                     resolved_it.next();
                 }
 
-                if let Some(mut inner_descriptor) = descriptor.range.inner_descriptor().cloned() {
+                if let Some(mut inner_descriptor) = descriptor.range.inner_descriptor() {
                     if inner_descriptor.range.details().require_binding {
                         inner_descriptor.parent = descriptor.parent.clone();
                     }

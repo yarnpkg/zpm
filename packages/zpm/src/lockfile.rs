@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt::{self, Debug, Display}, hash::Hash, marker
 use bincode::{Decode, Encode};
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
-use zpm_primitives::{Descriptor, Locator};
+use zpm_primitives::{Descriptor, Locator, Reference, RegistryReference};
 use zpm_utils::{FromFileString, Hash64, ToFileString};
 
 use crate::{
@@ -257,14 +257,41 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
     lockfile.metadata.version = 1;
 
     for (key, entry) in payload.entries.0 {
-        for descriptor in key.0 {
-            lockfile.resolutions.insert(descriptor, entry.resolution.clone());
+        let (same_idents, aliased_idents): (Vec<_>, Vec<_>)
+            = key.0.into_iter()
+                .partition(|descriptor| descriptor.ident == entry.resolution.ident);
+
+        if !same_idents.is_empty() {
+            lockfile.entries.insert(entry.resolution.clone(), LockfileEntry {
+                checksum: None,
+                resolution: Resolution::new_empty(entry.resolution.clone(), Default::default()),
+            });
+
+            for descriptor in same_idents {
+                lockfile.resolutions.insert(descriptor, entry.resolution.clone());
+            }
         }
 
-        lockfile.entries.insert(entry.resolution.clone(), LockfileEntry {
-            checksum: None,
-            resolution: Resolution::new_empty(entry.resolution, Default::default()),
-        });
+        if !aliased_idents.is_empty() {
+            let Reference::Registry(params) = entry.resolution.reference.clone() else {
+                continue;
+            };
+
+            for descriptor in aliased_idents {
+                let aliased_locator
+                    = Locator::new(descriptor.ident.clone(), RegistryReference {
+                        ident: entry.resolution.ident.clone(),
+                        version: params.version.clone(),
+                    }.into());
+
+                lockfile.entries.insert(entry.resolution.clone(), LockfileEntry {
+                    checksum: None,
+                    resolution: Resolution::new_empty(aliased_locator, Default::default()),
+                });
+
+                lockfile.resolutions.insert(descriptor, entry.resolution.clone());
+            }
+        }
     }
 
     Ok(lockfile)

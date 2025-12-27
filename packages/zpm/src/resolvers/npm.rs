@@ -6,15 +6,15 @@ use serde::Deserialize;
 use serde_with::{serde_as, MapSkipError};
 use zpm_config::ConfigExt;
 use zpm_parsers::{JsonDocument, RawJsonValue};
-use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, RegistryReference, RegistrySemverRange, RegistryTagRange, UrlReference};
+use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, Reference, RegistryReference, RegistrySemverRange, RegistryTagRange, UrlReference};
 
 use crate::{
     error::Error,
     http_npm,
-    install::{InstallContext, IntoResolutionResult, ResolutionResult},
+    install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
     manifest::RemoteManifest,
     npm,
-    resolvers::{workspace, Resolution},
+    resolvers::{Resolution, workspace},
 };
 
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
@@ -109,6 +109,28 @@ fn is_package_approved(context: &InstallContext<'_>, ident: &Ident, version: &zp
     }
 
     true
+}
+
+pub fn resolve_aliased(descriptor: &Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
+    let mut dependencies_it
+        = dependencies.iter();
+
+    let mut inner_resolution
+        = dependencies_it.next().unwrap()
+            .as_resolved()
+            .clone();
+
+    let Reference::Shorthand(inner_params) = inner_resolution.resolution.locator.reference.clone() else {
+        unreachable!();
+    };
+
+    inner_resolution.resolution.locator
+        = Locator::new(descriptor.ident.clone(), RegistryReference {
+            ident: inner_resolution.resolution.locator.ident.clone(),
+            version: inner_params.version.clone(),
+        }.into());
+
+    Ok(inner_resolution)
 }
 
 pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistrySemverRange) -> Result<ResolutionResult, Error> {
