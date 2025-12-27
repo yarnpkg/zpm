@@ -1,6 +1,5 @@
 use structs::{ConstraintsDependency, ConstraintsPackage, ConstraintsWorkspace};
 use zpm_parsers::JsonDocument;
-use zpm_primitives::Reference;
 use zpm_utils::{Path, ToFileString};
 
 use crate::{
@@ -23,7 +22,7 @@ pub async fn check_constraints(project: &Project, fix: bool) -> Result<Constrain
     let constraints_packages
         = install_state.resolution_tree.locator_resolutions.iter()
             .map(|(_, resolution)| to_constraints_package(&project, install_state, resolution))
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
     let constraints_context = ConstraintsContext {
         workspaces: constraints_workspaces,
@@ -146,24 +145,22 @@ fn to_constraints_workspace<'a>(workspace: &'a Workspace, install_state: &'a Ins
     })
 }
 
-fn to_constraints_package<'a>(project: &'a Project, install_state: &'a InstallState, resolution: &'a Resolution) -> ConstraintsPackage<'a> {
+fn to_constraints_package<'a>(project: &'a Project, install_state: &'a InstallState, resolution: &'a Resolution) -> Result<ConstraintsPackage<'a>, Error> {
     let dependencies = resolution.dependencies.iter()
         .map(|(ident, descriptor)| {
             (ident, install_state.resolution_tree.descriptor_to_locator.get(descriptor).unwrap())
         }).collect::<Vec<_>>();
 
-    let workspace = if let Reference::WorkspaceIdent(params) = &resolution.locator.reference {
-        Some(project.workspace_by_ident(&params.ident).unwrap().rel_path.clone())
-    } else {
-        None
-    };
+    let workspace
+        = project.try_workspace_by_locator(&resolution.locator)?
+            .map(|workspace| workspace.rel_path.clone());
 
-    ConstraintsPackage {
+    Ok(ConstraintsPackage {
         locator: resolution.locator.clone(),
         workspace,
         ident: resolution.locator.ident.clone(),
         version: resolution.version.clone(),
         dependencies,
         peer_dependencies: vec![],
-    }
+    })
 }

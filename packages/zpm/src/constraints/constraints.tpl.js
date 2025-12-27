@@ -1054,7 +1054,7 @@ for (const workspace of input.workspaces) {
   workspaceIndex.insert(hydratedWorkspace);
 }
 for (const pkg of input.packages) {
-  const workspace = pkg.workspace ? workspaceByCwd.get(pkg.workspace) : null;
+  const workspace = pkg.workspace !== null ? workspaceByCwd.get(pkg.workspace) : null;
   if (typeof workspace === `undefined`)
     throw new Error(`Workspace ${pkg.workspace} not found`);
   const hydratedPackage = {
@@ -1065,6 +1065,8 @@ for (const pkg of input.packages) {
     peerDependencies: new Map(pkg.peerDependencies),
     optionalPeerDependencies: new Map(pkg.optionalPeerDependencies)
   };
+  if (workspace !== null)
+    workspace.pkg = hydratedPackage;
   packageByLocator.set(pkg.locator, hydratedPackage);
   packageIndex.insert(hydratedPackage);
 }
@@ -1168,8 +1170,10 @@ function applyEngineReport(fix) {
     const workspaceErrors = workspaceActions.errors.slice();
     const workspaceOperations = [];
     for (const { fieldPath, values } of workspaceActions.updates.values()) {
-      if (values.size > 1) {
-        const valuesArray = [...values];
+      const valuesArray = [...values];
+      if (valuesArray.length === 0)
+        continue;
+      if (valuesArray.length > 1) {
         const unsetValues = valuesArray.filter(([value]) => typeof value === `undefined`)?.[0]?.[1] ?? null;
         const setValues = valuesArray.filter(([value]) => typeof value !== `undefined`);
         workspaceErrors.push({
@@ -1179,7 +1183,7 @@ function applyEngineReport(fix) {
           unsetValues
         });
       } else {
-        const [[newValue]] = values;
+        const newValue = valuesArray[0][0];
         const currentValue = (0, import_get.default)(manifest, fieldPath);
         if (JSON.stringify(currentValue) === JSON.stringify(newValue))
           continue;

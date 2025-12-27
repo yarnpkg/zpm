@@ -134,7 +134,7 @@ for (const workspace of input.workspaces) {
 }
 
 for (const pkg of input.packages) {
-  const workspace = pkg.workspace
+  const workspace = pkg.workspace !== null
     ? workspaceByCwd.get(pkg.workspace)!
     : null;
 
@@ -149,6 +149,9 @@ for (const pkg of input.packages) {
     peerDependencies: new Map(pkg.peerDependencies),
     optionalPeerDependencies: new Map(pkg.optionalPeerDependencies),
   };
+
+  if (workspace !== null)
+    workspace.pkg = hydratedPackage;
 
   packageByLocator.set(pkg.locator, hydratedPackage);
   packageIndex.insert(hydratedPackage);
@@ -297,7 +300,7 @@ function applyEngineReport(fix: boolean) {
           unsetValues,
         });
       } else {
-        const newValue = valuesArray[0]!;
+        const newValue = valuesArray[0]![0];
 
         const currentValue = get(manifest, fieldPath);
         if (JSON.stringify(currentValue) === JSON.stringify(newValue))
