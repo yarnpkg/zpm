@@ -155,7 +155,7 @@ pub struct ConstraintsContext<'a> {
     pub packages: Vec<ConstraintsPackage<'a>>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConstraintsDependency {
     pub ident: Ident,
@@ -164,7 +164,7 @@ pub struct ConstraintsDependency {
     pub resolution: Option<Locator>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConstraintsWorkspace {
     pub cwd: Path,
@@ -174,7 +174,7 @@ pub struct ConstraintsWorkspace {
     pub dev_dependencies: Vec<ConstraintsDependency>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConstraintsPackage<'a> {
     pub locator: Locator,
