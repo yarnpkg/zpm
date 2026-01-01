@@ -141,6 +141,9 @@ pub enum Error {
     #[error("Semver error ({0})")]
     SemverError(#[from] zpm_semver::Error),
 
+    #[error("URL error ({0})")]
+    UrlError(#[from] url::ParseError),
+
     #[error("Invalid ident ({0})")]
     InvalidIdent(String),
 

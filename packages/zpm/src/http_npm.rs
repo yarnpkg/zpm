@@ -142,6 +142,19 @@ async fn get_id_token(options: &GetAuthorizationOptions<'_>) -> Result<Option<St
         return Ok(None);
     };
 
+    let registry_url
+        = url::Url::parse(options.registry)?;
+
+    let registry_host
+        = registry_url.host_str()
+            .expect("\"http:\" URL should have a host");
+
+    let mut actions_id_token_request_url
+        = url::Url::parse(&actions_id_token_request_url)?;
+
+    actions_id_token_request_url.query_pairs_mut()
+        .append_pair("audience", &format!("npm:{}", registry_host));
+
     let response
         = options.http_client.get(actions_id_token_request_url)?
             .header("authorization", Some(format!("Bearer {}", actions_id_token_request_token)))
