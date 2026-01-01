@@ -187,6 +187,7 @@ jobs:
         with:
           script: |
             const cp = require(`child_process`);
+            const fs = require(`fs`);
             const path = require(`path`);
 
             const artifacts = fs.readdirSync(`artifacts`, {
