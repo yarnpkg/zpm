@@ -180,7 +180,7 @@ jobs:
 
       - name: Add the bin directory to the PATH
         run: |
-          export PATH="$PWD/artifacts/yarn-x86_64-unknown-linux-musl/:$PATH"
+          echo "$PWD/artifacts/yarn-x86_64-unknown-linux-musl" >> $GITHUB_PATH
 
       - name: Generate the packages
         uses: actions/github-script@v8
