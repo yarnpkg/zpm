@@ -154,9 +154,7 @@ jobs:
               const destinationPath = path.join(artifact.parentPath, targetName);
               const sourcePath = path.join(artifact.parentPath, artifact.name);
 
-              cp.execFileSync(`unzip`, [`-d`, destinationPath, sourcePath], {
-                cwd: artifact.parentPath,
-              });
+              cp.execFileSync(`unzip`, [`-d`, destinationPath, sourcePath]);
 
               const ext = targetName.includes(`windows`) ? `.exe` : ``;
 
