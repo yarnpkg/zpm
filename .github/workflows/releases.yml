@@ -114,7 +114,7 @@ jobs:
   #         GH_TOKEN: ${{github.token}}
 
   npm:
-    needs: [build]
+    needs: [check, build]
 
     name: 'Publishing to npm'
     runs-on: ubuntu-latest
@@ -133,13 +133,12 @@ jobs:
           merge-multiple: true
 
       - name: Unpack the build of Yarn we just created
-        run: |
-          unzip artifacts/yarn-x86_64-unknown-linux-musl.zip
-
-      - name: Generate the packages
         uses: actions/github-script@v8
+        env:
+          VERSION: ${{needs.check.outputs.version}}
         with:
           script: |
+            const cp = require(`child_process`);
             const fs = require(`fs`);
             const path = require(`path`);
 
@@ -148,9 +147,62 @@ jobs:
             });
 
             for (const artifact of artifacts) {
-              if (!artifact.name.endsWith('.zip'))
+              if (!artifact.isFile() || !artifact.name.startsWith('yarn-'))
+                continue;
+
+              const targetName = artifact.name.replace(`.zip`, ``);
+              const destinationPath = path.join(artifact.parentPath, targetName);
+              const sourcePath = path.join(artifact.parentPath, artifact.name);
+
+              cp.execFileSync(`unzip`, [`-d`, destinationPath, sourcePath], {
+                cwd: artifact.parentPath,
+              });
+
+              const ext = targetName.includes(`windows`) ? `.exe` : ``;
+
+              // We don't need to distribute Yarn Switch itself
+              fs.unlinkSync(path.join(destinationPath, `yarn`));
+
+              // Rename the binary to `yarn`
+              fs.renameSync(path.join(destinationPath, `yarn-bin${ext}`), path.join(destinationPath, `yarn${ext}`));
+
+              // Make it executable
+              fs.chmodSync(path.join(destinationPath, `yarn-bin${ext}`), 0o755);
+
+              fs.writeFileSync(path.join(destinationPath, `package.json`), `${JSON.stringify({
+                name: `@arcanis/${baseName}`,
+                version: process.env.VERSION,
+                license: `GPL-3.0`,
+                bin: {yarn: `yarn${ext}`},
+              }, null, 2)}\n`);
+            }
+
+      - name: Add the bin directory to the PATH
+        run: |
+          export PATH="$PWD/artifacts/yarn-x86_64-unknown-linux-musl/:$PATH"
+
+      - name: Generate the packages
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const cp = require(`child_process`);
+            const path = require(`path`);
+
+            const artifacts = fs.readdirSync(`artifacts`, {
+              withFileTypes: true,
+            });
+
+            for (const artifact of artifacts) {
+              if (!artifact.isDirectory() || !artifact.name.startsWith('yarn-'))
                 continue;
 
               const artifactPath = path.join(artifact.parentPath, artifact.name);
-              console.log(artifactContent);
+
+              cp.execFileSync(`yarn`, [`install`], {
+                cwd: artifactPath,
+              });
+
+              cp.execFileSync(`yarn`, [`pack`], {
+                cwd: artifactPath,
+              });
             }
