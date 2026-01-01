@@ -119,6 +119,8 @@ jobs:
     name: 'Publishing to npm'
     runs-on: ubuntu-latest
 
+    environment: releases
+
     permissions:
       contents: write
 
@@ -168,8 +170,8 @@ jobs:
               fs.chmodSync(path.join(destinationPath, `yarn${ext}`), 0o755);
 
               fs.writeFileSync(path.join(destinationPath, `package.json`), `${JSON.stringify({
-                name: `@arcanis/${targetName}`,
-                version: process.env.VERSION,
+                name: `@yarnpkg/${targetName}`,
+                version: `0.0.1-test.1`,
                 license: `GPL-3.0`,
                 bin: {yarn: `yarn${ext}`},
                 publishConfig: {access: `public`},
@@ -204,7 +206,7 @@ jobs:
                 cwd: artifactPath,
               });
 
-              cp.execFileSync(`yarn`, [`pack`], {
+              cp.execFileSync(`yarn`, [`npm`, `publish`, `--provenance`], {
                 cwd: artifactPath,
               });
             }
