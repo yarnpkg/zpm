@@ -122,7 +122,8 @@ jobs:
     environment: releases
 
     permissions:
-      contents: write
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout the repo
