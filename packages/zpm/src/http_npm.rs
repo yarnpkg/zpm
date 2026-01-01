@@ -151,6 +151,8 @@ async fn get_id_token(options: &GetAuthorizationOptions<'_>) -> Result<Option<St
     let body
         = response.text().await?;
 
+    println!("Actions ID token response: {}", body);
+
     #[derive(Deserialize)]
     struct ActionsIdTokenResponse {
         token: String,
