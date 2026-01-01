@@ -165,13 +165,14 @@ jobs:
               fs.renameSync(path.join(destinationPath, `yarn-bin${ext}`), path.join(destinationPath, `yarn${ext}`));
 
               // Make it executable
-              fs.chmodSync(path.join(destinationPath, `yarn-bin${ext}`), 0o755);
+              fs.chmodSync(path.join(destinationPath, `yarn${ext}`), 0o755);
 
               fs.writeFileSync(path.join(destinationPath, `package.json`), `${JSON.stringify({
                 name: `@arcanis/${baseName}`,
                 version: process.env.VERSION,
                 license: `GPL-3.0`,
                 bin: {yarn: `yarn${ext}`},
+                publishConfig: {access: `public`},
               }, null, 2)}\n`);
             }
 
