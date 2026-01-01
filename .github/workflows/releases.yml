@@ -2,7 +2,6 @@ name: Releases
 
 on:
   push:
-    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -78,11 +77,46 @@ jobs:
           path: |
             yarn-${{matrix.target}}.zip
 
-  release:
-    if: needs.check.outputs.needs-release == 'true'
-    needs: [check, build]
+  # release:
+  #   needs: [check, build]
 
-    name: 'Creating a release'
+  #   name: 'Creating a release'
+  #   runs-on: ubuntu-latest
+
+  #   permissions:
+  #     contents: write
+
+  #   steps:
+  #     - name: Checkout the repo
+  #       uses: actions/checkout@v4
+
+  #     - name: Download artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         path: artifacts
+  #         merge-multiple: true
+
+  #     - name: Create GitHub Release
+  #       run: |
+  #         PRERELEASE_OPTIONS=
+
+  #         if [[ '${{needs.check.outputs.version}}' =~ - ]]; then
+  #           PRERELEASE_OPTIONS=--prerelease
+  #         fi
+
+  #         gh release create "v${{needs.check.outputs.version}}" \
+  #           --title "v${{needs.check.outputs.version}}" \
+  #           --notes "Release of v${{needs.check.outputs.version}}" \
+  #           --target ${{github.ref}} \
+  #           $PRERELEASE_OPTIONS \
+  #           artifacts/*
+  #       env:
+  #         GH_TOKEN: ${{github.token}}
+
+  npm:
+    needs: [build]
+
+    name: 'Publishing to npm'
     runs-on: ubuntu-latest
 
     permissions:
@@ -98,19 +132,25 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Create GitHub Release
+      - name: Unpack the build of Yarn we just created
         run: |
-          PRERELEASE_OPTIONS=
+          unzip artifacts/yarn-x86_64-unknown-linux-musl.zip
 
-          if [[ '${{needs.check.outputs.version}}' =~ - ]]; then
-            PRERELEASE_OPTIONS=--prerelease
-          fi
+      - name: Generate the packages
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require(`fs`);
+            const path = require(`path`);
 
-          gh release create "v${{needs.check.outputs.version}}" \
-            --title "v${{needs.check.outputs.version}}" \
-            --notes "Release of v${{needs.check.outputs.version}}" \
-            --target ${{github.ref}} \
-            $PRERELEASE_OPTIONS \
-            artifacts/*
-        env:
-          GH_TOKEN: ${{github.token}}
+            const artifacts = fs.readdirSync(`artifacts`, {
+              withFileTypes: true,
+            });
+
+            for (const artifact of artifacts) {
+              if (!artifact.name.endsWith('.zip'))
+                continue;
+
+              const artifactPath = path.join(artifact.parentPath, artifact.name);
+              console.log(artifactContent);
+            }
