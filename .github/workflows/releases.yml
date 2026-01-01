@@ -201,12 +201,15 @@ jobs:
                 continue;
 
               const artifactPath = path.join(artifact.parentPath, artifact.name);
+              console.log(`Publishing ${artifactPath}`);
 
               cp.execFileSync(`yarn`, [`install`], {
+                stdio: `inherit`,
                 cwd: artifactPath,
               });
 
               cp.execFileSync(`yarn`, [`npm`, `publish`, `--provenance`], {
+                stdio: `inherit`,
                 cwd: artifactPath,
               });
             }
