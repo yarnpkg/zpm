@@ -168,12 +168,14 @@ jobs:
               fs.chmodSync(path.join(destinationPath, `yarn${ext}`), 0o755);
 
               fs.writeFileSync(path.join(destinationPath, `package.json`), `${JSON.stringify({
-                name: `@arcanis/${baseName}`,
+                name: `@arcanis/${targetName}`,
                 version: process.env.VERSION,
                 license: `GPL-3.0`,
                 bin: {yarn: `yarn${ext}`},
                 publishConfig: {access: `public`},
               }, null, 2)}\n`);
+
+              fs.writeFileSync(path.join(destinationPath, `yarn.lock`), ``);
             }
 
       - name: Add the bin directory to the PATH
