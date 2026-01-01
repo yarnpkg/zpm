@@ -151,17 +151,15 @@ async fn get_id_token(options: &GetAuthorizationOptions<'_>) -> Result<Option<St
     let body
         = response.text().await?;
 
-    println!("Actions ID token response: {}", body);
-
     #[derive(Deserialize)]
     struct ActionsIdTokenResponse {
-        token: String,
+        value: String,
     }
 
     let data: ActionsIdTokenResponse
         = JsonDocument::hydrate_from_str(&body)?;
 
-    Ok(Some(data.token))
+    Ok(Some(data.value))
 }
 
 fn get_ident_url(ident: &Ident) -> String {
