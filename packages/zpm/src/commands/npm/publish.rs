@@ -545,7 +545,7 @@ fn create_github_provenance_payload(subject: &ProvenanceSubject) -> Result<Strin
         = std::env::var("GITHUB_SERVER_URL")?;
 
     let (workflow_path, workflow_ref)
-        = github_workflow_ref.split_once('/')
+        = github_workflow_ref.split_once('@')
             .unwrap_or_else(|| panic!("Expected workflow path and ref to both exist (got '{}' instead)", github_workflow_ref));
 
     let workflow_repository
