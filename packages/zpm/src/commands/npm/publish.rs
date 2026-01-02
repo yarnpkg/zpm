@@ -265,6 +265,8 @@ impl Publish {
         let registry_url
             = npm::registry_url_for_all_versions(&ident);
 
+        println!("Publishing to {} with authorization: {}", registry_url, authorization.as_deref().unwrap());
+
         if !self.dry_run {
             http_npm::put(&NpmHttpParams {
                 http_client: &project.http_client,
