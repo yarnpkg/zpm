@@ -8,7 +8,7 @@ use zpm_parsers::{JsonDocument, json_provider};
 use zpm_utils::{IoResultExt, Provider, Sha1, Sha512, ToFileString, ToHumanString, is_ci};
 
 use crate::{
-    error::Error, http::HttpClient, http_npm::{self, AuthorizationMode, NpmHttpParams}, npm, pack::{PackOptions, pack_workspace}, project::Project, provenance::attest, script::ScriptEnvironment
+    error::Error, http::HttpClient, http_npm::{self, AuthorizationMode, GetIdTokenOptions, NpmHttpParams}, npm, pack::{PackOptions, pack_workspace}, project::Project, provenance::attest, script::ScriptEnvironment
 };
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidNpmPublishAccess(s.to_string())))]
@@ -182,14 +182,14 @@ impl Publish {
                 digest: provenance_digest,
             };
 
-            let oidc_token
-                = authorization.as_deref()
-                    .ok_or(Error::ProvenanceRequiresAuthentication)?
-                    .strip_prefix("Bearer ")
-                    .ok_or(Error::ProvenanceRequiresAuthentication)?;
+            let sigstore_token
+                = http_npm::get_id_token(&GetIdTokenOptions {
+                    http_client: &project.http_client,
+                    audience: "sigstore",
+                }).await?;
 
             let provenance_payload
-                = create_provenance_payload(&project.http_client, &provenance_file, &oidc_token).await?;
+                = create_provenance_payload(&project.http_client, &provenance_file, &sigstore_token.unwrap()).await?;
 
             if let Some(provenance_payload) = provenance_payload {
                 attachments.insert(
@@ -545,7 +545,7 @@ fn create_github_provenance_payload(subject: &ProvenanceSubject) -> Result<Strin
         = std::env::var("GITHUB_SERVER_URL")?;
 
     let (workflow_path, workflow_ref)
-        = github_workflow_ref.split_once('/')
+        = github_workflow_ref.split_once('@')
             .unwrap_or_else(|| panic!("Expected workflow path and ref to both exist (got '{}' instead)", github_workflow_ref));
 
     let workflow_repository
@@ -581,7 +581,7 @@ fn create_github_provenance_payload(subject: &ProvenanceSubject) -> Result<Strin
             },
             run_details: GitHubProvenanceRunDetails {
                 builder: GitHubProvenanceBuilder {
-                    id: format!("{}{}", GITHUB_BUILDER_ID_PREFIX, std::env::var("RUNNER_ENVIRONMENT")?),
+                    id: format!("{}/{}", GITHUB_BUILDER_ID_PREFIX, std::env::var("RUNNER_ENVIRONMENT")?),
                 },
                 metadata: GitHubProvenanceMetadata {
                     invocation_id: format!("{}/{}/actions/runs/{}/attempts/{}", std::env::var("GITHUB_SERVER_URL")?, std::env::var("GITHUB_REPOSITORY")?, std::env::var("GITHUB_RUN_ID")?, std::env::var("GITHUB_RUN_ATTEMPT")?),

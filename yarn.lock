@@ -3553,6 +3553,16 @@
         "version": "0.11.0"
       }
     },
+    "@preact/compat@npm:^18.3.1": {
+      "checksum": "cf48eedaa0a49432a72783f297ca07b1c1cb5d0248c12bb9284837e848f9c4e4514a140110dfbd82566d894ec64c8ac38eb848c5dd41ffdb4a39fe537f2b92c6",
+      "resolution": {
+        "resolution": "@preact/compat@npm:18.3.1",
+        "version": "18.3.1",
+        "peerDependencies": {
+          "preact": "*"
+        }
+      }
+    },
     "@preact/preset-vite@npm:^2.10.2": {
       "checksum": "cbd2049216a2758dd74c3e576f95c488153bf4653922eb420bc8c2b8bfaa561c7e700c475370699a35903c4495c7d838ae102169a249de8141632cbba0296e3f",
       "resolution": {
@@ -9065,10 +9075,10 @@
         ]
       }
     },
-    "esbuild@npm:esbuild-wasm@^0.23.0": {
+    "esbuild-wasm@npm:^0.23.0": {
       "checksum": "fee5d3f6f09e7e07cadbae9747da17a6db912c701786ab033acf4137f7c07461a485b602f82fd5959ee3efe04745cad61f468804302791a610c903949dfec78b",
       "resolution": {
-        "resolution": "esbuild@npm:esbuild-wasm@0.23.1",
+        "resolution": "esbuild-wasm@npm:0.23.1",
         "version": "0.23.1"
       }
     },
@@ -14537,16 +14547,6 @@
         }
       }
     },
-    "react@npm:@preact/compat@^18.3.1": {
-      "checksum": "cf48eedaa0a49432a72783f297ca07b1c1cb5d0248c12bb9284837e848f9c4e4514a140110dfbd82566d894ec64c8ac38eb848c5dd41ffdb4a39fe537f2b92c6",
-      "resolution": {
-        "resolution": "react@npm:@preact/compat@18.3.1",
-        "version": "18.3.1",
-        "peerDependencies": {
-          "preact": "*"
-        }
-      }
-    },
     "react-devtools-core@npm:^4.19.1": {
       "checksum": "c7815d39e77b5845d41bd494625fc40e38744cf011669f9107c51a06dedb243db1f7fac7fd34e321bfd2628746f7b0c6557c6e20b3644931da03b252d5c6b59c",
       "resolution": {
@@ -16003,18 +16003,6 @@
         }
       }
     },
-    "string-width-cjs@npm:string-width@^4.2.0": {
-      "checksum": "3c7df75231f4459697a397151032a1cea901916d70fac45e231adbba08f2b9c80f7b691180e2f7c1e16dcbd20557e65bea249d5df17765e8df6c4409fb897ae2",
-      "resolution": {
-        "resolution": "string-width-cjs@npm:string-width@4.2.3",
-        "version": "4.2.3",
-        "dependencies": {
-          "emoji-regex": "^8.0.0",
-          "is-fullwidth-code-point": "^3.0.0",
-          "strip-ansi": "^6.0.1"
-        }
-      }
-    },
     "string.prototype.matchall@npm:^4.0.12": {
       "checksum": "34d6e9e8f2e91a2d8dc76a33e8dce71747092b566fcc44380efb972fb4f74efbf42a18e0dafddcfee81d3d5f552180f96470f8c764b7585a892f7597d9bcabf4",
       "resolution": {
@@ -16137,16 +16125,6 @@
         "version": "7.1.2",
         "dependencies": {
           "ansi-regex": "^6.0.1"
-        }
-      }
-    },
-    "strip-ansi-cjs@npm:strip-ansi@^6.0.1": {
-      "checksum": "66c579935338fde7afd712fe56ed95339f66837b89a6d50e824009ce92ff074073d5ae047b97d6bc2d2c5ac843d98e296cf48eb3dbf62d4b1041d5e882fd771c",
-      "resolution": {
-        "resolution": "strip-ansi-cjs@npm:strip-ansi@6.0.1",
-        "version": "6.0.1",
-        "dependencies": {
-          "ansi-regex": "^5.0.1"
         }
       }
     },
@@ -17536,18 +17514,6 @@
           "ansi-styles": "^6.2.1",
           "string-width": "^7.0.0",
           "strip-ansi": "^7.1.0"
-        }
-      }
-    },
-    "wrap-ansi-cjs@npm:wrap-ansi@^7.0.0": {
-      "checksum": "8734942765a1bec96e1d9e75749ddeb5691a3ea1ffdc6798d7ea47b01e110e646e2489883dc2430bfdfd41b80a7ea8374d17e3333e2557d5d48bc295e2639eaa",
-      "resolution": {
-        "resolution": "wrap-ansi-cjs@npm:wrap-ansi@7.0.0",
-        "version": "7.0.0",
-        "dependencies": {
-          "ansi-styles": "^4.0.0",
-          "string-width": "^4.1.0",
-          "strip-ansi": "^6.0.0"
         }
       }
     },

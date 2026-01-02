@@ -129,7 +129,23 @@ pub fn should_authenticate(options: &GetAuthorizationOptions<'_>) -> bool {
     }
 }
 
-async fn get_id_token(options: &GetAuthorizationOptions<'_>) -> Result<Option<String>, Error> {
+pub struct GetIdTokenOptions<'a> {
+    pub http_client: &'a HttpClient,
+    pub audience: &'a str,
+}
+
+fn get_npm_audience(registry: &str) -> Result<String, Error> {
+    let registry_url
+        = url::Url::parse(registry)?;
+
+    let registry_host
+        = registry_url.host_str()
+            .expect("\"http:\" URL should have a host");
+
+    Ok(format!("npm:{}", registry_host))
+}
+
+pub async fn get_id_token(options: &GetIdTokenOptions<'_>) -> Result<Option<String>, Error> {
     if let Ok(oidc_token) = std::env::var("NPM_ID_TOKEN") {
         return Ok(Some(oidc_token));
     }
@@ -142,6 +158,12 @@ async fn get_id_token(options: &GetAuthorizationOptions<'_>) -> Result<Option<St
         return Ok(None);
     };
 
+    let mut actions_id_token_request_url
+        = url::Url::parse(&actions_id_token_request_url)?;
+
+    actions_id_token_request_url.query_pairs_mut()
+        .append_pair("audience", options.audience);
+
     let response
         = options.http_client.get(actions_id_token_request_url)?
             .header("authorization", Some(format!("Bearer {}", actions_id_token_request_token)))
@@ -153,13 +175,13 @@ async fn get_id_token(options: &GetAuthorizationOptions<'_>) -> Result<Option<St
 
     #[derive(Deserialize)]
     struct ActionsIdTokenResponse {
-        token: String,
+        value: String,
     }
 
     let data: ActionsIdTokenResponse
         = JsonDocument::hydrate_from_str(&body)?;
 
-    Ok(Some(data.token))
+    Ok(Some(data.value))
 }
 
 fn get_ident_url(ident: &Ident) -> String {
@@ -179,7 +201,10 @@ async fn get_oidc_token(options: &GetAuthorizationOptions<'_>) -> Result<Option<
     };
 
     let id_token
-        = get_id_token(options).await?;
+        = get_id_token(&GetIdTokenOptions {
+            http_client: options.http_client,
+            audience: &get_npm_audience(&options.registry)?,
+        }).await?;
 
     let Some(id_token) = id_token else {
         return Ok(None);

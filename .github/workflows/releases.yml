@@ -50,6 +50,8 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
+          - target: i686-unknown-linux-musl
+            os: ubuntu-latest
           - target: aarch64-apple-darwin
             os: macos-latest
 
@@ -79,7 +81,6 @@ jobs:
             yarn-${{matrix.target}}.zip
 
   release:
-    if: needs.check.outputs.needs-release == 'true'
     needs: [check, build]
 
     name: 'Creating a release'
@@ -114,3 +115,138 @@ jobs:
             artifacts/*
         env:
           GH_TOKEN: ${{github.token}}
+
+  npm:
+    needs: [check, build]
+
+    name: 'Publishing to npm'
+    runs-on: ubuntu-latest
+
+    environment: releases
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Unpack the build of Yarn we just created
+        uses: actions/github-script@v8
+        env:
+          VERSION: ${{needs.check.outputs.version}}
+        with:
+          script: |
+            const cp = require(`child_process`);
+            const fs = require(`fs`);
+            const path = require(`path`);
+
+            const artifacts = fs.readdirSync(`artifacts`, {
+              withFileTypes: true,
+            });
+
+            function includes(str, search) {
+              return str.split(/-/).includes(search);
+            }
+
+            function findFirst(str, map) {
+              return Object.entries(map).find(([, value]) => includes(str, value))[0];
+            }
+
+            for (const artifact of artifacts) {
+              if (!artifact.isFile() || !artifact.name.startsWith('yarn-'))
+                continue;
+
+              const targetName = artifact.name.replace(`.zip`, ``);
+              const destinationPath = path.join(artifact.parentPath, targetName);
+              const sourcePath = path.join(artifact.parentPath, artifact.name);
+
+              cp.execFileSync(`unzip`, [`-d`, destinationPath, sourcePath]);
+
+              const ext = includes(targetName, `windows`) ? `.exe` : ``;
+
+              // We don't need to distribute Yarn Switch itself
+              fs.unlinkSync(path.join(destinationPath, `yarn`));
+
+              // Rename the binary to `yarn`
+              fs.renameSync(path.join(destinationPath, `yarn-bin${ext}`), path.join(destinationPath, `yarn${ext}`));
+
+              // Make it executable
+              fs.chmodSync(path.join(destinationPath, `yarn${ext}`), 0o755);
+
+              const cpu = findFirst(targetName, {
+                x64: `x86_64`,
+                arm64: `aarch64`,
+                ia32: `i686`,
+              });
+
+              const os = findFirst(targetName, {
+                linux: `linux`,
+                darwin: `darwin`,
+              });
+
+              fs.writeFileSync(path.join(destinationPath, `package.json`), `${JSON.stringify({
+                name: `@yarnpkg/${targetName}`,
+                version: process.env.VERSION,
+                license: `GPL-3.0`,
+                cpu: [cpu],
+                os: [os],
+                bin: {
+                  yarn: `yarn${ext}`,
+                },
+                repository: {
+                  type: `git`,
+                  url: `git+https://github.com/yarnpkg/zpm.git`,
+                },
+              }, null, 2)}\n`);
+
+              fs.writeFileSync(path.join(destinationPath, `yarn.lock`), ``);
+            }
+
+      - name: Add the bin directory to the PATH
+        run: |
+          echo "$PWD/artifacts/yarn-x86_64-unknown-linux-musl" >> $GITHUB_PATH
+
+      - name: Generate the packages
+        uses: actions/github-script@v8
+        env:
+          YARN_NPM_AUTH_TOKEN: ${{secrets.TEMPORARY_NPM_PUBLISH_TOKEN}}
+        with:
+          script: |
+            const cp = require(`child_process`);
+            const fs = require(`fs`);
+            const path = require(`path`);
+
+            const artifacts = fs.readdirSync(`artifacts`, {
+              withFileTypes: true,
+            });
+
+            for (const artifact of artifacts) {
+              if (!artifact.isDirectory() || !artifact.name.startsWith('yarn-'))
+                continue;
+
+              const artifactPath = path.join(artifact.parentPath, artifact.name);
+              console.log(`Publishing ${artifactPath}`);
+
+              cp.execFileSync(`yarn`, [`install`], {
+                stdio: `inherit`,
+                cwd: artifactPath,
+              });
+
+              cp.execFileSync(`yarn`, [`npm`, `whoami`], {
+                  stdio: `inherit`,
+                  cwd: artifactPath,
+              });
+
+              cp.execFileSync(`yarn`, [`npm`, `publish`, `--access`, `public`], {
+                stdio: `inherit`,
+                cwd: artifactPath,
+              });
+            }

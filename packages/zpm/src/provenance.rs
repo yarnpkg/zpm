@@ -294,7 +294,9 @@ impl<'a> FulcioSigner<'a> {
         public_key: String,
         challenge: ring::signature::Signature,
     ) -> Result<Vec<String>, Error> {
-        let url = format!("{}/api/v2/signingCert", *DEFAULT_FULCIO_URL);
+        let url
+            = format!("{}/api/v2/signingCert", *DEFAULT_FULCIO_URL);
+
         let request_body = CreateSigningCertificateRequest {
             credentials: Credentials {
                 oidc_identity_token: token.to_string(),
