@@ -581,7 +581,7 @@ fn create_github_provenance_payload(subject: &ProvenanceSubject) -> Result<Strin
             },
             run_details: GitHubProvenanceRunDetails {
                 builder: GitHubProvenanceBuilder {
-                    id: format!("{}{}", GITHUB_BUILDER_ID_PREFIX, std::env::var("RUNNER_ENVIRONMENT")?),
+                    id: format!("{}/{}", GITHUB_BUILDER_ID_PREFIX, std::env::var("RUNNER_ENVIRONMENT")?),
                 },
                 metadata: GitHubProvenanceMetadata {
                     invocation_id: format!("{}/{}/actions/runs/{}/attempts/{}", std::env::var("GITHUB_SERVER_URL")?, std::env::var("GITHUB_REPOSITORY")?, std::env::var("GITHUB_RUN_ID")?, std::env::var("GITHUB_RUN_ATTEMPT")?),

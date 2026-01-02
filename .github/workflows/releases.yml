@@ -170,8 +170,13 @@ jobs:
                 name: `@yarnpkg/${targetName}`,
                 version: `0.0.1-test.1`,
                 license: `GPL-3.0`,
-                bin: {yarn: `yarn${ext}`},
-                repository: {type: `git`, url: `https://github.com/yarnpkg/zpm.git`},
+                bin: {
+                  yarn: `yarn${ext}`,
+                },
+                repository: {
+                  type: `git`,
+                  url: `git+https://github.com/yarnpkg/zpm.git`,
+                },
               }, null, 2)}\n`);
 
               fs.writeFileSync(path.join(destinationPath, `yarn.lock`), ``);
