@@ -590,6 +590,8 @@ fn create_github_provenance_payload(subject: &ProvenanceSubject) -> Result<Strin
         },
     };
 
+    println!("GitHub provenance payload: {}", serde_json::to_string_pretty(&payload).unwrap());
+
     Ok(serde_json::to_string(&payload).unwrap())
 }
 
