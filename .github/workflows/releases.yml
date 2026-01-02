@@ -47,6 +47,10 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
 
     name: 'Building ${{matrix.target}}'
     runs-on: ${{matrix.os}}
@@ -145,6 +149,14 @@ jobs:
               withFileTypes: true,
             });
 
+            function includes(str, search) {
+              return str.split(/-/).includes(search);
+            }
+
+            function findFirst(str, map) {
+              return Object.entries(map).find(([, value]) => includes(str, value))[0];
+            }
+
             for (const artifact of artifacts) {
               if (!artifact.isFile() || !artifact.name.startsWith('yarn-'))
                 continue;
@@ -155,7 +167,7 @@ jobs:
 
               cp.execFileSync(`unzip`, [`-d`, destinationPath, sourcePath]);
 
-              const ext = targetName.includes(`windows`) ? `.exe` : ``;
+              const ext = includes(targetName, `windows`) ? `.exe` : ``;
 
               // We don't need to distribute Yarn Switch itself
               fs.unlinkSync(path.join(destinationPath, `yarn`));
@@ -166,10 +178,22 @@ jobs:
               // Make it executable
               fs.chmodSync(path.join(destinationPath, `yarn${ext}`), 0o755);
 
+              const cpu = findFirst(targetName, {
+                x64: `x86_64`,
+                arm64: `aarch64`,
+              });
+
+              const os = findFirst(targetName, {
+                linux: `linux`,
+                darwin: `darwin`,
+              });
+
               fs.writeFileSync(path.join(destinationPath, `package.json`), `${JSON.stringify({
                 name: `@yarnpkg/${targetName}`,
-                version: `0.0.1-test.1`,
+                version: `0.0.1-test.2`,
                 license: `GPL-3.0`,
+                cpu,
+                os,
                 bin: {
                   yarn: `yarn${ext}`,
                 },
@@ -216,7 +240,7 @@ jobs:
                   stdio: `inherit`,
                   cwd: artifactPath,
               });
-  
+
               cp.execFileSync(`yarn`, [`npm`, `publish`, `--access`, `public`], {
                 stdio: `inherit`,
                 cwd: artifactPath,
