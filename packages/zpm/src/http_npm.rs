@@ -243,6 +243,7 @@ pub async fn get_authorization(options: &GetAuthorizationOptions<'_>) -> Result<
             .or_else(|| options.configuration.settings.npm_auth_token.value.as_ref());
 
     if let Some(auth_token) = auth_token {
+        println!("Using auth token: {}", auth_token.value);
         return Ok(Some(format!("Bearer {}", auth_token.value)));
     }
 
@@ -263,6 +264,7 @@ pub async fn get_authorization(options: &GetAuthorizationOptions<'_>) -> Result<
             = get_oidc_token(options).await?;
 
         if let Some(oidc_token) = oidc_token {
+            println!("Using OIDC token: {}", oidc_token);
             return Ok(Some(format!("Bearer {}", oidc_token)));
         }
     }
