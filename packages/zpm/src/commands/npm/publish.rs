@@ -265,8 +265,6 @@ impl Publish {
         let registry_url
             = npm::registry_url_for_all_versions(&ident);
 
-        println!("Publishing to {} with authorization: {}", registry_url, authorization.as_deref().unwrap());
-
         if !self.dry_run {
             http_npm::put(&NpmHttpParams {
                 http_client: &project.http_client,
@@ -591,8 +589,6 @@ fn create_github_provenance_payload(subject: &ProvenanceSubject) -> Result<Strin
             },
         },
     };
-
-    println!("GitHub provenance payload: {}", serde_json::to_string_pretty(&payload).unwrap());
 
     Ok(serde_json::to_string(&payload).unwrap())
 }

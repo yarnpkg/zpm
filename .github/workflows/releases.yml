@@ -2,6 +2,7 @@ name: Releases
 
 on:
   push:
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -49,6 +50,8 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
+          - target: i686-unknown-linux-musl
+            os: ubuntu-latest
           - target: aarch64-apple-darwin
             os: macos-latest
 
@@ -77,41 +80,41 @@ jobs:
           path: |
             yarn-${{matrix.target}}.zip
 
-  # release:
-  #   needs: [check, build]
+  release:
+    needs: [check, build]
 
-  #   name: 'Creating a release'
-  #   runs-on: ubuntu-latest
+    name: 'Creating a release'
+    runs-on: ubuntu-latest
 
-  #   permissions:
-  #     contents: write
+    permissions:
+      contents: write
 
-  #   steps:
-  #     - name: Checkout the repo
-  #       uses: actions/checkout@v4
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
 
-  #     - name: Download artifacts
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         path: artifacts
-  #         merge-multiple: true
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
 
-  #     - name: Create GitHub Release
-  #       run: |
-  #         PRERELEASE_OPTIONS=
+      - name: Create GitHub Release
+        run: |
+          PRERELEASE_OPTIONS=
 
-  #         if [[ '${{needs.check.outputs.version}}' =~ - ]]; then
-  #           PRERELEASE_OPTIONS=--prerelease
-  #         fi
+          if [[ '${{needs.check.outputs.version}}' =~ - ]]; then
+            PRERELEASE_OPTIONS=--prerelease
+          fi
 
-  #         gh release create "v${{needs.check.outputs.version}}" \
-  #           --title "v${{needs.check.outputs.version}}" \
-  #           --notes "Release of v${{needs.check.outputs.version}}" \
-  #           --target ${{github.ref}} \
-  #           $PRERELEASE_OPTIONS \
-  #           artifacts/*
-  #       env:
-  #         GH_TOKEN: ${{github.token}}
+          gh release create "v${{needs.check.outputs.version}}" \
+            --title "v${{needs.check.outputs.version}}" \
+            --notes "Release of v${{needs.check.outputs.version}}" \
+            --target ${{github.ref}} \
+            $PRERELEASE_OPTIONS \
+            artifacts/*
+        env:
+          GH_TOKEN: ${{github.token}}
 
   npm:
     needs: [check, build]
