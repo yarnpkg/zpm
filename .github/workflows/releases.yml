@@ -184,6 +184,7 @@ jobs:
               const cpu = findFirst(targetName, {
                 x64: `x86_64`,
                 arm64: `aarch64`,
+                ia32: `i686`,
               });
 
               const os = findFirst(targetName, {
@@ -193,7 +194,7 @@ jobs:
 
               fs.writeFileSync(path.join(destinationPath, `package.json`), `${JSON.stringify({
                 name: `@yarnpkg/${targetName}`,
-                version: `0.0.1-test.2`,
+                version: process.env.VERSION,
                 license: `GPL-3.0`,
                 cpu: [cpu],
                 os: [os],
