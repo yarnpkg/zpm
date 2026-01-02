@@ -43,16 +43,24 @@ pub fn registry_url_for_all_versions(ident: &Ident) -> String {
     let mut url = String::new();
 
     url.push('/');
-    url.push_str(&ident.to_file_string());
+
+    let (scope, name)
+        = ident.split();
+
+    if let Some(scope) = scope {
+        url.push_str(scope);
+        url.push_str("%2f");
+    }
+
+    url.push_str(name);
 
     url
 }
 
 pub fn registry_url_for_one_version(ident: &Ident, version: &Version) -> String {
-    let mut url = String::new();
+    let mut url
+        = registry_url_for_all_versions(ident);
 
-    url.push('/');
-    url.push_str(&ident.to_file_string());
     url.push('/');
     url.push_str(&version.to_file_string());
 
@@ -60,10 +68,9 @@ pub fn registry_url_for_one_version(ident: &Ident, version: &Version) -> String 
 }
 
 pub fn registry_url_for_package_data(ident: &Ident, version: &Version) -> String {
-    let mut url = String::new();
+    let mut url
+        = registry_url_for_all_versions(ident);
 
-    url.push('/');
-    url.push_str(&ident.to_file_string());
     url.push_str("/-/");
     url.push_str(&ident.name());
     url.push('-');
