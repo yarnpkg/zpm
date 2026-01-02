@@ -318,14 +318,11 @@ impl<'a> FulcioSigner<'a> {
             .post(&url)?
             .header("content-type", Some("application/json"))
             .body(body_str)
-            .enable_status_check(false)
             .send()
             .await?;
 
         let body_text
             = response.text().await?;
-
-        println!("Signing certificate response: {}", body_text);
 
         let body: SigningCertificateResponse
             = JsonDocument::hydrate_from_str(&body_text)?;
