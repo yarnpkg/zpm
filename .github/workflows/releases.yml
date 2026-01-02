@@ -212,6 +212,11 @@ jobs:
                 cwd: artifactPath,
               });
 
+              cp.execFileSync(`yarn`, [`npm`, `whoami`], {
+                  stdio: `inherit`,
+                  cwd: artifactPath,
+              });
+  
               cp.execFileSync(`yarn`, [`npm`, `publish`, `--access`, `public`], {
                 stdio: `inherit`,
                 cwd: artifactPath,
