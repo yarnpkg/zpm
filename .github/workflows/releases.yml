@@ -171,7 +171,7 @@ jobs:
                 version: `0.0.1-test.1`,
                 license: `GPL-3.0`,
                 bin: {yarn: `yarn${ext}`},
-                publishConfig: {access: `public`},
+                repository: {type: `git`, url: `https://github.com/yarnpkg/zpm.git`},
               }, null, 2)}\n`);
 
               fs.writeFileSync(path.join(destinationPath, `yarn.lock`), ``);
@@ -205,7 +205,7 @@ jobs:
                 cwd: artifactPath,
               });
 
-              cp.execFileSync(`yarn`, [`npm`, `publish`, `--provenance`], {
+              cp.execFileSync(`yarn`, [`npm`, `publish`, `--provenance`, `--access`, `public`], {
                 stdio: `inherit`,
                 cwd: artifactPath,
               });
