@@ -192,8 +192,8 @@ jobs:
                 name: `@yarnpkg/${targetName}`,
                 version: `0.0.1-test.2`,
                 license: `GPL-3.0`,
-                cpu,
-                os,
+                cpu: [cpu],
+                os: [os],
                 bin: {
                   yarn: `yarn${ext}`,
                 },
