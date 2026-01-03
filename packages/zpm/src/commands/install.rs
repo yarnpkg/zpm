@@ -60,6 +60,10 @@ pub struct Install {
     /// Select the artifacts this install will generate
     #[cli::option("--mode")]
     mode: Option<InstallMode>,
+
+    /// Hide any output but errors
+    #[cli::option("--silent", default = false)]
+    silent: bool,
 }
 
 impl Install {
@@ -84,6 +88,7 @@ impl Install {
             check_resolutions: self.check_resolutions,
             refresh_lockfile: self.refresh_lockfile,
             mode: self.mode,
+            silent_or_error: self.silent,
             ..Default::default()
         }).await?;
 

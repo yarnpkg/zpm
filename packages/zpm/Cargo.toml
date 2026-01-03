@@ -52,3 +52,10 @@ p256 = "0.13.2"
 spki = "0.7.3"
 ring = "0.17.14"
 url = "2.5.7"
+
+[dev-dependencies]
+divan = { version = "4.2.0", package = "codspeed-divan-compat" }
+
+[[bench]]
+name = "cli"
+harness = false

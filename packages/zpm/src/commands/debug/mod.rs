@@ -1,3 +1,4 @@
+pub mod bench;
 pub mod check_descriptor;
 pub mod check_ident;
 pub mod check_locator;

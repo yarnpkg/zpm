@@ -1,4 +1,7 @@
+use std::sync::LazyLock;
+
 use itertools::Itertools;
+use regex::Regex;
 use zpm_formats::{iter_ext::IterExt, Entry};
 use zpm_primitives::Ident;
 use zpm_semver::Version;
@@ -37,6 +40,31 @@ impl<'a, T> NpmEntryExt<'a> for T where T: Iterator<Item = Entry<'a>> {
 
             .prefix_path(subdir)
     }
+}
+
+static NPM_REGISTRY_URL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^https?:(\/\/(?:[^/]+\.)?npmjs.org(?:$|\/))").unwrap()
+});
+
+pub fn is_conventional_tarball_url(registry: &str, ident: &Ident, version: &zpm_semver::Version, mut url: String) -> bool {
+    // From time to time the npm registry returns http urls instead of https 🤡
+    url = NPM_REGISTRY_URL_REGEX.replace(&url, "https:$1").to_string();
+
+    let path
+        = registry_url_for_package_data(ident, version);
+
+    if url == format!("{}{}", registry, path) {
+       return true;
+    }
+
+    let path_with_slash
+        = path.replace("%2f", "/");
+
+    if url == format!("{}{}", registry, path_with_slash) {
+        return true;
+    }
+
+    false
 }
 
 pub fn registry_url_for_all_versions(ident: &Ident) -> String {
