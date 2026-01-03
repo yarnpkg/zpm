@@ -40,5 +40,6 @@ jobs:
       - name: Run benchmarks
         uses: CodSpeedHQ/action@v4
         with:
+          mode: simulation
           run: cargo codspeed run -p zpm
           token: ${{ secrets.CODSPEED_TOKEN }}
