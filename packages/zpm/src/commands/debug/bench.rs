@@ -172,8 +172,8 @@ impl BenchRun {
             .ok()?;
 
         let hyperfine_args = vec![
-            "--min-runs=10".to_string(),
-            "--warmup=1".to_string(),
+            "--min-runs=30".to_string(),
+            "--warmup=4".to_string(),
             "--show-output".to_string(),
             format!("--export-json={bench_json_string}"),
             format!("--prepare={current_exec_string} debug bench {mode_string} --cleanup"),
