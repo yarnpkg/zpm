@@ -1,0 +1,170 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Find merge-base and prepare worktrees
+        id: setup
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+          MERGE_BASE=$(git merge-base HEAD origin/${{ github.event.pull_request.base.ref }})
+          echo "merge_base=$MERGE_BASE" >> $GITHUB_OUTPUT
+
+          # Create worktrees for base and head
+          git worktree add ../base $MERGE_BASE
+          git worktree add ../head HEAD
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+        with:
+          shared-key: benchmark
+          workspaces: |
+            ../base -> target
+            ../head -> target
+
+      - name: Install hyperfine
+        run: |
+          wget https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
+          sudo dpkg -i hyperfine_1.18.0_amd64.deb
+
+      - name: Build Yarn (base)
+        working-directory: ../base
+        run: cargo build --release -p zpm --bin yarn-bin
+
+      - name: Build Yarn (head)
+        working-directory: ../head
+        run: cargo build --release -p zpm --bin yarn-bin
+
+      - name: Run benchmark (base)
+        working-directory: ../base
+        run: ./target/release/yarn-bin debug bench gatsby install-full-cold
+
+      - name: Run benchmark (head)
+        working-directory: ../head
+        run: ./target/release/yarn-bin debug bench gatsby install-full-cold
+
+      - name: Merge benchmark results and post comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read both benchmark results
+            const baseResults = JSON.parse(fs.readFileSync('../base/bench-gatsby-install-full-cold.json', 'utf8'));
+            const headResults = JSON.parse(fs.readFileSync('../head/bench-gatsby-install-full-cold.json', 'utf8'));
+
+            // Rename commands to indicate before/after
+            baseResults.results.forEach(r => {
+              r.command = `[base] ${r.command.split('/').pop()}`;
+            });
+            headResults.results.forEach(r => {
+              r.command = `[head] ${r.command.split('/').pop()}`;
+            });
+
+            // Merge results
+            const mergedResults = {
+              results: [...baseResults.results, ...headResults.results]
+            };
+
+            // Save merged results
+            fs.writeFileSync('bench-merged.json', JSON.stringify(mergedResults, null, 2));
+
+            // Calculate comparison metrics
+            const baseMean = baseResults.results[0].mean;
+            const headMean = headResults.results[0].mean;
+            const baseMedian = baseResults.results[0].median;
+            const headMedian = headResults.results[0].median;
+
+            const meanDiff = headMean - baseMean;
+            const meanPct = ((meanDiff / baseMean) * 100).toFixed(2);
+            const medianDiff = headMedian - baseMedian;
+            const medianPct = ((medianDiff / baseMedian) * 100).toFixed(2);
+
+            const formatTime = (t) => `${t.toFixed(3)}s`;
+            const formatDiff = (pct) => {
+              const num = parseFloat(pct);
+              if (num > 0) return `+${pct}% ⚠️`;
+              if (num < 0) return `${pct}% ✅`;
+              return `${pct}%`;
+            };
+
+            // Build the comment
+            const comment = `## ⏱️ Benchmark Results
+
+            | Metric | Base | Head | Difference |
+            |--------|------|------|------------|
+            | **Mean** | ${formatTime(baseMean)} | ${formatTime(headMean)} | ${formatDiff(meanPct)} |
+            | **Median** | ${formatTime(baseMedian)} | ${formatTime(headMedian)} | ${formatDiff(medianPct)} |
+            | **Min** | ${formatTime(baseResults.results[0].min)} | ${formatTime(headResults.results[0].min)} | |
+            | **Max** | ${formatTime(baseResults.results[0].max)} | ${formatTime(headResults.results[0].max)} | |
+            | **Std Dev** | ${formatTime(baseResults.results[0].stddev)} | ${formatTime(headResults.results[0].stddev)} | |
+
+            <details>
+            <summary>📊 Raw benchmark data</summary>
+
+            **Base times:** ${baseResults.results[0].times.map(t => formatTime(t)).join(', ')}
+
+            **Head times:** ${headResults.results[0].times.map(t => formatTime(t)).join(', ')}
+            </details>
+
+            ---
+            *Benchmark: \`gatsby install-full-cold\`*
+            `.split('\n').map(l => l.trim()).join('\n');
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('## ⏱️ Benchmark Results')
+            );
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment,
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment,
+              });
+            }
+
+      - name: Upload merged benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: bench-merged.json
