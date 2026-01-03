@@ -39,6 +39,11 @@ mod why;
 
 #[cli::program(async)]
 pub enum YarnCli {
+    BenchCleanup(debug::bench::BenchCleanup),
+    BenchIter(debug::bench::BenchIter),
+    BenchPrepare(debug::bench::BenchPrepare),
+    BenchRun(debug::bench::BenchRun),
+
     CheckDescriptor(debug::check_descriptor::CheckDescriptor),
     CheckIdent(debug::check_ident::CheckIdent),
     CheckLocator(debug::check_locator::CheckLocator),
@@ -49,6 +54,7 @@ pub enum YarnCli {
     Flamegraph(debug::flamegraph::Flamegraph),
     Http(debug::http::Http),
     IterZip(debug::iter_zip::IterZip),
+    MockProxy(debug::mock_proxy::MockProxy),
     PrintBranchBase(debug::print_branch_base::PrintBranchBase),
     PrintChangedFiles(debug::print_changed_files::PrintChangedFiles),
     PrintChangedWorkspaces(debug::print_changed_workspaces::PrintChangedWorkspaces),
@@ -98,12 +104,12 @@ pub enum YarnCli {
     Why(why::Why),
 }
 
-pub async fn run_default() -> ExitCode {
+pub async fn run_default(args: Option<Vec<String>>) -> ExitCode {
     let BinMeta {
         cwd,
         args,
         version,
-    } = extract_bin_meta();
+    } = extract_bin_meta(args);
 
     if let Some(cwd) = cwd {
         cwd.sys_set_current_dir()

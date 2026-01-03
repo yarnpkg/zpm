@@ -182,6 +182,10 @@ pub struct Add {
     #[cli::option("--mode")]
     mode: Option<InstallMode>,
 
+    /// Hide any output but errors
+    #[cli::option("--silent", default = false)]
+    silent: bool,
+
     // ---
 
     /// Packages to add
@@ -327,6 +331,7 @@ impl Add {
         project.run_install(project::RunInstallOptions {
             mode: self.mode,
             enforced_resolutions,
+            silent_or_error: self.silent,
             ..Default::default()
         }).await?;
 

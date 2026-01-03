@@ -423,6 +423,12 @@ pub enum Error {
     #[error("Invalid install mode ({0})")]
     InvalidInstallMode(String),
 
+    #[error("Invalid benchmark name ({0}); expected one of: gatsby, monorepo, next")]
+    InvalidBenchName(String),
+
+    #[error("Invalid benchmark mode ({0}); expected one of: install-full-cold, install-cache-only, install-cache-and-lock, install-ready")]
+    InvalidBenchMode(String),
+
     #[error("Internal error: Join failed ({0})")]
     JoinFailed(#[from] Arc<JoinError>),
 

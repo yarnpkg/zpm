@@ -41,7 +41,7 @@ pub async fn run_default() -> ExitCode {
         cwd,
         args,
         version,
-    } = extract_bin_meta();
+    } = extract_bin_meta(None);
 
     if let Some(cwd) = cwd {
         set_fake_cwd(cwd);

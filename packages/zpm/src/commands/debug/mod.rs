@@ -1,3 +1,4 @@
+pub mod bench;
 pub mod check_descriptor;
 pub mod check_ident;
 pub mod check_locator;
@@ -8,6 +9,7 @@ pub mod check_semver_version;
 pub mod flamegraph;
 pub mod http;
 pub mod iter_zip;
+pub mod mock_proxy;
 pub mod print_branch_base;
 pub mod print_changed_files;
 pub mod print_changed_workspaces;

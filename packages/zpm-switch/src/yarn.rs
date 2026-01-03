@@ -136,12 +136,14 @@ pub fn get_bin_version() -> String {
     cargo_version.to_file_string()
 }
 
-pub fn extract_bin_meta() -> BinMeta {
+pub fn extract_bin_meta(args: Option<Vec<String>>) -> BinMeta {
     let mut cwd = None;
 
-    let mut args = std::env::args()
-        .skip(1)
-        .collect::<Vec<_>>();
+    let mut args = args.unwrap_or_else(|| {
+        std::env::args()
+            .skip(1)
+            .collect::<Vec<_>>()
+    });
 
     if let Some(first_arg) = args.first() {
         let explicit_path

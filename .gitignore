@@ -19,3 +19,5 @@ profile.json.gz
 /.yarn/ignore
 /.yarn/cache
 /.yarn/unplugged
+
+/bench-*.json

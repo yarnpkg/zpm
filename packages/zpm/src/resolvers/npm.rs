@@ -64,16 +64,13 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
         version,
     };
 
-    let expected_registry_base
+    let registry
         = project.config.registry_base_for(&registry_reference.ident);
-    let expected_registry_path
-        = npm::registry_url_for_package_data(&registry_reference.ident, &registry_reference.version);
-    let expected_registry_url
-        = format!("{}{}", expected_registry_base, expected_registry_path);
 
-    let locator = descriptor.resolve_with(match expected_registry_url == dist_manifest.tarball {
-        true => registry_reference.into(),
-        false => UrlReference {url: dist_manifest.tarball.clone()}.into(),
+    let locator = descriptor.resolve_with(if npm::is_conventional_tarball_url(&registry, &registry_reference.ident, &registry_reference.version, dist_manifest.tarball.clone()) {
+        registry_reference.into()
+    } else {
+        UrlReference {url: dist_manifest.tarball.clone()}.into()
     });
 
     Resolution::from_remote_manifest(locator, manifest.remote)

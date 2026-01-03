@@ -4,5 +4,5 @@ use std::process::ExitCode;
 async fn main() -> ExitCode {
     env_logger::init();
 
-    zpm::commands::run_default().await
+    zpm::commands::run_default(None).await
 }
