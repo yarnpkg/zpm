@@ -31,7 +31,7 @@ jobs:
           echo "merge_base=$MERGE_BASE" >> $GITHUB_OUTPUT
 
           # Create worktrees for base and head
-          git worktree add ../base $MERGE_BASE
+          git worktree add ../base HEAD #$MERGE_BASE
           git worktree add ../head HEAD
 
       - name: Setup Rust toolchain
