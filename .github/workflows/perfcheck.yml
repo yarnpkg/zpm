@@ -61,8 +61,9 @@ jobs:
       - name: Start mock proxy
         working-directory: ../head
         run: |
-          ./target/release/yarn-bin debug mock-proxy -p 4873 &
+          ./target/release/yarn-bin debug mock-proxy -p 4873 https://registry.npmjs.org &
           echo "YARN_NPM_REGISTRY_SERVER=http://localhost:4873" >> $GITHUB_ENV
+          echo "YARN_UNSAFE_HTTP_WHITELIST=localhost" >> $GITHUB_ENV
 
       - name: Run benchmark (base)
         working-directory: ../base
