@@ -58,6 +58,11 @@ jobs:
         working-directory: ../head
         run: cargo build --release -p zpm --bin yarn-bin
 
+      - name: Start mock proxy
+        run: |
+          ./target/release/yarn-bin debug mock-proxy -p 4873
+          echo "YARN_NPM_REGISTRY_SERVER=http://localhost:4873" >> $GITHUB_ENV
+
       - name: Run benchmark (base)
         working-directory: ../base
         run: ./target/release/yarn-bin debug bench gatsby install-full-cold
