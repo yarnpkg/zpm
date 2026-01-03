@@ -156,10 +156,11 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
 
     #[serde_as]
     #[derive(Deserialize)]
-    struct RegistryMetadata {
+    struct RegistryMetadata<'a> {
         #[serde_as(as = "Option<MapSkipError<_, _>>")]
         time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
-        versions: BTreeMap<zpm_semver::Version, RawJsonValue>,
+        #[serde(borrow)]
+        versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
     }
 
     let registry_data: RegistryMetadata
@@ -214,15 +215,17 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
 
     #[serde_as]
     #[derive(Deserialize)]
-    struct RegistryMetadata {
+    struct RegistryMetadata<'a> {
         #[serde(rename(deserialize = "dist-tags"))]
         dist_tags: BTreeMap<String, zpm_semver::Version>,
         #[serde_as(as = "Option<MapSkipError<_, _>>")]
         time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
-        versions: BTreeMap<zpm_semver::Version, RawJsonValue>,
+        #[serde(borrow)]
+        versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
     }
 
-    let registry_data: RegistryMetadata
+    // Added lifetime bound to fix 'lifetime may not live long enough'
+    let registry_data: RegistryMetadata<'_>
         = JsonDocument::hydrate_from_slice(&bytes[..])?;
 
     let latest_version

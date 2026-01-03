@@ -12,7 +12,12 @@ pub use serde_json as json_provider;
 pub use sonic_rs as json_provider;
 
 pub type RawJsonDeserializer<R> = json_provider::Deserializer<R>;
-pub type RawJsonValue = json_provider::Value;
+
+#[cfg(not(sonic_rs))]
+pub type RawJsonValue<'a> = &'a json_provider::RawJson;
+
+#[cfg(sonic_rs)]
+pub type RawJsonValue<'a> = json_provider::LazyValue<'a>;
 
 #[derive(Debug)]
 pub struct JsonSource<T> {
@@ -63,12 +68,12 @@ impl Document for JsonDocument {
 }
 
 impl JsonDocument {
-    pub fn hydrate_from_value<'de, T: DeserializeOwned>(input: &'de RawJsonValue) -> Result<T, Error> {
+    pub fn hydrate_from_value<'de, 'a, T: DeserializeOwned>(input: &'de RawJsonValue<'a>) -> Result<T, Error> {
         #[cfg(not(sonic_rs))]
         return Ok(json_provider::from_value(input.clone())?);
 
         #[cfg(sonic_rs)]
-        return Ok(json_provider::from_value(input)?);
+        return Ok(json_provider::from_str(input.as_raw_str())?);
     }
 
     pub fn hydrate_from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
