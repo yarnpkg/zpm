@@ -277,6 +277,7 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
     let bytes = match params.authorization {
         Some(authorization) => {
             params.http_client.get(&url)?
+                .header("accept", Some("application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*"))
                 .header("authorization", Some(authorization))
                 .send().await?
                 .error_for_status()?
@@ -284,7 +285,11 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
         },
 
         None => {
-            params.http_client.cached_get(&url).await?
+            params.http_client.get(&url)?
+                .header("accept", Some("application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*"))
+                .send().await?
+                .error_for_status()?
+                .bytes().await?
         },
     };
 

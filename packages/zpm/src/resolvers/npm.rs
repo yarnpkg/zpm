@@ -7,6 +7,7 @@ use serde_with::{serde_as, MapSkipError};
 use zpm_config::ConfigExt;
 use zpm_parsers::{JsonDocument, RawJsonValue};
 use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, Reference, RegistryReference, RegistrySemverRange, RegistryTagRange, UrlReference};
+use zpm_utils::Libc;
 
 use crate::{
     error::Error,
@@ -33,7 +34,7 @@ struct RemoteManifestWithScripts {
     scripts: BTreeMap<String, String>,
 }
 
-fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
+fn fix_manifest(manifest: &mut RemoteManifestWithScripts, package_ident: &Ident) {
     // Manually add node-gyp dependency if there is a script using it and not already set
     // This is because the npm registry will automatically add a `node-gyp rebuild` install script
     // in the metadata if there is not already an install script and a binding.gyp file exists.
@@ -47,13 +48,24 @@ fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
             }
         }
     }
+
+    // Infer libc field for Linux packages. The abbreviated packument format
+    // (application/vnd.npm.install-v1+json) doesn't include the libc field,
+    // so we infer it from the package name and os field.
+    if manifest.remote.requirements.has_linux_os() {
+        if package_ident.as_str().contains("musl") {
+            manifest.remote.requirements.set_libc(Libc::Musl);
+        } else {
+            manifest.remote.requirements.set_libc(Libc::Glibc);
+        }
+    }
 }
 
 fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: zpm_semver::Version, mut manifest: RemoteManifestWithScripts) -> ResolutionResult {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
-    fix_manifest(&mut manifest);
+    fix_manifest(&mut manifest, package_ident);
 
     let dist_manifest = manifest.remote.dist
         .as_ref()
@@ -268,7 +280,7 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     let mut manifest: RemoteManifestWithScripts
         = JsonDocument::hydrate_from_slice(&bytes[..])?;
 
-    fix_manifest(&mut manifest);
+    fix_manifest(&mut manifest, &params.ident);
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote.clone());
