@@ -174,13 +174,13 @@ impl BenchRun {
         let hyperfine_args = vec![
             "--min-runs=30".to_string(),
             "--warmup=4".to_string(),
-            "--show-output".to_string(),
             format!("--export-json={bench_json_string}"),
             format!("--prepare={current_exec_string} debug bench {mode_string} --cleanup"),
             format!("{current_exec_string} debug bench {mode_string} --iteration"),
         ];
 
         ScriptEnvironment::new()?
+            .enable_shell_forwarding()
             .with_cwd(temp_directory)
             .run_exec("hyperfine", hyperfine_args)
             .await?

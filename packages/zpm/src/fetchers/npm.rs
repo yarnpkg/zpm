@@ -65,7 +65,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
         let bytes
-            = http_npm::get(&http_npm::NpmHttpParams {
+            = http_npm::get_raw(&http_npm::NpmHttpParams {
                 http_client: &project.http_client,
                 registry: &registry_base,
                 path: &registry_path,

@@ -363,7 +363,7 @@ impl HttpClient {
     /// Performs a cached GET request. If the URL has already been fetched,
     /// returns the cached response bytes. Concurrent requests to the same URL
     /// will wait for the first request to complete and share the result.
-    pub async fn cached_get(&self, url: impl AsRef<str>) -> Result<Bytes, Error> {
+    pub async fn cached_get(&self, url: impl AsRef<str>, headers: Option<HeaderMap>) -> Result<Bytes, Error> {
         let url_str
             = url.as_ref().to_string();
 
@@ -374,7 +374,8 @@ impl HttpClient {
 
         let result = cell.get_or_init(|| async {
             let request
-                = self.get(&url_str)?;
+                = self.get(&url_str)?
+                    .add_headers(headers);
 
             let result
                 = request.send().await?;
