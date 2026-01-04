@@ -221,6 +221,14 @@ impl Requirements {
         !self.arch.is_empty() || !self.os.is_empty() || !self.libc.is_empty()
     }
 
+    pub fn has_linux_os(&self) -> bool {
+        self.os.contains(&Os::Linux)
+    }
+
+    pub fn set_libc(&mut self, libc: Libc) {
+        self.libc = vec![libc];
+    }
+
     pub fn validate_system(&self, system: &System) -> bool {
         let is_arch_valid
             = self.arch.is_empty() || system.arch.as_ref().map_or(false, |arch| self.arch.contains(&arch));

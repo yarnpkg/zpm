@@ -274,19 +274,48 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
     let url
         = format!("{}{}", params.registry, params.path);
 
-    let bytes = match params.authorization {
-        Some(authorization) => {
-            params.http_client.get(&url)?
-                .header("authorization", Some(authorization))
-                .send().await?
-                .error_for_status()?
-                .bytes().await?
-        },
+    let mut headers
+        = http::HeaderMap::new();
 
-        None => {
-            params.http_client.cached_get(&url).await?
-        },
-    };
+    headers.insert(
+        http::header::ACCEPT,
+        http::HeaderValue::from_static("application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*"),
+    );
+
+    if let Some(authorization) = params.authorization {
+        headers.insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_str(authorization).unwrap(),
+        );
+    }
+
+    let bytes
+        = params.http_client.cached_get(&url, Some(headers)).await?;
+
+    Ok(bytes)
+}
+
+pub async fn get_raw(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
+    let url
+        = format!("{}{}", params.registry, params.path);
+
+    let mut headers
+        = http::HeaderMap::new();
+
+    if let Some(authorization) = params.authorization {
+        headers.insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_str(authorization).unwrap(),
+        );
+    }
+
+    let bytes
+        = params.http_client.get(&url)?
+            .add_headers(Some(headers))
+            .send()
+            .await?
+            .error_for_status()?
+            .bytes().await?;
 
     Ok(bytes)
 }
