@@ -1,6 +1,5 @@
 use std::{collections::BTreeMap, ops::Range, str::FromStr};
 
-use itertools::Itertools;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{document::Document, value::Indent, Error, Path, Value};
@@ -396,57 +395,121 @@ impl JsonDocument {
     }
 
     pub fn sort_object_keys(&mut self, parent_path: &Path) -> Result<bool, Error> {
-        let mut keys_by_position
-            = self.paths.iter()
-                .filter(|(path, _)| path.is_direct_child_of(parent_path))
-                .map(|(path, &offset)| (path.last().unwrap(), offset))
-                .collect_vec();
+        // Find the object's opening brace offset
+        let object_offset
+            = match self.paths.get(parent_path) {
+                Some(&offset) => {
+                    // The stored offset points to the key string, skip to the value
+                    let mut scanner
+                        = Scanner::new(&self.input, offset);
 
-        if keys_by_position.len() <= 1 {
+                    scanner.skip_string()?;
+                    scanner.skip_whitespace();
+                    scanner.skip_char(b':')?;
+                    scanner.skip_whitespace();
+
+                    scanner.offset
+                }
+                None if parent_path.is_empty() => 0,
+                None => return Ok(false),
+            };
+
+        // Parse the object to find all entries (including duplicates)
+        let mut scanner
+            = Scanner::new(&self.input, object_offset);
+
+        scanner.skip_char(b'{')?;
+        scanner.skip_whitespace();
+
+        if scanner.peek() == Some(b'}') {
             return Ok(false);
         }
 
-        keys_by_position.sort_by_key(|(_, offset)| *offset);
+        let content_start
+            = scanner.offset;
 
-        // Check if already sorted alphabetically
-        if keys_by_position.windows(2).all(|w| w[0].0 <= w[1].0) {
-            return Ok(false);
-        }
+        let mut entries: Vec<(String, Vec<u8>)>
+            = vec![];
 
-        // Extract each "key": value as raw bytes
-        let mut key_value_pairs: Vec<(&str, Vec<u8>)> = vec![];
-        let mut content_end_offset = 0usize;
+        let mut separator: Option<Vec<u8>>
+            = None;
 
-        for (key_name, offset) in &keys_by_position {
-            let mut scanner
-                = Scanner::new(&self.input, *offset);
+        loop {
+            let entry_start
+                = scanner.offset;
+
+            let key_start
+                = scanner.offset;
 
             scanner.skip_string()?;
+
+            let key: String
+                = Self::hydrate_from_slice(&self.input[key_start..scanner.offset])?;
+
             scanner.skip_whitespace();
             scanner.skip_char(b':')?;
             scanner.skip_whitespace();
             scanner.skip_value()?;
 
-            key_value_pairs.push((key_name, self.input[*offset..scanner.offset].to_vec()));
-            content_end_offset = scanner.offset;
+            entries.push((key, self.input[entry_start..scanner.offset].to_vec()));
+            scanner.skip_whitespace();
+
+            match scanner.peek() {
+                Some(b',') => {
+                    let sep_start
+                        = scanner.offset;
+
+                    scanner.skip_char(b',')?;
+                    scanner.skip_whitespace();
+
+                    if separator.is_none() {
+                        separator = Some(self.input[sep_start..scanner.offset].to_vec());
+                    }
+                }
+                Some(b'}') => break,
+                _ => return Err(Error::InvalidSyntax("Expected ',' or '}'".to_string())),
+            }
         }
 
-        // Detect separator pattern (e.g., ", " or ",\n  ")
-        let separator
-            = self.input[key_value_pairs[0].1.len() + keys_by_position[0].1..keys_by_position[1].1].to_vec();
+        if entries.len() <= 1 {
+            return Ok(false);
+        }
 
-        // Sort by key name and rebuild content
-        key_value_pairs.sort_by_key(|(key_name, _)| *key_name);
+        let content_end
+            = scanner.offset;
 
-        let mut sorted_content
-            = key_value_pairs[0].1.clone();
+        let trailing_whitespace
+            = scanner.get_prior_whitespaces();
 
-        for (_, entry_bytes) in key_value_pairs.iter().skip(1) {
-            sorted_content.extend_from_slice(&separator);
+        // Collect into BTreeMap to sort and dedupe (last value wins)
+        let sorted_entries: BTreeMap<String, Vec<u8>>
+            = entries.iter().cloned().collect();
+
+        // Check if changes needed (sorting or deduplication)
+        let needs_change
+            = entries.len() != sorted_entries.len()
+                || entries.iter().map(|(k, _)| k).ne(sorted_entries.keys());
+
+        if !needs_change {
+            return Ok(false);
+        }
+
+        // Rebuild content with sorted/deduped entries
+        let sep
+            = separator.unwrap_or_else(|| b", ".to_vec());
+
+        let mut sorted_content: Vec<u8>
+            = vec![];
+
+        for (i, (_, entry_bytes)) in sorted_entries.iter().enumerate() {
+            if i > 0 {
+                sorted_content.extend_from_slice(&sep);
+            }
             sorted_content.extend_from_slice(entry_bytes);
         }
+        sorted_content.extend_from_slice(trailing_whitespace);
 
-        self.replace_range(keys_by_position[0].1..content_end_offset, &sorted_content)?;
+        self.replace_range(content_start..content_end, &sorted_content)?;
 
         Ok(true)
     }
@@ -981,6 +1044,15 @@ mod tests {
 
     // Scoped package names sort correctly
     #[case(b"{\"deps\": {\"@types/node\": \"1.0\", \"@babel/core\": \"2.0\", \"lodash\": \"3.0\"}}", vec!["deps"], b"{\"deps\": {\"@babel/core\": \"2.0\", \"@types/node\": \"1.0\", \"lodash\": \"3.0\"}}", true)]
+
+    // Duplicate keys - should dedupe and sort (keeping last occurrence)
+    #[case(b"{\"z\": \"1\", \"a\": \"2\", \"z\": \"3\"}", vec![], b"{\"a\": \"2\", \"z\": \"3\"}", true)]
+
+    // Duplicate keys with newlines - should dedupe and sort
+    #[case(b"{\n  \"z\": \"1\",\n  \"a\": \"2\",\n  \"z\": \"3\"\n}", vec![], b"{\n  \"a\": \"2\",\n  \"z\": \"3\"\n}", true)]
+
+    // Duplicate keys where earlier occurrence would be missed by offset-based lookup
+    #[case(b"{\"z\": \"1\", \"z\": \"2\", \"a\": \"3\"}", vec![], b"{\"a\": \"3\", \"z\": \"2\"}", true)]
 
     fn test_sort_object_keys(#[case] document: &[u8], #[case] path: Vec<&str>, #[case] expected: &[u8], #[case] expected_sorted: bool) {
         let mut document
