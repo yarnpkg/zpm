@@ -34,5 +34,6 @@
   "resolutions": {
     "@clipanion/tools": "file:scripts/@clipanion-tools.tgz",
     "@types/node": "^24.10.4"
-  }
+  },
+  "version": "2.0.3-4"
 }

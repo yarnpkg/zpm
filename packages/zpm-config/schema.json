@@ -285,6 +285,11 @@
       "description": "The folder to use for the Pnpm store",
       "default": "node_modules/.store"
     },
+    "preferDeferredVersions": {
+      "type": "boolean",
+      "description": "Whether to use deferred versioning by default when running the `yarn version` family of commands",
+      "default": false
+    },
     "preferReuse": {
       "type": "boolean",
       "description": "Whether to prefer reusing dependencies from the lockfile when running `yarn add`",

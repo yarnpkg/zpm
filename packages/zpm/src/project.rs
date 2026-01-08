@@ -215,6 +215,10 @@ impl Project {
         self.project_cwd.with_join_str(".yarn/ignore")
     }
 
+    pub fn versioning_path(&self) -> Path {
+        self.project_cwd.with_join_str(".yarn/versions")
+    }
+
     pub fn migration_path(&self) -> Path {
         self.ignore_path().with_join_str("migration")
     }

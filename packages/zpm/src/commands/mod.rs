@@ -31,6 +31,7 @@ mod set_version;
 mod set_version_from_sources;
 mod unplug;
 mod up;
+mod version;
 mod workspaces_focus;
 mod workspaces_foreach;
 mod workspaces_list;
@@ -67,6 +68,10 @@ pub enum YarnCli {
     Logout(npm::logout::Logout),
     Publish(npm::publish::Publish),
     Whoami(npm::whoami::Whoami),
+
+    VersionApply(version::apply::VersionApply),
+    Version(version::immediate::Version),
+    VersionDeferred(version::deferred::VersionDeferred),
 
     Add(add::Add),
     BinList(bin::BinList),

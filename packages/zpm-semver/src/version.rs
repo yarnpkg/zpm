@@ -94,6 +94,24 @@ impl Version {
         }
     }
 
+    pub fn next_rc(&self) -> Version {
+        let mut next
+            = self.clone();
+
+        if let Some(rc) = next.rc.as_mut() {
+            if let Some(VersionRc::Number(n)) = rc.last_mut() {
+                *n += 1;
+            } else {
+                rc.push(VersionRc::Number(0));
+            }
+        } else {
+            next.patch += 1;
+            next.rc = Some(vec![VersionRc::Number(0)]);
+        }
+
+        next
+    }
+
     pub fn next_immediate_spec(&self) -> Version {
         if let Some(rc) = &self.rc {
             let mut all_but_last = rc[..rc.len() - 1]

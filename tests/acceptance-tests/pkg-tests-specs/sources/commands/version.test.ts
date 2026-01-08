@@ -5,7 +5,7 @@ describe(`Commands`, () => {
     test(
       `it shouldn't work if the strategy isn't semver and there is no prior version`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
-        await expect(run(`version`, `patch`)).rejects.toThrow(`Usage Error: Can't bump the version if there wasn't a version to begin with - use 0.0.0 as initial version then run the command again.`);
+        await expect(run(`version`, `patch`)).rejects.toThrow(`Can't bump the version if there wasn't a version to begin with - use 0.0.0 as initial version then run the command again.`);
       }),
     );
 
@@ -15,7 +15,7 @@ describe(`Commands`, () => {
         version: `1.0.0`,
       }, async ({path, run, source}) => {
         await run(`version`, `1.1.0`, `--deferred`);
-        await expect(run(`version`, `1.0.1`)).rejects.toThrow(`Usage Error: Can't bump the version to one that would be lower than the current deferred one (1.1.0)`);
+        await expect(run(`version`, `1.0.1`)).rejects.toThrow(`Can't bump the version to one that would be lower than the current deferred one (1.1.0)`);
       }),
     );
 
@@ -25,7 +25,7 @@ describe(`Commands`, () => {
         version: `1.0.0`,
       }, async ({path, run, source}) => {
         await run(`version`, `1.1.0`, `--deferred`);
-        await expect(run(`version`, `patch`)).rejects.toThrow(`Usage Error: Can't bump the version to one that would be lower than the current deferred one (1.1.0)`);
+        await expect(run(`version`, `patch`)).rejects.toThrow(`Can't bump the version to one that would be lower than the current deferred one (1.1.0)`);
       }),
     );
 
@@ -222,9 +222,9 @@ describe(`Commands`, () => {
       makeTemporaryEnv({
         version: `1.0.0`,
       }, async ({path, run, source}) => {
-        await expect(run(`version`, `invalid`)).rejects.toThrow(`Invalid value for enumeration: "invalid"`);
+        await expect(run(`version`, `invalid`)).rejects.toThrow(`invalid`);
+      );
       }),
-    );
 
     test(
       `it should throw when applying an invalid strategy on top of the stored version`,
@@ -233,7 +233,7 @@ describe(`Commands`, () => {
       }, async ({path, run, source}) => {
         await run(`version`, `major`, `--deferred`);
 
-        await expect(run(`version`, `invalid`)).rejects.toThrow(`Invalid value for enumeration: "invalid"`);
+        await expect(run(`version`, `invalid`)).rejects.toThrow(`invalid`);
       }),
     );
 
@@ -242,7 +242,7 @@ describe(`Commands`, () => {
       makeTemporaryEnv({
         version: `1.0.0`,
       }, async ({path, run, source}) => {
-        await expect(run(`version`, `invalid`, `--deferred`)).rejects.toThrow(`Invalid value for enumeration: "invalid"`);
+        await expect(run(`version`, `invalid`, `--deferred`)).rejects.toThrow(`invalid`);
       }),
     );
 

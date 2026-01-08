@@ -34,4 +34,5 @@ pub mod report;
 pub mod script;
 pub mod scratchpad;
 pub mod tree_resolver;
+pub mod versioning;
 pub mod workspace_glob;
