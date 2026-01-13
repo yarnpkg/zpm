@@ -118,7 +118,7 @@ impl VersionApply {
         let root_node = tree::Node {
             label: None,
             value: None,
-            children: Some(tree::TreeNodeChildren::Vec(vec![])),
+            children: Some(tree::TreeNodeChildren::Vec(root_children)),
         };
 
         let rendering

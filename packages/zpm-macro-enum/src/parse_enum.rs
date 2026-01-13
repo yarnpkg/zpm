@@ -189,6 +189,10 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
                         Self::#variant_ident(#primary_field_name) => #primary_field_name.clone(),
                     });
 
+                    to_print_string_arms.push(quote! {
+                        Self::#variant_ident(#primary_field_name) => #primary_field_name.clone(),
+                    });
+
                     parse_quote!{#enum_name::#variant_ident(#primary_field_name: src.to_string())}
                 },
                 Fields::Unnamed(fields) => {
@@ -363,7 +367,7 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
 
             deserialization_pattern_arms.push(quote! {{
                 static RE: std::sync::LazyLock<regex::Regex>
-                    = std::sync::LazyLock::new(|| regex::Regex::new(#pattern_expr).unwrap());
+                    = std::sync::LazyLock::new(|| regex::Regex::new(&format!("^{}$", #pattern_expr)).unwrap());
 
                 if let Some(captures) = RE.captures(src) {
                     if let Ok(val) = (|| -> Result<Self, ()> {Ok(#variant_factory)})() {

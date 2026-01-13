@@ -259,6 +259,7 @@ impl<'a> Versioning<'a> {
             versioning_data.releases.insert(workspace_ident.clone(), release_strategy);
             versioning_data.declined.remove(workspace_ident);
         } else {
+            versioning_data.releases.remove(workspace_ident);
             versioning_data.declined.insert(workspace_ident.clone());
         }
 
