@@ -2,7 +2,7 @@ use std::convert::Infallible;
 
 use bincode::{Decode, Encode};
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, Path, ToFileString, ToHumanString};
+use zpm_utils::{DataType, Path, ToFileString};
 
 use crate::{AnonymousSemverRange, Range, WorkspaceMagicRange, WorkspacePathRange, WorkspaceSemverRange};
 
@@ -12,22 +12,30 @@ type Error = Infallible;
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
 pub enum PeerRange {
-    #[pattern(spec = r"(?<range>.*)")]
+    #[pattern(r"(?<range>.*)")]
+    #[to_file_string(|| format!("{range}"))]
+    #[to_print_string(|| DataType::Range.colorize(&format!("{}", range.to_file_string())))]
     Semver {
         range: zpm_semver::Range,
     },
 
-    #[pattern(spec = r"workspace:(?<magic>.*)")]
+    #[pattern(r"workspace:(?<magic>.*)")]
+    #[to_file_string(|| format!("workspace:{magic}"))]
+    #[to_print_string(|| DataType::Range.colorize(&format!("workspace:{}", magic.to_file_string())))]
     WorkspaceMagic {
         magic: zpm_semver::RangeKind,
     },
 
-    #[pattern(spec = "workspace:(?<range>.*)")]
+    #[pattern("workspace:(?<range>.*)")]
+    #[to_file_string(|| format!("workspace:{range}"))]
+    #[to_print_string(|| DataType::Range.colorize(&format!("workspace:{}", range.to_file_string())))]
     WorkspaceSemver {
         range: zpm_semver::Range,
     },
 
-    #[pattern(spec = r"workspace:(?<path>.*)")]
+    #[pattern(r"workspace:(?<path>.*)")]
+    #[to_file_string(|| format!("workspace:{path}"))]
+    #[to_print_string(|| DataType::Range.colorize(&format!("workspace:{}", path.to_file_string())))]
     WorkspacePath {
         path: Path,
     }
@@ -54,34 +62,3 @@ impl PeerRange {
         }
     }
 }
-
-impl ToFileString for PeerRange {
-    fn to_file_string(&self) -> String {
-        match self {
-            PeerRange::Semver(params) => {
-                params.range.to_file_string()
-            },
-
-            PeerRange::WorkspaceSemver(params) => {
-                format!("workspace:{}", params.range.to_file_string())
-            },
-
-            PeerRange::WorkspaceMagic(params) => {
-                format!("workspace:{}", params.magic.to_file_string())
-            },
-
-            PeerRange::WorkspacePath(params) => {
-                format!("workspace:{}", params.path.to_file_string())
-            },
-        }
-    }
-}
-
-impl ToHumanString for PeerRange {
-    fn to_print_string(&self) -> String {
-        DataType::Custom(0, 175, 175).colorize(&self.to_file_string())
-    }
-}
-
-impl_file_string_from_str!(PeerRange);
-impl_file_string_serialization!(PeerRange);

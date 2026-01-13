@@ -14,7 +14,7 @@ use zpm_semver::Version;
 #[derive(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq)]
 #[derive_variants(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq)]
 enum BinaryName {
-    #[pattern(spec = r"yarn")]
+    #[pattern(r"yarn")]
     Yarn,
 }
 
@@ -39,7 +39,7 @@ impl_file_string_serialization!(BinaryName);
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq)]
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq)]
 pub enum PackageManagerReference {
-    #[pattern(spec = r"(?<version>.*)")]
+    #[pattern(r"(?<version>.*)")]
     Version {
         version: Version,
     },

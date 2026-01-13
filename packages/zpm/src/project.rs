@@ -33,7 +33,7 @@ pub const PNP_DATA_NAME: &str = ".pnp.data.json";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallMode {
     /// Don't run the build scripts.
-    #[pattern(spec = "skip-build")]
+    #[pattern("skip-build")]
     SkipBuild,
 }
 

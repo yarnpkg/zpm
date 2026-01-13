@@ -4608,6 +4608,7 @@ dependencies = [
 name = "zpm-macro-helpers"
 version = "0.0.0"
 dependencies = [
+ "proc-macro2",
  "syn",
 ]
 

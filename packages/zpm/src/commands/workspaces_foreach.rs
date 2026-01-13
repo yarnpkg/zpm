@@ -45,7 +45,7 @@ pub enum FollowedDependencies {
 #[derive(Debug)]
 #[derive_variants(Debug)]
 pub enum Limit {
-    #[pattern(spec = r"^(?<limit>\d+)$")]
+    #[pattern(r"^(?<limit>\d+)$")]
     Fixed {
         limit: usize,
     },

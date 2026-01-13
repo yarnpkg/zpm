@@ -23,18 +23,18 @@ pub fn i(name: &str) -> Ident {
 pub fn l(name: &str) -> Locator {
     #[zpm_enum(error = Infallible)]
     enum NamePattern {
-        #[pattern(spec = r"(?<ident>.*)@(?<version>[0-9]+)")]
+        #[pattern(r"(?<ident>.*)@(?<version>[0-9]+)")]
         Locator {
             ident: Ident,
             version: String,
         },
 
-        #[pattern(spec = r"(?<ident>workspace-.*)")]
+        #[pattern(r"(?<ident>workspace-.*)")]
         WorkspaceIdent {
             ident: Ident,
         },
 
-        #[pattern(spec = r"(?<ident>.*)")]
+        #[pattern(r"(?<ident>.*)")]
         Ident {
             ident: Ident,
         },

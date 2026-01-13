@@ -12,23 +12,23 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode)]
 #[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode)]
 pub enum ResolutionSelector {
-    #[pattern(spec = r"^(?<descriptor>.*)$")]
+    #[pattern(r"^(?<descriptor>.*)$")]
     Descriptor {
         descriptor: Descriptor,
     },
 
-    #[pattern(spec = r"^(?<ident>.*)$")]
+    #[pattern(r"^(?<ident>.*)$")]
     Ident {
         ident: Ident,
     },
 
-    #[pattern(spec = r"^(?<parent_descriptor>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
+    #[pattern(r"^(?<parent_descriptor>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
     DescriptorIdent {
         parent_descriptor: Descriptor,
         ident: Ident,
     },
 
-    #[pattern(spec = r"^(?<parent_ident>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
+    #[pattern(r"^(?<parent_ident>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
     IdentIdent {
         parent_ident: Ident,
         ident: Ident,

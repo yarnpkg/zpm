@@ -7,10 +7,10 @@ use crate::errors::Error;
 #[derive(Debug)]
 #[derive_variants(Debug)]
 pub enum Channel {
-    #[pattern(spec = "stable")]
+    #[pattern("stable")]
     Stable,
 
-    #[pattern(spec = "canary")]
+    #[pattern("canary")]
     Canary,
 }
 
@@ -36,16 +36,16 @@ impl_file_string_serialization!(Channel);
 #[derive(Debug, Copy, Clone)]
 #[derive_variants(Debug, Copy, Clone)]
 pub enum ReleaseLine {
-    #[pattern(spec = "classic")]
+    #[pattern("classic")]
     Classic,
 
-    #[pattern(spec = "berry")]
+    #[pattern("berry")]
     Berry,
 
-    #[pattern(spec = "zpm")]
+    #[pattern("zpm")]
     Zpm,
 
-    #[pattern(spec = "default")]
+    #[pattern("default")]
     Default,
 }
 
@@ -89,20 +89,20 @@ impl_file_string_serialization!(ReleaseLine);
 #[derive(Debug)]
 #[derive_variants(Debug)]
 pub enum Selector {
-    #[pattern(spec = "(?<release_line>.*)")]
-    #[pattern(spec = "(?<channel>.*)")]
-    #[pattern(spec = "(?<release_line>.*)-(?<channel>.*)")]
+    #[pattern("(?<release_line>.*)")]
+    #[pattern("(?<channel>.*)")]
+    #[pattern("(?<release_line>.*)-(?<channel>.*)")]
     Channel {
         release_line: Option<ReleaseLine>,
         channel: Option<Channel>,
     },
 
-    #[pattern(spec = "(?<version>.*)")]
+    #[pattern("(?<version>.*)")]
     Version {
         version: zpm_semver::Version,
     },
 
-    #[pattern(spec = "(?<range>.*)")]
+    #[pattern("(?<range>.*)")]
     Range {
         range: zpm_semver::Range,
     },

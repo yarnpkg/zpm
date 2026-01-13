@@ -1,5 +1,4 @@
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
 
 use crate::{
     DescriptorError,
@@ -10,12 +9,15 @@ use crate::{
 #[derive(Debug, Clone,)]
 #[derive_variants(Debug, Clone)]
 pub enum FilterDescriptor {
-    #[pattern(spec = "(?<ident>@?[^@]+)")]
+    #[pattern("(?<ident>@?[^@]+)")]
+    #[to_file_string("{ident}")]
+    #[to_print_string("{ident}")]
     Ident {
         ident: IdentGlob,
     },
 
-    #[pattern(spec = "(?<ident>@?[^@]+)@(?<range>.*)")]
+    #[pattern("(?<ident>@?[^@]+)@(?<range>.*)")]
+    #[to_file_string("{ident}@{range}")]
     Range {
         ident: IdentGlob,
         range: zpm_semver::Range,
@@ -35,34 +37,3 @@ impl FilterDescriptor {
         }
     }
 }
-
-impl ToFileString for FilterDescriptor {
-    fn to_file_string(&self) -> String {
-        match self {
-            FilterDescriptor::Ident(params) => {
-                params.ident.to_file_string()
-            },
-
-            FilterDescriptor::Range(params) => {
-                format!("{}@{}", params.ident.to_file_string(), params.range.to_file_string())
-            },
-        }
-    }
-}
-
-impl ToHumanString for FilterDescriptor {
-    fn to_print_string(&self) -> String {
-        match self {
-            FilterDescriptor::Ident(params) => {
-                params.ident.to_print_string()
-            },
-
-            FilterDescriptor::Range(params) => {
-                format!("{}{}", params.ident.to_print_string(), format!("@{}", params.range.to_print_string()))
-            },
-        }
-    }
-}
-
-impl_file_string_from_str!(FilterDescriptor);
-impl_file_string_serialization!(FilterDescriptor);

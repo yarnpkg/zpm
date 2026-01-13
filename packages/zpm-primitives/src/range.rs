@@ -35,93 +35,93 @@ pub enum Range {
     #[no_pattern]
     MissingPeerDependency,
 
-    #[pattern(spec = r"builtin:(?<range>.*)")]
+    #[pattern(r"builtin:(?<range>.*)")]
     Builtin {
         range: zpm_semver::Range,
     },
 
-    #[pattern(spec = r"(?<range>.*)")]
+    #[pattern(r"(?<range>.*)")]
     AnonymousSemver {
         range: zpm_semver::Range,
     },
 
-    #[pattern(spec = r"npm:(?:(?<ident>.*)@)?(?<range>.*)")]
+    #[pattern(r"npm:(?:(?<ident>.*)@)?(?<range>.*)")]
     RegistrySemver {
         ident: Option<Ident>,
         range: zpm_semver::Range,
     },
 
-    #[pattern(spec = r"npm:(?:(?<ident>.*)@)?(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
+    #[pattern(r"npm:(?:(?<ident>.*)@)?(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
     RegistryTag {
         ident: Option<Ident>,
         tag: String,
     },
 
-    #[pattern(spec = r"link:(?<path>.*)")]
+    #[pattern(r"link:(?<path>.*)")]
     Link {
         path: String,
     },
 
-    #[pattern(spec = r"portal:(?<path>.*)")]
+    #[pattern(r"portal:(?<path>.*)")]
     Portal {
         path: String,
     },
 
-    #[pattern(spec = r"file:(?<path>.*\.(?:tgz|tar\.gz))")]
-    #[pattern(spec = r"(?<path>\.{0,2}/.*\.(?:tgz|tar\.gz))")]
+    #[pattern(r"file:(?<path>.*\.(?:tgz|tar\.gz))")]
+    #[pattern(r"(?<path>\.{0,2}/.*\.(?:tgz|tar\.gz))")]
     Tarball {
         path: String,
     },
 
-    #[pattern(spec = r"file:(?<path>.*)")]
-    #[pattern(spec = r"(?<path>\.{0,2}/.*)")]
+    #[pattern(r"file:(?<path>.*)")]
+    #[pattern(r"(?<path>\.{0,2}/.*)")]
     Folder {
         path: String,
     },
 
-    #[pattern(spec = r"patch:(?<inner>.*)#(?<path>.*)$")]
+    #[pattern(r"patch:(?<inner>.*)#(?<path>.*)$")]
     Patch {
         inner: Box<UrlEncoded<Descriptor>>,
         path: String,
     },
 
-    #[pattern(spec = r"workspace:(?<magic>.*)")]
+    #[pattern(r"workspace:(?<magic>.*)")]
     WorkspaceMagic {
         magic: zpm_semver::RangeKind,
     },
 
-    #[pattern(spec = r"workspace:(?<range>.*)")]
+    #[pattern(r"workspace:(?<range>.*)")]
     WorkspaceSemver {
         range: zpm_semver::Range,
     },
 
-    #[pattern(spec = r"workspace:(?<ident>.*)")]
+    #[pattern(r"workspace:(?<ident>.*)")]
     WorkspaceIdent {
         ident: Ident,
     },
 
-    #[pattern(spec = r"workspace:(?<path>.*)")]
+    #[pattern(r"workspace:(?<path>.*)")]
     WorkspacePath {
         path: Path,
     },
 
-    #[pattern(spec = "(?<git>.*)")]
+    #[pattern("(?<git>.*)")]
     Git {
         git: zpm_git::GitRange,
     },
 
-    #[pattern(spec = r"(?<url>https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
+    #[pattern(r"(?<url>https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
     Url {
         url: String,
     },
 
-    #[pattern(spec = r"(?<tag>.*)")]
+    #[pattern(r"(?<tag>.*)")]
     AnonymousTag {
         tag: String,
     },
 
     // We keep this at the end so virtual ranges are listed last when sorted
-    #[pattern(spec = r"virtual:(?<inner>.*)#(?<hash>[a-f0-9]*)$")]
+    #[pattern(r"virtual:(?<inner>.*)#(?<hash>[a-f0-9]*)$")]
     Virtual {
         inner: Box<Range>,
         hash: Hash64,

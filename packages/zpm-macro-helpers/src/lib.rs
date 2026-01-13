@@ -1,18 +1,26 @@
-use syn::meta::ParseNestedMeta;
+use std::collections::HashMap;
 
-pub fn extract_literal(meta: &ParseNestedMeta) -> syn::Result<String> {
-    let expr: syn::Expr = meta.value()?.parse()?;
-    let value = &expr;
+use proc_macro2::Span;
+use syn::{parse::{Parse, ParseStream}, punctuated::Punctuated, Attribute, Expr, ExprLit, Ident, Lit, LitBool, LitStr, Meta, Token};
 
-    if let syn::Expr::Lit(syn::ExprLit {
-        lit: syn::Lit::Str(lit),
-        attrs: _,
-    }) = value {
-        return Ok(lit.value());
-    }
+mod attribute_bag;
 
-    panic!("Invalid syntax")
-}
+pub use attribute_bag::AttributeBag;
+// mod field_info;
+
+// pub fn extract_literal(meta: &ParseNestedMeta) -> syn::Result<String> {
+//     let expr: syn::Expr = meta.value()?.parse()?;
+//     let value = &expr;
+
+//     if let syn::Expr::Lit(syn::ExprLit {
+//         lit: syn::Lit::Str(lit),
+//         attrs: _,
+//     }) = value {
+//         return Ok(lit.value());
+//     }
+
+//     panic!("Invalid syntax")
+// }
 
 // pub fn extract_bool(meta: &ParseNestedMeta) -> syn::Result<bool> {
 //     let expr: syn::Expr = meta.value()?.parse()?;

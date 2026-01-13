@@ -16,72 +16,72 @@ pub enum ReferenceError {
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Reference {
-    #[pattern(spec = r"builtin:(?<version>.*)")]
+    #[pattern(r"builtin:(?<version>.*)")]
     Builtin {
         version: zpm_semver::Version,
     },
 
-    #[pattern(spec = r"npm:(?<version>.*)")]
+    #[pattern(r"npm:(?<version>.*)")]
     Shorthand {
         version: zpm_semver::Version,
     },
 
-    #[pattern(spec = r"npm:(?<ident>.*)@(?<version>.*)")]
+    #[pattern(r"npm:(?<ident>.*)@(?<version>.*)")]
     Registry {
         ident: Ident,
         version: zpm_semver::Version,
     },
 
-    #[pattern(spec = r"file:(?<path>.*\.(?:tgz|tar\.gz))")]
+    #[pattern(r"file:(?<path>.*\.(?:tgz|tar\.gz))")]
     Tarball {
         path: String,
     },
 
-    #[pattern(spec = r"file:(?<path>.*)")]
+    #[pattern(r"file:(?<path>.*)")]
     Folder {
         path: String,
     },
 
-    #[pattern(spec = r"link:(?<path>.*)")]
+    #[pattern(r"link:(?<path>.*)")]
     Link {
         path: String,
     },
 
-    #[pattern(spec = r"portal:(?<path>.*)")]
+    #[pattern(r"portal:(?<path>.*)")]
     Portal {
         path: String,
     },
 
-    #[pattern(spec = r"patch:(?<inner>.*)#(?<path>.*)(?:&checksum=(?<checksum>[a-f0-9]*))?$")]
+    #[pattern(r"patch:(?<inner>.*)#(?<path>.*)(?:&checksum=(?<checksum>[a-f0-9]*))?$")]
     Patch {
         inner: Box<UrlEncoded<Locator>>,
         path: String,
         checksum: Option<Hash64>,
     },
 
-    #[pattern(spec = r"virtual:(?<hash>[a-f0-9]*)#(?<inner>.*)$")]
+    #[pattern(r"virtual:(?<hash>[a-f0-9]*)#(?<inner>.*)$")]
     Virtual {
         inner: Box<Reference>,
         hash: Hash64,
     },
 
-    #[pattern(spec = r"workspace:(?<ident>.*)")]
+    #[pattern(r"workspace:(?<ident>.*)")]
     WorkspaceIdent {
         ident: Ident,
     },
 
-    #[pattern(spec = r"workspace:(?<path>.*)")]
+    #[pattern(r"workspace:(?<path>.*)")]
     WorkspacePath {
         path: Path,
     },
 
-    #[pattern(spec = r"git:(?<git>.*)")]
-    #[pattern(spec = r"(?<git>https?://.*\.git#.*)")]
+    #[pattern(r"git:(?<git>.*)")]
+    #[pattern(r"(?<git>https?://.*\.git#.*)")]
     Git {
         git: zpm_git::GitReference,
     },
 
-    #[pattern(spec = r"(?<url>https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
+    #[pattern(r"(?<url>https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
     Url {
         url: String,
     },

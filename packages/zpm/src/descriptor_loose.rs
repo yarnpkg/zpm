@@ -28,17 +28,17 @@ pub struct LooseResolution {
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
 pub enum LooseDescriptor {
-    #[pattern(spec = r"(?<descriptor>.*)")]
+    #[pattern(r"(?<descriptor>.*)")]
     Descriptor {
         descriptor: Descriptor,
     },
 
-    #[pattern(spec = r"(?<ident>.*)")]
+    #[pattern(r"(?<ident>.*)")]
     Ident {
         ident: Ident,
     },
 
-    #[pattern(spec = r"(?<range>.*)")]
+    #[pattern(r"(?<range>.*)")]
     Range {
         range: Range,
     },

@@ -15,12 +15,12 @@ pub enum WorkspaceGlobError {
 #[derive(Debug)]
 #[derive_variants(Debug)]
 pub enum WorkspaceGlob {
-    #[pattern(spec = r"^(?<path>(?:\.{0,2}|[^@{}*/]+)/.*)$")]
+    #[pattern(r"^(?<path>(?:\.{0,2}|[^@{}*/]+)/.*)$")]
     Path {
         path: zpm_utils::Glob,
     },
 
-    #[pattern(spec = r"^(?<ident>.*)$")]
+    #[pattern(r"^(?<ident>.*)$")]
     Ident {
         ident: IdentGlob,
     },
