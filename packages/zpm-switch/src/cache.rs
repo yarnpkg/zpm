@@ -20,7 +20,11 @@ pub struct CacheKey {
 impl CacheKey {
     pub fn to_npm_url(&self) -> Option<String> {
         if self.version.rc.as_ref().map_or(true, |rc| !rc.starts_with(&[VersionRc::String("git".to_string())])) {
-            if self.version.major >= 6 {
+            // Older RC versions (<6.0.0-rc.8) are not available in npm
+            let is_older_rc_version =
+                self.version.rc.is_some() && self.version.minor <= 8;
+
+            if self.version.major >= 6 && !is_older_rc_version {
                 return Some(format!("https://registry.npmjs.org/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", self.platform, self.platform, self.version.to_file_string()));
             }
         }
