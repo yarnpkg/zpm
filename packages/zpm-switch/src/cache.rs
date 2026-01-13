@@ -21,10 +21,10 @@ impl CacheKey {
     pub fn to_npm_url(&self) -> Option<String> {
         if self.version.rc.as_ref().map_or(true, |rc| !rc.starts_with(&[VersionRc::String("git".to_string())])) {
             // Older RC versions (<6.0.0-rc.9) are not available in npm
-            let is_older_rc_version =
-                self.version < Version::new_from_components(6, 0, 0, Some(vec![VersionRc::String("rc".to_string()), VersionRc::Number(9)]));
+            let first_npm_release =
+                Version::new_from_components(6, 0, 0, Some(vec![VersionRc::String("rc".to_string()), VersionRc::Number(9)]));
 
-            if self.version.major >= 6 && !is_older_rc_version {
+            if self.version >= first_npm_release {
                 return Some(format!("https://registry.npmjs.org/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", self.platform, self.platform, self.version.to_file_string()));
             }
         }
