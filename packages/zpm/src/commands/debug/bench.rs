@@ -130,10 +130,10 @@ impl BenchMode {
     pub async fn run_iteration(&self) -> Result<(), Error> {
         match self {
             BenchMode::InstallReady => {
-                run_cli(&["add", "dummy-pkg@link:./dummy-pkg", "--silent"]).await
+                run_cli(&["add", "dummy-pkg@link:./dummy-pkg"]).await
             },
             _ => {
-                run_cli(&["install", "--silent"]).await
+                run_cli(&["install"]).await
             },
         }
     }
@@ -181,6 +181,7 @@ impl BenchRun {
         ];
 
         ScriptEnvironment::new()?
+            .enable_shell_forwarding()
             .with_cwd(temp_directory)
             .run_exec("hyperfine", hyperfine_args)
             .await?

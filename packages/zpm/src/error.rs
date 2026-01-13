@@ -441,7 +441,7 @@ pub enum Error {
     #[error("Cannot use {0} as a version bump strategy when using the `--deferred` flag or when `preferDeferredVersions` is enabled and `--immediate` isn't set")]
     InvalidDeferredVersionBump(String),
 
-    #[error("Can't bump the version if there wasn't a version to begin with - use 0.0.0 as initial version then run the command again")]
+    #[error("Can't bump the version if there wasn't a version to begin with - use 0.0.0 as initial version then run the command again.")]
     NoVersionFoundForActiveWorkspace,
 
     #[error("No existing version found for workspace {}", .0.to_print_string())]

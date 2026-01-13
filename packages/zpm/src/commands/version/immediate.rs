@@ -1,13 +1,13 @@
 use clipanion::cli;
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{ToHumanString, impl_file_string_from_str};
+use zpm_utils::ToHumanString;
 
-use crate::{commands::version::deferred::VersionDeferred, error::Error, project, versioning::{ReleaseStrategy, Versioning}};
+use crate::{error::Error, project, versioning::{ReleaseStrategy, Versioning}};
 
 #[zpm_enum(error = zpm_utils::EnumError, or_else = |s| Err(zpm_utils::EnumError::NotFound(s.to_string())))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[derive_variants(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum VersionBump {
+pub enum ImmediateStrategy {
     #[literal("major")]
     Major,
 
@@ -34,24 +34,26 @@ pub enum VersionBump {
     #[literal("decline")]
     Decline,
 
-    #[pattern(spec = r"(?<version>.*)")]
+    #[pattern(r"(?<version>.*)")]
+    #[to_file_string(|params| params.version.to_file_string())]
+    #[to_print_string(|params| params.version.to_print_string())]
     Exact {
         version: zpm_semver::Version,
     },
 }
 
-impl TryFrom<VersionBump> for Option<ReleaseStrategy> {
+impl TryFrom<ImmediateStrategy> for Option<ReleaseStrategy> {
     type Error = Error;
 
-    fn try_from(version_bump: VersionBump) -> Result<Self, Self::Error> {
+    fn try_from(version_bump: ImmediateStrategy) -> Result<Self, Self::Error> {
         match version_bump {
-            VersionBump::Major
+            ImmediateStrategy::Major
                 => Ok(Some(ReleaseStrategy::Major)),
-            VersionBump::Minor
+            ImmediateStrategy::Minor
                 => Ok(Some(ReleaseStrategy::Minor)),
-            VersionBump::Patch
+            ImmediateStrategy::Patch
                 => Ok(Some(ReleaseStrategy::Patch)),
-            VersionBump::Decline
+            ImmediateStrategy::Decline
                 => Ok(None),
 
             _ => {
@@ -61,19 +63,14 @@ impl TryFrom<VersionBump> for Option<ReleaseStrategy> {
     }
 }
 
-impl_file_string_from_str!(VersionBump);
-
 #[cli::command]
 #[cli::path("version")]
 #[cli::category("Project management")]
 pub struct Version {
-    #[cli::option("-d,--deferred", default = false)]
-    deferred: bool,
-
     #[cli::option("-i,--immediate", default = false)]
     immediate: bool,
 
-    version_bump: VersionBump,
+    version_bump: ImmediateStrategy,
 }
 
 impl Version {
@@ -82,7 +79,7 @@ impl Version {
             = project::Project::new(None).await?;
 
         let deferred
-            = !self.immediate && (self.deferred || project.config.settings.prefer_deferred_versions.value);
+            = !self.immediate && project.config.settings.prefer_deferred_versions.value;
 
         let versioning
             = Versioning::new(&project);
@@ -93,7 +90,7 @@ impl Version {
         if deferred {
             versioning.set_workspace_release_strategy(
                 &active_workspace.name,
-                self.strategy.clone().into(),
+                self.version_bump.clone().try_into()?,
             ).await?;
 
             return Ok(());
@@ -104,21 +101,21 @@ impl Version {
                 .ok_or(Error::NoVersionFoundForActiveWorkspace)?;
 
         let new_version = match &self.version_bump {
-            VersionBump::Major => current_version.next_major(),
-            VersionBump::Minor => current_version.next_minor(),
-            VersionBump::Patch => current_version.next_patch(),
+            ImmediateStrategy::Major => current_version.next_major(),
+            ImmediateStrategy::Minor => current_version.next_minor(),
+            ImmediateStrategy::Patch => current_version.next_patch(),
 
-            VersionBump::Premajor => current_version.next_major_rc(),
-            VersionBump::Preminor => current_version.next_minor_rc(),
-            VersionBump::Prepatch => current_version.next_patch_rc(),
+            ImmediateStrategy::Premajor => current_version.next_major_rc(),
+            ImmediateStrategy::Preminor => current_version.next_minor_rc(),
+            ImmediateStrategy::Prepatch => current_version.next_patch_rc(),
 
-            VersionBump::Pre => current_version.next_rc(),
+            ImmediateStrategy::Pre => current_version.next_rc(),
 
-            VersionBump::Exact(params) => {
+            ImmediateStrategy::Exact(params) => {
                 params.version.clone()
             },
 
-            VersionBump::Decline => {
+            ImmediateStrategy::Decline => {
                 return Err(Error::VersionDeclineNotAllowed);
             },
         };

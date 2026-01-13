@@ -39,6 +39,9 @@ const PATH_COLOR: Color
 const URL_COLOR: Color
     = Color::TrueColor { r: 215, g: 130, b: 215 };
 
+const SCOPE_COLOR: Color
+    = Color::TrueColor { r: 215, g: 95, b: 0 };
+
 const IDENT_COLOR: Color
     = Color::TrueColor { r: 215, g: 135, b: 95 };
 
@@ -63,6 +66,7 @@ pub enum DataType {
     Code,
     Path,
     Url,
+    Scope,
     Ident,
     Range,
     Reference,
@@ -85,6 +89,7 @@ impl DataType {
             DataType::Code => CODE_COLOR,
             DataType::Path => PATH_COLOR,
             DataType::Url => URL_COLOR,
+            DataType::Scope => SCOPE_COLOR,
             DataType::Ident => IDENT_COLOR,
             DataType::Range => RANGE_COLOR,
             DataType::Reference => REFERENCE_COLOR,

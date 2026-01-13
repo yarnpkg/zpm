@@ -2,7 +2,7 @@ use bincode::{Decode, Encode};
 use serde::{Deserialize, Deserializer};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, RegistrySemverRange};
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
     error::Error,
@@ -12,23 +12,31 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode)]
 #[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode)]
 pub enum ResolutionSelector {
-    #[pattern(spec = r"^(?<descriptor>.*)$")]
+    #[pattern(r"^(?<descriptor>.*)$")]
+    #[to_file_string(|params| params.descriptor.to_file_string())]
+    #[to_print_string(|params| params.descriptor.to_print_string())]
     Descriptor {
         descriptor: Descriptor,
     },
 
-    #[pattern(spec = r"^(?<ident>.*)$")]
+    #[pattern(r"^(?<ident>.*)$")]
+    #[to_file_string(|params| params.ident.to_file_string())]
+    #[to_print_string(|params| params.ident.to_print_string())]
     Ident {
         ident: Ident,
     },
 
-    #[pattern(spec = r"^(?<parent_descriptor>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
+    #[pattern(r"^(?<parent_descriptor>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
+    #[to_file_string(|params| format!("{}/{}", params.parent_descriptor.to_file_string(), params.ident.to_file_string()))]
+    #[to_print_string(|params| format!("{}/{}", params.parent_descriptor.to_print_string(), params.ident.to_print_string()))]
     DescriptorIdent {
         parent_descriptor: Descriptor,
         ident: Ident,
     },
 
-    #[pattern(spec = r"^(?<parent_ident>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
+    #[pattern(r"^(?<parent_ident>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
+    #[to_file_string(|params| format!("{}/{}", params.parent_ident.to_file_string(), params.ident.to_file_string()))]
+    #[to_print_string(|params| format!("{}/{}", params.parent_ident.to_print_string(), params.ident.to_print_string()))]
     IdentIdent {
         parent_ident: Ident,
         ident: Ident,
@@ -94,36 +102,7 @@ impl ResolutionSelector {
     }
 }
 
-impl ToFileString for ResolutionSelector {
-    fn to_file_string(&self) -> String {
-        match self {
-            ResolutionSelector::Descriptor(params) => {
-                params.descriptor.to_file_string()
-            },
 
-            ResolutionSelector::Ident(params) => {
-                params.ident.to_file_string()
-            },
-
-            ResolutionSelector::DescriptorIdent(params) => {
-                params.parent_descriptor.to_file_string() + "/" + &params.ident.to_file_string()
-            },
-
-            ResolutionSelector::IdentIdent(params) => {
-                params.parent_ident.to_file_string() + "/" + &params.ident.to_file_string()
-            },
-        }
-    }
-}
-
-impl ToHumanString for ResolutionSelector {
-    fn to_print_string(&self) -> String {
-        self.to_file_string()
-    }
-}
-
-impl_file_string_from_str!(ResolutionSelector);
-impl_file_string_serialization!(ResolutionSelector);
 
 use serde::{ser::SerializeMap, Serialize, Serializer};
 use serde::de::{self, Visitor, MapAccess};

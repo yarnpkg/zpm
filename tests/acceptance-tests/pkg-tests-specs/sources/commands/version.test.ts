@@ -223,8 +223,8 @@ describe(`Commands`, () => {
         version: `1.0.0`,
       }, async ({path, run, source}) => {
         await expect(run(`version`, `invalid`)).rejects.toThrow(`invalid`);
-      );
       }),
+    );
 
     test(
       `it should throw when applying an invalid strategy on top of the stored version`,
@@ -253,7 +253,7 @@ describe(`Commands`, () => {
       }, async ({path, run, source}) => {
         await run(`version`, `major`, `--deferred`);
 
-        await expect(run(`version`, `decline`)).resolves.toMatchObject({
+        await expect(run(`version`, `decline`, `--deferred`)).resolves.toMatchObject({
           code: 0,
         });
 

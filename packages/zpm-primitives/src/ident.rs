@@ -82,7 +82,18 @@ impl ToFileString for Ident {
 
 impl ToHumanString for Ident {
     fn to_print_string(&self) -> String {
-        DataType::Ident.colorize(&self.as_str())
+        let slash_index
+            = self.0.find('/');
+
+        if let Some(slash_index) = slash_index {
+            let scope_part
+                = &self.0[..=slash_index];
+            let name_part
+                = &self.0[slash_index + 1..];
+            format!("{}{}", DataType::Scope.colorize(scope_part), DataType::Ident.colorize(name_part))
+        } else {
+            DataType::Ident.colorize(&self.0)
+        }
     }
 }
 

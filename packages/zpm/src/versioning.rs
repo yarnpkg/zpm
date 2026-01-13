@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::{JsonDocument, document::Document};
 use zpm_primitives::Ident;
-use zpm_utils::{IoResultExt, Path, ToFileString, impl_file_string_serialization};
+use zpm_utils::{IoResultExt, Path, ToFileString};
 
 use crate::{error::Error, git_utils::{fetch_branch_base, fetch_changed_files}, project::Project};
 
@@ -23,7 +23,9 @@ pub enum ReleaseStrategy {
     #[literal("patch")]
     Patch,
 
-    #[pattern(spec = r"(?<version>.*)")]
+    #[pattern(r"(?<version>.*)")]
+    #[to_file_string(|params| params.version.to_file_string())]
+    #[to_print_string(|params| params.version.to_file_string())]
     Exact {
         version: zpm_semver::Version,
     },
@@ -43,23 +45,6 @@ impl ReleaseStrategy {
         }
     }
 }
-
-impl ToFileString for ReleaseStrategy {
-    fn to_file_string(&self) -> String {
-        match self {
-            ReleaseStrategy::Major
-                => "major".to_string(),
-            ReleaseStrategy::Minor
-                => "minor".to_string(),
-            ReleaseStrategy::Patch
-                => "patch".to_string(),
-            ReleaseStrategy::Exact(params)
-                => params.version.to_file_string(),
-        }
-    }
-}
-
-impl_file_string_serialization!(ReleaseStrategy);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct VersioningFile {

@@ -1,6 +1,6 @@
 use clipanion::cli;
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{ToHumanString, impl_file_string_from_str};
+use zpm_utils::ToHumanString;
 
 use crate::{error::Error, project, versioning::{ExactReleaseStrategy, ReleaseStrategy, Versioning}};
 
@@ -17,32 +17,15 @@ pub enum DeferredStrategy {
     #[literal("patch")]
     Patch,
 
-    #[literal("declined")]
-    Declined,
+    #[literal("decline")]
+    Decline,
 
-    #[pattern(spec = r"(?<version>.*)")]
+    #[pattern(r"(?<version>.*)")]
+    #[to_file_string(|params| params.version.to_file_string())]
+    #[to_print_string(|params| params.version.to_print_string())]
     Exact {
         version: zpm_semver::Version,
     },
-}
-
-impl_file_string_from_str!(DeferredStrategy);
-
-impl ToHumanString for DeferredStrategy {
-    fn to_print_string(&self) -> String {
-        match self {
-            DeferredStrategy::Major
-                => "major".to_string(),
-            DeferredStrategy::Minor
-                => "minor".to_string(),
-            DeferredStrategy::Patch
-                => "patch".to_string(),
-            DeferredStrategy::Exact(params)
-                => params.version.to_print_string(),
-            DeferredStrategy::Declined
-                => "declined".to_string(),
-        }
-    }
 }
 
 impl From<DeferredStrategy> for Option<ReleaseStrategy> {
@@ -56,7 +39,7 @@ impl From<DeferredStrategy> for Option<ReleaseStrategy> {
                 => Some(ReleaseStrategy::Patch),
             DeferredStrategy::Exact(params)
                 => Some(ExactReleaseStrategy { version: params.version.clone() }.into()),
-            DeferredStrategy::Declined
+            DeferredStrategy::Decline
                 => None,
         }
     }

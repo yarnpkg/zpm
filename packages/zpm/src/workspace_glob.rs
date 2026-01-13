@@ -1,7 +1,6 @@
 use thiserror::Error;
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::IdentGlob;
-use zpm_utils::impl_file_string_from_str;
 
 use crate::project::Workspace;
 
@@ -15,12 +14,12 @@ pub enum WorkspaceGlobError {
 #[derive(Debug)]
 #[derive_variants(Debug)]
 pub enum WorkspaceGlob {
-    #[pattern(spec = r"^(?<path>(?:\.{0,2}|[^@{}*/]+)/.*)$")]
+    #[pattern(r"^(?<path>(?:\.{0,2}|[^@{}*/]+)/.*)$")]
     Path {
         path: zpm_utils::Glob,
     },
 
-    #[pattern(spec = r"^(?<ident>.*)$")]
+    #[pattern(r"^(?<ident>.*)$")]
     Ident {
         ident: IdentGlob,
     },
@@ -37,5 +36,3 @@ impl WorkspaceGlob {
         }
     }
 }
-
-impl_file_string_from_str!(WorkspaceGlob);

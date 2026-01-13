@@ -6,7 +6,7 @@ use itertools::Itertools;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::Ident;
-use zpm_utils::{DataType, Path, ToFileString, ToHumanString, Unit, impl_file_string_from_str, impl_file_string_serialization};
+use zpm_utils::{DataType, Path, ToFileString, ToHumanString, Unit};
 
 use crate::{
     algos::scc_tarjan_pearce, commands::{PartialYarnCli, YarnCli}, error::Error, git_utils, project::{Project, Workspace}, workspace_glob::WorkspaceGlob
@@ -45,7 +45,9 @@ pub enum FollowedDependencies {
 #[derive(Debug)]
 #[derive_variants(Debug)]
 pub enum Limit {
-    #[pattern(spec = r"^(?<limit>\d+)$")]
+    #[pattern(r"^(?<limit>\d+)$")]
+    #[to_file_string(|params| format!("{}", params.limit))]
+    #[to_print_string(|params| format!("{}", params.limit))]
     Fixed {
         limit: usize,
     },
@@ -54,17 +56,6 @@ pub enum Limit {
     Unlimited,
 }
 
-impl ToFileString for Limit {
-    fn to_file_string(&self) -> String {
-        match self {
-            Limit::Fixed(params) => params.limit.to_string(),
-            Limit::Unlimited => "unlimited".to_string(),
-        }
-    }
-}
-
-impl_file_string_from_str!(Limit);
-impl_file_string_serialization!(Limit);
 
 #[cli::command(proxy)]
 #[cli::path("workspaces", "foreach")]

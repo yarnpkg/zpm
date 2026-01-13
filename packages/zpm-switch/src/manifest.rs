@@ -14,68 +14,32 @@ use zpm_semver::Version;
 #[derive(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq)]
 #[derive_variants(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq)]
 enum BinaryName {
-    #[pattern(spec = r"yarn")]
+    #[pattern(r"yarn")]
+    #[to_file_string(|| "yarn".to_string())]
+    #[to_print_string(|| "yarn".to_string())]
     Yarn,
 }
 
-impl ToFileString for BinaryName {
-    fn to_file_string(&self) -> String {
-        match self {
-            BinaryName::Yarn => "yarn".to_string(),
-        }
-    }
-}
-
-impl ToHumanString for BinaryName {
-    fn to_print_string(&self) -> String {
-        self.to_file_string()
-    }
-}
-
-impl_file_string_from_str!(BinaryName);
-impl_file_string_serialization!(BinaryName);
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidPackageManagerReference(s.to_string())))]
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq)]
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq)]
 pub enum PackageManagerReference {
-    #[pattern(spec = r"(?<version>.*)")]
+    #[pattern(r"(?<version>.*)")]
+    #[to_file_string(|params| params.version.to_file_string())]
+    #[to_print_string(|params| params.version.to_print_string())]
     Version {
         version: Version,
     },
 
     #[no_pattern]
+    #[to_file_string(|params| format!("local:{}", params.path.to_file_string()))]
+    #[to_print_string(|params| params.path.to_print_string())]
     Local {
         path: Path,
     },
 }
 
-impl ToFileString for PackageManagerReference {
-    fn to_file_string(&self) -> String {
-        match self {
-            PackageManagerReference::Version(params)
-                => format!("{}", params.version.to_file_string()),
-
-            PackageManagerReference::Local(params)
-                => format!("local:{}", params.path.to_file_string()),
-        }
-    }
-}
-
-impl ToHumanString for PackageManagerReference {
-    fn to_print_string(&self) -> String {
-        match self {
-            PackageManagerReference::Version(params)
-                => params.version.to_print_string(),
-
-            PackageManagerReference::Local(params)
-                => params.path.to_print_string(),
-        }
-    }
-}
-
-impl_file_string_from_str!(PackageManagerReference);
-impl_file_string_serialization!(PackageManagerReference);
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq)]
 pub struct PackageManagerField {
