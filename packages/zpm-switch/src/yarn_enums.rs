@@ -1,51 +1,55 @@
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, ToFileString, ToHumanString};
+use zpm_utils::ToFileString;
 
 use crate::errors::Error;
+
+fn format_channel_selector(release_line: &Option<ReleaseLine>, channel: &Option<Channel>) -> String {
+    match (release_line, channel) {
+        (None, None) => "stable".to_string(),
+        (Some(release_line), None) => release_line.to_file_string(),
+        (None, Some(channel)) => channel.to_file_string(),
+        (Some(release_line), Some(channel)) => format!("{}-{}", release_line.to_file_string(), channel.to_file_string()),
+    }
+}
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidVersionSelector(s.to_string())))]
 #[derive(Debug)]
 #[derive_variants(Debug)]
 pub enum Channel {
     #[pattern("stable")]
+    #[to_file_string(|| "stable".to_string())]
+    #[to_print_string(|| "stable".to_string())]
     Stable,
 
     #[pattern("canary")]
+    #[to_file_string(|| "canary".to_string())]
+    #[to_print_string(|| "canary".to_string())]
     Canary,
 }
 
-impl ToFileString for Channel {
-    fn to_file_string(&self) -> String {
-        match self {
-            Channel::Stable => "stable".to_string(),
-            Channel::Canary => "canary".to_string(),
-        }
-    }
-}
-
-impl ToHumanString for Channel {
-    fn to_print_string(&self) -> String {
-        self.to_file_string()
-    }
-}
-
-impl_file_string_from_str!(Channel);
-impl_file_string_serialization!(Channel);
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidVersionSelector(s.to_string())))]
 #[derive(Debug, Copy, Clone)]
 #[derive_variants(Debug, Copy, Clone)]
 pub enum ReleaseLine {
     #[pattern("classic")]
+    #[to_file_string(|| "classic".to_string())]
+    #[to_print_string(|| "classic".to_string())]
     Classic,
 
     #[pattern("berry")]
+    #[to_file_string(|| "berry".to_string())]
+    #[to_print_string(|| "berry".to_string())]
     Berry,
 
     #[pattern("zpm")]
+    #[to_file_string(|| "zpm".to_string())]
+    #[to_print_string(|| "zpm".to_string())]
     Zpm,
 
     #[pattern("default")]
+    #[to_file_string(|| "default".to_string())]
+    #[to_print_string(|| "default".to_string())]
     Default,
 }
 
@@ -65,25 +69,6 @@ impl ReleaseLine {
     }
 }
 
-impl ToFileString for ReleaseLine {
-    fn to_file_string(&self) -> String {
-        match self {
-            ReleaseLine::Classic => "classic".to_string(),
-            ReleaseLine::Berry => "berry".to_string(),
-            ReleaseLine::Zpm => "zpm".to_string(),
-            ReleaseLine::Default => "default".to_string(),
-        }
-    }
-}
-
-impl ToHumanString for ReleaseLine {
-    fn to_print_string(&self) -> String {
-        self.to_file_string()
-    }
-}
-
-impl_file_string_from_str!(ReleaseLine);
-impl_file_string_serialization!(ReleaseLine);
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidVersionSelector(s.to_string())))]
 #[derive(Debug)]
@@ -92,57 +77,24 @@ pub enum Selector {
     #[pattern("(?<release_line>.*)")]
     #[pattern("(?<channel>.*)")]
     #[pattern("(?<release_line>.*)-(?<channel>.*)")]
+    #[to_file_string(|params| format_channel_selector(&params.release_line, &params.channel))]
+    #[to_print_string(|params| format_channel_selector(&params.release_line, &params.channel))]
     Channel {
         release_line: Option<ReleaseLine>,
         channel: Option<Channel>,
     },
 
     #[pattern("(?<version>.*)")]
+    #[to_file_string(|params| params.version.to_file_string())]
+    #[to_print_string(|params| params.version.to_file_string())]
     Version {
         version: zpm_semver::Version,
     },
 
     #[pattern("(?<range>.*)")]
+    #[to_file_string(|params| params.range.to_file_string())]
+    #[to_print_string(|params| params.range.to_file_string())]
     Range {
         range: zpm_semver::Range,
     },
 }
-
-impl ToFileString for Selector {
-    fn to_file_string(&self) -> String {
-        match self {
-            Selector::Channel(ChannelSelector {release_line: Some(release_line), channel: None}) => {
-                release_line.to_file_string()
-            },
-
-            Selector::Channel(ChannelSelector {release_line: None, channel: Some(channel)}) => {
-                channel.to_file_string()
-            },
-
-            Selector::Channel(ChannelSelector {release_line: None, channel: None}) => {
-                "stable".to_string()
-            },
-
-            Selector::Channel(ChannelSelector {release_line: Some(release_line), channel: Some(channel)}) => {
-                format!("{}-{}", release_line.to_file_string(), channel.to_file_string())
-            },
-
-            Selector::Version(VersionSelector {version}) => {
-                version.to_file_string()
-            },
-
-            Selector::Range(RangeSelector {range}) => {
-                range.to_file_string()
-            },
-        }
-    }
-}
-
-impl ToHumanString for Selector {
-    fn to_print_string(&self) -> String {
-        self.to_file_string()
-    }
-}
-
-impl_file_string_from_str!(Selector);
-impl_file_string_serialization!(Selector);

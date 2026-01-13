@@ -278,21 +278,16 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
 
         if let Some(mut to_file_string_attr) = to_file_string_attrs.pop() {
             let Some(to_file_string_attr) = to_file_string_attr.take("main") else {
-                errors.push(syn::Error::new(variant.span(), "Expected a string literal in #[to_file_string(\"...\")]"));
+                errors.push(syn::Error::new(variant.span(), "Expected a closure in #[to_file_string(|params| ...)]"));
                 continue;
             };
 
             match &variant_type {
-                VariantType::Struct(_, fields) => {
-                    let field_vars
-                        = fields.keys()
-                            .map(|field_name| quote!{let #field_name = zpm_utils::ToFileString::to_file_string(&params.#field_name);})
-                            .collect::<Vec<_>>();
-
+                VariantType::Struct(struct_name, _) => {
                     to_file_string_arms.push(quote! {
                         Self::#variant_ident(params) => {
-                            #(#field_vars)*
-                            (#to_file_string_attr)()
+                            fn call<F: Fn(&#struct_name) -> String>(f: F, p: &#struct_name) -> String { f(p) }
+                            call(#to_file_string_attr, params)
                         },
                     });
                 },
@@ -307,21 +302,16 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
 
         if let Some(mut to_print_string_attr) = to_print_string_attrs.pop() {
             let Some(to_print_string_attr) = to_print_string_attr.take("main") else {
-                errors.push(syn::Error::new(variant.span(), "Expected a string literal in #[to_print_string(\"...\")]"));
+                errors.push(syn::Error::new(variant.span(), "Expected a closure in #[to_print_string(|params| ...)]"));
                 continue;
             };
 
             match &variant_type {
-                VariantType::Struct(_, fields) => {
-                let field_vars
-                    = fields.keys()
-                        .map(|field_name| quote!{let #field_name = zpm_utils::ToHumanString::to_print_string(&params.#field_name);})
-                        .collect::<Vec<_>>();
-
+                VariantType::Struct(struct_name, _) => {
                     to_print_string_arms.push(quote! {
                         Self::#variant_ident(params) => {
-                            #(#field_vars)*
-                            (#to_print_string_attr)()
+                            fn call<F: Fn(&#struct_name) -> String>(f: F, p: &#struct_name) -> String { f(p) }
+                            call(#to_print_string_attr, params)
                         },
                     });
                 },

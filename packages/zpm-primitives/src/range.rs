@@ -3,7 +3,7 @@ use std::{hash::Hash, str::FromStr, sync::LazyLock};
 use bincode::{Decode, Encode};
 use regex::Regex;
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, Hash64, Path, ToFileString, ToHumanString, UrlEncoded};
+use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
 
 use crate::{PeerRange, SemverPeerRange};
 
@@ -12,6 +12,29 @@ use super::{Descriptor, Ident};
 pub static EXPLICIT_PATH_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^.{0,2}/").unwrap()
 });
+
+fn format_registry_semver(ident: &Option<Ident>, range: &zpm_semver::Range) -> String {
+    match ident {
+        Some(ident) => format!("npm:{}@{}", ident.to_file_string(), range.to_file_string()),
+        None => format!("npm:{}", range.to_file_string()),
+    }
+}
+
+fn format_registry_tag(ident: &Option<Ident>, tag: &str) -> String {
+    match ident {
+        Some(ident) => format!("npm:{}@{}", ident.to_file_string(), tag),
+        None => format!("npm:{}", tag),
+    }
+}
+
+fn format_path_range(path: &str) -> String {
+    if EXPLICIT_PATH_REGEX.is_match(path) {
+        path.to_string()
+    } else {
+        format!("file:{}", path)
+    }
+}
+
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum RangeError {
@@ -33,95 +56,131 @@ pub enum RangeError {
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Range {
     #[no_pattern]
+    #[to_file_string(|| "missing!".to_string())]
+    #[to_print_string(|| DataType::Range.colorize("missing!"))]
     MissingPeerDependency,
 
     #[pattern(r"builtin:(?<range>.*)")]
+    #[to_file_string(|params| format!("builtin:{}", params.range.to_file_string()))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("builtin:{}", params.range.to_file_string())))]
     Builtin {
         range: zpm_semver::Range,
     },
 
     #[pattern(r"(?<range>.*)")]
+    #[to_file_string(|params| params.range.to_file_string())]
+    #[to_print_string(|params| DataType::Range.colorize(&params.range.to_file_string()))]
     AnonymousSemver {
         range: zpm_semver::Range,
     },
 
     #[pattern(r"npm:(?:(?<ident>.*)@)?(?<range>.*)")]
+    #[to_file_string(|params| format_registry_semver(&params.ident, &params.range))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_registry_semver(&params.ident, &params.range)))]
     RegistrySemver {
         ident: Option<Ident>,
         range: zpm_semver::Range,
     },
 
     #[pattern(r"npm:(?:(?<ident>.*)@)?(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
+    #[to_file_string(|params| format_registry_tag(&params.ident, &params.tag))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_registry_tag(&params.ident, &params.tag)))]
     RegistryTag {
         ident: Option<Ident>,
         tag: String,
     },
 
     #[pattern(r"link:(?<path>.*)")]
+    #[to_file_string(|params| format!("link:{}", params.path))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("link:{}", params.path)))]
     Link {
         path: String,
     },
 
     #[pattern(r"portal:(?<path>.*)")]
+    #[to_file_string(|params| format!("portal:{}", params.path))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("portal:{}", params.path)))]
     Portal {
         path: String,
     },
 
     #[pattern(r"file:(?<path>.*\.(?:tgz|tar\.gz))")]
     #[pattern(r"(?<path>\.{0,2}/.*\.(?:tgz|tar\.gz))")]
+    #[to_file_string(|params| format_path_range(&params.path))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_path_range(&params.path)))]
     Tarball {
         path: String,
     },
 
     #[pattern(r"file:(?<path>.*)")]
     #[pattern(r"(?<path>\.{0,2}/.*)")]
+    #[to_file_string(|params| format_path_range(&params.path))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_path_range(&params.path)))]
     Folder {
         path: String,
     },
 
     #[pattern(r"patch:(?<inner>.*)#(?<path>.*)$")]
+    #[to_file_string(|params| format!("patch:{}#{}", params.inner.to_file_string(), params.path))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("patch:{}#{}", params.inner.to_file_string(), params.path)))]
     Patch {
         inner: Box<UrlEncoded<Descriptor>>,
         path: String,
     },
 
     #[pattern(r"workspace:(?<magic>.*)")]
+    #[to_file_string(|params| format!("workspace:{}", serde_plain::to_string(&params.magic).unwrap()))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", serde_plain::to_string(&params.magic).unwrap())))]
     WorkspaceMagic {
         magic: zpm_semver::RangeKind,
     },
 
     #[pattern(r"workspace:(?<range>.*)")]
+    #[to_file_string(|params| format!("workspace:{}", params.range.to_file_string()))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", params.range.to_file_string())))]
     WorkspaceSemver {
         range: zpm_semver::Range,
     },
 
     #[pattern(r"workspace:(?<ident>.*)")]
+    #[to_file_string(|params| format!("workspace:{}", params.ident.to_file_string()))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", params.ident.to_file_string())))]
     WorkspaceIdent {
         ident: Ident,
     },
 
     #[pattern(r"workspace:(?<path>.*)")]
+    #[to_file_string(|params| format!("workspace:{}", params.path.to_file_string()))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", params.path.to_file_string())))]
     WorkspacePath {
         path: Path,
     },
 
     #[pattern("(?<git>.*)")]
+    #[to_file_string(|params| params.git.to_file_string())]
+    #[to_print_string(|params| DataType::Range.colorize(&params.git.to_file_string()))]
     Git {
         git: zpm_git::GitRange,
     },
 
     #[pattern(r"(?<url>https?://.*(?:/.*|\.tgz|\.tar\.gz))")]
+    #[to_file_string(|params| params.url.clone())]
+    #[to_print_string(|params| DataType::Range.colorize(&params.url))]
     Url {
         url: String,
     },
 
     #[pattern(r"(?<tag>.*)")]
+    #[to_file_string(|params| params.tag.clone())]
+    #[to_print_string(|params| DataType::Range.colorize(&params.tag))]
     AnonymousTag {
         tag: String,
     },
 
     // We keep this at the end so virtual ranges are listed last when sorted
     #[pattern(r"virtual:(?<inner>.*)#(?<hash>[a-f0-9]*)$")]
+    #[to_file_string(|params| format!("virtual:{}#{}", params.inner.to_file_string(), params.hash.to_file_string()))]
+    #[to_print_string(|params| format!("{} {}", params.inner.to_print_string(), DataType::Range.colorize(&format!("[{}]", params.hash.mini()))))]
     Virtual {
         inner: Box<Range>,
         hash: Hash64,
@@ -207,104 +266,3 @@ impl Range {
         }
     }
 }
-
-impl ToFileString for Range {
-    fn to_file_string(&self) -> String {
-        match self {
-            Range::Builtin(params) => {
-                format!("builtin:{}", params.range.to_file_string())
-            },
-
-            Range::AnonymousSemver(params) => {
-                params.range.to_file_string()
-            },
-
-            Range::AnonymousTag(params) => {
-                params.tag.clone()
-            },
-
-            Range::RegistrySemver(params) => match &params.ident {
-                Some(ident) => format!("npm:{}@{}", ident.to_file_string(), params.range.to_file_string()),
-                None => format!("npm:{}", params.range.to_file_string()),
-            },
-
-            Range::RegistryTag(params) => match &params.ident {
-                Some(ident) => format!("npm:{}@{}", ident.to_file_string(), params.tag),
-                None => format!("npm:{}", params.tag),
-            },
-
-            Range::Tarball(params) => {
-                if EXPLICIT_PATH_REGEX.is_match(params.path.as_str()) {
-                    params.path.clone()
-                } else {
-                    format!("file:{}", params.path)
-                }
-            },
-
-            Range::Folder(params) => {
-                if EXPLICIT_PATH_REGEX.is_match(params.path.as_str()) {
-                    params.path.clone()
-                } else {
-                    format!("file:{}", params.path)
-                }
-            },
-
-            Range::Patch(params) => {
-                format!("patch:{}#{}", params.inner.to_file_string(), params.path)
-            },
-
-            Range::Link(params) => {
-                format!("link:{}", params.path)
-            },
-
-            Range::Portal(params) => {
-                format!("portal:{}", params.path)
-            },
-
-            Range::Url(params) => {
-                params.url.clone()
-            },
-
-            Range::WorkspaceSemver(params) => {
-                format!("workspace:{}", params.range.to_file_string())
-            },
-
-            Range::WorkspaceMagic(params) => {
-                format!("workspace:{}", serde_plain::to_string(&params.magic).unwrap())
-            },
-
-            Range::WorkspacePath(params) => {
-                format!("workspace:{}", params.path.to_file_string())
-            },
-
-            Range::WorkspaceIdent(params) => {
-                format!("workspace:{}", params.ident.to_file_string())
-            },
-
-            Range::Git(params) => {
-                params.git.to_file_string()
-            },
-
-            Range::Virtual(params) => {
-                format!("virtual:{}#{}", params.inner.to_file_string(), params.hash.to_file_string())
-            },
-
-            Range::MissingPeerDependency => {
-                "missing!".to_string()
-            },
-        }
-    }
-}
-
-impl ToHumanString for Range {
-    fn to_print_string(&self) -> String {
-        if let Range::Virtual(params) = self {
-            format!("{} {}", params.inner.to_print_string(), DataType::Range.colorize(&format!("[{}]", params.hash.mini())))
-        } else {
-            DataType::Range.colorize(&self.to_file_string())
-        }
-    }
-}
-
-impl_file_string_from_str!(Range);
-impl_file_string_serialization!(Range);

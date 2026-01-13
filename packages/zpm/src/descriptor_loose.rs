@@ -7,7 +7,7 @@ use zpm_formats::{iter_ext::IterExt, tar, tar_iter};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::{AnonymousSemverRange, AnonymousTagRange, Descriptor, FolderRange, Ident, Locator, Range, RegistrySemverRange, RegistryTagRange, TarballRange, WorkspaceMagicRange};
 use zpm_semver::RangeKind;
-use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, Path, ToFileString, ToHumanString};
+use zpm_utils::Path;
 
 use crate::{error::Error, install::InstallContext, manifest::helpers::{parse_manifest_from_bytes, read_manifest}, project::Project, report::{with_report_result, StreamReport, StreamReportConfig}, resolvers};
 
@@ -29,16 +29,22 @@ pub struct LooseResolution {
 #[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
 pub enum LooseDescriptor {
     #[pattern(r"(?<descriptor>.*)")]
+    #[to_file_string(|params| params.descriptor.to_file_string())]
+    #[to_print_string(|params| params.descriptor.to_print_string())]
     Descriptor {
         descriptor: Descriptor,
     },
 
     #[pattern(r"(?<ident>.*)")]
+    #[to_file_string(|params| params.ident.to_file_string())]
+    #[to_print_string(|params| params.ident.to_print_string())]
     Ident {
         ident: Ident,
     },
 
     #[pattern(r"(?<range>.*)")]
+    #[to_file_string(|params| params.range.to_file_string())]
+    #[to_print_string(|params| params.range.to_print_string())]
     Range {
         range: Range,
     },
@@ -335,41 +341,6 @@ impl Default for LooseDescriptor {
     }
 }
 
-impl ToFileString for LooseDescriptor {
-    fn to_file_string(&self) -> String {
-        match self {
-            LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor}) => {
-                descriptor.to_file_string()
-            },
-
-            LooseDescriptor::Ident(IdentLooseDescriptor {ident}) => {
-                ident.to_file_string()
-            },
-
-            LooseDescriptor::Range(RangeLooseDescriptor {range}) => {
-                range.to_file_string()
-            },
-        }
-    }
-}
-
-impl ToHumanString for LooseDescriptor {
-    fn to_print_string(&self) -> String {
-        match self {
-            LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor}) => {
-                descriptor.to_print_string()
-            },
-
-            LooseDescriptor::Ident(IdentLooseDescriptor {ident}) => {
-                ident.to_print_string()
-            },
-
-            LooseDescriptor::Range(RangeLooseDescriptor {range}) => {
-                range.to_print_string()
-            },
-        }
-    }
-}
 
 fn find_project_descriptor(project: &Project, ident: Ident) -> Result<Option<Descriptor>, Error> {
     let mut occurrences
@@ -398,6 +369,3 @@ fn find_project_descriptor(project: &Project, ident: Ident) -> Result<Option<Des
 
     Ok(best_match)
 }
-
-impl_file_string_from_str!(LooseDescriptor);
-impl_file_string_serialization!(LooseDescriptor);

@@ -1,40 +1,6 @@
-use std::collections::HashMap;
-
-use proc_macro2::Span;
-use syn::{parse::{Parse, ParseStream}, punctuated::Punctuated, Attribute, Expr, ExprLit, Ident, Lit, LitBool, LitStr, Meta, Token};
-
 mod attribute_bag;
 
 pub use attribute_bag::AttributeBag;
-// mod field_info;
-
-// pub fn extract_literal(meta: &ParseNestedMeta) -> syn::Result<String> {
-//     let expr: syn::Expr = meta.value()?.parse()?;
-//     let value = &expr;
-
-//     if let syn::Expr::Lit(syn::ExprLit {
-//         lit: syn::Lit::Str(lit),
-//         attrs: _,
-//     }) = value {
-//         return Ok(lit.value());
-//     }
-
-//     panic!("Invalid syntax")
-// }
-
-// pub fn extract_bool(meta: &ParseNestedMeta) -> syn::Result<bool> {
-//     let expr: syn::Expr = meta.value()?.parse()?;
-//     let value = &expr;
-
-//     if let syn::Expr::Lit(syn::ExprLit {
-//         lit: syn::Lit::Bool(lit),
-//         attrs: _,
-//     }) = value {
-//         return Ok(lit.value);
-//     }
-
-//     panic!("Invalid syntax")
-// }
 
 // https://stackoverflow.com/a/56264023/880703
 pub fn extract_type_from_option(ty: &syn::Type) -> Option<&syn::Type> {

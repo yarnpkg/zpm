@@ -5,7 +5,7 @@ use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
-use zpm_utils::{LastModifiedAt, Path, ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
+use zpm_utils::{LastModifiedAt, Path, ToFileString, ToHumanString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -34,19 +34,11 @@ pub const PNP_DATA_NAME: &str = ".pnp.data.json";
 pub enum InstallMode {
     /// Don't run the build scripts.
     #[pattern("skip-build")]
+    #[to_file_string(|| "skip-build".to_string())]
+    #[to_print_string(|| "skip-build".to_string())]
     SkipBuild,
 }
 
-impl ToFileString for InstallMode {
-    fn to_file_string(&self) -> String {
-        match self {
-            InstallMode::SkipBuild => "skip-build".to_string(),
-        }
-    }
-}
-
-impl_file_string_from_str!(InstallMode);
-impl_file_string_serialization!(InstallMode);
 
 #[derive(Default)]
 pub struct RunInstallOptions {

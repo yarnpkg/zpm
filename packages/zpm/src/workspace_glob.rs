@@ -1,7 +1,6 @@
 use thiserror::Error;
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::IdentGlob;
-use zpm_utils::impl_file_string_from_str;
 
 use crate::project::Workspace;
 
@@ -37,5 +36,3 @@ impl WorkspaceGlob {
         }
     }
 }
-
-impl_file_string_from_str!(WorkspaceGlob);

@@ -1,6 +1,6 @@
 use clipanion::cli;
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{ToHumanString, impl_file_string_from_str};
+use zpm_utils::ToHumanString;
 
 use crate::{commands::version::deferred::VersionDeferred, error::Error, project, versioning::{ReleaseStrategy, Versioning}};
 
@@ -61,7 +61,6 @@ impl TryFrom<VersionBump> for Option<ReleaseStrategy> {
     }
 }
 
-impl_file_string_from_str!(VersionBump);
 
 #[cli::command]
 #[cli::path("version")]
