@@ -2,7 +2,7 @@ use std::{future::Future, io::Write};
 
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
-use zpm_semver::VersionRc;
+use zpm_semver::{Version, VersionRc};
 use zpm_utils::{DataType, Hash64, Path, ToFileString, ToHumanString, Unit, is_terminal};
 
 use crate::errors::Error;
@@ -20,7 +20,11 @@ pub struct CacheKey {
 impl CacheKey {
     pub fn to_npm_url(&self) -> Option<String> {
         if self.version.rc.as_ref().map_or(true, |rc| !rc.starts_with(&[VersionRc::String("git".to_string())])) {
-            if self.version.major >= 6 {
+            // Older RC versions (<6.0.0-rc.9) are not available in npm
+            let first_npm_release =
+                Version::new_from_components(6, 0, 0, Some(vec![VersionRc::String("rc".to_string()), VersionRc::Number(9)]));
+
+            if self.version >= first_npm_release {
                 return Some(format!("https://registry.npmjs.org/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", self.platform, self.platform, self.version.to_file_string()));
             }
         }
