@@ -302,7 +302,7 @@ impl<'a> Versioning<'a> {
             = self.resolve_releases(ResolveOptions {prerelease: None})?;
 
         let Some(requested_version) = releases.get(workspace_ident) else {
-            return self.apply_version(workspace_ident, version);
+            return self.set_manifest_version(workspace_ident, version);
         };
 
         if requested_version > version {

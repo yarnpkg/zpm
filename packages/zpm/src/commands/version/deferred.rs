@@ -71,7 +71,7 @@ impl VersionDeferred {
             self.strategy.clone().into(),
         ).await?;
 
-        println!("Marked {} has requiring a {} release", active_workspace.name.to_print_string(), self.strategy.to_print_string());
+        println!("Marked {} as requiring a {} release", active_workspace.name.to_print_string(), self.strategy.to_print_string());
 
         Ok(())
     }
