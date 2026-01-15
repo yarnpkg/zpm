@@ -1,18 +1,13 @@
 use std::{borrow::Cow, io::{Read, Write}};
 
+use zerocopy::{Immutable, IntoBytes, KnownLayout, Unaligned};
+
 use crate::{error::Error, tar_iter::TarIterator};
 
 use super::Entry;
 
-unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
-    ::core::slice::from_raw_parts(
-        (p as *const T) as *const u8,
-        ::core::mem::size_of::<T>(),
-    )
-}
-
-#[allow(dead_code)]
-#[repr(packed)]
+#[derive(IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(C)]
 struct FileHeader {
     file_name: [u8; 100],
     file_mode: [u8; 8],
@@ -84,11 +79,7 @@ impl<'a> ToTar for Vec<Entry<'a>> {
                 padding: [0; 255],
             };
 
-            let header_slice = unsafe {
-                any_as_u8_slice(&header)
-            };
-
-            let checksum_n = header_slice.iter()
+            let checksum_n = header.as_bytes().iter()
                 .fold(0, |acc, &x| acc + x as u32);
 
             let checksum = {
@@ -100,11 +91,7 @@ impl<'a> ToTar for Vec<Entry<'a>> {
 
             header.checksum = checksum;
 
-            unsafe {
-                archive.extend_from_slice(
-                    any_as_u8_slice(&header),
-                );
-            }
+            archive.extend_from_slice(header.as_bytes());
 
             let padded_size
                 = ((entry.data.len() + 511) / 512) * 512;
