@@ -2,7 +2,7 @@ use clipanion::cli;
 use zpm_macro_enum::zpm_enum;
 use zpm_utils::ToHumanString;
 
-use crate::{error::Error, project, versioning::{ReleaseStrategy, Versioning}};
+use crate::{error::Error, project, versioning::{ExactReleaseStrategy, ReleaseStrategy, Versioning}};
 
 #[zpm_enum(error = zpm_utils::EnumError, or_else = |s| Err(zpm_utils::EnumError::NotFound(s.to_string())))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,6 +55,8 @@ impl TryFrom<ImmediateStrategy> for Option<ReleaseStrategy> {
                 => Ok(Some(ReleaseStrategy::Patch)),
             ImmediateStrategy::Decline
                 => Ok(None),
+            ImmediateStrategy::Exact(params)
+                => Ok(Some(ExactReleaseStrategy {version: params.version}.into())),
 
             _ => {
                 Err(Error::InvalidDeferredVersionBump(version_bump.to_print_string()))
@@ -120,7 +122,7 @@ impl Version {
             },
         };
 
-        versioning.set_immediate_version(
+        versioning.apply_version(
             &active_workspace.name,
             &new_version,
         )?;

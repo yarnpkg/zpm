@@ -61,6 +61,12 @@ Some new features have been implemented. They are not "breaking changes" per se,
 
 - The `.pnp.cjs` file isn't generated with the `+x` flag anymore.
 
+- The `yarn version apply` command has a couple of changes:
+
+  - It will only update package versions and won't update the cross-dependency ranges anymore. Use the magic workspace ranges instead (`workspace:^`, `workspace:~`, `workspace:=`).
+
+  - The `--recursive` flag isn't supported at the moment. Please reach out if you find it useful, as its behaviour doesn't feel intuitive and I feel like it might be in need of a rework. Consider using `--all` instead.
+
 - Behavior inherited from npm, packages are currently allowed to omit listing dependencies on `node-gyp` if the package happens to contain a `binding.gyp` file.
 
   This behavior is unsafe as the only reasonable thing the package manager can do is to imply a dependency on `*`, meaning there are no guarantees as to the version of `node-gyp` projects would end up using.

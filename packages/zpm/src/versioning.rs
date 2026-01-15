@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::{JsonDocument, document::Document};
 use zpm_primitives::Ident;
+use zpm_semver::{Version, VersionRc};
 use zpm_utils::{IoResultExt, Path, ToFileString};
 
 use crate::{error::Error, git_utils::{fetch_branch_base, fetch_changed_files}, project::Project};
@@ -57,8 +58,59 @@ pub struct VersioningFile {
     pub declined: BTreeSet<Ident>,
 }
 
+fn extract_rc_number(version: &zpm_semver::Version, prerelease_pattern: &str) -> Option<u32> {
+    let Some(n_pos) = prerelease_pattern.find("%n") else {
+        return None;
+    };
+
+    let prefix = &prerelease_pattern[..n_pos];
+    let suffix = &prerelease_pattern[n_pos + 2..];
+
+    // Serialize rc to string (matching the format used by Version::to_file_string)
+    let Some(rc_str) = version.to_rc_string() else {
+        return None;
+    };
+
+    // Check if rc_str matches the pattern (prefix + number + suffix)
+    let Some(remaining) = rc_str.strip_prefix(prefix) else {
+        return None;
+    };
+
+    let Some(number_str) = remaining.strip_suffix(suffix) else {
+        return None;
+    };
+
+    number_str.parse().ok()
+}
+
+fn bump_rc_number(mut version: zpm_semver::Version, prerelease_pattern: &str) -> Version {
+    let current_rc_number
+        = extract_rc_number(&version, prerelease_pattern);
+
+    let next_rc_number
+        = current_rc_number.map(|n| n + 1).unwrap_or(0);
+
+    let updated_prerelease_pattern
+        = prerelease_pattern.replace("%n", &next_rc_number.to_string());
+
+    let rc_components
+        = updated_prerelease_pattern.split('.')
+            .map(|component| match component.parse() {
+                Ok(n) => VersionRc::Number(n),
+                Err(_) => VersionRc::String(component.to_string()),
+            })
+            .collect_vec();
+
+    version.rc = Some(rc_components);
+    version
+}
+
 pub struct Versioning<'a> {
     project: &'a Project,
+}
+
+pub struct ResolveOptions<'a> {
+    pub prerelease: Option<&'a str>,
 }
 
 impl<'a> Versioning<'a> {
@@ -76,7 +128,7 @@ impl<'a> Versioning<'a> {
         Ok(versioning_path)
     }
 
-    pub fn resolve_releases(&self) -> Result<BTreeMap<Ident, zpm_semver::Version>, Error> {
+    pub fn resolve_releases(&self, options: ResolveOptions) -> Result<BTreeMap<Ident, zpm_semver::Version>, Error> {
         let mut releases
             = BTreeMap::new();
 
@@ -108,17 +160,37 @@ impl<'a> Versioning<'a> {
                 = JsonDocument::hydrate_from_str(&content)?;
 
             for (ident, release_strategy) in versioning_data.releases {
-                let current_version
-                    = self.project.workspace_by_ident(&ident)?
-                        .manifest.remote.version.as_ref()
-                        .ok_or_else(|| Error::NoVersionFoundForWorkspace(ident.clone()))?;
+                let workspace
+                    = self.project.workspace_by_ident(&ident)?;
 
-                let resulting_version
-                    = release_strategy.apply(current_version);
+                let resulting_version = if let Some(prerelease) = options.prerelease.as_ref() {
+                    let current_version
+                        = workspace.manifest.remote.version.as_ref()
+                            .ok_or_else(|| Error::NoVersionFoundForWorkspace(ident.clone()))?;
 
-                if resulting_version < *current_version {
-                    return Err(Error::VersionBumpLowerThanCurrent(ident.clone(), current_version.clone(), resulting_version));
-                }
+                    let resulting_version
+                        = bump_rc_number(current_version.clone(), prerelease);
+
+                    if resulting_version < *current_version {
+                        return Err(Error::VersionBumpLowerThanCurrent(ident.clone(), current_version.clone(), resulting_version));
+                    }
+
+                    resulting_version
+                } else {
+                    let current_version
+                        = workspace.manifest.stable_version.as_ref()
+                            .or(workspace.manifest.remote.version.as_ref())
+                            .ok_or_else(|| Error::NoVersionFoundForWorkspace(ident.clone()))?;
+
+                    let resulting_version
+                        = release_strategy.apply(current_version);
+
+                    if resulting_version < *current_version {
+                        return Err(Error::VersionBumpLowerThanCurrent(ident.clone(), current_version.clone(), resulting_version));
+                    }
+
+                    resulting_version
+                };
 
                 let is_highest_requested_version
                     = releases.get(&ident)
@@ -203,7 +275,7 @@ impl<'a> Versioning<'a> {
         Ok(())
     }
 
-    fn apply_immediate_version(&self, workspace_ident: &Ident, version: &zpm_semver::Version) -> Result<(), Error> {
+    pub fn set_manifest_version(&self, workspace_ident: &Ident, version: &zpm_semver::Version) -> Result<(), Error> {
         let manifest_path
             = self.project.workspace_by_ident(workspace_ident)?
                 .manifest_path();
@@ -225,19 +297,19 @@ impl<'a> Versioning<'a> {
         Ok(())
     }
 
-    pub fn set_immediate_version(&self, workspace_ident: &Ident, version: &zpm_semver::Version) -> Result<(), Error> {
+    pub fn apply_version(&self, workspace_ident: &Ident, version: &zpm_semver::Version) -> Result<(), Error> {
         let releases
-            = self.resolve_releases()?;
+            = self.resolve_releases(ResolveOptions {prerelease: None})?;
 
         let Some(requested_version) = releases.get(workspace_ident) else {
-            return self.apply_immediate_version(workspace_ident, version);
+            return self.apply_version(workspace_ident, version);
         };
 
         if requested_version > version {
             return Err(Error::VersionBumpLowerThanDeferred(requested_version.clone()));
         }
 
-        self.apply_immediate_version(workspace_ident, version)?;
+        self.set_manifest_version(workspace_ident, version)?;
         self.discard_workspace_from_release(workspace_ident)?;
 
         Ok(())

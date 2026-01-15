@@ -1,4 +1,5 @@
 use bincode::{Decode, Encode};
+use itertools::Itertools;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
 
 use crate::{extract::extract_version, range::RangeKind, Error, Range};
@@ -198,6 +199,32 @@ impl Version {
             RangeKind::Tilde => Range::from_file_string(&format!("~{}", self.to_file_string())),
             RangeKind::Exact => Range::from_file_string(&self.to_file_string()),
         }.expect("Converting a version to a range should be trivial")
+    }
+
+    pub fn to_rc_string(&self) -> Option<String> {
+        let Some(rc) = &self.rc else {
+            return None;
+        };
+
+        let mut res
+            = String::new();
+
+        for segment in rc {
+            match segment {
+                VersionRc::Number(n) => {
+                    res.push_str(&n.to_string());
+                }
+                VersionRc::String(s) => {
+                    res.push_str(s);
+                }
+            }
+
+            res.push('.');
+        }
+
+        res.pop();
+
+        Some(res)
     }
 }
 

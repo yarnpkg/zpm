@@ -447,6 +447,9 @@ pub enum Error {
     #[error("No existing version found for workspace {}", .0.to_print_string())]
     NoVersionFoundForWorkspace(Ident),
 
+    #[error("Recursive version apply is not implemented yet")]
+    RecursiveVersionApplyNotImplemented,
+
     #[error("Can't bump the version to one that would be lower than the current one (trying to bump {} from version {} to version {})", .0.to_print_string(), .1.to_print_string(), .2.to_print_string())]
     VersionBumpLowerThanCurrent(Ident, zpm_semver::Version, zpm_semver::Version),
 
@@ -455,12 +458,6 @@ pub enum Error {
 
     #[error("The project doesn't seem to require a version bump.")]
     NoVersionBumpRequiredForProject,
-
-    #[error("The current workspace doesn't seem to require a version bump.")]
-    NoVersionBumpRequiredForActiveWorkspace,
-
-    #[error("The current workspace doesn't seem to require a version bump. Did you mean to use `--all`?")]
-    NoVersionBumpRequiredForActiveWorkspaceSuggestAll,
 
     #[error("No versioning file found")]
     VersioningFileNotFound,

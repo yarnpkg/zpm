@@ -32,10 +32,6 @@ pub struct VersionApply {
     #[cli::option("--prerelease")]
     prerelease: Option<String>,
 
-    /// Use the exact version of each package, removes any range. Useful for nightly releases where the range might match another version.
-    #[cli::option("--exact", default = false)]
-    exact: bool,
-
     /// Release the transitive workspaces as well
     #[cli::option("-R,--recursive", default = false)]
     recursive: bool,
@@ -57,7 +53,9 @@ impl VersionApply {
             = versioning::Versioning::new(&project);
 
         let mut releases
-            = versioning.resolve_releases()?;
+            = versioning.resolve_releases(versioning::ResolveOptions {
+                prerelease: self.prerelease.as_deref(),
+            })?;
 
         if self.all {
             if releases.is_empty() {
@@ -65,14 +63,10 @@ impl VersionApply {
             }
         } else {
             if self.recursive {
-                unimplemented!()
+                return Err(Error::RecursiveVersionApplyNotImplemented);
             } else {
                 let Some(requested_version) = releases.remove(&active_workspace.name) else {
-                    return Err(if releases.is_empty() {
-                        Error::NoVersionFoundForActiveWorkspace
-                    } else {
-                        Error::NoVersionBumpRequiredForActiveWorkspaceSuggestAll
-                    });
+                    return Ok(());
                 };
 
                 releases = BTreeMap::from_iter([(
@@ -132,7 +126,11 @@ impl VersionApply {
         }
 
         for (workspace_ident, version) in releases.iter() {
-            versioning.set_immediate_version(workspace_ident, version)?;
+            if self.prerelease.is_some() {
+                versioning.set_manifest_version(workspace_ident, version)?;
+            } else {
+                versioning.apply_version(workspace_ident, version)?;
+            }
         }
 
         Ok(())
