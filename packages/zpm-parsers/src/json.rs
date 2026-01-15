@@ -565,7 +565,9 @@ impl JsonDocument {
         let child_indent_info
             = self.find_object_indent(scanner.offset, suggested_child_indent)?;
 
-        let child_indent = child_indent_info.map(|(indent, _)| indent);
+        let child_indent
+            = child_indent_info
+                .map(|(indent, _)| indent);
 
         Ok(Indent::with_style(self_indent, child_indent, style))
     }

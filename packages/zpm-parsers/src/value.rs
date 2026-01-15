@@ -10,10 +10,10 @@ pub enum IndentStyle {
 }
 
 impl IndentStyle {
-    pub fn char(&self) -> &'static str {
+    pub fn char(self) -> char {
         match self {
-            IndentStyle::Spaces => " ",
-            IndentStyle::Tabs => "\t",
+            IndentStyle::Spaces => ' ',
+            IndentStyle::Tabs => '\t',
         }
     }
 }
@@ -102,7 +102,8 @@ impl Value {
                 let mut serializer
                     = String::new();
 
-                let indent_char = indent.style.char();
+                let indent_char
+                    = indent.style.char();
 
                 serializer.push_str("[");
 
@@ -110,7 +111,7 @@ impl Value {
                     if let Some(child_indent) = indent.child_indent {
                         serializer.push_str("\n");
                         for _ in 0..child_indent {
-                            serializer.push_str(indent_char);
+                            serializer.push(indent_char);
                         }
                     } else if i > 0 {
                         serializer.push(' ');
@@ -128,7 +129,7 @@ impl Value {
                         serializer.push_str("\n");
                         if let Some(child_indent) = indent.self_indent {
                             for _ in 0..child_indent {
-                                serializer.push_str(indent_char);
+                                serializer.push(indent_char);
                             }
                         }
                     }
@@ -143,7 +144,8 @@ impl Value {
                 let mut serializer
                     = String::new();
 
-                let indent_char = indent.style.char();
+                let indent_char
+                    = indent.style.char();
 
                 serializer.push_str("{");
 
@@ -151,7 +153,7 @@ impl Value {
                     if let Some(child_indent) = indent.child_indent {
                         serializer.push_str("\n");
                         for _ in 0..child_indent {
-                            serializer.push_str(indent_char);
+                            serializer.push(indent_char);
                         }
                     } else if i > 0 {
                         serializer.push(' ');
@@ -171,7 +173,7 @@ impl Value {
                         serializer.push_str("\n");
                         if let Some(child_indent) = indent.self_indent {
                             for _ in 0..child_indent {
-                                serializer.push_str(indent_char);
+                                serializer.push(indent_char);
                             }
                         }
                     }
