@@ -12,5 +12,6 @@ regex = "1.10.6"
 serde = { version = "1.0.207", features = ["derive"] }
 thiserror = "1.0.63"
 tokio = { version = "1.39.2", features = ["full"] }
+zerocopy = { version = "0.8.33", features = ["derive"] }
 zpm-macro-enum = { path = "../zpm-macro-enum" }
 zpm-utils = { path = "../zpm-utils" }
