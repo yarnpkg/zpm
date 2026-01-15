@@ -258,6 +258,9 @@ pub enum Error {
     #[error("An error occured while parsing the Yarn Berry lockfile: {0}")]
     LegacyLockfileParseError(Arc<serde_yaml::Error>),
 
+    #[error("An error occured while parsing your configuration: {0}")]
+    ConfigurationParseError(Arc<dyn std::error::Error + Send + Sync>),
+
     #[error("Lockfile generation error: {0}")]
     LockfileGenerationError(zpm_parsers::Error),
 

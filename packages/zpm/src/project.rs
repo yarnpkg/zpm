@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::Arc, time::UNIX_EPOCH};
 
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext};
@@ -120,15 +120,16 @@ impl Project {
         let mut last_modified_at
             = LastModifiedAt::new();
 
-        let mut config = Configuration::load(
-            &ConfigurationContext {
-                env: std::env::vars().collect(),
-                user_cwd: user_cwd.clone(),
-                project_cwd: Some(project_cwd.clone()),
-                package_cwd: Some(package_cwd.clone()),
-            },
-            &mut last_modified_at,
-        ).unwrap();
+        let configuration_context = ConfigurationContext {
+            env: std::env::vars().collect(),
+            user_cwd: user_cwd.clone(),
+            project_cwd: Some(project_cwd.clone()),
+            package_cwd: Some(package_cwd.clone()),
+        };
+
+        let mut config
+            = Configuration::load(&configuration_context, &mut last_modified_at)
+                .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
 
         if config.settings.enable_migration_mode.value {
             config.settings.enable_global_cache.value = true;
