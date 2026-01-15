@@ -16,7 +16,7 @@ use crate::{
     git::{GitOperation, detect_git_operation},
     http::HttpClient,
     install::{InstallContext, InstallManager, InstallResult, InstallState},
-    lockfile::{Lockfile, from_legacy_berry_lockfile, from_pnpm_lockfile},
+    lockfile::{Lockfile, from_legacy_berry_lockfile, from_pnpm_node_modules},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
     report::{StreamReport, StreamReportConfig, with_report_result},
@@ -24,7 +24,6 @@ use crate::{
 };
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
-pub const PNPM_LOCKFILE_NAME: &str = "pnpm-lock.yaml";
 pub const MANIFEST_NAME: &str = "package.json";
 pub const PNP_CJS_NAME: &str = ".pnp.cjs";
 pub const PNP_ESM_NAME: &str = ".pnp.loader.mjs";
@@ -269,18 +268,13 @@ impl Project {
 
     fn lockfile_from(lockfile_path: &Path) -> Result<Lockfile, Error> {
         if !lockfile_path.fs_exists() {
-            // Check for pnpm-lock.yaml in the same directory
-            if let Some(parent) = lockfile_path.dirname() {
-                let pnpm_lockfile_path
-                    = parent.with_join_str(PNPM_LOCKFILE_NAME);
+            // Check for pnpm node_modules in the same directory
+            if let Some(project_cwd) = lockfile_path.dirname() {
+                let pnpm_dir
+                    = project_cwd.with_join_str("node_modules/.pnpm");
 
-                if pnpm_lockfile_path.fs_exists() {
-                    let src = pnpm_lockfile_path
-                        .fs_read_text()?;
-
-                    if !src.is_empty() {
-                        return from_pnpm_lockfile(&src);
-                    }
+                if pnpm_dir.fs_exists() {
+                    return from_pnpm_node_modules(&project_cwd);
                 }
             }
 

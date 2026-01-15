@@ -258,8 +258,8 @@ pub enum Error {
     #[error("An error occured while parsing the Yarn Berry lockfile: {0}")]
     LegacyLockfileParseError(Arc<serde_yaml::Error>),
 
-    #[error("An error occured while parsing the pnpm lockfile: {0}")]
-    PnpmLockfileParseError(Arc<serde_yaml::Error>),
+    #[error("Failed to read pnpm node_modules directory")]
+    PnpmNodeModulesReadError,
 
     #[error("Lockfile generation error: {0}")]
     LockfileGenerationError(zpm_parsers::Error),

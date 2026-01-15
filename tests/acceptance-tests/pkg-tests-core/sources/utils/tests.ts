@@ -708,7 +708,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
   const parseRequest = (url: string, method: string): Request | null => {
     let match: RegExpMatchArray | null;
 
-    url = url.replace(/%2f/g, `/`);
+    url = url.replace(/%2f/gi, `/`);
 
     if ((match = url.match(/^\/repositories\//))) {
       return {
