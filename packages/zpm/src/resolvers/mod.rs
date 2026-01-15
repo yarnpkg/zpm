@@ -121,20 +121,20 @@ impl Resolution {
 }
 
 impl IntoResolutionResult for Resolution {
-    fn into_resolution_result(mut self, context: &InstallContext<'_>) -> ResolutionResult {
+    fn into_resolution_result(mut self, context: &InstallContext<'_>) -> Result<ResolutionResult, Error> {
         let original_resolution = self.clone();
 
         let (dependencies, peer_dependencies)
-            = normalize_resolutions(context, &self);
+            = normalize_resolutions(context, &self)?;
 
         self.dependencies = dependencies;
         self.peer_dependencies = peer_dependencies;
 
-        ResolutionResult {
+        Ok(ResolutionResult {
             resolution: self,
             original_resolution,
             package_data: None,
-        }
+        })
     }
 }
 

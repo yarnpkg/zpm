@@ -73,7 +73,7 @@ pub async fn resolve_nodejs_descriptor(context: &InstallContext<'_>, descriptor:
     resolution.variants = variants;
 
     let mut resolution_result
-        = resolution.into_resolution_result(context);
+        = resolution.into_resolution_result(context)?;
 
     resolution_result.package_data = Some(PackageData::Abstract);
 
@@ -99,7 +99,7 @@ pub async fn resolve_nodejs_variant_descriptor(context: &InstallContext<'_>, des
 
     resolution.requirements = system.to_requirements();
 
-    Ok(resolution.into_resolution_result(context))
+    resolution.into_resolution_result(context)
 }
 
 pub async fn resolve_nodejs_variant_locator(context: &InstallContext<'_>, locator: &Locator, version: &zpm_semver::Version) -> Result<ResolutionResult, Error> {
@@ -113,7 +113,7 @@ pub async fn resolve_nodejs_variant_locator(context: &InstallContext<'_>, locato
 
     resolution.requirements = system.to_requirements();
 
-    Ok(resolution.into_resolution_result(context))
+    resolution.into_resolution_result(context)
 }
 
 pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Locator, version: &zpm_semver::Version, is_mock_request: bool) -> Result<FetchResult, Error> {

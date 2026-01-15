@@ -49,7 +49,7 @@ fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
     }
 }
 
-fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: zpm_semver::Version, mut manifest: RemoteManifestWithScripts) -> ResolutionResult {
+fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: zpm_semver::Version, mut manifest: RemoteManifestWithScripts) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -183,7 +183,7 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         let manifest
             = JsonDocument::hydrate_from_value(manifest)?;
 
-        return Ok(build_resolution_result(context, descriptor, package_ident, version.clone(), manifest));
+        return build_resolution_result(context, descriptor, package_ident, version.clone(), manifest);
     }
 
     Err(Error::NoCandidatesFound(descriptor.range.clone()))
@@ -244,7 +244,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let manifest
         = JsonDocument::hydrate_from_value(&manifest)?;
 
-    Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
+    build_resolution_result(context, descriptor, package_ident, version, manifest)
 }
 
 pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &RegistryReference) -> Result<ResolutionResult, Error> {
@@ -273,5 +273,5 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote.clone());
 
-    Ok(resolution.into_resolution_result(context))
+    resolution.into_resolution_result(context)
 }
