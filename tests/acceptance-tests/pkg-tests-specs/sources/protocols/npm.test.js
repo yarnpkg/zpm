@@ -144,5 +144,25 @@ describe(`Protocols`, () => {
         },
       ),
     );
+
+    test(
+      `it should allow aliasing packages that have an unconventional url`,
+      makeTemporaryEnv(
+        {
+          dependencies: {[`aliased-unconventional`]: `npm:unconventional-tarball@1.0.0`},
+        },
+        async ({path, run, source}) => {
+          await run(`install`);
+
+          await expect(source(`require('aliased-unconventional')`)).resolves.toMatchObject({
+            name: `unconventional-tarball`,
+            version: `1.0.0`,
+          });
+
+          await xfs.removePromise(`${path}/.yarn`);
+          await run(`install`);
+        },
+      ),
+    );
   });
 });
