@@ -2,10 +2,27 @@ use serde::Serialize;
 
 use crate::{Error, JsonDocument, json::json_provider};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IndentStyle {
+    #[default]
+    Spaces,
+    Tabs,
+}
+
+impl IndentStyle {
+    pub fn char(&self) -> &'static str {
+        match self {
+            IndentStyle::Spaces => " ",
+            IndentStyle::Tabs => "\t",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Indent {
     pub self_indent: Option<usize>,
     pub child_indent: Option<usize>,
+    pub style: IndentStyle,
 }
 
 impl Indent {
@@ -13,6 +30,15 @@ impl Indent {
         Self {
             self_indent,
             child_indent,
+            style: IndentStyle::default(),
+        }
+    }
+
+    pub fn with_style(self_indent: Option<usize>, child_indent: Option<usize>, style: IndentStyle) -> Self {
+        Self {
+            self_indent,
+            child_indent,
+            style,
         }
     }
 
@@ -28,6 +54,7 @@ impl Indent {
         Self {
             self_indent,
             child_indent,
+            style: self.style,
         }
     }
 }
@@ -75,13 +102,15 @@ impl Value {
                 let mut serializer
                     = String::new();
 
+                let indent_char = indent.style.char();
+
                 serializer.push_str("[");
 
                 for (i, item) in arr.iter().enumerate() {
                     if let Some(child_indent) = indent.child_indent {
                         serializer.push_str("\n");
                         for _ in 0..child_indent {
-                            serializer.push_str(" ");
+                            serializer.push_str(indent_char);
                         }
                     } else if i > 0 {
                         serializer.push(' ');
@@ -99,7 +128,7 @@ impl Value {
                         serializer.push_str("\n");
                         if let Some(child_indent) = indent.self_indent {
                             for _ in 0..child_indent {
-                                serializer.push_str(" ");
+                                serializer.push_str(indent_char);
                             }
                         }
                     }
@@ -114,13 +143,15 @@ impl Value {
                 let mut serializer
                     = String::new();
 
+                let indent_char = indent.style.char();
+
                 serializer.push_str("{");
 
                 for (i, (k, v)) in obj.iter().enumerate() {
                     if let Some(child_indent) = indent.child_indent {
                         serializer.push_str("\n");
                         for _ in 0..child_indent {
-                            serializer.push_str(" ");
+                            serializer.push_str(indent_char);
                         }
                     } else if i > 0 {
                         serializer.push(' ');
@@ -140,7 +171,7 @@ impl Value {
                         serializer.push_str("\n");
                         if let Some(child_indent) = indent.self_indent {
                             for _ in 0..child_indent {
-                                serializer.push_str(" ");
+                                serializer.push_str(indent_char);
                             }
                         }
                     }

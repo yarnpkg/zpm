@@ -13,7 +13,7 @@ pub mod json;
 pub use error::Error;
 pub use path::Path;
 pub use json::*;
-pub use value::Value;
+pub use value::{Value, Indent, IndentStyle};
 
 use crate::node::Field;
 
