@@ -522,6 +522,7 @@ pub struct Install {
     pub install_state: InstallState,
     pub roots: BTreeSet<Descriptor>,
     pub skip_build: bool,
+    pub skip_link_step: bool,
     pub skip_lockfile_update: bool,
     pub constraints_check: bool,
 }
@@ -533,36 +534,44 @@ pub struct InstallResult {
 
 impl Install {
     pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
-        self.install_state.last_installed_at = project.last_modified_at.as_nanos();
+        if self.skip_link_step {
+            project.attach_install_state(self.install_state)?;
 
-        let link_future
-            = linker::link_project(project, &mut self);
+            if !self.skip_lockfile_update {
+                project.write_lockfile(&self.lockfile)?;
+            }
+        } else {
+            self.install_state.last_installed_at = project.last_modified_at.as_nanos();
 
-        let link_result
-            = async_section("Linking the project", link_future).await?;
+            let link_future
+                = linker::link_project(project, &mut self);
 
-        for (location, locator) in &link_result.packages_by_location {
-            self.install_state.locations_by_package.insert(locator.clone(), location.clone());
-        }
+            let link_result
+                = async_section("Linking the project", link_future).await?;
 
-        self.install_state.packages_by_location
-            = link_result.packages_by_location;
+            for (location, locator) in &link_result.packages_by_location {
+                self.install_state.locations_by_package.insert(locator.clone(), location.clone());
+            }
 
-        project.attach_install_state(self.install_state)?;
+            self.install_state.packages_by_location
+                = link_result.packages_by_location;
 
-        if !self.skip_lockfile_update {
-            project.write_lockfile(&self.lockfile)?;
-        }
+            project.attach_install_state(self.install_state)?;
 
-        if !self.skip_build && !link_result.build_requests.entries.is_empty() {
-            let build_future
-                = build::BuildManager::new(link_result.build_requests).run(project);
+            if !self.skip_lockfile_update {
+                project.write_lockfile(&self.lockfile)?;
+            }
 
-            let build_result
-                = async_section("Building the project", build_future).await?;
+            if !self.skip_build && !link_result.build_requests.entries.is_empty() {
+                let build_future
+                    = build::BuildManager::new(link_result.build_requests).run(project);
 
-            if !build_result.build_errors.is_empty() {
-                return Err(Error::SilentError);
+                let build_result
+                    = async_section("Building the project", build_future).await?;
+
+                if !build_result.build_errors.is_empty() {
+                    return Err(Error::SilentError);
+                }
             }
         }
 
@@ -635,6 +644,11 @@ impl<'a> InstallManager<'a> {
 
     pub fn with_constraints_check(mut self, constraints_check: bool) -> Self {
         self.result.constraints_check = constraints_check;
+        self
+    }
+
+    pub fn with_skip_link_step(mut self, skip_link_step: bool) -> Self {
+        self.result.skip_link_step = skip_link_step;
         self
     }
 
