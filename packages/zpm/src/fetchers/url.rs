@@ -5,7 +5,7 @@ use zpm_parsers::JsonDocument;
 use zpm_primitives::{Locator, UrlReference};
 
 use crate::{
-    error::Error, install::{FetchResult, InstallContext}, manifest::Manifest, npm::NpmEntryExt, resolvers::Resolution
+    error::Error, install::{FetchResult, InstallContext}, manifest::RemoteManifest, npm::NpmEntryExt, resolvers::Resolution
 };
 
 use super::PackageData;
@@ -42,11 +42,11 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let first_entry
         = zpm_formats::zip::first_entry_from_zip(&cached_blob.data)?;
 
-    let manifest: Manifest
+    let manifest: RemoteManifest
         = JsonDocument::hydrate_from_slice(&first_entry.data)?;
 
     let resolution
-        = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
+        = Resolution::from_remote_manifest(locator.clone(), manifest);
 
     let package_directory = cached_blob.info.path
         .with_join(&package_subdir);

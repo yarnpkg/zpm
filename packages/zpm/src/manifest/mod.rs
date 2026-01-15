@@ -74,7 +74,6 @@ pub struct RemoteManifest {
     pub dist: Option<DistManifest>,
 }
 
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Encode, Decode, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishConfig {
