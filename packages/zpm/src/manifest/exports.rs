@@ -6,6 +6,7 @@ use serde::{de::{self, Visitor}, ser::{SerializeMap, SerializeSeq}, Deserialize,
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, Eq)]
 pub enum ExportsField {
+    Null,
     Path(RawPath),
     Map(Vec<(String, ExportsField)>),
     Array(Vec<ExportsField>),
@@ -26,6 +27,10 @@ impl<'de> Deserialize<'de> for ExportsField {
 impl Serialize for ExportsField {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
         match self {
+            ExportsField::Null => {
+                serializer.serialize_none()
+            },
+
             ExportsField::Path(raw_path) => {
                 serializer.serialize_str(&raw_path.raw)
             },
@@ -62,7 +67,11 @@ impl<'de> Visitor<'de> for ExportsFieldVisitor {
     type Value = ExportsField;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a string or an object")
+        write!(formatter, "null, a string, or an object")
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> where E: de::Error {
+        Ok(ExportsField::Null)
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> where E: de::Error {
@@ -111,6 +120,10 @@ impl<'a> Iterator for ExportsFieldPathIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(current) = self.stack.pop() {
             match current {
+                ExportsField::Null => {
+                    continue;
+                },
+
                 ExportsField::Path(path) => {
                     return Some(path);
                 },
