@@ -117,15 +117,28 @@ pub fn resolve_aliased(descriptor: &Descriptor, dependencies: Vec<InstallOpResul
             .as_resolved()
             .clone();
 
-    let Reference::Shorthand(inner_params) = inner_resolution.resolution.locator.reference.clone() else {
-        unreachable!();
+    let inner_reference
+        = inner_resolution.resolution.locator.reference.clone();
+
+    let new_reference = match inner_reference {
+        Reference::Shorthand(inner_params) => RegistryReference {
+            ident: inner_resolution.resolution.locator.ident.clone(),
+            version: inner_params.version.clone(),
+        }.into(),
+
+        Reference::Registry(inner_params) => RegistryReference {
+            ident: inner_params.ident.clone(),
+            version: inner_params.version.clone(),
+        }.into(),
+
+        // For non-conventional tarball URLs, preserve the URL reference as-is
+        Reference::Url(_) => inner_reference,
+
+        _ => unreachable!("Unexpected reference type in resolve_aliased: {:?}", inner_reference),
     };
 
     inner_resolution.resolution.locator
-        = Locator::new(descriptor.ident.clone(), RegistryReference {
-            ident: inner_resolution.resolution.locator.ident.clone(),
-            version: inner_params.version.clone(),
-        }.into());
+        = Locator::new(descriptor.ident.clone(), new_reference);
 
     Ok(inner_resolution)
 }
