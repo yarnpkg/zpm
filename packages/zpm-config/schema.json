@@ -366,6 +366,31 @@
           }
         }
       }
+    },
+    "catalog": {
+      "type": "object",
+      "description": "Default catalog containing package name to version range mappings. This is an alias for catalogs.default.",
+      "additionalKeys": {
+        "type": "zpm_primitives::Ident"
+      },
+      "additionalProperties": {
+        "type": "zpm_primitives::Range"
+      }
+    },
+    "catalogs": {
+      "type": "object",
+      "description": "Named catalogs containing predefined version ranges for packages. Use 'catalog:' protocol in dependencies to reference them.",
+      "additionalProperties": {
+        "type": "object",
+        "title": "Catalog",
+        "description": "A named catalog containing package name to version range mappings",
+        "additionalKeys": {
+          "type": "zpm_primitives::Ident"
+        },
+        "additionalProperties": {
+          "type": "zpm_primitives::Range"
+        }
+      }
     }
   }
 }

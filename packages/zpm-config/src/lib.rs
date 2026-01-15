@@ -905,12 +905,16 @@ impl Configuration {
             }
         }
 
-        let settings = Settings::merge(
+        let mut settings = Settings::merge(
             &context,
             intermediate_user_config,
             intermediate_project_config,
             || panic!("No configuration found")
         );
+
+        settings.catalogs.entry("default".to_string())
+            .or_default()
+            .extend(std::mem::take(&mut settings.catalog));
 
         Ok(Configuration {
             settings,

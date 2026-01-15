@@ -10,6 +10,7 @@ use crate::{
 };
 
 pub mod builtin;
+pub mod catalog;
 pub mod folder;
 pub mod git;
 pub mod link;
@@ -222,6 +223,7 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
         Range::WorkspacePath(params)
             => workspace::resolve_path_descriptor(&context, &descriptor, params),
 
+        Range::Catalog(_) |
         Range::MissingPeerDependency |
         Range::WorkspaceMagic(_) |
         Range::WorkspaceSemver(_) |

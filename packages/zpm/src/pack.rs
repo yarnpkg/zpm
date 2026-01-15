@@ -10,7 +10,9 @@ use zpm_parsers::document::Document;
 use zpm_parsers::JsonDocument;
 use zpm_parsers::Value;
 use zpm_primitives::AnonymousSemverRange;
+use zpm_primitives::CatalogRange;
 use zpm_primitives::Descriptor;
+use zpm_primitives::Ident;
 use zpm_primitives::Locator;
 use zpm_primitives::PeerRange;
 use zpm_primitives::Range;
@@ -20,6 +22,7 @@ use globset::GlobMatcher;
 use regex::Regex;
 use zpm_utils::ToFileString;
 
+use crate::resolvers::catalog::lookup_catalog_entry;
 use crate::script::ScriptEnvironment;
 use crate::{
     error::Error,
@@ -480,6 +483,10 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: &PackOpt
                         Some(Range::AnonymousSemver(AnonymousSemverRange {
                             range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
                         }))
+                    },
+
+                    Range::Catalog(params) => {
+                        Some(lookup_catalog_entry(project, params, ident)?)
                     },
 
                     _ => {

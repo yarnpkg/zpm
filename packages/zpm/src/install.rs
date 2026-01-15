@@ -22,7 +22,7 @@ use crate::{
     primitives_exts::RangeExt,
     project::{InstallMode, Project},
     report::{ReportContext, async_section, current_report, with_context_result},
-    resolvers::{Resolution, SyncResolutionAttempt, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution}, tree_resolver::{ResolutionTree, TreeResolver},
+    resolvers::{Resolution, SyncResolutionAttempt, catalog::lookup_catalog_entry, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution}, tree_resolver::{ResolutionTree, TreeResolver},
 };
 
 #[derive(Clone)]
@@ -889,6 +889,24 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
     }
 
     match &mut descriptor.range {
+        Range::Catalog(params) => {
+            let project
+                = context.project
+                    .expect("The project is required to normalize catalog resolutions");
+
+            descriptor.range
+                = lookup_catalog_entry(project, params, &descriptor.ident)
+                    .expect("The catalog entry should be found for the descriptor");
+
+            if descriptor.range.details().require_binding {
+                descriptor.parent = Some(project.root_workspace().locator());
+            } else {
+                descriptor.parent = None;
+            }
+
+            normalize_resolution(context, descriptor, resolution, false);
+        },
+
         Range::Patch(params) => {
             normalize_resolution(context, &mut params.inner.as_mut().0, resolution, false);
         },

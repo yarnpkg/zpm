@@ -150,6 +150,12 @@ pub enum Error {
     #[error("Workspace profile not found ({0})")]
     WorkspaceProfileNotFound(String),
 
+    #[error("Catalog not found ({0})")]
+    CatalogNotFound(String),
+
+    #[error("Catalog entry not found ({0}:{})", .1.to_print_string())]
+    CatalogEntryNotFound(String, Ident),
+
     #[error("Package manifest not found ({})", .0.to_print_string())]
     ManifestNotFound(Path),
 
