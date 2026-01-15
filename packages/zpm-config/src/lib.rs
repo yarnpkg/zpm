@@ -51,9 +51,14 @@ impl<T: Serialize> Serialize for Setting<T> {
  * don't want that (`null` should be its own value), so we instead use the Partial<T>
  * type to present a potentially missing value.
  *
- * The `serde(skip)` attribute prevent serde from turning `null` into `Missing`, and
- * the `untagged` attribute will make it try to assign it to the `T` type instead. If
- * the T type is `Option<Something>`, it'll then be correctly turned into `None`.
+ * We implement custom Deserialize instead of using `#[serde(untagged)]` because the
+ * untagged attribute swallows the actual deserialization errors and replaces them
+ * with a generic "did not match any variant of untagged enum" message.
+ *
+ * The `#[serde(default)]` attribute on fields using `Partial` ensures that missing
+ * fields return `Partial::Missing` (via the Default trait). When a field is present,
+ * our custom deserialize directly attempts to deserialize into `T`, properly
+ * propagating any errors that occur.
  *
  * To recap:
  * - {} -> Missing
@@ -63,13 +68,17 @@ impl<T: Serialize> Serialize for Setting<T> {
  * The negative of this is that we have to enable `#[serde(default)]` on all fields
  * using `Partial`, but since we're generating the code, we can easily do that.
  */
-#[derive(Debug, Default, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Default)]
 enum Partial<T> {
     #[default]
-    #[serde(skip)]
     Missing,
     Value(T),
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Partial<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        T::deserialize(deserializer).map(Partial::Value)
+    }
 }
 
 impl<T> Partial<T> where T: Default {
@@ -865,7 +874,10 @@ impl Configuration {
                     = user_config_path
                         .fs_read_text_with_size(metadata.len())?;
 
-                intermediate_user_config = Partial::Value(serde_yaml::from_str::<intermediate::Settings>(&user_config_text)?);
+                let user_config: intermediate::Settings
+                    = serde_yaml::from_str(&user_config_text)?;
+
+                intermediate_user_config = Partial::Value(user_config);
             }
         }
 
@@ -886,7 +898,10 @@ impl Configuration {
                     = project_config_path
                         .fs_read_text_with_size(metadata.len())?;
 
-                intermediate_project_config = Partial::Value(serde_yaml::from_str::<intermediate::Settings>(&project_config_text)?);
+                let project_config: intermediate::Settings
+                    = serde_yaml::from_str(&project_config_text)?;
+
+                intermediate_project_config = Partial::Value(project_config);
             }
         }
 

@@ -22,7 +22,19 @@ impl FromFileString for CompressionAlgorithm {
     type Error = Error;
 
     fn from_file_string(src: &str) -> Result<Self, Self::Error> {
-        Ok(CompressionAlgorithm::Deflate(src.parse().unwrap()))
+        if src == "mixed" {
+            return Err(Error::MixedValueDeprecated);
+        }
+
+        let level
+            = src.parse::<usize>()
+                .map_err(|_| Error::InvalidCompressionLevel)?;
+
+        if level > 9 {
+            return Err(Error::InvalidCompressionLevel);
+        }
+
+        Ok(CompressionAlgorithm::Deflate(level))
     }
 }
 

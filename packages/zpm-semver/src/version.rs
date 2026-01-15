@@ -1,5 +1,4 @@
 use bincode::{Decode, Encode};
-use itertools::Itertools;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
 
 use crate::{extract::extract_version, range::RangeKind, Error, Range};
