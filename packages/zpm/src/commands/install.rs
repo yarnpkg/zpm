@@ -43,12 +43,12 @@ pub struct Install {
     check_resolutions: bool,
 
     /// Abort with an error exit code if the lockfile was to be modified
-    #[cli::option("--immutable", default = false)]
-    immutable: bool,
+    #[cli::option("--immutable")]
+    immutable: Option<bool>,
 
     /// Abort with an error exit code if the cache folder was to be modified
-    #[cli::option("--immutable-cache", default = false)]
-    immutable_cache: bool,
+    #[cli::option("--immutable-cache")]
+    immutable_cache: Option<bool>,
 
     #[cli::option("--check-checksums", default = false)]
     check_checksums: bool,
@@ -71,12 +71,24 @@ impl Install {
         let mut project
             = project::Project::new(None).await?;
 
-        if self.immutable {
+        if self.mode == Some(InstallMode::UpdateLockfile) && self.immutable == Some(true) {
+            return Err(Error::IncompatibleOptions(vec!["--immutable".to_string(), "--mode=update-lockfile".to_string()]));
+        }
+
+        if self.mode == Some(InstallMode::UpdateLockfile) && self.immutable_cache == Some(true) {
+            return Err(Error::IncompatibleOptions(vec!["--immutable-cache".to_string(), "--mode=update-lockfile".to_string()]));
+        }
+
+        if self.immutable == Some(true) {
             project.config.settings.enable_immutable_installs.value = true;
             project.config.settings.enable_immutable_installs.source = Source::Cli;
         }
 
-        if self.immutable_cache {
+        if self.mode == Some(InstallMode::UpdateLockfile) {
+            project.config.settings.enable_immutable_installs.value = false;
+        }
+
+        if self.immutable_cache == Some(true) {
             project.config.settings.enable_immutable_cache.value = true;
             project.config.settings.enable_immutable_cache.source = Source::Cli;
         }

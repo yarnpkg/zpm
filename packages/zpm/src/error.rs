@@ -261,6 +261,9 @@ pub enum Error {
     #[error("Lockfile generation error: {0}")]
     LockfileGenerationError(zpm_parsers::Error),
 
+    #[error("Incompatible options: {}", .0.join(", "))]
+    IncompatibleOptions(Vec<String>),
+
     #[error("Repository clone failed")]
     RepositoryCloneFailed(String),
 
