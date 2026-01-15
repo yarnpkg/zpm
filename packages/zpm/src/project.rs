@@ -37,6 +37,12 @@ pub enum InstallMode {
     #[to_file_string(|| "skip-build".to_string())]
     #[to_print_string(|| "skip-build".to_string())]
     SkipBuild,
+
+    /// Just update the lockfile, skip the fetching and linking.
+    #[pattern("update-lockfile")]
+    #[to_file_string(|| "update-lockfile".to_string())]
+    #[to_print_string(|| "update-lockfile".to_string())]
+    UpdateLockfile,
 }
 
 
@@ -802,6 +808,7 @@ impl Project {
                     .with_previous_state(self.install_state.as_ref())
                     .with_roots(roots)
                     .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
+                    .with_skip_link_step(options.mode == Some(InstallMode::UpdateLockfile))
                     .with_skip_lockfile_update(options.roots.is_some())
                     .resolve_and_fetch().await?
                     .link_and_build(self).await?;
