@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt::{self, Debug, Display}, hash::Hash, marker
 use bincode::{Decode, Encode};
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
-use zpm_primitives::{Descriptor, Locator, Reference, RegistryReference};
+use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, RegistryReference, RegistrySemverRange};
 use zpm_utils::{FromFileString, Hash64, ToFileString};
 
 use crate::{
@@ -291,6 +291,90 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
 
                 lockfile.resolutions.insert(descriptor, entry.resolution.clone());
             }
+        }
+    }
+
+    Ok(lockfile)
+}
+
+#[derive(Debug, Deserialize)]
+struct PnpmDependencyEntry {
+    specifier: String,
+    version: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PnpmImporter {
+    #[serde(default)]
+    dependencies: BTreeMap<String, PnpmDependencyEntry>,
+    #[serde(default)]
+    #[serde(rename = "devDependencies")]
+    dev_dependencies: BTreeMap<String, PnpmDependencyEntry>,
+    #[serde(default)]
+    #[serde(rename = "optionalDependencies")]
+    optional_dependencies: BTreeMap<String, PnpmDependencyEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PnpmLockfilePayload {
+    #[serde(default)]
+    importers: BTreeMap<String, PnpmImporter>,
+}
+
+pub fn from_pnpm_lockfile(data: &str) -> Result<Lockfile, Error> {
+    let payload: PnpmLockfilePayload = serde_yaml::from_str(data)
+        .map_err(|err| Error::PnpmLockfileParseError(Arc::new(err)))?;
+
+    let mut lockfile
+        = Lockfile::new();
+
+    lockfile.metadata.version = 1;
+
+    for (_importer_path, importer) in payload.importers {
+        let all_deps = importer.dependencies.into_iter()
+            .chain(importer.dev_dependencies)
+            .chain(importer.optional_dependencies);
+
+        for (name, entry) in all_deps {
+            // Parse the specifier (range) and version
+            // Best-effort: only handle simple semver specifiers and versions
+
+            // Skip if the specifier doesn't look like a semver range
+            let Ok(range) = zpm_semver::Range::from_file_string(&entry.specifier) else {
+                continue;
+            };
+
+            // The version in pnpm lockfile might have additional info like (peer-deps-hash)
+            // Extract just the version part
+            let version_str = entry.version
+                .split('(')
+                .next()
+                .unwrap_or(&entry.version)
+                .trim();
+
+            let Ok(version) = zpm_semver::Version::from_file_string(version_str) else {
+                continue;
+            };
+
+            let ident
+                = Ident::new(name);
+
+            let descriptor = Descriptor::new(ident.clone(), Range::RegistrySemver(RegistrySemverRange {
+                ident: None,
+                range,
+            }));
+
+            let locator = Locator::new(ident.clone(), RegistryReference {
+                ident: ident.clone(),
+                version: version.clone(),
+            }.into());
+
+            lockfile.entries.insert(locator.clone(), LockfileEntry {
+                checksum: None,
+                resolution: Resolution::new_empty(locator.clone(), Default::default()),
+            });
+
+            lockfile.resolutions.insert(descriptor, locator);
         }
     }
 
