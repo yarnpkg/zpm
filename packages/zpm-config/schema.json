@@ -282,7 +282,7 @@
     },
     "pnpmHoistPatterns": {
       "type": "array",
-      "description": "Patterns specifying which packages should be hoisted to node_modules/.pnpm/node_modules. By default, all packages are hoisted. Use empty array to disable hoisting.",
+      "description": "Patterns specifying which packages should be hoisted to node_modules/.store/node_modules. By default, all packages are hoisted. Use empty array to disable hoisting.",
       "items": {
         "type": "zpm_utils::Glob"
       },
@@ -293,8 +293,7 @@
       "description": "Patterns specifying which packages should be hoisted to the root node_modules directory. Unlike pnpmHoistPatterns which hoists to the hidden modules directory inside the virtual store, this hoists to the public root modules directory.",
       "items": {
         "type": "zpm_utils::Glob"
-      },
-      "default": []
+      }
     },
     "pnpmStoreFolder": {
       "type": "string",

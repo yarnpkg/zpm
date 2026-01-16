@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use itertools::Itertools;
 use zpm_primitives::{Ident, Locator};
 use zpm_utils::{Glob, IoResultExt, Path, ToHumanString};
 
@@ -145,7 +146,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         = project.config.settings.pnpm_hoist_patterns
             .iter()
             .map(|s| s.value.clone())
-            .collect();
+            .collect_vec();
 
     let hoisted_packages
         = collect_hoistable_packages(tree, &hoist_patterns, &locations_by_package);
@@ -154,7 +155,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         = project.config.settings.pnpm_public_hoist_patterns
             .iter()
             .map(|s| s.value.clone())
-            .collect();
+            .collect_vec();
 
     let public_hoisted_packages
         = collect_hoistable_packages(tree, &public_hoist_patterns, &locations_by_package);

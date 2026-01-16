@@ -295,13 +295,20 @@ impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::f
 impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
     type Intermediate = Vec<T::Intermediate>;
 
-    fn from_env_string(value: &str, from_config: Option<Self>) -> Result<Self, HydrateError> {
+    fn from_env_string(value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
+        // An empty string means an explicitly empty array
+        if value.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // When an env var is set, it replaces the config entirely (not appends)
         let mut result
-            = from_config.unwrap_or_default();
+            = Vec::new();
 
         let items = value
             .split(',')
-            .map(|s| s.trim());
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty());
 
         for item_str in items {
             let value
