@@ -114,6 +114,9 @@ impl Path {
 
             dir.join_str(format!("{}-{}", name, iteration));
 
+            // Create parent directories if needed (for nested patterns like "zpm/.../build/<>")
+            dir.fs_create_parent()?;
+
             match dir.fs_create_dir() {
                 Ok(_) => {
                     return Ok(dir);
