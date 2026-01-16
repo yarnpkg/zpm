@@ -19,7 +19,7 @@ fn convert_workspace_to_link(project: &Project, locator: Locator) -> Locator {
             = project.package_location(&physical_locator)
                 .expect("Expected the workspace to have a package location");
 
-        Locator::new(locator.ident.clone(), LinkReference {
+        Locator::new(locator.ident, LinkReference {
             path: workspace_location.to_file_string(),
         }.into())
     } else {
@@ -218,9 +218,7 @@ impl<'a, 'b> TreeRenderer<'a, 'b> {
 
         let is_workspace_link
             = |expected_locator: &Locator, locator: &Locator|
-                expected_locator.reference.is_workspace_reference() && locator.ident == expected_locator.ident && locator.reference == LinkReference {
-                    path: self.tree.project.package_location(&expected_locator).unwrap().to_file_string(),
-                }.into();
+                expected_locator.reference.is_workspace_reference() && locator.ident == expected_locator.ident && locator == &convert_workspace_to_link(self.tree.project, expected_locator.clone());
 
         let is_dependency_valid
             = |expected_locator: &Locator|
