@@ -398,11 +398,17 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
                 },
 
                 false => {
-                    let build_dir_pattern
-                        = format!("zpm/{}/build/<>", locator.slug());
+                    let build_dir_base
+                        = Path::temp_dir_pattern("zpm-<>")?;
 
-                    Path::temp_dir_pattern(&build_dir_pattern)?
-                        .relative_to(&project.project_cwd)
+                    let build_dir
+                        = build_dir_base
+                            .with_join_str(format!("build/{}", locator.slug()));
+
+                    build_dir
+                        .fs_create_dir_all()?;
+
+                    build_dir.relative_to(&project.project_cwd)
                 },
             };
 
