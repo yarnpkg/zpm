@@ -13,6 +13,12 @@ pub enum Error {
     #[error(transparent)]
     Utf8Conversion(#[from] std::str::Utf8Error),
 
+    #[error("Using 'mixed' as compression level is deprecated - the compression will now be automatically mixed if beneficial")]
+    MixedValueDeprecated,
+
+    #[error("Compression level must be between 0 and 9")]
+    InvalidCompressionLevel,
+
     #[error("Invalid os string conversion")]
     OsStringConversion(std::ffi::OsString),
 

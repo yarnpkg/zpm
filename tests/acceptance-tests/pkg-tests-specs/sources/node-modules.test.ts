@@ -149,6 +149,83 @@ describe(`Node_Modules`, () => {
     ),
   );
 
+  test(`should create .bin folder with symlinks for direct dependencies`,
+    makeTemporaryEnv(
+      {
+        dependencies: {
+          [`has-bin-entries`]: `1.0.0`,
+        },
+      },
+      {
+        nodeLinker: `node-modules`,
+      },
+      async ({path, run}) => {
+        await run(`install`);
+
+        // Check that .bin folder exists
+        await expect(xfs.lstatPromise(npath.toPortablePath(`${path}/node_modules/.bin`))).resolves.toBeDefined();
+
+        // Check that bin symlinks are created for the dependency
+        const binSymlink = await xfs.readlinkPromise(npath.toPortablePath(`${path}/node_modules/.bin/has-bin-entries`));
+        expect(binSymlink).toContain(`has-bin-entries`);
+
+        // Check that all bin entries are created
+        await expect(xfs.lstatPromise(npath.toPortablePath(`${path}/node_modules/.bin/has-bin-entries-with-exit-code`))).resolves.toBeDefined();
+        await expect(xfs.lstatPromise(npath.toPortablePath(`${path}/node_modules/.bin/has-bin-entries-with-require`))).resolves.toBeDefined();
+      },
+    ),
+  );
+
+  test(`should create .bin symlinks for hoisted transitive dependencies`,
+    makeTemporaryEnv(
+      {
+        dependencies: {
+          [`one-fixed-dep-bins`]: `1.0.0`,
+        },
+      },
+      {
+        nodeLinker: `node-modules`,
+      },
+      async ({path, run}) => {
+        await run(`install`);
+
+        // no-deps-bins is a transitive dependency of one-fixed-dep-bins
+        // It should be hoisted to root node_modules, so its bin should be available there
+        await expect(xfs.lstatPromise(npath.toPortablePath(`${path}/node_modules/.bin/no-deps-bins`))).resolves.toBeDefined();
+
+        // The bin symlink should point to the hoisted package location
+        const binSymlink = await xfs.readlinkPromise(npath.toPortablePath(`${path}/node_modules/.bin/no-deps-bins`));
+        expect(binSymlink).toContain(`no-deps-bins`);
+      },
+    ),
+  );
+
+  test(`should prefer workspace bin over dependency bin when names overlap`,
+    makeTemporaryEnv(
+      {
+        name: `has-bin-entries`,
+        bin: `./my-bin.js`,
+        dependencies: {
+          [`has-bin-entries`]: `1.0.0`,
+        },
+      },
+      {
+        nodeLinker: `node-modules`,
+      },
+      async ({path, run}) => {
+        // Create the workspace bin file
+        await writeFile(npath.toPortablePath(`${path}/my-bin.js`), `#!/usr/bin/env node\nconsole.log("workspace bin");`);
+
+        await run(`install`);
+
+        // The .bin/has-bin-entries symlink should point to the workspace's bin, not the dependency's
+        const binSymlink = await xfs.readlinkPromise(npath.toPortablePath(`${path}/node_modules/.bin/has-bin-entries`));
+        // Workspace bin points to ../../my-bin.js (up from .bin, up from node_modules)
+        expect(binSymlink).toContain(`my-bin.js`);
+      },
+    ),
+  );
+
   test(`should support dependency via link: protocol to a missing folder`,
     makeTemporaryEnv(
       {

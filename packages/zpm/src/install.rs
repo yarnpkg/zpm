@@ -22,7 +22,7 @@ use crate::{
     primitives_exts::RangeExt,
     project::{InstallMode, Project},
     report::{ReportContext, async_section, current_report, with_context_result},
-    resolvers::{Resolution, SyncResolutionAttempt, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution}, tree_resolver::{ResolutionTree, TreeResolver},
+    resolvers::{Resolution, SyncResolutionAttempt, catalog::lookup_catalog_entry, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution}, tree_resolver::{ResolutionTree, TreeResolver},
 };
 
 #[derive(Clone)]
@@ -121,7 +121,7 @@ pub struct ResolutionResult {
 }
 
 pub trait IntoResolutionResult {
-    fn into_resolution_result(self, context: &InstallContext<'_>) -> ResolutionResult;
+    fn into_resolution_result(self, context: &InstallContext<'_>) -> Result<ResolutionResult, Error>;
 }
 
 #[derive(Clone, Debug)]
@@ -148,23 +148,23 @@ impl FetchResult {
 }
 
 impl IntoResolutionResult for FetchResult {
-    fn into_resolution_result(self, context: &InstallContext<'_>) -> ResolutionResult {
+    fn into_resolution_result(self, context: &InstallContext<'_>) -> Result<ResolutionResult, Error> {
         let mut resolution = self.resolution
             .expect("Expected this fetch result to contain a resolution record to be convertible into a resolution result");
 
         let original_resolution = resolution.clone();
 
         let (dependencies, peer_dependencies)
-            = normalize_resolutions(context, &resolution);
+            = normalize_resolutions(context, &resolution)?;
 
         resolution.dependencies = dependencies;
         resolution.peer_dependencies = peer_dependencies;
 
-        ResolutionResult {
+        Ok(ResolutionResult {
             resolution,
             original_resolution,
             package_data: Some(self.package_data),
-        }
+        })
     }
 }
 
@@ -461,14 +461,14 @@ impl InstallCache {
     }
 }
 
-impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for InstallCache {
-    fn graph_cache(&self, ctx: &InstallContext<'a>, op: &InstallOp) -> Option<InstallOpResult> {
+impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult, Error> for InstallCache {
+    fn graph_cache(&self, ctx: &InstallContext<'a>, op: &InstallOp) -> Result<Option<InstallOpResult>, Error> {
         if let InstallOp::Resolve {descriptor} = op {
             let range_details
                 = descriptor.range.details();
 
             if range_details.transient_resolution {
-                return None;
+                return Ok(None);
             }
 
             let enforced_resolution
@@ -477,26 +477,26 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult> for Inst
             if let Some(locator) = self.lockfile.resolutions.get(descriptor) {
                 if enforced_resolution.map_or(true, |enforced_resolution| locator == enforced_resolution) {
                     if self.lockfile.metadata.version != LockfileMetadata::new().version || ctx.refresh_lockfile {
-                        return Some(InstallOpResult::Pinned(PinnedResult {
+                        return Ok(Some(InstallOpResult::Pinned(PinnedResult {
                             locator: locator.clone(),
-                        }));
+                        })));
                     }
 
                     let entry = self.lockfile.entries.get(locator)
                         .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator.to_print_string()));
 
-                    return Some(InstallOpResult::Resolved(entry.resolution.clone().into_resolution_result(ctx)));
+                    return Ok(Some(InstallOpResult::Resolved(entry.resolution.clone().into_resolution_result(ctx)?)));
                 }
             }
 
             if let Some(locator) = enforced_resolution {
-                return Some(InstallOpResult::Pinned(PinnedResult {
+                return Ok(Some(InstallOpResult::Pinned(PinnedResult {
                     locator: locator.clone(),
-                }));
+                })));
             }
         }
 
-        None
+        Ok(None)
     }
 }
 
@@ -522,6 +522,7 @@ pub struct Install {
     pub install_state: InstallState,
     pub roots: BTreeSet<Descriptor>,
     pub skip_build: bool,
+    pub skip_link_step: bool,
     pub skip_lockfile_update: bool,
     pub constraints_check: bool,
 }
@@ -533,36 +534,44 @@ pub struct InstallResult {
 
 impl Install {
     pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
-        self.install_state.last_installed_at = project.last_modified_at.as_nanos();
+        if self.skip_link_step {
+            project.attach_install_state(self.install_state)?;
 
-        let link_future
-            = linker::link_project(project, &mut self);
+            if !self.skip_lockfile_update {
+                project.write_lockfile(&self.lockfile)?;
+            }
+        } else {
+            self.install_state.last_installed_at = project.last_modified_at.as_nanos();
 
-        let link_result
-            = async_section("Linking the project", link_future).await?;
+            let link_future
+                = linker::link_project(project, &mut self);
 
-        for (location, locator) in &link_result.packages_by_location {
-            self.install_state.locations_by_package.insert(locator.clone(), location.clone());
-        }
+            let link_result
+                = async_section("Linking the project", link_future).await?;
 
-        self.install_state.packages_by_location
-            = link_result.packages_by_location;
+            for (location, locator) in &link_result.packages_by_location {
+                self.install_state.locations_by_package.insert(locator.clone(), location.clone());
+            }
 
-        project.attach_install_state(self.install_state)?;
+            self.install_state.packages_by_location
+                = link_result.packages_by_location;
 
-        if !self.skip_lockfile_update {
-            project.write_lockfile(&self.lockfile)?;
-        }
+            project.attach_install_state(self.install_state)?;
 
-        if !self.skip_build && !link_result.build_requests.entries.is_empty() {
-            let build_future
-                = build::BuildManager::new(link_result.build_requests).run(project);
+            if !self.skip_lockfile_update {
+                project.write_lockfile(&self.lockfile)?;
+            }
 
-            let build_result
-                = async_section("Building the project", build_future).await?;
+            if !self.skip_build && !link_result.build_requests.entries.is_empty() {
+                let build_future
+                    = build::BuildManager::new(link_result.build_requests).run(project);
 
-            if !build_result.build_errors.is_empty() {
-                return Err(Error::SilentError);
+                let build_result
+                    = async_section("Building the project", build_future).await?;
+
+                if !build_result.build_errors.is_empty() {
+                    return Err(Error::SilentError);
+                }
             }
         }
 
@@ -635,6 +644,11 @@ impl<'a> InstallManager<'a> {
 
     pub fn with_constraints_check(mut self, constraints_check: bool) -> Self {
         self.result.constraints_check = constraints_check;
+        self
+    }
+
+    pub fn with_skip_link_step(mut self, skip_link_step: bool) -> Self {
+        self.result.skip_link_step = skip_link_step;
         self
     }
 
@@ -834,7 +848,7 @@ impl<'a> InstallManager<'a> {
     }
 }
 
-fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descriptor, resolution: &Resolution, apply_overrides: bool) -> () {
+fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descriptor, resolution: &Resolution, apply_overrides: bool) -> Result<(), Error> {
     if apply_overrides {
         let candidate_resolutions = context.project
             .expect("The project is required to normalize resolutions, as it may be impacted by the project's overrides")
@@ -875,8 +889,25 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
     }
 
     match &mut descriptor.range {
+        Range::Catalog(params) => {
+            let project
+                = context.project
+                    .expect("The project is required to normalize catalog resolutions");
+
+            descriptor.range
+                = lookup_catalog_entry(project, params, &descriptor.ident)?;
+
+            if descriptor.range.details().require_binding {
+                descriptor.parent = Some(project.root_workspace().locator());
+            } else {
+                descriptor.parent = None;
+            }
+
+            normalize_resolution(context, descriptor, resolution, false)?;
+        },
+
         Range::Patch(params) => {
-            normalize_resolution(context, &mut params.inner.as_mut().0, resolution, false);
+            normalize_resolution(context, &mut params.inner.as_mut().0, resolution, false)?;
         },
 
         Range::AnonymousSemver(params) => {
@@ -895,6 +926,8 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
 
         _ => {},
     };
+
+    Ok(())
 }
 
 const BUILTIN_EXTENSIONS_JSON: &str = include_str!("../data/builtin-extensions.json");
@@ -911,7 +944,7 @@ static BUILTIN_EXTENSIONS: LazyLock<BTreeMap<SemverDescriptor, PackageExtension>
     extension_map
 });
 
-pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resolution) -> (BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>) {
+pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resolution) -> Result<(BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>), Error> {
     let project
         = context.project.expect("The project is required to normalize resolutions");
 
@@ -1002,7 +1035,7 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     // independently from any other.
     //
     for descriptor in dependencies.values_mut() {
-        normalize_resolution(context, descriptor, resolution, true);
+        normalize_resolution(context, descriptor, resolution, true)?;
     }
 
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
@@ -1010,5 +1043,5 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
             .or_insert(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}.into());
     }
 
-    (dependencies, peer_dependencies)
+    Ok((dependencies, peer_dependencies))
 }

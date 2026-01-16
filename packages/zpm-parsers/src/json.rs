@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, ops::Range, str::FromStr};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::{document::Document, value::Indent, Error, Path, Value};
+use crate::{document::Document, value::{Indent, IndentStyle}, Error, Path, Value};
 
 #[cfg(not(sonic_rs))]
 pub use serde_json as json_provider;
@@ -267,11 +267,16 @@ impl JsonDocument {
 
         scanner.skip_whitespace();
 
-        let top_level_indent
-            = self.find_object_indent(scanner.offset, Some(2))?;
+        let top_level_indent_info
+            = self.find_object_indent(scanner.offset, Some((2, IndentStyle::default())))?;
+
+        let (top_level_indent, style) = match top_level_indent_info {
+            Some((indent, style)) => (Some(indent), style),
+            None => (None, IndentStyle::default()),
+        };
 
         let property_indent
-            = Indent::new(None, top_level_indent);
+            = Indent::with_style(None, top_level_indent, style);
 
         self.insert_at(scanner.offset, &Path::new(), new_key, property_indent, value)
     }
@@ -355,10 +360,15 @@ impl JsonDocument {
         let mut new_content
             = vec![];
 
+        let indent_byte = match indent.style {
+            IndentStyle::Spaces => b' ',
+            IndentStyle::Tabs => b'\t',
+        };
+
         if let Some(child_indent) = indent.child_indent {
             new_content.push(b'\n');
             for _ in 0..child_indent {
-                new_content.push(b' ');
+                new_content.push(indent_byte);
             }
         }
 
@@ -370,7 +380,7 @@ impl JsonDocument {
             new_content.push(b'\n');
             if let Some(self_indent) = indent.self_indent {
                 for _ in 0..self_indent {
-                    new_content.push(b' ');
+                    new_content.push(indent_byte);
                 }
             }
         }
@@ -452,26 +462,38 @@ impl JsonDocument {
     }
 
     /**
-     * Return the indent level at the given offset. Return None if the given
+     * Return the indent level and style at the given offset. Return None if the given
      * offset is inline (i.e. not at the beginning of a line).
      */
-    fn find_indent_at(&self, mut offset: usize) -> Option<usize> {
+    fn find_indent_at(&self, mut offset: usize) -> Option<(usize, IndentStyle)> {
         let mut indent
             = 0;
+        let mut style
+            = IndentStyle::Spaces;
 
-        while offset > 0 && self.input[offset - 1] == b' ' {
+        // Check for tabs first
+        while offset > 0 && self.input[offset - 1] == b'\t' {
             indent += 1;
             offset -= 1;
+            style = IndentStyle::Tabs;
+        }
+
+        // If no tabs found, check for spaces
+        if indent == 0 {
+            while offset > 0 && self.input[offset - 1] == b' ' {
+                indent += 1;
+                offset -= 1;
+            }
         }
 
         if offset == 0 || self.input[offset - 1] == b'\n' {
-            Some(indent)
+            Some((indent, style))
         } else {
             None
         }
     }
 
-    fn find_object_indent(&self, offset: usize, default_if_empty: Option<usize>) -> Result<Option<usize>, Error> {
+    fn find_object_indent(&self, offset: usize, default_if_empty: Option<(usize, IndentStyle)>) -> Result<Option<(usize, IndentStyle)>, Error> {
         let mut scanner
             = Scanner::new(&self.input, offset);
 
@@ -503,24 +525,29 @@ impl JsonDocument {
     }
 
     fn find_property_indent(&self, path: &Path, offset: usize) -> Result<Indent, Error> {
-        let self_indent
+        let self_indent_info
             = self.find_indent_at(offset);
 
+        let (self_indent, style) = match self_indent_info {
+            Some((indent, style)) => (Some(indent), style),
+            None => (None, IndentStyle::default()),
+        };
+
         let suggested_child_indent = match self_indent {
-            Some(self_indent) => {
+            Some(self_indent_val) => {
                 let delta_between_parent_and_self
                     = path.parent()
                         .map(|p| self.paths.get(&p).unwrap_or(&0))
                         .and_then(|&offset| self.find_indent_at(offset))
-                        .map(|parent_indent| self_indent.saturating_sub(parent_indent))
-                        .unwrap_or(2);
+                        .map(|(parent_indent, _)| self_indent_val.saturating_sub(parent_indent))
+                        .unwrap_or(if style == IndentStyle::Tabs { 1 } else { 2 });
 
-                Some(self_indent + delta_between_parent_and_self)
+                Some((self_indent_val + delta_between_parent_and_self, style))
             },
 
             None => {
                 if offset == 0 {
-                    Some(2)
+                    Some((if style == IndentStyle::Tabs { 1 } else { 2 }, style))
                 } else {
                     None
                 }
@@ -535,13 +562,14 @@ impl JsonDocument {
         scanner.skip_char(b':')?;
         scanner.skip_whitespace();
 
-        let child_indent
+        let child_indent_info
             = self.find_object_indent(scanner.offset, suggested_child_indent)?;
 
-        Ok(Indent {
-            self_indent,
-            child_indent,
-        })
+        let child_indent
+            = child_indent_info
+                .map(|(indent, _)| indent);
+
+        Ok(Indent::with_style(self_indent, child_indent, style))
     }
 }
 
@@ -587,13 +615,13 @@ impl<'a> Scanner<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while self.offset < self.input.len() && (self.input[self.offset] == b' ' || self.input[self.offset] == b'\n') {
+        while self.offset < self.input.len() && (self.input[self.offset] == b' ' || self.input[self.offset] == b'\t' || self.input[self.offset] == b'\n') {
             self.offset += 1;
         }
     }
 
     fn rskip_whitespace(&mut self) {
-        while self.offset > 0 && (self.input[self.offset - 1] == b' ' || self.input[self.offset - 1] == b'\n') {
+        while self.offset > 0 && (self.input[self.offset - 1] == b' ' || self.input[self.offset - 1] == b'\t' || self.input[self.offset - 1] == b'\n') {
             self.offset -= 1;
         }
     }
@@ -937,6 +965,29 @@ mod tests {
 
     // Preserve formatting in complex structures
     #[case(b"{\n  \"section1\": {\n    \"key1\": \"value1\",\n    \"key2\": \"value2\"\n  },\n  \"section2\": {\n    \"key3\": \"value3\"\n  }\n}", vec!["section1", "key2"], Value::String("updated_value2".to_string()), b"{\n  \"section1\": {\n    \"key1\": \"value1\",\n    \"key2\": \"updated_value2\"\n  },\n  \"section2\": {\n    \"key3\": \"value3\"\n  }\n}")]
+
+    // ===== Tab indentation tests =====
+    // Basic value updates with tab indentation
+    #[case(b"{\n\t\"test\": \"value\"\n}", vec!["test"], Value::String("foo".to_string()), b"{\n\t\"test\": \"foo\"\n}")]
+
+    // Insert new top-level key with tab indentation
+    #[case(b"{\n\t\"existing\": \"value\"\n}", vec!["new_key"], Value::String("another".to_string()), b"{\n\t\"existing\": \"value\",\n\t\"new_key\": \"another\"\n}")]
+
+    // Insert nested key with tab indentation
+    #[case(b"{\n\t\"test\": {}\n}", vec!["test", "nested"], Value::String("foo".to_string()), b"{\n\t\"test\": {\n\t\t\"nested\": \"foo\"\n\t}\n}")]
+    #[case(b"{\n\t\"parent\": {\n\t\t\"existing\": \"value\"\n\t}\n}", vec!["parent", "new_child"], Value::String("new".to_string()), b"{\n\t\"parent\": {\n\t\t\"existing\": \"value\",\n\t\t\"new_child\": \"new\"\n\t}\n}")]
+
+    // Delete operations with tab indentation
+    #[case(b"{\n\t\"keep\": \"this\",\n\t\"delete\": \"me\"\n}", vec!["delete"], Value::Undefined, b"{\n\t\"keep\": \"this\"\n}")]
+
+    // Array values with tab indentation
+    #[case(b"{\n\t\"items\": []\n}", vec!["items"], Value::Array(vec![Value::String("item1".to_string()), Value::String("item2".to_string())]), b"{\n\t\"items\": [\n\t\t\"item1\",\n\t\t\"item2\"\n\t]\n}")]
+
+    // Object values with tab indentation
+    #[case(b"{\n\t\"config\": {}\n}", vec!["config"], Value::Object(vec![("enabled".to_string(), Value::Bool(true)), ("timeout".to_string(), Value::Number("30".to_string()))]), b"{\n\t\"config\": {\n\t\t\"enabled\": true,\n\t\t\"timeout\": 30\n\t}\n}")]
+
+    // Deeply nested with tab indentation
+    #[case(b"{\n\t\"a\": {\n\t\t\"b\": {}\n\t}\n}", vec!["a", "b", "c"], Value::String("deep".to_string()), b"{\n\t\"a\": {\n\t\t\"b\": {\n\t\t\t\"c\": \"deep\"\n\t\t}\n\t}\n}")]
 
     fn test_update_document(#[case] document: &[u8], #[case] path: Vec<&str>, #[case] value: Value, #[case] expected: &[u8]) {
         let mut document

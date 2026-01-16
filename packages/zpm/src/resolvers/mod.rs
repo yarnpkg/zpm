@@ -10,6 +10,7 @@ use crate::{
 };
 
 pub mod builtin;
+pub mod catalog;
 pub mod folder;
 pub mod git;
 pub mod link;
@@ -120,20 +121,20 @@ impl Resolution {
 }
 
 impl IntoResolutionResult for Resolution {
-    fn into_resolution_result(mut self, context: &InstallContext<'_>) -> ResolutionResult {
+    fn into_resolution_result(mut self, context: &InstallContext<'_>) -> Result<ResolutionResult, Error> {
         let original_resolution = self.clone();
 
         let (dependencies, peer_dependencies)
-            = normalize_resolutions(context, &self);
+            = normalize_resolutions(context, &self)?;
 
         self.dependencies = dependencies;
         self.peer_dependencies = peer_dependencies;
 
-        ResolutionResult {
+        Ok(ResolutionResult {
             resolution: self,
             original_resolution,
             package_data: None,
-        }
+        })
     }
 }
 
@@ -222,6 +223,7 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
         Range::WorkspacePath(params)
             => workspace::resolve_path_descriptor(&context, &descriptor, params),
 
+        Range::Catalog(_) |
         Range::MissingPeerDependency |
         Range::WorkspaceMagic(_) |
         Range::WorkspaceSemver(_) |

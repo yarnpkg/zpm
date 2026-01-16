@@ -355,8 +355,7 @@ describe(`Features`, () => {
             [`my-local-package`]: `catalog:`,
           },
         },
-        async ({path, run}) => {
-          // Create a local package
+        async ({path, run, source}) => {
           await xfs.mkdirPromise(`${path}/local-package` as PortablePath, {recursive: true});
           await xfs.writeJsonPromise(`${path}/local-package/package.json` as PortablePath, {
             name: `my-local-package`,
@@ -371,9 +370,10 @@ describe(`Features`, () => {
 
           await run(`install`);
 
-          // Verify that the local package was installed
-          const lockfile = await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`);
-          expect(lockfile).toMatch(/my-local-package@file:\.\/local-package/);
+          await expect(source(`require('my-local-package/package.json')`)).resolves.toMatchObject({
+            name: `my-local-package`,
+            version: `1.0.0`,
+          });
         },
       ),
     );

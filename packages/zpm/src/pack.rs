@@ -20,6 +20,7 @@ use globset::GlobMatcher;
 use regex::Regex;
 use zpm_utils::ToFileString;
 
+use crate::resolvers::catalog::lookup_catalog_entry;
 use crate::script::ScriptEnvironment;
 use crate::{
     error::Error,
@@ -480,6 +481,10 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: &PackOpt
                         Some(Range::AnonymousSemver(AnonymousSemverRange {
                             range: workspace.manifest.remote.version.clone().unwrap_or_default().to_range(zpm_semver::RangeKind::Exact),
                         }))
+                    },
+
+                    Range::Catalog(params) => {
+                        Some(lookup_catalog_entry(project, params, ident)?)
                     },
 
                     _ => {

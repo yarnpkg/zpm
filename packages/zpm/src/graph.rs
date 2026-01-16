@@ -6,8 +6,8 @@ use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt}
 #[path = "./graph.test.rs"]
 mod graph_tests;
 
-pub trait GraphCache<TCtx, TIn, TOut> where Self: Sized {
-    fn graph_cache(&self, ctx: &TCtx, value: &TIn) -> Option<TOut>;
+pub trait GraphCache<TCtx, TIn, TOut, TErr> where Self: Sized {
+    fn graph_cache(&self, ctx: &TCtx, value: &TIn) -> Result<Option<TOut>, TErr>;
 }
 
 pub trait GraphIn<'a, TCtx, TOut, TErr> where Self: Sized, TCtx: Send {
@@ -85,7 +85,7 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
     TCtx: Clone + Send,
     TIn: Clone + Debug + Eq + Hash + Send + GraphIn<'a, TCtx, TOut, TErr> + 'a,
     TOut: Clone + GraphOut<TCtx, TIn>,
-    TCache: GraphCache<TCtx, TIn, TOut>
+    TCache: GraphCache<TCtx, TIn, TOut, TErr>
 {
     pub fn new(context: TCtx, cache: TCache) -> Self {
         Self {
@@ -179,29 +179,36 @@ impl<'a, TCtx, TIn, TOut, TErr, TCache> GraphTasks<'a, TCtx, TIn, TOut, TErr, TC
     fn update(&mut self) {
         while self.running.len() < 100 {
             if let Some(op) = self.ready.pop() {
-                if let Some(cached_value) = self.cache.graph_cache(&self.context, &op) {
-                    self.accept_cached(op, cached_value);
-                    continue;
+                match self.cache.graph_cache(&self.context, &op) {
+                    Ok(Some(out)) => {
+                        self.accept_cached(op, out);
+                    },
+
+                    Ok(None) => {
+                        let (resolved_dependency_count, dependencies) = self.tasks.get(&op)
+                            .expect("Expected the task entry to exist for ops registered in the ready list");
+
+                        assert_eq!(*resolved_dependency_count, dependencies.len());
+
+                        let op_dependencies = dependencies.iter()
+                            .map(|dep| self.results.success.get(dep).cloned().expect("Expected a resolved dependency to have a success status"))
+                            .collect();
+
+                        let op_clone = op.clone();
+                        let op_run
+                            = op.graph_run(self.context.clone(), op_dependencies);
+
+                        let op_run_tagged
+                            = op_run.map(move |x| (op_clone, x))
+                                .boxed();
+
+                        self.running.push(op_run_tagged);
+                    },
+
+                    Err(err) => {
+                        self.results.failed.push((op, err));
+                    },
                 }
-
-                let (resolved_dependency_count, dependencies) = self.tasks.get(&op)
-                    .expect("Expected the task entry to exist for ops registered in the ready list");
-
-                assert_eq!(*resolved_dependency_count, dependencies.len());
-
-                let op_dependencies = dependencies.iter()
-                    .map(|dep| self.results.success.get(dep).cloned().expect("Expected a resolved dependency to have a success status"))
-                    .collect();
-
-                let op_clone = op.clone();
-                let op_run
-                    = op.graph_run(self.context.clone(), op_dependencies);
-
-                let op_run_tagged
-                    = op_run.map(move |x| (op_clone, x))
-                        .boxed();
-
-                self.running.push(op_run_tagged);
             } else {
                 break;
             }

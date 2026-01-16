@@ -49,7 +49,7 @@ fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
     }
 }
 
-fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: zpm_semver::Version, mut manifest: RemoteManifestWithScripts) -> ResolutionResult {
+fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: zpm_semver::Version, mut manifest: RemoteManifestWithScripts) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -117,15 +117,28 @@ pub fn resolve_aliased(descriptor: &Descriptor, dependencies: Vec<InstallOpResul
             .as_resolved()
             .clone();
 
-    let Reference::Shorthand(inner_params) = inner_resolution.resolution.locator.reference.clone() else {
-        unreachable!();
+    let inner_reference
+        = inner_resolution.resolution.locator.reference.clone();
+
+    let new_reference = match inner_reference {
+        Reference::Shorthand(inner_params) => RegistryReference {
+            ident: inner_resolution.resolution.locator.ident.clone(),
+            version: inner_params.version.clone(),
+        }.into(),
+
+        Reference::Registry(inner_params) => RegistryReference {
+            ident: inner_params.ident.clone(),
+            version: inner_params.version.clone(),
+        }.into(),
+
+        // For non-conventional tarball URLs, preserve the URL reference as-is
+        Reference::Url(_) => inner_reference,
+
+        _ => unreachable!("Unexpected reference type in resolve_aliased: {:?}", inner_reference),
     };
 
     inner_resolution.resolution.locator
-        = Locator::new(descriptor.ident.clone(), RegistryReference {
-            ident: inner_resolution.resolution.locator.ident.clone(),
-            version: inner_params.version.clone(),
-        }.into());
+        = Locator::new(descriptor.ident.clone(), new_reference);
 
     Ok(inner_resolution)
 }
@@ -183,7 +196,7 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         let manifest
             = JsonDocument::hydrate_from_value(manifest)?;
 
-        return Ok(build_resolution_result(context, descriptor, package_ident, version.clone(), manifest));
+        return build_resolution_result(context, descriptor, package_ident, version.clone(), manifest);
     }
 
     Err(Error::NoCandidatesFound(descriptor.range.clone()))
@@ -244,7 +257,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let manifest
         = JsonDocument::hydrate_from_value(&manifest)?;
 
-    Ok(build_resolution_result(context, descriptor, package_ident, version, manifest))
+    build_resolution_result(context, descriptor, package_ident, version, manifest)
 }
 
 pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &RegistryReference) -> Result<ResolutionResult, Error> {
@@ -273,5 +286,5 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote.clone());
 
-    Ok(resolution.into_resolution_result(context))
+    resolution.into_resolution_result(context)
 }

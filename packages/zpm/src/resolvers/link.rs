@@ -25,5 +25,5 @@ pub fn resolve_locator(ctx: &InstallContext<'_>, locator: &Locator, _params: &Li
     let resolution
         = Resolution::new_empty(locator.clone(), zpm_semver::Version::new());
 
-    Ok(resolution.into_resolution_result(ctx))
+    resolution.into_resolution_result(ctx)
 }

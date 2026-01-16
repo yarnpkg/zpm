@@ -128,6 +128,13 @@ pub enum Range {
         path: String,
     },
 
+    #[pattern(r"catalog:(?<catalog>.+)?")]
+    #[to_file_string(|params| format!("catalog:{}", params.catalog.as_deref().unwrap_or("")))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("catalog:{}", params.catalog.as_deref().unwrap_or(""))))]
+    Catalog {
+        catalog: Option<String>,
+    },
+
     #[pattern(r"workspace:(?<magic>.*)")]
     #[to_file_string(|params| format!("workspace:{}", serde_plain::to_string(&params.magic).unwrap()))]
     #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", serde_plain::to_string(&params.magic).unwrap())))]

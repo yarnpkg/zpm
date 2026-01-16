@@ -41,5 +41,5 @@ pub fn resolve_locator(context: &InstallContext, locator: &Locator, params: &Por
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
-    Ok(resolution.into_resolution_result(context))
+    resolution.into_resolution_result(context)
 }

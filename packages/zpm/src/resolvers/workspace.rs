@@ -69,7 +69,7 @@ fn resolve_workspace(context: &InstallContext<'_>, locator: Locator, mut manifes
         resolution.dependencies.extend(manifest.dev_dependencies);
     }
 
-    Ok(resolution.into_resolution_result(context))
+    resolution.into_resolution_result(context)
 }
 
 pub fn resolve_name_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &WorkspaceIdentRange) -> Result<ResolutionResult, Error> {

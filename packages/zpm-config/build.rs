@@ -140,8 +140,11 @@ impl Field {
                         Some(Expression::Number(default))
                             => format!("|| Setting::new({}, Source::Default)", default),
 
+                        Some(Expression::Array(default)) if default.is_empty()
+                            => "|| Default::default()".to_string(),
+
                         Some(Expression::Array(default))
-                            => format!("|| [{}].iter().map(|s| Setting::new(s.to_string(), Source::Default)).collect()", default.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(", ")),
+                            => format!("|| [{}].iter().map(|s| Setting::new(FromFileString::from_file_string(s).unwrap(), Source::Default)).collect()", default.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(", ")),
 
                         None if field.types.contains(&Type::Null)
                             => "|| Setting::new(None, Source::Default)".to_string(),

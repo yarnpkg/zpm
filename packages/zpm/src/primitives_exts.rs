@@ -123,6 +123,17 @@ impl RangeExt for Range {
                     transient_resolution: true,
                 }
             },
+
+            Range::Catalog(_) => {
+                // Catalog ranges are resolved to their actual range before
+                // resolution, so this should not be reached during normal
+                // execution. We provide sensible defaults just in case.
+                RangeDetails {
+                    require_binding: false,
+                    fetch_before_resolve: false,
+                    transient_resolution: false,
+                }
+            },
         }
     }
 }

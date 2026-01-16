@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::Arc, time::UNIX_EPOCH};
 
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext};
@@ -37,6 +37,12 @@ pub enum InstallMode {
     #[to_file_string(|| "skip-build".to_string())]
     #[to_print_string(|| "skip-build".to_string())]
     SkipBuild,
+
+    /// Just update the lockfile, skip the fetching and linking.
+    #[pattern("update-lockfile")]
+    #[to_file_string(|| "update-lockfile".to_string())]
+    #[to_print_string(|| "update-lockfile".to_string())]
+    UpdateLockfile,
 }
 
 
@@ -120,15 +126,16 @@ impl Project {
         let mut last_modified_at
             = LastModifiedAt::new();
 
-        let mut config = Configuration::load(
-            &ConfigurationContext {
-                env: std::env::vars().collect(),
-                user_cwd: user_cwd.clone(),
-                project_cwd: Some(project_cwd.clone()),
-                package_cwd: Some(package_cwd.clone()),
-            },
-            &mut last_modified_at,
-        ).unwrap();
+        let configuration_context = ConfigurationContext {
+            env: std::env::vars().collect(),
+            user_cwd: user_cwd.clone(),
+            project_cwd: Some(project_cwd.clone()),
+            package_cwd: Some(package_cwd.clone()),
+        };
+
+        let mut config
+            = Configuration::load(&configuration_context, &mut last_modified_at)
+                .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
 
         if config.settings.enable_migration_mode.value {
             config.settings.enable_global_cache.value = true;
@@ -812,6 +819,7 @@ impl Project {
                     .with_previous_state(self.install_state.as_ref())
                     .with_roots(roots)
                     .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
+                    .with_skip_link_step(options.mode == Some(InstallMode::UpdateLockfile))
                     .with_skip_lockfile_update(options.roots.is_some())
                     .resolve_and_fetch().await?
                     .link_and_build(self).await?;

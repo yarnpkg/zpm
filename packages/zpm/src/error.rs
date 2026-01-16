@@ -150,6 +150,12 @@ pub enum Error {
     #[error("Workspace profile not found ({0})")]
     WorkspaceProfileNotFound(String),
 
+    #[error("Catalog not found ({0})")]
+    CatalogNotFound(String),
+
+    #[error("Catalog entry not found ({0}:{})", .1.to_print_string())]
+    CatalogEntryNotFound(String, Ident),
+
     #[error("Package manifest not found ({})", .0.to_print_string())]
     ManifestNotFound(Path),
 
@@ -261,8 +267,14 @@ pub enum Error {
     #[error("Failed to read pnpm node_modules directory")]
     PnpmNodeModulesReadError,
 
+    #[error("An error occured while parsing your configuration: {0}")]
+    ConfigurationParseError(Arc<dyn std::error::Error + Send + Sync>),
+
     #[error("Lockfile generation error: {0}")]
     LockfileGenerationError(zpm_parsers::Error),
+
+    #[error("Incompatible options: {}", .0.join(", "))]
+    IncompatibleOptions(Vec<String>),
 
     #[error("Repository clone failed")]
     RepositoryCloneFailed(String),
