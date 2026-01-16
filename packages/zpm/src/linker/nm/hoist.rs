@@ -216,10 +216,16 @@ impl<'a, 'b> TreeRenderer<'a, 'b> {
         let node
             = &self.tree.nodes[node_idx];
 
+        let is_workspace_link
+            = |expected_locator: &Locator, locator: &Locator|
+                expected_locator.reference.is_workspace_reference() && locator.ident == expected_locator.ident && locator.reference == LinkReference {
+                    path: self.tree.project.package_location(&expected_locator).unwrap().to_file_string(),
+                }.into();
+
         let is_dependency_valid
             = |expected_locator: &Locator|
                 available_dependencies.get(&expected_locator.ident)
-                    .map_or(false, |&available_locator| available_locator == expected_locator);
+                    .map_or(false, |&available_locator| available_locator == expected_locator || is_workspace_link(expected_locator, available_locator));
 
         let invalid_dependencies
             = node.dependencies.values()
@@ -357,7 +363,7 @@ impl<'a, 'b> Hoister<'a, 'b> {
                 .copied()
                 .collect_vec();
 
-        let mut hoist_candidates_with_parents: BTreeMap<Locator, Vec<usize>>
+        let mut hoist_candidates_with_parents: BTreeMap<Locator, Vec<(usize, Ident, usize)>>
             = BTreeMap::new();
 
         for &child_idx in node_children.iter() {
@@ -369,14 +375,14 @@ impl<'a, 'b> Hoister<'a, 'b> {
             let transitive_children
                 = flattened_node.children.clone().unwrap();
 
-            for &transitive_node in transitive_children.values() {
+            for (child_ident, &transitive_node) in transitive_children.iter() {
                 let parents = hoist_candidates_with_parents
                     .entry(self.work_tree.nodes[transitive_node].locator.clone())
                         .or_default();
 
                 self.work_tree.expand_node(transitive_node);
 
-                parents.push(child_idx);
+                parents.push((child_idx, child_ident.clone(), transitive_node));
             }
         }
 
@@ -398,9 +404,9 @@ impl<'a, 'b> Hoister<'a, 'b> {
                     existing_child_locator == Some(transitive_locator)
                 });
 
-        for (transitive_locator, parents) in locators_to_meld {
-            for parent_idx in parents {
-                self.work_tree.nodes[parent_idx].children.as_mut().unwrap().remove(&transitive_locator.ident).unwrap();
+        for (_transitive_locator, parents) in locators_to_meld {
+            for (parent_idx, child_ident, _child_node_idx) in parents {
+                self.work_tree.nodes[parent_idx].children.as_mut().unwrap().remove(&child_ident).unwrap();
             }
         }
 
@@ -431,16 +437,11 @@ impl<'a, 'b> Hoister<'a, 'b> {
             for (hoistable_locator, parents) in &selected_hoist_candidates {
                 // We can take the node from any parent; we just need to read the locator dependencies
                 // anyway (perhaps we should keep that elsewhere so we don't need to clone it?).
-                let parent_node
-                    = &self.work_tree.nodes[parents[0]];
-
-                let hoistable_idx
-                    = *parent_node
-                        .children.as_ref().unwrap().get(&hoistable_locator.ident)
-                        .unwrap_or_else(|| panic!("Failed to find ident [{}] in [{}]", hoistable_locator.to_file_string(), parent_node.locator.to_file_string()));
+                let (_parent_idx, _child_ident, hoistable_idx)
+                    = &parents[0];
 
                 let hoistable_node
-                    = &self.work_tree.nodes[hoistable_idx];
+                    = &self.work_tree.nodes[*hoistable_idx];
 
                 let mut candidate_dependencies
                     = BTreeSet::new();
@@ -674,14 +675,8 @@ impl<'a, 'b> Hoister<'a, 'b> {
                     // We need to hoist a node, but we only have the locator ... no big deal, we'll just
                     // steal the node from one of the old parents! They should all be valid anyway (and
                     // perhaps even identical although I'm not certain about that just yet).
-                    let old_parent_idx
-                        = selected_hoist_candidates[&hoisting_locator][0];
-
-                    let old_parent_node
-                        = &self.work_tree.nodes[old_parent_idx];
-
-                    let hoisting_idx
-                        = old_parent_node.children.as_ref().unwrap()[&hoisting_locator.ident];
+                    let (_old_parent_idx, _child_ident, hoisting_idx)
+                        = &selected_hoist_candidates[&hoisting_locator][0];
 
                     new_dependencies.insert(
                         hoisting_locator.ident.clone(),
@@ -690,7 +685,7 @@ impl<'a, 'b> Hoister<'a, 'b> {
 
                     new_children.insert(
                         hoisting_locator.ident.clone(),
-                        hoisting_idx,
+                        *hoisting_idx,
                     );
 
                     hoisted_dependencies_to_remove.push(hoisting_locator.clone());
@@ -698,8 +693,8 @@ impl<'a, 'b> Hoister<'a, 'b> {
             }
 
             for hoisted_dependency_to_remove in hoisted_dependencies_to_remove {
-                for parent_locator in &selected_hoist_candidates[&hoisted_dependency_to_remove] {
-                    self.work_tree.nodes[*parent_locator].children.as_mut().unwrap().remove(&hoisted_dependency_to_remove.ident).unwrap();
+                for (parent_idx, child_ident, _child_node_idx) in &selected_hoist_candidates[&hoisted_dependency_to_remove] {
+                    self.work_tree.nodes[*parent_idx].children.as_mut().unwrap().remove(child_ident).unwrap();
                 }
             }
 
