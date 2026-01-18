@@ -25,6 +25,7 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 itertools = "0.13.0"
 open = "5.3.2"
 rayon = "1.10.0"
+rkyv = { version = "0.8", features = ["bytecheck"] }
 reqwest = { version = "0.12.26", default-features = false, features = ["gzip", "http2", "hickory-dns", "rustls-tls"] }
 regex = "1.10.6"
 serde_with = "3.9.0"

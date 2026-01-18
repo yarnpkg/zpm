@@ -11,7 +11,7 @@ use zpm_formats::zip::ZipSupport;
 
 use crate::{
     cache::{CompositeCache, DiskCache},
-    diff_finder::SaveEntry,
+    diff_finder::CacheEntry,
     error::Error,
     git::{GitOperation, detect_git_operation},
     http::HttpClient,
@@ -965,24 +965,25 @@ impl Workspace {
                 let workspace_paths
                     = lookup_state.cache.iter()
                         .filter(|(_, entry)| {
-                            matches!(entry, SaveEntry::File(_, _))
+                            matches!(entry, CacheEntry::File(_, _))
                         })
                         .filter(|(p, _)| {
-                            let candidate_workspace_rel_dir = p.dirname()
-                                .expect("Expected this path to have a parent directory, since it's supposed to be the relative path to a package.json file");
+                            let candidate_workspace_rel_dir
+                                = p.dirname()
+                                    .expect("Expected this path to have a parent directory, since it's supposed to be the relative path to a package.json file");
 
-                            let dir_str = candidate_workspace_rel_dir.as_str();
+                            let dir_str
+                                = candidate_workspace_rel_dir.as_str();
 
-                            // Important: If there are no positive patterns, nothing matches.
                             positive_glob_set.is_match(dir_str) && !negative_glob_set.is_match(dir_str)
                         })
                         .collect::<Vec<_>>();
 
-                for (manifest_rel_path, save_entry) in workspace_paths {
-                    if let SaveEntry::File(last_changed_at, manifest) = save_entry {
-                        let workspace_rel_path = manifest_rel_path.dirname().unwrap();
+                for (manifest_rel_path, cache_entry) in workspace_paths {
+                    if let CacheEntry::File(last_changed_at, manifest) = cache_entry {
+                        let workspace_rel_path
+                            = manifest_rel_path.dirname().unwrap();
 
-                        // Skip if we've already processed this workspace
                         if !processed_workspaces.insert(workspace_rel_path.clone()) {
                             continue;
                         }
@@ -993,7 +994,6 @@ impl Workspace {
                             last_changed_at: *last_changed_at,
                         })?);
 
-                        // If this workspace has its own workspaces field, add it to the queue
                         if let Some(nested_patterns) = &manifest.workspaces {
                             workspace_queue.push((workspace_rel_path, nested_patterns.clone()));
                         }

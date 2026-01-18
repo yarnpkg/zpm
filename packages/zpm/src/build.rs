@@ -79,8 +79,11 @@ impl BuildRequest {
                 Some(build_cache_folder)
             };
 
+            let roots
+                = vec![Path::new()];
+
             let mut artifact_finder
-                = DiffFinder::<ArtifactFinder>::new(cwd_abs, Default::default());
+                = DiffFinder::<ArtifactFinder>::new(cwd_abs, roots, Default::default());
 
             if build_cache_folder.is_some() {
                 artifact_finder.rsync()?;
