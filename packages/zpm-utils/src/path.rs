@@ -38,6 +38,10 @@ impl FromFileString for ExplicitPath {
     type Error = PathError;
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        if !s.contains('/') {
+            return Err(PathError::InvalidExplicitPathParameter(s.to_string()));
+        }
+
         let raw_path
             = RawPath::try_from(s)?;
 
