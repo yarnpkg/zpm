@@ -49,22 +49,7 @@ impl FromFileString for ExplicitPath {
     }
 }
 
-impl FromStr for ExplicitPath {
-    type Err = PathError;
-
-    fn from_str(val: &str) -> Result<ExplicitPath, PathError> {
-        if !val.contains('/') {
-            return Err(PathError::InvalidExplicitPathParameter(val.to_string()));
-        }
-
-        let raw_path
-            = RawPath::try_from(val)?;
-
-        Ok(ExplicitPath {
-            raw_path,
-        })
-    }
-}
+impl_file_string_from_str!(ExplicitPath);
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RawPath {
