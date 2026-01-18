@@ -13,17 +13,17 @@ import heroEllipse from "@/assets/svg/hero-ellipse.svg";
 ---
 
 <div class="absolute inset-0 overflow-hidden -z-40">
-  <div class="w-full aspect-square">
+  <div class="mt-20 lg:mt-0 w-full aspect-square">
     <CatShader client:load/>
   </div>
 </div>
 
-<div class="-mt-32">
-  <section class="relative not-content">
-    <div class="container flex flex-col items-start min-h-[100vh] justify-around">
-      <div class="flex-none mt-0 h-8"/>
+<div class="-mt-28 lg:-mt-33">
+  <section class="relative">
+    <div class="px-4 container flex flex-col items-start h-[100vh] lg:justify-around">
+      <div class="flex-none mt-0 h-33"/>
 
-      <div class="flex flex-col items-start my-auto">
+      <div class="flex flex-col items-start mt-auto mb-0 lg:mb-auto">
         <Heading size="h1" className="max-w-3xl">
           Safe, stable, <br /> reproducible projects
         </Heading>
@@ -36,19 +36,17 @@ import heroEllipse from "@/assets/svg/hero-ellipse.svg";
         <div class="pt-6 lg:pt-8">
           <Headline>
             <span class="font-mono">
-              curl -sS https://repo.yarnpkg.com/install | bash
+              curl repo.yarnpkg.com/install | bash
             </span>
           </Headline>
         </div>
-        <div class="pt-2">
+        <div class="pt-4">
           <Versions client:load/>
         </div>
       </div>
 
-      <div class="flex flex-col items-start w-full relative">
-        <div class="mt-auto mb-0 max-w-2xl w-full h-28">
-          <SearchPackageInterface client:only="preact" />
-        </div>
+      <div class="mt-8 -mx-2 mb-8 max-w-2xl w-full">
+        <SearchPackageInterface client:only="preact" />
       </div>
     </div>
   </section>

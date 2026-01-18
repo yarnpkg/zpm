@@ -20,7 +20,7 @@ export default function PackageSidebar({
   const searchQuery = localStorage.getItem(`lastSearchQuery`) || ``;
 
   return (
-    <div class={`lg:w-1/4 not-content`}>
+    <div class={`lg:w-1/4`}>
       <div class={`flex flex-col gap-y-6`}>
         <div class={`lg:hidden`}>
           <PackageBreadcrumbs name={name} version={version} />

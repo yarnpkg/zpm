@@ -33,7 +33,7 @@ function Badge({labelClass, label, value}: BadgeProps) {
 
 function Versions() {
   return (
-    <div class={`flex items-center gap-x-2`}>
+    <div class={`flex items-center gap-x-4`}>
       <Badge labelClass={`bg-linear-to-t from-green-800 to-green-600 text-white`} label={`Stable`} value={<Version name={`stable`} />} />
       <Badge labelClass={`bg-linear-to-t from-orange-900 to-orange-800 text-white`} label={`Canary`} value={<Version name={`canary`} />} />
     </div>
