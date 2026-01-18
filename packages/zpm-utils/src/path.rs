@@ -34,6 +34,17 @@ pub struct ExplicitPath {
     pub raw_path: RawPath,
 }
 
+impl FromFileString for ExplicitPath {
+    type Error = PathError;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        let raw_path
+            = RawPath::try_from(s)?;
+
+        Ok(ExplicitPath { raw_path })
+    }
+}
+
 impl FromStr for ExplicitPath {
     type Err = PathError;
 
