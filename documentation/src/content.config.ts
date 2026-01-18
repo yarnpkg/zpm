@@ -127,6 +127,7 @@ export const collections = {
     schema: z.object({
       id: z.string(),
       name: z.string(),
+      emojis: z.string().optional(),
       title: z.string().optional(),
       url: z.string().url().optional(),
       image_url: z.string().url().optional(),
