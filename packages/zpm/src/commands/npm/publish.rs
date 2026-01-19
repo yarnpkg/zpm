@@ -4,7 +4,7 @@ use clipanion::cli;
 use http::StatusCode;
 use serde::Serialize;
 use zpm_macro_enum::zpm_enum;
-use zpm_parsers::{JsonDocument, RawJsonValue};
+use zpm_parsers::{JsonDocument, RawJsonOwnedValue};
 use zpm_utils::{IoResultExt, Provider, Sha1, Sha512, ToFileString, ToHumanString, is_ci};
 
 use crate::{
@@ -385,7 +385,7 @@ struct VersionPayload<'a> {
     git_head: Option<String>,
 
     #[serde(flatten)]
-    extra: RawJsonValue<'a>,
+    extra: RawJsonOwnedValue,
 }
 
 #[derive(Serialize)]

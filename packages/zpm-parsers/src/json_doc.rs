@@ -17,6 +17,12 @@ pub type RawJsonValue<'a> = &'a json_provider::value::RawValue;
 #[cfg(sonic_rs)]
 pub type RawJsonValue<'a> = json_provider::LazyValue<'a>;
 
+#[cfg(not(sonic_rs))]
+pub type RawJsonOwnedValue = json_provider::value::Value;
+
+#[cfg(sonic_rs)]
+pub type RawJsonOwnedValue = json_provider::Value;
+
 #[derive(Debug)]
 pub struct JsonSource<T> {
     pub value: T,
