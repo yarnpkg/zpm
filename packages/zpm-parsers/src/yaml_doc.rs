@@ -202,24 +202,10 @@ impl YamlDocument {
                 let line_indent
                     = scanner.get_line_indent();
 
-                // Check if we hit a line with less or equal indent (and it's not empty/comment)
+                // Check if we hit a line with less indent (sibling or parent level)
+                // Lines at block_indent are children, not siblings
                 if line_indent < block_indent && !scanner.is_empty_or_comment_line() {
                     break;
-                }
-
-                if line_indent == block_indent && !scanner.is_empty_or_comment_line() {
-                    // Same indent means sibling key, only break if it looks like a key
-                    let saved
-                        = scanner.offset;
-
-                    scanner.skip_inline_whitespace();
-
-                    if scanner.peek_key() {
-                        scanner.offset = saved;
-                        break;
-                    }
-
-                    scanner.offset = saved;
                 }
 
                 scanner.skip_line();
@@ -237,17 +223,24 @@ impl YamlDocument {
 
         // If the new value starts with a newline (block value), start from after the colon
         // to remove any trailing spaces. Otherwise, add a space if needed.
-        let (replace_start, final_value) = if formatted.starts_with('\n') {
-            (after_colon_offset, formatted)
+        let (replace_start, replace_end, final_value) = if formatted.starts_with('\n') {
+            (after_colon_offset, post_value_offset, formatted)
         } else {
             // Ensure there's a space before inline values
             let prefix
                 = if pre_value_offset == after_colon_offset {" "} else {""};
 
-            (pre_value_offset, format!("{}{}", prefix, formatted))
+            // When replacing a block value with an inline value, preserve the trailing newline
+            let end = if is_block && post_value_offset > 0 && self.input[post_value_offset - 1] == b'\n' {
+                post_value_offset - 1
+            } else {
+                post_value_offset
+            };
+
+            (pre_value_offset, end, format!("{}{}", prefix, formatted))
         };
 
-        self.replace_range(replace_start..post_value_offset, final_value.as_bytes())
+        self.replace_range(replace_start..replace_end, final_value.as_bytes())
     }
 
     fn insert_key(&mut self, path: &Path, value: Value) -> Result<(), Error> {
@@ -405,6 +398,12 @@ impl YamlDocument {
 
         let mut injected_content
             = vec![];
+
+        // Add leading newline if the previous line doesn't end with one
+        // (happens when document ends without trailing newline)
+        if scanner.offset > 0 && self.input[scanner.offset - 1] != b'\n' {
+            injected_content.push(b'\n');
+        }
 
         // Add indentation
         for _ in 0..self_indent {
@@ -910,59 +909,6 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn peek_key(&self) -> bool {
-        let mut offset
-            = self.offset;
-
-        // Skip leading whitespace
-        while offset < self.input.len() && self.input[offset] == b' ' {
-            offset += 1;
-        }
-
-        // Check for quoted key
-        if offset < self.input.len() && (self.input[offset] == b'"' || self.input[offset] == b'\'') {
-            let quote
-                = self.input[offset];
-
-            offset += 1;
-
-            let mut escaped
-                = false;
-
-            while offset < self.input.len() {
-                if escaped {
-                    escaped = false;
-                    offset += 1;
-                } else if self.input[offset] == b'\\' {
-                    escaped = true;
-                    offset += 1;
-                } else if self.input[offset] == quote {
-                    offset += 1;
-
-                    // Skip whitespace after quote
-                    while offset < self.input.len() && self.input[offset] == b' ' {
-                        offset += 1;
-                    }
-
-                    return offset < self.input.len() && self.input[offset] == b':';
-                } else if self.input[offset] == b'\n' {
-                    return false;
-                } else {
-                    offset += 1;
-                }
-            }
-
-            return false;
-        }
-
-        // Unquoted key - look for colon
-        while offset < self.input.len() && self.input[offset] != b':' && self.input[offset] != b'\n' {
-            offset += 1;
-        }
-
-        offset < self.input.len() && self.input[offset] == b':'
-    }
-
     fn skip_key(&mut self) -> Result<(), Error> {
         self.skip_inline_whitespace();
 
@@ -1181,7 +1127,7 @@ mod tests {
     // Insert nested keys
     #[case(b"parent:\n  existing: value\n", vec!["parent", "new_child"], Value::String("new".to_string()), b"parent:\n  existing: value\n  new_child: new\n")]
 
-    // Insert into empty parent (regression test for insert_into_empty indent bug)
+    // Insert into empty parent
     #[case(b"parent:\n", vec!["parent", "child"], Value::String("value".to_string()), b"parent:\n  child: value\n")]
     #[case(b"level1:\n  level2:\n", vec!["level1", "level2", "level3"], Value::String("deep".to_string()), b"level1:\n  level2:\n    level3: deep\n")]
     // Insert into empty parent with 4-space indentation
@@ -1191,7 +1137,7 @@ mod tests {
     #[case(b"keep: this\ndelete: me\n", vec!["delete"], Value::Undefined, b"keep: this\n")]
     #[case(b"first: v1\nsecond: v2\nthird: v3\n", vec!["second"], Value::Undefined, b"first: v1\nthird: v3\n")]
 
-    // Delete key at EOF without trailing newline (regression test for remove_key_at EOF bug)
+    // Delete key at EOF without trailing newline
     #[case(b"keep: this\ndelete: me", vec!["delete"], Value::Undefined, b"keep: this\n")]
     #[case(b"only:", vec!["only"], Value::Undefined, b"")]
 
@@ -1204,6 +1150,14 @@ mod tests {
     // String quoting
     #[case(b"test: simple\n", vec!["test"], Value::String("has space".to_string()), b"test: \"has space\"\n")]
     #[case(b"test: old\n", vec!["test"], Value::String("true".to_string()), b"test: \"true\"\n")]
+
+    // Insert after property without trailing newline
+    #[case(b"existing: value", vec!["new_key"], Value::String("new".to_string()), b"existing: value\nnew_key: new\n")]
+
+    // Update parent key that has nested children
+    #[case(b"parent:\n  child: old\n", vec!["parent"], Value::String("new".to_string()), b"parent: new\n")]
+    #[case(b"a:\n  b:\n    c: value\n", vec!["a"], Value::String("replaced".to_string()), b"a: replaced\n")]
+    #[case(b"a:\n  b:\n    c: value\n", vec!["a", "b"], Value::String("replaced".to_string()), b"a:\n  b: replaced\n")]
 
     fn test_update_document(#[case] document: &[u8], #[case] path: Vec<&str>, #[case] value: Value, #[case] expected: &[u8]) {
         let mut document
