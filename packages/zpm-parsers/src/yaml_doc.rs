@@ -36,7 +36,8 @@ impl Document for YamlDocument {
     }
 
     fn set_path(&mut self, path: &Path, value: Value) -> Result<(), Error> {
-        let key_span = self.paths.get(path);
+        let key_span
+            = self.paths.get(path);
 
         if value == Value::Undefined {
             if let Some(key_span) = key_span {
@@ -68,12 +69,14 @@ impl YamlDocument {
     }
 
     pub fn new(input: Vec<u8>) -> Result<Self, Error> {
-        let mut scanner = Scanner::new(&input, 0);
+        let mut scanner
+            = Scanner::new(&input, 0);
 
         scanner.path = Some(vec![]);
         scanner.scan_document()?;
 
-        let paths = scanner.fields.into_iter().collect();
+        let paths
+            = scanner.fields.into_iter().collect();
 
         Ok(Self {
             input,
@@ -83,19 +86,24 @@ impl YamlDocument {
     }
 
     pub fn rescan(&mut self) -> Result<(), Error> {
-        let mut scanner = Scanner::new(&self.input, 0);
+        let mut scanner
+            = Scanner::new(&self.input, 0);
 
         scanner.path = Some(vec![]);
         scanner.scan_document()?;
 
-        self.paths = scanner.fields.into_iter().collect();
+        self.paths
+            = scanner.fields.into_iter().collect();
 
         Ok(())
     }
 
     fn replace_range(&mut self, range: Range<usize>, data: &[u8]) -> Result<(), Error> {
-        let (before, after) = self.input.split_at(range.start);
-        let (_, after) = after.split_at(range.end - range.start);
+        let (before, after)
+            = self.input.split_at(range.start);
+
+        let (_, after)
+            = after.split_at(range.end - range.start);
 
         self.changed = true;
 
@@ -106,49 +114,50 @@ impl YamlDocument {
     }
 
     fn remove_key_at(&mut self, path: &Path, key_offset: usize) -> Result<(), Error> {
-        // Find the line containing this key
-        let line_start = self.input[0..key_offset]
-            .iter()
-            .rposition(|&c| c == b'\n')
-            .map(|pos| pos + 1)
-            .unwrap_or(0);
+        let line_start
+            = self.input[0..key_offset]
+                .iter()
+                .rposition(|&c| c == b'\n')
+                .map(|pos| pos + 1)
+                .unwrap_or(0);
 
-        let mut scanner = Scanner::new(&self.input, key_offset);
+        let mut scanner
+            = Scanner::new(&self.input, key_offset);
 
-        // Skip the key
         scanner.skip_key()?;
         scanner.skip_char(b':')?;
         scanner.skip_inline_whitespace();
 
-        // Skip the value (could be inline or block)
-        let _value_start = scanner.offset;
-
         if scanner.peek() == Some(b'\n') || scanner.peek().is_none() {
-            // Block value - need to find the end of the block
-            scanner.offset += 1;
-            let block_indent = self.find_indent_at(key_offset).map(|(i, _)| i).unwrap_or(0);
+            let _ = scanner.skip_char(b'\n');
+
+            let block_indent
+                = self.find_indent_at(key_offset)
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
 
             while scanner.offset < self.input.len() {
-                let line_indent = scanner.get_line_indent();
+                let line_indent
+                    = scanner.get_line_indent();
+
                 if line_indent <= block_indent && !scanner.is_empty_or_comment_line() {
                     break;
                 }
+
                 scanner.skip_line();
             }
         } else {
-            // Inline value - skip to end of line
-            scanner.skip_to_eol();
-            if scanner.peek() == Some(b'\n') {
-                scanner.offset += 1;
-            }
+            scanner.skip_line();
         }
 
-        let end_offset = scanner.offset;
+        let end_offset
+            = scanner.offset;
 
         // Check if this is the only key at this level
-        let siblings: Vec<_> = self.paths.keys()
-            .filter(|p| p.is_direct_child_of(&Path::from_segments(path[0..path.len() - 1].to_vec())))
-            .collect();
+        let siblings: Vec<_>
+            = self.paths.keys()
+                .filter(|p| p.is_direct_child_of(&Path::from_segments(path[0..path.len() - 1].to_vec())))
+                .collect();
 
         if siblings.len() == 1 && path.len() > 1 {
             // This is the only child, remove the parent too
@@ -159,47 +168,60 @@ impl YamlDocument {
     }
 
     fn update_key_at(&mut self, path: &Path, key_offset: usize, value: Value) -> Result<(), Error> {
-        let mut scanner = Scanner::new(&self.input, key_offset);
+        let mut scanner
+            = Scanner::new(&self.input, key_offset);
 
-        let indent = self.find_property_indent(path, key_offset)?;
+        let indent
+            = self.find_property_indent(path, key_offset)?;
 
-        // Skip key
         scanner.skip_key()?;
         scanner.skip_char(b':')?;
 
         // Remember offset right after colon (before any whitespace)
-        let after_colon_offset = scanner.offset;
+        let after_colon_offset
+            = scanner.offset;
 
         scanner.skip_inline_whitespace();
 
-        let pre_value_offset = scanner.offset;
+        let pre_value_offset
+            = scanner.offset;
 
-        // Determine if the current value is a block or inline
-        let is_block = scanner.peek() == Some(b'\n') || scanner.peek().is_none();
+        let is_block
+            = scanner.peek() == Some(b'\n') || scanner.peek().is_none();
 
         if is_block {
             // Skip block value
             if scanner.peek() == Some(b'\n') {
                 scanner.offset += 1;
             }
-            let block_indent = indent.child_indent.unwrap_or(2);
+
+            let block_indent
+                = indent.child_indent.unwrap_or(2);
 
             while scanner.offset < self.input.len() {
-                let line_indent = scanner.get_line_indent();
+                let line_indent
+                    = scanner.get_line_indent();
+
                 // Check if we hit a line with less or equal indent (and it's not empty/comment)
                 if line_indent < block_indent && !scanner.is_empty_or_comment_line() {
                     break;
                 }
+
                 if line_indent == block_indent && !scanner.is_empty_or_comment_line() {
                     // Same indent means sibling key, only break if it looks like a key
-                    let saved = scanner.offset;
+                    let saved
+                        = scanner.offset;
+
                     scanner.skip_inline_whitespace();
+
                     if scanner.peek_key() {
                         scanner.offset = saved;
                         break;
                     }
+
                     scanner.offset = saved;
                 }
+
                 scanner.skip_line();
             }
         } else {
@@ -207,10 +229,11 @@ impl YamlDocument {
             scanner.skip_to_eol();
         }
 
-        let post_value_offset = scanner.offset;
+        let post_value_offset
+            = scanner.offset;
 
-        // Format the new value
-        let formatted = self.format_value(&value, indent);
+        let formatted
+            = self.format_value(&value, indent);
 
         // If the new value starts with a newline (block value), start from after the colon
         // to remove any trailing spaces. Otherwise, add a space if needed.
@@ -218,7 +241,9 @@ impl YamlDocument {
             (after_colon_offset, formatted)
         } else {
             // Ensure there's a space before inline values
-            let prefix = if pre_value_offset == after_colon_offset { " " } else { "" };
+            let prefix
+                = if pre_value_offset == after_colon_offset {" "} else {""};
+
             (pre_value_offset, format!("{}{}", prefix, formatted))
         };
 
@@ -226,7 +251,8 @@ impl YamlDocument {
     }
 
     fn insert_key(&mut self, path: &Path, value: Value) -> Result<(), Error> {
-        let parent_path = Path::from_segments(path[0..path.len() - 1].to_vec());
+        let parent_path
+            = Path::from_segments(path[0..path.len() - 1].to_vec());
 
         if path.len() > 1 {
             self.insert_nested_key(&parent_path, &path[path.len() - 1], value)
@@ -250,34 +276,50 @@ impl YamlDocument {
     fn insert_nested_key(&mut self, parent_path: &Path, new_key: &str, value: Value) -> Result<(), Error> {
         self.ensure_object_key(&parent_path)?;
 
-        let &parent_key_offset = self.paths.get(parent_path)
-            .expect("A parent key must exist");
+        let &parent_key_offset
+            = self.paths.get(parent_path)
+                .expect("A parent key must exist");
 
-        let mut scanner = Scanner::new(&self.input, parent_key_offset);
+        let mut scanner
+            = Scanner::new(&self.input, parent_key_offset);
 
         scanner.skip_key()?;
         scanner.skip_char(b':')?;
         scanner.skip_inline_whitespace();
 
-        // Get parent's indent level
-        let parent_indent = self.find_indent_at(parent_key_offset).map(|(i, _)| i).unwrap_or(0);
-        let child_indent = parent_indent + 2;
+        // Get parent's indent level and calculate the indent delta
+        let parent_indent
+            = self.find_indent_at(parent_key_offset).map(|(i, _)| i).unwrap_or(0);
 
-        let property_indent = Indent::with_style(Some(child_indent), Some(child_indent + 2), IndentStyle::Spaces);
+        // Calculate indent delta by comparing parent's indent with grandparent's indent
+        let indent_delta
+            = parent_path.parent()
+                .and_then(|grandparent| self.paths.get(&grandparent))
+                .and_then(|&grandparent_offset| self.find_indent_at(grandparent_offset))
+                .map(|(grandparent_indent, _)| parent_indent.saturating_sub(grandparent_indent))
+                .unwrap_or(2);
+
+        let child_indent
+            = parent_indent + indent_delta;
+
+        let property_indent
+            = Indent::with_style(Some(child_indent), Some(child_indent + indent_delta), IndentStyle::Spaces);
 
         self.insert_at(scanner.offset, parent_path, new_key, property_indent, value)
     }
 
     fn insert_top_level_key(&mut self, new_key: &str, value: Value) -> Result<(), Error> {
-        let top_level_indent = Indent::with_style(Some(0), Some(2), IndentStyle::Spaces);
+        let top_level_indent
+            = Indent::with_style(Some(0), Some(2), IndentStyle::Spaces);
 
         self.insert_at(0, &Path::new(), new_key, top_level_indent, value)
     }
 
     fn insert_at(&mut self, _offset: usize, parent_path: &Path, new_key: &str, indent: Indent, value: Value) -> Result<(), Error> {
-        let (before, after): (Vec<_>, Vec<_>) = self.paths.keys()
-            .filter(|p| p.is_direct_child_of(parent_path))
-            .partition(|p| p.last() < Some(new_key));
+        let (before, after): (Vec<_>, Vec<_>)
+            = self.paths.keys()
+                .filter(|p| p.is_direct_child_of(parent_path))
+                .partition(|p| p.last() < Some(new_key));
 
         if let Some(insert_path) = after.first() {
             return self.insert_before_property(self.paths[insert_path], new_key, indent, value);
@@ -293,15 +335,18 @@ impl YamlDocument {
 
     fn insert_before_property(&mut self, next_property_offset: usize, new_key: &str, indent: Indent, value: Value) -> Result<(), Error> {
         // Find line start for the next property
-        let line_start = self.input[0..next_property_offset]
-            .iter()
-            .rposition(|&c| c == b'\n')
-            .map(|pos| pos + 1)
-            .unwrap_or(0);
+        let line_start
+            = self.input[0..next_property_offset]
+                .iter()
+                .rposition(|&c| c == b'\n')
+                .map(|pos| pos + 1)
+                .unwrap_or(0);
 
-        let self_indent = indent.self_indent.unwrap_or(0);
+        let self_indent
+            = indent.self_indent.unwrap_or(0);
 
-        let mut injected_content = vec![];
+        let mut injected_content
+            = vec![];
 
         // Add indentation
         for _ in 0..self_indent {
@@ -311,10 +356,13 @@ impl YamlDocument {
         push_yaml_key(&mut injected_content, new_key);
         injected_content.push(b':');
 
-        let formatted_value = self.format_value(&value, indent.clone());
+        let formatted_value
+            = self.format_value(&value, indent.clone());
+
         if !formatted_value.starts_with('\n') {
             injected_content.push(b' ');
         }
+
         injected_content.extend_from_slice(formatted_value.as_bytes());
         injected_content.push(b'\n');
 
@@ -322,9 +370,11 @@ impl YamlDocument {
     }
 
     fn insert_after_property(&mut self, previous_property_offset: usize, new_key: &str, indent: Indent, value: Value) -> Result<(), Error> {
-        let mut scanner = Scanner::new(&self.input, previous_property_offset);
+        let mut scanner
+            = Scanner::new(&self.input, previous_property_offset);
 
-        let self_indent = indent.self_indent.unwrap_or(0);
+        let self_indent
+            = indent.self_indent.unwrap_or(0);
 
         // Skip the previous property's key and value
         scanner.skip_key()?;
@@ -335,23 +385,26 @@ impl YamlDocument {
         if scanner.peek() == Some(b'\n') {
             // Block value
             scanner.offset += 1;
-            let block_indent = indent.child_indent.unwrap_or(self_indent + 2);
+
+            let block_indent
+                = indent.child_indent.unwrap_or(self_indent + 2);
 
             while scanner.offset < self.input.len() {
-                let line_indent = scanner.get_line_indent();
+                let line_indent
+                    = scanner.get_line_indent();
+
                 if line_indent < block_indent && !scanner.is_empty_or_comment_line() {
                     break;
                 }
+
                 scanner.skip_line();
             }
         } else {
-            scanner.skip_to_eol();
-            if scanner.peek() == Some(b'\n') {
-                scanner.offset += 1;
-            }
+            scanner.skip_line();
         }
 
-        let mut injected_content = vec![];
+        let mut injected_content
+            = vec![];
 
         // Add indentation
         for _ in 0..self_indent {
@@ -361,10 +414,13 @@ impl YamlDocument {
         push_yaml_key(&mut injected_content, new_key);
         injected_content.push(b':');
 
-        let formatted_value = self.format_value(&value, indent.clone());
+        let formatted_value
+            = self.format_value(&value, indent.clone());
+
         if !formatted_value.starts_with('\n') {
             injected_content.push(b' ');
         }
+
         injected_content.extend_from_slice(formatted_value.as_bytes());
         injected_content.push(b'\n');
 
@@ -374,15 +430,19 @@ impl YamlDocument {
     fn insert_into_empty(&mut self, parent_path: &Path, new_key: &str, indent: Indent, value: Value) -> Result<(), Error> {
         if parent_path.is_empty() {
             // Inserting at top level into empty document
-            let mut new_content = vec![];
+            let mut new_content
+                = vec![];
 
             push_yaml_key(&mut new_content, new_key);
             new_content.push(b':');
 
-            let formatted_value = self.format_value(&value, indent);
+            let formatted_value
+                = self.format_value(&value, indent);
+
             if !formatted_value.starts_with('\n') {
                 new_content.push(b' ');
             }
+
             new_content.extend_from_slice(formatted_value.as_bytes());
             new_content.push(b'\n');
 
@@ -390,34 +450,46 @@ impl YamlDocument {
         }
 
         // Find parent and insert after the colon
-        let &parent_offset = self.paths.get(parent_path)
-            .expect("Parent path must exist");
+        let &parent_offset
+            = self.paths.get(parent_path)
+                .expect("Parent path must exist");
 
-        let mut scanner = Scanner::new(&self.input, parent_offset);
+        let mut scanner
+            = Scanner::new(&self.input, parent_offset);
+
         scanner.skip_key()?;
         scanner.skip_char(b':')?;
 
-        let child_indent = indent.child_indent.unwrap_or(indent.self_indent.unwrap_or(0) + 2);
+        let self_indent
+            = indent.self_indent.unwrap_or(0);
 
-        let mut new_content = vec![];
+        let mut new_content
+            = vec![];
+
         new_content.push(b'\n');
 
-        for _ in 0..child_indent {
+        for _ in 0..self_indent {
             new_content.push(b' ');
         }
 
         push_yaml_key(&mut new_content, new_key);
         new_content.push(b':');
 
-        let child_indent_obj = Indent::with_style(Some(child_indent), Some(child_indent + 2), indent.style);
-        let formatted_value = self.format_value(&value, child_indent_obj);
+        let child_indent_obj
+            = Indent::with_style(Some(self_indent), Some(self_indent + 2), indent.style);
+
+        let formatted_value
+            = self.format_value(&value, child_indent_obj);
+
         if !formatted_value.starts_with('\n') {
             new_content.push(b' ');
         }
+
         new_content.extend_from_slice(formatted_value.as_bytes());
 
-        // Find what comes after the colon
-        let insert_offset = scanner.offset;
+        let insert_offset
+            = scanner.offset;
+
         scanner.skip_inline_whitespace();
 
         let end_offset = if scanner.peek() == Some(b'\n') || scanner.peek().is_none() {
@@ -432,8 +504,10 @@ impl YamlDocument {
     }
 
     fn find_indent_at(&self, offset: usize) -> Option<(usize, IndentStyle)> {
-        let mut check_offset = offset;
-        let mut indent = 0;
+        let mut check_offset
+            = offset;
+        let mut indent
+            = 0;
 
         while check_offset > 0 && self.input[check_offset - 1] == b' ' {
             indent += 1;
@@ -448,7 +522,8 @@ impl YamlDocument {
     }
 
     fn find_property_indent(&self, path: &Path, offset: usize) -> Result<Indent, Error> {
-        let self_indent_info = self.find_indent_at(offset);
+        let self_indent_info
+            = self.find_indent_at(offset);
 
         let (self_indent, style) = match self_indent_info {
             Some((indent, style)) => (Some(indent), style),
@@ -458,18 +533,23 @@ impl YamlDocument {
         // Calculate child indent based on parent relationship
         let suggested_child_indent = match self_indent {
             Some(self_indent_val) => {
-                let delta = path.parent()
-                    .and_then(|p| self.paths.get(&p))
-                    .and_then(|&offset| self.find_indent_at(offset))
-                    .map(|(parent_indent, _)| self_indent_val.saturating_sub(parent_indent))
-                    .unwrap_or(2);
+                let delta
+                    = path.parent()
+                        .and_then(|p| self.paths.get(&p))
+                        .and_then(|&offset| self.find_indent_at(offset))
+                        .map(|(parent_indent, _)| self_indent_val.saturating_sub(parent_indent))
+                        .unwrap_or(2);
 
                 Some(self_indent_val + delta)
-            }
-            None => Some(2),
+            },
+
+            None => {
+                Some(2)
+            },
         };
 
-        let child_indent = suggested_child_indent;
+        let child_indent
+            = suggested_child_indent;
 
         Ok(Indent::with_style(self_indent, child_indent, style))
     }
@@ -480,26 +560,33 @@ impl YamlDocument {
             Value::Bool(b) => b.to_string(),
             Value::Number(n) => n.to_string(),
             Value::String(s) => format_yaml_string(s),
+
             Value::Array(arr) => {
                 if arr.is_empty() {
                     return "[]".to_string();
                 }
 
-                let child_indent = indent.child_indent.unwrap_or(indent.self_indent.unwrap_or(0) + 2);
-                let mut result = String::new();
+                let child_indent
+                    = indent.child_indent.unwrap_or(indent.self_indent.unwrap_or(0) + 2);
+                let mut result
+                    = String::new();
 
                 for item in arr {
                     result.push('\n');
+
                     for _ in 0..child_indent {
                         result.push(' ');
                     }
+
                     result.push_str("- ");
 
-                    let item_str = self.format_value(item, Indent::with_style(
-                        Some(child_indent + 2),
-                        Some(child_indent + 4),
-                        indent.style,
-                    ));
+                    let item_str
+                        = self.format_value(item, Indent::with_style(
+                            Some(child_indent + 2),
+                            Some(child_indent + 4),
+                            indent.style,
+                        ));
+
                     result.push_str(&item_str);
                 }
 
@@ -510,26 +597,32 @@ impl YamlDocument {
                     return "{}".to_string();
                 }
 
-                let child_indent = indent.child_indent.unwrap_or(indent.self_indent.unwrap_or(0) + 2);
-                let mut result = String::new();
+                let child_indent
+                    = indent.child_indent.unwrap_or(indent.self_indent.unwrap_or(0) + 2);
+                let mut result
+                    = String::new();
 
                 for (key, val) in obj {
                     result.push('\n');
+
                     for _ in 0..child_indent {
                         result.push(' ');
                     }
+
                     result.push_str(&format_yaml_key(key));
                     result.push(':');
 
-                    let val_str = self.format_value(val, Indent::with_style(
-                        Some(child_indent),
-                        Some(child_indent + 2),
-                        indent.style,
-                    ));
+                    let val_str
+                        = self.format_value(val, Indent::with_style(
+                            Some(child_indent),
+                            Some(child_indent + 2),
+                            indent.style,
+                        ));
 
                     if !val_str.starts_with('\n') {
                         result.push(' ');
                     }
+
                     result.push_str(&val_str);
                 }
 
@@ -541,10 +634,11 @@ impl YamlDocument {
     }
 
     pub fn sort_object_keys(&mut self, parent_path: &Path) -> Result<bool, Error> {
-        let mut keys_by_position = self.paths.iter()
-            .filter(|(path, _)| path.is_direct_child_of(parent_path))
-            .map(|(path, &offset)| (path.last().unwrap(), offset))
-            .collect_vec();
+        let mut keys_by_position
+            = self.paths.iter()
+                .filter(|(path, _)| path.is_direct_child_of(parent_path))
+                .map(|(path, &offset)| (path.last().unwrap(), offset))
+                .collect_vec();
 
         if keys_by_position.len() <= 1 {
             return Ok(false);
@@ -558,16 +652,20 @@ impl YamlDocument {
         }
 
         // For YAML, we need to extract and sort entire key-value blocks
-        let mut key_value_pairs: Vec<(&str, Vec<u8>)> = vec![];
+        let mut key_value_pairs: Vec<(&str, Vec<u8>)>
+            = vec![];
 
         for (key_name, offset) in &keys_by_position {
-            let line_start = self.input[0..*offset]
-                .iter()
-                .rposition(|&c| c == b'\n')
-                .map(|pos| pos + 1)
-                .unwrap_or(0);
+            let line_start
+                = self.input[0..*offset]
+                    .iter()
+                    .rposition(|&c| c == b'\n')
+                    .map(|pos| pos + 1)
+                    .unwrap_or(0);
 
-            let mut scanner = Scanner::new(&self.input, *offset);
+            let mut scanner
+                = Scanner::new(&self.input, *offset);
+
             scanner.skip_key()?;
             scanner.skip_char(b':')?;
             scanner.skip_inline_whitespace();
@@ -579,20 +677,21 @@ impl YamlDocument {
                     scanner.offset += 1;
                 }
 
-                let key_indent = self.find_indent_at(*offset).map(|(i, _)| i).unwrap_or(0);
+                let key_indent
+                    = self.find_indent_at(*offset).map(|(i, _)| i).unwrap_or(0);
 
                 while scanner.offset < self.input.len() {
-                    let line_indent = scanner.get_line_indent();
+                    let line_indent
+                        = scanner.get_line_indent();
+
                     if line_indent <= key_indent && !scanner.is_empty_or_comment_line() {
                         break;
                     }
+
                     scanner.skip_line();
                 }
             } else {
-                scanner.skip_to_eol();
-                if scanner.peek() == Some(b'\n') {
-                    scanner.offset += 1;
-                }
+                scanner.skip_line();
             }
 
             key_value_pairs.push((key_name, self.input[line_start..scanner.offset].to_vec()));
@@ -602,14 +701,19 @@ impl YamlDocument {
         key_value_pairs.sort_by_key(|(key_name, _)| *key_name);
 
         // Calculate the range to replace
-        let first_line_start = self.input[0..keys_by_position[0].1]
-            .iter()
-            .rposition(|&c| c == b'\n')
-            .map(|pos| pos + 1)
-            .unwrap_or(0);
+        let first_line_start
+            = self.input[0..keys_by_position[0].1]
+                .iter()
+                .rposition(|&c| c == b'\n')
+                .map(|pos| pos + 1)
+                .unwrap_or(0);
 
-        let last_offset = keys_by_position.last().unwrap().1;
-        let mut scanner = Scanner::new(&self.input, last_offset);
+        let last_offset
+            = keys_by_position.last().unwrap().1;
+
+        let mut scanner
+            = Scanner::new(&self.input, last_offset);
+
         scanner.skip_key()?;
         scanner.skip_char(b':')?;
         scanner.skip_inline_whitespace();
@@ -618,26 +722,30 @@ impl YamlDocument {
             if scanner.peek() == Some(b'\n') {
                 scanner.offset += 1;
             }
-            let key_indent = self.find_indent_at(last_offset).map(|(i, _)| i).unwrap_or(0);
+
+            let key_indent
+                = self.find_indent_at(last_offset).map(|(i, _)| i).unwrap_or(0);
 
             while scanner.offset < self.input.len() {
-                let line_indent = scanner.get_line_indent();
+                let line_indent
+                    = scanner.get_line_indent();
+
                 if line_indent <= key_indent && !scanner.is_empty_or_comment_line() {
                     break;
                 }
+
                 scanner.skip_line();
             }
         } else {
-            scanner.skip_to_eol();
-            if scanner.peek() == Some(b'\n') {
-                scanner.offset += 1;
-            }
+            scanner.skip_line();
         }
 
-        let content_end = scanner.offset;
+        let content_end
+            = scanner.offset;
 
         // Rebuild content
-        let mut sorted_content: Vec<u8> = vec![];
+        let mut sorted_content: Vec<u8>
+            = vec![];
         for (_, entry_bytes) in key_value_pairs {
             sorted_content.extend_from_slice(&entry_bytes);
         }
@@ -649,42 +757,43 @@ impl YamlDocument {
 }
 
 fn format_yaml_string(s: &str) -> String {
-    // Check if the string needs quoting
     if s.is_empty() {
         return "\"\"".to_string();
     }
 
-    // Check for special YAML values that would be misinterpreted
-    let lower = s.to_lowercase();
-    let needs_quotes = lower == "true" || lower == "false" || lower == "null" || lower == "~"
-        || s.parse::<f64>().is_ok()
-        || s.contains(' ')
-        || s.contains(':')
-        || s.contains('#')
-        || s.contains('\n')
-        || s.contains('"')
-        || s.contains('\'')
-        || s.starts_with(' ')
-        || s.ends_with(' ')
-        || s.starts_with('-')
-        || s.starts_with('[')
-        || s.starts_with('{')
-        || s.starts_with('!')
-        || s.starts_with('&')
-        || s.starts_with('*')
-        || s.starts_with('|')
-        || s.starts_with('>')
-        || s.starts_with('%')
-        || s.starts_with('@')
-        || s.starts_with('`');
+    let lower
+        = s.to_lowercase();
+
+    let needs_quotes
+        = lower == "true" || lower == "false" || lower == "null" || lower == "~"
+            || s.parse::<f64>().is_ok()
+            || s.contains(' ')
+            || s.contains(':')
+            || s.contains('#')
+            || s.contains('\n')
+            || s.contains('"')
+            || s.contains('\'')
+            || s.starts_with(' ')
+            || s.ends_with(' ')
+            || s.starts_with('-')
+            || s.starts_with('[')
+            || s.starts_with('{')
+            || s.starts_with('!')
+            || s.starts_with('&')
+            || s.starts_with('*')
+            || s.starts_with('|')
+            || s.starts_with('>')
+            || s.starts_with('%')
+            || s.starts_with('@')
+            || s.starts_with('`');
 
     if needs_quotes {
-        // Use double quotes and escape special characters
         let escaped = s
             .replace('\\', "\\\\")
             .replace('"', "\\\"")
             .replace('\n', "\\n")
             .replace('\t', "\\t");
+
         format!("\"{}\"", escaped)
     } else {
         s.to_string()
@@ -693,23 +802,25 @@ fn format_yaml_string(s: &str) -> String {
 
 fn format_yaml_key(key: &str) -> String {
     // Check if the key needs quoting
-    let needs_quotes = key.is_empty()
-        || key.contains(':')
-        || key.contains('#')
-        || key.contains('\n')
-        || key.starts_with(' ')
-        || key.ends_with(' ')
-        || key.starts_with('-')
-        || key.starts_with('[')
-        || key.starts_with('{')
-        || key.starts_with('"')
-        || key.starts_with('\'');
+    let needs_quotes
+        = key.is_empty()
+            || key.contains(':')
+            || key.contains('#')
+            || key.contains('\n')
+            || key.starts_with(' ')
+            || key.ends_with(' ')
+            || key.starts_with('-')
+            || key.starts_with('[')
+            || key.starts_with('{')
+            || key.starts_with('"')
+            || key.starts_with('\'');
 
     if needs_quotes {
-        let escaped = key
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n");
+        let escaped
+            = key
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n");
         format!("\"{}\"", escaped)
     } else {
         key.to_string()
@@ -731,7 +842,12 @@ struct Scanner<'a> {
 
 impl<'a> Scanner<'a> {
     fn new(input: &'a [u8], offset: usize) -> Self {
-        Self { input, offset, path: None, fields: vec![] }
+        Self {
+            input,
+            offset,
+            path: None,
+            fields: vec![],
+        }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -752,24 +868,31 @@ impl<'a> Scanner<'a> {
 
     fn skip_line(&mut self) {
         self.skip_to_eol();
+
         if self.peek() == Some(b'\n') {
             self.offset += 1;
         }
     }
 
     fn get_line_indent(&self) -> usize {
-        let mut offset = self.offset;
+        let mut offset
+            = self.offset;
+
         while offset < self.input.len() && self.input[offset] == b' ' {
             offset += 1;
         }
+
         offset - self.offset
     }
 
     fn is_empty_or_comment_line(&self) -> bool {
-        let mut offset = self.offset;
+        let mut offset
+            = self.offset;
+
         while offset < self.input.len() && self.input[offset] == b' ' {
             offset += 1;
         }
+
         offset >= self.input.len() || self.input[offset] == b'\n' || self.input[offset] == b'#'
     }
 
@@ -788,7 +911,8 @@ impl<'a> Scanner<'a> {
     }
 
     fn peek_key(&self) -> bool {
-        let mut offset = self.offset;
+        let mut offset
+            = self.offset;
 
         // Skip leading whitespace
         while offset < self.input.len() && self.input[offset] == b' ' {
@@ -797,9 +921,13 @@ impl<'a> Scanner<'a> {
 
         // Check for quoted key
         if offset < self.input.len() && (self.input[offset] == b'"' || self.input[offset] == b'\'') {
-            let quote = self.input[offset];
+            let quote
+                = self.input[offset];
+
             offset += 1;
-            let mut escaped = false;
+
+            let mut escaped
+                = false;
 
             while offset < self.input.len() {
                 if escaped {
@@ -810,10 +938,12 @@ impl<'a> Scanner<'a> {
                     offset += 1;
                 } else if self.input[offset] == quote {
                     offset += 1;
+
                     // Skip whitespace after quote
                     while offset < self.input.len() && self.input[offset] == b' ' {
                         offset += 1;
                     }
+
                     return offset < self.input.len() && self.input[offset] == b':';
                 } else if self.input[offset] == b'\n' {
                     return false;
@@ -821,6 +951,7 @@ impl<'a> Scanner<'a> {
                     offset += 1;
                 }
             }
+
             return false;
         }
 
@@ -837,9 +968,13 @@ impl<'a> Scanner<'a> {
 
         // Check for quoted key
         if self.peek() == Some(b'"') || self.peek() == Some(b'\'') {
-            let quote = self.input[self.offset];
+            let quote
+                = self.input[self.offset];
+
             self.offset += 1;
-            let mut escaped = false;
+
+            let mut escaped
+                = false;
 
             while self.offset < self.input.len() {
                 if escaped {
@@ -855,6 +990,7 @@ impl<'a> Scanner<'a> {
                     self.offset += 1;
                 }
             }
+
             return Err(Error::InvalidSyntax("Unterminated quoted key".to_string()));
         }
 
@@ -867,14 +1003,20 @@ impl<'a> Scanner<'a> {
     }
 
     fn parse_key(&mut self) -> Result<Option<String>, Error> {
-        let start = self.offset;
+        let start
+            = self.offset;
 
         // Check for quoted key
         if self.peek() == Some(b'"') || self.peek() == Some(b'\'') {
-            let quote = self.input[self.offset];
+            let quote
+                = self.input[self.offset];
+
             self.offset += 1;
-            let mut key = Vec::new();
-            let mut escaped = false;
+
+            let mut key
+                = Vec::new();
+            let mut escaped
+                = false;
 
             while self.offset < self.input.len() {
                 if escaped {
@@ -884,6 +1026,7 @@ impl<'a> Scanner<'a> {
                         b'r' => key.push(b'\r'),
                         c => key.push(c),
                     }
+
                     escaped = false;
                     self.offset += 1;
                 } else if self.input[self.offset] == b'\\' {
@@ -911,7 +1054,9 @@ impl<'a> Scanner<'a> {
             return Ok(None);
         }
 
-        let key = std::str::from_utf8(&self.input[start..self.offset])?.trim().to_string();
+        let key
+            = std::str::from_utf8(&self.input[start..self.offset])?.trim().to_string();
+
         Ok(Some(key))
     }
 
@@ -922,14 +1067,14 @@ impl<'a> Scanner<'a> {
 
     fn scan_block(&mut self, expected_indent: usize) -> Result<(), Error> {
         while self.offset < self.input.len() {
-            // Skip empty lines and comments
             self.skip_empty_lines();
 
             if self.offset >= self.input.len() {
                 break;
             }
 
-            let line_indent = self.get_line_indent();
+            let line_indent
+                = self.get_line_indent();
 
             // If indent decreased, we're done with this block
             if line_indent < expected_indent {
@@ -946,51 +1091,46 @@ impl<'a> Scanner<'a> {
                 continue;
             }
 
-            // Try to parse a key
-            let key_start = self.offset;
-            let key = self.parse_key()?;
+            let key_start
+                = self.offset;
+            let key
+                = self.parse_key()?;
 
             if let Some(key) = key {
-                // Register the field
                 if let Some(ref mut path) = self.path {
                     path.push(key.clone());
                     self.fields.push((Path::from_segments(path.clone()), key_start));
                 }
 
-                // Skip the colon
                 if self.peek() == Some(b':') {
                     self.offset += 1;
                 }
+
                 self.skip_inline_whitespace();
 
-                // Check if there's a value on the same line
                 if self.peek() != Some(b'\n') && self.peek().is_some() {
-                    // Inline value - skip it
                     self.skip_to_eol();
                 }
 
-                // Skip newline
                 if self.peek() == Some(b'\n') {
                     self.offset += 1;
                 }
 
-                // Check for nested block
                 self.skip_empty_lines();
 
                 if self.offset < self.input.len() {
-                    let next_indent = self.get_line_indent();
+                    let next_indent
+                        = self.get_line_indent();
+
                     if next_indent > line_indent {
-                        // Nested block
                         self.scan_block(next_indent)?;
                     }
                 }
 
-                // Pop the path
                 if let Some(ref mut path) = self.path {
                     path.pop();
                 }
             } else {
-                // Not a valid key line, skip it
                 self.skip_line();
             }
         }
@@ -1000,17 +1140,16 @@ impl<'a> Scanner<'a> {
 
     fn skip_empty_lines(&mut self) {
         while self.offset < self.input.len() {
-            let start = self.offset;
+            let start
+                = self.offset;
+
             self.skip_inline_whitespace();
 
             if self.peek() == Some(b'#') {
-                // Comment line
                 self.skip_line();
             } else if self.peek() == Some(b'\n') {
-                // Empty line
                 self.offset += 1;
             } else {
-                // Not empty, restore position
                 self.offset = start;
                 break;
             }
@@ -1042,9 +1181,19 @@ mod tests {
     // Insert nested keys
     #[case(b"parent:\n  existing: value\n", vec!["parent", "new_child"], Value::String("new".to_string()), b"parent:\n  existing: value\n  new_child: new\n")]
 
+    // Insert into empty parent (regression test for insert_into_empty indent bug)
+    #[case(b"parent:\n", vec!["parent", "child"], Value::String("value".to_string()), b"parent:\n  child: value\n")]
+    #[case(b"level1:\n  level2:\n", vec!["level1", "level2", "level3"], Value::String("deep".to_string()), b"level1:\n  level2:\n    level3: deep\n")]
+    // Insert into empty parent with 4-space indentation
+    #[case(b"parent:\n    child:\n", vec!["parent", "child", "grandchild"], Value::String("value".to_string()), b"parent:\n    child:\n        grandchild: value\n")]
+
     // Delete operations
     #[case(b"keep: this\ndelete: me\n", vec!["delete"], Value::Undefined, b"keep: this\n")]
     #[case(b"first: v1\nsecond: v2\nthird: v3\n", vec!["second"], Value::Undefined, b"first: v1\nthird: v3\n")]
+
+    // Delete key at EOF without trailing newline (regression test for remove_key_at EOF bug)
+    #[case(b"keep: this\ndelete: me", vec!["delete"], Value::Undefined, b"keep: this\n")]
+    #[case(b"only:", vec!["only"], Value::Undefined, b"")]
 
     // Array values
     #[case(b"arr: []\n", vec!["arr"], Value::Array(vec![Value::Number("1".to_string()), Value::Number("2".to_string())]), b"arr:\n  - 1\n  - 2\n")]
@@ -1057,7 +1206,8 @@ mod tests {
     #[case(b"test: old\n", vec!["test"], Value::String("true".to_string()), b"test: \"true\"\n")]
 
     fn test_update_document(#[case] document: &[u8], #[case] path: Vec<&str>, #[case] value: Value, #[case] expected: &[u8]) {
-        let mut document = YamlDocument::new(document.to_vec()).unwrap();
+        let mut document
+            = YamlDocument::new(document.to_vec()).unwrap();
 
         document.set_path(&Path::from_segments(path.into_iter().map(|s| s.to_string()).collect()), value).unwrap();
         assert_eq!(String::from_utf8(document.input).unwrap(), String::from_utf8(expected.to_vec()).unwrap());
@@ -1065,8 +1215,10 @@ mod tests {
 
     #[test]
     fn test_hydrate_from_str() {
-        let yaml = "name: test\nversion: \"1.0\"\n";
-        let result: serde_yaml::Value = YamlDocument::hydrate_from_str(yaml).unwrap();
+        let yaml
+            = "name: test\nversion: \"1.0\"\n";
+        let result: serde_yaml::Value
+            = YamlDocument::hydrate_from_str(yaml).unwrap();
 
         assert_eq!(result["name"], serde_yaml::Value::String("test".to_string()));
         assert_eq!(result["version"], serde_yaml::Value::String("1.0".to_string()));
@@ -1076,10 +1228,12 @@ mod tests {
     fn test_to_string() {
         use std::collections::HashMap;
 
-        let mut map = HashMap::new();
+        let mut map
+            = HashMap::new();
         map.insert("key", "value");
 
-        let yaml = YamlDocument::to_string(&map).unwrap();
+        let yaml
+            = YamlDocument::to_string(&map).unwrap();
         assert!(yaml.contains("key:"));
         assert!(yaml.contains("value"));
     }
@@ -1098,9 +1252,11 @@ mod tests {
     #[case(b"deps:\n  zebra: '1.0'\n  apple: '2.0'\n", vec!["deps"], b"deps:\n  apple: '2.0'\n  zebra: '1.0'\n", true)]
 
     fn test_sort_object_keys(#[case] document: &[u8], #[case] path: Vec<&str>, #[case] expected: &[u8], #[case] expected_sorted: bool) {
-        let mut document = YamlDocument::new(document.to_vec()).unwrap();
+        let mut document
+            = YamlDocument::new(document.to_vec()).unwrap();
 
-        let sorted = document.sort_object_keys(&Path::from_segments(path.into_iter().map(|s| s.to_string()).collect())).unwrap();
+        let sorted
+            = document.sort_object_keys(&Path::from_segments(path.into_iter().map(|s| s.to_string()).collect())).unwrap();
 
         assert_eq!(sorted, expected_sorted, "sort_object_keys return value mismatch");
         assert_eq!(String::from_utf8(document.input).unwrap(), String::from_utf8(expected.to_vec()).unwrap());
