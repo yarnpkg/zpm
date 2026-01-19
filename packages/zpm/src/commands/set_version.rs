@@ -1,5 +1,5 @@
 use clipanion::cli;
-use zpm_parsers::{document::Document, JsonDocument, Value};
+use zpm_parsers::{Document, JsonDocument, Value};
 use zpm_switch::{PackageManagerField, PackageManagerReference, VersionPackageManagerReference};
 use zpm_utils::{Path, ToFileString, ToHumanString};
 

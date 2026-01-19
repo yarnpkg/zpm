@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use clipanion::cli;
 use wax::{Glob, Program};
 use zpm_config::Configuration;
-use zpm_parsers::{document::Document, JsonDocument};
+use zpm_parsers::{Document, JsonDocument};
 use zpm_primitives::Ident;
 use zpm_utils::ToFileString;
 

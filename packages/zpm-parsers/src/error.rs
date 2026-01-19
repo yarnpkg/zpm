@@ -1,4 +1,4 @@
-use crate::json::json_provider;
+use crate::json_doc::json_provider;
 
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum Error {

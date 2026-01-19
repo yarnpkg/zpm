@@ -4,7 +4,7 @@ use clipanion::cli;
 use http::StatusCode;
 use serde::Serialize;
 use zpm_macro_enum::zpm_enum;
-use zpm_parsers::{JsonDocument, json_provider};
+use zpm_parsers::{JsonDocument, RawJsonOwnedValue};
 use zpm_utils::{IoResultExt, Provider, Sha1, Sha512, ToFileString, ToHumanString, is_ci};
 
 use crate::{
@@ -225,7 +225,7 @@ impl Publish {
                 .transpose()?;
 
         let extra_manifest
-            = json_provider::from_str(&pack_result.pack_manifest_content).unwrap();
+            = JsonDocument::hydrate_from_str(&pack_result.pack_manifest_content)?;
 
         let version_payload = VersionPayload {
             id: format!("{}@{}", ident.to_file_string(), version_string),
@@ -385,7 +385,7 @@ struct VersionPayload<'a> {
     git_head: Option<String>,
 
     #[serde(flatten)]
-    extra: json_provider::Value,
+    extra: RawJsonOwnedValue,
 }
 
 #[derive(Serialize)]
