@@ -11,8 +11,6 @@ pub use serde_json as json_provider;
 #[cfg(sonic_rs)]
 pub use sonic_rs as json_provider;
 
-pub type RawJsonDeserializer<R> = json_provider::Deserializer<R>;
-
 #[cfg(not(sonic_rs))]
 pub type RawJsonValue<'a> = &'a json_provider::value::RawValue;
 

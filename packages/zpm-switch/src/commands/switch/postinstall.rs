@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::process::Command;
 
 use clipanion::cli;
-use zpm_parsers::{document::Document, JsonDocument};
+use zpm_parsers::{Document, JsonDocument};
 use zpm_utils::{DataType, FromFileString, Note, IoResultExt, Path, ToFileString, ToHumanString};
 
 use crate::errors::Error;

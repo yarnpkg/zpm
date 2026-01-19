@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use browser::BrowserField;
 use serde_with::{serde_as, DefaultOnError};
-use zpm_parsers::{document::Document, Value};
+use zpm_parsers::{Document, Value};
 use zpm_primitives::{Descriptor, Ident, PeerRange, descriptor_map_deserializer, descriptor_map_serializer};
 use zpm_switch::PackageManagerField;
 use zpm_utils::{Path, Requirements, ToFileString};

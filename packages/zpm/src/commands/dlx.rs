@@ -1,6 +1,6 @@
 use std::process::ExitStatus;
 
-use zpm_parsers::{document::Document, JsonDocument, Value};
+use zpm_parsers::{Document, JsonDocument, Value};
 use zpm_utils::{Path, ToFileString};
 use clipanion::cli;
 use zpm_semver::RangeKind;

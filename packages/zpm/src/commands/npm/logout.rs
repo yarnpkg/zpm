@@ -1,4 +1,5 @@
 use clipanion::cli;
+use zpm_parsers::DataDocument;
 use zpm_utils::DataType;
 
 use crate::{
@@ -49,7 +50,7 @@ impl Logout {
             let config_content = config_path
                 .fs_read_text()?;
 
-            let updated_content = zpm_parsers::yaml::Yaml::update_document_field(
+            let updated_content = DataDocument::update_document_field(
                 &config_content,
                 zpm_parsers::Path::from_segments(vec![
                     "npmRegistries".to_string(),
