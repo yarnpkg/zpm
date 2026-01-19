@@ -51,11 +51,17 @@ impl Whoami {
                 allow_oidc: false,
             }).await?;
 
+        let Some(authorization) = authorization else {
+            return Err(Error::AuthenticationError(
+                "No authentication configured".to_string()
+            ));
+        };
+
         let response = http_npm::get(&NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry,
             path: "/-/whoami",
-            authorization: authorization.as_deref(),
+            authorization: Some(&authorization),
             otp: None,
         }).await?;
 
