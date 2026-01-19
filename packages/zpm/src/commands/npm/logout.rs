@@ -39,33 +39,75 @@ impl Logout {
         });
 
         with_report_result(report, async {
-            let registry
-                = get_registry(&project.config, self.scope.as_deref(), self.publish)?
-                    .to_string();
-
-            let Some(config_path) = project.config.user_config_path else {
+            let Some(ref config_path) = project.config.user_config_path else {
                 return Err(Error::AuthenticationError("Failed to get user config path".to_string()));
             };
 
             let config_content = config_path
                 .fs_read_text()?;
 
-            let updated_content = DataDocument::update_document_field(
-                &config_content,
-                zpm_parsers::Path::from_segments(vec![
-                    "npmRegistries".to_string(),
-                    registry.to_string(),
-                    "npmAuthToken".to_string(),
-                ]),
-                zpm_parsers::Value::Undefined,
-            )?;
+            let updated_content = if let Some(scope) = &self.scope {
+                let scope = scope.strip_prefix('@').unwrap_or(scope);
+
+                let updated = DataDocument::update_document_field(
+                    &config_content,
+                    zpm_parsers::Path::from_segments(vec![
+                        "npmScopes".to_string(),
+                        scope.to_string(),
+                        "npmAuthToken".to_string(),
+                    ]),
+                    zpm_parsers::Value::Undefined,
+                )?;
+
+                let updated = DataDocument::update_document_field(
+                    &updated,
+                    zpm_parsers::Path::from_segments(vec![
+                        "npmScopes".to_string(),
+                        scope.to_string(),
+                        "npmAuthIdent".to_string(),
+                    ]),
+                    zpm_parsers::Value::Undefined,
+                )?;
+
+                current_report().await.as_ref().map(|report| {
+                    report.info(format!("Successfully logged out from scope {}", DataType::Scope.colorize(scope)));
+                });
+
+                updated
+            } else {
+                let registry
+                    = get_registry(&project.config, None, self.publish)?
+                        .to_string();
+
+                let updated = DataDocument::update_document_field(
+                    &config_content,
+                    zpm_parsers::Path::from_segments(vec![
+                        "npmRegistries".to_string(),
+                        registry.to_string(),
+                        "npmAuthToken".to_string(),
+                    ]),
+                    zpm_parsers::Value::Undefined,
+                )?;
+
+                let updated = DataDocument::update_document_field(
+                    &updated,
+                    zpm_parsers::Path::from_segments(vec![
+                        "npmRegistries".to_string(),
+                        registry.to_string(),
+                        "npmAuthIdent".to_string(),
+                    ]),
+                    zpm_parsers::Value::Undefined,
+                )?;
+
+                current_report().await.as_ref().map(|report| {
+                    report.info(format!("Successfully logged out from {}", DataType::Url.colorize(&registry)));
+                });
+
+                updated
+            };
 
             config_path
                 .fs_write_text(&updated_content)?;
-
-            current_report().await.as_ref().map(|report| {
-                report.info(format!("Successfully logged out from {}", DataType::Url.colorize(&registry)));
-            });
 
             Ok(())
         }).await

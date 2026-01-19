@@ -39,8 +39,8 @@ impl LogoutAll {
                 = doc.paths().keys()
                     .filter(|path| {
                         path.len() == 3
-                            && path[0] == "npmRegistries"
-                            && path[2] == "npmAuthToken"
+                            && (path[0] == "npmRegistries" || path[0] == "npmScopes")
+                            && (path[2] == "npmAuthToken" || path[2] == "npmAuthIdent")
                     })
                     .cloned()
                     .collect();
