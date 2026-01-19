@@ -19,6 +19,7 @@ mod exec;
 mod info;
 mod init;
 mod install;
+mod link;
 mod node;
 mod pack;
 mod patch_commit;
@@ -29,6 +30,7 @@ mod run;
 mod set_resolution;
 mod set_version;
 mod set_version_from_sources;
+mod unlink;
 mod unplug;
 mod up;
 mod version;
@@ -90,6 +92,7 @@ pub enum YarnCli {
     InitWithTemplate(init::InitWithTemplate),
     Init(init::Init),
     Install(install::Install),
+    Link(link::Link),
     SetResolution(set_resolution::SetResolution),
     SetVersion(set_version::SetVersion),
     SetVersionFromSources(set_version_from_sources::SetVersionFromSources),
@@ -100,6 +103,7 @@ pub enum YarnCli {
     Rebuild(rebuild::Rebuild),
     Remove(remove::Remove),
     Run(run::Run),
+    Unlink(unlink::Unlink),
     Unplug(unplug::Unplug),
     Up(up::Up),
     WorkspacesFocus(workspaces_focus::WorkspacesFocus),

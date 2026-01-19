@@ -34,22 +34,22 @@ pub struct ExplicitPath {
     pub raw_path: RawPath,
 }
 
-impl FromStr for ExplicitPath {
-    type Err = PathError;
+impl FromFileString for ExplicitPath {
+    type Error = PathError;
 
-    fn from_str(val: &str) -> Result<ExplicitPath, PathError> {
-        if !val.contains('/') {
-            return Err(PathError::InvalidExplicitPathParameter(val.to_string()));
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        if !s.contains('/') {
+            return Err(PathError::InvalidExplicitPathParameter(s.to_string()));
         }
 
         let raw_path
-            = RawPath::try_from(val)?;
+            = RawPath::try_from(s)?;
 
-        Ok(ExplicitPath {
-            raw_path,
-        })
+        Ok(ExplicitPath { raw_path })
     }
 }
+
+impl_file_string_from_str!(ExplicitPath);
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RawPath {

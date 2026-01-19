@@ -78,6 +78,12 @@ pub enum Error {
     #[error("Conflicting options: {0}")]
     ConflictingOptions(String),
 
+    #[error("Can't link the project to itself")]
+    CannotLinkToSelf,
+
+    #[error("The linked package at {} doesn't have a name", .0.to_print_string())]
+    LinkedPackageMissingName(Path),
+
     #[error("Checksum mismatch for {}", .0.to_print_string())]
     ChecksumMismatch(Locator),
 
