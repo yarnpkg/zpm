@@ -1,10 +1,11 @@
 use bincode::{Decode, Encode};
+use rkyv::Archive;
 
 use zpm_utils::{DataType, FromFileString, QueryString, QueryStringValue, ToFileString, ToHumanString, UnwrapInfallible};
 
 use crate::{range::PrepareParams, Error, GitRange, GitSource, GitTreeish};
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct GitReference {
     pub repo: GitSource,
     pub commit: String,

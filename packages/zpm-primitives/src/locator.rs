@@ -1,6 +1,7 @@
 use std::{hash::Hash, sync::Arc};
 
 use bincode::{Decode, Encode};
+use rkyv::Archive;
 use rstest::rstest;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, Hash64, ToFileString, ToHumanString};
 
@@ -26,10 +27,14 @@ pub enum LocatorError {
     ParentError(#[from] Arc<LocatorError>),
 }
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
 pub struct Locator {
     pub ident: Ident,
     pub reference: Reference,
+    #[rkyv(omit_bounds)]
     pub parent: Option<Arc<Locator>>,
 }
 

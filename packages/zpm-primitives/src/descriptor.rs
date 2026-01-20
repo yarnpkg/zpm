@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use bincode::{Decode, Encode};
 use colored::Colorize;
+use rkyv::Archive;
 use rstest::rstest;
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeMap;
@@ -34,10 +35,14 @@ pub enum DescriptorError {
     ParentError(#[from] LocatorError),
 }
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
 pub struct Descriptor {
     pub ident: Ident,
     pub range: Range,
+    #[rkyv(omit_bounds)]
     pub parent: Option<Locator>,
 }
 

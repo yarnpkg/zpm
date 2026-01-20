@@ -2,11 +2,16 @@ use core::panic;
 use std::collections::{BTreeMap, BTreeSet};
 
 use quote::quote;
-use syn::{Data, DeriveInput, Expr, Fields, Ident, Meta, Type, Variant, parse_quote, parse_quote_spanned, spanned::Spanned};
+use syn::{Attribute, Data, DeriveInput, Expr, Fields, Ident, Meta, Type, Variant, parse_quote, parse_quote_spanned, spanned::Spanned};
 use zpm_macro_helpers::{AttributeBag, extract_type_from_option};
 
+struct FieldInfo {
+    ty: Type,
+    attrs: Vec<Attribute>,
+}
+
 enum VariantType {
-    Struct(Ident, BTreeMap<Ident, Type>),
+    Struct(Ident, BTreeMap<Ident, FieldInfo>),
     Empty,
 }
 
@@ -18,7 +23,13 @@ fn extract_variant_type(enum_name: &Ident, variant: &Variant) -> Result<VariantT
 
             let fields
                 = enum_fields.named.iter()
-                    .map(|field| (field.ident.as_ref().unwrap().clone(), field.ty.clone()))
+                    .map(|field| (
+                        field.ident.as_ref().unwrap().clone(),
+                        FieldInfo {
+                            ty: field.ty.clone(),
+                            attrs: field.attrs.clone(),
+                        }
+                    ))
                     .collect::<BTreeMap<_, _>>();
 
             Ok(VariantType::Struct(struct_name, fields))
@@ -83,7 +94,7 @@ fn make_pattern_factory(capture_expr: &Expr, pattern: &Expr, variant_name: &Iden
                 = fields.iter()
                     .partition(|(name, _)| capture_names.contains(name.to_string().as_str()));
 
-            let field_creators = captured_fields.iter().copied().map(|(field_name, ty)| {
+            let field_creators = captured_fields.iter().copied().map(|(field_name, field_info)| {
                 let field_name_str: String
                     = field_name.to_string();
 
@@ -93,7 +104,7 @@ fn make_pattern_factory(capture_expr: &Expr, pattern: &Expr, variant_name: &Iden
                     = parse_quote!(#capture_expr.name(#field_name_str_expr));
 
                 let field_hydrater
-                    = make_value_hydrater(&field_capture, ty);
+                    = make_value_hydrater(&field_capture, &field_info.ty);
 
                 quote!{#field_name: #field_hydrater}
             });
@@ -221,17 +232,51 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
         let variant_type
             = extract_variant_type(enum_name, &variant)?;
 
+        // Parse #[struct_attr(...)] from variant attributes
+        // Converts #[struct_attr(rkyv(serialize_bounds(...)))] to #[rkyv(serialize_bounds(...))]
+        let struct_attrs = variant.attrs.iter()
+            .filter(|attr| attr.path().is_ident("struct_attr"))
+            .map(|attr| {
+                let meta = attr.meta.require_list()?;
+                // Parse the inner content as a Meta
+                let inner_meta: Meta = syn::parse2(meta.tokens.clone())
+                    .map_err(|e| syn::Error::new(meta.tokens.span(), format!("Expected attribute in #[struct_attr(...)]: {}", e)))?;
+                Ok(syn::Attribute {
+                    pound_token: attr.pound_token.clone(),
+                    style: attr.style.clone(),
+                    bracket_token: attr.bracket_token.clone(),
+                    meta: inner_meta,
+                })
+            })
+            .collect::<Result<Vec<_>, syn::Error>>();
+
+        let struct_attrs = match struct_attrs {
+            Ok(attrs) => attrs,
+            Err(e) => {
+                errors.push(e);
+                Vec::new()
+            }
+        };
+
         match &variant_type {
             VariantType::Struct(struct_name, fields) => {
-                let fields
+                let field_tokens
                     = fields.iter()
-                        .map(|(field_name, field_ty)| quote!{pub #field_name: #field_ty})
+                        .map(|(field_name, field_info)| {
+                            let field_ty = &field_info.ty;
+                            let field_attrs = &field_info.attrs;
+                            quote!{
+                                #(#field_attrs)*
+                                pub #field_name: #field_ty
+                            }
+                        })
                         .collect::<Vec<_>>();
 
                 generated_structs.push(quote!{
                     #(#derive_variants_attrs)*
+                    #(#struct_attrs)*
                     pub struct #struct_name {
-                        #(#fields),*
+                        #(#field_tokens),*
                     }
 
                     impl Into<#enum_name> for #struct_name {

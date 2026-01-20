@@ -7,10 +7,7 @@ use std::{
 };
 
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use rkyv::{
-    rancor::{Fallible, Source},
-    Archive,
-};
+use rkyv::Archive;
 use zpm_utils::Path;
 
 use crate::error::Error;
@@ -24,12 +21,15 @@ enum CacheCheck<T> {
 }
 
 #[derive(Debug, Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub enum SaveEntry<T> {
-    File(u128, T),
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, T: rkyv::Serialize<__S>, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, T::Archived: rkyv::Deserialize<T, __D>, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, T::Archived: rkyv::bytecheck::CheckBytes<__C>, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+pub enum SaveEntry<T: Archive> {
+    File(u128, #[rkyv(omit_bounds)] T),
     Directory(u128),
 }
 
-impl<T> SaveEntry<T> {
+impl<T: Archive> SaveEntry<T> {
     pub fn mtime(&self) -> u128 {
         match self {
             SaveEntry::File(mtime, _) => *mtime,
@@ -60,13 +60,17 @@ pub struct FailedFile {
 }
 
 #[derive(Default, Debug, Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct SaveState<T> {
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, T: rkyv::Serialize<__S>, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, T::Archived: rkyv::Deserialize<T, __D>, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, T::Archived: rkyv::bytecheck::CheckBytes<__C>, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+pub struct SaveState<T: Archive> {
+    #[rkyv(omit_bounds)]
     pub cache: BTreeMap<Path, SaveEntry<T>>,
     pub roots: Vec<Path>,
     pub retry_files: BTreeSet<Path>,
 }
 
-impl<T> SaveState<T> {
+impl<T: Archive> SaveState<T> {
     pub fn new(roots: Vec<Path>) -> Self {
         Self {
             cache: BTreeMap::from_iter(
@@ -79,7 +83,7 @@ impl<T> SaveState<T> {
 
     pub fn from_slice(data: &[u8]) -> Result<Self, Error>
     where
-        Self: for<'a> rkyv::Deserialize<Self, rkyv::de::Pool>,
+        T::Archived: rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::BoxedError>>,
         for<'a> <Self as Archive>::Archived: rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::BoxedError>>,
     {
         rkyv::from_bytes::<Self, rkyv::rancor::BoxedError>(data)
@@ -88,7 +92,7 @@ impl<T> SaveState<T> {
 
     pub fn to_vec(&self) -> Result<Vec<u8>, Error>
     where
-        Self: for<'a> rkyv::Serialize<rkyv::ser::Serializer<rkyv::util::AlignedVec, rkyv::ser::allocator::ArenaHandle<'a>, rkyv::ser::sharing::Share>>,
+        T: for<'a> rkyv::Serialize<rkyv::rancor::Strategy<rkyv::ser::Serializer<rkyv::util::AlignedVec, rkyv::ser::allocator::ArenaHandle<'a>, rkyv::ser::sharing::Share>, rkyv::rancor::BoxedError>>,
     {
         rkyv::to_bytes::<rkyv::rancor::BoxedError>(self)
             .map(|v| v.to_vec())
@@ -97,7 +101,7 @@ impl<T> SaveState<T> {
 }
 
 pub trait DiffController {
-    type Data: Debug + Send + Sync;
+    type Data: Debug + Send + Sync + Archive;
 
     fn is_relevant_entry(file_name: &str, file_type: &FileType) -> bool;
     fn get_file_data(path: &Path, metadata: &Metadata) -> Result<Self::Data, Error>;
@@ -122,7 +126,9 @@ impl<T> CacheState<T> {
             retry_files: BTreeSet::new(),
         }
     }
+}
 
+impl<T: Archive> CacheState<T> {
     pub fn from_save_state(save_state: SaveState<T>) -> Self {
         let cache
             = save_state

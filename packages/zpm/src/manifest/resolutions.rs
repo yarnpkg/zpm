@@ -1,4 +1,5 @@
 use bincode::{Decode, Encode};
+use rkyv::Archive;
 use serde::{Deserialize, Deserializer};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, RegistrySemverRange};
@@ -9,8 +10,8 @@ use crate::{
 };
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidResolution(s.to_string())))]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode)]
-#[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encode, Decode, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ResolutionSelector {
     #[pattern(r"^(?<descriptor>.*)$")]
     #[to_file_string(|params| params.descriptor.to_file_string())]
@@ -109,7 +110,7 @@ use serde::de::{self, Visitor, MapAccess};
 use std::fmt;
 use std::collections::BTreeMap;
 
-#[derive(Clone, Debug, Default, Encode, Decode, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Encode, Decode, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct ResolutionsField {
     pub entries: Vec<(ResolutionSelector, Range)>,
     pub by_ident: BTreeMap<Ident, Vec<(ResolutionSelector, Range)>>,

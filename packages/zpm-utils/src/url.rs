@@ -1,17 +1,18 @@
 use std::{borrow::Cow, collections::BTreeMap, string::FromUtf8Error};
 
 use bincode::{Decode, Encode};
+use rkyv::Archive;
 use urlencoding::decode;
 
 use crate::{FromFileString, ToFileString, ToHumanString};
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum QueryStringValue {
     String(String),
     True,
 }
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct QueryString {
     pub fields: BTreeMap<String, QueryStringValue>,
 }
@@ -58,7 +59,7 @@ impl FromFileString for QueryString {
     }
 }
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct UrlEncoded<T>(pub T);
 
 impl<T> UrlEncoded<T> {

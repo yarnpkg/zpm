@@ -1,8 +1,9 @@
 use bincode::{Decode, Encode};
+use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use zpm_utils::ToFileString;
 
-#[derive(Clone, Debug, Decode, Deserialize, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, Decode, Deserialize, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum GitTreeish {
     AnythingGoes(String),
     Head(String),

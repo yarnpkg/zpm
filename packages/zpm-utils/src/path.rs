@@ -52,7 +52,7 @@ impl FromFileString for ExplicitPath {
 
 impl_file_string_from_str!(ExplicitPath);
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct RawPath {
     pub raw: String,
     pub path: Path,

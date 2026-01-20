@@ -1,6 +1,7 @@
 use std::hash::Hash;
 
 use bincode::{Decode, Encode};
+use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
 use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
 
@@ -28,8 +29,8 @@ pub enum ReferenceError {
 }
 
 #[zpm_enum(error = ReferenceError, or_else = |s| Err(ReferenceError::SyntaxError(s.to_string())))]
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum Reference {
     #[pattern(r"builtin:(?<version>.*)")]
     #[to_file_string(|params| format!("builtin:{}", params.version.to_file_string()))]
@@ -84,7 +85,11 @@ pub enum Reference {
     #[pattern(r"patch:(?<inner>.*)#(?<path>.*)(?:&checksum=(?<checksum>[a-f0-9]*))?$")]
     #[to_file_string(|params| format_patch(&params.inner, &params.path, &params.checksum))]
     #[to_print_string(|params| DataType::Reference.colorize(&format_patch(&params.inner, &params.path, &params.checksum)))]
+    #[struct_attr(rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+    #[struct_attr(rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+    #[struct_attr(rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))))]
     Patch {
+        #[rkyv(omit_bounds)]
         inner: Box<UrlEncoded<Locator>>,
         path: String,
         checksum: Option<Hash64>,
@@ -93,7 +98,11 @@ pub enum Reference {
     #[pattern(r"virtual:(?<hash>[a-f0-9]*)#(?<inner>.*)$")]
     #[to_file_string(|params| format!("virtual:{}#{}", params.hash.to_file_string(), params.inner.to_file_string()))]
     #[to_print_string(|params| format!("{} {}", params.inner.to_print_string(), DataType::Reference.colorize(&format!("[{}]", params.hash.mini()))))]
+    #[struct_attr(rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+    #[struct_attr(rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+    #[struct_attr(rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))))]
     Virtual {
+        #[rkyv(omit_bounds)]
         inner: Box<Reference>,
         hash: Hash64,
     },
