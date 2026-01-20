@@ -1,26 +1,15 @@
-pub mod document;
-pub mod node;
-pub mod ops;
-pub mod value;
-pub mod yaml_formatter;
-pub mod yaml_parser;
-pub mod yaml;
+mod data_doc;
+mod document;
+mod error;
+mod json_doc;
+mod path;
+mod value;
+mod yaml_doc;
 
-pub mod error;
-pub mod path;
-pub mod json;
-
+pub use data_doc::{DataDocument, DataSource};
+pub use document::Document;
 pub use error::Error;
+pub use json_doc::{JsonDocument, JsonSource, RawJsonOwnedValue, RawJsonValue};
 pub use path::Path;
-pub use json::*;
 pub use value::{Value, Indent, IndentStyle};
-
-use crate::node::Field;
-
-pub trait Parser {
-    fn parse(input: &str) -> Result<Vec<Field>, Error>;
-}
-
-pub trait Formatter {
-    fn value_to_string(value: &Value, indent_size: usize, indent: usize) -> String;
-}
+pub use yaml_doc::{YamlDocument, YamlSource};

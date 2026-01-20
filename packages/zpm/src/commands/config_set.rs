@@ -1,5 +1,5 @@
 use clipanion::cli;
-use zpm_parsers::yaml::Yaml;
+use zpm_parsers::DataDocument;
 use zpm_utils::IoResultExt;
 
 use crate::{
@@ -53,7 +53,7 @@ impl ConfigSet {
             .ok_missing()?
             .unwrap_or_default();
 
-        let updated_document = Yaml::update_document_field(
+        let updated_document = DataDocument::update_document_field(
             &document,
             self.name.clone(),
             zpm_parsers::Value::Raw(value.export(true)),

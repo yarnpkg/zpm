@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use clipanion::cli;
-use zpm_parsers::{document::Document, JsonDocument, Value};
+use zpm_parsers::{Document, JsonDocument, Value};
 use zpm_primitives::{AnonymousSemverRange, Descriptor};
 use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, ToFileString, ToHumanString};

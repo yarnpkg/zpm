@@ -13,17 +13,9 @@ describe(`Commands`, () => {
       makeTemporaryEnv({}, async ({path, run, source}) => {
         await writeFile(`${path}/.yarnrc.yml`, `npmAuthToken: "${validLogins.fooUser.npmAuthToken}"\n`);
 
-        let code;
-        let stdout;
-        let stderr;
-
-        try {
-          ({code, stdout, stderr} = await run(`npm`, `whoami`));
-        } catch (error) {
-          ({code, stdout, stderr} = error);
-        }
-
-        expect({code, stdout, stderr}).toMatchSnapshot();
+        await expect(run(`npm`, `whoami`)).resolves.toMatchObject({
+          stdout: expect.stringContaining(`foo-user`),
+        });
       }),
     );
 
@@ -32,17 +24,9 @@ describe(`Commands`, () => {
       makeTemporaryEnv({}, async ({path, run, source}) => {
         await writeFile(`${path}/.yarnrc.yml`, `npmAuthIdent: "${validLogins.fooUser.npmAuthIdent.encoded}"\n`);
 
-        let code;
-        let stdout;
-        let stderr;
-
-        try {
-          ({code, stdout, stderr} = await run(`npm`, `whoami`));
-        } catch (error) {
-          ({code, stdout, stderr} = error);
-        }
-
-        expect({code, stdout, stderr}).toMatchSnapshot();
+        await expect(run(`npm`, `whoami`)).resolves.toMatchObject({
+          stdout: expect.stringContaining(`foo-user`),
+        });
       }),
     );
 
@@ -60,17 +44,9 @@ describe(`Commands`, () => {
           `    npmRegistryServer: "${url}"\n`,
         ].join(``));
 
-        let code;
-        let stdout;
-        let stderr;
-
-        try {
-          ({code, stdout, stderr} = await run(`npm`, `whoami`, `--scope`, `testScope`));
-        } catch (error) {
-          ({code, stdout, stderr} = error);
-        }
-
-        expect({code, stdout, stderr}).toMatchSnapshot();
+        await expect(run(`npm`, `whoami`, `--scope`, `testScope`)).resolves.toMatchObject({
+          stdout: expect.stringContaining(`bar-user`),
+        });
       }),
     );
 

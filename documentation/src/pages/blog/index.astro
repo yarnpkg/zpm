@@ -4,6 +4,7 @@ import { getCollection, getEntry, render } from "astro:content";
 import dayjs from "dayjs";
 import Calendar from "@/assets/svg/calendar.svg";
 import Clock from "@/assets/svg/clock.svg";
+import europeanFlagUrl from "@/assets/svg/europe.svg?url";
 import { Image } from "astro:assets";
 import Headline from "@/components/Headline.astro";
 import Heading from "@/components/Heading";
@@ -41,7 +42,7 @@ renderedEntries.sort((a, b) => b.rawDate.valueOf() - a.rawDate.valueOf());
     hideBackground: true,
   }}
 >
-  <div class="container not-content pt-20">
+  <div class="container pt-20">
     <div class="flex flex-col items-center text-center pb-16">
       <div class="pb-3 lg:pb-4">
         <Headline> Blog </Headline>
@@ -49,7 +50,7 @@ renderedEntries.sort((a, b) => b.rawDate.valueOf() - a.rawDate.valueOf());
       <Heading size="h2">Find out the news</Heading>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 not-content">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {
         renderedEntries.map(({ entry, date, minutesRead, author, Content }) => (
           <div class="bg-gradient-to-b from-white/15 to-white/5 p-px rounded-[20px]">
@@ -77,10 +78,10 @@ renderedEntries.sort((a, b) => b.rawDate.valueOf() - a.rawDate.valueOf());
                       href={author?.url}
                       target="_blank"
                       rel="noopener noreferrer"
+                      class="block leading-[22px] text-base font-medium text-white! no-underline"
                     >
-                      <p class="leading-[22px] text-base font-medium underline text-white!">
-                        {author?.name}
-                      </p>
+                      {author?.name}
+                      <img src={europeanFlagUrl} class="inline rounded h-4 ml-1 -mt-[3px]"/>
                     </a>
                     <div class="flex items-baseline justify-between text-sm leading-[22px]">
                       <p class="text-white/60">

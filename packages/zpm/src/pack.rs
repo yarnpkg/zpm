@@ -6,9 +6,7 @@ use std::sync::LazyLock;
 
 use zpm_formats::iter_ext::IterExt;
 use zpm_formats::tar::ToTar;
-use zpm_parsers::document::Document;
-use zpm_parsers::JsonDocument;
-use zpm_parsers::Value;
+use zpm_parsers::{Document, JsonDocument, Value};
 use zpm_primitives::AnonymousSemverRange;
 use zpm_primitives::Descriptor;
 use zpm_primitives::Locator;

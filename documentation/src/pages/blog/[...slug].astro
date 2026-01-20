@@ -9,6 +9,7 @@ import TableOfContentsList from "@/components/table-of-content/TableOfContentsLi
 // Icons
 import CalendarIcon from "@/assets/svg/calendar-days.svg";
 import ClockIcon from "@/assets/svg/clock.svg";
+import europeanFlagUrl from "@/assets/svg/europe.svg?url";
 import MobileTableOfContents from "@/components/table-of-content/MobileTableOfContents.astro";
 import Breadcrumbs from "@/components/Breadcrumbs.astro";
 import Heading from "@/components/Heading";
@@ -45,7 +46,7 @@ const { data: author } = await getEntry(entry.data.author);
   <div class="container">
     <div class="flex lg:gap-x-10 xl:gap-x-20">
       <div
-        class="hidden lg:block lg:w-1/3 xl:w-1/4 sticky top-0 h-screen overflow-y-auto not-content"
+        class="hidden lg:block lg:w-1/3 xl:w-1/4 sticky top-0 h-screen overflow-y-auto"
       >
         <TableOfContentsList
           toc={headings}
@@ -57,7 +58,7 @@ const { data: author } = await getEntry(entry.data.author);
         <Heading size="h2" as="h1" className="pb-3 md:pb-4 pt-4 md:pt-5"
           >{title}</Heading
         >
-        <div class="flex items-center gap-x-7 not-content">
+        <div class="flex items-center gap-x-7">
           <div class="flex items-center gap-x-2">
             <CalendarIcon class="size-6" />
             <span
@@ -76,7 +77,7 @@ const { data: author } = await getEntry(entry.data.author);
           </div>
         </div>
 
-        <div class="pt-8 pb-6 not-content">
+        <div class="pt-8 pb-6">
           {
             author !== undefined && (
               <div class="flex items-center gap-x-4">
@@ -90,11 +91,12 @@ const { data: author } = await getEntry(entry.data.author);
                 <div>
                   <a
                     href={author.url}
-                    class="font-montserrat font-medium leading-[22px] underline text-white!"
+                    class="font-montserrat font-medium leading-[22px] text-white! no-underline"
                     target="_blank"
                     referrerpolicy="no-referrer"
                   >
                     {author.name}
+                    <img src={europeanFlagUrl} class="inline rounded h-4 ml-1 -mt-[3px]"/>
                   </a>
                   <p class="font-montserrat leading-[22px] text-white/80! pt-1.5">
                     {author.title}
@@ -105,7 +107,9 @@ const { data: author } = await getEntry(entry.data.author);
           }
         </div>
 
-        <Content />
+        <div class="sl-markdown-content content">
+          <Content />
+        </div>
       </main>
     </div>
   </div>

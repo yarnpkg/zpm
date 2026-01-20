@@ -1,0 +1,124 @@
+@layer starlight.content {
+  .sl-markdown-content .sl-link-card {
+    transition: all 150ms ease-in-out;
+  }
+
+  .sl-markdown-content .sl-link-card:hover {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+  }
+
+  .sl-markdown-content p,
+  .sl-markdown-content li,
+  .sl-markdown-content td,
+  .starlight-aside__content > p {
+    color: #ffffffcc;
+  }
+
+  .sl-markdown-content .sl-link-card a span {
+    color: #ffffff !important;
+  }
+
+  .sl-markdown-content .sl-link-card span:not(a span) {
+    color: #ffffffcc !important;
+  }
+
+  .sl-markdown-content sup {
+    margin-left: 0.5em;
+  }
+
+  .sl-markdown-content sup a {
+    text-decoration: none;
+  }
+
+  .sl-markdown-content .footnotes {
+    font-size: 0.8rem;
+  }
+
+  .sl-markdown-content code {
+    padding: 4px 8px;
+    background: rgba(42, 87, 219, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    line-height: 150%;
+    color: var(--color-indigo-300);
+    text-decoration: inherit;
+  }
+
+  .sl-markdown-content .rjd-annotation p,
+  .sl-markdown-content .rjd-annotation li {
+    margin-top: calc(var(--spacing) * 4);
+  }
+
+  .sl-markdown-content .rjd-annotation > div > :first-child {
+    margin-top: 0;
+  }
+
+  .sl-markdown-content .custom-code-block {
+    background: rgba(42, 87, 219, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 16px;
+    line-height: 150%;
+    color: #c3d2ff;
+
+    a {
+      color: inherit;
+    }
+  }
+
+  .expressive-code .frame.is-terminal .header::before {
+    display: none;
+  }
+
+  .sl-markdown-content .expressive-code .frame.is-terminal .title {
+    background-color: rgba(255, 255, 255, 0.03) !important;
+    position: relative;
+  }
+
+  .sl-markdown-content .expressive-code .frame.is-terminal .title::before {
+    content: "";
+    display: inline-block;
+    position: absolute;
+    top: 50%;
+    left: 24px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    transform: translateY(-50%);
+    background: #db2a4d;
+    box-shadow: 20px 0 0 #ffb888, 40px 0 0 #b2ffb5;
+    z-index: 1;
+  }
+
+  /* Fix copy button positioning for expressive code blocks */
+  .sl-markdown-content .expressive-code .frame .copy {
+    position: absolute !important;
+    top: 12px !important;
+    right: 12px !important;
+    z-index: 10 !important;
+  }
+
+  /* Ensure copy button is visible and properly positioned in terminal frames */
+  .sl-markdown-content .expressive-code .frame.is-terminal .copy {
+    top: 64px !important;
+    right: 16px !important;
+  }
+
+  .sl-markdown-content .expressive-code pre {
+    background: rgba(255, 255, 255, 0.03) !important;
+  }
+
+  .rjd-container .rjd-annotation > div:not(:first-child) {
+    color: #ffffffcc !important;
+  }
+
+  .rjd-container {
+    padding: 0rem !important;
+  }
+
+  @media (max-width: 768px) {
+    .rjd-container {
+      padding: 0 !important;
+    }
+  }
+}

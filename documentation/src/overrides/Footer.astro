@@ -13,7 +13,7 @@ const { id } = Astro.locals.starlightRoute;
 const isBackgroundVisible = id === "" || id === "blog";
 ---
 
-<footer class="relative not-content z-10">
+<footer class="relative z-10">
   {
     isBackgroundVisible && (
       <div>
@@ -30,7 +30,7 @@ const isBackgroundVisible = id === "" || id === "blog";
         )
       }
 
-      <div class="max-2xl:bg-[#0D0F19]">
+      <div class="bg-[#0D0F19]">
         <div class="container">
           <div class="flex justify-between pt-6 pb-12 max-lg:gap-x-14">
             <div>

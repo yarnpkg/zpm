@@ -80,7 +80,7 @@ const extraTheme = {
 
 export default function JsonToDoc({json}: {json: string}) {
   return (
-    <div class={`not-content json-doc`}>
+    <div class={`json-doc`}>
       <JsonDoc
         data={json}
         theme={jsonTheme}
