@@ -29,7 +29,7 @@ pub struct CachedManifestFinder {
 }
 
 impl CachedManifestFinder {
-    pub fn new(root_path: Path) -> Self {
+    pub fn new(root_path: Path, roots: Vec<Path>) -> Self {
         let save_state_path
             = root_path.with_join_str(".yarn/ignore/manifests");
 
@@ -39,9 +39,6 @@ impl CachedManifestFinder {
                 .ok()
                 .and_then(|save_data| CacheState::from_slice(&save_data).ok())
                 .unwrap_or_default();
-
-        let roots
-            = vec![Path::new()];
 
         Self {
             diff_finder: DiffFinder::new(root_path, roots, save_state),

@@ -5,7 +5,7 @@ use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
-use zpm_utils::{LastModifiedAt, Path, ToFileString, ToHumanString};
+use zpm_utils::{Glob, LastModifiedAt, Path, ToFileString, ToHumanString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -905,8 +905,26 @@ impl Workspace {
         let mut workspaces = vec![];
 
         if let Some(patterns) = &self.manifest.workspaces {
+            let roots
+                = patterns.iter().filter_map(|pattern| {
+                    if pattern.starts_with('!') {
+                        return None;
+                    }
+
+                    let Ok(glob) = Glob::parse(pattern.as_str()) else {
+                        return None;
+                    };
+
+                    let Ok(prefix) = glob.prefix() else {
+                        return None;
+                    };
+
+                    Some(prefix)
+                })
+                .collect::<Vec<_>>();
+
             let mut manifest_finder
-                = CachedManifestFinder::new(self.path.clone());
+                = CachedManifestFinder::new(self.path.clone(), roots);
 
             manifest_finder.rsync()?;
 
