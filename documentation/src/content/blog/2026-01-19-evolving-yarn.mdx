@@ -16,54 +16,56 @@ Almost ten years after the first public release of Yarn, now is a great time to 
 
 Keep in mind that while performances are a significant part of why we did this rewrite, we first focused on the compatibility aspect. Many low hanging fruits remain, and we’re excited to work with the JavaScript / Rust tooling community to increase the difference even further.
 
-<table class="table-fixed [&_th,&_td]:min-w-auto">
-  <colgroup>
-    <col style="width: calc(100% - 600px)"/>
-    <col style="width: 200px"/>
-    <col style="width: 200px"/>
-    <col style="width: 200px"/>
-  </colgroup>
-  <thead>
-    <tr>
-      <th>Test</th>
-      <th>Before</th>
-      <th>After</th>
-      <th>Pnpm</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <th colspan="4">Next.js - few but heavy dependencies</th>
-    </tr>
-    <tr>
-      <td>Cold cache</td>
-      <td>4.1s</td>
-      <td>2.5s</td>
-      <td>3.0s</td>
-    </tr>
-    <tr>
-      <td>Warm cache</td>
-      <td>577ms</td>
-      <td>184ms</td>
-      <td>686ms</td>
-    </tr>
-    <tr>
-      <th colspan="4">Gatsby - lots of small dependencies</th>
-    </tr>
-    <tr>
-      <td>Cold cache</td>
-      <td>19.8s</td>
-      <td>11.7s</td>
-      <td>13.1s</td>
-    </tr>
-    <tr>
-      <td>Warm cache</td>
-      <td>1.7s</td>
-      <td>0.3s</td>
-      <td>1.9s</td>
-    </tr>
-  </tbody>
-</table>
+<div class="w-full overflow-auto">
+  <table class="table-fixed [&_th,&_td]:min-w-auto">
+    <colgroup>
+      <col style="width: calc(100% - 600px); min-width: 200px"/>
+      <col style="width: 200px"/>
+      <col style="width: 200px"/>
+      <col style="width: 200px"/>
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Test</th>
+        <th>Before</th>
+        <th>After</th>
+        <th>Pnpm</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th colspan="4">Next.js - few but heavy dependencies</th>
+      </tr>
+      <tr>
+        <td>Cold cache</td>
+        <td>4.1s</td>
+        <td>2.5s</td>
+        <td>3.0s</td>
+      </tr>
+      <tr>
+        <td>Warm cache</td>
+        <td>577ms</td>
+        <td>184ms</td>
+        <td>686ms</td>
+      </tr>
+      <tr>
+        <th colspan="4">Gatsby - lots of small dependencies</th>
+      </tr>
+      <tr>
+        <td>Cold cache</td>
+        <td>19.8s</td>
+        <td>11.7s</td>
+        <td>13.1s</td>
+      </tr>
+      <tr>
+        <td>Warm cache</td>
+        <td>1.7s</td>
+        <td>0.3s</td>
+        <td>1.9s</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
 
 *(more benchmarks are available here; we’re also setting up a new benchmark on massive megarepos, but those don’t run on other package managers yet)*
 
@@ -104,6 +106,6 @@ Yarn 6.x is still months away, and important features remain to tackle:
 - Windows support
 - Interactive commands
 - Collaboration with third-party tools parsing the lockfile manually
-- …
+- Wrapping up the last standing failing tests
 
-The work is ongoing, and we’re eager to engage with the community to release a tool that we think will redefine once more what JavaScript developers come to expect from their package managers.
+This work is ongoing, and we’re eager to engage with the community to release a tool that we think will redefine once more what JavaScript developers come to expect from their package managers.

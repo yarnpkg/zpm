@@ -230,6 +230,7 @@ export function CatShader() {
       return () => {};
 
     const shader = new ShaderController(canvas, gl);
+    shader.render();
 
     let renderLoop: ReturnType<typeof requestAnimationFrame>;
 
