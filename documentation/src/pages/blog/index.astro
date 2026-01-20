@@ -49,7 +49,7 @@ renderedEntries.sort((a, b) => b.rawDate.valueOf() - a.rawDate.valueOf());
 
     <div class="flex flex-col gap-12">
       {
-        [...renderedEntries,...renderedEntries,...renderedEntries].map(({ entry, date, minutesRead, author, Content }) => (
+        renderedEntries.map(({ entry, date, minutesRead, author, Content }) => (
           <div class="mx-auto max-w-[700px] bg-gradient-to-b from-white/15 to-white/5 p-px rounded-[20px]">
             <div class="rounded-[20px] p-4 md:p-6 bg-gradient-to-b from-gray-950 to-gray-800 h-full flex flex-col justify-between">
               <a href={`/blog/${entry.data.slug}`}>
