@@ -44,7 +44,7 @@ vec2 fbm(vec2 p) {
   float amplitude = 0.5;
   float frequency = 1.0;
 
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 3; i++) {
     value += amplitude * noise(p * frequency - time * 0.5);
     amplitude *= 0.5;
     frequency *= 2.0;
@@ -76,7 +76,7 @@ float kset(vec2 p2) {
     //pp+=.5;
     pp.y+=.3;
     pp = abs(.5-fract(pp));
-    for (int i=0; i<9; i++) {
+    for (int i=0; i<7; i++) {
       pp = abs(pp)/max(dot(pp,pp),0.003)-.91;
     };
     c+=pow(length(pp),1.3)*.35;
@@ -108,6 +108,7 @@ void main() {
   vec2 scaledUv = v_texCoord;
   scaledUv = scaledUv - 0.5;
   scaledUv.x *= resolution.x / resolution.y;
+  scaledUv /= 1.2;
 
   vec2 pxUv = v_texCoord;
   pxUv *= resolution;
@@ -116,8 +117,8 @@ void main() {
   uv.x *= textureSize.y / textureSize.x;
 
   // Make the cat larger and slightly to the right
-  uv.x -= 0.3;
-  uv.y += 0.15;
+  // uv.x -= 0.3;
+  // uv.y += 0.15;
 
   vec2 p = uv;
   uv = uv + 0.5;
@@ -129,7 +130,7 @@ void main() {
   float f = fbm((uv-.5)*30.).x*0.2*exp(-sdf);
   vec3 col = smoothstep(y*.3+.1,.4,sdf-f) * color1 * .7;
   col = pow(max(0.,sdf*2.2-f*fbmsubstract),falloff) * color1 * .8;
-  float k = ksetaa(p+.5);
+  float k = kset(p+.5);
   sdf = pow(sdf,.4+y*1.5);
   col=clamp(col,0.,1.);
   col+=k*.3*smoothstep(0.,.7,sdf)*color1+pow(k*.2,2.5)*pow(sdf,2.)*2.;
@@ -141,13 +142,13 @@ void main() {
   col+=star(4.,(p+vec2(.1,.23))*1.8);
   col+=star(5.,(p+vec2(.0,.3))*4.);
   col+=star(6.,(p+vec2(-.15,.3))*3.);
-  col+=star(7.,(p+vec2(-.25,.33))*3.);
+  // col+=star(7.,(p+vec2(-.25,.33))*3.);
   col+=star(8.,(p+vec2(.3,.0))*2.);
   col+=star(9.,(p+vec2(.25,-.13))*3.5);
-  col+=star(10.,(p+vec2(-.25,-.1))*3.5);
-  col+=star(11.,(p+vec2(-.27,-.3))*3.5);
-  col+=star(12.,(p+vec2(-.3,-.05))*5.);
-  col+=star(13.,(p+vec2(-.27,.1))*4.);
+  // col+=star(10.,(p+vec2(-.25,-.1))*3.5);
+  // col+=star(11.,(p+vec2(-.27,-.3))*3.5);
+  // col+=star(12.,(p+vec2(-.3,-.05))*5.);
+  // col+=star(13.,(p+vec2(-.27,.1))*4.);
 
   float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
   fragColor = vec4(col, lum);

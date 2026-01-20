@@ -12,8 +12,8 @@ import cat from "@/assets/image/logo-cat-nobg.png";
 import heroEllipse from "@/assets/svg/hero-ellipse.svg";
 ---
 
-<div class="absolute inset-0 overflow-hidden -z-40">
-  <div class="mt-20 lg:mt-0 w-full aspect-square">
+<div class="absolute top-0 right-0 overflow-hidden -z-40">
+  <div class="mt-20 lg:mt-0 h-screen pt-32 aspect-square">
     <CatShader client:load/>
   </div>
 </div>
@@ -45,7 +45,7 @@ import heroEllipse from "@/assets/svg/hero-ellipse.svg";
         </div>
       </div>
 
-      <div class="mt-8 -mx-2 mb-8 max-w-2xl w-full">
+      <div class="mt-16 -mx-2 mb-16 lg:mb-8 max-w-2xl w-full">
         <SearchPackageInterface client:only="preact" />
       </div>
     </div>

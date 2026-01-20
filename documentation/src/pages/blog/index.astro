@@ -42,18 +42,15 @@ renderedEntries.sort((a, b) => b.rawDate.valueOf() - a.rawDate.valueOf());
     hideBackground: true,
   }}
 >
-  <div class="container pt-20">
+  <div class="container pt-8">
     <div class="flex flex-col items-center text-center pb-16">
-      <div class="pb-3 lg:pb-4">
-        <Headline> Blog </Headline>
-      </div>
       <Heading size="h2">Find out the news</Heading>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="flex flex-col gap-12">
       {
-        renderedEntries.map(({ entry, date, minutesRead, author, Content }) => (
-          <div class="bg-gradient-to-b from-white/15 to-white/5 p-px rounded-[20px]">
+        [...renderedEntries,...renderedEntries,...renderedEntries].map(({ entry, date, minutesRead, author, Content }) => (
+          <div class="mx-auto max-w-[700px] bg-gradient-to-b from-white/15 to-white/5 p-px rounded-[20px]">
             <div class="rounded-[20px] p-4 md:p-6 bg-gradient-to-b from-gray-950 to-gray-800 h-full flex flex-col justify-between">
               <a href={`/blog/${entry.data.slug}`}>
                 <Heading className="pb-2 md:pb-3">{entry.data.title}</Heading>
