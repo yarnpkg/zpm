@@ -965,7 +965,7 @@ impl Workspace {
                 let workspace_paths
                     = lookup_state.cache.iter()
                         .filter(|(_, entry)| {
-                            matches!(entry, CacheEntry::File(_, _))
+                            matches!(entry, CacheEntry::File(_, _) | CacheEntry::Error(_))
                         })
                         .filter(|(p, _)| {
                             let candidate_workspace_rel_dir
@@ -980,23 +980,33 @@ impl Workspace {
                         .collect::<Vec<_>>();
 
                 for (manifest_rel_path, cache_entry) in workspace_paths {
-                    if let CacheEntry::File(last_changed_at, manifest) = cache_entry {
-                        let workspace_rel_path
-                            = manifest_rel_path.dirname().unwrap();
+                    match cache_entry {
+                        CacheEntry::File(last_changed_at, manifest) => {
+                            let workspace_rel_path
+                                = manifest_rel_path.dirname().unwrap();
 
-                        if !processed_workspaces.insert(workspace_rel_path.clone()) {
-                            continue;
-                        }
+                            if !processed_workspaces.insert(workspace_rel_path.clone()) {
+                                continue;
+                            }
 
-                        workspaces.push(Workspace::from_info(&self.path, WorkspaceInfo {
-                            rel_path: workspace_rel_path.clone(),
-                            manifest: manifest.clone(),
-                            last_changed_at: *last_changed_at,
-                        })?);
+                            workspaces.push(Workspace::from_info(&self.path, WorkspaceInfo {
+                                rel_path: workspace_rel_path.clone(),
+                                manifest: manifest.clone(),
+                                last_changed_at: *last_changed_at,
+                            })?);
 
-                        if let Some(nested_patterns) = &manifest.workspaces {
-                            workspace_queue.push((workspace_rel_path, nested_patterns.clone()));
-                        }
+                            if let Some(nested_patterns) = &manifest.workspaces {
+                                workspace_queue.push((workspace_rel_path, nested_patterns.clone()));
+                            }
+                        },
+
+                        CacheEntry::Error(error) => {
+                            return Err(error.as_ref().unwrap().clone());
+                        },
+
+                        CacheEntry::Directory(_) => {
+                            unreachable!();
+                        },
                     }
                 }
             }

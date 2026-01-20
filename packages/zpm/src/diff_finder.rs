@@ -7,7 +7,7 @@ use std::{
 };
 
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use rkyv::Archive;
+use rkyv::{Archive, with::Skip};
 use zpm_utils::Path;
 
 use crate::error::Error;
@@ -20,64 +20,46 @@ enum CacheCheck<T> {
     ChangedDirectory(Path, u128),
 }
 
-#[derive(Debug, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, T: rkyv::Serialize<__S>, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
 #[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, T::Archived: rkyv::Deserialize<T, __D>, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
 #[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, T::Archived: rkyv::bytecheck::CheckBytes<__C>, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
-pub enum SaveEntry<T: Archive> {
+pub enum CacheEntry<T: Archive> {
     File(u128, #[rkyv(omit_bounds)] T),
+    Error(#[rkyv(with = Skip)] Option<Error>),
     Directory(u128),
 }
 
-impl<T: Archive> SaveEntry<T> {
-    pub fn mtime(&self) -> u128 {
-        match self {
-            SaveEntry::File(mtime, _) => *mtime,
-            SaveEntry::Directory(mtime) => *mtime,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum CacheEntry<T> {
-    File(u128, T),
-    Directory(u128),
-}
-
-impl<T> CacheEntry<T> {
+impl<T: Archive> CacheEntry<T> {
     pub fn mtime(&self) -> u128 {
         match self {
             CacheEntry::File(mtime, _) => *mtime,
             CacheEntry::Directory(mtime) => *mtime,
+            CacheEntry::Error(_) => 0, // Errors will be retried
         }
     }
-}
-
-#[derive(Debug)]
-pub struct FailedFile {
-    pub mtime: u128,
-    pub error: Error,
 }
 
 #[derive(Default, Debug, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, T: rkyv::Serialize<__S>, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
 #[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, T::Archived: rkyv::Deserialize<T, __D>, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
 #[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, T::Archived: rkyv::bytecheck::CheckBytes<__C>, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
-pub struct SaveState<T: Archive> {
+pub struct CacheState<T: Archive> {
     #[rkyv(omit_bounds)]
-    pub cache: BTreeMap<Path, SaveEntry<T>>,
+    pub cache: BTreeMap<Path, CacheEntry<T>>,
     pub roots: Vec<Path>,
-    pub retry_files: BTreeSet<Path>,
 }
 
-impl<T: Archive> SaveState<T> {
+impl<T: Archive> CacheState<T> {
     pub fn new(roots: Vec<Path>) -> Self {
+        let cache
+            = roots.iter()
+                .map(|root| (root.clone(), CacheEntry::Directory(0)))
+                .collect();
+
         Self {
-            cache: BTreeMap::from_iter(
-                roots.iter().map(|root| (root.clone(), SaveEntry::Directory(0))),
-            ),
+            cache,
             roots,
-            retry_files: BTreeSet::new(),
         }
     }
 
@@ -107,109 +89,18 @@ pub trait DiffController {
     fn get_file_data(path: &Path, metadata: &Metadata) -> Result<Self::Data, Error>;
 }
 
-#[derive(Debug)]
-pub struct CacheState<T> {
-    pub cache: BTreeMap<Path, CacheEntry<T>>,
-    pub roots: Vec<Path>,
-    pub failed_files: BTreeMap<Path, FailedFile>,
-    retry_files: BTreeSet<Path>,
-}
-
-impl<T> CacheState<T> {
-    pub fn new(roots: Vec<Path>) -> Self {
-        Self {
-            cache: BTreeMap::from_iter(
-                roots.iter().map(|root| (root.clone(), CacheEntry::Directory(0))),
-            ),
-            roots,
-            failed_files: BTreeMap::new(),
-            retry_files: BTreeSet::new(),
-        }
-    }
-}
-
-impl<T: Archive> CacheState<T> {
-    pub fn from_save_state(save_state: SaveState<T>) -> Self {
-        let cache
-            = save_state
-                .cache
-                .into_iter()
-                .map(|(path, entry)| {
-                    let cache_entry
-                        = match entry {
-                            SaveEntry::File(mtime, data) => CacheEntry::File(mtime, data),
-                            SaveEntry::Directory(mtime) => CacheEntry::Directory(mtime),
-                        };
-                    (path, cache_entry)
-                })
-                .collect();
-
-        Self {
-            cache,
-            roots: save_state.roots,
-            failed_files: BTreeMap::new(),
-            retry_files: save_state.retry_files,
-        }
-    }
-
-    pub fn to_save_state(&self) -> SaveState<T>
-    where
-        T: Clone,
-    {
-        let cache
-            = self
-                .cache
-                .iter()
-                .map(|(path, entry)| {
-                    let save_entry
-                        = match entry {
-                            CacheEntry::File(mtime, data) => SaveEntry::File(*mtime, data.clone()),
-                            CacheEntry::Directory(mtime) => SaveEntry::Directory(*mtime),
-                        };
-                    (path.clone(), save_entry)
-                })
-                .collect();
-
-        let retry_files
-            = self.failed_files.keys().cloned().collect();
-
-        SaveState {
-            cache,
-            roots: self.roots.clone(),
-            retry_files,
-        }
-    }
-}
-
-fn deduplicate_roots(roots: Vec<Path>) -> Vec<Path> {
-    let mut sorted_roots
-        = roots;
-
-    sorted_roots.sort_by(|a, b| {
+fn deduplicate_roots(mut roots: Vec<Path>) -> Vec<Path> {
+    roots.sort_by(|a, b| {
         a.as_str().len().cmp(&b.as_str().len())
     });
 
     let mut deduplicated
         = Vec::new();
 
-    for root in sorted_roots {
+    for root in roots {
         let is_covered
-            = deduplicated.iter().any(|existing: &Path| {
-                if root.as_str().is_empty() {
-                    return false;
-                }
-                if existing.as_str().is_empty() {
-                    return true;
-                }
-
-                let existing_str
-                    = existing.as_str();
-                let root_str
-                    = root.as_str();
-
-                root_str.starts_with(existing_str)
-                    && root_str[existing_str.len()..].starts_with('/')
-            });
+            = deduplicated.iter()
+                .any(|existing: &Path| existing.contains(&root));
 
         if !is_covered {
             deduplicated.push(root);
@@ -223,34 +114,27 @@ fn deduplicate_roots(roots: Vec<Path>) -> Vec<Path> {
 #[derive(Debug)]
 pub struct DiffFinder<TController: DiffController> {
     pub root_path: Path,
-    pub cache_state: CacheState<TController::Data>,
+    pub state: CacheState<TController::Data>,
 }
 
 impl<TController: DiffController> DiffFinder<TController> {
-    pub fn new(root_path: Path, roots: Vec<Path>, save_state: SaveState<TController::Data>) -> Self {
+    pub fn new(root_path: Path, roots: Vec<Path>, state: CacheState<TController::Data>) -> Self {
         let deduplicated_roots
             = deduplicate_roots(roots);
 
-        let mut cache_state
-            = if save_state.roots == deduplicated_roots {
-                CacheState::from_save_state(save_state)
-            } else {
-                CacheState::new(deduplicated_roots)
-            };
+        let mut state = if state.roots == deduplicated_roots {
+            state
+        } else {
+            CacheState::new(deduplicated_roots)
+        };
 
-        // Ensure failed files from a previous run are marked for retry by resetting their mtime.
-        // Since we don't persist errors, any file that previously failed will have been removed
-        // from the cache, so no special handling is needed here.
-        for root in &cache_state.roots {
-            if !cache_state.cache.contains_key(root) {
-                cache_state.cache.insert(root.clone(), CacheEntry::Directory(0));
+        for root in &state.roots {
+            if !state.cache.contains_key(root) {
+                state.cache.insert(root.clone(), CacheEntry::Directory(0));
             }
         }
 
-        Self {
-            root_path,
-            cache_state,
-        }
+        Self {root_path, state}
     }
 
     fn refresh_directory(
@@ -259,13 +143,14 @@ impl<TController: DiffController> DiffFinder<TController> {
         rel_path: &Path,
         current_time: u128,
     ) -> Result<(), Error> {
-        self.cache_state.cache.insert(
+        self.state.cache.insert(
             rel_path.clone(),
             CacheEntry::Directory(current_time),
         );
 
         let abs_path
-            = self.root_path.with_join(rel_path);
+            = self.root_path
+                .with_join(rel_path);
 
         let directory_entries
             = abs_path
@@ -288,9 +173,10 @@ impl<TController: DiffController> DiffFinder<TController> {
             }
 
             let entry_rel_path
-                = rel_path.with_join_str(entry.file_name().to_str().unwrap());
+                = rel_path
+                    .with_join_str(entry.file_name().to_str().unwrap());
 
-            if self.cache_state.cache.contains_key(&entry_rel_path) {
+            if self.state.cache.contains_key(&entry_rel_path) {
                 continue;
             }
 
@@ -305,65 +191,62 @@ impl<TController: DiffController> DiffFinder<TController> {
     }
 
     pub fn rsync(&mut self) -> Result<(bool, BTreeSet<Path>), Error> {
-        let cache_checks
-            = self
-                .cache_state
-                .cache
-                .par_iter()
-                .map(|(rel_path, cache_entry)| {
-                    let abs_path
-                        = self.root_path.with_join(&rel_path);
+        let cache_checks = self.state
+            .cache
+            .par_iter()
+            .map(|(rel_path, cache_entry)| {
+                let abs_path
+                    = self.root_path.with_join(&rel_path);
 
-                    let metadata
-                        = match abs_path.fs_metadata() {
-                            Ok(metadata) => metadata,
+                let metadata = match abs_path.fs_metadata() {
+                    Ok(metadata)
+                        => metadata,
 
-                            Err(e) if e.io_kind() == Some(ErrorKind::NotFound) => {
-                                return Ok(CacheCheck::NotFound(rel_path.clone()))
-                            }
+                    Err(e) if e.io_kind() == Some(ErrorKind::NotFound)
+                        => return Ok(CacheCheck::NotFound(rel_path.clone())),
 
-                            Err(e) => return Err(e.into()),
+                    Err(e)
+                        => return Err(e.into()),
+                };
+
+                let mtime
+                    = metadata
+                        .modified()?
+                        .duration_since(UNIX_EPOCH)?
+                        .as_nanos() as u128;
+
+                if metadata.is_dir() {
+                    if mtime > cache_entry.mtime() {
+                        Ok(CacheCheck::ChangedDirectory(rel_path.clone(), mtime))
+                    } else {
+                        Ok(CacheCheck::Skip)
+                    }
+                } else {
+                    if mtime > cache_entry.mtime() {
+                        let Some(file_name) = rel_path.basename() else {
+                            return Ok(CacheCheck::Skip);
                         };
 
-                    let mtime
-                        = metadata
-                            .modified()?
-                            .duration_since(UNIX_EPOCH)?
-                            .as_nanos() as u128;
-
-                    if metadata.is_dir() {
-                        if mtime > cache_entry.mtime() {
-                            Ok(CacheCheck::ChangedDirectory(rel_path.clone(), mtime))
-                        } else {
-                            Ok(CacheCheck::Skip)
+                        if !TController::is_relevant_entry(file_name, &metadata.file_type()) {
+                            return Ok(CacheCheck::NotFound(rel_path.clone()));
                         }
+
+                        let data_result
+                            = TController::get_file_data(&abs_path, &metadata);
+
+                        Ok(CacheCheck::ChangedFile(rel_path.clone(), mtime, data_result))
                     } else {
-                        if mtime > cache_entry.mtime() {
-                            let Some(file_name) = rel_path.basename() else {
-                                return Ok(CacheCheck::Skip);
-                            };
-
-                            if !TController::is_relevant_entry(file_name, &metadata.file_type()) {
-                                return Ok(CacheCheck::NotFound(rel_path.clone()));
-                            }
-
-                            let data_result
-                                = TController::get_file_data(&abs_path, &metadata);
-
-                            Ok(CacheCheck::ChangedFile(rel_path.clone(), mtime, data_result))
-                        } else {
-                            Ok(CacheCheck::Skip)
-                        }
+                        Ok(CacheCheck::Skip)
                     }
-                })
-                .collect::<Result<Vec<_>, Error>>()?;
+                }
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
 
         let mut has_changed
             = false;
+
         let mut new_file_paths
-            = std::mem::take(&mut self.cache_state.retry_files)
-                .into_iter()
-                .collect::<Vec<_>>();
+            = vec![];
         let mut all_changed_paths
             = BTreeSet::new();
 
@@ -374,18 +257,16 @@ impl<TController: DiffController> DiffFinder<TController> {
                 CacheCheck::ChangedFile(rel_path, mtime, data_result) => {
                     match data_result {
                         Ok(data) => {
-                            self.cache_state.cache.insert(
+                            self.state.cache.insert(
                                 rel_path.clone(),
                                 CacheEntry::File(mtime, data),
                             );
-                            self.cache_state.failed_files.remove(&rel_path);
                         }
 
                         Err(error) => {
-                            self.cache_state.cache.remove(&rel_path);
-                            self.cache_state.failed_files.insert(
+                            self.state.cache.insert(
                                 rel_path.clone(),
-                                FailedFile { mtime, error },
+                                CacheEntry::Error(Some(error)),
                             );
                         }
                     }
@@ -400,49 +281,46 @@ impl<TController: DiffController> DiffFinder<TController> {
                 }
 
                 CacheCheck::NotFound(rel_path) => {
-                    self.cache_state.cache.remove(&rel_path);
-                    self.cache_state.failed_files.remove(&rel_path);
+                    self.state.cache.remove(&rel_path);
                     has_changed = true;
                 }
             }
         }
 
-        let new_entries
-            = new_file_paths
-                .into_par_iter()
-                .map(|rel_path| {
-                    let abs_path
-                        = self.root_path.with_join(&rel_path);
+        let new_entries = new_file_paths
+            .into_par_iter()
+            .map(|rel_path| {
+                let abs_path
+                    = self.root_path.with_join(&rel_path);
 
-                    let metadata
-                        = abs_path.fs_metadata()?;
+                let metadata
+                    = abs_path.fs_metadata()?;
 
-                    let data_result
-                        = TController::get_file_data(&abs_path, &metadata);
+                let data_result
+                    = TController::get_file_data(&abs_path, &metadata);
 
-                    let mtime
-                        = metadata
-                            .modified()?
-                            .duration_since(UNIX_EPOCH)?
-                            .as_nanos() as u128;
+                let mtime = metadata
+                    .modified()?
+                    .duration_since(UNIX_EPOCH)?
+                    .as_nanos() as u128;
 
-                    Ok((rel_path, mtime, data_result))
-                })
-                .collect::<Result<Vec<_>, Error>>()?;
+                Ok((rel_path, mtime, data_result))
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
 
         for (rel_path, mtime, data_result) in new_entries {
             match data_result {
                 Ok(data) => {
-                    self.cache_state.cache.insert(
+                    self.state.cache.insert(
                         rel_path.clone(),
                         CacheEntry::File(mtime, data),
                     );
                 }
 
                 Err(error) => {
-                    self.cache_state.failed_files.insert(
+                    self.state.cache.insert(
                         rel_path.clone(),
-                        FailedFile { mtime, error },
+                        CacheEntry::Error(Some(error)),
                     );
                 }
             }
@@ -453,91 +331,7 @@ impl<TController: DiffController> DiffFinder<TController> {
         Ok((has_changed, all_changed_paths))
     }
 
-    pub fn into_cache_state(self) -> CacheState<TController::Data> {
-        self.cache_state
-    }
-
-    pub fn to_save_state(&self) -> SaveState<TController::Data>
-    where
-        TController::Data: Clone,
-    {
-        self.cache_state.to_save_state()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn p(s: &str) -> Path {
-        Path::new().with_join_str(s)
-    }
-
-    #[test]
-    fn test_deduplicate_roots_removes_inner_paths() {
-        let roots
-            = vec![
-                p("packages/foo"),
-                p("packages"),
-                p("packages/foo/bar"),
-            ];
-
-        let result
-            = deduplicate_roots(roots);
-
-        assert_eq!(result, vec![p("packages")]);
-    }
-
-    #[test]
-    fn test_deduplicate_roots_keeps_non_overlapping() {
-        let roots
-            = vec![
-                p("packages"),
-                p("apps"),
-                p("libs"),
-            ];
-
-        let result
-            = deduplicate_roots(roots);
-
-        assert_eq!(
-            result,
-            vec![
-                p("apps"),
-                p("libs"),
-                p("packages"),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_deduplicate_roots_handles_empty_root() {
-        let roots
-            = vec![
-                p("packages"),
-                Path::new(),
-            ];
-
-        let result
-            = deduplicate_roots(roots);
-
-        assert_eq!(result, vec![Path::new()]);
-    }
-
-    #[test]
-    fn test_deduplicate_roots_partial_prefix_not_ancestor() {
-        let roots
-            = vec![
-                p("pack"),
-                p("packages"),
-            ];
-
-        let result
-            = deduplicate_roots(roots);
-
-        assert_eq!(
-            result,
-            vec![p("pack"), p("packages")]
-        );
+    pub fn into_state(self) -> CacheState<TController::Data> {
+        self.state
     }
 }

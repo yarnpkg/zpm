@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, fs::{FileType, Metadata}};
 
 use zpm_utils::Path;
 
-use crate::{diff_finder::{CacheState, DiffController, DiffFinder, SaveState}, error::Error, manifest::{helpers::read_manifest_with_size, Manifest}};
+use crate::{diff_finder::{CacheState, DiffController, DiffFinder}, error::Error, manifest::{helpers::read_manifest_with_size, Manifest}};
 
 #[derive(Debug)]
 pub enum PollResult {
@@ -37,7 +37,7 @@ impl CachedManifestFinder {
             = save_state_path
                 .fs_read_prealloc()
                 .ok()
-                .and_then(|save_data| SaveState::from_slice(&save_data).ok())
+                .and_then(|save_data| CacheState::from_slice(&save_data).ok())
                 .unwrap_or_default();
 
         let roots
@@ -51,7 +51,7 @@ impl CachedManifestFinder {
 
     fn save(&self) -> Result<(), Error> {
         let data
-            = self.diff_finder.to_save_state().to_vec()?;
+            = self.diff_finder.state.to_vec()?;
 
         let _
             = self.save_state_file(&data);
@@ -79,7 +79,7 @@ impl CachedManifestFinder {
     }
 
     pub fn into_state(self) -> CacheState<Manifest> {
-        self.diff_finder.into_cache_state()
+        self.diff_finder.into_state()
     }
 }
 
