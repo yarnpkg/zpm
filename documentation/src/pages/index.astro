@@ -1,9 +1,10 @@
 ---
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import Hero from "@/sections/Hero.astro";
-import Features from "@/sections/Features.astro";
-import HowItWorks from "@/sections/HowItWorks.astro";
-import Testimonials from "@/sections/Testimonials.astro";
+
+import Versions from "@/components/HeroVersions";
+import Headline from "@/components/Headline.astro";
+import Heading from "@/components/Heading";
 ---
 
 <StarlightPage
@@ -16,7 +17,27 @@ import Testimonials from "@/sections/Testimonials.astro";
     hideBackground: true,
   }}
 >
-  <div class="flex flex-col gap-y-32">
-    <Hero />
-  </div>
+  <Hero>
+    <div class="flex flex-col items-start lg:mt-auto mb-0 lg:mb-auto">
+      <Heading size="h1" className="max-w-3xl">
+        Safe, stable, <br /> reproducible projects
+      </Heading>
+
+      <p class="text-white! pt-6 max-w-2xl text-sm md:text-base">
+        Yarn is a package manager that doubles down as project manager.
+        Simple projects or large scale monorepos, Yarn got you covered.
+      </p>
+
+      <div class="flex flex-col items-center lg:items-start mx-auto lg:mx-0 my-6 lg:mb-0 space-y-4">
+        <Headline>
+          <span class="font-mono">
+            curl repo.yarnpkg.com/install | bash
+          </span>
+        </Headline>
+        <div>
+          <Versions client:load/>
+        </div>
+      </div>
+    </div>
+  </Hero>
 </StarlightPage>

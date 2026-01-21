@@ -94,94 +94,91 @@ export default function MobileNavigation({pathname}: {pathname: string}) {
   }, [isSearchOpen]);
 
   return (
-    <div className={`relative`}>
-      <div className={`h-12`}/>
+    <div
+      className={cn(
+        `absolute inset-x-0 top-0 bg-linear-to-b from-white/15 to-white/5 p-px rounded-3xl`,
+      )}
+    >
       <div
         className={cn(
-          `absolute inset-x-0 top-0 bg-linear-to-b from-white/15 to-white/5 p-px rounded-3xl`,
+          `px-4 bg-linear-to-b from-gray-950 to-gray-800 rounded-3xl`,
         )}
       >
-        <div
-          className={cn(
-            `px-4 bg-linear-to-b from-gray-950 to-gray-800 rounded-3xl`,
-          )}
-        >
-          <div className={`flex justify-between items-center h-12`}>
-            <a href={`/`} aria-label={`Logo`}>
-              <BrandLogo class={`h-6 w-14 shrink-0`} />
-            </a>
+        <div className={`flex justify-between items-center h-12`}>
+          <a href={`/`} aria-label={`Logo`}>
+            <BrandLogo class={`h-6 w-14 shrink-0`} />
+          </a>
 
-            <div className={`flex items-center gap-x-3`}>
-              <div ref={searchContainerRef} id={`docsearch-container`} />
+          <div className={`flex items-center gap-x-3`}>
+            <div ref={searchContainerRef} id={`docsearch-container`} />
 
-              <button
-                type={`button`}
-                id={`docsearch-button`}
-                aria-label={`Search documentation`}
-                onClick={() => setIsSearchOpen(true)}
-              >
-                <SearchIcon className={`size-6`} />
-              </button>
+            <button
+              type={`button`}
+              id={`docsearch-button`}
+              aria-label={`Search documentation`}
+              onClick={() => setIsSearchOpen(true)}
+            >
+              <SearchIcon className={`size-6`} />
+            </button>
 
-              <button
-                type={`button`}
-                onClick={() => setIsMenuOpen(!isMenuOpen)}
-                aria-label={`Toggle menu`}
-              >
-                {isMenuOpen ? (
-                  <Close className={`size-6 shrink-0`} />
-                ) : (
-                  <Menu className={`size-6 shrink-0`} />
-                )}
-              </button>
-            </div>
+            <button
+              type={`button`}
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              aria-label={`Toggle menu`}
+            >
+              {isMenuOpen ? (
+                <Close className={`size-6 shrink-0`} />
+              ) : (
+                <Menu className={`size-6 shrink-0`} />
+              )}
+            </button>
           </div>
-          {isMenuOpen && (
-            <div ref={menuRef} className={`pt-10 flex flex-col gap-y-10`}>
-              <ul className={`flex flex-col gap-y-7`}>
-                {NAVIGATION.map(
-                  ({href, title}: {href: string, title: string}) => (
-                    <li key={href} onClick={() => setIsMenuOpen(false)}>
-                      <a
-                        href={href}
-                        aria-label={title}
-                        className={cn(
-                          `font-medium text-sm leading-5 tracking-normal text-white/90 hover:text-[#7388FF]`,
-                          isActivePath(pathname, href) && `text-[#7388FF] `,
-                        )}
-                      >
-                        {title}
-                      </a>
-                    </li>
-                  ),
-                )}
-              </ul>
+        </div>
+        {isMenuOpen && (
+          <div ref={menuRef} className={`pt-10 flex flex-col gap-y-10`}>
+            <ul className={`flex flex-col gap-y-7`}>
+              {NAVIGATION.map(
+                ({href, title}: {href: string, title: string}) => (
+                  <li key={href} onClick={() => setIsMenuOpen(false)}>
+                    <a
+                      href={href}
+                      aria-label={title}
+                      className={cn(
+                        `font-medium text-sm leading-5 tracking-normal text-white/90 hover:text-[#7388FF]`,
+                        isActivePath(pathname, href) && `text-[#7388FF] `,
+                      )}
+                    >
+                      {title}
+                    </a>
+                  </li>
+                ),
+              )}
+            </ul>
 
-              <div className={`h-px w-full bg-white/15`}></div>
+            <div className={`h-px w-full bg-white/15`}></div>
 
-              <div className={`flex flex-col gap-y-6 pb-3`}>
-                <CollapsibleNavigation />
+            <div className={`flex flex-col gap-y-6 pb-3`}>
+              <CollapsibleNavigation />
 
-                <div className={`flex items-center gap-x-6`}>
-                  <a
-                    href={`https://discord.gg/yarnpkg`}
-                    target={`_blank`}
-                    rel={`noopener noreferrer`}
-                  >
-                    <Discord className={`size-6 shrink-0`} />
-                  </a>
-                  <a
-                    href={`https://github.com/yarnpkg/yarn`}
-                    target={`_blank`}
-                    rel={`noopener noreferrer`}
-                  >
-                    <GitHub className={`size-6 shrink-0`} />
-                  </a>
-                </div>
+              <div className={`flex items-center gap-x-6`}>
+                <a
+                  href={`https://discord.gg/yarnpkg`}
+                  target={`_blank`}
+                  rel={`noopener noreferrer`}
+                >
+                  <Discord className={`size-6 shrink-0`} />
+                </a>
+                <a
+                  href={`https://github.com/yarnpkg/yarn`}
+                  target={`_blank`}
+                  rel={`noopener noreferrer`}
+                >
+                  <GitHub className={`size-6 shrink-0`} />
+                </a>
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

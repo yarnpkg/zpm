@@ -1,6 +1,7 @@
 ---
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
-import SearchPackageInterface from "@/features/package/search/SearchPackageInterface";
+import Hero from "@/sections/Hero.astro";
+import SearchResults from "@/features/package/search/SearchResults";
 ---
 
 <StarlightPage
@@ -9,10 +10,13 @@ import SearchPackageInterface from "@/features/package/search/SearchPackageInter
     template: "splash",
   }}
   {...{
+    hideTitle: true,
     hideBackground: true,
   }}
 >
-  <div class="container">
-    <SearchPackageInterface client:only="preact" />
-  </div>
+  <Hero>
+    <div class="w-full">
+      <SearchResults client:only="preact"/>
+    </div>
+  </Hero>
 </StarlightPage>

@@ -1,6 +1,6 @@
 ---
 import DesktopNavigation from "./partial/DesktopNavigation.astro";
-import MobileNavigation from "./partial/client/MobileNavigation";
+import MobileNavigation from "./partial/MobileNavigation.astro";
 import { Image } from "astro:assets";
 
 import stars from "@/assets/image/stars.png";
@@ -12,10 +12,10 @@ const { pathname } = Astro.url;
 
 <nav class="relative container py-8 z-40">
   <div class="max-xl:hidden w-full">
-    <DesktopNavigation pathname={pathname} />
+    <DesktopNavigation pathname={pathname} transition:persist />
   </div>
-  <div class="xl:hidden">
-    <MobileNavigation client:only="preact" pathname={pathname} />
+  <div class="xl:hidden w-full">
+    <MobileNavigation pathname={pathname} transition:persist />
   </div>
 </nav>
 

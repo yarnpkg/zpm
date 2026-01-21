@@ -1,6 +1,7 @@
 ---
 import { Image } from "astro:assets";
-import SearchPackageInterface from "@/features/package/search/SearchPackageInterface.js";
+import SearchInput from "@/features/package/search/SearchInput";
+import SearchResults from "@/features/package/search/SearchResults";
 import Versions from "@/components/HeroVersions";
 import Headline from "@/components/Headline.astro";
 import Heading from "@/components/Heading";
@@ -14,38 +15,20 @@ import heroEllipse from "@/assets/svg/hero-ellipse.svg";
 
 <div class="-mt-28 lg:-mt-33">
   <section class="relative text-center lg:text-left">
-    <div class="px-4 pb-8 container flex flex-col min-h-[100vh] items-center lg:items-start lg:justify-around">
-      <div class="flex-none mt-0 h-28 lg:h-25"/>
-
-      <div class="flex flex-col items-start lg:mt-auto mb-0 lg:mb-auto">
-        <Heading size="h1" className="max-w-3xl">
-          Safe, stable, <br /> reproducible projects
-        </Heading>
-
-        <p class="text-white! pt-6 max-w-2xl text-sm md:text-base">
-          Yarn is a package manager that doubles down as project manager.
-          Simple projects or large scale monorepos, Yarn got you covered.
-        </p>
-
-        <div class="flex flex-col items-center lg:items-start mx-auto lg:mx-0 my-6 lg:mb-0 space-y-4">
-          <Headline>
-            <span class="font-mono">
-              curl repo.yarnpkg.com/install | bash
-            </span>
-          </Headline>
-          <div>
-            <Versions client:load/>
-          </div>
+    <div class="px-4 pt-28 lg:pt-25 pb-8 container flex flex-col min-h-[100vh] items-center lg:items-stretch">
+      <div class="relative flex-1">
+        <div class="absolute top-0 left-0 w-full h-full flex" transition:animate="slide">
+          <slot/>
         </div>
       </div>
 
       <div class="w-full lg:max-w-[650px]">
-        <SearchPackageInterface client:only="preact" />
+        <SearchInput client:load transition:persist />
       </div>
 
       <div class="lg:absolute lg:top-0 lg:right-0 lg:h-screen lg:pt-33 -z-40">
         <div class="lg:h-full aspect-square">
-          <CatShader client:load/>
+          <CatShader client:load transition:persist/>
         </div>
       </div>
     </div>

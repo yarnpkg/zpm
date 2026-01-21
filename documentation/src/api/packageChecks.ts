@@ -157,7 +157,7 @@ export const checks: Array<Check> = [
 
         return {
           ok: true,
-          message: `<p>Types are available via <a href="${href}">${dtPackageName}</a></p>`,
+          message: `Types are available via <a href="${href}">${dtPackageName}</a>`,
         };
       }
 

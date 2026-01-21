@@ -1,9 +1,9 @@
-import {useEffect, useRef}  from 'preact/hooks';
+import {useCallback, useEffect, useRef} from 'preact/hooks';
 
-import catSdfUrl            from './cat-shader/cat-sdf.png?url';
-import catShapeUrl          from './cat-shader/cat-shape.png?url';
-import fragmentShaderSource from './cat-shader/fragment.glsl?raw';
-import vertexShaderSource   from './cat-shader/vertex.glsl?raw';
+import catSdfUrl                        from './cat-shader/cat-sdf.png?url';
+import catShapeUrl                      from './cat-shader/cat-shape.png?url';
+import fragmentShaderSource             from './cat-shader/fragment.glsl?raw';
+import vertexShaderSource               from './cat-shader/vertex.glsl?raw';
 
 class ShaderController {
   canvas: HTMLCanvasElement;
@@ -217,19 +217,39 @@ class ShaderController {
   }
 }
 
+type ShaderRef = {
+  canvas: HTMLCanvasElement;
+  context: WebGL2RenderingContext;
+  shader: ShaderController;
+};
+
 export function CatShader() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const shaderRef = useRef<ShaderRef | null>(null);
+
+  const attachContext = useCallback((canvas: HTMLCanvasElement | null) => {
+    if (!canvas) {
+      shaderRef.current = null;
+      return;
+    }
+
+    const context = canvas.getContext(`webgl2`, {alpha: true, premultipliedAlpha: true});
+    if (!context) {
+      shaderRef.current = null;
+      return;
+    }
+
+    shaderRef.current = {
+      canvas,
+      context,
+      shader: new ShaderController(canvas, context),
+    };
+  }, []);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas)
+    const shader = shaderRef.current?.shader;
+    if (!shader)
       return () => {};
 
-    const gl = canvas.getContext(`webgl2`, {alpha: true, premultipliedAlpha: true});
-    if (!gl)
-      return () => {};
-
-    const shader = new ShaderController(canvas, gl);
     shader.render();
 
     let renderLoop: ReturnType<typeof requestAnimationFrame>;
@@ -243,11 +263,18 @@ export function CatShader() {
 
     return () => {
       cancelAnimationFrame(renderLoop);
-      shader.dispose();
     };
   }, []);
 
+  useEffect(() => {
+    const shader = shaderRef.current?.shader;
+    if (!shader)
+      return;
+
+    shader.dispose();
+  }, []);
+
   return (
-    <canvas ref={canvasRef} className={`w-full h-full`} />
+    <canvas ref={attachContext} className={`w-full h-full`} />
   );
 }
