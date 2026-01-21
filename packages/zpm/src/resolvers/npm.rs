@@ -157,12 +157,22 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     let registry_path
         = npm::registry_url_for_all_versions(&package_ident);
 
+    let authorization
+        = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+            configuration: &project.config,
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: Some(package_ident),
+            auth_mode: http_npm::AuthorizationMode::RespectConfiguration,
+            allow_oidc: false,
+        }).await?;
+
     let bytes
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
             path: &registry_path,
-            authorization: None,
+            authorization: authorization.as_deref(),
             otp: None,
         }).await?;
 
@@ -216,12 +226,22 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let registry_path
         = npm::registry_url_for_all_versions(&package_ident);
 
+    let authorization
+        = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+            configuration: &project.config,
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: Some(package_ident),
+            auth_mode: http_npm::AuthorizationMode::RespectConfiguration,
+            allow_oidc: false,
+        }).await?;
+
     let bytes
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
             path: &registry_path,
-            authorization: None,
+            authorization: authorization.as_deref(),
             otp: None,
         }).await?;
 
@@ -271,12 +291,22 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     let registry_path
         = npm::registry_url_for_one_version(&params.ident, &params.version);
 
+    let authorization
+        = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+            configuration: &project.config,
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: Some(&params.ident),
+            auth_mode: http_npm::AuthorizationMode::RespectConfiguration,
+            allow_oidc: false,
+        }).await?;
+
     let bytes
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
             path: &registry_path,
-            authorization: None,
+            authorization: authorization.as_deref(),
             otp: None,
         }).await?;
 

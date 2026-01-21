@@ -4,7 +4,7 @@ use zpm_primitives::{Locator, RegistryReference};
 
 use crate::{
     error::Error,
-    http_npm,
+    http_npm::{self, AuthorizationMode, GetAuthorizationOptions},
     install::{FetchResult, InstallContext},
     npm::{self, NpmEntryExt},
 };
@@ -63,13 +63,23 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let package_subdir
         = params.ident.nm_subdir();
 
+    let authorization
+        = http_npm::get_authorization(&GetAuthorizationOptions {
+            configuration: &project.config,
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: Some(&params.ident),
+            auth_mode: AuthorizationMode::RespectConfiguration,
+            allow_oidc: false,
+        }).await?;
+
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
         let bytes
             = http_npm::get(&http_npm::NpmHttpParams {
                 http_client: &project.http_client,
                 registry: &registry_base,
                 path: &registry_path,
-                authorization: None,
+                authorization: authorization.as_deref(),
                 otp: None,
             }).await?;
 
