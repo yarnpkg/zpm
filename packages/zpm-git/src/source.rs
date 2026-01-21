@@ -1,13 +1,13 @@
 use std::convert::Infallible;
 
-use bincode::{Decode, Encode};
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use zpm_utils::{DataType, FromFileString, ToFileString, ToHumanString};
 
 use crate::{normalize_git_url, GH_TARBALL_URL, GH_URL};
 
-#[derive(Clone, Debug, Decode, Deserialize, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub enum GitSource {
     GitHub { owner: String, repository: String },
     Url(String),

@@ -1,4 +1,3 @@
-use bincode::{Decode, Encode};
 use rkyv::Archive;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
 
@@ -8,13 +7,15 @@ use crate::{extract::extract_version, range::RangeKind, Error, Range};
 #[path = "./version.test.rs"]
 mod version_tests;
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub enum VersionRc {
     Number(u32),
     String(String),
 }
 
-#[derive(Clone, Debug, Default, Decode, Encode, PartialEq, Eq, Hash, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub struct Version {
     pub major: u32,
     pub minor: u32,

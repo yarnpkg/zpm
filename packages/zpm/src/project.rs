@@ -307,8 +307,8 @@ impl Project {
         let src = install_state_path
             .fs_read()?;
 
-        let (install_state, _): (InstallState, _)
-            = bincode::decode_from_slice(src.as_slice(), bincode::config::standard())
+        let install_state
+            = rkyv::from_bytes::<InstallState, rkyv::rancor::BoxedError>(&src)
                 .map_err(|_| Error::InvalidInstallState)?;
 
         self.install_state
@@ -332,7 +332,9 @@ impl Project {
             = self.install_state_path();
 
         let contents
-            = bincode::encode_to_vec(install_state, bincode::config::standard()).unwrap();
+            = rkyv::to_bytes::<rkyv::rancor::BoxedError>(install_state)
+                .map_err(|_| Error::InvalidInstallState)?
+                .to_vec();
 
         // let re_parsed: InstallState
         //     = serde_json::from_str(&contents)?;

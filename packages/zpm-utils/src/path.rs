@@ -1,6 +1,5 @@
 use std::{collections::BTreeMap, io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}};
 
-use bincode::{Decode, Encode};
 use rkyv::Archive;
 
 use crate::{diff_data, impl_file_string_from_str, impl_file_string_serialization, path_resolve::resolve_path, DataType, FromFileString, IoResultExt, PathError, PathIterator, ToFileString, ToHumanString};
@@ -52,7 +51,8 @@ impl FromFileString for ExplicitPath {
 
 impl_file_string_from_str!(ExplicitPath);
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub struct RawPath {
     pub raw: String,
     pub path: Path,
@@ -88,7 +88,7 @@ macro_rules! p {
 
 impl_file_string_from_str!(RawPath);
 impl_file_string_serialization!(RawPath);
-#[derive(Clone, Debug, Decode, Encode, Archive, rkyv::Serialize, rkyv::Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Archive, rkyv::Serialize, rkyv::Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[rkyv(compare(PartialEq, PartialOrd), derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub struct Path {
     path: String,

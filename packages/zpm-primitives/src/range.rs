@@ -1,6 +1,5 @@
 use std::{hash::Hash, str::FromStr, sync::LazyLock};
 
-use bincode::{Decode, Encode};
 use regex::Regex;
 use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
@@ -53,8 +52,10 @@ pub enum RangeError {
 }
 
 #[zpm_enum(error = RangeError, or_else = |s| Err(RangeError::SyntaxError(s.to_string())))]
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash))]
+#[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[variant_struct_attr(rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash)))]
 pub enum Range {
     #[no_pattern]
     #[to_file_string(|| "missing!".to_string())]

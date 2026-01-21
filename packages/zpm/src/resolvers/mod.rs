@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use bincode::{Decode, Encode};
+use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use zpm_primitives::{Descriptor, Ident, Locator, PeerRange, Range, Reference, RegistryReference, SemverPeerRange, WorkspaceIdentRange, descriptor_map_serializer, descriptor_map_deserializer};
 use zpm_utils::Requirements;
@@ -26,7 +26,10 @@ pub mod workspace;
 /**
  * Contains the information we keep in the lockfile for a given package.
  */
-#[derive(Clone, Debug, Deserialize, Decode, Encode, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
 #[serde(rename_all = "camelCase")]
 pub struct Resolution {
     #[serde(rename = "resolution")]

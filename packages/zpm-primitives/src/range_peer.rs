@@ -1,6 +1,5 @@
 use std::convert::Infallible;
 
-use bincode::{Decode, Encode};
 use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
 use zpm_utils::{DataType, Path, ToFileString};
@@ -10,8 +9,9 @@ use crate::{AnonymousSemverRange, Range, WorkspaceMagicRange, WorkspacePathRange
 type Error = Infallible;
 
 #[zpm_enum(or_else = |_| Ok(PeerRange::Semver(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()})))]
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive_variants(Clone, Debug, PartialEq, Eq, Hash, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[variant_struct_attr(rkyv(derive(PartialEq, Eq, Hash)))]
 pub enum PeerRange {
     #[pattern(r"(?<range>.*)")]
     #[to_file_string(|params| params.range.to_file_string())]

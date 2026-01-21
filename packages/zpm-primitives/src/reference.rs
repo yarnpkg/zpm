@@ -1,6 +1,5 @@
 use std::hash::Hash;
 
-use bincode::{Decode, Encode};
 use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
 use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
@@ -29,8 +28,10 @@ pub enum ReferenceError {
 }
 
 #[zpm_enum(error = ReferenceError, or_else = |s| Err(ReferenceError::SyntaxError(s.to_string())))]
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash))]
+#[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[variant_struct_attr(rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash)))]
 pub enum Reference {
     #[pattern(r"builtin:(?<version>.*)")]
     #[to_file_string(|params| format!("builtin:{}", params.version.to_file_string()))]

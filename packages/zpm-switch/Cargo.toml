@@ -8,7 +8,6 @@ name = "yarn"
 path = "src/main.rs"
 
 [dependencies]
-bincode = {version = "2.0.0-rc.3", features = ["serde"] }
 blake2 = { version = "0.10.6" }
 clipanion = { git = "https://github.com/arcanis/clipanion-rs.git", features = ["serde"] }
 hex = "0.4.3"

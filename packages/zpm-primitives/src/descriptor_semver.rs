@@ -1,4 +1,3 @@
-use bincode::{Decode, Encode};
 use colored::Colorize;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
 
@@ -6,7 +5,7 @@ use crate::{DescriptorError, RangeError};
 
 use super::Ident;
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SemverDescriptor {
     pub ident: Ident,
     pub range: zpm_semver::Range,

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, str::FromStr, sync::LazyLock};
 
-use bincode::{Decode, Encode};
+use rkyv::Archive;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{DefaultOnError, serde_as};
@@ -26,7 +26,7 @@ static UNPLUG_EXT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
  * inside the install state so we can avoid having to recompute it every time,
  * which would otherwise require to parse the zip archives every time.
  */
-#[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct ContentFlags {
     /**
      * The binaries that should be made available to the package.

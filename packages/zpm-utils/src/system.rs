@@ -1,7 +1,6 @@
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use bincode::{Decode, Encode};
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use zpm_macro_enum::zpm_enum;
@@ -148,7 +147,7 @@ impl System {
 }
 
 #[zpm_enum(error = EnumError, or_else = |s| Err(EnumError::NotFound(s.to_string())))]
-#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum Cpu {
     #[literal("current")]
     Current,
@@ -167,7 +166,7 @@ pub enum Cpu {
 }
 
 #[zpm_enum(error = EnumError, or_else = |s| Err(EnumError::NotFound(s.to_string())))]
-#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum Libc {
     #[literal("current")]
     Current,
@@ -183,7 +182,7 @@ pub enum Libc {
 }
 
 #[zpm_enum(error = EnumError, or_else = |s| Err(EnumError::NotFound(s.to_string())))]
-#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum Os {
     #[literal("current")]
     Current,
@@ -201,7 +200,7 @@ pub enum Os {
     Other(String),
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Decode, Encode, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Requirements {
     #[serde(default)]
     #[serde(rename = "cpu")]

@@ -8,7 +8,6 @@ use zpm_primitives::{Descriptor, Ident, PeerRange, descriptor_map_deserializer, 
 use zpm_switch::PackageManagerField;
 use zpm_utils::{Path, Requirements, ToFileString};
 use bin::BinField;
-use bincode::{Decode, Encode};
 use exports::ExportsField;
 use imports::ImportsField;
 use resolutions::ResolutionsField;
@@ -21,25 +20,25 @@ pub mod helpers;
 pub mod imports;
 pub mod resolutions;
 
-#[derive(Clone, Debug, Deserialize, Serialize, Encode, Decode, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DistManifest {
     pub tarball: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct BinManifest {
     pub name: Option<Ident>,
     pub bin: Option<BinField>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct PeerDependenciesMeta {
     pub optional: bool,
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Default, Deserialize, Serialize, Encode, Decode, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteManifest {
     #[serde(default)]
@@ -75,7 +74,7 @@ pub struct RemoteManifest {
     pub dist: Option<DistManifest>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, Encode, Decode, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishConfig {
     #[serde(default)]
@@ -124,7 +123,7 @@ pub struct PublishConfig {
     pub provenance: Option<bool>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, Encode, Decode, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     #[serde(default)]

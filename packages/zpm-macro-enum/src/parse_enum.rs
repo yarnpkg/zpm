@@ -132,7 +132,7 @@ pub struct ParseEnumArgs {
 
 pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::TokenStream, syn::Error> {
     let all_attrs = ast.attrs.iter()
-        .filter(|attr| !attr.path().is_ident("derive_variants"))
+        .filter(|attr| !attr.path().is_ident("derive_variants") && !attr.path().is_ident("variant_struct_attr"))
         .cloned()
         .collect::<Vec<_>>();
 
@@ -148,6 +148,23 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
         derive_list.path = syn::Path::from(syn::Ident::new("derive", derive_list.path.span()));
         derive_variant_attr.meta = Meta::List(derive_list);
     }
+
+    // Parse #[variant_struct_attr(...)] from enum attributes
+    // These are applied to ALL generated variant structs
+    let variant_struct_attrs = ast.attrs.iter()
+        .filter(|attr| attr.path().is_ident("variant_struct_attr"))
+        .map(|attr| {
+            let meta = attr.meta.require_list()?;
+            let inner_meta: Meta = syn::parse2(meta.tokens.clone())
+                .map_err(|e| syn::Error::new(meta.tokens.span(), format!("Expected attribute in #[variant_struct_attr(...)]: {}", e)))?;
+            Ok(syn::Attribute {
+                pound_token: attr.pound_token.clone(),
+                style: attr.style.clone(),
+                bracket_token: attr.bracket_token.clone(),
+                meta: inner_meta,
+            })
+        })
+        .collect::<Result<Vec<_>, syn::Error>>()?;
 
     let enum_name
         = &ast.ident;
@@ -274,6 +291,7 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
 
                 generated_structs.push(quote!{
                     #(#derive_variants_attrs)*
+                    #(#variant_struct_attrs)*
                     #(#struct_attrs)*
                     pub struct #struct_name {
                         #(#field_tokens),*

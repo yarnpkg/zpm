@@ -3,10 +3,9 @@ use std::collections::BTreeMap;
 use rkyv::Archive;
 use serde_with::serde_as;
 use zpm_utils::{Path, RawPath};
-use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(untagged)]
 pub enum BrowserFieldEntry {
     Ignore(bool),
@@ -14,7 +13,7 @@ pub enum BrowserFieldEntry {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(untagged)]
 pub enum BrowserField {
     String(RawPath),

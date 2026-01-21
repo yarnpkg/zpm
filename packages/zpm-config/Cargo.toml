@@ -13,7 +13,6 @@ zpm-macro-enum = { path = "../zpm-macro-enum" }
 zpm-primitives = { path = "../zpm-primitives" }
 zpm-semver = { path = "../zpm-semver" }
 zpm-utils = { path = "../zpm-utils" }
-bincode = "2.0.1"
 
 [build-dependencies]
 convert_case = "0.8.0"
