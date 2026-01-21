@@ -109,13 +109,15 @@ fn is_package_approved(context: &InstallContext<'_>, ident: &Ident, version: &zp
 }
 
 pub fn resolve_aliased(descriptor: &Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
-    let mut dependencies_it
-        = dependencies.iter();
-
-    let mut inner_resolution
-        = dependencies_it.next().unwrap()
-            .as_resolved()
-            .clone();
+    // When the inner resolution returns Pinned (e.g., during lockfile migration),
+    // the graph will add a Refresh dependency that produces Resolved.
+    // We need to find the first Resolved result in the dependencies.
+    let mut inner_resolution = dependencies.iter()
+        .find_map(|dep| match dep {
+            InstallOpResult::Resolved(res) => Some(res.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("Expected at least one Resolved result in dependencies for aliased package; got {:?}", dependencies));
 
     let inner_reference
         = inner_resolution.resolution.locator.reference.clone();

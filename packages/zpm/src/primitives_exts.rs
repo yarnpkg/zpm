@@ -1,5 +1,16 @@
 use zpm_primitives::Range;
 
+/// Describes what kind of inner dependency is needed when a range has an inner descriptor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InnerDependencyKind {
+    /// The inner dependency only needs to be resolved (for aliases).
+    /// When receiving a Pinned result, schedule a Refresh to get the full ResolutionResult.
+    Resolution,
+    /// The inner dependency needs to be fetched (for patches).
+    /// Always schedule a Fetch to get the package contents.
+    Fetch,
+}
+
 pub struct RangeDetails {
     /**
      * The descriptor requires a binding to work. This is usually because they
@@ -24,6 +35,10 @@ pub struct RangeDetails {
 
 pub trait RangeExt {
     fn details(&self) -> RangeDetails;
+
+    /// Returns the kind of inner dependency needed for ranges that have an inner descriptor.
+    /// Returns None if the range doesn't have an inner descriptor.
+    fn inner_dependency(&self) -> Option<InnerDependencyKind>;
 }
 
 impl RangeExt for Range {
@@ -134,6 +149,21 @@ impl RangeExt for Range {
                     transient_resolution: false,
                 }
             },
+        }
+    }
+
+    fn inner_dependency(&self) -> Option<InnerDependencyKind> {
+        // This should be kept in sync with Range::inner_descriptor in zpm-primitives
+        match self {
+            // Aliased packages only need the resolution (to remap the ident)
+            Range::RegistrySemver(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
+            Range::RegistryTag(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
+
+            // Patches need the fetched package contents to apply the patch
+            Range::Patch(_) => Some(InnerDependencyKind::Fetch),
+
+            // All other ranges don't have inner dependencies
+            _ => None,
         }
     }
 }
