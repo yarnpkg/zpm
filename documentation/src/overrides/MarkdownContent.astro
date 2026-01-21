@@ -1,6 +1,10 @@
 ---
-import "../styles/markdown.css";
+import "../styles/markdown-content.css";
+import "../styles/markdown-ui.css";
 import "../styles/asides.css";
+
+const { entry } = Astro.locals.starlightRoute;
+const isSplash = entry.data.template === "splash";
 ---
 
-<div class="sl-markdown-content"><slot /></div>
+<div class:list={["sl-markdown-content", { content: !isSplash }]}><slot /></div>

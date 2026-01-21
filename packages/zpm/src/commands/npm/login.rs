@@ -4,7 +4,7 @@ use clipanion::cli;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
-use zpm_parsers::JsonDocument;
+use zpm_parsers::{DataDocument, JsonDocument};
 use zpm_utils::{DataType, IoResultExt, QueryString};
 
 use crate::{
@@ -133,7 +133,7 @@ impl Login {
                 ])
             };
 
-            let updated_content = zpm_parsers::yaml::Yaml::update_document_field(
+            let updated_content = DataDocument::update_document_field(
                 &config_content,
                 auth_token_path,
                 zpm_parsers::Value::String(token),

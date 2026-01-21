@@ -12,7 +12,10 @@
       "Bash(cargo test:*)",
       "Bash(git add:*)",
       "Bash(gh pr edit:*)",
-      "Bash(git push)"
+      "Bash(git push)",
+      "Bash(yarn test:integration:*)",
+      "Bash(cargo check:*)",
+      "Bash(git stash:*)"
     ],
     "deny": [],
     "ask": []

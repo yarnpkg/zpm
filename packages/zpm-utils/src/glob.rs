@@ -1,7 +1,7 @@
 use ouroboros::self_referencing;
 use wax::Program;
 
-use crate::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, ToFileString, ToHumanString};
+use crate::{FromFileString, Path, ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
 
 #[self_referencing]
 #[derive(Debug)]
@@ -54,6 +54,10 @@ impl Glob {
         }.try_build()?;
 
         Ok(Glob { inner: pattern })
+    }
+
+    pub fn prefix(&self) -> Result<Path, crate::PathError> {
+        Path::try_from(self.inner.borrow_pattern().clone().partition().0)
     }
 
     pub fn raw(&self) -> &str {

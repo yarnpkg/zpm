@@ -1,5 +1,6 @@
 - id: arcanis
-  name: Maël Nison
+  name: "Maël Nison"
+  emojis: 🇪🇺
   title: Lead Yarn maintainer
   url: https://github.com/arcanis
   image_url: https://github.com/arcanis.png

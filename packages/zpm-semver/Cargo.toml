@@ -3,10 +3,9 @@ name = "zpm-semver"
 edition = "2021"
 
 [dependencies]
-bincode_derive = { version = "2.0.0-rc.3" }
-bincode = { version = "2.0.0-rc.3" }
 colored = "3.0.0"
 itertools = "0.13.0"
+rkyv = { version = "0.8", features = ["bytecheck"] }
 rstest = "0.22.0"
 serde = { version = "1.0.207", features = ["derive"] }
 thiserror = "1.0.63"

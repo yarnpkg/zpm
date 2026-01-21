@@ -4,7 +4,7 @@ use itertools::Itertools;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use zpm_macro_enum::zpm_enum;
-use zpm_parsers::{JsonDocument, document::Document};
+use zpm_parsers::{JsonDocument, Document};
 use zpm_primitives::Ident;
 use zpm_semver::{Version, VersionRc};
 use zpm_utils::{IoResultExt, Path, ToFileString};

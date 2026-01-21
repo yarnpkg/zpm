@@ -23,7 +23,7 @@ pub struct ConfigGet {
     redacted: bool,
 
     /// The name of the configuration field to retrieve
-    name: zpm_parsers::path::Path,
+    name: zpm_parsers::Path,
 }
 
 impl ConfigGet {

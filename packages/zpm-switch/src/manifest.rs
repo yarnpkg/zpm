@@ -1,6 +1,6 @@
 use std::mem::take;
 
-use bincode::{Decode, Encode};
+use rkyv::Archive;
 use serde::Deserialize;
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
@@ -11,8 +11,9 @@ use crate::errors::Error;
 use zpm_semver::Version;
 
 #[zpm_enum(or_else = |s| Err(Error::UnknownBinaryName(s.to_string())))]
-#[derive(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq)]
-#[derive_variants(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive_variants(Clone, Copy, Debug, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[variant_struct_attr(rkyv(derive(PartialEq, Eq)))]
 enum BinaryName {
     #[pattern(r"yarn")]
     #[to_file_string(|| "yarn".to_string())]
@@ -22,8 +23,9 @@ enum BinaryName {
 
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidPackageManagerReference(s.to_string())))]
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq)]
-#[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive_variants(Clone, Debug, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[variant_struct_attr(rkyv(derive(PartialEq, Eq)))]
 pub enum PackageManagerReference {
     #[pattern(r"(?<version>.*)")]
     #[to_file_string(|params| params.version.to_file_string())]
@@ -41,7 +43,7 @@ pub enum PackageManagerReference {
 }
 
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct PackageManagerField {
     pub name: String,
 

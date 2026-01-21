@@ -5,13 +5,13 @@ use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
-use zpm_utils::{LastModifiedAt, Path, ToFileString, ToHumanString};
+use zpm_utils::{Glob, LastModifiedAt, Path, ToFileString, ToHumanString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
 use crate::{
     cache::{CompositeCache, DiskCache},
-    diff_finder::SaveEntry,
+    diff_finder::CacheEntry,
     error::Error,
     git::{GitOperation, detect_git_operation},
     http::HttpClient,
@@ -317,8 +317,8 @@ impl Project {
         let src = install_state_path
             .fs_read()?;
 
-        let (install_state, _): (InstallState, _)
-            = bincode::decode_from_slice(src.as_slice(), bincode::config::standard())
+        let install_state
+            = rkyv::from_bytes::<InstallState, rkyv::rancor::BoxedError>(&src)
                 .map_err(|_| Error::InvalidInstallState)?;
 
         self.install_state
@@ -342,7 +342,9 @@ impl Project {
             = self.install_state_path();
 
         let contents
-            = bincode::encode_to_vec(install_state, bincode::config::standard()).unwrap();
+            = rkyv::to_bytes::<rkyv::rancor::BoxedError>(install_state)
+                .map_err(|_| Error::InvalidInstallState)?
+                .to_vec();
 
         // let re_parsed: InstallState
         //     = serde_json::from_str(&contents)?;
@@ -915,8 +917,26 @@ impl Workspace {
         let mut workspaces = vec![];
 
         if let Some(patterns) = &self.manifest.workspaces {
+            let roots
+                = patterns.iter().filter_map(|pattern| {
+                    if pattern.starts_with('!') {
+                        return None;
+                    }
+
+                    let Ok(glob) = Glob::parse(pattern.as_str()) else {
+                        return None;
+                    };
+
+                    let Ok(prefix) = glob.prefix() else {
+                        return None;
+                    };
+
+                    Some(prefix)
+                })
+                .collect::<Vec<_>>();
+
             let mut manifest_finder
-                = CachedManifestFinder::new(self.path.clone());
+                = CachedManifestFinder::new(self.path.clone(), roots);
 
             manifest_finder.rsync()?;
 
@@ -975,38 +995,48 @@ impl Workspace {
                 let workspace_paths
                     = lookup_state.cache.iter()
                         .filter(|(_, entry)| {
-                            matches!(entry, SaveEntry::File(_, _))
+                            matches!(entry, CacheEntry::File(_, _) | CacheEntry::Error(_))
                         })
                         .filter(|(p, _)| {
-                            let candidate_workspace_rel_dir = p.dirname()
-                                .expect("Expected this path to have a parent directory, since it's supposed to be the relative path to a package.json file");
+                            let candidate_workspace_rel_dir
+                                = p.dirname()
+                                    .expect("Expected this path to have a parent directory, since it's supposed to be the relative path to a package.json file");
 
-                            let dir_str = candidate_workspace_rel_dir.as_str();
+                            let dir_str
+                                = candidate_workspace_rel_dir.as_str();
 
-                            // Important: If there are no positive patterns, nothing matches.
                             positive_glob_set.is_match(dir_str) && !negative_glob_set.is_match(dir_str)
                         })
                         .collect::<Vec<_>>();
 
-                for (manifest_rel_path, save_entry) in workspace_paths {
-                    if let SaveEntry::File(last_changed_at, manifest) = save_entry {
-                        let workspace_rel_path = manifest_rel_path.dirname().unwrap();
+                for (manifest_rel_path, cache_entry) in workspace_paths {
+                    match cache_entry {
+                        CacheEntry::File(last_changed_at, manifest) => {
+                            let workspace_rel_path
+                                = manifest_rel_path.dirname().unwrap();
 
-                        // Skip if we've already processed this workspace
-                        if !processed_workspaces.insert(workspace_rel_path.clone()) {
-                            continue;
-                        }
+                            if !processed_workspaces.insert(workspace_rel_path.clone()) {
+                                continue;
+                            }
 
-                        workspaces.push(Workspace::from_info(&self.path, WorkspaceInfo {
-                            rel_path: workspace_rel_path.clone(),
-                            manifest: manifest.clone(),
-                            last_changed_at: *last_changed_at,
-                        })?);
+                            workspaces.push(Workspace::from_info(&self.path, WorkspaceInfo {
+                                rel_path: workspace_rel_path.clone(),
+                                manifest: manifest.clone(),
+                                last_changed_at: *last_changed_at,
+                            })?);
 
-                        // If this workspace has its own workspaces field, add it to the queue
-                        if let Some(nested_patterns) = &manifest.workspaces {
-                            workspace_queue.push((workspace_rel_path, nested_patterns.clone()));
-                        }
+                            if let Some(nested_patterns) = &manifest.workspaces {
+                                workspace_queue.push((workspace_rel_path, nested_patterns.clone()));
+                            }
+                        },
+
+                        CacheEntry::Error(error) => {
+                            return Err(error.as_ref().unwrap().clone());
+                        },
+
+                        CacheEntry::Directory(_) => {
+                            unreachable!();
+                        },
                     }
                 }
             }

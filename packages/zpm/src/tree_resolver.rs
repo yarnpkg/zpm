@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use bincode::{Decode, Encode};
+use rkyv::Archive;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference};
@@ -10,7 +10,10 @@ use crate::{
     error::Error, resolvers::Resolution
 };
 
-#[derive(Clone, Debug, Default, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
 pub struct ResolutionTree {
     pub roots: BTreeSet<Descriptor>,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,

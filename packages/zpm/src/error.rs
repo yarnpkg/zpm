@@ -78,6 +78,12 @@ pub enum Error {
     #[error("Conflicting options: {0}")]
     ConflictingOptions(String),
 
+    #[error("Can't link the project to itself")]
+    CannotLinkToSelf,
+
+    #[error("The linked package at {} doesn't have a name", .0.to_print_string())]
+    LinkedPackageMissingName(Path),
+
     #[error("Checksum mismatch for {}", .0.to_print_string())]
     ChecksumMismatch(Locator),
 
@@ -239,12 +245,6 @@ pub enum Error {
 
     #[error("Remote error ({0:?})")]
     RemoteRegistryError(Arc<reqwest::Error>),
-
-    #[error("Internal serialization error")]
-    InternalSerializationError(#[from] Arc<bincode::error::EncodeError>),
-
-    #[error("Internal serialization error")]
-    InternalDeserializationError(#[from] Arc<bincode::error::DecodeError>),
 
     #[error("An error occured while reading the lockfile from disk")]
     LockfileReadError(Arc<std::io::Error>),
@@ -527,11 +527,6 @@ impl From<wax::walk::WalkError> for Error {
     }
 }
 
-impl From<bincode::error::EncodeError> for Error {
-    fn from(error: bincode::error::EncodeError) -> Self {
-        Arc::new(error).into()
-    }
-}
 
 impl From<std::convert::Infallible> for Error {
     fn from(_: std::convert::Infallible) -> Self {

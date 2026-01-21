@@ -1,6 +1,6 @@
 use std::{hash::Hash, str::FromStr, sync::LazyLock};
 
-use bincode::{Decode, Encode};
+use rkyv::Archive;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, Path, ToFileString, ToHumanString};
 
 #[derive(thiserror::Error, Clone, Debug)]
@@ -9,7 +9,8 @@ pub enum IdentError {
     SyntaxError(String),
 }
 
-#[derive(Clone, Debug, Default, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash))]
 pub struct Ident(String);
 
 impl Ident {

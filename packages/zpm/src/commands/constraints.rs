@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use clipanion::cli;
 use colored::Colorize;
 use zpm_utils::{tree, AbstractValue, DataType, ToFileString, ToHumanString};
-use zpm_parsers::{document::Document, JsonDocument, Value};
+use zpm_parsers::{Document, JsonDocument, Value};
 
 use crate::{constraints::{check_constraints, structs::{ConstraintsOutput, WorkspaceError, WorkspaceOperation}}, error::Error, project::Project};
 

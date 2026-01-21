@@ -35,8 +35,9 @@ macro_rules! scope_registry_setting {
         (|| {
             if let Some(ident) = &$ident {
                 if let Some(scope) = ident.scope() {
+                    let scope_key = scope.strip_prefix('@').unwrap_or(scope);
                     let scope_settings
-                        = $config.settings.npm_scopes.get(scope);
+                        = $config.settings.npm_scopes.get(scope_key);
 
                     if let Some(scope_settings) = scope_settings {
                         if let Some(value) = scope_settings.$field.value.as_ref() {
@@ -276,11 +277,14 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
 
     let bytes = match params.authorization {
         Some(authorization) => {
-            params.http_client.get(&url)?
+            let response = params.http_client.get(&url)?
                 .header("authorization", Some(authorization))
-                .send().await?
-                .error_for_status()?
-                .bytes().await?
+                .enable_status_check(false)
+                .send().await?;
+
+            handle_invalid_authentication_error(params, &response).await?;
+
+            response.error_for_status()?.bytes().await?
         },
 
         None => {
@@ -382,21 +386,15 @@ async fn handle_invalid_authentication_error(params: &NpmHttpParams<'_>, respons
     }
 
     if response.status().as_u16() == 401 {
-        let whoami = match params.authorization {
-            Some(authorization) => {
-                whoami(params, authorization).await.unwrap_or_else(|_| "an unknown user".to_string())
-            },
-
-            None => {
-                "an anonymous user".to_string()
-            },
+        let attempted_as = match whoami(params.http_client, params.registry, params.authorization).await {
+            Ok(Some(username)) => username,
+            Ok(None) => "an anonymous user".to_string(),
+            Err(_) => "an unknown user".to_string(),
         };
 
-        if whoami.contains("npm_default") {
-            return Err(Error::AuthenticationError(
-                format!("Invalid authentication (as {})", whoami)
-            ));
-        }
+        return Err(Error::AuthenticationError(
+            format!("Invalid authentication (as {})", attempted_as)
+        ));
     }
 
     Ok(())
@@ -416,21 +414,20 @@ fn is_otp_error(response: &Response) -> bool {
     false
 }
 
-async fn whoami(params: &NpmHttpParams<'_>, authorization: &str) -> Result<String, Error> {
-    let http_client
-        = params.http_client;
+async fn whoami(http_client: &HttpClient, registry: &str, authorization: Option<&str>) -> Result<Option<String>, Error> {
+    let Some(authorization) = authorization else {
+        return Ok(None);
+    };
 
-    let response = http_client
-        .get(format!("{}/-/whoami", params.registry))?
-        .header("authorization", Some(authorization))
-        .send()
-        .await?;
+    let response
+        = http_client
+            .get(format!("{}/-/whoami", registry))?
+            .header("authorization", Some(authorization))
+            .send()
+            .await?;
 
     if !response.status().is_success() {
-        return Err(Error::AuthenticationError(format!(
-            "Failed to get user info: {}",
-            response.status()
-        )));
+        return Ok(None);
     }
 
     #[derive(Deserialize)]
@@ -440,10 +437,11 @@ async fn whoami(params: &NpmHttpParams<'_>, authorization: &str) -> Result<Strin
 
     let body
         = response.text().await?;
+
     let data: WhoamiResponse
         = JsonDocument::hydrate_from_str(&body)?;
 
-    Ok(data.username)
+    Ok(Some(data.username))
 }
 
 static URL_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://[^ ]+").unwrap());

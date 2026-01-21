@@ -134,7 +134,7 @@ export function useReleaseReadme({name, readme, version, versions}: UseReleaseRe
     renderer: {
       code({text}: Tokens.Code) {
         return `
-          <figure class="not-content border border-white/5 rounded-2xl bg-white/3">
+          <figure class="border border-white/5 rounded-2xl bg-white/3">
             <div class="flex items-center gap-2 border-b border-white/5 p-4">
               <span class="size-3 rounded-full bg-[#DB2A4D] border border-[#DB2A4D]"></span>
               <span class="size-3 rounded-full bg-[#FFB888] border border-[#FFB888]"></span>

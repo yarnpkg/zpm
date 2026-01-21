@@ -1,15 +1,17 @@
-use bincode::{Decode, Encode};
+use rkyv::Archive;
 use zpm_utils::{DataType, FromFileString, QueryString, QueryStringValue, ToFileString, ToHumanString, UnwrapInfallible};
 
 use crate::{is_git_url, normalize_git_url, Error, GitSource, GitTreeish};
 
-#[derive(Clone, Default, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub struct PrepareParams {
     pub cwd: Option<String>,
     pub workspace: Option<String>,
 }
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub struct GitRange {
     pub repo: GitSource,
     pub treeish: GitTreeish,

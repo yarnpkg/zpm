@@ -1,15 +1,18 @@
 use std::fmt;
 
+use rkyv::Archive;
 use zpm_utils::{Path, RawPath};
-use bincode::{Decode, Encode};
 use serde::{de::{self, Visitor}, ser::{SerializeMap, SerializeSeq}, Deserialize, Deserializer, Serialize, Serializer};
 
-#[derive(Clone, Debug, Encode, Decode, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(<__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
 pub enum ExportsField {
     Null,
     Path(RawPath),
-    Map(Vec<(String, ExportsField)>),
-    Array(Vec<ExportsField>),
+    Map(#[rkyv(omit_bounds)] Vec<(String, ExportsField)>),
+    Array(#[rkyv(omit_bounds)] Vec<ExportsField>),
 }
 
 impl<'a> ExportsField {

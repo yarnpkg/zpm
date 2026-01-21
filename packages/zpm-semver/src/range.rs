@@ -1,5 +1,5 @@
 use std::borrow::Borrow;
-use bincode::{Decode, Encode};
+use rkyv::Archive;
 use zpm_utils::{DataType, FromFileString, ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
 
 use crate::{Error, VersionRc};
@@ -10,7 +10,8 @@ use super::{extract, Version};
 #[path = "./range.test.rs"]
 mod range_tests;
 
-#[derive(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub enum RangeKind {
     Caret,
     Tilde,
@@ -53,7 +54,8 @@ impl ToHumanString for RangeKind {
 impl_file_string_from_str!(RangeKind);
 impl_file_string_serialization!(RangeKind);
 
-#[derive(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub enum TokenType {
     LParen,
     RParen,
@@ -62,7 +64,8 @@ pub enum TokenType {
     Or,
 }
 
-#[derive(Clone, Copy, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub enum OperatorType {
     Equal,
     LessThan,
@@ -71,13 +74,15 @@ pub enum OperatorType {
     GreaterThanOrEqual,
 }
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub enum Token {
     Syntax(TokenType),
     Operation(OperatorType, Version),
 }
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub struct Range {
     pub source: String,
 

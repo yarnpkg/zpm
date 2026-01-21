@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use bincode::{Decode, Encode};
 use futures::{future::BoxFuture, FutureExt};
 use wax::{Glob, Program};
 use zpm_formats::{iter_ext::IterExt, tar, tar_iter};
@@ -25,8 +24,8 @@ pub struct LooseResolution {
 }
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidRange(s.to_string())))]
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
-#[derive_variants(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive_variants(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LooseDescriptor {
     #[pattern(r"(?<descriptor>.*)")]
     #[to_file_string(|params| params.descriptor.to_file_string())]

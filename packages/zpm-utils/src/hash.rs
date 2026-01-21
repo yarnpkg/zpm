@@ -1,13 +1,14 @@
 use std::hash::Hash;
 
-use bincode::{Decode, Encode};
 use blake2::{Blake2b, Digest, digest::consts::U64};
+use rkyv::Archive;
 
 use crate::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
 
 pub type Blake2b80 = Blake2b<U64>;
 
-#[derive(Clone, Debug, Decode, Encode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub struct Hash64 {
     state: Vec<u8>,
 }

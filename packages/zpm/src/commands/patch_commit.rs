@@ -2,7 +2,7 @@ use std::io::Write;
 
 use clipanion::cli;
 use itertools::Itertools;
-use zpm_parsers::{document::Document, JsonDocument};
+use zpm_parsers::{Document, JsonDocument};
 use zpm_primitives::{Descriptor, Locator, Range};
 use zpm_utils::{FromFileString, Path, ToFileString, ToHumanString, UrlEncoded};
 

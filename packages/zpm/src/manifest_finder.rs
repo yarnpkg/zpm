@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, fs::{FileType, Metadata}};
 
 use zpm_utils::Path;
 
-use crate::{diff_finder::{DiffController, DiffFinder, SaveState}, error::Error, manifest::{helpers::read_manifest_with_size, Manifest}};
+use crate::{diff_finder::{CacheState, DiffController, DiffFinder}, error::Error, manifest::{helpers::read_manifest_with_size, Manifest}};
 
 #[derive(Debug)]
 pub enum PollResult {
@@ -22,41 +22,34 @@ pub trait ManifestFinder {
  * only need to compare the cached mtime for each directory with the current
  * mtime to figure out whether they need perform the costly readdir syscall.
  */
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct CachedManifestFinder {
     pub diff_finder: DiffFinder<CachedManifestFinder>,
     pub save_state_path: Path,
 }
 
 impl CachedManifestFinder {
-    pub fn new(root_path: Path) -> Self {
-        let save_state_path = root_path
-            .with_join_str(".yarn/ignore/manifests");
+    pub fn new(root_path: Path, roots: Vec<Path>) -> Self {
+        let save_state_path
+            = root_path.with_join_str(".yarn/ignore/manifests");
 
-        // We tolerate any errors; worst case, we'll just re-scan the entire
-        // directory to rebuild the cache.
-        let save_state = save_state_path
-            .fs_read_prealloc()
-            .ok()
-            .and_then(|save_data| SaveState::from_slice(&save_data).ok())
-            .unwrap_or_default();
+        let save_state
+            = save_state_path
+                .fs_read_prealloc()
+                .ok()
+                .and_then(|save_data| CacheState::from_slice(&save_data).ok())
+                .unwrap_or_default();
 
         Self {
-            diff_finder: DiffFinder::new(root_path, save_state),
+            diff_finder: DiffFinder::new(root_path, roots, save_state),
             save_state_path,
         }
     }
 
     fn save(&self) -> Result<(), Error> {
         let data
-            = self.diff_finder.save_state.to_vec()?;
+            = self.diff_finder.state.to_vec()?;
 
-        // We don't care about write errors, as it may be due to read-only
-        // filesystems which were modified after we first scanned the filesystem
-        // (e.g. Docker images with COPY call right between a Yarn command and
-        // a USER directive); in the worst case Yarn commands will just need
-        // to re-scan some directories, but that's not that big a deal, especially
-        // within containers.
         let _
             = self.save_state_file(&data);
 
@@ -82,8 +75,8 @@ impl CachedManifestFinder {
         Ok((has_changed, changeset))
     }
 
-    pub fn into_state(self) -> SaveState<Manifest> {
-        self.diff_finder.save_state
+    pub fn into_state(self) -> CacheState<Manifest> {
+        self.diff_finder.into_state()
     }
 }
 

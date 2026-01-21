@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
 use zpm_utils::{CollectHash, Hash64, IoResultExt, Path, ToFileString};
-use bincode::{Decode, Encode};
+use rkyv::Archive;
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize};
 
@@ -16,7 +16,7 @@ use crate::{
     script::{ScriptEnvironment, ScriptResult},
 };
 
-#[derive(Clone, Debug, Decode, Encode, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(tag = "type")]
 pub enum Command {
     Program {
@@ -79,8 +79,11 @@ impl BuildRequest {
                 Some(build_cache_folder)
             };
 
+            let roots
+                = vec![Path::new()];
+
             let mut artifact_finder
-                = DiffFinder::<ArtifactFinder>::new(cwd_abs, Default::default());
+                = DiffFinder::<ArtifactFinder>::new(cwd_abs, roots, Default::default());
 
             if build_cache_folder.is_some() {
                 artifact_finder.rsync()?;

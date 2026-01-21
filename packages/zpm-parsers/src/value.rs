@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{Error, JsonDocument, json::json_provider};
+use crate::{Error, JsonDocument, json_doc::json_provider};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IndentStyle {

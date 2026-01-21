@@ -12,42 +12,40 @@ import cat from "@/assets/image/logo-cat-nobg.png";
 import heroEllipse from "@/assets/svg/hero-ellipse.svg";
 ---
 
-<div class="absolute inset-0 overflow-hidden -z-40">
-  <div class="w-full aspect-square">
-    <CatShader client:load/>
-  </div>
-</div>
+<div class="-mt-28 lg:-mt-33">
+  <section class="relative text-center lg:text-left">
+    <div class="px-4 pb-8 container flex flex-col min-h-[100vh] items-center lg:items-start lg:justify-around">
+      <div class="flex-none mt-0 h-28 lg:h-25"/>
 
-<div class="-mt-32">
-  <section class="relative not-content">
-    <div class="container flex flex-col items-start min-h-[100vh] justify-around">
-      <div class="flex-none mt-0 h-8"/>
-
-      <div class="flex flex-col items-start my-auto">
+      <div class="flex flex-col items-start lg:mt-auto mb-0 lg:mb-auto">
         <Heading size="h1" className="max-w-3xl">
           Safe, stable, <br /> reproducible projects
         </Heading>
 
         <p class="text-white! pt-6 max-w-2xl text-sm md:text-base">
-          Yarn is a package manager that doubles down as project manager. Whether
-          you work on simple projects or industry monorepos, Yarn got it covered.
+          Yarn is a package manager that doubles down as project manager.
+          Simple projects or large scale monorepos, Yarn got you covered.
         </p>
 
-        <div class="pt-6 lg:pt-8">
+        <div class="flex flex-col items-center lg:items-start mx-auto lg:mx-0 my-6 lg:mb-0 space-y-4">
           <Headline>
             <span class="font-mono">
-              curl -sS https://repo.yarnpkg.com/install | bash
+              curl repo.yarnpkg.com/install | bash
             </span>
           </Headline>
-        </div>
-        <div class="pt-2">
-          <Versions client:load/>
+          <div>
+            <Versions client:load/>
+          </div>
         </div>
       </div>
 
-      <div class="flex flex-col items-start w-full relative">
-        <div class="mt-auto mb-0 max-w-2xl w-full h-28">
-          <SearchPackageInterface client:only="preact" />
+      <div class="w-full lg:max-w-[650px]">
+        <SearchPackageInterface client:only="preact" />
+      </div>
+
+      <div class="lg:absolute lg:top-0 lg:right-0 lg:h-screen lg:pt-33 -z-40">
+        <div class="lg:h-full aspect-square">
+          <CatShader client:load/>
         </div>
       </div>
     </div>
