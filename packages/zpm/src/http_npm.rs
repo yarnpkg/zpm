@@ -70,7 +70,7 @@ macro_rules! scope_registry_setting {
 fn get_registry_raw<'a>(config: &'a Configuration, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
     if let Some(scope) = scope {
         let scope_settings
-            = config.settings.npm_scopes.get(scope);
+            = config.settings.npm_scopes.get(scope.strip_prefix('@').unwrap_or(scope));
 
         if let Some(scope_settings) = scope_settings {
             if publish {

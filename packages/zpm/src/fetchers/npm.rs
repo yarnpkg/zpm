@@ -1,4 +1,3 @@
-use zpm_config::ConfigExt;
 use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Locator, RegistryReference};
 
@@ -53,7 +52,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .expect("The project is required for resolving a workspace package");
 
     let registry_base
-        = project.config.registry_base_for(&params.ident);
+        = http_npm::get_registry(&project.config, params.ident.scope(), false)?;
     let registry_path
         = npm::registry_url_for_package_data(&params.ident, &params.version);
 
@@ -72,6 +71,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             auth_mode: AuthorizationMode::RespectConfiguration,
             allow_oidc: false,
         }).await?;
+
+    println!("ident: {:?}", params.ident);
+    println!("authorization: {:?}", authorization);
 
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
         let bytes

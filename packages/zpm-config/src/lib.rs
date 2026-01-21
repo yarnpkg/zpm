@@ -931,9 +931,6 @@ impl Configuration {
     }
 }
 
-mod exts;
-pub use exts::*;
-
 mod fns;
 pub use fns::*;
 

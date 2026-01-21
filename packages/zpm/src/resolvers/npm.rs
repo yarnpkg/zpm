@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::Deserialize;
 use serde_with::{serde_as, MapSkipError};
-use zpm_config::ConfigExt;
 use zpm_parsers::{JsonDocument, RawJsonValue};
 use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, Reference, RegistryReference, RegistrySemverRange, RegistryTagRange, UrlReference};
 
@@ -64,10 +63,10 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
         version,
     };
 
-    let registry
-        = project.config.registry_base_for(&registry_reference.ident);
+    let registry_base
+        = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
 
-    let locator = descriptor.resolve_with(if npm::is_conventional_tarball_url(&registry, &registry_reference.ident, &registry_reference.version, dist_manifest.tarball.clone()) {
+    let locator = descriptor.resolve_with(if npm::is_conventional_tarball_url(&registry_base, &registry_reference.ident, &registry_reference.version, dist_manifest.tarball.clone()) {
         registry_reference.into()
     } else {
         UrlReference {url: dist_manifest.tarball.clone()}.into()
@@ -153,7 +152,7 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         .unwrap_or(&descriptor.ident);
 
     let registry_base
-        = project.config.registry_base_for(package_ident);
+        = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
     let registry_path
         = npm::registry_url_for_all_versions(&package_ident);
 
@@ -222,7 +221,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
         .unwrap_or(&descriptor.ident);
 
     let registry_base
-        = project.config.registry_base_for(package_ident);
+        = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
     let registry_path
         = npm::registry_url_for_all_versions(&package_ident);
 
@@ -287,7 +286,7 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
         .expect("The project is required for resolving a workspace package");
 
     let registry_base
-        = project.config.registry_base_for(&params.ident);
+        = http_npm::get_registry(&project.config, params.ident.scope(), false)?;
     let registry_path
         = npm::registry_url_for_one_version(&params.ident, &params.version);
 
