@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use itertools::Itertools;
-use zpm_primitives::{Ident, Locator};
-use zpm_utils::{Glob, IoResultExt, Path, ToHumanString};
+use zpm_primitives::{Ident, IdentGlob, Locator};
+use zpm_utils::{IoResultExt, Path, ToHumanString};
 
 use crate::{
     build,
@@ -14,14 +14,13 @@ use crate::{
 };
 
 /// Check if an ident matches any of the given glob patterns.
-fn matches_patterns(ident: &Ident, patterns: &[Glob]) -> bool {
-    let ident_str = ident.as_str();
-    patterns.iter().any(|pattern| pattern.is_match(&ident_str))
+fn matches_patterns(ident: &Ident, patterns: &[IdentGlob]) -> bool {
+    patterns.iter().any(|pattern| pattern.check(ident))
 }
 
 /// Collect all packages that should be hoisted based on patterns.
 /// Returns a map from ident to the locator that should be hoisted (picks the first one found for conflicts).
-fn collect_hoistable_packages<'a>(tree: &'a ResolutionTree, patterns: &[Glob], locations_by_package: &BTreeMap<Locator, Path>) -> BTreeMap<Ident, &'a Locator> {
+fn collect_hoistable_packages<'a>(tree: &'a ResolutionTree, patterns: &[IdentGlob], locations_by_package: &BTreeMap<Locator, Path>) -> BTreeMap<Ident, &'a Locator> {
     let mut hoistable
         = BTreeMap::new();
 
@@ -78,15 +77,17 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             .get(&locator.physical_locator())
             .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator().to_print_string()));
 
+        let package_base_path = store_path
+            .with_join_str(&locator.slug());
+
         let package_location_abs = match &physical_package_data {
             PackageData::Local {..} => {
                 physical_package_data.package_directory().clone()
             },
 
             _ => {
-                let package_store_path = store_path
-                    .with_join_str(&locator.slug())
-                    .with_join_str("package");
+                let package_store_path = package_base_path
+                    .with_join(&locator.ident.nm_subdir());
 
                 linker::helpers::fs_extract_archive(
                     &package_store_path,
@@ -238,28 +239,19 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
 
     // Second pass: create symlinks in node_modules directories
     for (locator, resolution) in &tree.locator_resolutions {
-        // <empty path, if we assume the root workspace>
-        let package_location
-            = locations_by_package.get(locator)
-                .expect("Failed to find package location; it should have been registered a little earlier");
+        let workspace_path
+            = project.try_workspace_by_locator(locator)?;
 
-        // /path/to/project
-        let package_abs_path = project.project_cwd
-            .with_join(package_location);
+        let package_base_path = match workspace_path {
+            Some(workspace_path) => workspace_path.path.clone(),
+            None => store_path.with_join_str(&locator.slug()),
+        };
 
         let physical_package_data = install.package_data.get(&locator.physical_locator())
             .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator().to_print_string()));
 
         let is_local
             = matches!(physical_package_data, PackageData::Local {..});
-
-        // /path/to/project/node_modules
-        // /path/to/project/node_modules/.store/@types-no-deps-npm-1.0.0-xyz/node_modules
-        let package_abs_nm_path = if is_local {
-            package_abs_path.with_join_str("node_modules")
-        } else {
-            package_abs_path.dirname().unwrap().with_join_str("node_modules")
-        };
 
         for (dep_name, descriptor) in &resolution.dependencies {
             let dep_locator = tree.descriptor_to_locator
@@ -286,8 +278,8 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 .with_join(dep_rel_location);
 
             // /path/to/project/node_modules/@types/no-deps
-            let link_abs_path = package_abs_nm_path
-                .with_join_str(dep_name.as_str());
+            let link_abs_path = package_base_path
+                .with_join(&dep_name.nm_subdir());
 
             // /path/to/project/node_modules/@types
             let link_abs_dirname = link_abs_path
@@ -304,35 +296,6 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 .unwrap_or(&link_abs_path)
                 .fs_create_parent()?
                 .fs_symlink(&symlink_target)?;
-        }
-
-        if !resolution.dependencies.contains_key(&locator.ident) {
-            // We don't install self-dependencies in pnpm mode because it could lead
-            // to filesystem loops for tools that traverse node_modules.
-            if !is_local {
-                // Check if the self-reference is available through hoisting
-                let self_is_hoisted = hoisted_packages.get(&locator.ident)
-                    .map_or(false, |hoisted_locator| *hoisted_locator == locator);
-
-                if !self_is_hoisted {
-                    let self_link_abs_path = package_abs_nm_path
-                        .with_join_str(locator.ident.as_str());
-
-                    let self_link_abs_dirname = self_link_abs_path
-                        .dirname()
-                        .expect("Failed to get directory name");
-
-                    let symlink_target = package_abs_path
-                        .relative_to(&self_link_abs_dirname);
-
-                    self_link_abs_path
-                        .fs_rm_file()
-                        .ok_missing()?
-                        .unwrap_or(&self_link_abs_path)
-                        .fs_create_parent()?
-                        .fs_symlink(&symlink_target)?;
-                }
-            }
         }
     }
 

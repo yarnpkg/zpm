@@ -951,6 +951,7 @@ merge_settings!(zpm_formats::CompressionAlgorithm, |s: &str| FromFileString::fro
 merge_settings!(zpm_primitives::Descriptor, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_primitives::FilterDescriptor, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_primitives::Ident, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(zpm_primitives::IdentGlob, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_primitives::Locator, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_primitives::PeerRange, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_primitives::Range, |s: &str| FromFileString::from_file_string(s).unwrap());

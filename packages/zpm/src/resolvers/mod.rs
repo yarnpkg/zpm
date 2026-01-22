@@ -264,7 +264,7 @@ pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, depe
             => patch::resolve_locator(&context, &locator, params, dependencies).await,
 
         Reference::Shorthand(params)
-            => npm::resolve_locator(&context, &locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone()}).await,
+            => npm::resolve_locator(&context, &locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone(), url: None}).await,
 
         Reference::Registry(params)
             => npm::resolve_locator(&context, &locator, params).await,

@@ -5,7 +5,8 @@ use regex::Regex;
 use serde::Deserialize;
 use serde_with::{serde_as, MapSkipError};
 use zpm_parsers::{JsonDocument, RawJsonValue};
-use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, Reference, RegistryReference, RegistrySemverRange, RegistryTagRange, UrlReference};
+use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, Reference, RegistryReference, RegistrySemverRange, RegistryTagRange};
+use zpm_utils::UrlEncoded;
 
 use crate::{
     error::Error,
@@ -58,19 +59,24 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
         .as_ref()
         .expect("Expected the registry to return a 'dist' field amongst the manifest data");
 
-    let registry_reference = RegistryReference {
-        ident: package_ident.clone(),
-        version,
-    };
-
     let registry_base
         = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
 
-    let locator = descriptor.resolve_with(if npm::is_conventional_tarball_url(&registry_base, &registry_reference.ident, &registry_reference.version, dist_manifest.tarball.clone()) {
-        registry_reference.into()
+    // Store the tarball URL only if it's non-conventional (can't be computed from registry + path)
+    let url = if npm::is_conventional_tarball_url(&registry_base, &package_ident, &version, dist_manifest.tarball.clone()) {
+        None
     } else {
-        UrlReference {url: dist_manifest.tarball.clone()}.into()
-    });
+        Some(UrlEncoded::new(dist_manifest.tarball.clone()))
+    };
+
+    let registry_reference = RegistryReference {
+        ident: package_ident.clone(),
+        version,
+        url,
+    };
+
+    let locator
+        = descriptor.resolve_with(registry_reference.into());
 
     Resolution::from_remote_manifest(locator, manifest.remote)
         .into_resolution_result(context)
@@ -125,14 +131,17 @@ pub fn resolve_aliased(descriptor: &Descriptor, dependencies: Vec<InstallOpResul
         Reference::Shorthand(inner_params) => RegistryReference {
             ident: inner_resolution.resolution.locator.ident.clone(),
             version: inner_params.version.clone(),
+            url: None,
         }.into(),
 
         Reference::Registry(inner_params) => RegistryReference {
             ident: inner_params.ident.clone(),
             version: inner_params.version.clone(),
+            url: inner_params.url.clone(),
         }.into(),
 
         // For non-conventional tarball URLs, preserve the URL reference as-is
+        // (kept for backwards compatibility with old lockfiles)
         Reference::Url(_) => inner_reference,
 
         _ => unreachable!("Unexpected reference type in resolve_aliased: {:?}", inner_reference),

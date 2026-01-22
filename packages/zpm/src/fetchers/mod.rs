@@ -136,7 +136,7 @@ pub enum SyncFetchAttempt {
 pub fn try_fetch_locator_sync(context: InstallContext, locator: &Locator, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<SyncFetchAttempt, Error> {
     match &locator.reference {
         Reference::Shorthand(params)
-            => match npm::try_fetch_locator_sync(&context, locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone()}, is_mock_request)? {
+            => match npm::try_fetch_locator_sync(&context, locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone(), url: None}, is_mock_request)? {
                 Some(fetch_result) => Ok(SyncFetchAttempt::Success(fetch_result)),
                 None => Ok(SyncFetchAttempt::Failure(dependencies)),
             },
@@ -190,7 +190,7 @@ pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, i
             => patch::fetch_locator(&context, locator, params, dependencies).await,
 
         Reference::Shorthand(params)
-            => npm::fetch_locator(&context, locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone()}, is_mock_request).await,
+            => npm::fetch_locator(&context, locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone(), url: None}, is_mock_request).await,
 
         Reference::Registry(params)
             => npm::fetch_locator(&context, locator, params, is_mock_request).await,

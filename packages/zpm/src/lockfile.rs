@@ -3,13 +3,13 @@ use std::{collections::BTreeMap, fmt::{self, Debug, Display}, hash::Hash, marker
 use rkyv::Archive;
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
+use zpm_config::{Configuration, ConfigurationContext};
+use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, RegistryReference, RegistrySemverRange};
-use zpm_utils::{FromFileString, Hash64, Path, ToFileString};
+use zpm_utils::{FromFileString, Hash64, LastModifiedAt, Path, ToFileString, UrlEncoded};
 
 use crate::{
-    error::Error,
-    primitives_exts::RangeExt,
-    resolvers::Resolution,
+    error::Error, http_npm, npm, primitives_exts::RangeExt, resolvers::Resolution
 };
 
 const LOCKFILE_VERSION: u64 = 9;
@@ -288,6 +288,7 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
                     = Locator::new(descriptor.ident.clone(), RegistryReference {
                         ident: entry.resolution.ident.clone(),
                         version: params.version.clone(),
+                        url: params.url.clone(),
                     }.into());
 
                 lockfile.entries.insert(entry.resolution.clone(), LockfileEntry {
@@ -303,207 +304,169 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
     Ok(lockfile)
 }
 
-/// Minimal manifest structure for reading pnpm package.json files
-#[derive(Debug, Deserialize)]
-struct PnpmManifest {
+/// Dependency entry from pnpm list --json output
+#[derive(Debug, Deserialize, Clone)]
+struct PnpmListDependency {
+    #[serde(default)]
+    name: String,
+
+    #[serde(default)]
+    from: Option<String>,
+
     #[serde(default)]
     version: Option<String>,
 
     #[serde(default)]
-    dependencies: Option<BTreeMap<String, String>>,
+    resolved: Option<String>,
+
+    #[serde(default)]
+    path: Option<String>,
+
+    #[serde(default)]
+    dependencies: BTreeMap<String, PnpmListDependency>,
 }
 
-/// Scans `node_modules/.pnpm` to build a best-effort lockfile from pnpm's installed packages.
+/// Builds a lockfile from pnpm's installed packages using `pnpm list --json`.
 ///
 /// The approach:
-/// 1. Read all package folders in `node_modules/.pnpm`
-/// 2. For each package, read its package.json to get dependencies (as descriptors)
-/// 3. Build a reverse map: descriptor -> path (where the descriptor was found)
-/// 4. For each descriptor, read `../node_modules/<dep>/package.json` to find the resolved version
+/// 1. Run `pnpm list --json --depth=Infinity` to get the full dependency tree
+/// 2. Recursively walk the tree to collect all packages with their resolved URLs
+/// 3. For each package, read its package.json to get the original dependency ranges
+/// 4. Build descriptor -> locator mappings
 pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
+    let user_cwd
+        = Path::home_dir()?;
+
+    let configuration_context = ConfigurationContext {
+        env: std::env::vars().collect(),
+        user_cwd: user_cwd.clone(),
+        project_cwd: Some(project_cwd.clone()),
+        package_cwd: None,
+    };
+
+    let mut last_modified_at
+        = LastModifiedAt::new();
+
+    let config
+        = Configuration::load(&configuration_context, &mut last_modified_at)
+            .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
+
     let pnpm_dir
-        = project_cwd.with_join_str("node_modules/.pnpm");
+        = project_cwd
+            .with_join_str("node_modules/.pnpm");
 
     if !pnpm_dir.fs_exists() {
         return Ok(Lockfile::new());
     }
 
-    // Step 1: Scan all package folders in .pnpm and collect their dependencies
-    // Maps descriptor -> list of paths where this descriptor appears
-    let mut descriptor_to_paths: BTreeMap<_, Vec<_>>
-        = BTreeMap::new();
+    // Run pnpm list --json --depth=Infinity
+    let output = std::process::Command::new("pnpm")
+        .args(["list", "-r", "--json", "--depth=3"])
+        .current_dir(project_cwd.as_str())
+        .output()
+        .map_err(|_| Error::PnpmNodeModulesReadError)?;
 
-    let entries
-        = pnpm_dir.fs_read_dir()
+    if !output.status.success() {
+        return Err(Error::PnpmNodeModulesReadError);
+    }
+
+    let json_output
+        = String::from_utf8_lossy(&output.stdout);
+
+    let mut pnpm_list: Vec<PnpmListDependency>
+        = JsonDocument::hydrate_from_str(&json_output)
             .map_err(|_| Error::PnpmNodeModulesReadError)?;
 
-    for entry in entries {
-        let Ok(entry) = entry else {
-            continue;
-        };
-
-        let Ok(entry_path) = Path::try_from(entry.path()) else {
-            continue;
-        };
-
-        // Skip non-directories and special entries
-        if !entry_path.fs_is_dir() {
-            continue;
-        }
-
-        let folder_name
-            = entry_path.basename()
-                .map(|s| s.to_string());
-
-        let Some(folder_name) = folder_name else {
-            continue;
-        };
-
-        // Skip special folders like .modules.yaml, lock files, etc.
-        if folder_name.starts_with('.') {
-            continue;
-        }
-
-        // Parse the folder name to get the package name
-        // Format: <name>@<version> or @scope+name@version
-        let package_name
-            = parse_pnpm_folder_name(&folder_name);
-
-        let Some(package_name) = package_name else {
-            continue;
-        };
-
-        // The actual package.json is at:
-        // node_modules/.pnpm/<folder>/node_modules/<package_name>/package.json
-        let manifest_path = entry_path
-            .with_join_str("node_modules")
-            .with_join_str(&package_name)
-            .with_join_str("package.json");
-
-        if !manifest_path.fs_exists() {
-            continue;
-        }
-
-        let manifest_content
-            = manifest_path.fs_read_text();
-
-        let Ok(manifest_content) = manifest_content else {
-            continue;
-        };
-
-        let manifest: Result<PnpmManifest, _>
-            = serde_json::from_str(&manifest_content);
-
-        let Ok(manifest) = manifest else {
-            continue;
-        };
-
-        // Collect dependencies as descriptors
-        if let Some(dependencies) = manifest.dependencies {
-            let package_node_modules = entry_path
-                .with_join_str("node_modules");
-
-            for (dep_name, dep_range) in dependencies {
-                // Try to parse as semver range, skip if not recognized
-                let Ok(range) = zpm_semver::Range::from_file_string(&dep_range) else {
-                    continue;
-                };
-
-                let ident
-                    = Ident::new(dep_name);
-
-                let descriptor = Descriptor::new(ident, Range::RegistrySemver(RegistrySemverRange {
-                    ident: None,
-                    range,
-                }));
-
-                descriptor_to_paths.entry(descriptor)
-                    .or_default()
-                    .push(package_node_modules.clone());
-            }
-        }
-    }
-
-    // Step 2: For each descriptor, resolve it by reading the target package.json
-    let mut lockfile
-        = Lockfile::new();
-
+    let mut lockfile = Lockfile::new();
     lockfile.metadata.version = 1;
 
-    for (descriptor, paths) in descriptor_to_paths {
-        // Use the first path that has the dependency
-        let Some(base_path) = paths.first() else {
+    while let Some(entry) = pnpm_list.pop() {
+        pnpm_list.extend(entry.dependencies.values().cloned());
+
+        let Some(package_path_str) = &entry.path else {
             continue;
         };
 
-        // Build the path to the resolved package
-        // For scoped packages, the ident contains the scope
-        let dep_manifest_path = base_path
-            .with_join_str(&descriptor.ident.to_file_string())
-            .with_join_str("package.json");
-
-        // Canonicalize to resolve symlinks
-        let dep_manifest_path = dep_manifest_path.fs_canonicalize()
-            .unwrap_or(dep_manifest_path);
-
-        if !dep_manifest_path.fs_exists() {
+        let Ok(package_path) = Path::try_from(package_path_str.as_str()) else {
             continue;
+        };
+
+        #[derive(Debug, Deserialize)]
+        struct Manifest {
+            #[serde(default)]
+            dependencies: BTreeMap<String, String>,
         }
 
-        let dep_manifest_content
-            = dep_manifest_path.fs_read_text();
+        let manifest: Option<Manifest>
+            = package_path
+                .with_join_str("package.json")
+                .fs_read_text()
+                .ok()
+                .and_then(|content| JsonDocument::hydrate_from_str(&content).ok());
 
-        let Ok(dep_manifest_content) = dep_manifest_content else {
+        let Some(manifest) = manifest else {
             continue;
         };
 
-        let dep_manifest: Result<PnpmManifest, _>
-            = serde_json::from_str(&dep_manifest_content);
+        for (name, range) in manifest.dependencies {
+            let Ok(ident) = Ident::from_file_string(&name) else {
+                continue;
+            };
 
-        let Ok(dep_manifest) = dep_manifest else {
-            continue;
-        };
+            // We only support importing raw semver ranges for now
+            let Ok(range) = zpm_semver::Range::from_file_string(&range) else {
+                continue;
+            };
 
-        let Some(version_str) = dep_manifest.version else {
-            continue;
-        };
+            let Some(resolved_entry) = entry.dependencies.get(&name) else {
+                continue;
+            };
 
-        let Ok(version) = zpm_semver::Version::from_file_string(&version_str) else {
-            continue;
-        };
+            let Some(version) = &resolved_entry.version else {
+                continue;
+            };
 
-        let locator = Locator::new(descriptor.ident.clone(), RegistryReference {
-            ident: descriptor.ident.clone(),
-            version: version.clone(),
-        }.into());
+            // All semver ranges are assumed to resolve to a registry package, so they should have a `resolved`
+            // field pointing to a .tgz url.
+            let Some(resolved_field) = &resolved_entry.resolved else {
+                continue;
+            };
 
-        lockfile.entries.insert(locator.clone(), LockfileEntry {
-            checksum: None,
-            resolution: Resolution::new_empty(locator.clone(), Default::default()),
-        });
+            let descriptor = Descriptor::new(ident.clone(), Range::RegistrySemver(RegistrySemverRange {
+                ident: None,
+                range,
+            }));
 
-        lockfile.resolutions.insert(descriptor, locator);
+            let Ok(version) = zpm_semver::Version::from_file_string(version.as_str()) else {
+                continue;
+            };
+
+            let registry_base
+                = http_npm::get_registry(&config, ident.scope(), false)?;
+
+            // Store the tarball URL only if it's non-conventional (can't be computed from registry + path)
+            let url = if npm::is_conventional_tarball_url(&registry_base, &ident, &version, resolved_field.clone()) {
+                None
+            } else {
+                Some(UrlEncoded::new(resolved_field.clone()))
+            };
+
+            let locator = Locator::new(ident.clone(), RegistryReference {
+                ident: ident,
+                version,
+                url,
+            }.into());
+
+            lockfile.entries.insert(locator.clone(), LockfileEntry {
+                checksum: None,
+                resolution: Resolution::new_empty(locator.clone(), Default::default()),
+            });
+
+            lockfile.resolutions.insert(descriptor, locator);
+        }
     }
+
+    println!("lockfile: {:#?}", lockfile);
 
     Ok(lockfile)
-}
-
-/// Parses a pnpm folder name to extract the package name.
-/// Examples:
-/// - "lodash@4.17.21" -> "lodash"
-/// - "@babel+core@7.0.0" -> "@babel/core"
-/// - "@types+node@18.0.0_peer@1.0.0" -> "@types/node"
-fn parse_pnpm_folder_name(folder_name: &str) -> Option<String> {
-    // Handle scoped packages: @scope+name@version
-    if folder_name.starts_with('@') {
-        // Find the @ that separates name from version (not the scope @)
-        let name_end = folder_name[1..].find('@')?;
-        let name_part = &folder_name[..name_end + 1];
-        // Convert + back to /
-        Some(name_part.replace('+', "/"))
-    } else {
-        // Regular package: name@version
-        let name_end = folder_name.find('@')?;
-        Some(folder_name[..name_end].to_string())
-    }
 }

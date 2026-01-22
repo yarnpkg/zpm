@@ -11,7 +11,12 @@ pub struct IdentGlob {
 
 impl IdentGlob {
     pub fn new(raw: &str) -> Result<Self, globset::Error> {
-        let glob = GlobBuilder::new(raw)
+        let actual_raw = match raw {
+            "*" => "**/*",
+            _ => raw,
+        };
+
+        let glob = GlobBuilder::new(actual_raw)
             .literal_separator(false)
             .build()?;
 

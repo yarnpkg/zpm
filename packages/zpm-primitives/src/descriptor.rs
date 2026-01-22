@@ -86,7 +86,7 @@ impl Descriptor {
         };
 
         let reference = match reference {
-            Reference::Registry(params) if params.ident == self.ident => reference::ShorthandReference {
+            Reference::Registry(params) if params.ident == self.ident && params.url.is_none() => reference::ShorthandReference {
                 version: params.version,
             }.into(),
 

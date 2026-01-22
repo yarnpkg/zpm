@@ -57,5 +57,37 @@ describe(`Features`, () => {
         },
       });
     }));
+
+    test(`it should correctly import resolutions from packages with non-conventional urls`, makeTemporaryEnv({
+      dependencies: {
+        [`unconventional-tarball`]: `*`,
+      },
+    }, async ({path, run, source}) => {
+      const registryUrl = await startPackageServer();
+
+      // Configure pnpm to use our test registry
+      await xfs.writeFilePromise(ppath.join(path, `.npmrc`), `registry=${registryUrl}\n`);
+
+      // First, install with pnpm when only 1.0.0 is available
+      // This ensures that pnpm resolves unconventional-tarball@* to 1.0.0
+      await setPackageWhitelist(new Map([
+        [`unconventional-tarball`, new Set([`1.0.0`])],
+      ]), async () => {
+        await execFile(`pnpm`, [`install`], {
+          cwd: path,
+          env: {
+            ...process.env,
+            npm_config_registry: registryUrl,
+          },
+        });
+      });
+
+      await run(`install`);
+
+      await expect(source(`require('unconventional-tarball')`)).resolves.toMatchObject({
+        name: `unconventional-tarball`,
+        version: `1.0.0`,
+      });
+    }));
   });
 });

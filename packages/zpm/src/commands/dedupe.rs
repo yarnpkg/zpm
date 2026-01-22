@@ -226,6 +226,7 @@ fn prepare_highest_dedupe(project: &Project, patterns: &Vec<IdentGlob>) -> Resul
                     Locator::new(descriptor.ident.clone(), RegistryReference {
                         ident: ident.clone(),
                         version: version.clone(),
+                        url: None,
                     }.into())
                 })
             },

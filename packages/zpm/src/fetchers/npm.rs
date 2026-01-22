@@ -53,8 +53,12 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let registry_base
         = http_npm::get_registry(&project.config, params.ident.scope(), false)?;
-    let registry_path
-        = npm::registry_url_for_package_data(&params.ident, &params.version);
+
+    // When a custom archive URL is provided, use it directly; otherwise build from registry + path
+    let (fetch_registry, fetch_path) = match &params.url {
+        Some(url) => ("".to_string(), url.0.clone()),
+        None => (registry_base.to_string(), npm::registry_url_for_package_data(&params.ident, &params.version)),
+    };
 
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching npm packages");
@@ -72,15 +76,12 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             allow_oidc: false,
         }).await?;
 
-    println!("ident: {:?}", params.ident);
-    println!("authorization: {:?}", authorization);
-
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
         let bytes
             = http_npm::get(&http_npm::NpmHttpParams {
                 http_client: &project.http_client,
-                registry: &registry_base,
-                path: &registry_path,
+                registry: &fetch_registry,
+                path: &fetch_path,
                 authorization: authorization.as_deref(),
                 otp: None,
             }).await?;

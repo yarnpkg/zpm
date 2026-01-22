@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, string::FromUtf8Error};
 
 use colored::Colorize;
 use erased_serde::serialize_trait_object;
@@ -209,7 +209,7 @@ impl ToHumanString for std::time::Duration {
 }
 
 impl FromFileString for String {
-    type Error = std::convert::Infallible;
+    type Error = FromUtf8Error;
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
         Ok(s.to_string())
