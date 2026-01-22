@@ -2,7 +2,7 @@ import {Filename, PortablePath, npath, ppath, xfs} from '@yarnpkg/fslib';
 import {pathToFileURL}                             from 'url';
 
 const lsStore = async (path: PortablePath) => {
-  return await xfs.readdirPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath);
+  return await xfs.readdirPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath);
 };
 
 describe(`Install Artifact Cleanup`, () => {
@@ -111,7 +111,7 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       await run(`remove`, `no-deps`);
@@ -125,7 +125,7 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `@types/no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/@types/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       await run(`remove`, `@types/no-deps`);
@@ -139,7 +139,7 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.cache` as PortablePath);
@@ -156,7 +156,7 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `@types/no-deps@1.0.0`, `@types/is-number@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/@types/no-deps` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/@types/is-number` as PortablePath)).resolves.toStrictEqual(true);
 
@@ -172,7 +172,7 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/foo` as PortablePath);
@@ -189,7 +189,7 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/@foo` as PortablePath);
@@ -205,7 +205,7 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/no-deps/foo` as PortablePath);
@@ -222,21 +222,21 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `one-fixed-dep@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/one-fixed-dep/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const oneFixedDepEntry = entries.find(entry => entry.startsWith(`one-fixed-dep`));
       expect(oneFixedDepEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/foo` as PortablePath);
-      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/foo/bar` as PortablePath, ``);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/foo` as PortablePath);
+      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/foo/bar` as PortablePath, ``);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/foo` as PortablePath)).resolves.toStrictEqual(false);
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/foo` as PortablePath)).resolves.toStrictEqual(false);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
     }));
 
     it(`should remove extraneous nested entries that look like scopes`, makeTemporaryEnv({}, {
@@ -245,20 +245,20 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `one-fixed-dep@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/one-fixed-dep/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const oneFixedDepEntry = entries.find(entry => entry.startsWith(`one-fixed-dep`));
       expect(oneFixedDepEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/@foo` as PortablePath);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/@foo` as PortablePath);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/@foo` as PortablePath)).resolves.toStrictEqual(false);
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/@foo` as PortablePath)).resolves.toStrictEqual(false);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
     }));
 
     it(`should remove extraneous nested entries (self-require-trap)`, makeTemporaryEnv({}, {
@@ -267,7 +267,7 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `self-require-trap@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/self-require-trap/${Filename.nodeModules}/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
 
       await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/self-require-trap/${Filename.nodeModules}/foo` as PortablePath);
@@ -285,20 +285,20 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `one-fixed-dep@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/one-fixed-dep/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const oneFixedDepEntry = entries.find(entry => entry.startsWith(`one-fixed-dep`));
       expect(oneFixedDepEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps/foo` as PortablePath);
-      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps/foo/bar` as PortablePath, ``);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps/foo` as PortablePath);
+      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps/foo/bar` as PortablePath, ``);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps/foo/bar` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${oneFixedDepEntry}/node_modules/one-fixed-dep/node_modules/no-deps/foo/bar` as PortablePath)).resolves.toStrictEqual(true);
     }));
 
     it(`should not remove extraneous files in valid nested entries (self-require-trap)`, makeTemporaryEnv({}, {
@@ -307,7 +307,7 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `self-require-trap@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/self-require-trap/${Filename.nodeModules}/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
 
       await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/self-require-trap/${Filename.nodeModules}/self-require-trap/foo` as PortablePath);
@@ -324,7 +324,7 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/no-deps/index.js` as PortablePath)).resolves.toStrictEqual(true);
 
       await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/no-deps/index.js` as PortablePath, `module.exports = \`changed\`;`);
@@ -341,11 +341,11 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/foo` as PortablePath);
-      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.store/foo/bar` as PortablePath, ``);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/foo` as PortablePath);
+      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.pnpm/foo/bar` as PortablePath, ``);
 
       await run(`remove`, `no-deps`);
 
@@ -358,20 +358,20 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const noDepsEntry = entries.find(entry => entry.startsWith(`no-deps`));
       expect(noDepsEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/foo` as PortablePath);
-      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/foo/bar` as PortablePath, ``);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/foo` as PortablePath);
+      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/foo/bar` as PortablePath, ``);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/foo` as PortablePath)).resolves.toStrictEqual(false);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/foo` as PortablePath)).resolves.toStrictEqual(false);
     }));
 
     it(`should remove extraneous files in .store entries (self-require-trap)`, makeTemporaryEnv({}, {
@@ -380,20 +380,20 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `self-require-trap@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const selfRequireTrapEntry = entries.find(entry => entry.startsWith(`self-require-trap-npm-1.0.0`));
       expect(selfRequireTrapEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/self-require-trap/node_modules/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/self-require-trap/node_modules/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/foo` as PortablePath);
-      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/foo/bar` as PortablePath, ``);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/foo` as PortablePath);
+      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/foo/bar` as PortablePath, ``);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/foo` as PortablePath)).resolves.toStrictEqual(false);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/foo` as PortablePath)).resolves.toStrictEqual(false);
     }));
 
     it(`should remove extraneous files in the prefix path of .store entries`, makeTemporaryEnv({}, {
@@ -402,20 +402,20 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const noDepsEntry = entries.find(entry => entry.startsWith(`no-deps`));
       expect(noDepsEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/foo` as PortablePath);
-      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/foo/bar` as PortablePath, ``);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/foo` as PortablePath);
+      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/foo/bar` as PortablePath, ``);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/foo` as PortablePath)).resolves.toStrictEqual(false);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/foo` as PortablePath)).resolves.toStrictEqual(false);
     }));
 
     it(`should remove extraneous files in the prefix path of .store entries (self-require-trap)`, makeTemporaryEnv({}, {
@@ -424,20 +424,20 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `self-require-trap@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const selfRequireTrapEntry = entries.find(entry => entry.startsWith(`self-require-trap-npm-1.0.0`));
       expect(selfRequireTrapEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/self-require-trap/node_modules/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/self-require-trap/node_modules/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/foo` as PortablePath);
-      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/foo/bar` as PortablePath, ``);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/foo` as PortablePath);
+      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/foo/bar` as PortablePath, ``);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/foo` as PortablePath)).resolves.toStrictEqual(false);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/foo` as PortablePath)).resolves.toStrictEqual(false);
     }));
 
     it(`should remove extraneous files that look like scopes in the prefix path of .store entries`, makeTemporaryEnv({}, {
@@ -446,19 +446,19 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const noDepsEntry = entries.find(entry => entry.startsWith(`no-deps`));
       expect(noDepsEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/@foo` as PortablePath);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/@foo` as PortablePath);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/@foo` as PortablePath)).resolves.toStrictEqual(false);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/@foo` as PortablePath)).resolves.toStrictEqual(false);
     }));
 
     it(`should remove extraneous files that look like scopes in the prefix path of .store entries (self-require-trap)`, makeTemporaryEnv({}, {
@@ -467,19 +467,19 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `self-require-trap@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const selfRequireTrapEntry = entries.find(entry => entry.startsWith(`self-require-trap-npm-1.0.0`));
       expect(selfRequireTrapEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/self-require-trap/node_modules/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/self-require-trap/node_modules/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/@foo` as PortablePath);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/@foo` as PortablePath);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/@foo` as PortablePath)).resolves.toStrictEqual(false);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/@foo` as PortablePath)).resolves.toStrictEqual(false);
     }));
 
     it(`should remove extraneous scoped files in the prefix path of .store entries`, makeTemporaryEnv({}, {
@@ -488,20 +488,20 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const noDepsEntry = entries.find(entry => entry.startsWith(`no-deps`));
       expect(noDepsEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/@foo` as PortablePath);
-      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/@foo/bar` as PortablePath, ``);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/@foo` as PortablePath);
+      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/@foo/bar` as PortablePath, ``);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${noDepsEntry}/node_modules/@foo` as PortablePath)).resolves.toStrictEqual(false);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${noDepsEntry}/node_modules/@foo` as PortablePath)).resolves.toStrictEqual(false);
     }));
 
     it(`should remove extraneous scoped files in the prefix path of .store entries (self-require-trap)`, makeTemporaryEnv({}, {
@@ -510,20 +510,20 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `self-require-trap@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const selfRequireTrapEntry = entries.find(entry => entry.startsWith(`self-require-trap-npm-1.0.0`));
       expect(selfRequireTrapEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/self-require-trap/node_modules/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/self-require-trap/node_modules/self-require-trap` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/@foo` as PortablePath);
-      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/@foo/bar` as PortablePath, ``);
+      await xfs.mkdirPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/@foo` as PortablePath);
+      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/@foo/bar` as PortablePath, ``);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${selfRequireTrapEntry}/node_modules/@foo` as PortablePath)).resolves.toStrictEqual(false);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${selfRequireTrapEntry}/node_modules/@foo` as PortablePath)).resolves.toStrictEqual(false);
     }));
 
     it(`should remove extraneous files in scope folders in the prefix path of .store entries`, makeTemporaryEnv({}, {
@@ -532,19 +532,19 @@ describe(`Install Artifact Cleanup`, () => {
       await run(`add`, `@types/no-deps@1.0.0`);
 
       // Sanity check
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
       await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/@types/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
       const entries = await lsStore(path);
       const typesNoDepsEntry = entries.find(entry => entry.startsWith(`@types-no-deps`));
       expect(typesNoDepsEntry).toBeDefined();
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${typesNoDepsEntry}/node_modules/@types/no-deps` as PortablePath)).resolves.toStrictEqual(true);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${typesNoDepsEntry}/node_modules/@types/no-deps` as PortablePath)).resolves.toStrictEqual(true);
 
-      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.store/${typesNoDepsEntry}/node_modules/@types/foo` as PortablePath, ``);
+      await xfs.writeFilePromise(`${path}/${Filename.nodeModules}/.pnpm/${typesNoDepsEntry}/node_modules/@types/foo` as PortablePath, ``);
 
       await run(`install`);
 
-      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store/${typesNoDepsEntry}/node_modules/@types/foo` as PortablePath)).resolves.toStrictEqual(false);
+      await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm/${typesNoDepsEntry}/node_modules/@types/foo` as PortablePath)).resolves.toStrictEqual(false);
     }));
 
     describe(`Migration`, () => {
@@ -554,7 +554,7 @@ describe(`Install Artifact Cleanup`, () => {
         await run(`add`, `no-deps@1.0.0`);
 
         // Sanity check
-        await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+        await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
 
         await run(`config`, `set`, `nodeLinker`, `pnp`);
 
@@ -569,14 +569,14 @@ describe(`Install Artifact Cleanup`, () => {
         await run(`add`, `no-deps@1.0.0`);
 
         // Sanity check
-        await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(true);
+        await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(true);
 
         await run(`config`, `set`, `nodeLinker`, `node-modules`);
 
         await run(`install`);
 
         await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}` as PortablePath)).resolves.toStrictEqual(true);
-        await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.store` as PortablePath)).resolves.toStrictEqual(false);
+        await expect(xfs.existsPromise(`${path}/${Filename.nodeModules}/.pnpm` as PortablePath)).resolves.toStrictEqual(false);
       }));
     });
   });

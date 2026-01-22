@@ -162,7 +162,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         = collect_hoistable_packages(tree, &public_hoist_patterns, &locations_by_package);
 
     // Create symlinks for hoisted packages in the store's shared node_modules
-    // This is at node_modules/.store/node_modules/<package-name>
+    // This is at node_modules/.pnpm/node_modules/<package-name>
     let store_nm_path
         = store_path.with_join_str("node_modules");
 
@@ -268,12 +268,12 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 }
             }
 
-            // node_modules/.store/@types-no-deps-npm-1.0.0-xyz/package
+            // node_modules/.pnpm/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
             let dep_rel_location = locations_by_package
                 .get(dep_locator)
                 .expect("Failed to find dependency location; it should have been registered a little earlier");
 
-            // /path/to/project/node_modules/.store/@types-no-deps-npm-1.0.0-xyz/package
+            // /path/to/project/node_modules/.pnpm/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
             let dep_abs_path = project.project_cwd
                 .with_join(dep_rel_location);
 
@@ -286,7 +286,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 .dirname()
                 .expect("Failed to get directory name");
 
-            // ../.store/@types-no-deps-npm-1.0.0-xyz/package
+            // ../.pnpm/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
             let symlink_target = dep_abs_path
                 .relative_to(&link_abs_dirname);
 

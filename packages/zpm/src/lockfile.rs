@@ -308,12 +308,6 @@ pub fn from_legacy_berry_lockfile(data: &str) -> Result<Lockfile, Error> {
 #[derive(Debug, Deserialize, Clone)]
 struct PnpmListDependency {
     #[serde(default)]
-    name: String,
-
-    #[serde(default)]
-    from: Option<String>,
-
-    #[serde(default)]
     version: Option<String>,
 
     #[serde(default)]
@@ -465,8 +459,6 @@ pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
             lockfile.resolutions.insert(descriptor, locator);
         }
     }
-
-    println!("lockfile: {:#?}", lockfile);
 
     Ok(lockfile)
 }

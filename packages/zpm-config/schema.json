@@ -282,7 +282,7 @@
     },
     "pnpmHoistPatterns": {
       "type": "array",
-      "description": "Patterns specifying which packages should be hoisted to node_modules/.store/node_modules. By default, all packages are hoisted. Use empty array to disable hoisting.",
+      "description": "Patterns specifying which packages should be hoisted to node_modules/.pnpm/node_modules. By default, all packages are hoisted. Use empty array to disable hoisting.",
       "items": {
         "type": "zpm_primitives::IdentGlob"
       },

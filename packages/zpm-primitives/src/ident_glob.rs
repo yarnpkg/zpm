@@ -12,7 +12,7 @@ pub struct IdentGlob {
 impl IdentGlob {
     pub fn new(raw: &str) -> Result<Self, globset::Error> {
         let actual_raw = match raw {
-            "*" => "**/*",
+            "*" => "**",
             _ => raw,
         };
 
