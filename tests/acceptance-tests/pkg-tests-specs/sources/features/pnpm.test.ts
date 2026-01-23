@@ -145,7 +145,7 @@ describe(`Features`, () => {
           await run(`install`);
 
           // The transitive dependency 'no-deps' should be hoisted to the store's node_modules
-          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.store/node_modules/no-deps`);
+          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules/no-deps`);
           const hoistedStat = await xfs.lstatPromise(hoistedPath);
           expect(hoistedStat.isSymbolicLink()).toBeTruthy();
         },
@@ -168,7 +168,7 @@ describe(`Features`, () => {
           await run(`install`);
 
           // The store's shared node_modules should not exist or be empty
-          const storeNmPath = npath.toPortablePath(`${path}/node_modules/.store/node_modules`);
+          const storeNmPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules`);
           await expect(xfs.existsPromise(storeNmPath)).resolves.toBeFalsy();
         },
       ),
@@ -191,12 +191,12 @@ describe(`Features`, () => {
           await run(`install`);
 
           // one-fixed-dep should be hoisted
-          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.store/node_modules/one-fixed-dep`);
+          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules/one-fixed-dep`);
           const hoistedStat = await xfs.lstatPromise(hoistedPath);
           expect(hoistedStat.isSymbolicLink()).toBeTruthy();
 
           // no-deps should NOT be hoisted (doesn't match pattern)
-          const notHoistedPath = npath.toPortablePath(`${path}/node_modules/.store/node_modules/no-deps`);
+          const notHoistedPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules/no-deps`);
           await expect(xfs.existsPromise(notHoistedPath)).resolves.toBeFalsy();
         },
       ),

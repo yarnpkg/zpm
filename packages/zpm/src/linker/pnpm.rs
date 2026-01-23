@@ -163,23 +163,23 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
 
     // Create symlinks for hoisted packages in the store's shared node_modules
     // This is at node_modules/.pnpm/node_modules/<package-name>
-    let store_nm_path
-        = store_path.with_join_str("node_modules");
-
     for (ident, locator) in &hoisted_packages {
         let package_location = locations_by_package
             .get(*locator)
             .expect("Failed to find package location for hoisted package");
 
-        let package_abs_path = project.project_cwd
-            .with_join(package_location);
+        let package_abs_path
+            = project.project_cwd
+                .with_join(package_location);
 
-        let link_abs_path = store_nm_path
-            .with_join_str(ident.as_str());
+        let link_abs_path
+            = store_path
+                .with_join(&ident.nm_subdir());
 
-        let link_abs_dirname = link_abs_path
-            .dirname()
-            .expect("Failed to get directory name");
+        let link_abs_dirname
+            = link_abs_path
+                .dirname()
+                .expect("Failed to get directory name");
 
         let symlink_target = package_abs_path
             .relative_to(&link_abs_dirname);
@@ -191,10 +191,6 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             .fs_create_parent()?
             .fs_symlink(&symlink_target)?;
     }
-
-    // Create symlinks for publicly hoisted packages in root node_modules
-    let root_nm_path
-        = project.project_cwd.with_join_str("node_modules");
 
     // Track which packages are direct dependencies of workspaces
     let mut direct_dependency_idents: BTreeSet<Ident> = BTreeSet::new();
@@ -212,22 +208,27 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             continue;
         }
 
-        let package_location = locations_by_package
-            .get(*locator)
-            .expect("Failed to find package location for publicly hoisted package");
+        let package_location
+            = locations_by_package
+                .get(*locator)
+                .expect("Failed to find package location for publicly hoisted package");
 
-        let package_abs_path = project.project_cwd
-            .with_join(package_location);
+        let package_abs_path
+            = project.project_cwd
+                .with_join(package_location);
 
-        let link_abs_path = root_nm_path
-            .with_join_str(ident.as_str());
+        let link_abs_path
+            = project.project_cwd
+                .with_join(&ident.nm_subdir());
 
-        let link_abs_dirname = link_abs_path
-            .dirname()
-            .expect("Failed to get directory name");
+        let link_abs_dirname
+            = link_abs_path
+                .dirname()
+                .expect("Failed to get directory name");
 
-        let symlink_target = package_abs_path
-            .relative_to(&link_abs_dirname);
+        let symlink_target
+            = package_abs_path
+                .relative_to(&link_abs_dirname);
 
         link_abs_path
             .fs_rm_file()
@@ -239,13 +240,8 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
 
     // Second pass: create symlinks in node_modules directories
     for (locator, resolution) in &tree.locator_resolutions {
-        let workspace_path
+        let workspace
             = project.try_workspace_by_locator(locator)?;
-
-        let package_base_path = match workspace_path {
-            Some(workspace_path) => workspace_path.path.clone(),
-            None => store_path.with_join_str(&locator.slug()),
-        };
 
         let physical_package_data = install.package_data.get(&locator.physical_locator())
             .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator().to_print_string()));
@@ -254,9 +250,10 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             = matches!(physical_package_data, PackageData::Local {..});
 
         for (dep_name, descriptor) in &resolution.dependencies {
-            let dep_locator = tree.descriptor_to_locator
-                .get(descriptor)
-                .expect("Failed to find dependency resolution");
+            let dep_locator
+                = tree.descriptor_to_locator
+                    .get(descriptor)
+                    .expect("Failed to find dependency resolution");
 
             if !is_local && !locator.reference.is_workspace_reference() {
                 if let Some(hoisted_locator) = hoisted_packages.get(dep_name) {
@@ -269,26 +266,33 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             }
 
             // node_modules/.pnpm/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
-            let dep_rel_location = locations_by_package
-                .get(dep_locator)
-                .expect("Failed to find dependency location; it should have been registered a little earlier");
+            let dep_rel_location
+                = locations_by_package
+                    .get(dep_locator)
+                    .expect("Failed to find dependency location; it should have been registered a little earlier");
 
             // /path/to/project/node_modules/.pnpm/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
-            let dep_abs_path = project.project_cwd
-                .with_join(dep_rel_location);
+            let dep_abs_path
+                = project.project_cwd
+                    .with_join(dep_rel_location);
 
             // /path/to/project/node_modules/@types/no-deps
-            let link_abs_path = package_base_path
-                .with_join(&dep_name.nm_subdir());
+            let link_abs_path = match workspace {
+                Some(workspace) => workspace.path.with_join(&dep_name.nm_subdir()),
+                None if dep_name == &locator.ident => store_path.with_join_str(&locator.slug()).with_join(&locator.ident.nm_subdir()).with_join(&dep_name.nm_subdir()),
+                None => store_path.with_join_str(&locator.slug()).with_join(&dep_name.nm_subdir()),
+            };
 
             // /path/to/project/node_modules/@types
-            let link_abs_dirname = link_abs_path
-                .dirname()
-                .expect("Failed to get directory name");
+            let link_abs_dirname
+                = link_abs_path
+                    .dirname()
+                    .expect("Failed to get directory name");
 
             // ../.pnpm/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
-            let symlink_target = dep_abs_path
-                .relative_to(&link_abs_dirname);
+            let symlink_target
+                = dep_abs_path
+                    .relative_to(&link_abs_dirname);
 
             link_abs_path
                 .fs_rm_file()

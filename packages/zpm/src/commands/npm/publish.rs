@@ -5,7 +5,7 @@ use http::StatusCode;
 use serde::Serialize;
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::{JsonDocument, RawJsonOwnedValue};
-use zpm_utils::{IoResultExt, Provider, Sha1, Sha512, ToFileString, ToHumanString, is_ci};
+use zpm_utils::{DataType, IoResultExt, Provider, Sha1, Sha512, ToFileString, ToHumanString, is_ci};
 
 use crate::{
     error::Error, http::HttpClient, http_npm::{self, AuthorizationMode, GetIdTokenOptions, NpmHttpParams}, npm, pack::{PackOptions, pack_workspace}, project::Project, provenance::attest, script::ScriptEnvironment
@@ -91,19 +91,19 @@ impl Publish {
         let registry_base
             = http_npm::get_registry(&project.config, ident.scope(), true)?;
 
-        let authorization
-            = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
-                configuration: &project.config,
-                http_client: &project.http_client,
-                registry: &registry_base,
-                ident: Some(ident),
-                auth_mode: AuthorizationMode::AlwaysAuthenticate,
-                allow_oidc: true,
-            }).await?;
-
         if self.tolerate_republish {
             let check_url
                 = npm::registry_url_for_one_version(&ident, &version);
+
+            let authorization
+                = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+                    configuration: &project.config,
+                    http_client: &project.http_client,
+                    registry: &registry_base,
+                    ident: Some(ident),
+                    auth_mode: AuthorizationMode::RespectConfiguration,
+                    allow_oidc: true,
+                }).await?;
 
             let check_result = http_npm::get(&NpmHttpParams {
                 http_client: &project.http_client,
@@ -266,6 +266,16 @@ impl Publish {
             = npm::registry_url_for_all_versions(&ident);
 
         if !self.dry_run {
+            let authorization
+                = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+                    configuration: &project.config,
+                    http_client: &project.http_client,
+                    registry: &registry_base,
+                    ident: Some(ident),
+                    auth_mode: AuthorizationMode::AlwaysAuthenticate,
+                    allow_oidc: true,
+                }).await?;
+
             http_npm::put(&NpmHttpParams {
                 http_client: &project.http_client,
                 registry: &registry_base,
@@ -276,9 +286,9 @@ impl Publish {
         }
 
         let message = if self.dry_run {
-            format!("Package would be published to {} with tag {}", registry_url, self.tag)
+            format!("Package would be published to {} with tag {}", DataType::Url.colorize(registry_base), DataType::Code.colorize(&self.tag))
         } else {
-            format!("Published package to {} with tag {}", registry_url, self.tag)
+            format!("Published package to {} with tag {}", DataType::Url.colorize(registry_base), DataType::Code.colorize(&self.tag))
         };
 
         if self.json {

@@ -323,7 +323,7 @@ struct PnpmListDependency {
 /// Builds a lockfile from pnpm's installed packages using `pnpm list --json`.
 ///
 /// The approach:
-/// 1. Run `pnpm list --json --depth=Infinity` to get the full dependency tree
+/// 1. Run `pnpm list --json --depth=3` to get most of the full dependency tree
 /// 2. Recursively walk the tree to collect all packages with their resolved URLs
 /// 3. For each package, read its package.json to get the original dependency ranges
 /// 4. Build descriptor -> locator mappings

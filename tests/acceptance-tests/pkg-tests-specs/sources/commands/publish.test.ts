@@ -97,7 +97,7 @@ describe(`publish`, () =>   {
     await run(`install`);
 
     const {stdout} = await run(`npm`, `publish`, `--dry-run`, `--tolerate-republish`);
-    expect(stdout).toContain(`[DRY RUN]`);
+    expect(stdout).toContain(`Package would be published to http://registry.example.org with tag latest`);
   }));
 
   test(`should support --json flag`, makeTemporaryEnv({
