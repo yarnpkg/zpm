@@ -7904,6 +7904,13 @@
         }
       }
     },
+    "@types/dom-navigation@npm:^1.0.6": {
+      "checksum": "f1a7c0bfd13ae12c5cfd8d4c94a435eba3aa876723c7c031700eef2142959879c072a4481c757adb2521191c6f53ef11f692b457d1a56c5e671565aee1babe81",
+      "resolution": {
+        "resolution": "@types/dom-navigation@npm:1.0.6",
+        "version": "1.0.6"
+      }
+    },
     "@types/dom-speech-recognition@npm:^0.0.1": {
       "checksum": "4cc375e6f80901858cbc7043e9ff31f2cedeaa9be59b7921e77b9dcd57f7509f22e3be753b02269f5dbb2d537c48d5a4c3c847eb4260167d61d3592c2006e109",
       "resolution": {

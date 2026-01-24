@@ -11,10 +11,10 @@ function SearchResultsWatcher() {
   const {refine} = useSearchBox();
 
   useLayoutEffect(() => {
-    if (typeof navigation === `undefined`)
+    if (typeof window.navigation === `undefined`)
       return () => {};
 
-    function handleUrlChange(e: NavigationEvent | null) {
+    function handleUrlChange(e: NavigateEvent | null) {
       const url = new URL(e?.destination.url || window.location.href);
 
       if (url.pathname === `/search`) {
@@ -22,11 +22,11 @@ function SearchResultsWatcher() {
       }
     }
 
-    navigation.addEventListener(`navigate`, handleUrlChange);
+    window.navigation.addEventListener(`navigate`, handleUrlChange);
     handleUrlChange(null);
 
     return () => {
-      navigation.removeEventListener(`navigate`, handleUrlChange);
+      window.navigation.removeEventListener(`navigate`, handleUrlChange);
     };
   }, []);
 

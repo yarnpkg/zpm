@@ -181,17 +181,14 @@ export default function Search({query: initialQuery}: SearchProps) {
     };
   }, [query]);
 
-  if (state.status === `loading` || state.status === `idle`) {
+  if (state.status === `loading` || state.status === `idle`)
     return <PackageGridSkeleton />;
-  }
 
-  if (state.status === `error`) {
+  if (state.status === `error`)
     return <NoPackagesFound />;
-  }
 
-  if (state.hits.length === 0 && !state.isDefaultResults) {
+  if (state.hits.length === 0 && !state.isDefaultResults)
     return <NoPackagesFound />;
-  }
 
   return (
     <div className={`grid md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 !mt-10 md:!mt-8`}>
