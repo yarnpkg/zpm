@@ -11,22 +11,24 @@ import {CatShader} from "@/components/CatShader.tsx";
 import heroBg from "@/assets/image/shine-hero-bg.png";
 import cat from "@/assets/image/logo-cat-nobg.png";
 import heroEllipse from "@/assets/svg/hero-ellipse.svg";
+
+const {searchOnTop} = Astro.props;
 ---
 
 <div class="-mt-28 lg:-mt-33">
   <section class="relative text-center lg:text-left">
     <div class="px-4 pt-28 lg:pt-25 pb-8 container flex flex-col min-h-[100vh] items-center lg:items-stretch">
-      <div class="relative flex-1">
-        <div class="absolute top-0 left-0 w-full h-full flex" transition:animate="slide">
+      <div class={`relative w-full flex-1 ${searchOnTop ? `order-2` : `order-1`} lg:order-1`}>
+        <div class="relative lg:absolute top-0 left-0 w-full h-auto lg:h-full flex" transition:animate="slide">
           <slot/>
         </div>
       </div>
 
-      <div class="w-full lg:max-w-[650px]">
+      <div class={`w-full lg:max-w-[650px] ${searchOnTop ? `order-1 mb-8` : `order-2`} lg:order-2 lg:mb-0`}>
         <SearchInput client:load transition:persist />
       </div>
 
-      <div class="lg:absolute lg:top-0 lg:right-0 lg:h-screen lg:pt-33 -z-40">
+      <div class="lg:absolute lg:top-0 lg:right-0 lg:h-screen lg:pt-33 -z-40 order-3">
         <div class="lg:h-full aspect-square">
           <CatShader client:load transition:persist/>
         </div>

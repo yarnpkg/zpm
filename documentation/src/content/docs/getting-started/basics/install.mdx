@@ -31,3 +31,21 @@ yarn set version latest
 ```
 
 Yarn will then configure your project to use the most recent stable binary.
+
+## Alternative installs
+
+### Corepack
+
+While Corepack doesn't support installing different binaries depending on the platform, we provide a compatibility setting under the form of `YARNSW_COREPACK_COMPAT` which, when set, will instruct Corepack to install Yarn Switch and transparently forward Yarn CLI commands to it.
+
+While not recommended for a local setup, this compatibility layer can unlock you if you work in environments where dependencies are installed with Corepack before you even have a chance to run your own code, such as Netlify runners.
+
+### Self-managed binaries
+
+Our [release tarballs](https://github.com/yarnpkg/zpm/releases) all provide two binaries:
+
+- `yarn` is the [Yarn Switch](/concepts/switch) binary, which adds support for reading the `packageManager` field.
+
+- `yarn-bin` is the "true" binary, containing all commands such as `yarn install`, `yarn add`, etc.
+
+You can bypass Yarn Switch by extracting the `yarn-bin` binary somewhere into your `$PATH` and renaming it into `yarn`.

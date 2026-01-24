@@ -77,11 +77,13 @@ While we’re focused on completing the rewrite before looking at new features, 
 
 ### Yarn Switch
 
-If you’re familiar with the Node.js ecosystem you may have heard about Corepack before. Corepack was an experimental project built in tandem with Node.js core contributors that intended to provide a way to manage package manager versions across projects. While package managers all lock dependencies nowadays, they don’t always support locking their own version. Corepack was solving this need, but the Node.js ultimately declined to pursue the experiment further.
+If you're familiar with the Node.js ecosystem you may have heard about Corepack before. Corepack, an experimental version manager of packages managers built in tandem with Node.js core contributors, has been the recommended way to use Yarn since it was first distributed via Node.js official releases. While package managers all lock dependencies nowadays, they don't always support locking their own version. Corepack was the response to this need, but with the recent decision from Node.js to stop distributing Corepack, we had to look elsewhere.
 
-Consequently we developed our own replacement for Corepack: Yarn Switch. Yarn Switch is the binary that will get installed on your machine when running the Yarn install script. When run it'll read the `packageManager` field from your project and transparently forward the command to the appropriate Yarn version. You can see it as a rustup / nvm equivalent, but for Yarn.
+Consequently we developed our own replacement for Corepack: Yarn Switch. Yarn Switch, also written in Rust, will be the recommended way to run Yarn 6.x. We'll provide an install script which will download a `yarn` executable capable of reading the `packageManager` field from your `package.json` and transparently download, cache, and forward the command to the appropriate Yarn version. You can see it as a rustup / nvm equivalent, but for Yarn.
 
-For more details about Yarn Switch, check out its dedicated documentation.
+We intend to keep supporting using Yarn 6.x from Corepack on mainstream platforms (i.e. Linux, macOS, and Windows, on x86-64 and ARM) as long as Corepack is still shipped with Node.js 24.x, however we're confident that Yarn Switch will provide a much superior DX.
+
+For more details about Yarn Switch, check out its [dedicated documentation](/concepts/switch).
 
 ### Lazy Installs
 
