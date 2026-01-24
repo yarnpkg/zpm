@@ -18,19 +18,21 @@ export default function SearchInput({onQueryChange}: SearchInputProps) {
     if (window.location.pathname === `/search`)
       setQuery(getQueryFromUrl());
 
-    if (typeof navigation === `undefined`)
+    if (typeof window.navigation === `undefined`)
       return () => {};
 
-    function handleUrlChange(e: NavigationEvent | null) {
-      if (e.destination.pathname === `/`) {
+    function handleUrlChange(e: NavigateEvent | null) {
+      const url = new URL(e?.destination.url || window.location.href);
+
+      if (url.pathname === `/`) {
         setQuery(``);
       }
     }
 
-    navigation.addEventListener(`navigate`, handleUrlChange);
+    window.navigation.addEventListener(`navigate`, handleUrlChange);
 
     return () => {
-      navigation.removeEventListener(`navigate`, handleUrlChange);
+      window.navigation.removeEventListener(`navigate`, handleUrlChange);
     };
   }, []);
 

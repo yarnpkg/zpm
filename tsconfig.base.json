@@ -14,7 +14,6 @@
     "target": "ES2023",
     "module": "ES2022",
     "moduleResolution": "bundler",
-    "lib": ["ES2023"],
     "composite": true,
     "outDir": "${configDir}/dist/types",
     "emitDeclarationOnly": true,

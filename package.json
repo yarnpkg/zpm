@@ -10,12 +10,13 @@
     "tests/acceptance-tests/pkg-tests-specs"
   ],
   "devDependencies": {
+    "@types/dom-navigation": "^1.0.6",
     "@types/lodash": "^4.17.17",
     "@types/node": "^22.15.20",
     "@yarnpkg/types": "^4.0.1",
     "esbuild": "^0.25.5",
     "lodash": "^4.17.21",
-    "typescript": "^5.8.3"
+    "typescript": "^5.9.3"
   },
   "repository": {
     "directory": "",

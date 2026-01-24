@@ -25878,11 +25878,11 @@
         }
       }
     },
-    "typescript@npm:^5.8.3": {
-      "checksum": "fa9335b328896f2174b4805cf3c18e29bd9365a31f2c35923a837005f16fa94d16a59a6e6081eb459fe2caa00780cd33931dae6a6502abeeba8073438d985c4a",
+    "typescript@npm:^5.9.3": {
+      "checksum": "d13258e325e2eccd32999b8c7ee6b90fa4af7212101f6089e000743143650a35809bc7120b10ee33b67279332a55584bb1a58fdff67c1f79946a7c7ece3c110b",
       "resolution": {
-        "resolution": "typescript@npm:5.9.2",
-        "version": "5.9.2"
+        "resolution": "typescript@npm:5.9.3",
+        "version": "5.9.3"
       }
     },
     "ua-parser-js@npm:^1.0.35": {

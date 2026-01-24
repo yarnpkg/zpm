@@ -1,4 +1,3 @@
-import {liteClient as algoliasearch}     from 'algoliasearch/lite';
 import {history}                         from 'instantsearch.js/es/lib/routers';
 import {useEffect}                       from 'preact/hooks';
 import {InstantSearch, useInstantSearch} from 'react-instantsearch';
@@ -18,7 +17,7 @@ updateTimeout();
 export default function SearchPackageInterface() {
   return (
     <InstantSearch
-      searchClient={searchClient as any}
+      searchClient={null as any}
       indexName={`npm-search`}
       routing={{
         router: history({
