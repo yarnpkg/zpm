@@ -39,7 +39,7 @@ Yarn Plug'n'Play has been the default installation strategy in Yarn since 2019, 
 
 ## `nodeLinker: pnpm`
 
-Under this mode, a flat folder is generated in `node_modules/.store` containing one folder for each dependency in the project. Each dependency folder is populated with hardlinks obtained from a central store common to all projects on the system (by default `$HOME/.yarn/berry/index`). Finally, symlinks to the relevant folders from the flat store are placed into the `node_modules` folders.
+Under this mode, a flat folder is generated in `node_modules/.pnpm` containing one folder for each dependency in the project. Each dependency folder is populated with hardlinks obtained from a central store common to all projects on the system (by default `$HOME/.yarn/berry/index`). Finally, symlinks to the relevant folders from the flat store are placed into the `node_modules` folders.
 
 <div class="[&_table]:table-fixed [&_th]:w-[50%]">
 

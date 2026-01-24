@@ -26,8 +26,8 @@ describe(`Features`, () => {
           const absolutePnpmStorePath = ppath.join(path, customStoreFolderName);
           expect(xfs.existsSync(absolutePnpmStorePath)).toEqual(true);
 
-          // Ensure that the default node_modules/.store folder is not created
-          expect(xfs.existsSync(ppath.join(path, `node_modules`, `.store`))).toEqual(false);
+          // Ensure that the default node_modules/.pnpm folder is not created
+          expect(xfs.existsSync(ppath.join(path, `node_modules`, `.pnpm`))).toEqual(false);
 
           // Ensure that the installed package is a symbolic link
           const installedPackagePath = ppath.join(path, `node_modules`, `no-deps`);

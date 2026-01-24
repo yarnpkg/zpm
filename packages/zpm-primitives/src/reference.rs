@@ -13,6 +13,13 @@ fn format_patch(inner: &UrlEncoded<Locator>, path: &str, checksum: &Option<Hash6
     }
 }
 
+fn format_registry(ident: &Ident, version: &zpm_semver::Version, url: Option<&String>) -> String {
+    match url {
+        Some(url) => format!("npm:{}@{}#{}", ident.to_file_string(), version.to_file_string(), url.to_file_string()),
+        None => format!("npm:{}@{}", ident.to_file_string(), version.to_file_string()),
+    }
+}
+
 fn format_workspace_path(path: &Path) -> String {
     if path.is_empty() {
         "workspace:.".to_string()
@@ -47,12 +54,13 @@ pub enum Reference {
         version: zpm_semver::Version,
     },
 
-    #[pattern(r"npm:(?<ident>.*)@(?<version>.*)")]
-    #[to_file_string(|params| format!("npm:{}@{}", params.ident.to_file_string(), params.version.to_file_string()))]
-    #[to_print_string(|params| DataType::Reference.colorize(&format!("npm:{}@{}", params.ident.to_file_string(), params.version.to_file_string())))]
+    #[pattern(r"npm:(?<ident>(?:@[^#@]+/)?[^#@]+)@(?<version>[^#]*)(?:#(?<url>.*))?")]
+    #[to_file_string(|params| format_registry(&params.ident, &params.version, params.url.as_deref()))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format_registry(&params.ident, &params.version, params.url.as_deref())))]
     Registry {
         ident: Ident,
         version: zpm_semver::Version,
+        url: Option<UrlEncoded<String>>,
     },
 
     #[pattern(r"file:(?<path>.*\.(?:tgz|tar\.gz))")]

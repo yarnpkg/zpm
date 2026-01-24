@@ -1,10 +1,9 @@
-use zpm_config::ConfigExt;
 use zpm_formats::iter_ext::IterExt;
 use zpm_primitives::{Locator, RegistryReference};
 
 use crate::{
     error::Error,
-    http_npm,
+    http_npm::{self, AuthorizationMode, GetAuthorizationOptions},
     install::{FetchResult, InstallContext},
     npm::{self, NpmEntryExt},
 };
@@ -53,9 +52,13 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .expect("The project is required for resolving a workspace package");
 
     let registry_base
-        = project.config.registry_base_for(&params.ident);
-    let registry_path
-        = npm::registry_url_for_package_data(&params.ident, &params.version);
+        = http_npm::get_registry(&project.config, params.ident.scope(), false)?;
+
+    // When a custom archive URL is provided, use it directly; otherwise build from registry + path
+    let (fetch_registry, fetch_path) = match &params.url {
+        Some(url) => ("".to_string(), url.0.clone()),
+        None => (registry_base.to_string(), npm::registry_url_for_package_data(&params.ident, &params.version)),
+    };
 
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching npm packages");
@@ -63,13 +66,23 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let package_subdir
         = params.ident.nm_subdir();
 
+    let authorization
+        = http_npm::get_authorization(&GetAuthorizationOptions {
+            configuration: &project.config,
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: Some(&params.ident),
+            auth_mode: AuthorizationMode::RespectConfiguration,
+            allow_oidc: false,
+        }).await?;
+
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
         let bytes
             = http_npm::get(&http_npm::NpmHttpParams {
                 http_client: &project.http_client,
-                registry: &registry_base,
-                path: &registry_path,
-                authorization: None,
+                registry: &fetch_registry,
+                path: &fetch_path,
+                authorization: authorization.as_deref(),
                 otp: None,
             }).await?;
 

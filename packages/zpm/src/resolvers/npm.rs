@@ -4,9 +4,9 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::Deserialize;
 use serde_with::{serde_as, MapSkipError};
-use zpm_config::ConfigExt;
 use zpm_parsers::{JsonDocument, RawJsonValue};
-use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, Reference, RegistryReference, RegistrySemverRange, RegistryTagRange, UrlReference};
+use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, Reference, RegistryReference, RegistrySemverRange, RegistryTagRange};
+use zpm_utils::UrlEncoded;
 
 use crate::{
     error::Error,
@@ -59,19 +59,24 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
         .as_ref()
         .expect("Expected the registry to return a 'dist' field amongst the manifest data");
 
+    let registry_base
+        = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
+
+    // Store the tarball URL only if it's non-conventional (can't be computed from registry + path)
+    let url = if npm::is_conventional_tarball_url(&registry_base, &package_ident, &version, dist_manifest.tarball.clone()) {
+        None
+    } else {
+        Some(UrlEncoded::new(dist_manifest.tarball.clone()))
+    };
+
     let registry_reference = RegistryReference {
         ident: package_ident.clone(),
         version,
+        url,
     };
 
-    let registry
-        = project.config.registry_base_for(&registry_reference.ident);
-
-    let locator = descriptor.resolve_with(if npm::is_conventional_tarball_url(&registry, &registry_reference.ident, &registry_reference.version, dist_manifest.tarball.clone()) {
-        registry_reference.into()
-    } else {
-        UrlReference {url: dist_manifest.tarball.clone()}.into()
-    });
+    let locator
+        = descriptor.resolve_with(registry_reference.into());
 
     Resolution::from_remote_manifest(locator, manifest.remote)
         .into_resolution_result(context)
@@ -109,13 +114,15 @@ fn is_package_approved(context: &InstallContext<'_>, ident: &Ident, version: &zp
 }
 
 pub fn resolve_aliased(descriptor: &Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
-    let mut dependencies_it
-        = dependencies.iter();
-
-    let mut inner_resolution
-        = dependencies_it.next().unwrap()
-            .as_resolved()
-            .clone();
+    // When the inner resolution returns Pinned (e.g., during lockfile migration),
+    // the graph will add a Refresh dependency that produces Resolved.
+    // We need to find the first Resolved result in the dependencies.
+    let mut inner_resolution = dependencies.iter()
+        .find_map(|dep| match dep {
+            InstallOpResult::Resolved(res) => Some(res.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("Expected at least one Resolved result in dependencies for aliased package; got {:?}", dependencies));
 
     let inner_reference
         = inner_resolution.resolution.locator.reference.clone();
@@ -124,14 +131,17 @@ pub fn resolve_aliased(descriptor: &Descriptor, dependencies: Vec<InstallOpResul
         Reference::Shorthand(inner_params) => RegistryReference {
             ident: inner_resolution.resolution.locator.ident.clone(),
             version: inner_params.version.clone(),
+            url: None,
         }.into(),
 
         Reference::Registry(inner_params) => RegistryReference {
             ident: inner_params.ident.clone(),
             version: inner_params.version.clone(),
+            url: inner_params.url.clone(),
         }.into(),
 
         // For non-conventional tarball URLs, preserve the URL reference as-is
+        // (kept for backwards compatibility with old lockfiles)
         Reference::Url(_) => inner_reference,
 
         _ => unreachable!("Unexpected reference type in resolve_aliased: {:?}", inner_reference),
@@ -151,16 +161,26 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         .unwrap_or(&descriptor.ident);
 
     let registry_base
-        = project.config.registry_base_for(package_ident);
+        = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
     let registry_path
         = npm::registry_url_for_all_versions(&package_ident);
+
+    let authorization
+        = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+            configuration: &project.config,
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: Some(package_ident),
+            auth_mode: http_npm::AuthorizationMode::RespectConfiguration,
+            allow_oidc: false,
+        }).await?;
 
     let bytes
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
             path: &registry_path,
-            authorization: None,
+            authorization: authorization.as_deref(),
             otp: None,
         }).await?;
 
@@ -210,16 +230,26 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
         .unwrap_or(&descriptor.ident);
 
     let registry_base
-        = project.config.registry_base_for(package_ident);
+        = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
     let registry_path
         = npm::registry_url_for_all_versions(&package_ident);
+
+    let authorization
+        = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+            configuration: &project.config,
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: Some(package_ident),
+            auth_mode: http_npm::AuthorizationMode::RespectConfiguration,
+            allow_oidc: false,
+        }).await?;
 
     let bytes
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
             path: &registry_path,
-            authorization: None,
+            authorization: authorization.as_deref(),
             otp: None,
         }).await?;
 
@@ -265,16 +295,26 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
         .expect("The project is required for resolving a workspace package");
 
     let registry_base
-        = project.config.registry_base_for(&params.ident);
+        = http_npm::get_registry(&project.config, params.ident.scope(), false)?;
     let registry_path
         = npm::registry_url_for_one_version(&params.ident, &params.version);
+
+    let authorization
+        = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+            configuration: &project.config,
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: Some(&params.ident),
+            auth_mode: http_npm::AuthorizationMode::RespectConfiguration,
+            allow_oidc: false,
+        }).await?;
 
     let bytes
         = http_npm::get(&http_npm::NpmHttpParams {
             http_client: &project.http_client,
             registry: &registry_base,
             path: &registry_path,
-            authorization: None,
+            authorization: authorization.as_deref(),
             otp: None,
         }).await?;
 

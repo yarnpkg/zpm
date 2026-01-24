@@ -1,0 +1,7 @@
+{
+    "name": "one-scoped-range-dep",
+    "version": "1.0.0",
+    "dependencies": {
+        "@scoped/no-deps": "^1.0.0"
+    }
+}

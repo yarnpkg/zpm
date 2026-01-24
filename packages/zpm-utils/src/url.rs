@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::BTreeMap, string::FromUtf8Error};
+use std::{borrow::Cow, collections::BTreeMap, ops::Deref, string::FromUtf8Error};
 
 use rkyv::Archive;
 use urlencoding::decode;
@@ -91,5 +91,13 @@ impl<T: ToFileString> ToFileString for UrlEncoded<T> {
 impl<T: ToHumanString> ToHumanString for UrlEncoded<T> {
     fn to_print_string(&self) -> String {
         self.0.to_print_string()
+    }
+}
+
+impl<T> Deref for UrlEncoded<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }

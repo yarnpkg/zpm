@@ -5,10 +5,23 @@ use zpm_parsers::JsonDocument;
 use zpm_primitives::{Locator, UrlReference};
 
 use crate::{
-    error::Error, install::{FetchResult, InstallContext}, manifest::RemoteManifest, npm::NpmEntryExt, resolvers::Resolution
+    error::Error,
+    http_npm::{self, AuthorizationMode, GetAuthorizationOptions},
+    install::{FetchResult, InstallContext},
+    manifest::RemoteManifest,
+    npm::NpmEntryExt,
+    resolvers::Resolution,
 };
 
 use super::PackageData;
+
+/// Extracts the registry base (scheme + host + port) from a URL.
+fn get_registry_base_from_url(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    let host = parsed.host_str()?;
+    let port = parsed.port().map(|p| format!(":{}", p)).unwrap_or_default();
+    Some(format!("{}://{}{}", parsed.scheme(), host, port))
+}
 
 pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &UrlReference) -> Result<FetchResult, Error> {
     let project = context.project
@@ -20,9 +33,24 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let package_subdir
         = locator.ident.nm_subdir();
 
+    // Try to get authorization for the URL's registry
+    let authorization = if let Some(registry_base) = get_registry_base_from_url(&params.url) {
+        http_npm::get_authorization(&GetAuthorizationOptions {
+            configuration: &project.config,
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: Some(&locator.ident),
+            auth_mode: AuthorizationMode::RespectConfiguration,
+            allow_oidc: false,
+        }).await?
+    } else {
+        None
+    };
+
     let cached_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
-        let response
-            = project.http_client.get(&params.url)?.send().await?;
+        let response = project.http_client.get(&params.url)?
+            .header("authorization", authorization.as_deref())
+            .send().await?;
 
         let tgz_data = response.bytes().await
             .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;

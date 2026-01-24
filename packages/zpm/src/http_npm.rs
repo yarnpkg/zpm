@@ -47,7 +47,16 @@ macro_rules! scope_registry_setting {
                 }
             }
 
+            // Try exact match first
             if let Some(registry_settings) = $config.settings.npm_registries.get($registry) {
+                if let Some(value) = registry_settings.$field.value.as_ref() {
+                    return Some(value);
+                }
+            }
+
+            // Also try with trailing slash (for normalization)
+            let registry_with_slash = format!("{}/", $registry);
+            if let Some(registry_settings) = $config.settings.npm_registries.get(&registry_with_slash) {
                 if let Some(value) = registry_settings.$field.value.as_ref() {
                     return Some(value);
                 }
@@ -61,7 +70,7 @@ macro_rules! scope_registry_setting {
 fn get_registry_raw<'a>(config: &'a Configuration, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
     if let Some(scope) = scope {
         let scope_settings
-            = config.settings.npm_scopes.get(scope);
+            = config.settings.npm_scopes.get(scope.strip_prefix('@').unwrap_or(scope));
 
         if let Some(scope_settings) = scope_settings {
             if publish {
@@ -116,6 +125,16 @@ pub struct GetAuthorizationOptions<'a> {
 pub fn should_authenticate(options: &GetAuthorizationOptions<'_>) -> bool {
     match options.auth_mode {
         AuthorizationMode::RespectConfiguration => {
+            // For scoped packages, always authenticate if credentials are available
+            let is_scoped = options.ident
+                .map(|ident| ident.scope().is_some())
+                .unwrap_or(false);
+
+            if is_scoped {
+                return true;
+            }
+
+            // For unscoped packages, only authenticate if npmAlwaysAuth is true
             *scope_registry_setting!(options.configuration, options.registry, options.ident, npm_always_auth)
                 .unwrap_or(&options.configuration.settings.npm_always_auth.value)
         },
@@ -231,6 +250,32 @@ async fn get_oidc_token(options: &GetAuthorizationOptions<'_>) -> Result<Option<
     Ok(Some(data.token))
 }
 
+/// Returns whether authentication is strictly required (should error if not configured).
+/// This is different from should_authenticate, which returns whether auth should be sent if available.
+fn is_auth_strictly_required(options: &GetAuthorizationOptions<'_>) -> bool {
+    match options.auth_mode {
+        AuthorizationMode::AlwaysAuthenticate => true,
+
+        AuthorizationMode::RespectConfiguration => {
+            // For scoped packages, auth is preferred but not strictly required
+            // (the server may accept anonymous requests for public packages)
+            let is_scoped = options.ident
+                .map(|ident| ident.scope().is_some())
+                .unwrap_or(false);
+
+            if is_scoped {
+                return false;
+            }
+
+            // For unscoped packages, npmAlwaysAuth=true means auth is strictly required
+            *scope_registry_setting!(options.configuration, options.registry, options.ident, npm_always_auth)
+                .unwrap_or(&options.configuration.settings.npm_always_auth.value)
+        },
+
+        AuthorizationMode::BestEffort | AuthorizationMode::NeverAuthenticate => false,
+    }
+}
+
 pub async fn get_authorization(options: &GetAuthorizationOptions<'_>) -> Result<Option<String>, Error> {
     let should_authenticate
         = should_authenticate(options);
@@ -266,6 +311,13 @@ pub async fn get_authorization(options: &GetAuthorizationOptions<'_>) -> Result<
         if let Some(oidc_token) = oidc_token {
             return Ok(Some(format!("Bearer {}", oidc_token)));
         }
+    }
+
+    // If auth is strictly required but no credentials were found, error
+    if is_auth_strictly_required(options) {
+        return Err(Error::AuthenticationError(
+            "No authentication configured for request".to_string()
+        ));
     }
 
     Ok(None)

@@ -19,7 +19,7 @@ use crate::{
     graph::{GraphCache, GraphIn, GraphOut, GraphTasks},
     linker,
     lockfile::{Lockfile, LockfileEntry, LockfileMetadata},
-    primitives_exts::RangeExt,
+    primitives_exts::{InnerDependencyKind, RangeExt},
     project::{InstallMode, Project},
     report::{ReportContext, async_section, current_report, with_context_result},
     resolvers::{Resolution, SyncResolutionAttempt, catalog::lookup_catalog_entry, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution}, tree_resolver::{ResolutionTree, TreeResolver},
@@ -338,11 +338,28 @@ impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'
                     }
 
                     dependencies.push(InstallOp::Resolve {descriptor: inner_descriptor});
-                    let patch_resolution = resolved_it.next();
+                    let inner_resolution = resolved_it.next();
 
-                    if let Some(result) = patch_resolution {
-                        let patch_resolved_locator = result.as_resolved_locator();
-                        dependencies.push(InstallOp::Fetch {locator: patch_resolved_locator.clone(), is_mock_request: false});
+                    if let Some(result) = inner_resolution {
+                        let inner_locator = result.as_resolved_locator();
+                        let inner_dep_kind = descriptor.range.inner_dependency();
+
+                        match inner_dep_kind {
+                            // Aliased packages only need the resolution. When the inner result is Pinned,
+                            // add a Refresh dependency to get the full ResolutionResult.
+                            Some(InnerDependencyKind::Resolution) => {
+                                if matches!(result, InstallOpResult::Pinned(_)) {
+                                    dependencies.push(InstallOp::Refresh {locator: inner_locator.clone()});
+                                }
+                            },
+
+                            // Patches need the fetched package contents.
+                            Some(InnerDependencyKind::Fetch) => {
+                                dependencies.push(InstallOp::Fetch {locator: inner_locator.clone(), is_mock_request: false});
+                            },
+
+                            None => {},
+                        }
                     }
                 }
             },

@@ -84,7 +84,7 @@ describe(`Protocols`, () => {
 
           await expect(source(`require('unconventional-tarball')`)).resolves.toMatchObject({
             name: `unconventional-tarball`,
-            version: `1.0.0`,
+            version: `2.0.0`,
           });
 
           await xfs.removePromise(`${path}/.yarn`);
@@ -100,7 +100,7 @@ describe(`Protocols`, () => {
 
         await expect(source(`require('unconventional-tarball')`)).resolves.toMatchObject({
           name: `unconventional-tarball`,
-          version: `1.0.0`,
+          version: `2.0.0`,
         });
       }),
     );

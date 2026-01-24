@@ -264,6 +264,9 @@ pub enum Error {
     #[error("An error occured while parsing the Yarn Berry lockfile: {0}")]
     LegacyLockfileParseError(Arc<serde_yaml::Error>),
 
+    #[error("Failed to read pnpm node_modules directory")]
+    PnpmNodeModulesReadError,
+
     #[error("An error occured while parsing your configuration: {0}")]
     ConfigurationParseError(Arc<dyn std::error::Error + Send + Sync>),
 
