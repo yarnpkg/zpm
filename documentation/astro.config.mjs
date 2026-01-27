@@ -153,7 +153,7 @@ export default defineConfig({
       [clipanionRemark, {
         clis: {
           yarn: {
-            baseUrl: `https://example.org/git`,
+            baseUrl: `https://yarn6.netlify.app/reference/cli`,
             path: path.resolve(import.meta.dirname, `../target/release/yarn-bin`),
           },
         },

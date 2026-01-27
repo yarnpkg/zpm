@@ -28,7 +28,7 @@ const clipanionBody = ({data: {binaryName, commandSpec}}: {data: {binaryName: st
 
       | Option | Description |
       | --- | --- |
-      ${options.map(option => dedent`
+      ${options.filter(option => option.documentation?.description !== undefined).map(option => dedent`
         | \`${option.primaryName}\` | ${option.documentation?.description} |
       `).join(`\n`)}
 

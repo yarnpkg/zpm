@@ -1,0 +1,121 @@
+---
+slug: 2026-01-28-yarn-6-preview
+title: Yarn 6 Preview
+author: arcanis
+---
+
+I'm excited to announce the next evolution for Yarn, redefining what "state of the art" means when it comes to JavaScript package managers.
+
+{/* truncate */}
+
+Yarn has always prioritized three pillars: correctness, developer experience, and performance. Excelling in all three simultaneously is a challenge, but we believe you shouldn't expect less from the very foundation of your projects. While we are proud of our correctness, stability, and DX, it became clear in recent years that Yarn was hitting a ceiling on performance - especially within massive monorepos hosting thousands of workspaces.
+
+Almost ten years after the first public release of Yarn, now is the perfect time to reveal our plans to port Yarn to Rust. This project, started over a year ago, is now ready to share more broadly. While still a preview, we expect to complete this transition in the next 6-8 months. This evolution will lead to drastically higher responsiveness and lower memory footprints, enabling features we simply couldn't efficiently pull off until now.
+
+## How much faster?
+
+While performance was a significant driver for this rewrite, our initial focus has been strict compatibility. Even with that constraint, the results are compelling. Many low-hanging fruits remain, and we're excited to now be able to publicly work with the JavaScript + Rust tooling community to widen the gap even further.
+
+<div class="w-full overflow-auto">
+  <table class="table-fixed [&_th,&_td]:min-w-auto">
+    <colgroup>
+      <col style="width: calc(100% - 600px); min-width: 200px"/>
+      <col style="width: 200px"/>
+      <col style="width: 200px"/>
+      <col style="width: 200px"/>
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Test</th>
+        <th>Before</th>
+        <th>After</th>
+        <th>Pnpm</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th colspan="4">Next.js - few but heavy dependencies</th>
+      </tr>
+      <tr>
+        <td>Cold cache</td>
+        <td>4.1s</td>
+        <td>2.5s</td>
+        <td>3.0s</td>
+      </tr>
+      <tr>
+        <td>Warm cache</td>
+        <td>577ms</td>
+        <td>**184ms**</td>
+        <td>686ms</td>
+      </tr>
+      <tr>
+        <th colspan="4">Gatsby - lots of small dependencies</th>
+      </tr>
+      <tr>
+        <td>Cold cache</td>
+        <td>19.8s</td>
+        <td>11.7s</td>
+        <td>13.1s</td>
+      </tr>
+      <tr>
+        <td>Warm cache</td>
+        <td>1.7s</td>
+        <td>**0.3s**</td>
+        <td>1.9s</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+*(more benchmarks are available [here](https://p.datadoghq.eu/sb/d2wdprp9uki7gfks-badb2c0f08402af744326888f9535a82); we're also setting up a new benchmark on massive megarepos, but those don't run on other package managers yet)*
+
+Beyond raw speed, these numbers unlock new opportunities. While some concepts are still in the ideation phase, others have already been implemented - such as the Lazy Install feature I'm just about to present.
+
+## New features
+
+Our primary focus is completing the rewrite, but some features were foundational enough that we felt the need to implement them as part of the MVP, knowing they would instruct the design.
+
+### Yarn Switch
+
+If you're familiar with the Node.js ecosystem you may have heard of Corepack. Corepack is an experimental version manager of packages managers built in tandem with Node.js core contributors and has been the recommended way to use Yarn since it was first distributed via Node.js official releases. While package managers all lock dependencies nowadays, they don't always support locking their own version. Corepack was the response to this need, but with the recent decision from Node.js to stop distributing Corepack, we had to look elsewhere.
+
+Consequently, we developed our own replacement: **Yarn Switch**.
+
+Yarn Switch, also written in Rust, is the binary that gets installed on your machine when following our new [installation guide](/getting-started). When executed it will read the `packageManager` field from your project and transparently download, cache, and forward the command to the appropriate Yarn version. Think of it as a `rustup` or `nvm` equivalent, but intended specifically for Yarn.
+
+We intend to keep supporting using Yarn 6.x from Corepack on mainstream platforms (i.e. Linux, macOS, and Windows, on x86-64 and ARM) as long as Corepack is still shipped with Node.js 24.x, however we're confident that Yarn Switch will provide a much superior DX.
+
+For more details about Yarn Switch, check out the [Yarn Switch documentation](/concepts/switch).
+
+### Lazy Installs
+
+Yarn has long supported "Zero Installs" - the ability to check-in install artifacts to your repository so you can omit running installs when switching branches. This worked well but had drawbacks regarding repository size, particularly in massive monorepos.
+
+Starting with Yarn 6.x, we are introducing a new default mode: **Lazy Installs**.
+
+Under this model, running most Yarn commands - including `yarn run` - will prompt Yarn to silently perform an install if it detects the artifacts are out of sync with package.json. Thanks to the native Rust implementation, this check has negligible overhead in the happy path. We believe this offers most of the benefits of Zero Installs without the repository bloat.
+
+## Versioning roadmap
+
+Our current release is Yarn 4.12. We plan for the JS codebase to continue into the Yarn 5.x series. This will be released in a couple of months as a stepping stone, including some of the deprecations introduced in the Rust-based Yarn 6.x series.
+
+The first Yarn 6.x stable release will be published once the Rust implementation has reached sufficient parity with current Yarn releases. We do not expect this until at least **Q3 2026**.
+
+Once 6.x is stable, Yarn 5.x will enter LTS status: the codebase will receive critical bugfixes for approximately 30 months, while active development shifts to the Rust codebase.
+
+Backward compatibility is a primary concern. We are using the exact same test suite to validate Yarn 6.x against its predecessors. Experimental releases of Yarn 6.x have already been successfully deployed in production at **Datadog** with minimal breaking changes.
+
+## Next steps
+
+This preview is an important steps, but Yarn 6.x is still months away. Important features remain to tackle:
+
+- Windows support
+- Interactive commands
+- Collaboration with third-party tools that manually parse the lockfile
+- Wrapping up the last remaining failing tests and missing commands
+
+This work is ongoing, and we are eager to build this next chapter alongside the community.
+
+If you are looking to expand your knowledge of Rust or deep-dive into JavaScript tooling, there has never been a better time to get involved. We are actively looking for contributors to help us tackle the remaining challenges—check out our [issues](https://github.com/yarnpkg/zpm/issues) or say hello on our [Discord server](https://discord.com/invite/yarnpkg) to get started.
+
+Finally, if your company relies on Yarn and wants to ensure its sustainable development, please consider backing us via [GitHub Sponsors](http://github.com/sponsors/yarnpkg) or [OpenCollective](https://opencollective.com/yarnpkg).

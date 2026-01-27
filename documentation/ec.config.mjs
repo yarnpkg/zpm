@@ -12,7 +12,7 @@ export default {
     clipanionExpressiveCode({
       clis: {
         [`yarn`]: {
-          baseUrl: `https://example.org/git`,
+          baseUrl: `https://yarn6.netlify.app/reference/cli`,
           path: require.resolve(`@yarnpkg/monorepo/target/release/yarn-bin`),
         },
       },
