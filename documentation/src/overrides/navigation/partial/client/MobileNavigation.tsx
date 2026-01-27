@@ -11,9 +11,6 @@ import * as DocSearchReact           from '@docsearch/react';
 import {useEffect, useRef, useState} from 'preact/hooks';
 import {createElement, render}       from 'preact';
 
-// Images
-import CollapsibleNavigation         from './CollapsibleNavigation';
-
 const {DocSearchModal} = DocSearchReact;
 
 export default function MobileNavigation({pathname}: {pathname: string}) {
@@ -135,8 +132,8 @@ export default function MobileNavigation({pathname}: {pathname: string}) {
           </div>
         </div>
         {isMenuOpen && (
-          <div ref={menuRef} className={`pt-10 flex flex-col gap-y-10`}>
-            <ul className={`flex flex-col gap-y-7`}>
+          <div ref={menuRef} className={`pt-8 flex flex-col gap-y-8`}>
+            <ul className={`flex flex-col gap-y-4`}>
               {NAVIGATION.map(
                 ({href, title}: {href: string, title: string}) => (
                   <li key={href} onClick={() => setIsMenuOpen(false)}>
@@ -155,11 +152,7 @@ export default function MobileNavigation({pathname}: {pathname: string}) {
               )}
             </ul>
 
-            <div className={`h-px w-full bg-white/15`}></div>
-
-            <div className={`flex flex-col gap-y-6 pb-3`}>
-              <CollapsibleNavigation />
-
+            <div className={`flex flex-col gap-y-6 pb-4`}>
               <div className={`flex items-center gap-x-6`}>
                 <a
                   href={`https://discord.gg/yarnpkg`}
