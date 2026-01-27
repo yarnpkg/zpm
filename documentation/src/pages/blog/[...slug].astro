@@ -7,9 +7,10 @@ import utc from "dayjs/plugin/utc";
 import TableOfContentsList from "@/components/table-of-content/TableOfContentsList.astro";
 
 // Icons
+import Author from "./Author.astro";
 import CalendarIcon from "@/assets/svg/calendar-days.svg";
 import ClockIcon from "@/assets/svg/clock.svg";
-import europeanFlagUrl from "@/assets/svg/europe.svg?url";
+import Author from "@/components/blog/Author.astro";
 import MobileTableOfContents from "@/components/table-of-content/MobileTableOfContents.astro";
 import Breadcrumbs from "@/components/Breadcrumbs.astro";
 import Heading from "@/components/Heading";
@@ -45,9 +46,7 @@ const { data: author } = await getEntry(entry.data.author);
 >
   <div class="container">
     <div class="flex lg:gap-x-10 xl:gap-x-20">
-      <div
-        class="hidden lg:block lg:w-1/3 xl:w-1/4 sticky top-0 h-screen overflow-y-auto"
-      >
+      <div class="hidden lg:block lg:w-1/3 xl:w-1/4 sticky top-0 h-screen overflow-y-auto">
         <TableOfContentsList
           toc={headings}
           className="mt-4! flex flex-col gap-y-4"
@@ -55,56 +54,26 @@ const { data: author } = await getEntry(entry.data.author);
       </div>
 
       <main class="lg:w-2/3 xl:w-3/4 w-full">
-        <Heading size="h2" as="h1" className="pb-3 md:pb-4 pt-4 md:pt-5"
-          >{title}</Heading
-        >
+        <Heading size="h2" as="h1" className="pb-3 md:pb-4 pt-4 md:pt-5">
+          {title}
+        </Heading>
         <div class="flex items-center gap-x-7">
           <div class="flex items-center gap-x-2">
             <CalendarIcon class="size-6" />
-            <span
-              class="font-montserrat font-medium text-sm leading-5 text-white"
-            >
+            <span class="font-montserrat font-medium text-sm leading-5 text-white">
               {publishDate}
             </span>
           </div>
           <div class="flex items-center gap-x-2 mt-0!">
             <ClockIcon class="size-6" />
-            <span
-              class="font-montserrat font-medium text-sm leading-5 text-white"
-            >
+            <span class="font-montserrat font-medium text-sm leading-5 text-white">
               {minutesRead}
             </span>
           </div>
         </div>
 
         <div class="pt-8 pb-12">
-          {
-            author !== undefined && (
-              <div class="flex items-center gap-x-4">
-                <Image
-                  src={author.image_url ?? "/default-author.png"}
-                  alt={author.name}
-                  width={56}
-                  height={56}
-                  class="rounded-full object-cover"
-                />
-                <div>
-                  <a
-                    href={author.url}
-                    class="font-montserrat font-medium leading-[22px] text-white! no-underline"
-                    target="_blank"
-                    referrerpolicy="no-referrer"
-                  >
-                    {author.name}
-                    <img src={europeanFlagUrl} class="inline rounded h-4 ml-1 -mt-[3px]"/>
-                  </a>
-                  <p class="font-montserrat leading-[22px] text-white/80! pt-1.5">
-                    {author.title}
-                  </p>
-                </div>
-              </div>
-            )
-          }
+          <Author author={author}/>
         </div>
 
         <div class="sl-markdown-content content">
@@ -112,33 +81,7 @@ const { data: author } = await getEntry(entry.data.author);
         </div>
 
         <div class="pt-12">
-          {
-            author !== undefined && (
-              <div class="flex items-center gap-x-4">
-                <Image
-                  src={author.image_url ?? "/default-author.png"}
-                  alt={author.name}
-                  width={56}
-                  height={56}
-                  class="rounded-full object-cover"
-                />
-                <div>
-                  <a
-                    href={author.url}
-                    class="font-montserrat font-medium leading-[22px] text-white! no-underline"
-                    target="_blank"
-                    referrerpolicy="no-referrer"
-                  >
-                    {author.name}
-                    <img src={europeanFlagUrl} class="inline rounded h-4 ml-1 -mt-[3px]"/>
-                  </a>
-                  <p class="font-montserrat leading-[22px] text-white/80! pt-1.5">
-                    {author.title}
-                  </p>
-                </div>
-              </div>
-            )
-          }
+          <Author author={author}/>
         </div>
       </main>
     </div>

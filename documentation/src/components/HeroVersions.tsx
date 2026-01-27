@@ -1,6 +1,7 @@
-import {useYarnReleaseVersions}           from '@/api/versions';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {Suspense}                         from 'preact/compat';
+
+import {useVersion}                       from '../api/versions';
 
 const queryClient = new QueryClient();
 
@@ -10,11 +11,6 @@ type BadgeProps = {
   value: any;
 };
 
-function Version({name}: {name: string}) {
-  const versions = useYarnReleaseVersions();
-
-  return <>{versions[name]}</>;
-}
 
 function Badge({labelClass, label, value}: BadgeProps) {
   return (
@@ -22,7 +18,7 @@ function Badge({labelClass, label, value}: BadgeProps) {
       <div class={`rounded-l-xl px-2 ${labelClass}`}>
         {label}
       </div>
-      <div class={`rounded-r-xl w-16 px-2 bg-linear-to-t from-gray-950 to-gray-800 text-center text-white`}>
+      <div class={`rounded-r-xl px-2 bg-linear-to-t from-gray-950 to-gray-800 text-center text-white`}>
         <Suspense fallback={<></>}>
           {value}
         </Suspense>
@@ -32,10 +28,13 @@ function Badge({labelClass, label, value}: BadgeProps) {
 }
 
 function Versions() {
+  const stable = useVersion(`berry`, `stable`);
+  const canary = useVersion(`zpm`, `canary`);
+
   return (
     <div class={`flex items-center gap-x-4`}>
-      <Badge labelClass={`bg-linear-to-t from-green-800 to-green-600 text-white`} label={`Stable`} value={<Version name={`stable`} />} />
-      <Badge labelClass={`bg-linear-to-t from-orange-900 to-orange-800 text-white`} label={`Canary`} value={<Version name={`canary`} />} />
+      <Badge labelClass={`bg-linear-to-t from-green-800 to-green-600 text-white`} label={`Stable`} value={stable} />
+      <Badge labelClass={`bg-linear-to-t from-orange-900 to-orange-800 text-white`} label={`Canary`} value={canary} />
     </div>
   );
 }

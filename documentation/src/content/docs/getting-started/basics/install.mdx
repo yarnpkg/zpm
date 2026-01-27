@@ -6,7 +6,7 @@ description: Yarn's in-depth installation guide.
 sidebar_position: 2
 ---
 
-Yarn is intended to be used with [Yarn Switch](/concepts/switch), a tool letting you use different Yarn versions depending on the project you're working on.
+Yarn is intended to be used with [Yarn Switch](/concepts/switch), a tool that lets you use different Yarn versions depending on the project you're in.
 
 ```bash
 curl -sS https://repo.yarnpkg.com/install | bash
@@ -16,11 +16,13 @@ curl -sS https://repo.yarnpkg.com/install | bash
 You will likely have to restart your terminal sessions, **IDEs included**, for the changes to take effect.
 :::
 
-Once Yarn Switch is ready, just initialize a new project:
+Once Yarn Switch is ready, if you wish to start a new project, running `yarn init` is all that's needed. If you instead prefer to migrate an existing project, run the following command:
 
-```bash
-yarn init
 ```
+yarn switch zpm set version zpm
+```
+
+It intructs Yarn Switch to download the latest version of Yarn on its `zpm` release branch and run the `yarn set version zpm` command with it. This command will in turn update `packageManager` with the appropriate version.
 
 ## Updating Yarn
 
