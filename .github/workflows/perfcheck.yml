@@ -3,8 +3,6 @@ name: Benchmarks
 on:
   pull_request:
     branches: [main]
-    paths:
-      - '**'
     paths-ignore:
       - 'documentation/**'
       - 'README.md'
