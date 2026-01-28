@@ -12,11 +12,13 @@ import svgr                 from 'vite-plugin-svgr';
 import {remarkModifiedTime} from './src/plugins/remark-modified-time.mjs';
 import {remarkReadingTime}  from './src/plugins/remark-reading-time.mjs';
 
+const MAIN_URL = `https://yarn6.netlify.app`;
+
 // eslint-disable-next-line arca/no-default-export
 export default defineConfig({
   site: process.env.DEPLOY_PRIME_URL !== `https://main--yarn6.netlify.app`
-    ? process.env.DEPLOY_PRIME_URL ?? `https://yarnpkg.com`
-    : `https://yarnpkg.com`,
+    ? process.env.DEPLOY_PRIME_URL ?? MAIN_URL
+    : MAIN_URL,
   base: `/`,
   output: `static`,
   trailingSlash: `never`,

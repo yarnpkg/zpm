@@ -45,7 +45,12 @@ export default function SearchInput({onQueryChange}: SearchInputProps) {
       : `/search`;
 
     if (location.pathname === `/search`) {
-      history.replaceState(null, ``, targetUrl);
+      // Use Navigation API to trigger navigate event for SearchResultsWatcher
+      if (typeof window.navigation !== `undefined`) {
+        window.navigation.navigate(targetUrl, {history: `replace`});
+      } else {
+        history.replaceState(null, ``, targetUrl);
+      }
     } else {
       navigate(targetUrl, {history: `push`});
     }
