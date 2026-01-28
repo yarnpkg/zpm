@@ -42,6 +42,21 @@ While Corepack doesn't support installing different binaries depending on the pl
 
 While not recommended for a local setup, this compatibility layer can unlock you if you work in environments where dependencies are installed with Corepack before you even have a chance to run your own code, such as Netlify runners.
 
+### GitHub Actions
+
+We provide a `yarnpkg/setup-action` repository that runs the standard installation flow on GitHub Actions:
+
+```yaml
+jobs:
+  my-job:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Yarn
+        uses: yarnpkg/setup-action@main
+```
+
 ### Self-managed binaries
 
 Our [release tarballs](https://github.com/yarnpkg/zpm/releases) all provide two binaries:

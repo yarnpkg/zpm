@@ -172,8 +172,8 @@ class ShaderController {
     const currentTime = Date.now();
     const time = (currentTime - this.startTime) / 1000.0;
 
-    this.canvas.width = this.canvas.offsetWidth;
-    this.canvas.height = this.canvas.offsetHeight;
+    this.canvas.width = this.canvas.offsetWidth * window.devicePixelRatio;
+    this.canvas.height = this.canvas.offsetHeight * window.devicePixelRatio;
 
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
 
