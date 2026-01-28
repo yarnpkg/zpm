@@ -3,15 +3,11 @@ name = "zpm-formats"
 edition = "2021"
 
 [dependencies]
-bytes = "1.7.1"
 crc32fast = "1.4.2"
 flate2 = { version = "1.0.31", features = ["zlib-rs"] }
 itertools = "0.13.0"
 pnp = { git = "https://github.com/yarnpkg/pnp-rs.git", branch = "mael/pub-vpath" }
-regex = "1.10.6"
 serde = { version = "1.0.207", features = ["derive"] }
 thiserror = "1.0.63"
-tokio = { version = "1.39.2", features = ["full"] }
 zerocopy = { version = "0.8.33", features = ["derive"] }
-zpm-macro-enum = { path = "../zpm-macro-enum" }
 zpm-utils = { path = "../zpm-utils" }

@@ -15,6 +15,10 @@ members = [
     "packages/zpm",
 ]
 
+[workspace.metadata.cargo-shear]
+ignored = ["zpm-semver", "zpm-switch"]
+ignored-paths = ["packages/zpm/*.rs"]
+
 [profile.bench]
 debug = true
 

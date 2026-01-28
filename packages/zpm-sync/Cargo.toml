@@ -4,7 +4,6 @@ edition = "2021"
 
 [dependencies]
 itertools = "0.13.0"
-serde_derive = { version = "1.0.163" }
 serde = { version = "1.0.163" }
 thiserror = "2.0.12"
 zpm-formats = { path = "../zpm-formats" }

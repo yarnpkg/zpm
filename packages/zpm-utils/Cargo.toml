@@ -5,16 +5,10 @@ edition = "2021"
 [dependencies]
 base64 = "0.22.0"
 blake2 = { version = "0.10.6" }
-chrono = "0.4.38"
-clean-path = "0.2.1"
 colored = "3.0.0"
 hex = "0.4.3"
-napi = { version = "2.13.1", default-features = false, features = [] }
 ouroboros = "0.18.5"
-path-slash = "0.2.1"
-radix_trie = "0.2.1"
 rkyv = { version = "0.8", features = ["bytecheck"] }
-serde_derive = { version = "1.0.163" }
 serde_json = "1.0.145"
 serde = { version = "1.0.163", features = ["derive"] }
 sha1 = "0.10.6"

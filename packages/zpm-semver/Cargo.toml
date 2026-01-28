@@ -3,8 +3,6 @@ name = "zpm-semver"
 edition = "2021"
 
 [dependencies]
-colored = "3.0.0"
-itertools = "0.13.0"
 rkyv = { version = "0.8", features = ["bytecheck"] }
 rstest = "0.22.0"
 serde = { version = "1.0.207", features = ["derive"] }
