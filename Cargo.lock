@@ -1686,15 +1686,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
@@ -4316,7 +4307,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "indexmap 2.11.0",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "open",
  "p256",
  "rand",
@@ -4372,7 +4363,7 @@ version = "0.0.0"
 dependencies = [
  "crc32fast",
  "flate2",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "pnp",
  "serde",
  "thiserror 1.0.69",
@@ -4415,7 +4406,7 @@ dependencies = [
 name = "zpm-parsers"
 version = "0.0.0"
 dependencies = [
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "pretty_assertions",
  "rstest",
  "serde",
@@ -4481,7 +4472,7 @@ dependencies = [
 name = "zpm-sync"
 version = "0.0.0"
 dependencies = [
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "serde",
  "thiserror 1.0.69",
  "zpm-formats",
