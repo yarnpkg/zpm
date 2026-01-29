@@ -20,9 +20,8 @@ use crate::{
 /// workspaces will be upgraded in the process.
 ///
 /// If `-R,--recursive` is set the command will change behavior and no other switch will be allowed. When operating under this mode yarn up will
-/// force all ranges matching the selected packages to be resolved again (often to the highest available versions) before being stored in the
-/// lockfile. It however won't touch your manifests anymore, so depending on your needs you might want to run both `yarn up` and `yarn up -R` to
-/// cover all bases.
+/// collect package idents from both workspace manifests and the lockfile, expand patterns against all of them, then re-resolve matching packages
+/// (often to their highest available versions). Both the lockfile and workspace manifests are updated with the new resolutions.
 ///
 /// If `-i,--interactive` is set (or if the `preferInteractive` settings is toggled on) the command will offer various choices, depending on the
 /// detected upgrade paths. Some upgrades require this flag in order to resolve ambiguities.
@@ -69,6 +68,10 @@ pub struct Up {
     #[cli::option("-C,--caret", default = false)]
     caret: bool,
 
+    /// Resolve again ALL resolutions for those packages
+    #[cli::option("-R,--recursive", default = false)]
+    recursive: bool,
+
     // ---
 
     /// Change what artifacts this install will generate
@@ -83,6 +86,20 @@ pub struct Up {
 
 impl Up {
     pub async fn execute(&self) -> Result<(), Error> {
+        if self.recursive && (self.exact || self.tilde || self.caret || self.fixed) {
+            return Err(Error::ConflictingOptions(
+                "The --recursive flag cannot be used together with --exact, --tilde, --caret, or --fixed".into()
+            ));
+        }
+
+        if self.recursive {
+            self.up_recursive().await
+        } else {
+            self.up_classic().await
+        }
+    }
+
+    async fn up_classic(&self) -> Result<(), Error> {
         let project
             = Project::new(None).await?;
 
@@ -124,34 +141,7 @@ impl Up {
             = LooseDescriptor::resolve_all(&install_context, &resolve_options, &expanded_descriptors).await?;
 
         for workspace in &project.workspaces {
-            let manifest_path = workspace.path
-                .with_join_str("package.json");
-
-            let manifest_content = manifest_path
-                .fs_read_prealloc()?;
-
-            let mut document
-                = JsonDocument::new(manifest_content)?;
-
-            for resolution in loose_resolutions.iter() {
-                document.update_path(
-                    &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
-                    Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
-                )?;
-
-                document.update_path(
-                    &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
-                    Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
-                )?;
-
-                document.update_path(
-                    &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
-                    Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
-                )?;
-            }
-
-            manifest_path
-                .fs_change(&document.input, false)?;
+            self.update_workspace_manifest(workspace, &loose_resolutions)?;
         }
 
         let mut project
@@ -167,6 +157,93 @@ impl Up {
             enforced_resolutions,
             ..Default::default()
         }).await?;
+
+        Ok(())
+    }
+
+    async fn up_recursive(&self) -> Result<(), Error> {
+        let project = Project::new(None).await?;
+
+        // Collect idents from both workspaces and lockfile for pattern matching
+        let workspace_idents: BTreeSet<Ident> = project.workspaces.iter()
+            .flat_map(|workspace| self.list_workspace_idents(workspace))
+            .collect();
+
+        let lockfile = project.lockfile()?;
+        let lockfile_idents: BTreeSet<Ident> = lockfile.resolutions.keys()
+            .map(|d| d.ident.clone())
+            .collect();
+
+        let all_idents: BTreeSet<Ident> = workspace_idents.union(&lockfile_idents).cloned().collect();
+
+        // Expand patterns against all idents (workspaces + lockfile)
+        let expanded_descriptors = self.descriptors.iter()
+            .flat_map(|descriptor| descriptor.expand(&all_idents))
+            .collect::<Vec<_>>();
+
+        let range_kind = project.config.settings.default_semver_range_prefix.value;
+
+        let resolve_options = descriptor_loose::ResolveOptions {
+            active_workspace_ident: project.active_workspace()?.name.clone(),
+            range_kind,
+            resolve_tags: true,
+        };
+
+        let package_cache = project.package_cache()?;
+
+        let install_context = InstallContext::default()
+            .with_package_cache(Some(&package_cache))
+            .with_project(Some(&project));
+
+        let loose_resolutions = LooseDescriptor::resolve_all(&install_context, &resolve_options, &expanded_descriptors).await?;
+
+        for workspace in &project.workspaces {
+            self.update_workspace_manifest(workspace, &loose_resolutions)?;
+        }
+
+        let mut project = Project::new(None).await?;
+
+        let enforced_resolutions = loose_resolutions.into_iter()
+            .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, locator)))
+            .collect();
+
+        project.run_install(RunInstallOptions {
+            mode: self.mode,
+            enforced_resolutions,
+            ..Default::default()
+        }).await?;
+
+        Ok(())
+    }
+
+    fn update_workspace_manifest(&self, workspace: &Workspace, loose_resolutions: &[descriptor_loose::LooseResolution]) -> Result<(), Error> {
+        let manifest_path = workspace.path
+            .with_join_str("package.json");
+
+        let manifest_content = manifest_path
+            .fs_read_prealloc()?;
+
+        let mut document = JsonDocument::new(manifest_content)?;
+
+        for resolution in loose_resolutions.iter() {
+            document.update_path(
+                &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
+                Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
+            )?;
+
+            document.update_path(
+                &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
+                Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
+            )?;
+
+            document.update_path(
+                &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
+                Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
+            )?;
+        }
+
+        manifest_path
+            .fs_change(&document.input, false)?;
 
         Ok(())
     }
