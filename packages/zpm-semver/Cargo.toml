@@ -3,8 +3,8 @@ name = "zpm-semver"
 edition = "2021"
 
 [dependencies]
-rkyv = { version = "0.8", features = ["bytecheck"] }
-rstest = "0.22.0"
-serde = { version = "1.0.207", features = ["derive"] }
-thiserror = "1.0.63"
-zpm-utils = { path = "../zpm-utils" }
+rkyv = { workspace = true, features = ["bytecheck"] }
+rstest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+zpm-utils = { workspace = true }

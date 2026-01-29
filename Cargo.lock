@@ -2724,43 +2724,13 @@ dependencies = [
 
 [[package]]
 name = "rstest"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b423f0e62bdd61734b67cd21ff50871dfaeb9cc74f869dcd6af974fbcb19936"
-dependencies = [
- "futures",
- "futures-timer",
- "rstest_macros 0.22.0",
- "rustc_version",
-]
-
-[[package]]
-name = "rstest"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f5a3193c063baaa2a95a33f03035c8a72b83d97a54916055ba22d35ed3839d49"
 dependencies = [
  "futures-timer",
  "futures-util",
- "rstest_macros 0.26.1",
-]
-
-[[package]]
-name = "rstest_macros"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5e1711e7d14f74b12a58411c542185ef7fb7f2e7f8ee6e2940a883628522b42"
-dependencies = [
- "cfg-if",
- "glob",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "regex",
- "relative-path",
- "rustc_version",
- "syn",
- "unicode-ident",
+ "rstest_macros",
 ]
 
 [[package]]
@@ -4387,7 +4357,7 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "shellexpand",
- "thiserror 2.0.16",
+ "thiserror 1.0.69",
  "zpm-formats",
  "zpm-macro-enum",
  "zpm-parsers",
@@ -4445,9 +4415,9 @@ dependencies = [
 name = "zpm-parsers"
 version = "0.0.0"
 dependencies = [
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "pretty_assertions",
- "rstest 0.26.1",
+ "rstest",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -4464,7 +4434,7 @@ dependencies = [
  "globset",
  "regex",
  "rkyv",
- "rstest 0.26.1",
+ "rstest",
  "serde",
  "serde_plain",
  "thiserror 1.0.69",
@@ -4479,7 +4449,7 @@ name = "zpm-semver"
 version = "0.0.0"
 dependencies = [
  "rkyv",
- "rstest 0.22.0",
+ "rstest",
  "serde",
  "thiserror 1.0.69",
  "zpm-utils",
@@ -4498,7 +4468,7 @@ dependencies = [
  "serde",
  "serde_plain",
  "serde_with",
- "thiserror 2.0.16",
+ "thiserror 1.0.69",
  "tokio",
  "zpm-formats",
  "zpm-macro-enum",
@@ -4513,7 +4483,7 @@ version = "0.0.0"
 dependencies = [
  "itertools 0.13.0",
  "serde",
- "thiserror 2.0.16",
+ "thiserror 1.0.69",
  "zpm-formats",
  "zpm-utils",
 ]
@@ -4532,14 +4502,14 @@ dependencies = [
  "num",
  "ouroboros",
  "rkyv",
- "rstest 0.26.1",
+ "rstest",
  "serde",
  "serde_json",
  "sha1",
  "sha2",
  "shlex",
  "similar",
- "thiserror 2.0.16",
+ "thiserror 1.0.69",
  "timeago",
  "tokio",
  "urlencoding",

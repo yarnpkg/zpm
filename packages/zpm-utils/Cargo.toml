@@ -3,26 +3,26 @@ name = "zpm-utils"
 edition = "2021"
 
 [dependencies]
-base64 = "0.22.0"
-blake2 = { version = "0.10.6" }
-colored = "3.0.0"
-hex = "0.4.3"
-ouroboros = "0.18.5"
-rkyv = { version = "0.8", features = ["bytecheck"] }
-serde_json = "1.0.145"
-serde = { version = "1.0.163", features = ["derive"] }
-sha1 = "0.10.6"
-sha2 = "0.10.8"
-tokio = { version = "1.39.2", features = ["fs"] }
-thiserror = "2.0.12"
-shlex = "1.3.0"
-similar = "2.7.0"
-urlencoding = "2.1.3"
-wax = { git = "https://github.com/arcanis/wax.git" }
-erased-serde = "0.4.6"
-num = "0.4.3"
-rstest = "0.26.1"
-indexmap = {version = "2.11.0", features = ["serde"]}
-timeago = "0.5.0"
-fundu = "2.0.1"
-zpm-macro-enum = { path = "../zpm-macro-enum" }
+base64 = { workspace = true }
+blake2 = { workspace = true }
+colored = { workspace = true }
+hex = { workspace = true }
+ouroboros = { workspace = true }
+rkyv = { workspace = true, features = ["bytecheck"] }
+serde_json = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
+thiserror = { workspace = true }
+shlex = { workspace = true }
+similar = { workspace = true }
+urlencoding = { workspace = true }
+wax = { workspace = true }
+erased-serde = { workspace = true }
+num = { workspace = true }
+rstest = { workspace = true }
+indexmap = { workspace = true, features = ["serde"]}
+timeago = { workspace = true }
+fundu = { workspace = true }
+zpm-macro-enum = { workspace = true }

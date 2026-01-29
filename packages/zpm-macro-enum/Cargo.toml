@@ -6,8 +6,8 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1.0.79"
-quote = "1.0.36"
-regex = "1.10.6"
-syn = "2.0.74"
-zpm-macro-helpers = { path = "../zpm-macro-helpers" }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+regex = { workspace = true }
+syn = { workspace = true }
+zpm-macro-helpers = { workspace = true }

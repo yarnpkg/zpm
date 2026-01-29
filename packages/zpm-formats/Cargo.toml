@@ -3,11 +3,11 @@ name = "zpm-formats"
 edition = "2021"
 
 [dependencies]
-crc32fast = "1.4.2"
-flate2 = { version = "1.0.31", features = ["zlib-rs"] }
-itertools = "0.13.0"
-pnp = { git = "https://github.com/yarnpkg/pnp-rs.git", branch = "mael/pub-vpath" }
-serde = { version = "1.0.207", features = ["derive"] }
-thiserror = "1.0.63"
-zerocopy = { version = "0.8.33", features = ["derive"] }
-zpm-utils = { path = "../zpm-utils" }
+crc32fast = { workspace = true }
+flate2 = { workspace = true, features = ["zlib-rs"] }
+itertools = { workspace = true }
+pnp = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+zerocopy = { workspace = true, features = ["derive"] }
+zpm-utils = { workspace = true }

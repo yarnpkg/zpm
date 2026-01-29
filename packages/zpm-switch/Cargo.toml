@@ -8,21 +8,21 @@ name = "yarn"
 path = "src/main.rs"
 
 [dependencies]
-clipanion = { git = "https://github.com/arcanis/clipanion-rs.git", features = ["serde"] }
-regex = "1.11.1"
-reqwest = { version = "0.12.26", default-features = false, features = ["hickory-dns", "rustls-tls"] }
-rkyv = { version = "0.8", features = ["bytecheck"] }
-serde_plain = "1.0.2"
-serde_with = "3.9.0"
-serde = "1.0.219"
-thiserror = "2.0.12"
-tokio = { version = "1.39.2", features = ["full"] }
-zpm-formats = { path = "../zpm-formats" }
-zpm-macro-enum = { path = "../zpm-macro-enum" }
-zpm-parsers = { path = "../zpm-parsers" }
-zpm-semver = { path = "../zpm-semver" }
-zpm-utils = { path = "../zpm-utils" }
-chrono = "0.4.41"
+clipanion = { workspace = true, features = ["serde"] }
+regex = { workspace = true }
+reqwest = { workspace = true, default-features = false, features = ["hickory-dns", "rustls-tls"] }
+rkyv = { workspace = true, features = ["bytecheck"] }
+serde_plain = { workspace = true }
+serde_with = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+zpm-formats = { workspace = true }
+zpm-macro-enum = { workspace = true }
+zpm-parsers = { workspace = true }
+zpm-semver = { workspace = true }
+zpm-utils = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
-assert_cmd = "2.0.17"
+assert_cmd = { workspace = true }
