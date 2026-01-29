@@ -3,4 +3,4 @@ name = "zpm-macro-helpers"
 edition = "2021"
 
 [dependencies]
-syn = "2.0.74"
+syn = { workspace = true }

@@ -578,7 +578,7 @@ impl ScriptEnvironment {
 
         let mut child
             = cmd.spawn()
-                .map_err(|e| Error::SpawnFailed(program.to_string(), self.cwd.clone(), Arc::new(Box::new(e))))?;
+                .map_err(|e| Error::SpawnFailed { name: program.to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 
         if let Some(stdin) = &self.stdin {
             if let Some(mut child_stdin) = child.stdin.take() {

@@ -42,8 +42,8 @@ pub enum Error {
     #[error(transparent)]
     SwitchError(#[from] zpm_switch::Error),
 
-    #[error("Network error: {0}{}", .1.as_deref().map(|s| format!(" ({})", s)).unwrap_or_default())]
-    HttpError(Arc<reqwest::Error>, Option<String>),
+    #[error("Network error: {inner}{}", extra.as_deref().map(|s| format!(" ({})", s)).unwrap_or_default())]
+    HttpError { inner: Arc<reqwest::Error>, extra: Option<String> },
 
     #[error(transparent)]
     PathError(#[from] zpm_utils::PathError),
@@ -159,8 +159,8 @@ pub enum Error {
     #[error("Catalog not found ({0})")]
     CatalogNotFound(String),
 
-    #[error("Catalog entry not found ({0}:{})", .1.to_print_string())]
-    CatalogEntryNotFound(String, Ident),
+    #[error("Catalog entry not found ({catalog}:{})", ident.to_print_string())]
+    CatalogEntryNotFound { catalog: String, ident: Ident },
 
     #[error("Package manifest not found ({})", .0.to_print_string())]
     ManifestNotFound(Path),
@@ -354,8 +354,8 @@ pub enum Error {
     #[error("Binary not found ({0})")]
     BinaryNotFound(String),
 
-    #[error("Binary failed to spawn: {2} ({}, in {})", DataType::Code.colorize(.0), .1.to_print_string())]
-    SpawnFailed(String, Path, Arc<Box<dyn std::error::Error + Send + Sync>>),
+    #[error("Binary failed to spawn: {error} ({}, in {})", DataType::Code.colorize(name), path.to_print_string())]
+    SpawnFailed { name: String, path: Path, error: Arc<Box<dyn std::error::Error + Send + Sync>> },
 
     #[error("No binaries available in the dlx context")]
     MissingBinariesDlxContent,
@@ -536,6 +536,6 @@ impl From<std::convert::Infallible> for Error {
 
 impl From<reqwest::Error> for Error {
     fn from(error: reqwest::Error) -> Self {
-        Error::HttpError(Arc::new(error), None)
+        Error::HttpError { inner: Arc::new(error), extra: None }
     }
 }

@@ -3,8 +3,8 @@ name = "zpm-sync"
 edition = "2021"
 
 [dependencies]
-itertools = "0.13.0"
-serde = { version = "1.0.163" }
-thiserror = "2.0.12"
-zpm-formats = { path = "../zpm-formats" }
-zpm-utils = { path = "../zpm-utils" }
+itertools = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+zpm-formats = { workspace = true }
+zpm-utils = { workspace = true }
