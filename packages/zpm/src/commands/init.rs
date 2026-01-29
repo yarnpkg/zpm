@@ -274,7 +274,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             .with_join_str(".gitignore");
 
         if !gitignore_path.fs_exists() {
-            let gitignore_content = vec![
+            let gitignore_content = [
                 "node_modules\n",
             ];
 
@@ -290,7 +290,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             .with_join_str(".gitattributes");
 
         if !gitattributes_path.fs_exists() {
-            let gitattributes_content = vec![
+            let gitattributes_content = [
                 "/.yarn/**         linguist-vendored\n",
                 "/.pnp.*           linguist-generated binary\n",
             ];
@@ -307,7 +307,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             .with_join_str(".editorconfig");
 
         if !editorconfig_path.fs_exists() {
-            let editorconfig_content = vec![
+            let editorconfig_content = [
                 "root = true\n",
                 "\n",
                 "[*]\n",

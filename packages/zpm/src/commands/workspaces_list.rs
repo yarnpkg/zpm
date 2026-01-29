@@ -73,7 +73,7 @@ impl WorkspacesList {
             Path::from_str(".pnp.loader.mjs").unwrap(),
         ]);
 
-        let ignored_paths = vec![
+        let ignored_paths = [
             Path::from_str(".yarn").unwrap(),
         ];
 
