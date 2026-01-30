@@ -248,7 +248,7 @@ impl Path {
     /// assert_eq!(iterator.next(), Some(p!("")));
     /// assert_eq!(iterator.next(), None);
     /// ```
-    pub fn iter_path(&self) -> PathIterator {
+    pub fn iter_path(&self) -> PathIterator<'_> {
         PathIterator::new(self)
     }
 

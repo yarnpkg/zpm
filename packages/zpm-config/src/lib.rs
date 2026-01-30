@@ -154,12 +154,12 @@ trait MergeSettings: Sized {
         &self,
         path: &[&str],
         value_str: &str,
-    ) -> Result<AbstractValue, HydrateError>;
+    ) -> Result<AbstractValue<'_>, HydrateError>;
 
     fn get(
         &self,
         path: &[&str],
-    ) -> Result<ConfigurationEntry, GetError>;
+    ) -> Result<ConfigurationEntry<'_>, GetError>;
 
     fn merge<F: Fn() -> Self>(
         context: &ConfigurationContext,
@@ -172,7 +172,7 @@ trait MergeSettings: Sized {
         &self,
         label: Option<String>,
         description: Option<String>,
-    ) -> tree::Node;
+    ) -> tree::Node<'_>;
 }
 
 impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::fmt::Debug, T: MergeSettings + Serialize + std::fmt::Debug> MergeSettings for BTreeMap<K, T> {
@@ -182,7 +182,7 @@ impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::f
         unimplemented!("Configuration maps cannot be returned directly just yet");
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
         let Some(key_str) = path.first() else {
             unimplemented!("Configuration maps cannot be returned directly just yet");
         };
@@ -198,7 +198,7 @@ impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::f
         entry.hydrate(&path[1..], value_str)
     }
 
-    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         let Some(key_str) = path.first() else {
             return Ok(ConfigurationEntry {
                 value: AbstractValue::new(Container::new(self)),
@@ -253,7 +253,7 @@ impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::f
         result
     }
 
-    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node<'_> {
         let mut children
             = tree::Map::new();
 
@@ -322,7 +322,7 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
         Ok(result)
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
         let Some(key_str) = path.first() else {
             unimplemented!("Configuration lists cannot be returned directly just yet");
         };
@@ -338,7 +338,7 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
         self[key].hydrate(&path[1..], value_str)
     }
 
-    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         let Some(key_str) = path.first() else {
             return Ok(ConfigurationEntry {
                 value: AbstractValue::new(Container::new(self)),
@@ -390,7 +390,7 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
         result
     }
 
-    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node<'_> {
         let mut children
             = Vec::new();
 
@@ -443,7 +443,7 @@ impl MergeSettings for Setting<Path> {
         })
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
         if let Some(key) = path.first() {
             return Err(HydrateError::KeyNotFound(key.to_string()));
         }
@@ -455,7 +455,7 @@ impl MergeSettings for Setting<Path> {
         Ok(AbstractValue::new(value))
     }
 
-    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         if let Some(key) = path.first() {
             return Err(GetError::KeyNotFound(key.to_string()));
         }
@@ -496,7 +496,7 @@ impl MergeSettings for Setting<Path> {
         default()
     }
 
-    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node<'_> {
         let mut fields
             = tree::Map::new();
 
@@ -538,7 +538,7 @@ macro_rules! merge_settings_impl {
                 })
             }
 
-            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
                 if let Some(key) = path.first() {
                     return Err(HydrateError::KeyNotFound(key.to_string()));
                 }
@@ -550,7 +550,7 @@ macro_rules! merge_settings_impl {
                 Ok(AbstractValue::new(value))
             }
 
-            fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+            fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
                 if let Some(key) = path.first() {
                     return Err(GetError::KeyNotFound(key.to_string()));
                 }
@@ -579,7 +579,7 @@ macro_rules! merge_settings_impl {
                 default()
             }
 
-            fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+            fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node<'_> {
                 let mut fields
                     = tree::Map::new();
 
@@ -619,7 +619,7 @@ macro_rules! merge_settings_impl {
                 })
             }
 
-            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
                 if let Some(key) = path.first() {
                     return Err(HydrateError::KeyNotFound(key.to_string()));
                 }
@@ -631,7 +631,7 @@ macro_rules! merge_settings_impl {
                 Ok(AbstractValue::new(value))
             }
 
-            fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+            fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
                 if !path.is_empty() {
                     return Err(GetError::KeyNotFound(path.join(".").to_string()));
                 }
@@ -678,7 +678,7 @@ macro_rules! merge_settings_impl {
                 default()
             }
 
-            fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+            fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node<'_> {
                 let mut fields
                     = tree::Map::new();
 
@@ -834,15 +834,15 @@ pub enum HydrateError {
 }
 
 impl Configuration {
-    pub fn tree_node(&self) -> tree::Node {
+    pub fn tree_node(&self) -> tree::Node<'_> {
         self.settings.tree_node(None, None)
     }
 
-    pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+    pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
         self.settings.hydrate(path, value_str)
     }
 
-    pub fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+    pub fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         self.settings.get(path)
     }
 

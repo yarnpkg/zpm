@@ -326,7 +326,7 @@ impl HttpClient {
         }))
     }
 
-    pub fn request(&self, url: impl AsRef<str>, method: Method) -> Result<HttpRequest, Error> {
+    pub fn request(&self, url: impl AsRef<str>, method: Method) -> Result<HttpRequest<'_>, Error> {
         let url
             = url.as_ref();
 
@@ -356,7 +356,7 @@ impl HttpClient {
         Ok(HttpRequest::new(self, url, method))
     }
 
-    pub fn get(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
+    pub fn get(&self, url: impl AsRef<str>) -> Result<HttpRequest<'_>, Error> {
         self.request(url, Method::GET)
     }
 
@@ -388,11 +388,11 @@ impl HttpClient {
         result.clone()
     }
 
-    pub fn post(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
+    pub fn post(&self, url: impl AsRef<str>) -> Result<HttpRequest<'_>, Error> {
         self.request(url, Method::POST)
     }
 
-    pub fn put(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
+    pub fn put(&self, url: impl AsRef<str>) -> Result<HttpRequest<'_>, Error> {
         self.request(url, Method::PUT)
     }
 }

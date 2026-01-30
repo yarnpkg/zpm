@@ -12,11 +12,11 @@ pub struct CraftZipOptions {
     pub compression: Option<CompressionAlgorithm>,
 }
 
-pub fn entries_from_zip(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
+pub fn entries_from_zip(buffer: &[u8]) -> Result<Vec<Entry<'_>>, Error> {
     ZipIterator::new(buffer)?.collect()
 }
 
-pub fn first_entry_from_zip(buffer: &[u8]) -> Result<Entry, Error> {
+pub fn first_entry_from_zip(buffer: &[u8]) -> Result<Entry<'_>, Error> {
     ZipIterator::new(buffer)?.next()
         .unwrap_or_else(|| Err(Error::InvalidZipFile("Empty".to_string())))
 }
