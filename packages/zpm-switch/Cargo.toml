@@ -17,6 +17,7 @@ serde_with = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+zpm-allocator = { workspace = true }
 zpm-formats = { workspace = true }
 zpm-macro-enum = { workspace = true }
 zpm-parsers = { workspace = true }

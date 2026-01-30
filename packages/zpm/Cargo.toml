@@ -35,6 +35,7 @@ tower = { workspace = true, features = ["limit"] }
 serde_json = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 wax = { workspace = true }
+zpm-allocator ={ workspace = true }
 zpm-config = { workspace = true }
 zpm-formats = { workspace = true }
 zpm-git = { workspace = true }
