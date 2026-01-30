@@ -1,11 +1,10 @@
-use ecow::{EcoString, EcoVec};
-use rkyv::{Archive, with::Map};
+use rkyv::Archive;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
+use zpm_ecow::{EcoString, EcoVec};
 
 use crate::{
     extract::extract_version,
     range::RangeKind,
-    rkyv_ecow::{EcowAsString, EcowVec},
     Error,
     Range,
     MAX_LENGTH,
@@ -19,7 +18,7 @@ mod version_tests;
 #[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub enum VersionRc {
     Number(u32),
-    String(#[rkyv(with = EcowAsString)] EcoString),
+    String(EcoString),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -28,7 +27,6 @@ pub struct Version {
     pub major: u32,
     pub minor: u32,
     pub patch: u32,
-    #[rkyv(with = Map<EcowVec>)]
     pub rc: Option<EcoVec<VersionRc>>,
 }
 

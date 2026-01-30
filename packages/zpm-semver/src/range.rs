@@ -1,11 +1,10 @@
 use std::borrow::Borrow;
 
-use ecow::{EcoString, EcoVec};
+use zpm_ecow::{EcoString, EcoVec};
 use rkyv::Archive;
 use zpm_utils::{DataType, FromFileString, ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
 
 use crate::{Error, VersionRc};
-use crate::rkyv_ecow::{EcowAsString, EcowVec};
 
 use super::{extract, Version};
 
@@ -87,10 +86,8 @@ pub enum Token {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub struct Range {
-    #[rkyv(with = EcowAsString)]
     pub source: EcoString,
 
-    #[rkyv(with = EcowVec)]
     tokens: EcoVec<Token>,
 }
 

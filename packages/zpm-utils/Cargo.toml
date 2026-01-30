@@ -6,6 +6,7 @@ edition = "2021"
 base64 = { workspace = true }
 blake2 = { workspace = true }
 colored = { workspace = true }
+zpm-ecow = { workspace = true }
 hex = { workspace = true }
 ouroboros = { workspace = true }
 rkyv = { workspace = true, features = ["bytecheck"] }

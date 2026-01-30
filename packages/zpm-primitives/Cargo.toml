@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 colored = { workspace = true }
-ecow = { workspace = true }
 regex = { workspace = true }
 rkyv = { workspace = true, features = ["bytecheck"] }
 serde_plain = { workspace = true }
@@ -15,5 +14,6 @@ zpm-git = { workspace = true }
 zpm-macro-enum = { workspace = true }
 zpm-semver = { workspace = true }
 zpm-utils = { workspace = true }
+zpm-ecow = { workspace = true }
 rstest = { workspace = true }
 globset = { workspace = true }

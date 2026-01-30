@@ -1,4 +1,4 @@
-use ecow::EcoVec;
+use zpm_ecow::EcoVec;
 
 use super::{range::{OperatorType, Token, TokenType}, version::VersionRc, Version};
 use crate::{
@@ -407,7 +407,7 @@ pub fn extract_tokens(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<
                         tokens.push(Token::Syntax(TokenType::SAnd));
                     }
 
-                    tokens.extend(predicate);
+                    tokens.extend(predicate.into_iter());
                 } else {
                     return None;
                 }

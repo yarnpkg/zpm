@@ -3,9 +3,9 @@ name = "zpm-semver"
 edition = "2021"
 
 [dependencies]
-ecow = { workspace = true }
 rkyv = { workspace = true, features = ["bytecheck"] }
 rstest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 zpm-utils = { workspace = true }
+zpm-ecow = { workspace = true }

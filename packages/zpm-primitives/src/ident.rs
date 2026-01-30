@@ -1,6 +1,6 @@
 use std::{hash::Hash, str::FromStr, sync::LazyLock};
 
-use ecow::EcoString;
+use zpm_ecow::EcoString;
 use rkyv::{
     Archive, Deserialize, DeserializeUnsized, Place, Serialize, SerializeUnsized,
 };

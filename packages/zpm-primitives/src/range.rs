@@ -1,5 +1,6 @@
 use std::{hash::Hash, str::FromStr, sync::LazyLock};
 
+use zpm_ecow::EcoString;
 use regex::Regex;
 use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
@@ -85,11 +86,11 @@ pub enum Range {
     },
 
     #[pattern(r"npm:(?:(?<ident>.*)@)?(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
-    #[to_file_string(|params| format_registry_tag(&params.ident, &params.tag))]
-    #[to_print_string(|params| DataType::Range.colorize(&format_registry_tag(&params.ident, &params.tag)))]
+    #[to_file_string(|params| format_registry_tag(&params.ident, params.tag.as_str()))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_registry_tag(&params.ident, params.tag.as_str())))]
     RegistryTag {
         ident: Option<Ident>,
-        tag: String,
+        tag: EcoString,
     },
 
     #[pattern(r"link:(?<path>.*)")]
@@ -184,10 +185,10 @@ pub enum Range {
     },
 
     #[pattern(r"(?<tag>.*)")]
-    #[to_file_string(|params| params.tag.clone())]
-    #[to_print_string(|params| DataType::Range.colorize(&params.tag))]
+    #[to_file_string(|params| params.tag.as_str().to_string())]
+    #[to_print_string(|params| DataType::Range.colorize(params.tag.as_str()))]
     AnonymousTag {
-        tag: String,
+        tag: EcoString,
     },
 
     // We keep this at the end so virtual ranges are listed last when sorted

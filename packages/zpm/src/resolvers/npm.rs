@@ -271,7 +271,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let latest_version
         = registry_data.dist_tags
         .get(params.tag.as_str())
-        .ok_or_else(|| Error::TagNotFound(params.tag.clone()))?;
+        .ok_or_else(|| Error::TagNotFound(params.tag.to_string()))?;
 
     let time
         = registry_data.time;

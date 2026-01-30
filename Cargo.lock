@@ -4364,6 +4364,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "zpm-ecow"
+version = "0.0.0"
+dependencies = [
+ "ecow",
+ "rkyv",
+]
+
+[[package]]
 name = "zpm-formats"
 version = "0.0.0"
 dependencies = [
@@ -4428,7 +4436,6 @@ name = "zpm-primitives"
 version = "6.0.0-alpha.0"
 dependencies = [
  "colored 3.0.0",
- "ecow",
  "globset",
  "regex",
  "rkyv",
@@ -4436,6 +4443,7 @@ dependencies = [
  "serde",
  "serde_plain",
  "thiserror 2.0.16",
+ "zpm-ecow",
  "zpm-git",
  "zpm-macro-enum",
  "zpm-semver",
@@ -4446,11 +4454,11 @@ dependencies = [
 name = "zpm-semver"
 version = "0.0.0"
 dependencies = [
- "ecow",
  "rkyv",
  "rstest",
  "serde",
  "thiserror 2.0.16",
+ "zpm-ecow",
  "zpm-utils",
 ]
 
@@ -4461,7 +4469,6 @@ dependencies = [
  "assert_cmd",
  "chrono",
  "clipanion",
- "ecow",
  "regex",
  "reqwest",
  "rkyv",
@@ -4470,6 +4477,7 @@ dependencies = [
  "serde_with",
  "thiserror 2.0.16",
  "tokio",
+ "zpm-ecow",
  "zpm-formats",
  "zpm-macro-enum",
  "zpm-parsers",
@@ -4514,5 +4522,6 @@ dependencies = [
  "tokio",
  "urlencoding",
  "wax",
+ "zpm-ecow",
  "zpm-macro-enum",
 ]

@@ -23,7 +23,7 @@ zpm-parsers = { workspace = true }
 zpm-semver = { workspace = true }
 zpm-utils = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
-ecow = { workspace = true }
+zpm-ecow = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

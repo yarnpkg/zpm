@@ -4,6 +4,7 @@ members = [
     "packages/zpm-config",
     "packages/zpm-formats",
     "packages/zpm-git",
+    "packages/zpm-ecow",
     "packages/zpm-macro-enum",
     "packages/zpm-macro-helpers",
     "packages/zpm-parsers",
@@ -20,6 +21,7 @@ zpm = { path = "packages/zpm" }
 zpm-config = { path = "packages/zpm-config" }
 zpm-formats = { path = "packages/zpm-formats" }
 zpm-git = { path = "packages/zpm-git" }
+zpm-ecow = { path = "packages/zpm-ecow" }
 zpm-macro-enum = { path = "packages/zpm-macro-enum" }
 zpm-macro-helpers = { path = "packages/zpm-macro-helpers" }
 zpm-parsers = { path = "packages/zpm-parsers" }

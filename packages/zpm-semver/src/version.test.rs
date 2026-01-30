@@ -2,7 +2,7 @@ use rstest::rstest;
 use zpm_utils::FromFileString;
 
 use crate::{Version, VersionRc};
-use ecow::{eco_vec, EcoString};
+use zpm_ecow::{eco_vec, EcoString};
 
 #[rstest]
 #[case("1.2.3", Version { major: 1, minor: 2, patch: 3, rc: None })]
