@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::Hash;
@@ -183,9 +184,9 @@ pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<BTreeMap<I
             let mut map
                 = BTreeMap::new();
 
-            while let Some((key, value)) = access.next_entry::<&str, &str>()? {
+            while let Some((key, value)) = access.next_entry::<Cow<'de, str>, Cow<'de, str>>()? {
                 let descriptor
-                    = extract_descriptor(key, value)
+                    = extract_descriptor(&key, &value)
                         .map_err(|e| serde::de::Error::custom(e.to_string()))?;
 
                 map.insert(descriptor.ident.clone(), descriptor);

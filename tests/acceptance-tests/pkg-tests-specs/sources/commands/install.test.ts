@@ -928,6 +928,17 @@ describe(`Commands`, () => {
       }),
     );
 
+    test(
+      `it should support registries that return escaped JSON`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`one-range-dep-escaped`]: `1.0.0`,
+        },
+      }, async ({path, run, source}) => {
+        await run(`install`);
+      }),
+    );
+
     test(`it should exit with an error code after an unexpected empty event loop`,
       makeTemporaryEnv({}, async ({path, run}) => {
         await xfs.writeFilePromise(ppath.join(path, `plugin.cjs`), `

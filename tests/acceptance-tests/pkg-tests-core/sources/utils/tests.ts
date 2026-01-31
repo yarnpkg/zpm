@@ -223,6 +223,12 @@ export function sortJson<T>(data: Iterable<T>): Array<T> {
   });
 }
 
+function serializeJsonWithEscapedAngles(data: unknown): string {
+  return JSON.stringify(data)
+    .replace(/</g, `\\u003c`)
+    .replace(/>/g, `\\u003e`);
+}
+
 export const startRegistryRecording = async (
   fn: () => Promise<void>,
 ) => {
@@ -430,7 +436,11 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       if (typeof distTags === `object` && distTags !== null && !Object.hasOwn(distTags, `latest`))
         throw new Error(`Assertion failed: The package "${name}" must define a "latest" dist-tag too if it defines any dist-tags`);
 
-      const data = JSON.stringify({
+      const serialize = localName.endsWith(`-escaped`)
+        ? serializeJsonWithEscapedAngles
+        : JSON.stringify;
+
+      const data = serialize({
         name,
         versions: Object.assign(
           {},
@@ -489,7 +499,11 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       const packageVersionEntry = packageEntry.get(version);
       invariant(packageVersionEntry, `This can only exist`);
 
-      const data = JSON.stringify(Object.assign({}, packageVersionEntry!.packageJson, {
+      const serialize = localName.endsWith(`-escaped`)
+        ? serializeJsonWithEscapedAngles
+        : JSON.stringify;
+
+      const data = serialize(Object.assign({}, packageVersionEntry!.packageJson, {
         dist: {
           shasum: await getPackageArchiveHash(name, version),
           tarball: (localName === `unconventional-tarball` || localName === `private-unconventional-tarball`)
