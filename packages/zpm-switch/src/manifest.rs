@@ -37,7 +37,7 @@ pub enum PackageManagerReference {
     },
 
     #[no_pattern]
-    #[to_file_string(|params| format!("local:{}", params.path.to_file_string()))]
+    #[to_file_string(|params| format!("local:{}", zpm_utils::FileStringDisplay(&params.path)))]
     #[write_file_string(|params, out| { out.write_str("local:")?; params.path.write_file_string(out) })]
     #[to_print_string(|params| params.path.to_print_string())]
     Local {
@@ -100,10 +100,6 @@ impl FromFileString for PackageManagerField {
 }
 
 impl ToFileString for PackageManagerField {
-    fn to_file_string(&self) -> String {
-        format!("{}@{}", self.name.to_file_string(), self.reference.to_file_string())
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         self.name.write_file_string(out)?;
         out.write_str("@")?;

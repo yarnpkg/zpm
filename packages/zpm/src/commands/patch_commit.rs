@@ -4,7 +4,7 @@ use clipanion::cli;
 use itertools::Itertools;
 use zpm_parsers::{Document, JsonDocument};
 use zpm_primitives::{Descriptor, Locator, Range};
-use zpm_utils::{FromFileString, Path, ToFileString, ToHumanString, UrlEncoded};
+use zpm_utils::{FileStringDisplay, FromFileString, Path, ToFileString, ToHumanString, UrlEncoded};
 
 use crate::{error::Error, git, project};
 
@@ -70,7 +70,7 @@ impl PatchCommit {
         let patch_rel_path
             = Path::try_from(format!(".yarn/patches/{}.patch", locator.slug()))?;
         let patch_str
-            = format!("~/{}", patch_rel_path.to_file_string());
+            = format!("~/{}", FileStringDisplay(&patch_rel_path));
 
         project
             .import_install_state()?;

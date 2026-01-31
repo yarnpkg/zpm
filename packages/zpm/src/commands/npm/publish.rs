@@ -5,7 +5,7 @@ use http::StatusCode;
 use serde::Serialize;
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::{JsonDocument, RawJsonOwnedValue};
-use zpm_utils::{DataType, IoResultExt, Provider, Sha1, Sha512, ToFileString, ToHumanString, is_ci};
+use zpm_utils::{DataType, FileStringDisplay, IoResultExt, Provider, Sha1, Sha512, ToFileString, ToHumanString, is_ci};
 
 use crate::{
     error::Error, http::HttpClient, http_npm::{self, AuthorizationMode, GetIdTokenOptions, NpmHttpParams}, npm, pack::{PackOptions, pack_workspace}, project::Project, provenance::attest, script::ScriptEnvironment
@@ -161,7 +161,7 @@ impl Publish {
             = format!("sha512-{}", Sha512::new(&pack_result.pack_file).to_base64());
 
         let tarball_name
-            = format!("{}-{}.tgz", ident.to_file_string(), version.to_file_string());
+            = format!("{}-{}.tgz", FileStringDisplay(ident), FileStringDisplay(version));
 
         let mut attachments = BTreeMap::from_iter([
             (tarball_name.clone(), AttachmentInfo::from_raw("application/octet-stream".to_string(), &pack_result.pack_file)),
@@ -178,7 +178,7 @@ impl Publish {
 
             let provenance_file = ProvenanceSubject {
                 // Adapted from https://github.com/npm/npm-package-arg/blob/fbbf22ef99ece449428fee761ae8950c08bc2cbf/lib/npa.js#L118
-                name: format!("pkg:npm/{}@{}", ident.to_file_string().replace("@", "%40"), version.to_file_string()),
+                name: format!("pkg:npm/{}@{}", ident.to_file_string().replace("@", "%40"), FileStringDisplay(version)),
                 digest: provenance_digest,
             };
 
@@ -193,7 +193,7 @@ impl Publish {
 
             if let Some(provenance_payload) = provenance_payload {
                 attachments.insert(
-                    format!("{}-{}.sigstore", ident.to_file_string(), version.to_file_string()),
+                    format!("{}-{}.sigstore", FileStringDisplay(ident), FileStringDisplay(version)),
                     AttachmentInfo::from_str("application/json".to_string(), &provenance_payload),
                 );
             }
@@ -203,7 +203,7 @@ impl Publish {
             = published_workspace.path.with_join_str("README.md")
                 .fs_read_text()
                 .ok_missing()?
-                .unwrap_or_else(|| format!("# {}\n", ident.to_file_string()));
+                .unwrap_or_else(|| format!("# {}\n", FileStringDisplay(ident)));
 
         // While the npm registry ignores the provided tarball URL, it's used by
         // other registries such as verdaccio.
@@ -228,7 +228,7 @@ impl Publish {
             = JsonDocument::hydrate_from_str(&pack_result.pack_manifest_content)?;
 
         let version_payload = VersionPayload {
-            id: format!("{}@{}", ident.to_file_string(), version_string),
+            id: format!("{}@{}", FileStringDisplay(ident), version_string),
 
             name: ident,
             version: version,

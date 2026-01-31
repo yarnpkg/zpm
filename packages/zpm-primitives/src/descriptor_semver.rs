@@ -40,10 +40,6 @@ impl FromFileString for SemverDescriptor {
 }
 
 impl ToFileString for SemverDescriptor {
-    fn to_file_string(&self) -> String {
-        format!("{}@{}", self.ident.to_file_string(), self.range.to_file_string())
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         self.ident.write_file_string(out)?;
         out.write_str("@")?;

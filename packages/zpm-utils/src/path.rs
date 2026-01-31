@@ -68,10 +68,6 @@ impl FromFileString for RawPath {
 }
 
 impl ToFileString for RawPath {
-    fn to_file_string(&self) -> String {
-        self.raw.clone()
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         out.write_str(&self.raw)
     }
@@ -396,14 +392,16 @@ impl Path {
 
         if let Some(home) = home {
             if let Some(relative_path) = self.forward_relative_to(&home) {
-                let pretty_path
-                    = relative_path.to_file_string();
+                let mut pretty_path = String::new();
+                let _ = relative_path.write_file_string(&mut pretty_path);
 
                 return format!("~/{}", pretty_path);
             }
         }
 
-        self.to_file_string()
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        buffer
     }
 
     pub fn sys_set_current_dir(&self) -> Result<(), PathError> {
@@ -1052,10 +1050,6 @@ impl FromFileString for Path {
 }
 
 impl ToFileString for Path {
-    fn to_file_string(&self) -> String {
-        self.path.clone()
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         out.write_str(&self.path)
     }

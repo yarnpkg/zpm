@@ -105,43 +105,6 @@ impl FromFileString for GitRange {
 }
 
 impl ToFileString for GitRange {
-    fn to_file_string(&self) -> String {
-        let mut params
-            = vec![];
-
-        params.push(match &self.treeish {
-            GitTreeish::AnythingGoes(treeish) => {
-                treeish.to_string()
-            },
-
-            GitTreeish::Head(head) => {
-                format!("head={}", head)
-            },
-
-            GitTreeish::Commit(commit) => {
-                format!("commit={}", commit)
-            },
-
-            GitTreeish::Semver(range) => {
-                format!("semver={}", range.to_file_string())
-            },
-
-            GitTreeish::Tag(tag) => {
-                format!("tag={}", tag)
-            },
-        });
-
-        if let Some(cwd) = &self.prepare_params.cwd {
-            params.push(format!("cwd={}", urlencoding::encode(cwd)));
-        }
-
-        if let Some(workspace) = &self.prepare_params.workspace {
-            params.push(format!("workspace={}", urlencoding::encode(workspace)));
-        }
-
-        format!("{}#{}", self.repo.to_file_string(), params.join("&"))
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         self.repo.write_file_string(out)?;
         out.write_str("#")?;
@@ -187,6 +150,8 @@ impl ToFileString for GitRange {
 
 impl ToHumanString for GitRange {
     fn to_print_string(&self) -> String {
-        DataType::Custom(135, 175, 255).colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Custom(135, 175, 255).colorize(&buffer)
     }
 }

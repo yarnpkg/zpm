@@ -3,7 +3,7 @@ use std::{fmt, hash::Hash, str::FromStr, sync::LazyLock};
 use regex::Regex;
 use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
+use zpm_utils::{DataType, FileStringDisplay, Hash64, Path, ToFileString, UrlEncoded};
 
 use crate::{PeerRange, SemverPeerRange};
 
@@ -14,10 +14,15 @@ pub static EXPLICIT_PATH_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 fn format_registry_semver(ident: &Option<Ident>, range: &zpm_semver::Range) -> String {
-    match ident {
-        Some(ident) => format!("npm:{}@{}", ident.to_file_string(), range.to_file_string()),
-        None => format!("npm:{}", range.to_file_string()),
+    let mut buffer = String::from("npm:");
+
+    if let Some(ident) = ident {
+        let _ = ident.write_file_string(&mut buffer);
+        buffer.push('@');
     }
+
+    let _ = range.write_file_string(&mut buffer);
+    buffer
 }
 
 fn write_registry_semver<W: fmt::Write>(ident: &Option<Ident>, range: &zpm_semver::Range, out: &mut W) -> fmt::Result {
@@ -32,10 +37,23 @@ fn write_registry_semver<W: fmt::Write>(ident: &Option<Ident>, range: &zpm_semve
 }
 
 fn format_registry_tag(ident: &Option<Ident>, tag: &str) -> String {
-    match ident {
-        Some(ident) => format!("npm:{}@{}", ident.to_file_string(), tag),
-        None => format!("npm:{}", tag),
+    let mut buffer = String::from("npm:");
+
+    if let Some(ident) = ident {
+        let _ = ident.write_file_string(&mut buffer);
+        buffer.push('@');
     }
+
+    buffer.push_str(tag);
+    buffer
+}
+
+fn format_prefixed<T: ToFileString>(prefix: &str, value: &T) -> String {
+    format!("{}{}", prefix, FileStringDisplay(value))
+}
+
+fn colorize_prefixed<T: ToFileString>(prefix: &str, value: &T, kind: DataType) -> String {
+    kind.colorize(&format_prefixed(prefix, value))
 }
 
 fn write_registry_tag<W: fmt::Write>(ident: &Option<Ident>, tag: &str, out: &mut W) -> fmt::Result {
@@ -95,9 +113,9 @@ pub enum Range {
     MissingPeerDependency,
 
     #[pattern(r"builtin:(?<range>.*)")]
-    #[to_file_string(|params| format!("builtin:{}", params.range.to_file_string()))]
+    #[to_file_string(|params| format_prefixed("builtin:", &params.range))]
     #[write_file_string(|params, out| { out.write_str("builtin:")?; params.range.write_file_string(out) })]
-    #[to_print_string(|params| DataType::Range.colorize(&format!("builtin:{}", params.range.to_file_string())))]
+    #[to_print_string(|params| colorize_prefixed("builtin:", &params.range, DataType::Range))]
     Builtin {
         range: zpm_semver::Range,
     },
@@ -163,14 +181,14 @@ pub enum Range {
     },
 
     #[pattern(r"patch:(?<inner>.*)#(?<path>.*)$")]
-    #[to_file_string(|params| format!("patch:{}#{}", params.inner.to_file_string(), params.path))]
+    #[to_file_string(|params| format!("patch:{}#{}", FileStringDisplay(&params.inner), params.path))]
     #[write_file_string(|params, out| {
         out.write_str("patch:")?;
         params.inner.write_file_string(out)?;
         out.write_str("#")?;
         out.write_str(&params.path)
     })]
-    #[to_print_string(|params| DataType::Range.colorize(&format!("patch:{}#{}", params.inner.to_file_string(), params.path)))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("patch:{}#{}", FileStringDisplay(&params.inner), params.path)))]
     #[struct_attr(rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
     #[struct_attr(rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
     #[struct_attr(rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))))]
@@ -206,25 +224,25 @@ pub enum Range {
     },
 
     #[pattern(r"workspace:(?<range>.*)")]
-    #[to_file_string(|params| format!("workspace:{}", params.range.to_file_string()))]
+    #[to_file_string(|params| format_prefixed("workspace:", &params.range))]
     #[write_file_string(|params, out| { out.write_str("workspace:")?; params.range.write_file_string(out) })]
-    #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", params.range.to_file_string())))]
+    #[to_print_string(|params| colorize_prefixed("workspace:", &params.range, DataType::Range))]
     WorkspaceSemver {
         range: zpm_semver::Range,
     },
 
     #[pattern(r"workspace:(?<ident>.*)")]
-    #[to_file_string(|params| format!("workspace:{}", params.ident.to_file_string()))]
+    #[to_file_string(|params| format_prefixed("workspace:", &params.ident))]
     #[write_file_string(|params, out| { out.write_str("workspace:")?; params.ident.write_file_string(out) })]
-    #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", params.ident.to_file_string())))]
+    #[to_print_string(|params| colorize_prefixed("workspace:", &params.ident, DataType::Range))]
     WorkspaceIdent {
         ident: Ident,
     },
 
     #[pattern(r"workspace:(?<path>.*)")]
-    #[to_file_string(|params| format!("workspace:{}", params.path.to_file_string()))]
+    #[to_file_string(|params| format_prefixed("workspace:", &params.path))]
     #[write_file_string(|params, out| { out.write_str("workspace:")?; params.path.write_file_string(out) })]
-    #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", params.path.to_file_string())))]
+    #[to_print_string(|params| colorize_prefixed("workspace:", &params.path, DataType::Range))]
     WorkspacePath {
         path: Path,
     },
@@ -255,7 +273,7 @@ pub enum Range {
 
     // We keep this at the end so virtual ranges are listed last when sorted
     #[pattern(r"virtual:(?<inner>.*)#(?<hash>[a-f0-9]*)$")]
-    #[to_file_string(|params| format!("virtual:{}#{}", params.inner.to_file_string(), params.hash.to_file_string()))]
+    #[to_file_string(|params| format!("virtual:{}#{}", FileStringDisplay(&params.inner), FileStringDisplay(&params.hash)))]
     #[write_file_string(|params, out| {
         out.write_str("virtual:")?;
         params.inner.write_file_string(out)?;

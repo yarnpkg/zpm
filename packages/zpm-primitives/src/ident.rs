@@ -76,10 +76,6 @@ impl FromFileString for Ident {
 }
 
 impl ToFileString for Ident {
-    fn to_file_string(&self) -> String {
-        self.as_str().to_string()
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         out.write_str(self.as_str())
     }

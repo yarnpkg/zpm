@@ -85,20 +85,6 @@ fn yarn_berry_hash(locator: &Locator) -> Result<String, Error> {
 struct PnpReference(Locator);
 
 impl ToFileString for PnpReference {
-    fn to_file_string(&self) -> String {
-        let serialized_locator = self.0.reference.to_file_string();
-
-        let mut final_str = String::new();
-        final_str.push_str(&serialized_locator);
-
-        if let Some(parent) = &self.0.parent {
-            final_str.push_str("::parent=");
-            final_str.push_str(&parent.to_file_string());
-        }
-
-        final_str
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         self.0.reference.write_file_string(out)?;
 

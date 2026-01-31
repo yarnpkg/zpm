@@ -18,7 +18,7 @@ pub enum FilterDescriptor {
     },
 
     #[pattern("(?<ident>@?[^@]+)@(?<range>.*)")]
-    #[to_file_string(|params| format!("{}@{}", params.ident.to_file_string(), params.range.to_file_string()))]
+    #[to_file_string(|params| format!("{}@{}", zpm_utils::FileStringDisplay(&params.ident), zpm_utils::FileStringDisplay(&params.range)))]
     #[write_file_string(|params, out| {
         params.ident.write_file_string(out)?;
         out.write_str("@")?;

@@ -32,14 +32,6 @@ impl FromFileString for RangeKind {
 }
 
 impl ToFileString for RangeKind {
-    fn to_file_string(&self) -> String {
-        match self {
-            RangeKind::Caret => "^".to_string(),
-            RangeKind::Tilde => "~".to_string(),
-            RangeKind::Exact => "*".to_string(),
-        }
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         match self {
             RangeKind::Caret => out.write_str("^"),
@@ -113,8 +105,11 @@ impl Range {
     }
 
     pub fn lte(version: Version) -> Range {
+        let mut source = String::from("<=");
+        let _ = version.write_file_string(&mut source);
+
         Range {
-            source: format!("<={}", version.to_file_string()),
+            source,
             tokens: vec![Token::Operation(OperatorType::LessThanOrEqual, version)],
         }
     }
@@ -126,8 +121,11 @@ impl Range {
             _ => version.next_major_rc(),
         };
 
+        let mut source = String::from("^");
+        let _ = version.write_file_string(&mut source);
+
         Range {
-            source: format!("^{}", version.to_file_string()),
+            source,
             tokens: vec![
                 Token::Syntax(TokenType::SAnd),
                 Token::Operation(OperatorType::GreaterThanOrEqual, version),
@@ -140,8 +138,11 @@ impl Range {
         let upper_bound
             = version.next_minor_rc();
 
+        let mut source = String::from("~");
+        let _ = version.write_file_string(&mut source);
+
         Range {
-            source: format!("~{}", version.to_file_string()),
+            source,
             tokens: vec![
                 Token::Syntax(TokenType::SAnd),
                 Token::Operation(OperatorType::GreaterThanOrEqual, version),
@@ -151,8 +152,11 @@ impl Range {
     }
 
     pub fn exact(version: Version) -> Range {
+        let mut source = String::new();
+        let _ = version.write_file_string(&mut source);
+
         Range {
-            source: version.to_file_string(),
+            source,
             tokens: vec![Token::Operation(OperatorType::Equal, version)],
         }
     }
@@ -330,10 +334,6 @@ impl FromFileString for Range {
 }
 
 impl ToFileString for Range {
-    fn to_file_string(&self) -> String {
-        self.source.clone()
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         out.write_str(&self.source)
     }
@@ -341,7 +341,9 @@ impl ToFileString for Range {
 
 impl ToHumanString for Range {
     fn to_print_string(&self) -> String {
-        DataType::Range.colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Range.colorize(&buffer)
     }
 }
 

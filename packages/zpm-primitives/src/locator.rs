@@ -64,7 +64,8 @@ impl Locator {
     }
 
     pub fn virtualized_for(&self, parent: &Locator) -> Locator {
-        let serialized = parent.to_file_string();
+        let mut serialized = String::new();
+        let _ = parent.write_file_string(&mut serialized);
 
         let reference = Reference::Virtual(VirtualReference {
             inner: Box::new(self.reference.clone()),
@@ -80,7 +81,7 @@ impl Locator {
 
     pub fn slug(&self) -> String {
         let key
-            = Hash64::from_string(&self.to_file_string());
+            = Hash64::from_string(self);
 
         format!("{}-{}-{}", self.ident.slug(), self.reference.slug(), key.short())
     }
@@ -114,23 +115,6 @@ impl FromFileString for Locator {
 }
 
 impl ToFileString for Locator {
-    fn to_file_string(&self) -> String {
-        let serialized_ident = self.ident.to_file_string();
-        let serialized_reference = self.reference.to_file_string();
-
-        let mut final_str = String::new();
-        final_str.push_str(&serialized_ident);
-        final_str.push('@');
-        final_str.push_str(&serialized_reference);
-
-        if let Some(parent) = &self.parent {
-            final_str.push_str("::parent=");
-            final_str.push_str(&parent.to_file_string());
-        }
-
-        final_str
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         self.ident.write_file_string(out)?;
         out.write_str("@")?;
@@ -171,5 +155,8 @@ impl_file_string_serialization!(Locator);
 #[case("foo@npm:1.0.0")]
 #[case("foo@npm:1.0.0::parent=root@workspace:")]
 fn test_locator_serialization(#[case] str: &str) {
-    assert_eq!(str, Locator::from_file_string(str).unwrap().to_file_string());
+    let locator = Locator::from_file_string(str).unwrap();
+    let mut buffer = String::new();
+    let _ = locator.write_file_string(&mut buffer);
+    assert_eq!(str, buffer);
 }

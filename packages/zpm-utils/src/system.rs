@@ -95,29 +95,6 @@ impl System {
 }
 
 impl ToFileString for System {
-    fn to_file_string(&self) -> String {
-        let mut segments
-            = vec![];
-
-        if let Some(os) = &self.os {
-            segments.push(os.to_file_string());
-        }
-
-        if let Some(arch) = &self.arch {
-            segments.push(arch.to_file_string());
-        }
-
-        if let Some(libc) = &self.libc {
-            segments.push(libc.to_file_string());
-        }
-
-        if segments.is_empty() {
-            return "unknown".to_string();
-        }
-
-        segments.join("-")
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         let mut has_output = false;
 

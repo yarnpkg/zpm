@@ -6,12 +6,9 @@ use zpm_utils::ToFileString;
 use crate::errors::Error;
 
 fn format_channel_selector(release_line: &Option<ReleaseLine>, channel: &Option<Channel>) -> String {
-    match (release_line, channel) {
-        (None, None) => "stable".to_string(),
-        (Some(release_line), None) => release_line.to_file_string(),
-        (None, Some(channel)) => channel.to_file_string(),
-        (Some(release_line), Some(channel)) => format!("{}-{}", release_line.to_file_string(), channel.to_file_string()),
-    }
+    let mut buffer = String::new();
+    let _ = write_channel_selector(release_line, channel, &mut buffer);
+    buffer
 }
 
 fn write_channel_selector<W: fmt::Write>(release_line: &Option<ReleaseLine>, channel: &Option<Channel>, out: &mut W) -> fmt::Result {
@@ -106,17 +103,33 @@ pub enum Selector {
     },
 
     #[pattern("(?<version>.*)")]
-    #[to_file_string(|params| params.version.to_file_string())]
+    #[to_file_string(|params| {
+        let mut buffer = String::new();
+        let _ = params.version.write_file_string(&mut buffer);
+        buffer
+    })]
     #[write_file_string(|params, out| params.version.write_file_string(out))]
-    #[to_print_string(|params| params.version.to_file_string())]
+    #[to_print_string(|params| {
+        let mut buffer = String::new();
+        let _ = params.version.write_file_string(&mut buffer);
+        buffer
+    })]
     Version {
         version: zpm_semver::Version,
     },
 
     #[pattern("(?<range>.*)")]
-    #[to_file_string(|params| params.range.to_file_string())]
+    #[to_file_string(|params| {
+        let mut buffer = String::new();
+        let _ = params.range.write_file_string(&mut buffer);
+        buffer
+    })]
     #[write_file_string(|params, out| params.range.write_file_string(out))]
-    #[to_print_string(|params| params.range.to_file_string())]
+    #[to_print_string(|params| {
+        let mut buffer = String::new();
+        let _ = params.range.write_file_string(&mut buffer);
+        buffer
+    })]
     Range {
         range: zpm_semver::Range,
     },

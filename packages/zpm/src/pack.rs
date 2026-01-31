@@ -12,11 +12,10 @@ use zpm_primitives::Descriptor;
 use zpm_primitives::Locator;
 use zpm_primitives::PeerRange;
 use zpm_primitives::Range;
-use zpm_utils::Path;
+use zpm_utils::{FileStringDisplay, Path, ToFileString};
 use globset::GlobBuilder;
 use globset::GlobMatcher;
 use regex::Regex;
-use zpm_utils::ToFileString;
 
 use crate::resolvers::catalog::lookup_catalog_entry;
 use crate::script::ScriptEnvironment;
@@ -628,19 +627,19 @@ pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) 
 
     if let Some(exports) = &manifest.exports {
         for export_path in exports.paths() {
-            glob_ignore.add(&Path::new(), &format!("!/{}", export_path.path.to_file_string()))?;
+            glob_ignore.add(&Path::new(), &format!("!/{}", FileStringDisplay(&export_path.path)))?;
         }
     }
 
     if let Some(imports) = &manifest.imports {
         for import_path in imports.paths() {
-            glob_ignore.add(&Path::new(), &format!("!/{}", import_path.path.to_file_string()))?;
+            glob_ignore.add(&Path::new(), &format!("!/{}", FileStringDisplay(&import_path.path)))?;
         }
     }
 
     if let Some(browser) = &manifest.browser {
         for import_path in browser.paths() {
-            glob_ignore.add(&Path::new(), &format!("!/{}", import_path.to_file_string()))?;
+            glob_ignore.add(&Path::new(), &format!("!/{}", FileStringDisplay(import_path)))?;
         }
     }
 
@@ -650,7 +649,7 @@ pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) 
 
     if let Some(bin) = &manifest.bin {
         for path in bin.paths() {
-            glob_ignore.add(&Path::new(), &format!("!/{}", path.to_file_string()))?;
+            glob_ignore.add(&Path::new(), &format!("!/{}", FileStringDisplay(path)))?;
         }
     }
 

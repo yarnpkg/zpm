@@ -260,44 +260,6 @@ impl FromFileString for Path {
 }
 
 impl ToFileString for Path {
-    fn to_file_string(&self) -> String {
-        let parts
-            = self.to_parts();
-
-        let guessed_size
-            = parts.iter().map(|part| part.as_str().len()).sum::<usize>()
-            + parts.len() * 4;
-
-        let mut result
-            = String::with_capacity(guessed_size);
-
-        for part in parts {
-            match part {
-                PathSegment::Identifier(segment) => {
-                    if !result.is_empty() {
-                        result.push_str(".");
-                    }
-
-                    result.push_str(segment);
-                },
-
-                PathSegment::Number(segment) => {
-                    result.push_str("[");
-                    result.push_str(segment);
-                    result.push_str("]");
-                },
-
-                PathSegment::String(segment) => {
-                    result.push_str("[");
-                    result.push_str(&JsonDocument::to_string(segment).expect("Failed to escape string"));
-                    result.push_str("]");
-                },
-            }
-        }
-
-        result
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         let parts
             = self.to_parts();
@@ -379,7 +341,7 @@ impl_file_string_from_str!(Path);
 
 impl Serialize for Path {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
-        serializer.serialize_str(&self.to_file_string())
+        serializer.collect_str(&zpm_utils::FileStringDisplay(self))
     }
 }
 

@@ -5,7 +5,7 @@ use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
-use zpm_utils::{Glob, LastModifiedAt, Path, ToFileString, ToHumanString};
+use zpm_utils::{FileStringDisplay, Glob, LastModifiedAt, Path, ToHumanString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -412,7 +412,7 @@ impl Project {
             = self.config.settings.enable_immutable_cache.value;
 
         let name_suffix = match compression_algorithm {
-            Some(zpm_formats::CompressionAlgorithm::Deflate(_)) => format!("-d{}", compression_algorithm.unwrap().to_file_string()),
+            Some(zpm_formats::CompressionAlgorithm::Deflate(_)) => format!("-d{}", FileStringDisplay(&compression_algorithm.unwrap())),
             None => "".to_string(),
         };
 

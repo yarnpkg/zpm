@@ -6,7 +6,7 @@ use itertools::Itertools;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::Ident;
-use zpm_utils::{DataType, Path, ToFileString, ToHumanString, Unit};
+use zpm_utils::{DataType, FileStringDisplay, Path, ToHumanString, Unit};
 
 use crate::{
     algos::scc_tarjan_pearce, commands::{PartialYarnCli, YarnCli}, error::Error, git_utils, project::{Project, Workspace}, workspace_glob::WorkspaceGlob
@@ -150,7 +150,7 @@ impl WorkspacesForeach {
     }
 
     fn prefix_for_ident(&self, ident: &Ident, color: &DataType) -> String {
-        color.colorize(&format!("[{}]: ", ident.to_file_string()))
+        color.colorize(&format!("[{}]: ", FileStringDisplay(ident)))
     }
 
     fn jobs(&self) -> usize {

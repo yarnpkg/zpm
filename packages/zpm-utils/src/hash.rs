@@ -75,10 +75,6 @@ impl FromFileString for Hash64 {
 }
 
 impl ToFileString for Hash64 {
-    fn to_file_string(&self) -> String {
-        hex::encode(self.state.clone())
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         out.write_str(&hex::encode(self.state.clone()))
     }
@@ -86,7 +82,9 @@ impl ToFileString for Hash64 {
 
 impl ToHumanString for Hash64 {
     fn to_print_string(&self) -> String {
-        DataType::Custom(135, 175, 255).colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Custom(135, 175, 255).colorize(&buffer)
     }
 }
 

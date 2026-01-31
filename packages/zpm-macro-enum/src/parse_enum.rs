@@ -538,12 +538,6 @@ pub fn parse_enum(args: ParseEnumArgs, ast: DeriveInput) -> Result<proc_macro::T
         }
 
         impl zpm_utils::ToFileString for #enum_name {
-            fn to_file_string(&self) -> String {
-                let mut buffer = String::new();
-                let _ = self.write_file_string(&mut buffer);
-                buffer
-            }
-
             fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
                 match self {
                     #(#write_file_string_arms)*

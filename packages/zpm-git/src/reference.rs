@@ -80,22 +80,6 @@ impl FromFileString for GitReference {
 }
 
 impl ToFileString for GitReference {
-    fn to_file_string(&self) -> String {
-        let mut params = vec![
-            format!("commit={}", urlencoding::encode(&self.commit)),
-        ];
-
-        if let Some(cwd) = &self.prepare_params.cwd {
-            params.push(format!("cwd={}", urlencoding::encode(cwd)));
-        }
-
-        if let Some(workspace) = &self.prepare_params.workspace {
-            params.push(format!("workspace={}", urlencoding::encode(workspace)));
-        }
-
-        format!("{}#{}", self.repo.to_file_string(), params.join("&"))
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         self.repo.write_file_string(out)?;
         out.write_str("#")?;
@@ -121,6 +105,8 @@ impl ToFileString for GitReference {
 
 impl ToHumanString for GitReference {
     fn to_print_string(&self) -> String {
-        DataType::Custom(135, 175, 255).colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Custom(135, 175, 255).colorize(&buffer)
     }
 }

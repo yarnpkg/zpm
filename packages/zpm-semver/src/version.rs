@@ -201,10 +201,13 @@ impl Version {
     }
 
     pub fn to_range(&self, kind: RangeKind) -> Range {
+        let mut version_string = String::new();
+        let _ = self.write_file_string(&mut version_string);
+
         match kind {
-            RangeKind::Caret => Range::from_file_string(&format!("^{}", self.to_file_string())),
-            RangeKind::Tilde => Range::from_file_string(&format!("~{}", self.to_file_string())),
-            RangeKind::Exact => Range::from_file_string(&self.to_file_string()),
+            RangeKind::Caret => Range::from_file_string(&format!("^{}", version_string)),
+            RangeKind::Tilde => Range::from_file_string(&format!("~{}", version_string)),
+            RangeKind::Exact => Range::from_file_string(&version_string),
         }.expect("Converting a version to a range should be trivial")
     }
 
@@ -270,32 +273,6 @@ impl FromFileString for Version {
 }
 
 impl ToFileString for Version {
-    fn to_file_string(&self) -> String {
-        let mut res = format!("{}.{}.{}", self.major, self.minor, self.patch);
-
-        if let Some(rc) = &self.rc {
-            res.push('-');
-
-            for segment in rc.iter() {
-                match segment {
-                    VersionRc::Number(n) => {
-                        res.push_str(&n.to_string());
-                        res.push('.');
-                    }
-
-                    VersionRc::String(s) => {
-                        res.push_str(s);
-                        res.push('.');
-                    }
-                }
-            }
-
-            res.pop();
-        }
-
-        res
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         write!(out, "{}.{}.{}", self.major, self.minor, self.patch)?;
 
@@ -327,7 +304,9 @@ impl ToFileString for Version {
 
 impl ToHumanString for Version {
     fn to_print_string(&self) -> String {
-        DataType::Reference.colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Reference.colorize(&buffer)
     }
 }
 

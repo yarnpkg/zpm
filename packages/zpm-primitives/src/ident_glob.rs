@@ -40,10 +40,6 @@ impl FromFileString for IdentGlob {
 }
 
 impl ToFileString for IdentGlob {
-    fn to_file_string(&self) -> String {
-        self.glob.glob().to_string()
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         out.write_str(self.glob.glob())
     }
@@ -51,7 +47,9 @@ impl ToFileString for IdentGlob {
 
 impl ToHumanString for IdentGlob {
     fn to_print_string(&self) -> String {
-        DataType::Ident.colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Ident.colorize(&buffer)
     }
 }
 

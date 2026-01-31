@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use clipanion::cli;
 use itertools::Itertools;
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{IoResultExt, Path, ToFileString};
+use zpm_utils::{FileStringDisplay, IoResultExt, Path, ToFileString};
 
 use crate::{error::Error, script::ScriptEnvironment};
 
@@ -89,7 +89,7 @@ impl BenchMode {
                 .with_join_str(".yarnrc.yml");
 
         yarnrc_yml
-            .fs_append_text(format!("globalFolder: '{}'\n", global_folder.to_file_string()))?
+            .fs_append_text(format!("globalFolder: '{}'\n", FileStringDisplay(&global_folder)))?
             .fs_append_text("enableImmutableInstalls: false\n")?
             .fs_append_text("enableScripts: false\n")?;
 

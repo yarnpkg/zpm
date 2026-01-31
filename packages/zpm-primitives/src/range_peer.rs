@@ -14,33 +14,65 @@ type Error = Infallible;
 #[variant_struct_attr(rkyv(derive(PartialEq, Eq, Hash)))]
 pub enum PeerRange {
     #[pattern(r"(?<range>.*)")]
-    #[to_file_string(|params| params.range.to_file_string())]
+    #[to_file_string(|params| {
+        let mut buffer = String::new();
+        let _ = params.range.write_file_string(&mut buffer);
+        buffer
+    })]
     #[write_file_string(|params, out| params.range.write_file_string(out))]
-    #[to_print_string(|params| DataType::Range.colorize(&params.range.to_file_string()))]
+    #[to_print_string(|params| {
+        let mut buffer = String::new();
+        let _ = params.range.write_file_string(&mut buffer);
+        DataType::Range.colorize(&buffer)
+    })]
     Semver {
         range: zpm_semver::Range,
     },
 
     #[pattern(r"workspace:(?<magic>.*)")]
-    #[to_file_string(|params| format!("workspace:{}", params.magic.to_file_string()))]
+    #[to_file_string(|params| {
+        let mut buffer = String::from("workspace:");
+        let _ = params.magic.write_file_string(&mut buffer);
+        buffer
+    })]
     #[write_file_string(|params, out| { out.write_str("workspace:")?; params.magic.write_file_string(out) })]
-    #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", params.magic.to_file_string())))]
+    #[to_print_string(|params| {
+        let mut buffer = String::from("workspace:");
+        let _ = params.magic.write_file_string(&mut buffer);
+        DataType::Range.colorize(&buffer)
+    })]
     WorkspaceMagic {
         magic: zpm_semver::RangeKind,
     },
 
     #[pattern("workspace:(?<range>.*)")]
-    #[to_file_string(|params| format!("workspace:{}", params.range.to_file_string()))]
+    #[to_file_string(|params| {
+        let mut buffer = String::from("workspace:");
+        let _ = params.range.write_file_string(&mut buffer);
+        buffer
+    })]
     #[write_file_string(|params, out| { out.write_str("workspace:")?; params.range.write_file_string(out) })]
-    #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", params.range.to_file_string())))]
+    #[to_print_string(|params| {
+        let mut buffer = String::from("workspace:");
+        let _ = params.range.write_file_string(&mut buffer);
+        DataType::Range.colorize(&buffer)
+    })]
     WorkspaceSemver {
         range: zpm_semver::Range,
     },
 
     #[pattern(r"workspace:(?<path>.*)")]
-    #[to_file_string(|params| format!("workspace:{}", params.path.to_file_string()))]
+    #[to_file_string(|params| {
+        let mut buffer = String::from("workspace:");
+        let _ = params.path.write_file_string(&mut buffer);
+        buffer
+    })]
     #[write_file_string(|params, out| { out.write_str("workspace:")?; params.path.write_file_string(out) })]
-    #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", params.path.to_file_string())))]
+    #[to_print_string(|params| {
+        let mut buffer = String::from("workspace:");
+        let _ = params.path.write_file_string(&mut buffer);
+        DataType::Range.colorize(&buffer)
+    })]
     WorkspacePath {
         path: Path,
     }

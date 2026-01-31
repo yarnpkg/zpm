@@ -3,7 +3,7 @@ use std::process::Command;
 
 use clipanion::cli;
 use zpm_parsers::{Document, JsonDocument};
-use zpm_utils::{DataType, FromFileString, Note, IoResultExt, Path, ToFileString, ToHumanString};
+use zpm_utils::{DataType, FileStringDisplay, FromFileString, Note, IoResultExt, Path, ToHumanString};
 
 use crate::errors::Error;
 
@@ -64,25 +64,25 @@ impl PostinstallCommand {
                 name: "Bash".to_string(),
                 force: self.check_has_binary("bash"),
                 rc_file: home.with_join_str(".bashrc"),
-                rc_line: format!("source \"{}\"\n", home.with_join_str(".yarn/switch/env").to_file_string()),
+                rc_line: format!("source \"{}\"\n", FileStringDisplay(&home.with_join_str(".yarn/switch/env"))),
                 env_file: home.with_join_str(".yarn/switch/env"),
-                env_line: format!("export PATH=\"{}:$PATH\"\n", bin_dir.to_file_string()),
+                env_line: format!("export PATH=\"{}:$PATH\"\n", FileStringDisplay(bin_dir)),
             },
             ShellProfile {
                 name: "Zsh".to_string(),
                 force: self.check_has_binary("zsh"),
                 rc_file: home.with_join_str(".zshrc"),
-                rc_line: format!("source \"{}\"\n", home.with_join_str(".yarn/switch/env").to_file_string()),
+                rc_line: format!("source \"{}\"\n", FileStringDisplay(&home.with_join_str(".yarn/switch/env"))),
                 env_file: home.with_join_str(".yarn/switch/env"),
-                env_line: format!("export PATH=\"{}:$PATH\"\n", bin_dir.to_file_string()),
+                env_line: format!("export PATH=\"{}:$PATH\"\n", FileStringDisplay(bin_dir)),
             },
             ShellProfile {
                 name: "Fish".to_string(),
                 force: self.check_has_binary("fish"),
                 rc_file: home.with_join_str(".config/fish/config.fish"),
-                rc_line: format!("source \"{}\"\n", home.with_join_str(".yarn/switch/env.fish").to_file_string()),
+                rc_line: format!("source \"{}\"\n", FileStringDisplay(&home.with_join_str(".yarn/switch/env.fish"))),
                 env_file: home.with_join_str(".yarn/switch/env.fish"),
-                env_line: format!("set -x PATH \"{}:$PATH\"", bin_dir.to_file_string()),
+                env_line: format!("set -x PATH \"{}:$PATH\"", FileStringDisplay(bin_dir)),
             },
         ];
 
@@ -168,7 +168,7 @@ impl PostinstallCommand {
             = Path::from_str(&github_path).unwrap();
 
         let github_path_file_write_result = github_path_file
-            .fs_append_text(format!("{}\n", bin_dir.to_file_string()));
+            .fs_append_text(format!("{}\n", FileStringDisplay(bin_dir)));
 
         if github_path_file_write_result.is_err() {
             Note::Warning(format!("
@@ -194,7 +194,7 @@ impl PostinstallCommand {
 
     fn check_volta_interference(&self, bin_dir: &Path) {
         let path
-            = format!("{}:{}", bin_dir.to_file_string(), std::env::var("PATH").unwrap_or_default());
+            = format!("{}:{}", FileStringDisplay(bin_dir), std::env::var("PATH").unwrap_or_default());
 
         let output = Command::new("node")
             .env("PATH", path)

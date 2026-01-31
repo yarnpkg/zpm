@@ -65,18 +65,6 @@ impl FromFileString for GitSource {
 }
 
 impl ToFileString for GitSource {
-    fn to_file_string(&self) -> String {
-        match self {
-            GitSource::GitHub { owner, repository } => {
-                format!("github:{owner}/{repository}")
-            },
-
-            GitSource::Url(url) => {
-                url.clone()
-            },
-        }
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         match self {
             GitSource::GitHub { owner, repository } => {
@@ -95,6 +83,8 @@ impl ToFileString for GitSource {
 
 impl ToHumanString for GitSource {
     fn to_print_string(&self) -> String {
-        DataType::Custom(135, 175, 255).colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Custom(135, 175, 255).colorize(&buffer)
     }
 }

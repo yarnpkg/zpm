@@ -1,7 +1,7 @@
 use clipanion::cli;
 use zpm_parsers::{Document, JsonDocument, Value};
 use zpm_primitives::Ident;
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::{FileStringDisplay, Path, ToFileString};
 
 use crate::{
     error::Error,
@@ -112,7 +112,7 @@ impl Link {
             workspace_path.clone()
         };
 
-        let portal_url = format!("portal:{}", portal_path.to_file_string());
+        let portal_url = format!("portal:{}", FileStringDisplay(&portal_path));
 
         document.set_path(
             &zpm_parsers::Path::from_segments(vec!["resolutions".to_string(), name.to_file_string()]),

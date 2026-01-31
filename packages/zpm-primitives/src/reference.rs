@@ -2,14 +2,14 @@ use std::{fmt, hash::Hash};
 
 use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
-use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
+use zpm_utils::{DataType, FileStringDisplay, Hash64, Path, ToFileString, UrlEncoded};
 
 use super::{Ident, Locator};
 
 fn format_patch(inner: &UrlEncoded<Locator>, path: &str, checksum: &Option<Hash64>) -> String {
     match checksum {
-        Some(checksum) => format!("patch:{}#{}&checksum={}", inner.to_file_string(), path, checksum.to_file_string()),
-        None => format!("patch:{}#{}", inner.to_file_string(), path),
+        Some(checksum) => format!("patch:{}#{}&checksum={}", FileStringDisplay(inner), path, FileStringDisplay(checksum)),
+        None => format!("patch:{}#{}", FileStringDisplay(inner), path),
     }
 }
 
@@ -29,8 +29,8 @@ fn write_patch<W: fmt::Write>(inner: &UrlEncoded<Locator>, path: &str, checksum:
 
 fn format_registry(ident: &Ident, version: &zpm_semver::Version, url: Option<&String>) -> String {
     match url {
-        Some(url) => format!("npm:{}@{}#{}", ident.to_file_string(), version.to_file_string(), url.to_file_string()),
-        None => format!("npm:{}@{}", ident.to_file_string(), version.to_file_string()),
+        Some(url) => format!("npm:{}@{}#{}", FileStringDisplay(ident), FileStringDisplay(version), FileStringDisplay(url)),
+        None => format!("npm:{}@{}", FileStringDisplay(ident), FileStringDisplay(version)),
     }
 }
 
@@ -52,7 +52,7 @@ fn format_workspace_path(path: &Path) -> String {
     if path.is_empty() {
         "workspace:.".to_string()
     } else {
-        format!("workspace:{}", path.to_file_string())
+        format!("workspace:{}", FileStringDisplay(path))
     }
 }
 
@@ -78,17 +78,17 @@ pub enum ReferenceError {
 #[variant_struct_attr(rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash)))]
 pub enum Reference {
     #[pattern(r"builtin:(?<version>.*)")]
-    #[to_file_string(|params| format!("builtin:{}", params.version.to_file_string()))]
+    #[to_file_string(|params| format!("builtin:{}", FileStringDisplay(&params.version)))]
     #[write_file_string(|params, out| { out.write_str("builtin:")?; params.version.write_file_string(out) })]
-    #[to_print_string(|params| DataType::Reference.colorize(&format!("builtin:{}", params.version.to_file_string())))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format!("builtin:{}", FileStringDisplay(&params.version))))]
     Builtin {
         version: zpm_semver::Version,
     },
 
     #[pattern(r"npm:(?<version>.*)")]
-    #[to_file_string(|params| format!("npm:{}", params.version.to_file_string()))]
+    #[to_file_string(|params| format!("npm:{}", FileStringDisplay(&params.version)))]
     #[write_file_string(|params, out| { out.write_str("npm:")?; params.version.write_file_string(out) })]
-    #[to_print_string(|params| DataType::Reference.colorize(&format!("npm:{}", params.version.to_file_string())))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format!("npm:{}", FileStringDisplay(&params.version))))]
     Shorthand {
         version: zpm_semver::Version,
     },
@@ -150,7 +150,7 @@ pub enum Reference {
     },
 
     #[pattern(r"virtual:(?<hash>[a-f0-9]*)#(?<inner>.*)$")]
-    #[to_file_string(|params| format!("virtual:{}#{}", params.hash.to_file_string(), params.inner.to_file_string()))]
+    #[to_file_string(|params| format!("virtual:{}#{}", FileStringDisplay(&params.hash), FileStringDisplay(&params.inner)))]
     #[write_file_string(|params, out| {
         out.write_str("virtual:")?;
         params.hash.write_file_string(out)?;
@@ -168,9 +168,9 @@ pub enum Reference {
     },
 
     #[pattern(r"workspace:(?<ident>.*)")]
-    #[to_file_string(|params| format!("workspace:{}", params.ident.to_file_string()))]
+    #[to_file_string(|params| format!("workspace:{}", FileStringDisplay(&params.ident)))]
     #[write_file_string(|params, out| { out.write_str("workspace:")?; params.ident.write_file_string(out) })]
-    #[to_print_string(|params| DataType::Reference.colorize(&format!("workspace:{}", params.ident.to_file_string())))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format!("workspace:{}", FileStringDisplay(&params.ident))))]
     WorkspaceIdent {
         ident: Ident,
     },
@@ -185,9 +185,9 @@ pub enum Reference {
 
     #[pattern(r"git:(?<git>.*)")]
     #[pattern(r"(?<git>https?://.*\.git#.*)")]
-    #[to_file_string(|params| format!("git:{}", params.git.to_file_string()))]
+    #[to_file_string(|params| format!("git:{}", FileStringDisplay(&params.git)))]
     #[write_file_string(|params, out| { out.write_str("git:")?; params.git.write_file_string(out) })]
-    #[to_print_string(|params| DataType::Reference.colorize(&format!("git:{}", params.git.to_file_string())))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format!("git:{}", FileStringDisplay(&params.git))))]
     Git {
         git: zpm_git::GitReference,
     },
@@ -249,11 +249,11 @@ impl Reference {
     pub fn slug(&self) -> String {
         match self {
             Reference::Builtin(params) => {
-                format!("builtin-{}", params.version.to_file_string())
+                format!("builtin-{}", FileStringDisplay(&params.version))
             },
 
             Reference::Shorthand(params) => {
-                format!("npm-{}", params.version.to_file_string())
+                format!("npm-{}", FileStringDisplay(&params.version))
             },
 
             Reference::Git(_) => {
@@ -261,7 +261,7 @@ impl Reference {
             },
 
             Reference::Registry(params) => {
-                format!("npm-{}", params.version.to_file_string())
+                format!("npm-{}", FileStringDisplay(&params.version))
             },
 
             Reference::Tarball(_) => {

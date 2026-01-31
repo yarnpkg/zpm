@@ -83,12 +83,10 @@ impl<T: FromFileString> FromFileString for UrlEncoded<T> where T::Error: From<Fr
 }
 
 impl<T: ToFileString> ToFileString for UrlEncoded<T> {
-    fn to_file_string(&self) -> String {
-        urlencoding::encode(&self.0.to_file_string()).to_string()
-    }
-
     fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
-        out.write_str(&urlencoding::encode(&self.0.to_file_string()))
+        let mut buffer = String::new();
+        let _ = self.0.write_file_string(&mut buffer);
+        out.write_str(&urlencoding::encode(&buffer))
     }
 }
 

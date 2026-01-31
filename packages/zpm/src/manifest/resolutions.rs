@@ -30,7 +30,7 @@ pub enum ResolutionSelector {
     },
 
     #[pattern(r"^(?<parent_descriptor>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
-    #[to_file_string(|params| format!("{}/{}", params.parent_descriptor.to_file_string(), params.ident.to_file_string()))]
+    #[to_file_string(|params| format!("{}/{}", zpm_utils::FileStringDisplay(&params.parent_descriptor), zpm_utils::FileStringDisplay(&params.ident)))]
     #[write_file_string(|params, out| {
         params.parent_descriptor.write_file_string(out)?;
         out.write_str("/")?;
@@ -43,7 +43,7 @@ pub enum ResolutionSelector {
     },
 
     #[pattern(r"^(?<parent_ident>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
-    #[to_file_string(|params| format!("{}/{}", params.parent_ident.to_file_string(), params.ident.to_file_string()))]
+    #[to_file_string(|params| format!("{}/{}", zpm_utils::FileStringDisplay(&params.parent_ident), zpm_utils::FileStringDisplay(&params.ident)))]
     #[write_file_string(|params, out| {
         params.parent_ident.write_file_string(out)?;
         out.write_str("/")?;
