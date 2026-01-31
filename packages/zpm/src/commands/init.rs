@@ -72,6 +72,7 @@ impl InitWithTemplate {
             active_workspace_ident: project.active_workspace()?.name.clone(),
             range_kind: zpm_semver::RangeKind::Exact,
             resolve_tags: true,
+            allow_reuse: true,
         };
 
         let package_cache

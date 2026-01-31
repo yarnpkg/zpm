@@ -15,6 +15,7 @@ pub struct ResolveOptions {
     pub active_workspace_ident: Ident,
     pub range_kind: RangeKind,
     pub resolve_tags: bool,
+    pub allow_reuse: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -218,7 +219,7 @@ impl LooseDescriptor {
                     });
                 }
 
-                if project.config.settings.prefer_reuse.value {
+                if options.allow_reuse && project.config.settings.prefer_reuse.value {
                     if let Some(descriptor) = find_project_descriptor(project, ident.clone())? {
                         return Ok(LooseResolution {
                             descriptor: descriptor.clone(),
