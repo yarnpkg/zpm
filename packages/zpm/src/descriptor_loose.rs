@@ -29,6 +29,7 @@ pub struct LooseResolution {
 pub enum LooseDescriptor {
     #[pattern(r"(?<descriptor>.*)")]
     #[to_file_string(|params| params.descriptor.to_file_string())]
+    #[write_file_string(|params, out| params.descriptor.write_file_string(out))]
     #[to_print_string(|params| params.descriptor.to_print_string())]
     Descriptor {
         descriptor: Descriptor,
@@ -36,6 +37,7 @@ pub enum LooseDescriptor {
 
     #[pattern(r"(?<ident>.*)")]
     #[to_file_string(|params| params.ident.to_file_string())]
+    #[write_file_string(|params, out| params.ident.write_file_string(out))]
     #[to_print_string(|params| params.ident.to_print_string())]
     Ident {
         ident: Ident,
@@ -43,6 +45,7 @@ pub enum LooseDescriptor {
 
     #[pattern(r"(?<range>.*)")]
     #[to_file_string(|params| params.range.to_file_string())]
+    #[write_file_string(|params, out| params.range.write_file_string(out))]
     #[to_print_string(|params| params.range.to_print_string())]
     Range {
         range: Range,

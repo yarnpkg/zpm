@@ -17,7 +17,7 @@ To try to formalize this, the codebase has three traits:
 > [!NOTE]
 > `ToHumanString` is badly named because the function it contains is called `to_print_string`. I need to fix that.
 
-- `ToFileString` and `FromFileString` are bidirectional traits meant to be used when serializing data structures to and from strings, for example so they can be passed as command line arguments. Such representations should be lossless, meaning that if you serialize an object and then deserialize it, you should get the same object back.
+- `ToFileString` and `FromFileString` are bidirectional traits meant to be used when serializing data structures to and from strings, for example so they can be passed as command line arguments. Such representations should be lossless, meaning that if you serialize an object and then deserialize it, you should get the same object back. `ToFileString` also exposes `write_file_string`, which writes into a formatter without building a temporary string (useful for avoiding extra allocations when composing larger strings).
 
 ## Relation with native traits
 

@@ -161,7 +161,7 @@ impl<T> Serialize for MultiKey<T> where T: ToFileString {
                 string.push_str(", ");
             }
 
-            string.push_str(&item.to_file_string());
+            let _ = item.write_file_string(&mut string);
         }
 
         serializer.serialize_str(&string)

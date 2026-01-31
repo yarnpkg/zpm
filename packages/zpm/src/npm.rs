@@ -90,7 +90,7 @@ pub fn registry_url_for_one_version(ident: &Ident, version: &Version) -> String 
         = registry_url_for_all_versions(ident);
 
     url.push('/');
-    url.push_str(&version.to_file_string());
+    let _ = version.write_file_string(&mut url);
 
     url
 }
@@ -102,7 +102,7 @@ pub fn registry_url_for_package_data(ident: &Ident, version: &Version) -> String
     url.push_str("/-/");
     url.push_str(&ident.name());
     url.push('-');
-    url.push_str(&version.to_file_string());
+    let _ = version.write_file_string(&mut url);
     url.push_str(".tgz");
 
     url

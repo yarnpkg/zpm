@@ -22,7 +22,19 @@ pub trait FromFileString {
 }
 
 pub trait ToFileString {
-    fn to_file_string(&self) -> String;
+    fn write_file_string<W: fmt::Write>(&self, out: &mut W) -> fmt::Result;
+
+    fn to_file_string(&self) -> String {
+        format!("{}", FileStringDisplay(self))
+    }
+}
+
+pub struct FileStringDisplay<'a, T: ?Sized>(pub &'a T);
+
+impl<'a, T: ToFileString + ?Sized> fmt::Display for FileStringDisplay<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.write_file_string(f)
+    }
 }
 
 pub trait ToHumanString {
@@ -105,8 +117,8 @@ impl<T: FromFileString> FromFileString for Box<T> {
 }
 
 impl<T: ToFileString> ToFileString for Box<T> {
-    fn to_file_string(&self) -> String {
-        self.as_ref().to_file_string()
+    fn write_file_string<W: fmt::Write>(&self, out: &mut W) -> fmt::Result {
+        self.as_ref().write_file_string(out)
     }
 }
 
@@ -137,14 +149,16 @@ impl FromFileString for bool {
 }
 
 impl ToFileString for bool {
-    fn to_file_string(&self) -> String {
-        self.to_string()
+    fn write_file_string<W: fmt::Write>(&self, out: &mut W) -> fmt::Result {
+        write!(out, "{}", self)
     }
 }
 
 impl ToHumanString for bool {
     fn to_print_string(&self) -> String {
-        DataType::Boolean.colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Boolean.colorize(&buffer)
     }
 }
 
@@ -157,14 +171,16 @@ impl FromFileString for usize {
 }
 
 impl ToFileString for usize {
-    fn to_file_string(&self) -> String {
-        self.to_string()
+    fn write_file_string<W: fmt::Write>(&self, out: &mut W) -> fmt::Result {
+        write!(out, "{}", self)
     }
 }
 
 impl ToHumanString for usize {
     fn to_print_string(&self) -> String {
-        DataType::Number.colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Number.colorize(&buffer)
     }
 }
 
@@ -177,14 +193,16 @@ impl FromFileString for u64 {
 }
 
 impl ToFileString for u64 {
-    fn to_file_string(&self) -> String {
-        self.to_string()
+    fn write_file_string<W: fmt::Write>(&self, out: &mut W) -> fmt::Result {
+        write!(out, "{}", self)
     }
 }
 
 impl ToHumanString for u64 {
     fn to_print_string(&self) -> String {
-        DataType::Number.colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Number.colorize(&buffer)
     }
 }
 
@@ -197,14 +215,16 @@ impl FromFileString for std::time::Duration {
 }
 
 impl ToFileString for std::time::Duration {
-    fn to_file_string(&self) -> String {
-        self.as_secs().to_string()
+    fn write_file_string<W: fmt::Write>(&self, out: &mut W) -> fmt::Result {
+        write!(out, "{}", self.as_secs())
     }
 }
 
 impl ToHumanString for std::time::Duration {
     fn to_print_string(&self) -> String {
-        DataType::Number.colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Number.colorize(&buffer)
     }
 }
 
@@ -217,26 +237,30 @@ impl FromFileString for String {
 }
 
 impl ToFileString for String {
-    fn to_file_string(&self) -> String {
-        self.as_str().to_file_string()
+    fn write_file_string<W: fmt::Write>(&self, out: &mut W) -> fmt::Result {
+        out.write_str(self)
     }
 }
 
 impl ToHumanString for String {
     fn to_print_string(&self) -> String {
-        DataType::String.colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::String.colorize(&buffer)
     }
 }
 
 impl ToFileString for &str {
-    fn to_file_string(&self) -> String {
-        self.to_string()
+    fn write_file_string<W: fmt::Write>(&self, out: &mut W) -> fmt::Result {
+        out.write_str(self)
     }
 }
 
 impl ToHumanString for &str {
     fn to_print_string(&self) -> String {
-        self.to_file_string().truecolor(0, 153, 0).to_string()
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        buffer.truecolor(0, 153, 0).to_string()
     }
 }
 
@@ -253,11 +277,11 @@ impl<T: FromFileString> FromFileString for Option<T> {
 }
 
 impl<T: ToFileString> ToFileString for Option<T> {
-    fn to_file_string(&self) -> String {
+    fn write_file_string<W: fmt::Write>(&self, out: &mut W) -> fmt::Result {
         if let Some(value) = self {
-            value.to_file_string()
+            value.write_file_string(out)
         } else {
-            "null".to_string()
+            out.write_str("null")
         }
     }
 }
@@ -345,7 +369,7 @@ macro_rules! impl_file_string_from_str(($type:ty) => {
 macro_rules! impl_file_string_serialization(($type:ty) => {
     impl serde::Serialize for $type {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
-            serializer.serialize_str(&$crate::ToFileString::to_file_string(self))
+            serializer.collect_str(&$crate::FileStringDisplay(self))
         }
     }
 

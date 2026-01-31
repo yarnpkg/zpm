@@ -1,4 +1,4 @@
-use std::hash::Hash;
+use std::{fmt, hash::Hash};
 
 use blake2::{Blake2b, Digest, digest::consts::U64};
 use rkyv::Archive;
@@ -23,7 +23,8 @@ impl Hash64 {
 
     pub fn from_string<T: ToFileString>(str: &T) -> Self {
         let mut hasher = Blake2b80::new();
-        hasher.update(str.to_file_string().as_bytes());
+        let mut writer = HasherWriter { hasher: &mut hasher };
+        let _ = str.write_file_string(&mut writer);
 
         Hash64 {state: hasher.finalize().to_vec()}
     }
@@ -34,6 +35,17 @@ impl Hash64 {
 
     pub fn short(&self) -> String {
         hex::encode(&self.state[0..16])
+    }
+}
+
+struct HasherWriter<'a> {
+    hasher: &'a mut Blake2b80,
+}
+
+impl fmt::Write for HasherWriter<'_> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.hasher.update(s.as_bytes());
+        Ok(())
     }
 }
 
@@ -63,14 +75,16 @@ impl FromFileString for Hash64 {
 }
 
 impl ToFileString for Hash64 {
-    fn to_file_string(&self) -> String {
-        hex::encode(self.state.clone())
+    fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
+        out.write_str(&hex::encode(self.state.clone()))
     }
 }
 
 impl ToHumanString for Hash64 {
     fn to_print_string(&self) -> String {
-        DataType::Custom(135, 175, 255).colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Custom(135, 175, 255).colorize(&buffer)
     }
 }
 

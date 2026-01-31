@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
-use zpm_utils::{DataType, Hash64, Path, ToFileString};
+use zpm_utils::{DataType, FileStringDisplay, Hash64, Path};
 use clipanion::cli;
 
 use crate::{error::Error, script::ScriptEnvironment};
@@ -52,7 +52,7 @@ impl SetVersionFromSources {
                 = Hash64::from_string(&self.repository);
 
             Path::temp_root_dir()?
-                .with_join_str(format!("zpm-sources/{}", hash.to_file_string()))
+                .with_join_str(format!("zpm-sources/{}", FileStringDisplay(&hash)))
         };
 
         prepare_repo(self, &target).await?;

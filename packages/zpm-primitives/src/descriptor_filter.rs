@@ -11,13 +11,19 @@ use crate::{
 pub enum FilterDescriptor {
     #[pattern("(?<ident>@?[^@]+)")]
     #[to_file_string(|params| params.ident.to_file_string())]
+    #[write_file_string(|params, out| params.ident.write_file_string(out))]
     #[to_print_string(|params| params.ident.to_print_string())]
     Ident {
         ident: IdentGlob,
     },
 
     #[pattern("(?<ident>@?[^@]+)@(?<range>.*)")]
-    #[to_file_string(|params| format!("{}@{}", params.ident.to_file_string(), params.range.to_file_string()))]
+    #[to_file_string(|params| format!("{}@{}", zpm_utils::FileStringDisplay(&params.ident), zpm_utils::FileStringDisplay(&params.range)))]
+    #[write_file_string(|params, out| {
+        params.ident.write_file_string(out)?;
+        out.write_str("@")?;
+        params.range.write_file_string(out)
+    })]
     #[to_print_string(|params| format!("{}@{}", params.ident.to_print_string(), params.range.to_print_string()))]
     Range {
         ident: IdentGlob,

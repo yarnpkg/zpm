@@ -22,6 +22,7 @@ pub enum DeferredStrategy {
 
     #[pattern(r"(?<version>.*)")]
     #[to_file_string(|params| params.version.to_file_string())]
+    #[write_file_string(|params, out| params.version.write_file_string(out))]
     #[to_print_string(|params| params.version.to_print_string())]
     Exact {
         version: zpm_semver::Version,

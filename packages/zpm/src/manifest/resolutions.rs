@@ -15,6 +15,7 @@ use crate::{
 pub enum ResolutionSelector {
     #[pattern(r"^(?<descriptor>.*)$")]
     #[to_file_string(|params| params.descriptor.to_file_string())]
+    #[write_file_string(|params, out| params.descriptor.write_file_string(out))]
     #[to_print_string(|params| params.descriptor.to_print_string())]
     Descriptor {
         descriptor: Descriptor,
@@ -22,13 +23,19 @@ pub enum ResolutionSelector {
 
     #[pattern(r"^(?<ident>.*)$")]
     #[to_file_string(|params| params.ident.to_file_string())]
+    #[write_file_string(|params, out| params.ident.write_file_string(out))]
     #[to_print_string(|params| params.ident.to_print_string())]
     Ident {
         ident: Ident,
     },
 
     #[pattern(r"^(?<parent_descriptor>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
-    #[to_file_string(|params| format!("{}/{}", params.parent_descriptor.to_file_string(), params.ident.to_file_string()))]
+    #[to_file_string(|params| format!("{}/{}", zpm_utils::FileStringDisplay(&params.parent_descriptor), zpm_utils::FileStringDisplay(&params.ident)))]
+    #[write_file_string(|params, out| {
+        params.parent_descriptor.write_file_string(out)?;
+        out.write_str("/")?;
+        params.ident.write_file_string(out)
+    })]
     #[to_print_string(|params| format!("{}/{}", params.parent_descriptor.to_print_string(), params.ident.to_print_string()))]
     DescriptorIdent {
         parent_descriptor: Descriptor,
@@ -36,7 +43,12 @@ pub enum ResolutionSelector {
     },
 
     #[pattern(r"^(?<parent_ident>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
-    #[to_file_string(|params| format!("{}/{}", params.parent_ident.to_file_string(), params.ident.to_file_string()))]
+    #[to_file_string(|params| format!("{}/{}", zpm_utils::FileStringDisplay(&params.parent_ident), zpm_utils::FileStringDisplay(&params.ident)))]
+    #[write_file_string(|params, out| {
+        params.parent_ident.write_file_string(out)?;
+        out.write_str("/")?;
+        params.ident.write_file_string(out)
+    })]
     #[to_print_string(|params| format!("{}/{}", params.parent_ident.to_print_string(), params.ident.to_print_string()))]
     IdentIdent {
         parent_ident: Ident,

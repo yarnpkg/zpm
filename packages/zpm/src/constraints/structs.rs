@@ -17,32 +17,36 @@ pub struct Caller {
 }
 
 impl ToFileString for Caller {
-    fn to_file_string(&self) -> String {
-        let mut parts
-            = vec![];
+    fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
+        let mut has_output = false;
 
         if let Some(method_name) = &self.method_name {
-            parts.push(method_name.clone());
+            out.write_str(method_name)?;
+            has_output = true;
         }
 
         if let Some(file) = &self.file {
-            let mut file_parts
-                = vec![];
+            if has_output {
+                out.write_str(" ")?;
+            }
 
-            file_parts.push(file.clone());
+            out.write_str("(")?;
+            out.write_str(file)?;
 
             if let Some(line) = &self.line {
-                file_parts.push(line.to_string());
+                out.write_str(":")?;
+                write!(out, "{}", line)?;
 
                 if let Some(column) = &self.column {
-                    file_parts.push(column.to_string());
+                    out.write_str(":")?;
+                    write!(out, "{}", column)?;
                 }
             }
 
-            parts.push(format!("({})", file_parts.join(":")));
+            out.write_str(")")?;
         }
 
-        parts.join(" ")
+        Ok(())
     }
 }
 

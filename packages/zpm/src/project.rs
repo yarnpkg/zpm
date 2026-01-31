@@ -5,7 +5,7 @@ use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
-use zpm_utils::{Glob, LastModifiedAt, Path, ToFileString, ToHumanString};
+use zpm_utils::{FileStringDisplay, Glob, LastModifiedAt, Path, ToHumanString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -35,12 +35,14 @@ pub enum InstallMode {
     /// Don't run the build scripts.
     #[pattern("skip-build")]
     #[to_file_string(|| "skip-build".to_string())]
+    #[write_file_string(|out| out.write_str("skip-build"))]
     #[to_print_string(|| "skip-build".to_string())]
     SkipBuild,
 
     /// Just update the lockfile, skip the fetching and linking.
     #[pattern("update-lockfile")]
     #[to_file_string(|| "update-lockfile".to_string())]
+    #[write_file_string(|out| out.write_str("update-lockfile"))]
     #[to_print_string(|| "update-lockfile".to_string())]
     UpdateLockfile,
 }
@@ -410,7 +412,7 @@ impl Project {
             = self.config.settings.enable_immutable_cache.value;
 
         let name_suffix = match compression_algorithm {
-            Some(zpm_formats::CompressionAlgorithm::Deflate(_)) => format!("-d{}", compression_algorithm.unwrap().to_file_string()),
+            Some(zpm_formats::CompressionAlgorithm::Deflate(_)) => format!("-d{}", FileStringDisplay(&compression_algorithm.unwrap())),
             None => "".to_string(),
         };
 

@@ -3,7 +3,7 @@ use std::str::FromStr;
 use itertools::Itertools;
 use zpm_git::PrepareParams;
 use zpm_primitives::Locator;
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::{FileStringDisplay, Path, ToFileString};
 
 use crate::{
     error::Error,
@@ -311,7 +311,7 @@ async fn prepare_yarn_zpm_project(folder_path: &Path, params: &PrepareParams) ->
     ScriptEnvironment::new()?
         .with_cwd(cwd_path.clone())
 
-        .with_env_variable("YARNSW_DEFAULT", &format!("local:{}", current_exe.to_file_string()))
+        .with_env_variable("YARNSW_DEFAULT", &format!("local:{}", FileStringDisplay(&current_exe)))
 
         .run_exec("yarn", pack_args)
         .await?

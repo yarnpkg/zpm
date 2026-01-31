@@ -3,7 +3,7 @@ use std::{future::Future, io::Write};
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
 use zpm_semver::{Version, VersionRc};
-use zpm_utils::{DataType, Hash64, Path, ToFileString, ToHumanString, Unit, is_terminal};
+use zpm_utils::{DataType, FileStringDisplay, Hash64, Path, ToHumanString, Unit, is_terminal};
 
 use crate::errors::Error;
 
@@ -25,7 +25,12 @@ impl CacheKey {
                 Version::new_from_components(6, 0, 0, Some(vec![VersionRc::String("rc".to_string()), VersionRc::Number(9)]));
 
             if self.version >= first_npm_release {
-                return Some(format!("https://registry.npmjs.org/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", self.platform, self.platform, self.version.to_file_string()));
+                return Some(format!(
+                    "https://registry.npmjs.org/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz",
+                    self.platform,
+                    self.platform,
+                    FileStringDisplay(&self.version)
+                ));
             }
         }
 
@@ -33,7 +38,7 @@ impl CacheKey {
     }
 
     pub fn to_url(&self) -> String {
-        format!("https://repo.yarnpkg.com/releases/{}/{}", self.version.to_file_string(), self.platform)
+        format!("https://repo.yarnpkg.com/releases/{}/{}", FileStringDisplay(&self.version), self.platform)
     }
 }
 

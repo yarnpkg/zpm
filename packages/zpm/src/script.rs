@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
-use zpm_utils::{shell_escape, to_shell_line, FromFileString, Hash64, Path, ToFileString};
+use zpm_utils::{shell_escape, to_shell_line, FileStringDisplay, FromFileString, Hash64, Path, ToFileString};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -396,11 +396,11 @@ impl ScriptEnvironment {
         self.remove_pnp_loader();
 
         if let Some(pnp_path) = project.pnp_path().if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_file_string()));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", FileStringDisplay(&pnp_path)));
         }
 
         if let Some(pnp_loader_path) = project.pnp_loader_path().if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_file_string()));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", FileStringDisplay(&pnp_loader_path)));
         }
 
         self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
@@ -495,7 +495,7 @@ impl ScriptEnvironment {
         let hash
             = Hash64::from_string(&JsonDocument::to_string(&self.binaries)?);
         let dir_name
-            = format!(".yarn/zpm/binaries/zpm-{}", hash.to_file_string());
+            = format!(".yarn/zpm/binaries/zpm-{}", FileStringDisplay(&hash));
 
         let dir = Path::home_dir()?
             .expect("Expected home directory")
@@ -558,7 +558,7 @@ impl ScriptEnvironment {
             },
 
             false => {
-                format!("{}:{}", bin_dir.to_file_string(), env_path)
+                format!("{}:{}", FileStringDisplay(&bin_dir), env_path)
             },
         };
 

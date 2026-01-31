@@ -97,7 +97,8 @@ impl Descriptor {
     }
 
     pub fn virtualized_for(&self, parent: &Locator) -> Descriptor {
-        let serialized = parent.to_file_string();
+        let mut serialized = String::new();
+        let _ = parent.write_file_string(&mut serialized);
 
         let range = Range::Virtual(VirtualRange {
             inner: Box::new(self.range.clone()),
@@ -150,7 +151,8 @@ pub fn descriptor_map_serializer<S>(value: &BTreeMap<Ident, Descriptor>, seriali
         = serializer.serialize_map(Some(value.len()))?;
 
     for v in value.values() {
-        let serialized_range = v.to_file_string();
+        let mut serialized_range = String::new();
+        let _ = v.write_file_string(&mut serialized_range);
 
         let at_split = match serialized_range.starts_with('@') {
             true => serialized_range[1..serialized_range.len()].find('@').map(|x| x + 1),
@@ -219,21 +221,17 @@ impl FromFileString for Descriptor {
 }
 
 impl ToFileString for Descriptor {
-    fn to_file_string(&self) -> String {
-        let serialized_ident = self.ident.to_file_string();
-        let serialized_range = self.range.to_file_string();
-
-        let mut final_str = String::new();
-        final_str.push_str(&serialized_ident);
-        final_str.push('@');
-        final_str.push_str(&serialized_range);
+    fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
+        self.ident.write_file_string(out)?;
+        out.write_str("@")?;
+        self.range.write_file_string(out)?;
 
         if let Some(parent) = &self.parent {
-            final_str.push_str("::parent=");
-            final_str.push_str(&parent.to_file_string());
+            out.write_str("::parent=")?;
+            parent.write_file_string(out)?;
         }
 
-        final_str
+        Ok(())
     }
 }
 
@@ -258,5 +256,8 @@ impl_file_string_serialization!(Descriptor);
 #[case("foo@npm:1.0.0")]
 #[case("foo@npm:1.0.0::parent=root@workspace:")]
 fn test_descriptor_serialization(#[case] str: &str) {
-    assert_eq!(str, Descriptor::from_file_string(str).unwrap().to_file_string());
+    let descriptor = Descriptor::from_file_string(str).unwrap();
+    let mut buffer = String::new();
+    let _ = descriptor.write_file_string(&mut buffer);
+    assert_eq!(str, buffer);
 }

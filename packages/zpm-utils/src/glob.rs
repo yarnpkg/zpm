@@ -88,14 +88,16 @@ impl FromFileString for Glob {
 }
 
 impl ToFileString for Glob {
-    fn to_file_string(&self) -> String {
-        self.raw().to_string()
+    fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
+        out.write_str(self.raw())
     }
 }
 
 impl ToHumanString for Glob {
     fn to_print_string(&self) -> String {
-        self.to_file_string()
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        buffer
     }
 }
 

@@ -105,46 +105,53 @@ impl FromFileString for GitRange {
 }
 
 impl ToFileString for GitRange {
-    fn to_file_string(&self) -> String {
-        let mut params
-            = vec![];
+    fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
+        self.repo.write_file_string(out)?;
+        out.write_str("#")?;
 
-        params.push(match &self.treeish {
+        match &self.treeish {
             GitTreeish::AnythingGoes(treeish) => {
-                treeish.to_string()
+                out.write_str(treeish)?;
             },
 
             GitTreeish::Head(head) => {
-                format!("head={}", head)
+                write!(out, "head={}", head)?;
             },
 
             GitTreeish::Commit(commit) => {
-                format!("commit={}", commit)
+                write!(out, "commit={}", commit)?;
             },
 
             GitTreeish::Semver(range) => {
-                format!("semver={}", range.to_file_string())
+                out.write_str("semver=")?;
+                range.write_file_string(out)?;
             },
 
             GitTreeish::Tag(tag) => {
-                format!("tag={}", tag)
+                write!(out, "tag={}", tag)?;
             },
-        });
+        }
 
         if let Some(cwd) = &self.prepare_params.cwd {
-            params.push(format!("cwd={}", urlencoding::encode(cwd)));
+            out.write_str("&")?;
+            let cwd = urlencoding::encode(cwd);
+            write!(out, "cwd={}", cwd)?;
         }
 
         if let Some(workspace) = &self.prepare_params.workspace {
-            params.push(format!("workspace={}", urlencoding::encode(workspace)));
+            out.write_str("&")?;
+            let workspace = urlencoding::encode(workspace);
+            write!(out, "workspace={}", workspace)?;
         }
 
-        format!("{}#{}", self.repo.to_file_string(), params.join("&"))
+        Ok(())
     }
 }
 
 impl ToHumanString for GitRange {
     fn to_print_string(&self) -> String {
-        DataType::Custom(135, 175, 255).colorize(&self.to_file_string())
+        let mut buffer = String::new();
+        let _ = self.write_file_string(&mut buffer);
+        DataType::Custom(135, 175, 255).colorize(&buffer)
     }
 }

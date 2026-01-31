@@ -70,13 +70,15 @@ pub async fn resolve_semver_range(range: &Range) -> Result<Version, Error> {
 }
 
 pub async fn resolve_channel_selector(channel_selector: &ChannelSelector) -> Result<Version, Error> {
-    let release_line = channel_selector.release_line.as_ref()
+    let mut release_line = String::new();
+    let _ = channel_selector.release_line.as_ref()
         .unwrap_or(&crate::yarn_enums::ReleaseLine::Classic)
-        .to_file_string();
+        .write_file_string(&mut release_line);
 
-    let channel = channel_selector.channel.as_ref()
+    let mut channel = String::new();
+    let _ = channel_selector.channel.as_ref()
         .unwrap_or(&crate::yarn_enums::Channel::Stable)
-        .to_file_string();
+        .write_file_string(&mut channel);
 
     let today
         = chrono::Utc::now();
@@ -133,7 +135,9 @@ pub fn get_bin_version() -> String {
     rc.push(VersionRc::String("local".to_string()));
 
     cargo_version.rc = Some(rc);
-    cargo_version.to_file_string()
+    let mut buffer = String::new();
+    let _ = cargo_version.write_file_string(&mut buffer);
+    buffer
 }
 
 pub fn extract_bin_meta(args: Option<Vec<String>>) -> BinMeta {

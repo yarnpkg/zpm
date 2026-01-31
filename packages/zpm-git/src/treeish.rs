@@ -13,13 +13,16 @@ pub enum GitTreeish {
 }
 
 impl ToFileString for GitTreeish {
-    fn to_file_string(&self) -> String {
+    fn write_file_string<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
         match self {
-            GitTreeish::AnythingGoes(treeish) => treeish.to_string(),
-            GitTreeish::Head(head) => format!("head={}", head),
-            GitTreeish::Commit(commit) => format!("commit={}", commit),
-            GitTreeish::Semver(range) => format!("semver={}", range.to_file_string()),
-            GitTreeish::Tag(tag) => format!("tag={}", tag),
+            GitTreeish::AnythingGoes(treeish) => out.write_str(treeish),
+            GitTreeish::Head(head) => write!(out, "head={}", head),
+            GitTreeish::Commit(commit) => write!(out, "commit={}", commit),
+            GitTreeish::Semver(range) => {
+                out.write_str("semver=")?;
+                range.write_file_string(out)
+            },
+            GitTreeish::Tag(tag) => write!(out, "tag={}", tag),
         }
     }
 }
