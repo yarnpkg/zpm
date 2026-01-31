@@ -1,6 +1,6 @@
 [package]
 name = "zpm-formats"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 crc32fast = { workspace = true }

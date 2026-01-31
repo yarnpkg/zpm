@@ -21,7 +21,7 @@ struct FileHeader {
     padding: [u8; 255],
 }
 
-pub fn entries_from_tar(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
+pub fn entries_from_tar(buffer: &[u8]) -> Result<Vec<Entry<'_>>, Error> {
     TarIterator::new(buffer).collect()
 }
 

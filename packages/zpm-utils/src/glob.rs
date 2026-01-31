@@ -64,7 +64,7 @@ impl Glob {
         self.inner.borrow_raw()
     }
 
-    pub fn matcher(&self) -> &wax::Glob {
+    pub fn matcher(&self) -> &wax::Glob<'_> {
         self.inner.borrow_pattern()
     }
 
