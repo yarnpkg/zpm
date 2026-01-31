@@ -150,8 +150,12 @@ fn gzip_isize_hint(buffer: &[u8]) -> Option<usize> {
         return None;
     }
     let compressed_payload = buffer.len().saturating_sub(MIN_GZIP_OVERHEAD);
-    if compressed_payload > 0 && isize <= compressed_payload {
-        return None;
+    if compressed_payload > 0 {
+        // Allow slight expansion to avoid rejecting incompressible gzip payloads.
+        let min_reasonable = compressed_payload.saturating_mul(9) / 10;
+        if isize < min_reasonable {
+            return None;
+        }
     }
 
     Some(isize)
