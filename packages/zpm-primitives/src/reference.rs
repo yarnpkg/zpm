@@ -34,7 +34,7 @@ fn format_registry(ident: &Ident, version: &zpm_semver::Version, url: Option<&St
     }
 }
 
-fn write_registry<W: fmt::Write>(ident: &Ident, version: &zpm_semver::Version, url: Option<&String>, out: &mut W) -> fmt::Result {
+fn write_registry<W: fmt::Write>(ident: &Ident, version: &zpm_semver::Version, url: Option<&UrlEncoded<String>>, out: &mut W) -> fmt::Result {
     out.write_str("npm:")?;
     ident.write_file_string(out)?;
     out.write_str("@")?;
@@ -42,7 +42,7 @@ fn write_registry<W: fmt::Write>(ident: &Ident, version: &zpm_semver::Version, u
 
     if let Some(url) = url {
         out.write_str("#")?;
-        out.write_str(url)?;
+        url.write_file_string(out)?;
     }
 
     Ok(())
@@ -95,7 +95,7 @@ pub enum Reference {
 
     #[pattern(r"npm:(?<ident>(?:@[^#@]+/)?[^#@]+)@(?<version>[^#]*)(?:#(?<url>.*))?")]
     #[to_file_string(|params| format_registry(&params.ident, &params.version, params.url.as_deref()))]
-    #[write_file_string(|params, out| write_registry(&params.ident, &params.version, params.url.as_deref(), out))]
+    #[write_file_string(|params, out| write_registry(&params.ident, &params.version, params.url.as_ref(), out))]
     #[to_print_string(|params| DataType::Reference.colorize(&format_registry(&params.ident, &params.version, params.url.as_deref())))]
     Registry {
         ident: Ident,
