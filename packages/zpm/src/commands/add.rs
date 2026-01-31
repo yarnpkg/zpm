@@ -213,6 +213,7 @@ impl Add {
             active_workspace_ident: project.active_workspace()?.name.clone(),
             range_kind,
             resolve_tags: !self.fixed,
+            allow_reuse: true,
         };
 
         let package_cache

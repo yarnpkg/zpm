@@ -59,6 +59,7 @@ impl DlxWithPackages {
             active_workspace_ident: dlx_project.active_workspace()?.name.clone(),
             range_kind: RangeKind::Exact,
             resolve_tags: true,
+            allow_reuse: true,
         };
 
         let descriptors
@@ -102,6 +103,7 @@ impl Dlx {
             active_workspace_ident: dlx_project.active_workspace()?.name.clone(),
             range_kind: RangeKind::Exact,
             resolve_tags: true,
+            allow_reuse: true,
         };
 
         let resolution
