@@ -130,7 +130,7 @@ pub fn get_bin_version() -> String {
     let mut rc = cargo_version.rc
         .unwrap_or_default();
 
-    rc.push(VersionRc::String("local".to_string()));
+    rc.push(VersionRc::String("local".into()));
 
     cargo_version.rc = Some(rc);
     cargo_version.to_file_string()

@@ -14,5 +14,6 @@ zpm-git = { workspace = true }
 zpm-macro-enum = { workspace = true }
 zpm-semver = { workspace = true }
 zpm-utils = { workspace = true }
+zpm-ecow = { workspace = true }
 rstest = { workspace = true }
 globset = { workspace = true }

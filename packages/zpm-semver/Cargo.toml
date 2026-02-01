@@ -8,3 +8,4 @@ rstest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 zpm-utils = { workspace = true }
+zpm-ecow = { workspace = true }

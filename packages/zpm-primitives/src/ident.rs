@@ -1,6 +1,11 @@
 use std::{hash::Hash, str::FromStr, sync::LazyLock};
 
-use rkyv::Archive;
+use zpm_ecow::EcoString;
+use rkyv::{
+    Archive, Deserialize, DeserializeUnsized, Place, Serialize, SerializeUnsized,
+};
+use rkyv::rancor::{Fallible, Source};
+use rkyv::string::{ArchivedString, StringResolver};
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, Path, ToFileString, ToHumanString};
 
 #[derive(thiserror::Error, Clone, Debug)]
@@ -9,13 +14,40 @@ pub enum IdentError {
     SyntaxError(String),
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash))]
-pub struct Ident(String);
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Ident(EcoString);
+
+impl Archive for Ident {
+    type Archived = ArchivedString;
+    type Resolver = StringResolver;
+
+    fn resolve(&self, resolver: Self::Resolver, out: Place<Self::Archived>) {
+        ArchivedString::resolve_from_str(self.0.as_str(), resolver, out);
+    }
+}
+
+impl<S: Fallible + ?Sized> Serialize<S> for Ident
+where
+    S::Error: Source,
+    str: SerializeUnsized<S>,
+{
+    fn serialize(&self, serializer: &mut S) -> Result<Self::Resolver, S::Error> {
+        ArchivedString::serialize_from_str(self.0.as_str(), serializer)
+    }
+}
+
+impl<D: Fallible + ?Sized> Deserialize<Ident, D> for ArchivedString
+where
+    str: DeserializeUnsized<str, D>,
+{
+    fn deserialize(&self, _: &mut D) -> Result<Ident, D::Error> {
+        Ok(Ident(EcoString::from(self.as_str())))
+    }
+}
 
 impl Ident {
     pub fn new<P: AsRef<str>>(full: P) -> Ident {
-        Ident(full.as_ref().to_string())
+        Ident(EcoString::from(full.as_ref()))
     }
 
     pub fn split(&self) -> (Option<&str>, &str) {
@@ -30,15 +62,15 @@ impl Ident {
     }
 
     pub fn name(&self) -> &str {
-        self.0.split_once('/').map(|(_,  name)| name).unwrap_or(&self.0)
+        self.0.split_once('/').map(|(_, name)| name).unwrap_or(self.0.as_str())
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 
     pub fn slug(&self) -> String {
-        self.0.replace("/", "-")
+        self.0.replace("/", "-").into()
     }
 
     pub fn nm_subdir(&self) -> Path {
@@ -55,7 +87,7 @@ impl Ident {
 
 impl AsRef<str> for Ident {
     fn as_ref(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }
 
@@ -100,3 +132,19 @@ impl ToHumanString for Ident {
 
 impl_file_string_from_str!(Ident);
 impl_file_string_serialization!(Ident);
+
+#[cfg(test)]
+mod tests {
+    use super::Ident;
+
+    #[test]
+    fn ident_rkyv_roundtrip() {
+        let ident = Ident::new("@scope/name");
+        let bytes =
+            rkyv::to_bytes::<rkyv::rancor::BoxedError>(&ident).unwrap();
+        let decoded =
+            rkyv::from_bytes::<Ident, rkyv::rancor::BoxedError>(&bytes)
+                .unwrap();
+        assert_eq!(ident, decoded);
+    }
+}

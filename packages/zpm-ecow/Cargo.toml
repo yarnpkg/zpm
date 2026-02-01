@@ -1,0 +1,7 @@
+[package]
+name = "zpm-ecow"
+edition = "2024"
+
+[dependencies]
+ecow = { workspace = true }
+rkyv = { workspace = true, features = ["bytecheck"] }

@@ -2,13 +2,14 @@ use rstest::rstest;
 use zpm_utils::FromFileString;
 
 use crate::{Version, VersionRc};
+use zpm_ecow::{eco_vec, EcoString};
 
 #[rstest]
 #[case("1.2.3", Version { major: 1, minor: 2, patch: 3, rc: None })]
-#[case("1.2.3-rc", Version { major: 1, minor: 2, patch: 3, rc: Some(vec![VersionRc::String("rc".to_string())]) })]
-#[case("1.2.3-rc.1", Version { major: 1, minor: 2, patch: 3, rc: Some(vec![VersionRc::String("rc".to_string()), VersionRc::Number(1)]) })]
-#[case("1.2.3-rc.1.32a", Version { major: 1, minor: 2, patch: 3, rc: Some(vec![VersionRc::String("rc".to_string()), VersionRc::Number(1), VersionRc::String("32a".to_string())]) })]
-#[case("5.11.0-next.1603014861.18546659943e6c5744ce67403b1c78c1993ccf84", Version { major: 5, minor: 11, patch: 0, rc: Some(vec![VersionRc::String("next".to_string()), VersionRc::Number(1603014861), VersionRc::String("18546659943e6c5744ce67403b1c78c1993ccf84".to_string())]) })]
+#[case("1.2.3-rc", Version { major: 1, minor: 2, patch: 3, rc: Some(eco_vec![VersionRc::String(EcoString::from("rc"))]) })]
+#[case("1.2.3-rc.1", Version { major: 1, minor: 2, patch: 3, rc: Some(eco_vec![VersionRc::String(EcoString::from("rc")), VersionRc::Number(1)]) })]
+#[case("1.2.3-rc.1.32a", Version { major: 1, minor: 2, patch: 3, rc: Some(eco_vec![VersionRc::String(EcoString::from("rc")), VersionRc::Number(1), VersionRc::String(EcoString::from("32a"))]) })]
+#[case("5.11.0-next.1603014861.18546659943e6c5744ce67403b1c78c1993ccf84", Version { major: 5, minor: 11, patch: 0, rc: Some(eco_vec![VersionRc::String(EcoString::from("next")), VersionRc::Number(1603014861), VersionRc::String(EcoString::from("18546659943e6c5744ce67403b1c78c1993ccf84"))]) })]
 fn test_version_parse(#[case] version: Version, #[case] expected: Version) {
     assert_eq!(version, expected);
 }

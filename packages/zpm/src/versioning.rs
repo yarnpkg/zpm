@@ -97,11 +97,11 @@ fn bump_rc_number(mut version: zpm_semver::Version, prerelease_pattern: &str) ->
         = updated_prerelease_pattern.split('.')
             .map(|component| match component.parse() {
                 Ok(n) => VersionRc::Number(n),
-                Err(_) => VersionRc::String(component.to_string()),
+                Err(_) => VersionRc::String(component.into()),
             })
             .collect_vec();
 
-    version.rc = Some(rc_components);
+    version.rc = Some(rc_components.into());
     version
 }
 

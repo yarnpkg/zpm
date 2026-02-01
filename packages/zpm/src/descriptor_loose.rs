@@ -191,11 +191,11 @@ impl LooseDescriptor {
             }
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::AnonymousTag(AnonymousTagRange {tag}), ..}}) => {
-                LooseDescriptor::resolve_registry_tag(context, options, ident, None, tag).await
+                LooseDescriptor::resolve_registry_tag(context, options, ident, None, tag.as_str()).await
             },
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::RegistryTag(RegistryTagRange {ident: ident_range, tag}), ..}}) => {
-                LooseDescriptor::resolve_registry_tag(context, options, ident, ident_range.as_ref(), tag).await
+                LooseDescriptor::resolve_registry_tag(context, options, ident, ident_range.as_ref(), tag.as_str()).await
             },
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor}) => {
@@ -271,7 +271,7 @@ impl LooseDescriptor {
     async fn resolve_registry_tag(context: &InstallContext<'_>, options: &ResolveOptions, ident: &Ident, range_ident: Option<&Ident>, tag: &str) -> Result<LooseResolution, Error> {
         if !options.resolve_tags {
             let descriptor
-                = Descriptor::new(ident.clone(), RegistryTagRange {ident: range_ident.cloned(), tag: tag.to_string()}.into());
+                = Descriptor::new(ident.clone(), RegistryTagRange {ident: range_ident.cloned(), tag: tag.into()}.into());
 
             return Ok(LooseResolution {
                 descriptor,
@@ -280,7 +280,7 @@ impl LooseDescriptor {
         }
 
         let descriptor
-            = Descriptor::new(ident.clone(), RegistryTagRange {ident: range_ident.cloned(), tag: tag.to_string()}.into());
+            = Descriptor::new(ident.clone(), RegistryTagRange {ident: range_ident.cloned(), tag: tag.into()}.into());
 
         let Range::RegistryTag(range_params) = &descriptor.range else {
             panic!("Invalid range");

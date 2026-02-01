@@ -1,3 +1,5 @@
+use zpm_ecow::EcoVec;
+
 use super::{range::{OperatorType, Token, TokenType}, version::VersionRc, Version};
 use crate::{
     MAX_SAFE_COMPONENT_LENGTH,
@@ -73,11 +75,11 @@ pub fn extract_rc_segment(str: &mut std::iter::Peekable<std::str::Chars>) -> Opt
 
     *str = curr;
 
-    Some(VersionRc::String(extract_alnum_hyphen(str)?))
+    Some(VersionRc::String(extract_alnum_hyphen(str)?.into()))
 }
 
-pub fn extract_rc(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<Vec<VersionRc>> {
-    let mut segments = vec![];
+pub fn extract_rc(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<EcoVec<VersionRc>> {
+    let mut segments = EcoVec::new();
 
     segments.push(extract_rc_segment(str)?);
 
@@ -145,7 +147,7 @@ pub fn extract_version(str: &mut std::iter::Peekable<std::str::Chars>) -> Option
     Some((Version::new_from_components(major, minor, patch, rc), missing))
 }
 
-pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<Vec<Token>> {
+pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<EcoVec<Token>> {
     if let Some(c) = str.peek() {
         match c {
             '^' => {
@@ -162,7 +164,7 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                         _ => version.next_major_rc(),
                     };
 
-                    Some(vec![
+                    Some(EcoVec::from([
                         Token::Operation(
                             OperatorType::GreaterThanOrEqual,
                             version,
@@ -172,7 +174,7 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                             OperatorType::LessThan,
                             upper_bound,
                         ),
-                    ])
+                    ]))
                 } else {
                     None
                 }
@@ -189,7 +191,7 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                     let next_minor
                         = version.next_minor_rc();
 
-                    Some(vec![
+                    Some(EcoVec::from([
                         Token::Operation(
                             OperatorType::GreaterThanOrEqual,
                             version,
@@ -199,7 +201,7 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                             OperatorType::LessThan,
                             next_minor,
                         ),
-                    ])
+                    ]))
                 } else {
                     None
                 }
@@ -218,10 +220,10 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                 }
 
                 if let Some((version, _)) = extract_version(str) {
-                    Some(vec![Token::Operation(
+                    Some(EcoVec::from([Token::Operation(
                         operator,
                         version,
-                    )])
+                    )]))
                 } else {
                     None
                 }
@@ -240,10 +242,10 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                 }
 
                 if let Some((version, _)) = extract_version(str) {
-                    Some(vec![Token::Operation(
+                    Some(EcoVec::from([Token::Operation(
                         operator,
                         version,
-                    )])
+                    )]))
                 } else {
                     None
                 }
@@ -258,10 +260,10 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                 }
 
                 if let Some((version, _)) = extract_version(str) {
-                    Some(vec![Token::Operation(
+                    Some(EcoVec::from([Token::Operation(
                         OperatorType::Equal,
                         version,
-                    )])
+                    )]))
                 } else {
                     None
                 }
@@ -280,7 +282,7 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                             }
 
                             return extract_version(str).map(|(other_version, _)| {
-                                vec![
+                                EcoVec::from([
                                     Token::Operation(
                                         OperatorType::GreaterThanOrEqual,
                                         version,
@@ -290,25 +292,25 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                                         OperatorType::LessThan,
                                         other_version,
                                     ),
-                                ]
+                                ])
                             })
                         }
                     }
 
                     match missing {
                         3 => {
-                            Some(vec![
+                            Some(EcoVec::from([
                                 Token::Operation(
                                     OperatorType::GreaterThanOrEqual,
                                     version,
                                 ),
-                            ])
+                            ]))
                         }
 
                         2 => {
                             let next_major = version.next_major();
 
-                            Some(vec![
+                            Some(EcoVec::from([
                                 Token::Operation(
                                     OperatorType::GreaterThanOrEqual,
                                     version,
@@ -318,13 +320,13 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                                     OperatorType::LessThan,
                                     next_major,
                                 ),
-                            ])
+                            ]))
                         }
 
                         1 => {
                             let next_minor = version.next_minor();
 
-                            Some(vec![
+                            Some(EcoVec::from([
                                 Token::Operation(
                                     OperatorType::GreaterThanOrEqual,
                                     version,
@@ -334,14 +336,14 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                                     OperatorType::LessThan,
                                     next_minor,
                                 ),
-                            ])
+                            ]))
                         }
 
                         0 => {
-                            Some(vec![Token::Operation(
+                            Some(EcoVec::from([Token::Operation(
                                 OperatorType::Equal,
                                 version,
-                            )])
+                            )]))
                         }
 
                         _ => {
@@ -358,8 +360,8 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
     }
 }
 
-pub fn extract_tokens(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<Vec<Token>> {
-    let mut tokens = Vec::new();
+pub fn extract_tokens(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<EcoVec<Token>> {
+    let mut tokens = EcoVec::new();
 
     while let Some(c) = str.peek() {
         match c {
@@ -405,7 +407,7 @@ pub fn extract_tokens(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<
                         tokens.push(Token::Syntax(TokenType::SAnd));
                     }
 
-                    tokens.extend(predicate);
+                    tokens.extend(predicate.into_iter());
                 } else {
                     return None;
                 }
@@ -416,7 +418,7 @@ pub fn extract_tokens(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<
     Some(tokens)
 }
 
-pub fn infix_to_prefix(input: &[Token]) -> Option<Vec<Token>> {
+pub fn infix_to_prefix(input: &[Token]) -> Option<EcoVec<Token>> {
     let mut prefix = vec![];
     let mut stack = vec![];
 
@@ -458,5 +460,5 @@ pub fn infix_to_prefix(input: &[Token]) -> Option<Vec<Token>> {
 
     prefix.reverse();
 
-    Some(prefix)
+    Some(EcoVec::from(prefix))
 }

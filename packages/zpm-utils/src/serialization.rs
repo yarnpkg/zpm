@@ -1,6 +1,7 @@
 use std::{fmt, string::FromUtf8Error};
 
 use colored::Colorize;
+use zpm_ecow::EcoString;
 use erased_serde::serialize_trait_object;
 use fundu::parse_duration;
 use serde::{Serialize, Serializer};
@@ -133,6 +134,20 @@ impl FromFileString for bool {
                 Err(SerializationError::InvalidValue(s.to_string()))
             },
         }
+    }
+}
+
+impl FromFileString for EcoString {
+    type Error = SerializationError;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        Ok(EcoString::from(s))
+    }
+}
+
+impl ToFileString for EcoString {
+    fn to_file_string(&self) -> String {
+        self.as_str().to_string()
     }
 }
 

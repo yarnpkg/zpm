@@ -1,5 +1,6 @@
 use rkyv::Archive;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
+use zpm_ecow::{EcoString, EcoVec};
 
 use crate::{
     extract::extract_version,
@@ -17,7 +18,7 @@ mod version_tests;
 #[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub enum VersionRc {
     Number(u32),
-    String(String),
+    String(EcoString),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -26,7 +27,7 @@ pub struct Version {
     pub major: u32,
     pub minor: u32,
     pub patch: u32,
-    pub rc: Option<Vec<VersionRc>>,
+    pub rc: Option<EcoVec<VersionRc>>,
 }
 
 impl Version {
@@ -39,7 +40,7 @@ impl Version {
         }
     }
 
-    pub fn new_from_components(major: u32, minor: u32, patch: u32, rc: Option<Vec<VersionRc>>) -> Version {
+    pub fn new_from_components(major: u32, minor: u32, patch: u32, rc: Option<EcoVec<VersionRc>>) -> Version {
         Version {
             major,
             minor,
@@ -62,7 +63,7 @@ impl Version {
             major: self.major + 1,
             minor: 0,
             patch: 0,
-            rc: Some(vec![VersionRc::Number(0)]),
+            rc: Some(EcoVec::from([VersionRc::Number(0)])),
         }
     }
 
@@ -80,7 +81,7 @@ impl Version {
             major: self.major,
             minor: self.minor + 1,
             patch: 0,
-            rc: Some(vec![VersionRc::Number(0)]),
+            rc: Some(EcoVec::from([VersionRc::Number(0)])),
         }
     }
 
@@ -98,7 +99,7 @@ impl Version {
             major: self.major,
             minor: self.minor,
             patch: self.patch + 1,
-            rc: Some(vec![VersionRc::Number(0)]),
+            rc: Some(EcoVec::from([VersionRc::Number(0)])),
         }
     }
 
@@ -107,14 +108,19 @@ impl Version {
             = self.clone();
 
         if let Some(rc) = next.rc.as_mut() {
-            if let Some(VersionRc::Number(n)) = rc.last_mut() {
-                *n += 1;
-            } else {
+            let incremented = match rc.make_mut().last_mut() {
+                Some(VersionRc::Number(n)) => {
+                    *n += 1;
+                    true
+                }
+                _ => false,
+            };
+            if !incremented {
                 rc.push(VersionRc::Number(0));
             }
         } else {
             next.patch += 1;
-            next.rc = Some(vec![VersionRc::Number(0)]);
+            next.rc = Some(EcoVec::from([VersionRc::Number(0)]));
         }
 
         next
@@ -122,8 +128,8 @@ impl Version {
 
     pub fn next_immediate_spec(&self) -> Version {
         if let Some(rc) = &self.rc {
-            let mut all_but_last = rc[..rc.len() - 1]
-                .to_vec();
+            let mut all_but_last: EcoVec<VersionRc>
+                = rc[..rc.len() - 1].into();
 
             match rc.last() {
                 Some(VersionRc::Number(n)) => {
@@ -138,6 +144,7 @@ impl Version {
                 }
 
                 Some(VersionRc::String(rc_str)) => {
+                    let rc_str = rc_str.as_str();
                     let Some(last_char) = rc_str.chars().last() else {
                         panic!("VersionRc::String should always have a last character");
                     };
@@ -176,7 +183,7 @@ impl Version {
                         }
                     }
 
-                    all_but_last.push(VersionRc::String(all_but_last_str));
+                    all_but_last.push(VersionRc::String(all_but_last_str.into()));
 
                     return Version {
                         major: self.major,
@@ -196,7 +203,7 @@ impl Version {
             major: self.major,
             minor: self.minor,
             patch: self.patch + 1,
-            rc: Some(vec![VersionRc::Number(0)]),
+            rc: Some(EcoVec::from([VersionRc::Number(0)])),
         }
     }
 
@@ -222,7 +229,7 @@ impl Version {
                     res.push_str(&n.to_string());
                 }
                 VersionRc::String(s) => {
-                    res.push_str(s);
+                    res.push_str(s.as_str());
                 }
             }
 
@@ -284,7 +291,7 @@ impl ToFileString for Version {
                     }
 
                     VersionRc::String(s) => {
-                        res.push_str(s);
+                        res.push_str(s.as_str());
                         res.push('.');
                     }
                 }
