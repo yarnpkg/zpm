@@ -1,8 +1,7 @@
-use std::{collections::BTreeMap, fmt::{self, Debug, Display}, hash::Hash, marker::PhantomData, sync::Arc};
+use std::{collections::{BTreeMap, HashMap}, fmt::{self, Debug, Display}, hash::Hash, marker::PhantomData, sync::Arc};
 
 use rkyv::Archive;
-use itertools::Itertools;
-use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de::{self, Visitor}, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use zpm_config::{Configuration, ConfigurationContext};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, RegistryReference, RegistrySemverRange};
@@ -29,16 +28,16 @@ pub struct LockfileEntry {
 #[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
 pub struct Lockfile {
     pub metadata: LockfileMetadata,
-    pub resolutions: BTreeMap<Descriptor, Locator>,
-    pub entries: BTreeMap<Locator, LockfileEntry>,
+    pub resolutions: HashMap<Descriptor, Locator>,
+    pub entries: HashMap<Locator, LockfileEntry>,
 }
 
 impl Lockfile {
     pub fn new() -> Self {
         Self {
             metadata: LockfileMetadata::new(),
-            resolutions: BTreeMap::new(),
-            entries: BTreeMap::new(),
+            resolutions: HashMap::new(),
+            entries: HashMap::new(),
         }
     }
 }
@@ -65,35 +64,75 @@ impl<'de> Deserialize<'de> for Lockfile {
 
 impl Serialize for Lockfile {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
-        struct MultiKeyLockfileEntry {
-            key: MultiKey<Descriptor>,
-            inner: LockfileEntry,
+        let mut counts: HashMap<Locator, usize> = HashMap::new();
+        for (descriptor, locator) in self.resolutions.iter() {
+            if descriptor.range.details().transient_resolution {
+                continue;
+            }
+            *counts.entry(locator.clone()).or_insert(0) += 1;
         }
 
-        let mut descriptors_to_resolutions: BTreeMap<Locator, MultiKeyLockfileEntry> = BTreeMap::new();
-        for (descriptor, locator) in self.resolutions.iter().sorted_by_key(|(descriptor, _)| (*descriptor).clone()) {
+        let mut descriptors_to_resolutions: HashMap<Locator, MultiKey<Descriptor>> =
+            HashMap::with_capacity(counts.len());
+
+        let mut sorted_resolutions: Vec<_> = self.resolutions.iter().collect();
+        sorted_resolutions.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+
+        for (descriptor, locator) in sorted_resolutions {
             // Skip descriptors with transient_resolution set to true
             if descriptor.range.details().transient_resolution {
                 continue;
             }
 
-            let entry = self.entries.get(locator)
-                .expect("Expected a matching resolution to be found in the lockfile for any resolved locator.");
-
-            descriptors_to_resolutions.entry(entry.resolution.locator.clone())
-                .or_insert_with(|| MultiKeyLockfileEntry {inner: entry.clone(), key: MultiKey::new()})
-                .key.0
-                .push(descriptor.clone());
+            let entry = descriptors_to_resolutions
+                .entry(locator.clone())
+                .or_insert_with(|| {
+                    if !self.entries.contains_key(locator) {
+                        panic!("Expected a matching resolution to be found in the lockfile for any resolved locator.");
+                    }
+                    let cap = counts.get(locator).copied().unwrap_or(0);
+                    MultiKey::with_capacity(cap)
+                });
+            entry.0.push(descriptor.clone());
         }
 
-        let mut entries = BTreeMap::new();
-        for entry in descriptors_to_resolutions.into_values() {
-            entries.insert(entry.key, entry.inner);
+        let mut grouped_entries: Vec<(MultiKey<Descriptor>, Locator)> =
+            Vec::with_capacity(descriptors_to_resolutions.len());
+        for (locator, key) in descriptors_to_resolutions {
+            grouped_entries.push((key, locator));
+        }
+        grouped_entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+
+        struct Entries<'a> {
+            lockfile: &'a Lockfile,
+            items: Vec<(MultiKey<Descriptor>, Locator)>,
         }
 
-        let payload = LockfilePayload {
-            metadata: self.metadata.clone(),
-            entries,
+        impl Serialize for Entries<'_> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+                let mut map = serializer.serialize_map(Some(self.items.len()))?;
+                for (key, locator) in &self.items {
+                    let entry = self.lockfile.entries.get(locator)
+                        .expect("Expected a matching resolution to be found in the lockfile for any resolved locator.");
+                    map.serialize_entry(key, entry)?;
+                }
+                map.end()
+            }
+        }
+
+        #[derive(Serialize)]
+        struct LockfilePayloadRef<'a> {
+            #[serde(rename = "__metadata")]
+            metadata: &'a LockfileMetadata,
+            entries: Entries<'a>,
+        }
+
+        let payload = LockfilePayloadRef {
+            metadata: &self.metadata,
+            entries: Entries {
+                lockfile: self,
+                items: grouped_entries,
+            },
         };
 
         payload.serialize(serializer)
@@ -147,8 +186,8 @@ impl<'de, K, V> Deserialize<'de> for TolerantMap<K, V> where K: Debug + Eq + Ord
 struct MultiKey<T>(Vec<T>);
 
 impl<T> MultiKey<T> {
-    fn new() -> Self {
-        MultiKey(vec![])
+    fn with_capacity(capacity: usize) -> Self {
+        MultiKey(Vec::with_capacity(capacity))
     }
 }
 
@@ -461,4 +500,66 @@ pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
     }
 
     Ok(lockfile)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Lockfile, LockfileEntry, LockfileMetadata, LOCKFILE_VERSION};
+    use zpm_parsers::JsonDocument;
+    use zpm_primitives::{Descriptor, Locator};
+    use zpm_semver::Version;
+    use zpm_utils::FromFileString;
+    use crate::resolvers::Resolution;
+
+    #[test]
+    fn lockfile_serialization_is_stable() {
+        let mut lockfile = Lockfile::new();
+        lockfile.metadata = LockfileMetadata { version: LOCKFILE_VERSION };
+
+        let locator_bar = Locator::from_file_string("bar@npm:2.3.4").unwrap();
+        let locator_foo = Locator::from_file_string("foo@npm:1.2.3").unwrap();
+
+        let resolution_bar = Resolution::new_empty(locator_bar.clone(), Version::from_file_string("2.3.4").unwrap());
+        let resolution_foo = Resolution::new_empty(locator_foo.clone(), Version::from_file_string("1.2.3").unwrap());
+
+        // Insert in a non-sorted order to ensure serialization sorting is deterministic.
+        lockfile.entries.insert(locator_foo.clone(), LockfileEntry {
+            checksum: None,
+            resolution: resolution_foo,
+        });
+        lockfile.entries.insert(locator_bar.clone(), LockfileEntry {
+            checksum: None,
+            resolution: resolution_bar,
+        });
+
+        lockfile.resolutions.insert(Descriptor::from_file_string("foo@npm:~1.1.0").unwrap(), locator_foo.clone());
+        lockfile.resolutions.insert(Descriptor::from_file_string("bar@npm:^2.0.0").unwrap(), locator_bar.clone());
+        lockfile.resolutions.insert(Descriptor::from_file_string("foo@npm:^1.0.0").unwrap(), locator_foo);
+
+        let serialized = JsonDocument::to_string_pretty(&lockfile).unwrap();
+
+        const EXPECTED: &str = r#"{
+  "__metadata": {
+    "version": 9
+  },
+  "entries": {
+    "bar@npm:^2.0.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "bar@npm:2.3.4",
+        "version": "2.3.4"
+      }
+    },
+    "foo@npm:^1.0.0, foo@npm:~1.1.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "foo@npm:1.2.3",
+        "version": "1.2.3"
+      }
+    }
+  }
+}"#;
+
+        assert_eq!(serialized, EXPECTED);
+    }
 }
