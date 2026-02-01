@@ -1,3 +1,7 @@
+use std::sync::{Arc, LazyLock};
+
+use bytes::Bytes;
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zpm_utils::Path;
@@ -10,10 +14,27 @@ const MANIFEST_CACHE_DIR: &str = "manifest";
 
 #[derive(Debug, Clone)]
 pub struct ManifestCacheEntry {
-    pub body: Vec<u8>,
+    pub body: Bytes,
     pub etag: Option<String>,
     pub last_modified: Option<String>,
     pub fresh_until: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ManifestCacheMeta {
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    pub fresh_until: Option<u64>,
+}
+
+impl ManifestCacheMeta {
+    fn from_entry(entry: &ManifestCacheEntry) -> Self {
+        Self {
+            etag: entry.etag.clone(),
+            last_modified: entry.last_modified.clone(),
+            fresh_until: entry.fresh_until,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -32,6 +53,9 @@ struct CacheMeta {
     last_modified: Option<String>,
     fresh_until: Option<u64>,
 }
+
+static MEMORY_ENTRIES: LazyLock<DashMap<String, Arc<ManifestCacheEntry>>> = LazyLock::new(DashMap::new);
+static MEMORY_META: LazyLock<DashMap<String, ManifestCacheMeta>> = LazyLock::new(DashMap::new);
 
 impl ManifestCache {
     pub fn new(project: &Project) -> Result<Self, Error> {
@@ -60,14 +84,22 @@ impl ManifestCache {
         format!("{}{}", registry, path)
     }
 
-    pub fn get(&self, key: &str) -> Result<Option<ManifestCacheEntry>, Error> {
+    pub fn get_meta(&self, key: &str) -> Result<Option<ManifestCacheMeta>, Error> {
         if !self.enabled {
             return Ok(None);
         }
 
-        let (body_path, meta_path) = self.paths_for_key(key);
+        if let Some(entry) = MEMORY_ENTRIES.get(key) {
+            return Ok(Some(ManifestCacheMeta::from_entry(entry.as_ref())));
+        }
 
-        if !body_path.fs_exists() || !meta_path.fs_exists() {
+        if let Some(meta) = MEMORY_META.get(key) {
+            return Ok(Some(meta.clone()));
+        }
+
+        let (_body_path, meta_path) = self.paths_for_key(key);
+
+        if !meta_path.fs_exists() {
             return Ok(None);
         }
 
@@ -85,17 +117,52 @@ impl ManifestCache {
             return Ok(None);
         }
 
+        let meta = ManifestCacheMeta {
+            etag: meta.etag,
+            last_modified: meta.last_modified,
+            fresh_until: meta.fresh_until,
+        };
+
+        MEMORY_META.insert(key.to_string(), meta.clone());
+
+        Ok(Some(meta))
+    }
+
+    pub fn get_entry(&self, key: &str, meta: Option<&ManifestCacheMeta>) -> Result<Option<Arc<ManifestCacheEntry>>, Error> {
+        if !self.enabled {
+            return Ok(None);
+        }
+
+        if let Some(entry) = MEMORY_ENTRIES.get(key) {
+            return Ok(Some(entry.clone()));
+        }
+
+        let meta = match meta {
+            Some(meta) => meta.clone(),
+            None => match self.get_meta(key)? {
+                Some(meta) => meta,
+                None => return Ok(None),
+            },
+        };
+
+        let (body_path, _) = self.paths_for_key(key);
+
         let body = match body_path.fs_read() {
             Ok(body) => body,
             Err(_) => return Ok(None),
         };
 
-        Ok(Some(ManifestCacheEntry {
-            body,
-            etag: meta.etag,
-            last_modified: meta.last_modified,
+        let entry = Arc::new(ManifestCacheEntry {
+            body: Bytes::from(body),
+            etag: meta.etag.clone(),
+            last_modified: meta.last_modified.clone(),
             fresh_until: meta.fresh_until,
-        }))
+        });
+
+        MEMORY_ENTRIES.insert(key.to_string(), entry.clone());
+        MEMORY_META.insert(key.to_string(), meta);
+
+        Ok(Some(entry))
     }
 
     pub fn put(&self, key: &str, entry: &ManifestCacheEntry) -> Result<(), Error> {
@@ -107,11 +174,17 @@ impl ManifestCache {
         let hash = hash_key(key);
 
         let fresh_until = entry.fresh_until.or_else(|| self.compute_fresh_until());
+        let updated_entry = ManifestCacheEntry {
+            body: entry.body.clone(),
+            etag: entry.etag.clone(),
+            last_modified: entry.last_modified.clone(),
+            fresh_until,
+        };
 
         let meta = CacheMeta {
             version: SCHEMA_VERSION,
-            etag: entry.etag.clone(),
-            last_modified: entry.last_modified.clone(),
+            etag: updated_entry.etag.clone(),
+            last_modified: updated_entry.last_modified.clone(),
             fresh_until,
         };
 
@@ -121,11 +194,14 @@ impl ManifestCache {
         let tmp_body = self.root.with_join_str(format!(".{}.body.tmp-{}", hash, rand::random::<u64>()));
         let tmp_meta = self.root.with_join_str(format!(".{}.meta.tmp-{}", hash, rand::random::<u64>()));
 
-        tmp_body.fs_write(&entry.body)?;
+        tmp_body.fs_write(updated_entry.body.as_ref())?;
         tmp_body.fs_rename(&body_path)?;
 
         tmp_meta.fs_write_text(meta_text)?;
         tmp_meta.fs_rename(&meta_path)?;
+
+        MEMORY_ENTRIES.insert(key.to_string(), Arc::new(updated_entry.clone()));
+        MEMORY_META.insert(key.to_string(), ManifestCacheMeta::from_entry(&updated_entry));
 
         Ok(())
     }
@@ -138,11 +214,19 @@ impl ManifestCache {
         let (_body_path, meta_path) = self.paths_for_key(key);
         let hash = hash_key(key);
 
-        let meta = CacheMeta {
-            version: SCHEMA_VERSION,
+        let fresh_until = self.compute_fresh_until();
+        let updated_entry = ManifestCacheEntry {
+            body: entry.body.clone(),
             etag: entry.etag.clone(),
             last_modified: entry.last_modified.clone(),
-            fresh_until: self.compute_fresh_until(),
+            fresh_until,
+        };
+
+        let meta = CacheMeta {
+            version: SCHEMA_VERSION,
+            etag: updated_entry.etag.clone(),
+            last_modified: updated_entry.last_modified.clone(),
+            fresh_until,
         };
 
         let meta_text = serde_json::to_string(&meta)
@@ -152,15 +236,18 @@ impl ManifestCache {
         tmp_meta.fs_write_text(meta_text)?;
         tmp_meta.fs_rename(&meta_path)?;
 
+        MEMORY_META.insert(key.to_string(), ManifestCacheMeta::from_entry(&updated_entry));
+        MEMORY_ENTRIES.insert(key.to_string(), Arc::new(updated_entry));
+
         Ok(())
     }
 
-    pub fn is_fresh(&self, entry: &ManifestCacheEntry) -> bool {
+    pub fn is_fresh_meta(&self, meta: &ManifestCacheMeta) -> bool {
         if !self.enable_cache_control || self.max_age.is_zero() {
             return false;
         }
 
-        let Some(fresh_until) = entry.fresh_until else {
+        let Some(fresh_until) = meta.fresh_until else {
             return false;
         };
 

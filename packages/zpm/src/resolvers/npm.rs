@@ -63,18 +63,20 @@ async fn fetch_registry_metadata(
     let cache = ManifestCache::new(project).ok();
     let cache_key = ManifestCache::cache_key(registry_base, registry_path);
 
-    let cached_entry = cache.as_ref()
-        .and_then(|cache| cache.get(&cache_key).ok().flatten());
+    let cached_meta = cache.as_ref()
+        .and_then(|cache| cache.get_meta(&cache_key).ok().flatten());
 
-    if let (Some(cache), Some(entry)) = (cache.as_ref(), cached_entry.as_ref()) {
-        if cache.is_fresh(entry) {
-            return Ok(Bytes::from(entry.body.clone()));
+    if let (Some(cache), Some(meta)) = (cache.as_ref(), cached_meta.as_ref()) {
+        if cache.is_fresh_meta(meta) {
+            if let Some(entry) = cache.get_entry(&cache_key, Some(meta)).ok().flatten() {
+                return Ok(entry.body.clone());
+            }
         }
     }
 
-    let conditional = cached_entry.as_ref().and_then(|entry| {
-        let etag = entry.etag.as_deref();
-        let last_modified = entry.last_modified.as_deref();
+    let conditional = cached_meta.as_ref().and_then(|meta| {
+        let etag = meta.etag.as_deref();
+        let last_modified = meta.last_modified.as_deref();
 
         if etag.is_none() && last_modified.is_none() {
             None
@@ -93,11 +95,11 @@ async fn fetch_registry_metadata(
 
     match http_npm::get_with_meta(&params, conditional).await? {
         http_npm::GetWithMetaResult::NotModified => {
-            if let Some(entry) = cached_entry {
-                if let Some(cache) = &cache {
+            if let (Some(cache), Some(meta)) = (cache.as_ref(), cached_meta.as_ref()) {
+                if let Some(entry) = cache.get_entry(&cache_key, Some(meta)).ok().flatten() {
                     let _ = cache.refresh(&cache_key, &entry);
+                    return Ok(entry.body.clone());
                 }
-                return Ok(Bytes::from(entry.body));
             }
 
             let bytes = http_npm::get(&params).await?;
@@ -106,7 +108,7 @@ async fn fetch_registry_metadata(
         http_npm::GetWithMetaResult::Ok { bytes, etag, last_modified } => {
             if let Some(cache) = &cache {
                 let entry = ManifestCacheEntry {
-                    body: bytes.clone().to_vec(),
+                    body: bytes.clone(),
                     etag,
                     last_modified,
                     fresh_until: None,
