@@ -1,6 +1,5 @@
-use std::{collections::BTreeMap, str::FromStr, sync::LazyLock};
+use std::{collections::{BTreeMap, HashMap}, str::FromStr, sync::{Arc, LazyLock}};
 
-use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::Deserialize;
@@ -13,7 +12,7 @@ use crate::{
     error::Error,
     http_npm,
     install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
-    manifest_cache::{ManifestCache, ManifestCacheEntry},
+    manifest_cache::{ManifestCache, ManifestCacheEntry, ParsedRegistryCache, ParsedRegistryVersion},
     manifest::RemoteManifest,
     npm,
     resolvers::{Resolution, workspace},
@@ -51,12 +50,68 @@ fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
     }
 }
 
+#[serde_as]
+#[derive(Deserialize)]
+struct RegistryMetadataWithTags<'a> {
+    #[serde(rename(deserialize = "dist-tags"))]
+    #[serde(default)]
+    dist_tags: BTreeMap<String, zpm_semver::Version>,
+    #[serde_as(as = "Option<MapSkipError<_, _>>")]
+    time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
+    #[serde(borrow)]
+    versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
+}
+
+fn raw_json_bytes(value: &RawJsonValue<'_>) -> Result<Vec<u8>, Error> {
+    Ok(JsonDocument::to_string(value)?.into_bytes())
+}
+
+fn parse_registry_metadata(bytes: &[u8]) -> Result<ParsedRegistryCache, Error> {
+    let data: RegistryMetadataWithTags<'_>
+        = JsonDocument::hydrate_from_slice(bytes)?;
+
+    let mut versions = Vec::with_capacity(data.versions.len());
+    for (version, manifest) in data.versions.into_iter() {
+        versions.push(ParsedRegistryVersion {
+            version,
+            manifest: raw_json_bytes(&manifest)?,
+        });
+    }
+
+    let times = data.time
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(version, time)| (version, time.timestamp()))
+        .collect::<Vec<_>>();
+
+    let dist_tags = data.dist_tags.into_iter().collect::<Vec<_>>();
+    let has_dist_tags = !dist_tags.is_empty();
+
+    Ok(ParsedRegistryCache {
+        version: 1,
+        has_dist_tags,
+        dist_tags,
+        times,
+        versions,
+    })
+}
+
+fn build_time_map(times: &[(zpm_semver::Version, i64)]) -> HashMap<zpm_semver::Version, DateTime<Utc>> {
+    let mut map = HashMap::with_capacity(times.len());
+    for (version, timestamp) in times {
+        if let Some(time) = DateTime::<Utc>::from_timestamp(*timestamp, 0) {
+            map.insert(version.clone(), time);
+        }
+    }
+    map
+}
+
 async fn fetch_registry_metadata(
     context: &InstallContext<'_>,
     registry_base: &str,
     registry_path: &str,
     authorization: Option<String>,
-) -> Result<Bytes, Error> {
+) -> Result<Arc<ParsedRegistryCache>, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -68,8 +123,14 @@ async fn fetch_registry_metadata(
 
     if let (Some(cache), Some(meta)) = (cache.as_ref(), cached_meta.as_ref()) {
         if cache.is_fresh_meta(meta) {
+            if let Some(parsed) = cache.get_parsed(&cache_key).ok().flatten() {
+                return Ok(parsed);
+            }
+
             if let Some(entry) = cache.get_entry(&cache_key, Some(meta)).ok().flatten() {
-                return Ok(entry.body.clone());
+                let parsed = Arc::new(parse_registry_metadata(entry.body.as_ref())?);
+                cache.put_parsed_async(&cache_key, parsed.clone());
+                return Ok(parsed);
             }
         }
     }
@@ -106,17 +167,38 @@ async fn fetch_registry_metadata(
             let result = http_npm::get_with_meta(&params, conditional).await;
             match result {
                 Ok(http_npm::GetWithMetaResult::NotModified) => {
-                    if let (Some(cache), Some(meta)) = (cache.as_ref(), cached_meta.as_ref()) {
-                        if let Some(entry) = cache.get_entry(&cache_key, Some(meta)).ok().flatten() {
-                            let _ = cache.refresh(&cache_key, &entry);
-                            return Ok(entry.body.clone());
+                    if let Some(cache) = &cache {
+                        if let Some(parsed) = cache.get_parsed(&cache_key).ok().flatten() {
+                            if let Some(entry) = cache.get_entry(&cache_key, cached_meta.as_ref()).ok().flatten() {
+                                cache.refresh_async(&cache_key, (*entry).clone());
+                            }
+                            return Ok(parsed);
+                        }
+
+                        if let Some(entry) = cache.get_entry(&cache_key, cached_meta.as_ref()).ok().flatten() {
+                            cache.refresh_async(&cache_key, (*entry).clone());
+                            let parsed = Arc::new(parse_registry_metadata(entry.body.as_ref())?);
+                            cache.put_parsed_async(&cache_key, parsed.clone());
+                            return Ok(parsed);
                         }
                     }
 
                     let bytes = http_npm::get(&params).await?;
-                    Ok(bytes)
+                    let parsed = Arc::new(parse_registry_metadata(bytes.as_ref())?);
+                    if let Some(cache) = &cache {
+                        let entry = ManifestCacheEntry {
+                            body: bytes.clone(),
+                            etag: cached_meta.as_ref().and_then(|meta| meta.etag.clone()),
+                            last_modified: cached_meta.as_ref().and_then(|meta| meta.last_modified.clone()),
+                            fresh_until: None,
+                        };
+                        cache.put_async(&cache_key, entry);
+                        cache.put_parsed_async(&cache_key, parsed.clone());
+                    }
+                    Ok(parsed)
                 },
                 Ok(http_npm::GetWithMetaResult::Ok { bytes, etag, last_modified }) => {
+                    let parsed = Arc::new(parse_registry_metadata(bytes.as_ref())?);
                     if let Some(cache) = &cache {
                         let entry = ManifestCacheEntry {
                             body: bytes.clone(),
@@ -124,10 +206,11 @@ async fn fetch_registry_metadata(
                             last_modified,
                             fresh_until: None,
                         };
-                        let _ = cache.put(&cache_key, &entry);
+                        cache.put_async(&cache_key, entry);
+                        cache.put_parsed_async(&cache_key, parsed.clone());
                     }
 
-                    Ok(bytes)
+                    Ok(parsed)
                 },
                 Err(err) => Err(err),
             }
@@ -141,17 +224,38 @@ async fn fetch_registry_metadata(
     } else {
         match http_npm::get_with_meta(&params, conditional).await? {
             http_npm::GetWithMetaResult::NotModified => {
-                if let (Some(cache), Some(meta)) = (cache.as_ref(), cached_meta.as_ref()) {
-                    if let Some(entry) = cache.get_entry(&cache_key, Some(meta)).ok().flatten() {
-                        let _ = cache.refresh(&cache_key, &entry);
-                        return Ok(entry.body.clone());
+                if let Some(cache) = &cache {
+                    if let Some(parsed) = cache.get_parsed(&cache_key).ok().flatten() {
+                        if let Some(entry) = cache.get_entry(&cache_key, cached_meta.as_ref()).ok().flatten() {
+                            cache.refresh_async(&cache_key, (*entry).clone());
+                        }
+                        return Ok(parsed);
+                    }
+
+                    if let Some(entry) = cache.get_entry(&cache_key, cached_meta.as_ref()).ok().flatten() {
+                        cache.refresh_async(&cache_key, (*entry).clone());
+                        let parsed = Arc::new(parse_registry_metadata(entry.body.as_ref())?);
+                        cache.put_parsed_async(&cache_key, parsed.clone());
+                        return Ok(parsed);
                     }
                 }
 
                 let bytes = http_npm::get(&params).await?;
-                Ok(bytes)
+                let parsed = Arc::new(parse_registry_metadata(bytes.as_ref())?);
+                if let Some(cache) = &cache {
+                    let entry = ManifestCacheEntry {
+                        body: bytes.clone(),
+                        etag: cached_meta.as_ref().and_then(|meta| meta.etag.clone()),
+                        last_modified: cached_meta.as_ref().and_then(|meta| meta.last_modified.clone()),
+                        fresh_until: None,
+                    };
+                    cache.put_async(&cache_key, entry);
+                    cache.put_parsed_async(&cache_key, parsed.clone());
+                }
+                Ok(parsed)
             },
             http_npm::GetWithMetaResult::Ok { bytes, etag, last_modified } => {
+                let parsed = Arc::new(parse_registry_metadata(bytes.as_ref())?);
                 if let Some(cache) = &cache {
                     let entry = ManifestCacheEntry {
                         body: bytes.clone(),
@@ -159,10 +263,11 @@ async fn fetch_registry_metadata(
                         last_modified,
                         fresh_until: None,
                     };
-                    let _ = cache.put(&cache_key, &entry);
+                    cache.put_async(&cache_key, entry);
+                    cache.put_parsed_async(&cache_key, parsed.clone());
                 }
 
-                Ok(bytes)
+                Ok(parsed)
             },
         }
     };
@@ -296,23 +401,13 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
             allow_oidc: false,
         }).await?;
 
-    let bytes
+    let registry_data
         = fetch_registry_metadata(context, &registry_base, &registry_path, authorization).await?;
-
-    #[serde_as]
-    #[derive(Deserialize)]
-    struct RegistryMetadata<'a> {
-        #[serde_as(as = "Option<MapSkipError<_, _>>")]
-        time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
-        #[serde(borrow)]
-        versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
-    }
-
-    let registry_data: RegistryMetadata
-        = JsonDocument::hydrate_from_slice(&bytes[..])?;
+    let time_map = build_time_map(&registry_data.times);
 
     // Iterate in reverse order as we assume that users will most likely use newer versions.
-    for (version, manifest) in registry_data.versions.iter().rev() {
+    for entry in registry_data.versions.iter().rev() {
+        let version = &entry.version;
         // Skip if the version is not in the range
         if !params.range.check(version) {
             continue;
@@ -321,15 +416,14 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         // Skip if the version is more recent than the minimum age gate
         let time
             = project.config.settings.npm_minimal_age_gate.value
-                .and_then(|_| registry_data.time.as_ref())
-                .and_then(|map| map.get(version));
+                .and_then(|_| time_map.get(version));
 
         if !is_package_approved(context, package_ident, version, time) {
             continue;
         }
 
         let manifest
-            = JsonDocument::hydrate_from_value(manifest)?;
+            = JsonDocument::hydrate_from_slice(&entry.manifest)?;
 
         return build_resolution_result(context, descriptor, package_ident, version.clone(), manifest);
     }
@@ -359,44 +453,27 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
             allow_oidc: false,
         }).await?;
 
-    let bytes
+    let registry_data
         = fetch_registry_metadata(context, &registry_base, &registry_path, authorization).await?;
 
-    #[serde_as]
-    #[derive(Deserialize)]
-    struct RegistryMetadata<'a> {
-        #[serde(rename(deserialize = "dist-tags"))]
-        dist_tags: BTreeMap<String, zpm_semver::Version>,
-        #[serde_as(as = "Option<MapSkipError<_, _>>")]
-        time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
-        #[serde(borrow)]
-        versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
-    }
-
-    // Added lifetime bound to fix 'lifetime may not live long enough'
-    let registry_data: RegistryMetadata<'_>
-        = JsonDocument::hydrate_from_slice(&bytes[..])?;
-
-    let latest_version
-        = registry_data.dist_tags
-        .get(params.tag.as_str())
+    let latest_version = registry_data.dist_tags.iter()
+        .find(|(tag, _)| tag == params.tag.as_str())
+        .map(|(_, version)| version)
         .ok_or_else(|| Error::TagNotFound(params.tag.clone()))?;
 
-    let time
-        = registry_data.time;
+    let time_map = build_time_map(&registry_data.times);
 
-    let (version, manifest)
-        = registry_data.versions.into_iter()
-            .rev()
-            .filter(|(version, _)| version <= &latest_version)
-            .filter(|(version, _)| !version.rc.is_some() || latest_version.rc.is_some())
-            .find(|(version, _)| is_package_approved(context, package_ident, version, time.as_ref().and_then(|map| map.get(version))))
-            .ok_or_else(|| Error::NoCandidatesFound(AnonymousSemverRange {range: zpm_semver::Range::lte(latest_version.clone())}.into()))?;
+    let entry = registry_data.versions.iter()
+        .rev()
+        .filter(|entry| &entry.version <= latest_version)
+        .filter(|entry| !entry.version.rc.is_some() || latest_version.rc.is_some())
+        .find(|entry| is_package_approved(context, package_ident, &entry.version, time_map.get(&entry.version)))
+        .ok_or_else(|| Error::NoCandidatesFound(AnonymousSemverRange {range: zpm_semver::Range::lte(latest_version.clone())}.into()))?;
 
     let manifest
-        = JsonDocument::hydrate_from_value(&manifest)?;
+        = JsonDocument::hydrate_from_slice(&entry.manifest)?;
 
-    build_resolution_result(context, descriptor, package_ident, version, manifest)
+    build_resolution_result(context, descriptor, package_ident, entry.version.clone(), manifest)
 }
 
 pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &RegistryReference) -> Result<ResolutionResult, Error> {
