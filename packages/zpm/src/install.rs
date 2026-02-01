@@ -811,7 +811,10 @@ impl<'a> InstallManager<'a> {
             .with_roots(self.result.roots.clone())
             .run();
 
-        self.result.lockfile.resolutions = self.result.install_state.descriptor_to_locator.clone();
+        self.result.lockfile.resolutions = self.result.install_state.descriptor_to_locator
+            .iter()
+            .map(|(descriptor, locator)| (descriptor.clone(), locator.clone()))
+            .collect();
         self.result.lockfile_changed = self.result.lockfile != self.initial_lockfile;
 
         self.result.skip_build = self.context.mode == Some(InstallMode::SkipBuild);
