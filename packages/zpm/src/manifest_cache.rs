@@ -4,6 +4,7 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::sync::OnceCell;
 use zpm_utils::Path;
 
 use crate::error::Error;
@@ -56,6 +57,7 @@ struct CacheMeta {
 
 static MEMORY_ENTRIES: LazyLock<DashMap<String, Arc<ManifestCacheEntry>>> = LazyLock::new(DashMap::new);
 static MEMORY_META: LazyLock<DashMap<String, ManifestCacheMeta>> = LazyLock::new(DashMap::new);
+static IN_FLIGHT: LazyLock<DashMap<String, Arc<OnceCell<Result<Bytes, Error>>>>> = LazyLock::new(DashMap::new);
 
 impl ManifestCache {
     pub fn new(project: &Project) -> Result<Self, Error> {
@@ -252,6 +254,16 @@ impl ManifestCache {
         };
 
         fresh_until >= now_seconds()
+    }
+
+    pub fn in_flight_cell(&self, key: &str) -> Arc<OnceCell<Result<Bytes, Error>>> {
+        IN_FLIGHT.entry(key.to_string())
+            .or_insert_with(|| Arc::new(OnceCell::new()))
+            .clone()
+    }
+
+    pub fn clear_in_flight(&self, key: &str) {
+        IN_FLIGHT.remove(key);
     }
 
     fn paths_for_key(&self, key: &str) -> (Path, Path) {

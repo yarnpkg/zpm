@@ -26,6 +26,7 @@ pub struct NpmHttpParams<'a> {
 pub struct ConditionalRequest<'a> {
     pub etag: Option<&'a str>,
     pub last_modified: Option<&'a str>,
+    pub accept: Option<&'a str>,
 }
 
 pub enum GetWithMetaResult {
@@ -373,7 +374,8 @@ pub async fn get_with_meta(params: &NpmHttpParams<'_>, conditional: Option<Condi
     if let Some(conditional) = conditional {
         request = request
             .header("if-none-match", conditional.etag)
-            .header("if-modified-since", conditional.last_modified);
+            .header("if-modified-since", conditional.last_modified)
+            .header("accept", conditional.accept);
     }
 
     let response

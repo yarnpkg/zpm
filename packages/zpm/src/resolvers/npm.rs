@@ -74,16 +74,21 @@ async fn fetch_registry_metadata(
         }
     }
 
-    let conditional = cached_meta.as_ref().and_then(|meta| {
+    let accept_header = "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*";
+    let conditional = cached_meta.as_ref().map(|meta| {
         let etag = meta.etag.as_deref();
         let last_modified = meta.last_modified.as_deref();
 
-        if etag.is_none() && last_modified.is_none() {
-            None
-        } else {
-            Some(http_npm::ConditionalRequest { etag, last_modified })
+        http_npm::ConditionalRequest {
+            etag,
+            last_modified,
+            accept: Some(accept_header),
         }
-    });
+    }).or_else(|| Some(http_npm::ConditionalRequest {
+        etag: None,
+        last_modified: None,
+        accept: Some(accept_header),
+    }));
 
     let params = http_npm::NpmHttpParams {
         http_client: &project.http_client,
@@ -93,32 +98,76 @@ async fn fetch_registry_metadata(
         otp: None,
     };
 
-    match http_npm::get_with_meta(&params, conditional).await? {
-        http_npm::GetWithMetaResult::NotModified => {
-            if let (Some(cache), Some(meta)) = (cache.as_ref(), cached_meta.as_ref()) {
-                if let Some(entry) = cache.get_entry(&cache_key, Some(meta)).ok().flatten() {
-                    let _ = cache.refresh(&cache_key, &entry);
-                    return Ok(entry.body.clone());
+    let in_flight = cache.as_ref()
+        .map(|cache| cache.in_flight_cell(&cache_key));
+
+    let fetch_result = if let Some(cell) = in_flight {
+        let result = cell.get_or_init(|| async {
+            let result = http_npm::get_with_meta(&params, conditional).await;
+            match result {
+                Ok(http_npm::GetWithMetaResult::NotModified) => {
+                    if let (Some(cache), Some(meta)) = (cache.as_ref(), cached_meta.as_ref()) {
+                        if let Some(entry) = cache.get_entry(&cache_key, Some(meta)).ok().flatten() {
+                            let _ = cache.refresh(&cache_key, &entry);
+                            return Ok(entry.body.clone());
+                        }
+                    }
+
+                    let bytes = http_npm::get(&params).await?;
+                    Ok(bytes)
+                },
+                Ok(http_npm::GetWithMetaResult::Ok { bytes, etag, last_modified }) => {
+                    if let Some(cache) = &cache {
+                        let entry = ManifestCacheEntry {
+                            body: bytes.clone(),
+                            etag,
+                            last_modified,
+                            fresh_until: None,
+                        };
+                        let _ = cache.put(&cache_key, &entry);
+                    }
+
+                    Ok(bytes)
+                },
+                Err(err) => Err(err),
+            }
+        }).await;
+
+        if let Some(cache) = &cache {
+            cache.clear_in_flight(&cache_key);
+        }
+
+        result.clone()
+    } else {
+        match http_npm::get_with_meta(&params, conditional).await? {
+            http_npm::GetWithMetaResult::NotModified => {
+                if let (Some(cache), Some(meta)) = (cache.as_ref(), cached_meta.as_ref()) {
+                    if let Some(entry) = cache.get_entry(&cache_key, Some(meta)).ok().flatten() {
+                        let _ = cache.refresh(&cache_key, &entry);
+                        return Ok(entry.body.clone());
+                    }
                 }
-            }
 
-            let bytes = http_npm::get(&params).await?;
-            Ok(bytes)
-        },
-        http_npm::GetWithMetaResult::Ok { bytes, etag, last_modified } => {
-            if let Some(cache) = &cache {
-                let entry = ManifestCacheEntry {
-                    body: bytes.clone(),
-                    etag,
-                    last_modified,
-                    fresh_until: None,
-                };
-                let _ = cache.put(&cache_key, &entry);
-            }
+                let bytes = http_npm::get(&params).await?;
+                Ok(bytes)
+            },
+            http_npm::GetWithMetaResult::Ok { bytes, etag, last_modified } => {
+                if let Some(cache) = &cache {
+                    let entry = ManifestCacheEntry {
+                        body: bytes.clone(),
+                        etag,
+                        last_modified,
+                        fresh_until: None,
+                    };
+                    let _ = cache.put(&cache_key, &entry);
+                }
 
-            Ok(bytes)
-        },
-    }
+                Ok(bytes)
+            },
+        }
+    };
+
+    fetch_result
 }
 
 fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: zpm_semver::Version, mut manifest: RemoteManifestWithScripts) -> Result<ResolutionResult, Error> {
