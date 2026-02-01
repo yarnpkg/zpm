@@ -43,6 +43,16 @@
       "description": "Whether to remove unused packages from the local cache after each install",
       "default": true
     },
+    "enableManifestCache": {
+      "type": "boolean",
+      "description": "Whether to enable the registry manifest disk cache",
+      "default": true
+    },
+    "enableManifestCacheControl": {
+      "type": "boolean",
+      "description": "Whether to respect the manifest cache TTL to skip network requests",
+      "default": true
+    },
     "enableImmutableCache": {
       "type": "boolean",
       "description": "Whether to report errors when a package would be added or removed from the cache",
@@ -97,6 +107,11 @@
       "type": "usize",
       "description": "The number of times to retry a network request",
       "default": 3
+    },
+    "manifestCacheMaxAge": {
+      "type": "std::time::Duration",
+      "description": "How long to consider registry manifest cache entries fresh",
+      "default": "std::time::Duration::from_secs(300)"
     },
     "localCacheFolderName": {
       "type": "string",

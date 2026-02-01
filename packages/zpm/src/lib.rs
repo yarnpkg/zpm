@@ -20,6 +20,7 @@ pub mod http;
 pub mod install;
 pub mod linker;
 pub mod lockfile;
+pub mod manifest_cache;
 pub mod manifest;
 pub mod misc;
 pub mod npm;

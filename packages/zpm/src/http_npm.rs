@@ -23,6 +23,21 @@ pub struct NpmHttpParams<'a> {
     pub otp: Option<&'a str>,
 }
 
+pub struct ConditionalRequest<'a> {
+    pub etag: Option<&'a str>,
+    pub last_modified: Option<&'a str>,
+    pub accept: Option<&'a str>,
+}
+
+pub enum GetWithMetaResult {
+    Ok {
+        bytes: Bytes,
+        etag: Option<String>,
+        last_modified: Option<String>,
+    },
+    NotModified,
+}
+
 pub enum AuthorizationMode {
     RespectConfiguration,
     AlwaysAuthenticate,
@@ -345,6 +360,53 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
     };
 
     Ok(bytes)
+}
+
+pub async fn get_with_meta(params: &NpmHttpParams<'_>, conditional: Option<ConditionalRequest<'_>>) -> Result<GetWithMetaResult, Error> {
+    let url
+        = format!("{}{}", params.registry, params.path);
+
+    let mut request
+        = params.http_client.get(&url)?
+            .enable_status_check(false)
+            .header("authorization", params.authorization);
+
+    if let Some(conditional) = conditional {
+        request = request
+            .header("if-none-match", conditional.etag)
+            .header("if-modified-since", conditional.last_modified)
+            .header("accept", conditional.accept);
+    }
+
+    let response
+        = request.send().await?;
+
+    handle_invalid_authentication_error(params, &response).await?;
+
+    if response.status().as_u16() == 304 {
+        return Ok(GetWithMetaResult::NotModified);
+    }
+
+    let etag
+        = response.headers()
+            .get("etag")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_string());
+
+    let last_modified
+        = response.headers()
+            .get("last-modified")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_string());
+
+    let bytes
+        = response.error_for_status()?.bytes().await?;
+
+    Ok(GetWithMetaResult::Ok {
+        bytes,
+        etag,
+        last_modified,
+    })
 }
 
 pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {
