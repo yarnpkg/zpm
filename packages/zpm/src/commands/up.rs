@@ -2,12 +2,12 @@ use std::collections::BTreeSet;
 
 use clipanion::cli;
 use zpm_parsers::{Document, JsonDocument, Value};
-use zpm_primitives::Ident;
+use zpm_primitives::{Descriptor, Ident};
 use zpm_semver::RangeKind;
 use zpm_utils::ToFileString;
 
 use crate::{
-    descriptor_loose::{self, LooseDescriptor},
+    descriptor_loose::{self, DescriptorLooseDescriptor, LooseDescriptor},
     error::Error,
     install::InstallContext,
     project::{InstallMode, Project, RunInstallOptions, Workspace}
@@ -21,7 +21,7 @@ use crate::{
 ///
 /// If `-R,--recursive` is set the command will change behavior and no other switch will be allowed. When operating under this mode yarn up will
 /// collect package idents from both workspace manifests and the lockfile, expand patterns against all of them, then re-resolve matching packages
-/// (often to their highest available versions). Both the lockfile and workspace manifests are updated with the new resolutions.
+/// (often to their highest available versions). The lockfile is updated with the new resolutions; workspace manifests are left unchanged.
 ///
 /// If `-i,--interactive` is set (or if the `preferInteractive` settings is toggled on) the command will offer various choices, depending on the
 /// detected upgrade paths. Some upgrades require this flag in order to resolve ambiguities.
@@ -107,9 +107,7 @@ impl Up {
             .flat_map(|workspace| self.list_workspace_idents(workspace))
             .collect::<BTreeSet<_>>();
 
-        let expanded_descriptors = self.descriptors.iter()
-            .flat_map(|descriptor| descriptor.expand(&all_idents))
-            .collect::<Vec<_>>();
+        let expanded_descriptors = self.expand_descriptors(&all_idents);
 
         let range_kind = if self.fixed {
             RangeKind::Exact
@@ -177,9 +175,11 @@ impl Up {
         let all_idents: BTreeSet<Ident> = workspace_idents.union(&lockfile_idents).cloned().collect();
 
         // Expand patterns against all idents (workspaces + lockfile)
-        let expanded_descriptors = self.descriptors.iter()
-            .flat_map(|descriptor| descriptor.expand(&all_idents))
-            .collect::<Vec<_>>();
+        let expanded_descriptors = self.expand_descriptors(&all_idents);
+
+        let expanded_idents: BTreeSet<Ident> = expanded_descriptors.iter()
+            .filter_map(Self::loose_descriptor_ident)
+            .collect();
 
         let range_kind = project.config.settings.default_semver_range_prefix.value;
 
@@ -187,6 +187,7 @@ impl Up {
             active_workspace_ident: project.active_workspace()?.name.clone(),
             range_kind,
             resolve_tags: true,
+            allow_reuse: false,
         };
 
         let package_cache = project.package_cache()?;
@@ -195,17 +196,24 @@ impl Up {
             .with_package_cache(Some(&package_cache))
             .with_project(Some(&project));
 
-        let loose_resolutions = LooseDescriptor::resolve_all(&install_context, &resolve_options, &expanded_descriptors).await?;
+        let matching_descriptors = lockfile.resolutions.keys()
+            .filter(|descriptor| expanded_idents.contains(&descriptor.ident))
+            .cloned()
+            .collect::<Vec<Descriptor>>();
 
-        for workspace in &project.workspaces {
-            self.update_workspace_manifest(workspace, &loose_resolutions)?;
-        }
+        let loose_descriptors = matching_descriptors.iter()
+            .cloned()
+            .map(|descriptor| LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor}))
+            .collect::<Vec<_>>();
+
+        let loose_resolutions = LooseDescriptor::resolve_all(&install_context, &resolve_options, &loose_descriptors).await?;
+
+        let enforced_resolutions = matching_descriptors.into_iter()
+            .zip(loose_resolutions.into_iter())
+            .filter_map(|(descriptor, resolution)| resolution.locator.map(|locator| (descriptor, locator)))
+            .collect();
 
         let mut project = Project::new(None).await?;
-
-        let enforced_resolutions = loose_resolutions.into_iter()
-            .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, locator)))
-            .collect();
 
         project.run_install(RunInstallOptions {
             mode: self.mode,
@@ -264,5 +272,19 @@ impl Up {
         }
 
         idents
+    }
+
+    fn expand_descriptors(&self, all_idents: &BTreeSet<Ident>) -> Vec<LooseDescriptor> {
+        self.descriptors.iter()
+            .flat_map(|descriptor| descriptor.expand(all_idents))
+            .collect::<Vec<_>>()
+    }
+
+    fn loose_descriptor_ident(descriptor: &LooseDescriptor) -> Option<Ident> {
+        match descriptor {
+            LooseDescriptor::Descriptor(descriptor_loose::DescriptorLooseDescriptor {descriptor}) => Some(descriptor.ident.clone()),
+            LooseDescriptor::Ident(descriptor_loose::IdentLooseDescriptor {ident}) => Some(ident.clone()),
+            LooseDescriptor::Range(_) => None,
+        }
     }
 }
