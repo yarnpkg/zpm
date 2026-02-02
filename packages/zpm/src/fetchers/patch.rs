@@ -20,7 +20,20 @@ pub fn has_builtin_patch(ident: &Ident) -> bool {
         .any(|(name, _)| *name == ident.as_str())
 }
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &PatchReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &PatchReference, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+    let package_cache = context.package_cache
+        .expect("The package cache is required to fetch a patch package");
+
+    if is_mock_request {
+        let archive_path = package_cache
+            .key_path(locator, ".zip");
+
+        let package_directory = archive_path
+            .with_join(&locator.ident.nm_subdir());
+
+        return Ok(FetchResult::new_mock(archive_path, package_directory));
+    }
+
     let project = context.project
         .expect("The project is required to fetch a patch package");
 

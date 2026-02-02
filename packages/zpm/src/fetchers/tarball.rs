@@ -8,16 +8,26 @@ use crate::{
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &TarballReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &TarballReference, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+    let package_cache = context.package_cache
+        .expect("The package cache is required for fetching tarball packages");
+
+    if is_mock_request {
+        let archive_path = package_cache
+            .key_path(locator, ".zip");
+
+        let package_directory = archive_path
+            .with_join(&locator.ident.nm_subdir());
+
+        return Ok(FetchResult::new_mock(archive_path, package_directory));
+    }
+
     let parent_data
         = dependencies[0].as_fetched();
 
     let tarball_path = parent_data.package_data
         .context_directory()
         .with_join_str(&params.path);
-
-    let package_cache = context.package_cache
-        .expect("The package cache is required for fetching tarball packages");
 
     let package_subdir
         = locator.ident.nm_subdir();

@@ -175,19 +175,19 @@ pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, i
             => portal::fetch_locator(&context, locator, params, dependencies),
 
         Reference::Url(params)
-            => url::fetch_locator(&context, locator, params).await,
+            => url::fetch_locator(&context, locator, params, is_mock_request).await,
 
         Reference::Tarball(params)
-            => tarball::fetch_locator(&context, locator, params, dependencies).await,
+            => tarball::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
 
         Reference::Folder(params)
-            => folder::fetch_locator(&context, locator, params, dependencies).await,
+            => folder::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
 
         Reference::Git(params)
-            => git::fetch_locator(&context, locator, params).await,
+            => git::fetch_locator(&context, locator, params, is_mock_request).await,
 
         Reference::Patch(params)
-            => patch::fetch_locator(&context, locator, params, dependencies).await,
+            => patch::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
 
         Reference::Shorthand(params)
             => npm::fetch_locator(&context, locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone(), url: None}, is_mock_request).await,

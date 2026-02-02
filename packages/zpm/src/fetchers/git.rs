@@ -8,9 +8,19 @@ use crate::{
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &GitReference) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &GitReference, is_mock_request: bool) -> Result<FetchResult, Error> {
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching git packages");
+
+    if is_mock_request {
+        let archive_path = package_cache
+            .key_path(locator, ".zip");
+
+        let package_directory = archive_path
+            .with_join(&locator.ident.nm_subdir());
+
+        return Ok(FetchResult::new_mock(archive_path, package_directory));
+    }
 
     let package_subdir
         = locator.ident.nm_subdir();

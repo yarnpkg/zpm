@@ -23,12 +23,22 @@ fn get_registry_base_from_url(url: &str) -> Option<String> {
     Some(format!("{}://{}{}", parsed.scheme(), host, port))
 }
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &UrlReference) -> Result<FetchResult, Error> {
-    let project = context.project
-        .expect("The project is required for fetching URL packages");
-
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &UrlReference, is_mock_request: bool) -> Result<FetchResult, Error> {
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching URL packages");
+
+    if is_mock_request {
+        let archive_path = package_cache
+            .key_path(locator, ".zip");
+
+        let package_directory = archive_path
+            .with_join(&locator.ident.nm_subdir());
+
+        return Ok(FetchResult::new_mock(archive_path, package_directory));
+    }
+
+    let project = context.project
+        .expect("The project is required for fetching URL packages");
 
     let package_subdir
         = locator.ident.nm_subdir();
