@@ -57,6 +57,9 @@ impl WorkspacesFocus {
         let mut processed_queue
             = BTreeSet::from_iter(process_queue.iter().map(|w| &w.name));
 
+        // Always include root workspace so `yarn node` works from project root
+        processed_queue.insert(&project.root_workspace().name);
+
         while let Some(workspace) = process_queue.pop() {
             let mut relevant_dependencies
                 = workspace.manifest.remote.dependencies.iter()
