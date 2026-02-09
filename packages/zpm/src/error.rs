@@ -336,6 +336,9 @@ pub enum Error {
     #[error("Invalid install state; please run an install operation to fix it")]
     InvalidInstallState,
 
+    #[error("Commands can only be run from focused workspaces and their dependencies")]
+    WorkspaceNotInstalled,
+
     #[error("Couldn't find a package matching the current working directory")]
     ActivePackageNotFound,
 

@@ -1,4 +1,5 @@
 {
+  "name": "@yarnpkg/zpm-constraints",
   "dependencies": {
     "@types/node": "^24.0.10",
     "@yarnpkg/types": "^4.0.1",

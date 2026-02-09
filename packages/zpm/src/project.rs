@@ -436,11 +436,21 @@ impl Project {
     }
 
     pub fn active_package(&self) -> Result<Locator, Error> {
-        let install_state = self.install_state.as_ref()
-            .ok_or(Error::InstallStateNotFound)?;
+        let install_state
+            = self.install_state.as_ref()
+                .ok_or(Error::InstallStateNotFound)?;
 
-        let active_package = install_state.packages_by_location.get(&self.package_cwd)
-            .ok_or(Error::ActivePackageNotFound)?;
+        let Some(active_package) = install_state.packages_by_location.get(&self.package_cwd) else {
+            let is_workspace
+                = self.try_workspace_by_rel_path(&self.package_cwd)?
+                    .is_some();
+
+            return Err(if is_workspace {
+                Error::WorkspaceNotInstalled
+            } else {
+                Error::ActivePackageNotFound
+            });
+        };
 
         Ok(active_package.clone())
     }
@@ -648,7 +658,8 @@ impl Project {
     }
 
     pub fn find_binary(&self, name: &str) -> Result<Binary, Error> {
-        let active_package = self.active_package()?;
+        let active_package
+            = self.active_package()?;
 
         self.package_visible_binaries(&active_package)?
             .remove(name)
@@ -656,7 +667,8 @@ impl Project {
     }
 
     pub fn find_script(&self, name: &str) -> Result<(Locator, String), Error> {
-        let active_package = self.active_package()?;
+        let active_package
+            = self.active_package()?;
 
         self.find_package_script(&active_package, name)
     }
