@@ -13,21 +13,21 @@ use crate::{
 #[derive_variants(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[variant_struct_attr(rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash)))]
 pub enum ResolutionSelector {
-    #[pattern(r"^(?<descriptor>.*)$")]
+    #[pattern(r"(?<descriptor>.*)")]
     #[to_file_string(|params| params.descriptor.to_file_string())]
     #[to_print_string(|params| params.descriptor.to_print_string())]
     Descriptor {
         descriptor: Descriptor,
     },
 
-    #[pattern(r"^(?<ident>.*)$")]
+    #[pattern(r"(?<ident>.*)")]
     #[to_file_string(|params| params.ident.to_file_string())]
     #[to_print_string(|params| params.ident.to_print_string())]
     Ident {
         ident: Ident,
     },
 
-    #[pattern(r"^(?<parent_descriptor>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
+    #[pattern(r"(?<parent_descriptor>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)")]
     #[to_file_string(|params| format!("{}/{}", params.parent_descriptor.to_file_string(), params.ident.to_file_string()))]
     #[to_print_string(|params| format!("{}/{}", params.parent_descriptor.to_print_string(), params.ident.to_print_string()))]
     DescriptorIdent {
@@ -35,7 +35,7 @@ pub enum ResolutionSelector {
         ident: Ident,
     },
 
-    #[pattern(r"^(?<parent_ident>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)$")]
+    #[pattern(r"(?<parent_ident>(?:@[^/*]*/)?[^/*]+)/(?<ident>[^*]+)")]
     #[to_file_string(|params| format!("{}/{}", params.parent_ident.to_file_string(), params.ident.to_file_string()))]
     #[to_print_string(|params| format!("{}/{}", params.parent_ident.to_print_string(), params.ident.to_print_string()))]
     IdentIdent {
@@ -195,7 +195,10 @@ impl<'de> Visitor<'de> for ResolutionsFieldVisitor {
 
             // TODO: Remove this in a future major version; we're keeping it for backwards compatibility with
             // the Berry codebase in which `yarn patch` was adding the "npm:" prefix to all descriptors.
-            if matches!(selector, ResolutionSelector::Descriptor(DescriptorResolutionSelector {descriptor: Descriptor {range: Range::RegistrySemver(RegistrySemverRange {ident: None, ..}), ..}, ..})) {
+            if matches!(selector,
+                | ResolutionSelector::Descriptor(DescriptorResolutionSelector {descriptor: Descriptor {range: Range::RegistrySemver(RegistrySemverRange {ident: None, ..}), ..}, ..})
+                | ResolutionSelector::DescriptorIdent(DescriptorIdentResolutionSelector {parent_descriptor: Descriptor {range: Range::RegistrySemver(RegistrySemverRange {ident: None, ..}), ..}, ..})
+            ) {
                 return Err(de::Error::custom("the 'npm:' prefix is no longer needed"));
             }
 
