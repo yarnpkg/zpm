@@ -33,7 +33,6 @@
     "eslint": "^9.36.0"
   },
   "resolutions": {
-    "express@npm:4.21.0/content-type": "~1.0.5",
     "@clipanion/tools": "file:scripts/@clipanion-tools.tgz",
     "@types/node": "^24.10.4"
   },
