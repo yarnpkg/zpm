@@ -141,15 +141,15 @@ pub async fn install_package_manager(package_manager: &VersionPackageManagerRefe
         platform: get_system_string().to_string(),
     };
 
-    if zpm_semver::Range::from_file_string(">=6.0.0-0").unwrap().check(&package_manager.version) {
+    if zpm_semver::Range::from_file_string(">=6.0.0").unwrap().check_ignore_rc(&package_manager.version) {
         return install_native_from_zpm(&version_platform, &Path::from_str("yarn-bin").unwrap()).await;
     }
 
-    if zpm_semver::Range::from_file_string(">=2.0.0-0").unwrap().check(&package_manager.version) {
+    if zpm_semver::Range::from_file_string(">=2.0.0").unwrap().check_ignore_rc(&package_manager.version) {
         return install_node_js_from_url(&version_platform).await;
     }
 
-    if zpm_semver::Range::from_file_string(">=0.0.0-0").unwrap().check(&package_manager.version) {
+    if zpm_semver::Range::from_file_string(">=0.0.0").unwrap().check_ignore_rc(&package_manager.version) {
         return install_node_js_from_package(&version_platform, &Path::from_str("bin/yarn.js").unwrap()).await;
     }
 
