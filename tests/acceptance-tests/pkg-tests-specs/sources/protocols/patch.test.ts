@@ -192,6 +192,26 @@ describe(`Protocols`, () => {
     );
 
     test(
+      `it should support patch paths containing metadata suffixes`,
+      makeTemporaryEnv(
+        {
+          dependencies: {[`no-deps`]: `patch:no-deps@1.0.0#${PATCH_NAME}::version=1.0.0&hash=deadbeef`},
+        },
+        async ({path, run, source}) => {
+          await xfs.writeFilePromise(ppath.join(path, PATCH_NAME), NO_DEPS_PATCH);
+
+          await run(`install`);
+
+          await expect(source(`require('no-deps')`)).resolves.toMatchObject({
+            name: `no-deps`,
+            version: `1.0.0`,
+            hello: `world`,
+          });
+        },
+      ),
+    );
+
+    test(
       `it should support applying a patch on a patch`,
       makeTemporaryEnv(
         {
