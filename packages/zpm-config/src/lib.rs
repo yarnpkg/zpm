@@ -119,6 +119,8 @@ impl<'de, T: FromFileString + Deserialize<'de>> Deserialize<'de> for Interpolate
         #[serde(untagged)]
         enum StringOrAnything<T> {
             String(String),
+            Integer(i64),
+            Float(f64),
             Anything(T),
         }
 
@@ -130,6 +132,22 @@ impl<'de, T: FromFileString + Deserialize<'de>> Deserialize<'de> for Interpolate
 
                 let hydrated
                     = T::from_file_string(&interpolated)
+                        .map_err(de::Error::custom)?;
+
+                Ok(Interpolated::new(hydrated))
+            },
+
+            StringOrAnything::Integer(value) => {
+                let hydrated
+                    = T::from_file_string(&value.to_string())
+                        .map_err(de::Error::custom)?;
+
+                Ok(Interpolated::new(hydrated))
+            },
+
+            StringOrAnything::Float(value) => {
+                let hydrated
+                    = T::from_file_string(&value.to_string())
                         .map_err(de::Error::custom)?;
 
                 Ok(Interpolated::new(hydrated))
