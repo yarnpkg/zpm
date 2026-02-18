@@ -325,8 +325,7 @@ impl Add {
 
         let enforced_resolutions
             = resolutions.into_iter()
-                .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, locator)))
-                .map(|(descriptor, locator)| (descriptor.clone(), locator.clone()))
+                .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, Some(locator))))
                 .collect();
 
         project.run_install(project::RunInstallOptions {

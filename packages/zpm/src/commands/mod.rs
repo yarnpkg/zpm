@@ -33,6 +33,7 @@ mod set_version_from_sources;
 mod unlink;
 mod unplug;
 mod up;
+mod up_recursive;
 mod version;
 mod workspaces_focus;
 mod workspaces_foreach;
@@ -106,6 +107,7 @@ pub enum YarnCli {
     Unlink(unlink::Unlink),
     Unplug(unplug::Unplug),
     Up(up::Up),
+    UpRecursive(up_recursive::UpRecursive),
     WorkspacesFocus(workspaces_focus::WorkspacesFocus),
     WorkspacesForeach(workspaces_foreach::WorkspacesForeach),
     WorkspacesList(workspaces_list::WorkspacesList),

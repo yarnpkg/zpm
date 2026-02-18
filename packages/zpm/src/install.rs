@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
-use zpm_utils::{Hash64, IoResultExt, Path, System, ToHumanString, UrlEncoded};
+use zpm_utils::{CollectHash, Hash64, IoResultExt, Path, System, ToHumanString, UrlEncoded};
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
@@ -33,7 +33,7 @@ pub struct InstallContext<'a> {
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub prune_dev_dependencies: bool,
-    pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
+    pub enforced_resolutions: BTreeMap<Descriptor, Option<Locator>>,
     pub refresh_lockfile: bool,
     pub install_time: DateTime<Utc>,
     pub mode: Option<InstallMode>,
@@ -77,7 +77,7 @@ impl<'a> InstallContext<'a> {
         self
     }
 
-    pub fn set_enforced_resolutions(mut self, enforced_resolutions: BTreeMap<Descriptor, Locator>) -> Self {
+    pub fn set_enforced_resolutions(mut self, enforced_resolutions: BTreeMap<Descriptor, Option<Locator>>) -> Self {
         self.enforced_resolutions = enforced_resolutions;
         self
     }
@@ -488,11 +488,23 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult, Error> f
                 return Ok(None);
             }
 
+            // enforced_resolutions semantics:
+            // - None (not in map): use lockfile resolution if available
+            // - Some(None): skip lockfile, force re-resolution
+            // - Some(Some(locator)): force resolution to specific locator
             let enforced_resolution
                 = ctx.enforced_resolutions.get(descriptor);
 
+            // If Some(None), skip lockfile lookup entirely and force re-resolution
+            if enforced_resolution == Some(&None) {
+                return Ok(None);
+            }
+
+            // Get the enforced locator if any (flatten Option<Option<Locator>> to Option<Locator>)
+            let enforced_locator = enforced_resolution.and_then(|opt| opt.as_ref());
+
             if let Some(locator) = self.lockfile.resolutions.get(descriptor) {
-                if enforced_resolution.map_or(true, |enforced_resolution| locator == enforced_resolution) {
+                if enforced_locator.map_or(true, |enforced| locator == enforced) {
                     if self.lockfile.metadata.version != LockfileMetadata::new().version || ctx.refresh_lockfile {
                         return Ok(Some(InstallOpResult::Pinned(PinnedResult {
                             locator: locator.clone(),
@@ -506,7 +518,7 @@ impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult, Error> f
                 }
             }
 
-            if let Some(locator) = enforced_resolution {
+            if let Some(locator) = enforced_locator {
                 return Ok(Some(InstallOpResult::Pinned(PinnedResult {
                     locator: locator.clone(),
                 })));
@@ -812,6 +824,18 @@ impl<'a> InstallManager<'a> {
             .run();
 
         self.result.lockfile.resolutions = self.result.install_state.descriptor_to_locator.clone();
+
+        // Compute tree hashes for all workspaces
+        if let Some(project) = &self.context.project {
+            for workspace in &project.workspaces {
+                let tree_hash = compute_dependency_tree_hash(
+                    &self.result.install_state,
+                    &workspace.locator(),
+                );
+                self.result.lockfile.workspaces.insert(workspace.name.clone(), tree_hash);
+            }
+        }
+
         self.result.lockfile_changed = self.result.lockfile != self.initial_lockfile;
 
         self.result.skip_build = self.context.mode == Some(InstallMode::SkipBuild);
@@ -1064,4 +1088,46 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     }
 
     Ok((dependencies, peer_dependencies))
+}
+
+/// Computes a hash of the workspace's recursive dependency tree.
+/// The hash includes all locators in the dependency tree, traversed in a deterministic order.
+pub fn compute_dependency_tree_hash(install_state: &InstallState, root_locator: &Locator) -> Hash64 {
+    let mut visited = BTreeSet::new();
+    let mut locators = Vec::new();
+
+    collect_dependency_locators(install_state, root_locator, &mut visited, &mut locators);
+
+    // Hash all locators in order
+    locators.iter()
+        .map(|locator| Hash64::from_string(locator))
+        .collect::<Vec<_>>()
+        .iter()
+        .collect_hash()
+}
+
+/// Recursively collects all locators in the dependency tree.
+fn collect_dependency_locators(
+    install_state: &InstallState,
+    locator: &Locator,
+    visited: &mut BTreeSet<Locator>,
+    locators: &mut Vec<Locator>,
+) {
+    if !visited.insert(locator.clone()) {
+        return;
+    }
+
+    locators.push(locator.clone());
+
+    let Some(resolution) = install_state.resolution_tree.locator_resolutions.get(locator) else {
+        return;
+    };
+
+    for dependency_descriptor in resolution.dependencies.values() {
+        let Some(dependency_locator) = install_state.resolution_tree.descriptor_to_locator.get(dependency_descriptor) else {
+            continue;
+        };
+
+        collect_dependency_locators(install_state, dependency_locator, visited, locators);
+    }
 }

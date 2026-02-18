@@ -31,6 +31,7 @@ pub struct Lockfile {
     pub metadata: LockfileMetadata,
     pub resolutions: BTreeMap<Descriptor, Locator>,
     pub entries: BTreeMap<Locator, LockfileEntry>,
+    pub workspaces: BTreeMap<Ident, Hash64>,
 }
 
 impl Lockfile {
@@ -39,6 +40,7 @@ impl Lockfile {
             metadata: LockfileMetadata::new(),
             resolutions: BTreeMap::new(),
             entries: BTreeMap::new(),
+            workspaces: BTreeMap::new(),
         }
     }
 }
@@ -50,6 +52,7 @@ impl<'de> Deserialize<'de> for Lockfile {
         let mut lockfile = Lockfile::new();
 
         lockfile.metadata = payload.metadata;
+        lockfile.workspaces = payload.workspaces;
 
         for (key, entry) in payload.entries {
             for descriptor in key.0 {
@@ -94,6 +97,7 @@ impl Serialize for Lockfile {
         let payload = LockfilePayload {
             metadata: self.metadata.clone(),
             entries,
+            workspaces: self.workspaces.clone(),
         };
 
         payload.serialize(serializer)
@@ -230,6 +234,9 @@ struct LockfilePayload {
     #[serde(rename = "__metadata")]
     #[serde(default)]
     metadata: LockfileMetadata,
+
+    #[serde(default)]
+    workspaces: BTreeMap<Ident, Hash64>,
 
     #[serde(default)]
     entries: BTreeMap<MultiKey<Descriptor>, LockfileEntry>,

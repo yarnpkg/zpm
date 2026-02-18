@@ -50,7 +50,7 @@ pub enum InstallMode {
 pub struct RunInstallOptions {
     pub check_checksums: bool,
     pub check_resolutions: bool,
-    pub enforced_resolutions: BTreeMap<Descriptor, Locator>,
+    pub enforced_resolutions: BTreeMap<Descriptor, Option<Locator>>,
     pub prune_dev_dependencies: bool,
     pub mode: Option<InstallMode>,
     pub refresh_lockfile: bool,
@@ -752,6 +752,7 @@ impl Project {
             silent_or_error: true,
             mode: None,
             roots: None,
+            ..Default::default()
         }).await?;
 
         Ok(())

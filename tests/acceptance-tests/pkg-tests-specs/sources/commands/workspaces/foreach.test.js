@@ -3,7 +3,7 @@ const {npath, ppath, xfs} = require(`@yarnpkg/fslib`);
 const {
   exec: {execFile},
   fs: {writeJson, writeFile},
-  tests: {testIf, FEATURE_CHECKS},
+  tests: {testIf, setPackageWhitelist, FEATURE_CHECKS},
 } = require(`pkg-tests-core`);
 
 const forEachVerboseDone = FEATURE_CHECKS.forEachVerboseDone
@@ -884,6 +884,65 @@ describe(`Commands`, () => {
             `Test Workspace D\n`,
             `Test Workspace E\n`,
             `Test Workspace F\n`,
+            ...forEachVerboseDone,
+          ].join(``),
+        });
+      }),
+    );
+
+    test(
+      `--since only runs on workspaces whose recursive dependency trees changed when the lockfile changes`,
+      makeTemporaryEnv({
+        private: true,
+        workspaces: [`packages/*`],
+      }, async ({path, run}) => {
+        // Create two workspaces: workspace-a depends on one-range-dep (which depends on no-deps)
+        // and workspace-b has no npm dependencies
+        await writeJson(`${path}/packages/workspace-a/package.json`, {
+          name: `workspace-a`,
+          version: `1.0.0`,
+          scripts: {
+            print: `echo Test Workspace A`,
+          },
+          dependencies: {
+            [`one-range-dep`]: `1.0.0`,
+          },
+        });
+
+        await writeJson(`${path}/packages/workspace-b/package.json`, {
+          name: `workspace-b`,
+          version: `1.0.0`,
+          scripts: {
+            print: `echo Test Workspace B`,
+          },
+        });
+
+        const git = (...args) => execFile(`git`, args, {cwd: path});
+
+        // Install with only no-deps@1.0.0 visible, so one-range-dep resolves to no-deps@1.0.0
+        await setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
+          await run(`install`);
+        });
+
+        await git(`init`, `.`);
+        await git(`config`, `user.name`, `John Doe`);
+        await git(`config`, `user.email`, `john.doe@example.org`);
+        await git(`config`, `commit.gpgSign`, `false`);
+        await git(`add`, `.`);
+        await git(`commit`, `-m`, `First commit`);
+
+        // Now make no-deps@1.1.0 visible and upgrade no-deps
+        await setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`, `1.1.0`])]]), async () => {
+          await run(`up`, `-R`, `no-deps`);
+        });
+
+        // The lockfile changed, but only workspace-a's dependency tree changed (via one-range-dep -> no-deps)
+        // workspace-b should not be included since it doesn't depend on no-deps
+        await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`)).resolves.toEqual({
+          code: 0,
+          stderr: ``,
+          stdout: [
+            `Test Workspace A\n`,
             ...forEachVerboseDone,
           ].join(``),
         });

@@ -90,7 +90,7 @@ impl InitWithTemplate {
 
         let enforced_resolutions
             = vec![template.clone()].into_iter()
-                .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, locator)))
+                .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, Some(locator))))
                 .collect();
 
         project.run_install(RunInstallOptions {

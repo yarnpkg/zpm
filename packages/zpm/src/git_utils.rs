@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use itertools::Itertools;
+use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
 use zpm_utils::Path;
 
-use crate::{error::Error, project::Project, script::ScriptEnvironment};
+use crate::{error::Error, lockfile::Lockfile, project::{Project, LOCKFILE_NAME}, script::ScriptEnvironment};
 
 pub fn find_root(initial_cwd: &Path) -> Result<Path, Error> {
     // Note: We can't just use `git rev-parse --show-toplevel`, because on Windows
@@ -167,16 +168,32 @@ pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error
 }
 
 pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) -> Result<BTreeMap<Ident, BTreeSet<Path>>, Error> {
+    let since_ref = match since {
+        Some(since) => since.to_string(),
+        None => fetch_branch_base(project).await?,
+    };
+
     let changed_files
-        = fetch_changed_files(&project, since).await?;
+        = fetch_changed_files(&project, Some(&since_ref)).await?;
 
     let mut changed_workspaces: BTreeMap<_, BTreeSet<_>>
         = BTreeMap::new();
 
-    for file in changed_files {
+    let lockfile_path
+        = project.project_cwd.with_join_str(LOCKFILE_NAME);
+
+    let lockfile_changed
+        = changed_files.contains(&lockfile_path);
+
+    for file in &changed_files {
+        // Skip the lockfile itself - we handle it separately via hash comparison
+        if file == &lockfile_path {
+            continue;
+        }
+
         let workspace
             = project.workspaces.iter()
-                .filter(|w| w.path.contains(&file))
+                .filter(|w| w.path.contains(file))
                 .max_by_key(|w| w.path.as_str().len());
 
         if let Some(workspace) = workspace {
@@ -184,11 +201,65 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
                 = changed_workspaces.entry(workspace.name.clone())
                     .or_default();
 
-            entry.insert(file);
+            entry.insert(file.clone());
+        }
+    }
+
+    // If the lockfile changed, compare workspace hashes to find affected workspaces
+    if lockfile_changed {
+        let current_lockfile
+            = project.lockfile().ok();
+
+        let old_lockfile
+            = fetch_lockfile_at_ref(project, &since_ref).await.ok();
+
+        if let (Some(current), Some(old)) = (&current_lockfile, &old_lockfile) {
+            for workspace in &project.workspaces {
+                if changed_workspaces.contains_key(&workspace.name) {
+                    continue;
+                }
+
+                let current_hash
+                    = current.workspaces.get(&workspace.name);
+                let old_hash
+                    = old.workspaces.get(&workspace.name);
+
+                if current_hash != old_hash {
+                    changed_workspaces.entry(workspace.name.clone())
+                        .or_default()
+                        .insert(lockfile_path.clone());
+                }
+            }
         }
     }
 
     Ok(changed_workspaces)
+}
+
+/// Fetches and parses the lockfile at a specific git ref.
+async fn fetch_lockfile_at_ref(project: &Project, git_ref: &str) -> Result<Lockfile, Error> {
+    let lockfile_content
+        = ScriptEnvironment::new()?
+            .with_cwd(project.project_cwd.clone())
+            .run_exec("git", ["show", &format!("{}:{}", git_ref, LOCKFILE_NAME)])
+            .await?
+            .ok()?
+            .stdout_text()?;
+
+    if lockfile_content.is_empty() {
+        return Ok(Lockfile::new());
+    }
+
+    // Legacy Berry lockfiles start with '#'
+    if lockfile_content.starts_with('#') {
+        return Ok(Lockfile::new());
+    }
+
+    let lockfile: Lockfile
+        = JsonDocument::hydrate_from_str(&lockfile_content)
+            .map_err(|e| Error::LockfileParseError(e))?;
+
+    Ok(lockfile)
 }
 
 pub async fn fetch_changed_files(project: &Project, since: Option<&str>) -> Result<BTreeSet<Path>, Error> {

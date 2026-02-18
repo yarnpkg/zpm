@@ -166,7 +166,7 @@ pub async fn install_dependencies(workspace_path: &Path, loose_resolutions: Vec<
 
     let enforced_resolutions
         = loose_resolutions.into_iter()
-            .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, locator)))
+            .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, Some(locator))))
             .collect();
 
     project
