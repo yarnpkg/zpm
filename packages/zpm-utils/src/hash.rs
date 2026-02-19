@@ -5,6 +5,38 @@ use rkyv::Archive;
 
 use crate::{impl_file_string_from_str, impl_file_string_serialization, DataType, FromFileString, ToFileString, ToHumanString};
 
+pub struct Hash64Writer {
+    hasher: blake2b_simd::State,
+}
+
+impl Hash64Writer {
+    fn create_blake2b_state() -> blake2b_simd::State {
+        blake2b_simd::Params::new()
+            .hash_length(64)
+            .to_state()
+    }
+
+    pub fn new() -> Self {
+        Self {
+            hasher: Self::create_blake2b_state(),
+        }
+    }
+
+    pub fn update<T: AsRef<[u8]>>(&mut self, data: T) {
+        self.hasher.update(data.as_ref());
+    }
+
+    pub fn finalize(self) -> Hash64 {
+        Hash64 {state: self.hasher.finalize().as_bytes().to_vec()}
+    }
+}
+
+impl Default for Hash64Writer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub struct Hash64 {

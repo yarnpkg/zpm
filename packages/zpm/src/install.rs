@@ -1,10 +1,10 @@
 use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sync::LazyLock};
 
 use chrono::{DateTime, Utc};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
-use zpm_utils::{CollectHash, Hash64, IoResultExt, Path, System, ToHumanString, UrlEncoded};
+use zpm_utils::{Hash64, Hash64Writer, IoResultExt, Path, System, ToHumanString, UrlEncoded};
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
@@ -823,18 +823,15 @@ impl<'a> InstallManager<'a> {
             .with_roots(self.result.roots.clone())
             .run();
 
+        let project
+            = self.context.project
+                .expect("The project is required to compute workspace hashes");
+
         self.result.lockfile.resolutions = self.result.install_state.descriptor_to_locator.clone();
 
-        // Compute tree hashes for all workspaces
-        if let Some(project) = &self.context.project {
-            for workspace in &project.workspaces {
-                let tree_hash = compute_dependency_tree_hash(
-                    &self.result.install_state,
-                    &workspace.locator(),
-                );
-                self.result.lockfile.workspaces.insert(workspace.name.clone(), tree_hash);
-            }
-        }
+        self.result.lockfile.workspaces = project.workspaces.par_iter()
+            .map(|workspace| (workspace.name.clone(), self.compute_workspace_hash(&workspace.locator())))
+            .collect::<BTreeMap<_, _>>();
 
         self.result.lockfile_changed = self.result.lockfile != self.initial_lockfile;
 
@@ -889,6 +886,45 @@ impl<'a> InstallManager<'a> {
         self.result.install_state.content_flags.insert(locator, content_flags);
 
         Ok(())
+    }
+
+    fn compute_workspace_hash(&self, root_locator: &Locator) -> Hash64 {
+        let mut hash_writer
+            = Hash64Writer::new();
+
+        let mut visited
+            = BTreeSet::new();
+
+        let mut queue
+            = vec![root_locator.clone()];
+
+        while let Some(locator) = queue.pop() {
+            if !visited.insert(locator.clone()) {
+                continue;
+            }
+
+            hash_writer.update(locator.to_file_string());
+
+            if let Some(resolution) = self.result.install_state.normalized_resolutions.get(&locator) {
+                for dependency_descriptor in resolution.dependencies.values() {
+                    if let Some(dep_locator) = self.result.install_state.descriptor_to_locator.get(dependency_descriptor) {
+                        if !visited.contains(dep_locator) {
+                            queue.push(dep_locator.clone());
+                        }
+                    }
+                }
+
+                for variant_descriptor in &resolution.variants {
+                    if let Some(variant_locator) = self.result.install_state.descriptor_to_locator.get(variant_descriptor) {
+                        if !visited.contains(variant_locator) {
+                            queue.push(variant_locator.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        hash_writer.finalize()
     }
 }
 
@@ -1088,46 +1124,4 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     }
 
     Ok((dependencies, peer_dependencies))
-}
-
-/// Computes a hash of the workspace's recursive dependency tree.
-/// The hash includes all locators in the dependency tree, traversed in a deterministic order.
-pub fn compute_dependency_tree_hash(install_state: &InstallState, root_locator: &Locator) -> Hash64 {
-    let mut visited = BTreeSet::new();
-    let mut locators = Vec::new();
-
-    collect_dependency_locators(install_state, root_locator, &mut visited, &mut locators);
-
-    // Hash all locators in order
-    locators.iter()
-        .map(|locator| Hash64::from_string(locator))
-        .collect::<Vec<_>>()
-        .iter()
-        .collect_hash()
-}
-
-/// Recursively collects all locators in the dependency tree.
-fn collect_dependency_locators(
-    install_state: &InstallState,
-    locator: &Locator,
-    visited: &mut BTreeSet<Locator>,
-    locators: &mut Vec<Locator>,
-) {
-    if !visited.insert(locator.clone()) {
-        return;
-    }
-
-    locators.push(locator.clone());
-
-    let Some(resolution) = install_state.resolution_tree.locator_resolutions.get(locator) else {
-        return;
-    };
-
-    for dependency_descriptor in resolution.dependencies.values() {
-        let Some(dependency_locator) = install_state.resolution_tree.descriptor_to_locator.get(dependency_descriptor) else {
-            continue;
-        };
-
-        collect_dependency_locators(install_state, dependency_locator, visited, locators);
-    }
 }
