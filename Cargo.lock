@@ -4284,6 +4284,7 @@ dependencies = [
  "zpm-semver",
  "zpm-switch",
  "zpm-sync",
+ "zpm-tasks",
  "zpm-utils",
 ]
 
@@ -4433,6 +4434,18 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "zpm-formats",
+ "zpm-utils",
+]
+
+[[package]]
+name = "zpm-tasks"
+version = "0.0.0"
+dependencies = [
+ "regex",
+ "serde",
+ "thiserror 2.0.18",
+ "winnow",
+ "zpm-primitives",
  "zpm-utils",
 ]
 

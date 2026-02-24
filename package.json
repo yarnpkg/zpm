@@ -23,10 +23,6 @@
     "type": "git",
     "url": "git+https://github.com/yarnpkg/zpm.git"
   },
-  "scripts": {
-    "foo": "echo root",
-    "berry": "export TEST_BINARY=$PROJECT_CWD/local/yarn && export YARNSW_DEFAULT=local:$PROJECT_CWD/local/yarn-bin && export TEST_MAJOR=5 && cd ${BERRY_DIR:-../berry} && yarn"
-  },
   "dependencies": {
     "@yarnpkg/eslint-config": "^3.1.0",
     "clipanion": "^4.0.0-rc.4",

@@ -5,6 +5,7 @@ use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
+use zpm_tasks::{parse as parse_taskfile, ResolvedTasks, TaskId};
 use zpm_utils::{Glob, LastModifiedAt, Path, ToFileString, ToHumanString};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
@@ -21,6 +22,7 @@ use crate::{
     manifest_finder::CachedManifestFinder,
     report::{StreamReport, StreamReportConfig, with_report_result},
     script::{Binary, ScriptEnvironment},
+    tasks::TASK_FILE_NAME,
 };
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
@@ -841,6 +843,50 @@ impl Project {
             Ok(install_result)
         }).await
     }
+
+    /// Resolve a task and all its dependencies.
+    pub fn resolve_task(&self, root_task: &TaskId) -> Result<ResolvedTasks, Error> {
+        let get_task_file = |ident: &Ident, path: Option<&str>| {
+            let workspace = self.workspace_by_ident(ident).ok()?;
+            let task_file_path = match path {
+                Some(custom_path) => workspace.path.with_join_str(custom_path),
+                None => workspace.taskfile_path(),
+            };
+            let content = task_file_path.fs_read_text().ok()?;
+            parse_taskfile(&content).ok()
+        };
+
+        let resolve_ident_glob = |glob: &zpm_primitives::IdentGlob, context: &Ident| {
+            // Get the context workspace to check its dependencies
+            let Some(context_ws) = self.workspace_by_ident(context).ok() else {
+                return vec![];
+            };
+
+            // Only match workspaces that are dependencies of the context workspace
+            self.workspaces
+                .iter()
+                .filter(|ws| {
+                    glob.check(&ws.name)
+                        && (context_ws.manifest.remote.dependencies.contains_key(&ws.name)
+                            || context_ws.manifest.dev_dependencies.contains_key(&ws.name))
+                })
+                .map(|ws| ws.name.clone())
+                .collect()
+        };
+
+        let is_dependency = |workspace: &Ident, include_ident: &Ident| {
+            let Some(ws) = self.workspace_by_ident(workspace).ok() else {
+                return false;
+            };
+
+            // Check if include_ident is in workspace's dependencies or devDependencies
+            ws.manifest.remote.dependencies.contains_key(include_ident)
+                || ws.manifest.dev_dependencies.contains_key(include_ident)
+        };
+
+        zpm_tasks::resolve(root_task, get_task_file, resolve_ident_glob, is_dependency)
+            .map_err(Error::TaskResolveError)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -923,6 +969,10 @@ impl Workspace {
 
     pub fn manifest_path(&self) -> Path {
         self.path.with_join_str(MANIFEST_NAME)
+    }
+
+    pub fn taskfile_path(&self) -> Path {
+        self.path.with_join_str(TASK_FILE_NAME)
     }
 
     pub async fn workspaces(&self) -> Result<Vec<Workspace>, Error> {

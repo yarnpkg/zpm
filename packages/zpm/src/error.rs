@@ -357,6 +357,30 @@ pub enum Error {
     #[error("Binary not found ({0})")]
     BinaryNotFound(String),
 
+    #[error("Task file parse error: {0}")]
+    TaskParseError(#[source] zpm_tasks::Error),
+
+    #[error("Task resolution error: {0}")]
+    TaskResolveError(#[source] zpm_tasks::Error),
+
+    #[error("Task workspace not found: {}", .0.as_str())]
+    TaskWorkspaceNotFound(Ident),
+
+    #[error("Task '{}' not found in workspace '{}'", task_name, workspace.as_str())]
+    TaskNotFound { workspace: Ident, task_name: String },
+
+    #[error("No taskfile found in {}", .0.to_print_string())]
+    TaskFileNotFound(Path),
+
+    #[error("Task execution failed: {0}")]
+    TaskJoinError(String),
+
+    #[error("Invalid task name: {0}")]
+    TaskNameParseError(String),
+
+    #[error("JSON serialization error: {0}")]
+    JsonSerializeError(String),
+
     #[error("Binary failed to spawn: {error} ({}, in {})", DataType::Code.colorize(name), path.to_print_string())]
     SpawnFailed { name: String, path: Path, error: Arc<Box<dyn std::error::Error + Send + Sync>> },
 

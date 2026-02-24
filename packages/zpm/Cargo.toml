@@ -45,6 +45,7 @@ zpm-primitives = { workspace = true }
 zpm-semver = { workspace = true }
 zpm-switch = { workspace = true }
 zpm-sync = { workspace = true }
+zpm-tasks = { workspace = true }
 zpm-utils = { workspace = true }
 brotli = { workspace = true }
 env_logger = { workspace = true }

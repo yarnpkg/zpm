@@ -1,0 +1,17 @@
+test:
+  exit 1
+
+test2: test
+  echo test 2
+
+foo:
+  for x in {1..10}; do echo foo:$x; sleep 1; done
+
+foo2:
+  for x in {1..10}; do echo foo:$x; sleep 1; done
+
+bar: foo& foo2&
+  echo done!
+
+doc:
+  cd documentation && yarn astro dev

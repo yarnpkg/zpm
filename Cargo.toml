@@ -12,6 +12,7 @@ members = [
     "packages/zpm-semver",
     "packages/zpm-switch",
     "packages/zpm-sync",
+    "packages/zpm-tasks",
     "packages/zpm-utils",
     "packages/zpm",
 ]
@@ -29,6 +30,7 @@ zpm-primitives = { path = "packages/zpm-primitives" }
 zpm-semver = { path = "packages/zpm-semver" }
 zpm-switch = { path = "packages/zpm-switch" }
 zpm-sync = { path = "packages/zpm-sync" }
+zpm-tasks = { path = "packages/zpm-tasks" }
 zpm-utils = { path = "packages/zpm-utils" }
 
 assert_cmd = "2.0.17"
@@ -96,6 +98,7 @@ tower = { version = "0.5.2", features = ["limit"] }
 serde_json = "1.0.145"
 serde = { version = "1.0.207", features = ["derive"] }
 wax = { git = "https://github.com/arcanis/wax.git" }
+winnow = "0.7"
 url = "2.5.7"
 urlencoding = "2.1.3"
 zerocopy = { version = "0.8.33", features = ["derive"] }

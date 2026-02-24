@@ -1,0 +1,11 @@
+[package]
+name = "zpm-tasks"
+edition = "2024"
+
+[dependencies]
+regex = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+winnow = { workspace = true }
+zpm-primitives = { workspace = true }
+zpm-utils = { workspace = true }

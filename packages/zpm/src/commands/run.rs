@@ -4,12 +4,16 @@ use zpm_utils::Path;
 use clipanion::cli;
 
 use crate::{error::Error, project, script::ScriptEnvironment};
+use super::task::run as task_run;
 
 /// Run a dependency binary or local script
 ///
 /// This command will run a tool. The exact tool that will be executed will depend on the current state of your workspace:
 ///
 /// - If the `scripts` field from your local package.json contains a matching script name, its definition will get executed.
+///
+/// - Otherwise, if a `taskfile` exists in the workspace and contains a task with the matching name, that task will be executed
+///   (including all its dependencies in the correct order).
 ///
 /// - Otherwise, if one of the local workspace's dependencies exposes a binary with a matching name, this binary will get executed.
 ///
@@ -156,8 +160,23 @@ impl Run {
                     .into())
             },
 
-            Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_))
-                => execute_binary(true).await,
+            Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_)) => {
+                // Try task files as a fallback before looking for binaries
+                if task_run::task_exists(&project, &self.name) {
+                    return task_run::run_task(
+                        &project,
+                        &self.name,
+                        &self.args,
+                        0,     // verbose_level
+                        true,  // silent_dependencies
+                        true,  // interlaced
+                        project.config.settings.enable_timers.value,
+                    ).await;
+                }
+
+                // Fall back to binary lookup
+                execute_binary(true).await
+            }
 
             Err(err) => Err(err),
         }

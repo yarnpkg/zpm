@@ -298,12 +298,45 @@ impl From<ScriptResult> for ExitStatus {
     }
 }
 
+/// Target output mode for script execution.
+#[derive(Clone, Debug, Default)]
+pub enum TargetOutput {
+    /// Inherit stdout/stderr from parent process (direct to terminal).
+    Inherit,
+    /// Buffer all stdout/stderr and return in ScriptResult (default).
+    #[default]
+    Buffers,
+}
+
+/// A running script process with piped output.
+pub struct RunningScript {
+    pub child: tokio::process::Child,
+    program: String,
+}
+
+impl RunningScript {
+    /// Wait for the script to complete and return the result.
+    pub async fn wait(mut self) -> Result<ScriptResult, Error> {
+        let status = self.child.wait().await?;
+        let output = Output {
+            status,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        Ok(if status.success() {
+            ScriptResult::Success(output)
+        } else {
+            ScriptResult::Failure(output, self.program.clone(), self.program)
+        })
+    }
+}
+
 pub struct ScriptEnvironment {
     cwd: Path,
     binaries: ScriptBinaries,
     env: BTreeMap<String, Option<String>>,
     node_args: Vec<String>,
-    shell_forwarding: bool,
+    target_output: TargetOutput,
     stdin: Option<String>,
 }
 
@@ -314,7 +347,7 @@ impl ScriptEnvironment {
             binaries: ScriptBinaries::new().with_standard()?,
             env: BTreeMap::new(),
             node_args: Vec::new(),
-            shell_forwarding: false,
+            target_output: TargetOutput::default(),
             stdin: None,
         };
 
@@ -383,7 +416,7 @@ impl ScriptEnvironment {
     }
 
     pub fn enable_shell_forwarding(mut self) -> Self {
-        self.shell_forwarding = true;
+        self.target_output = TargetOutput::Inherit;
         self
     }
 
@@ -522,13 +555,9 @@ impl ScriptEnvironment {
         Ok(dir)
     }
 
-    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
-        let mut cmd
-            = Command::new(program);
-
-        let args = args.into_iter()
-            .map(|arg| arg.as_ref().to_string())
-            .collect::<Vec<_>>();
+    /// Prepares a command with the current environment settings.
+    fn prepare_command(&mut self, program: &str, args: &[String]) -> Result<(Command, Path), Error> {
+        let mut cmd = Command::new(program);
 
         cmd.current_dir(self.cwd.to_path_buf());
 
@@ -537,15 +566,13 @@ impl ScriptEnvironment {
                 Some(val) => {
                     cmd.env(key, val);
                 },
-
                 None => {
                     cmd.env_remove(key);
                 },
             };
         }
 
-        let bin_dir
-            = self.install_binaries()?;
+        let bin_dir = self.install_binaries()?;
 
         let env_path = self.env.get("PATH")
             .cloned()
@@ -553,32 +580,41 @@ impl ScriptEnvironment {
             .unwrap_or_default();
 
         let next_env_path = match env_path.is_empty() {
-            true => {
-                bin_dir.to_file_string()
-            },
-
-            false => {
-                format!("{}:{}", bin_dir.to_file_string(), env_path)
-            },
+            true => bin_dir.to_file_string(),
+            false => format!("{}:{}", bin_dir.to_file_string(), env_path),
         };
 
         cmd.env("PATH", next_env_path);
         cmd.env("BERRY_BIN_FOLDER", bin_dir.to_file_string());
-
-        cmd.args(&args);
+        cmd.args(args);
 
         if self.stdin.is_some() {
             cmd.stdin(std::process::Stdio::piped());
         }
 
-        if !self.shell_forwarding {
-            cmd.stdout(std::process::Stdio::piped());
-            cmd.stderr(std::process::Stdio::piped());
+        Ok((cmd, bin_dir))
+    }
+
+    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
+        let args = args.into_iter()
+            .map(|arg| arg.as_ref().to_string())
+            .collect::<Vec<_>>();
+
+        let (mut cmd, _) = self.prepare_command(program, &args)?;
+
+        // Configure stdout/stderr based on target_output
+        match &self.target_output {
+            TargetOutput::Inherit => {
+                // Output goes directly to terminal
+            },
+            TargetOutput::Buffers => {
+                cmd.stdout(std::process::Stdio::piped());
+                cmd.stderr(std::process::Stdio::piped());
+            },
         }
 
-        let mut child
-            = cmd.spawn()
-                .map_err(|e| Error::SpawnFailed { name: program.to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
+        let mut child = cmd.spawn()
+            .map_err(|e| Error::SpawnFailed { name: program.to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 
         if let Some(stdin) = &self.stdin {
             if let Some(mut child_stdin) = child.stdin.take() {
@@ -587,21 +623,48 @@ impl ScriptEnvironment {
             }
         }
 
-        let output = match self.shell_forwarding {
-            false => {
-                child.wait_with_output().await.unwrap()
-            },
-
-            true => {
+        let output = match &self.target_output {
+            TargetOutput::Inherit => {
                 Output {
                     status: child.wait().await.unwrap(),
                     stdout: Vec::new(),
                     stderr: Vec::new(),
                 }
             },
+            TargetOutput::Buffers => {
+                child.wait_with_output().await.unwrap()
+            },
         };
 
         Ok(ScriptResult::new(output, cmd.as_std()))
+    }
+
+    /// Spawns a command and returns the running process with piped stdout/stderr.
+    /// Use this when you need to read output incrementally (e.g., for interlaced task output).
+    pub async fn spawn_exec<I, S>(&mut self, program: &str, args: I) -> Result<RunningScript, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
+        let args = args.into_iter()
+            .map(|arg| arg.as_ref().to_string())
+            .collect::<Vec<_>>();
+
+        let (mut cmd, _) = self.prepare_command(program, &args)?;
+
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn()
+            .map_err(|e| Error::SpawnFailed { name: program.to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
+
+        if let Some(stdin) = &self.stdin {
+            if let Some(mut child_stdin) = child.stdin.take() {
+                use tokio::io::AsyncWriteExt;
+                child_stdin.write_all(stdin.as_bytes()).await.unwrap();
+            }
+        }
+
+        Ok(RunningScript {
+            child,
+            program: program.to_string(),
+        })
     }
 
     pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
@@ -622,20 +685,49 @@ impl ScriptEnvironment {
     }
 
     pub async fn run_script<I, S>(&mut self, script: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
-        let mut final_script
-            = script.to_string();
+        let mut final_script = script.to_string();
 
         for arg in args {
             final_script.push(' ');
             final_script.push_str(&shell_escape(arg.to_string().as_str()));
         }
 
-        let mut bash_args = vec![];
+        self.run_exec("bash", ["-c", &final_script, "yarn-script"]).await
+    }
 
-        bash_args.push("-c".to_string());
-        bash_args.push(final_script);
-        bash_args.push("yarn-script".to_string());
+    /// Spawns a script and returns the running process with piped stdout/stderr.
+    /// Use this when you need to read output incrementally (e.g., for interlaced task output).
+    pub async fn spawn_script<I, S>(&mut self, script: &str, args: I) -> Result<RunningScript, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+        let mut final_script = script.to_string();
 
-        self.run_exec("bash", bash_args).await
+        for arg in args {
+            final_script.push(' ');
+            final_script.push_str(&shell_escape(arg.to_string().as_str()));
+        }
+
+        self.spawn_exec("bash", ["-c", &final_script, "yarn-script"]).await
+    }
+
+    /// Runs a script with inherited stdio (output goes directly to terminal).
+    /// Use this when you want the script's output to go directly to the terminal without capturing.
+    pub async fn run_script_inherited<I, S>(&mut self, script: &str, args: I) -> Result<ExitStatus, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+        let mut final_script = script.to_string();
+
+        for arg in args {
+            final_script.push(' ');
+            final_script.push_str(&shell_escape(arg.to_string().as_str()));
+        }
+
+        let args = ["-c", &final_script, "yarn-script"];
+        let (mut cmd, _) = self.prepare_command("bash", &args.iter().map(|s| s.to_string()).collect::<Vec<_>>())?;
+
+        cmd.stdout(std::process::Stdio::inherit());
+        cmd.stderr(std::process::Stdio::inherit());
+        cmd.stdin(std::process::Stdio::inherit());
+
+        let status = cmd.status().await
+            .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
+
+        Ok(status)
     }
 }

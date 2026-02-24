@@ -15,4 +15,5 @@ pub mod print_changed_files;
 pub mod print_changed_workspaces;
 pub mod print_hoisting;
 pub mod print_platform;
+pub mod resolve_task;
 pub mod sync_fs;
