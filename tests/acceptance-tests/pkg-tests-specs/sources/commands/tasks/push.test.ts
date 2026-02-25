@@ -1,7 +1,7 @@
 import {ppath, xfs} from '@yarnpkg/fslib';
 
 describe(`Commands`, () => {
-  describe(`task push`, () => {
+  describe(`tasks push`, () => {
     test(
       `it should fail when not running inside a task context`,
       makeTemporaryEnv({
@@ -14,7 +14,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        await expect(run(`task`, `push`, `build`)).rejects.toMatchObject({
+        await expect(run(`tasks`, `push`, `build`)).rejects.toMatchObject({
           code: 1,
           stdout: expect.stringContaining(`Not running inside a task context`),
         });
@@ -31,13 +31,13 @@ describe(`Commands`, () => {
           `  echo "setup-done"`,
           ``,
           `trigger:`,
-          `  yarn task push setup`,
+          `  yarn tasks push setup`,
           `  echo "trigger-done"`,
         ].join(`\n`));
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `trigger`);
+        const {stdout} = await run(`tasks`, `run`, `trigger`);
         expect(stdout).toContain(`trigger-done`);
         expect(stdout).toContain(`setup-done`);
       }),
@@ -56,13 +56,13 @@ describe(`Commands`, () => {
           `  echo "task-b-done"`,
           ``,
           `trigger:`,
-          `  yarn task push task-a task-b`,
+          `  yarn tasks push task-a task-b`,
           `  echo "trigger-done"`,
         ].join(`\n`));
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `trigger`);
+        const {stdout} = await run(`tasks`, `run`, `trigger`);
         expect(stdout).toContain(`trigger-done`);
         expect(stdout).toContain(`task-a-done`);
         expect(stdout).toContain(`task-b-done`);
@@ -77,13 +77,13 @@ describe(`Commands`, () => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `trigger:`,
           `  set -e`,
-          `  yarn task push nonexistent`,
+          `  yarn tasks push nonexistent`,
           `  echo "should not reach here"`,
         ].join(`\n`));
 
         await run(`install`);
 
-        await expect(run(`task`, `run`, `trigger`)).rejects.toMatchObject({
+        await expect(run(`tasks`, `run`, `trigger`)).rejects.toMatchObject({
           code: 1,
         });
       }),
@@ -99,13 +99,13 @@ describe(`Commands`, () => {
           `  sleep 0.2 && echo "slow-task-done"`,
           ``,
           `trigger:`,
-          `  yarn task push slow-task`,
+          `  yarn tasks push slow-task`,
           `  echo "trigger-done"`,
         ].join(`\n`));
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `trigger`);
+        const {stdout} = await run(`tasks`, `run`, `trigger`);
         expect(stdout).toContain(`trigger-done`);
         expect(stdout).toContain(`slow-task-done`);
       }),
@@ -124,13 +124,13 @@ describe(`Commands`, () => {
           `  echo "main-task-done"`,
           ``,
           `trigger:`,
-          `  yarn task push main-task`,
+          `  yarn tasks push main-task`,
           `  echo "trigger-done"`,
         ].join(`\n`));
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `trigger`);
+        const {stdout} = await run(`tasks`, `run`, `trigger`);
         expect(stdout).toContain(`trigger-done`);
         expect(stdout).toContain(`dep-task-done`);
         expect(stdout).toContain(`main-task-done`);
@@ -148,14 +148,14 @@ describe(`Commands`, () => {
           `  exit 1`,
           ``,
           `trigger:`,
-          `  yarn task push failing-task`,
+          `  yarn tasks push failing-task`,
           `  sleep 0.1`,
           `  echo "trigger-done"`,
         ].join(`\n`));
 
         await run(`install`);
 
-        await expect(run(`task`, `run`, `trigger`)).rejects.toMatchObject({
+        await expect(run(`tasks`, `run`, `trigger`)).rejects.toMatchObject({
           code: 1,
         });
       }),
@@ -171,14 +171,14 @@ describe(`Commands`, () => {
           `  echo "counter-ran"`,
           ``,
           `trigger:`,
-          `  yarn task push counter`,
-          `  yarn task push counter`,
+          `  yarn tasks push counter`,
+          `  yarn tasks push counter`,
           `  echo "trigger-done"`,
         ].join(`\n`));
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `trigger`);
+        const {stdout} = await run(`tasks`, `run`, `trigger`);
         expect(stdout).toContain(`trigger-done`);
         const matches = stdout.match(/counter-ran/g);
         expect(matches).toHaveLength(1);

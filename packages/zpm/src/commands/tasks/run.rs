@@ -157,7 +157,7 @@ struct PreparedTask {
 }
 
 #[cli::command(proxy)]
-#[cli::path("task", "run")]
+#[cli::path("tasks", "run")]
 #[cli::category("Scripting commands")]
 pub struct TaskRun {
     #[cli::option("-i,--interlaced", default = true)]

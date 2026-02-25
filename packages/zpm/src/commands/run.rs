@@ -4,7 +4,7 @@ use zpm_utils::Path;
 use clipanion::cli;
 
 use crate::{error::Error, project, script::ScriptEnvironment};
-use super::task::run as task_run;
+use super::tasks::run as task_run;
 
 /// Run a dependency binary or local script
 ///

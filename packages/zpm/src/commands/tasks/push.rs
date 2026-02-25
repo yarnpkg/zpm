@@ -7,7 +7,7 @@ use crate::error::Error;
 use crate::ipc::{TaskIpcClient, IPC_CURRENT_TASK_ENV};
 
 #[cli::command]
-#[cli::path("task", "push")]
+#[cli::path("tasks", "push")]
 #[cli::category("Scripting commands")]
 pub struct TaskPush {
     #[cli::positional]

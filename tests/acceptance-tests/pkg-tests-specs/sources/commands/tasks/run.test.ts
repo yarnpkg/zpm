@@ -1,7 +1,7 @@
 import {ppath, xfs} from '@yarnpkg/fslib';
 
 describe(`Commands`, () => {
-  describe(`task run`, () => {
+  describe(`tasks run`, () => {
     test(
       `it should run a simple task`,
       makeTemporaryEnv({
@@ -14,7 +14,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `build`);
+        const {stdout} = await run(`tasks`, `run`, `build`);
         expect(stdout).toEqual(`building\n`);
       }),
     );
@@ -34,7 +34,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `build`);
+        const {stdout} = await run(`tasks`, `run`, `build`);
         expect(stdout).toEqual(`setup\nbuild\n`);
       }),
     );
@@ -51,7 +51,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `-v`, `build`);
+        const {stdout} = await run(`tasks`, `run`, `-v`, `build`);
         expect(stdout).toEqual(`[test-package:build]: building\n`);
       }),
     );
@@ -68,7 +68,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `-vv`, `build`);
+        const {stdout} = await run(`tasks`, `run`, `-vv`, `build`);
         expect(stdout).toEqual(`[test-package:build]: Process started\n[test-package:build]: building\n[test-package:build]: Process exited (exit code 0)\n`);
       }),
     );
@@ -88,7 +88,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `--silent-dependencies`, `build`);
+        const {stdout} = await run(`tasks`, `run`, `--silent-dependencies`, `build`);
         expect(stdout).toEqual(`build-output\n`);
       }),
     );
@@ -109,7 +109,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        await expect(run(`task`, `run`, `--silent-dependencies`, `build`)).rejects.toMatchObject({
+        await expect(run(`tasks`, `run`, `--silent-dependencies`, `build`)).rejects.toMatchObject({
           stdout: `[test-package:setup]: Process started\n[test-package:setup]: setup-failure-output\n[test-package:setup]: Process exited (exit code 1)\n`,
           code: 1,
         });
@@ -171,7 +171,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `greet`, `World`);
+        const {stdout} = await run(`tasks`, `run`, `greet`, `World`);
         expect(stdout).toEqual(`Hello World\n`);
       }),
     );
@@ -188,7 +188,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        await expect(run(`task`, `run`, `nonexistent`)).rejects.toMatchObject({
+        await expect(run(`tasks`, `run`, `nonexistent`)).rejects.toMatchObject({
           code: 1,
         });
       }),
@@ -201,7 +201,7 @@ describe(`Commands`, () => {
       }, async ({path, run}) => {
         await run(`install`);
 
-        await expect(run(`task`, `run`, `build`)).rejects.toMatchObject({
+        await expect(run(`tasks`, `run`, `build`)).rejects.toMatchObject({
           code: 1,
         });
       }),
@@ -225,7 +225,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `build`);
+        const {stdout} = await run(`tasks`, `run`, `build`);
 
         const lines = stdout.trim().split(`\n`);
         expect(lines).toHaveLength(3);
@@ -255,7 +255,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `build`, {cwd: ppath.join(path, `packages/pkg-b` as any)});
+        const {stdout} = await run(`tasks`, `run`, `build`, {cwd: ppath.join(path, `packages/pkg-b` as any)});
         expect(stdout).toEqual(`building-pkg-a\nbuilding-pkg-b\n`);
       }),
     );
@@ -281,7 +281,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `--silent-dependencies`, `build`, {cwd: ppath.join(path, `packages/pkg-b` as any)});
+        const {stdout} = await run(`tasks`, `run`, `--silent-dependencies`, `build`, {cwd: ppath.join(path, `packages/pkg-b` as any)});
         expect(stdout).toEqual(`building-pkg-b\n`);
       }),
     );
@@ -296,13 +296,13 @@ describe(`Commands`, () => {
           `  echo "subtask-output"`,
           ``,
           `main:`,
-          `  yarn task push subtask`,
+          `  yarn tasks push subtask`,
           `  echo "main-output"`,
         ].join(`\n`));
 
         await run(`install`);
 
-        const {stdout} = await run(`task`, `run`, `--silent-dependencies`, `main`);
+        const {stdout} = await run(`tasks`, `run`, `--silent-dependencies`, `main`);
         expect(stdout).toEqual(`main-output\n`);
       }),
     );
@@ -319,7 +319,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        await expect(run(`task`, `run`, `build`)).rejects.toMatchObject({
+        await expect(run(`tasks`, `run`, `build`)).rejects.toMatchObject({
           code: 42,
         });
       }),

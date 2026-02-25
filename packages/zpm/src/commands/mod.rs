@@ -5,7 +5,7 @@ use zpm_switch::{extract_bin_meta, BinMeta};
 
 mod debug;
 mod npm;
-mod task;
+mod tasks;
 
 mod add;
 mod bin;
@@ -105,8 +105,8 @@ pub enum YarnCli {
     Rebuild(rebuild::Rebuild),
     Remove(remove::Remove),
     Run(run::Run),
-    TaskPush(task::push::TaskPush),
-    TaskRun(task::run::TaskRun),
+    TaskPush(tasks::push::TaskPush),
+    TaskRun(tasks::run::TaskRun),
     Unlink(unlink::Unlink),
     Unplug(unplug::Unplug),
     Up(up::Up),

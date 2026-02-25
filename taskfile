@@ -1,14 +1,2 @@
-test1:
-  sleep 4
-
-test2:
-  sleep 10
-
-bar:
-  yarn task push test1 test2
-
-baz: bar
-  echo done!
-
 doc:
   cd documentation && yarn astro dev
