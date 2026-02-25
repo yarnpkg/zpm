@@ -1,12 +1,12 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::Write, os::unix::process::ExitStatusExt, process::ExitStatus, sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc, Mutex}, time::Instant};
+use std::{collections::{BTreeMap, BTreeSet, HashMap, HashSet}, io::Write, os::unix::process::ExitStatusExt, process::ExitStatus, sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc, Mutex, RwLock}, time::Instant};
 
 use clipanion::cli;
-use futures::future::try_join_all;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::mpsc;
 use zpm_tasks::{parse, TaskId, TaskName};
 use zpm_utils::{is_terminal, shell_escape, start_progress, DataType, Path, ProgressHandle, ToFileString, ToHumanString, Unit};
 
-use crate::{error::Error, project::Project, script::ScriptEnvironment};
+use crate::{error::Error, ipc::{IPC_SOCKET_ENV, IPC_CURRENT_TASK_ENV, PushRequest, PushResponse, TaskIpcServer}, project::Project, script::ScriptEnvironment};
 
 #[derive(Clone)]
 struct SpawnedTaskOptions {
@@ -17,7 +17,7 @@ struct SpawnedTaskOptions {
 }
 
 struct ProgressState {
-    total: usize,
+    total: AtomicUsize,
     completed: AtomicUsize,
     running_tasks: Mutex<BTreeSet<String>>,
     gradient_frames: Vec<String>,
@@ -87,11 +87,15 @@ impl ProgressState {
             = generate_gradient_frames("Running dependencies");
 
         Self {
-            total,
+            total: AtomicUsize::new(total),
             completed: AtomicUsize::new(0),
             running_tasks: Mutex::new(BTreeSet::new()),
             gradient_frames,
         }
+    }
+
+    fn add_to_total(&self, count: usize) {
+        self.total.fetch_add(count, Ordering::Relaxed);
     }
 
     fn add_task(&self, task_name: &str) {
@@ -104,6 +108,9 @@ impl ProgressState {
     }
 
     fn format_progress(&self, frame_idx: usize) -> String {
+        let total
+            = self.total.load(Ordering::Relaxed);
+
         let completed
             = self.completed.load(Ordering::Relaxed);
 
@@ -111,7 +118,7 @@ impl ProgressState {
             = self.running_tasks.lock().unwrap().len();
 
         let scheduled
-            = self.total - running - completed;
+            = total.saturating_sub(running).saturating_sub(completed);
 
         let label
             = &self.gradient_frames[frame_idx % self.gradient_frames.len()];
@@ -248,7 +255,26 @@ async fn run_task_impl(
     let resolved
         = project.resolve_task(&root_task)?;
 
-    execute_resolved_tasks(project, &resolved, &root_task, args, options).await
+    let ipc_server
+        = TaskIpcServer::new().await?;
+
+    let socket_name
+        = ipc_server.socket_name().to_string();
+
+    let (push_tx, push_rx)
+        = mpsc::channel::<PushRequest>(32);
+
+    let ipc_handle
+        = tokio::spawn(async move {
+            ipc_server.run(push_tx).await;
+        });
+
+    let result
+        = execute_resolved_tasks(project, resolved, &root_task, args, options, &socket_name, push_rx).await;
+
+    ipc_handle.abort();
+
+    result
 }
 
 pub fn task_exists(project: &Project, task_name: &str) -> bool {
@@ -286,24 +312,283 @@ pub fn task_exists(project: &Project, task_name: &str) -> bool {
     task_file.tasks.contains_key(task_name.as_str())
 }
 
+struct DynamicExecutionState {
+    resolved: RwLock<zpm_tasks::ResolvedTasks>,
+    target_tasks: RwLock<HashSet<TaskId>>,
+    original_targets: RwLock<HashSet<TaskId>>,
+    completed: RwLock<HashSet<TaskId>>,
+    script_finished: RwLock<HashSet<TaskId>>,
+    subtasks: RwLock<HashMap<TaskId, HashSet<TaskId>>>,
+    prepared_tasks: RwLock<BTreeMap<TaskId, PreparedTask>>,
+    color_index: RwLock<usize>,
+}
+
+impl DynamicExecutionState {
+    fn new(resolved: zpm_tasks::ResolvedTasks, root_task: TaskId) -> Self {
+        let mut target_tasks
+            = HashSet::new();
+
+        target_tasks.insert(root_task.clone());
+
+        let mut original_targets
+            = HashSet::new();
+
+        original_targets.insert(root_task);
+
+        Self {
+            resolved: RwLock::new(resolved),
+            target_tasks: RwLock::new(target_tasks),
+            original_targets: RwLock::new(original_targets),
+            completed: RwLock::new(HashSet::new()),
+            script_finished: RwLock::new(HashSet::new()),
+            subtasks: RwLock::new(HashMap::new()),
+            prepared_tasks: RwLock::new(BTreeMap::new()),
+            color_index: RwLock::new(0),
+        }
+    }
+
+    fn all_targets_completed(&self) -> bool {
+        let targets
+            = self.target_tasks.read().unwrap();
+
+        let completed
+            = self.completed.read().unwrap();
+
+        targets.iter().all(|t| completed.contains(t))
+    }
+
+    fn is_task_fully_completed(&self, task_id: &TaskId) -> bool {
+        let script_finished
+            = self.script_finished.read().unwrap();
+
+        if !script_finished.contains(task_id) {
+            return false;
+        }
+
+        let subtasks
+            = self.subtasks.read().unwrap();
+
+        let completed
+            = self.completed.read().unwrap();
+
+        if let Some(task_subtasks) = subtasks.get(task_id) {
+            task_subtasks.iter().all(|s| completed.contains(s))
+        } else {
+            true
+        }
+    }
+
+    fn try_complete_task(&self, task_id: &TaskId) -> bool {
+        if self.is_task_fully_completed(task_id) {
+            let mut completed
+                = self.completed.write().unwrap();
+
+            completed.insert(task_id.clone());
+            true
+        } else {
+            false
+        }
+    }
+
+    fn add_pushed_task(&self, project: &Project, task_name: &str, parent_task_id: Option<&str>) -> Result<(TaskId, usize), Error> {
+        let task_name
+            = TaskName::new(task_name)
+                .map_err(|_| Error::TaskNameParseError(task_name.to_string()))?;
+
+        let workspace
+            = project.active_workspace()?;
+
+        let task_id
+            = TaskId {
+                workspace: workspace.name.clone(),
+                task_name,
+            };
+
+        if let Some(parent_str) = parent_task_id {
+            if let Some(parent_id) = self.parse_task_id(project, parent_str) {
+                let mut subtasks
+                    = self.subtasks.write().unwrap();
+
+                subtasks
+                    .entry(parent_id)
+                    .or_default()
+                    .insert(task_id.clone());
+            }
+        }
+
+        {
+            let completed
+                = self.completed.read().unwrap();
+
+            let targets
+                = self.target_tasks.read().unwrap();
+
+            if completed.contains(&task_id) || targets.contains(&task_id) {
+                return Ok((task_id, 0));
+            }
+        }
+
+        let new_resolved
+            = project.resolve_task(&task_id)?;
+
+        {
+            let mut resolved
+                = self.resolved.write().unwrap();
+
+            for (tid, prereqs) in new_resolved.tasks {
+                resolved.tasks.entry(tid).or_insert(prereqs);
+            }
+
+            for (ident, tf) in new_resolved.task_files {
+                resolved.task_files.entry(ident).or_insert(tf);
+            }
+        }
+
+        {
+            let mut targets
+                = self.target_tasks.write().unwrap();
+
+            targets.insert(task_id.clone());
+        }
+
+        let new_task_count
+            = self.prepare_new_tasks(project)?;
+
+        Ok((task_id, new_task_count))
+    }
+
+    fn prepare_new_tasks(&self, project: &Project) -> Result<usize, Error> {
+        let resolved
+            = self.resolved.read().unwrap();
+
+        let mut prepared
+            = self.prepared_tasks.write().unwrap();
+
+        let mut color_index
+            = self.color_index.write().unwrap();
+
+        let colors: Vec<&DataType>
+            = prefix_colors().take(5).collect();
+
+        let mut new_count
+            = 0;
+
+        for task_id in resolved.tasks.keys() {
+            if prepared.contains_key(task_id) {
+                continue;
+            }
+
+            let Some(task_file)
+                = resolved.task_files.get(&task_id.workspace)
+            else {
+                continue;
+            };
+
+            let Some(task)
+                = task_file.tasks.get(task_id.task_name.as_str())
+            else {
+                continue;
+            };
+
+            if task.script.is_empty() {
+                continue;
+            }
+
+            let Ok(workspace)
+                = project.workspace_by_ident(&task_id.workspace)
+            else {
+                continue;
+            };
+
+            let script
+                = task.script.join("\n");
+
+            let mut env
+                = BTreeMap::new();
+
+            env.insert(
+                "npm_lifecycle_event".to_string(),
+                task_id.task_name.as_str().to_string(),
+            );
+
+            let color
+                = colors[*color_index % colors.len()];
+
+            *color_index += 1;
+
+            let prefix
+                = color.colorize(&format!(
+                    "[{}:{}]: ",
+                    task_id.workspace.to_file_string(),
+                    task_id.task_name.as_str()
+                ));
+
+            prepared.insert(
+                task_id.clone(),
+                PreparedTask {
+                    script,
+                    cwd: workspace.path.clone(),
+                    env,
+                    prefix,
+                },
+            );
+
+            new_count += 1;
+        }
+
+        Ok(new_count)
+    }
+
+    fn parse_task_id(&self, project: &Project, task_id_str: &str) -> Option<TaskId> {
+        let (workspace_str, task_name_str)
+            = task_id_str.split_once(':')?;
+
+        let task_name
+            = TaskName::new(task_name_str).ok()?;
+
+        let ident
+            = zpm_primitives::Ident::new(workspace_str);
+
+        let workspace
+            = project.workspace_by_ident(&ident).ok()?;
+
+        Some(TaskId {
+            workspace: workspace.name.clone(),
+            task_name,
+        })
+    }
+}
+
 async fn execute_resolved_tasks(
     project: &Project,
-    resolved: &zpm_tasks::ResolvedTasks,
+    resolved: zpm_tasks::ResolvedTasks,
     target_task: &TaskId,
     args: &[String],
     options: &SpawnedTaskOptions,
+    socket_name: &str,
+    push_rx: mpsc::Receiver<PushRequest>,
 ) -> Result<ExitStatus, Error> {
     if resolved.tasks.is_empty() {
         return Ok(ExitStatus::from_raw(0));
     }
 
-    let prepared_tasks
-        = prepare_all_tasks(project, resolved)?;
+    let state
+        = Arc::new(DynamicExecutionState::new(resolved, target_task.clone()));
+
+    state.prepare_new_tasks(project)?;
 
     let dependency_count
-        = resolved.tasks.keys()
-            .filter(|t| *t != target_task && prepared_tasks.contains_key(*t))
-            .count();
+        = {
+            let resolved
+                = state.resolved.read().unwrap();
+
+            let prepared
+                = state.prepared_tasks.read().unwrap();
+
+            resolved.tasks.keys()
+                .filter(|t| *t != target_task && prepared.contains_key(*t))
+                .count()
+        };
 
     let show_progress
         = options.silent_dependencies && is_terminal() && dependency_count > 0;
@@ -325,59 +610,104 @@ async fn execute_resolved_tasks(
         };
 
     execute_tasks_impl(
-        resolved,
+        project,
+        state,
         target_task,
         args,
         options,
-        prepared_tasks,
+        socket_name,
+        push_rx,
         &mut progress_handle,
     ).await
 }
 
 async fn execute_tasks_impl(
-    resolved: &zpm_tasks::ResolvedTasks,
-    target_task: &TaskId,
+    project: &Project,
+    state: Arc<DynamicExecutionState>,
+    root_task: &TaskId,
     args: &[String],
     options: &SpawnedTaskOptions,
-    prepared_tasks: BTreeMap<TaskId, PreparedTask>,
+    socket_name: &str,
+    mut push_rx: mpsc::Receiver<PushRequest>,
     progress: &mut Option<(ProgressHandle, Arc<ProgressState>)>,
 ) -> Result<ExitStatus, Error> {
-    let mut completed: HashSet<TaskId>
-        = HashSet::new();
+    use std::collections::HashMap;
+    use tokio::task::JoinHandle;
 
     let is_first_printed
         = Arc::new(AtomicBool::new(true));
 
-    while !completed.contains(target_task) {
-        let ready_tasks: Vec<&TaskId>
-            = resolved
-                .tasks
-                .iter()
-                .filter(|(task_id, prerequisites)| {
-                    !completed.contains(*task_id)
-                        && prerequisites.iter().all(|p| completed.contains(p))
-                })
-                .map(|(task_id, _)| task_id)
-                .collect();
+    let mut running_handles: HashMap<TaskId, JoinHandle<Result<ExitStatus, Error>>>
+        = HashMap::new();
 
-        if ready_tasks.is_empty() {
+    loop {
+        if state.all_targets_completed() {
             break;
         }
 
-        let mut handles
-            = Vec::with_capacity(ready_tasks.len());
+        while let Ok(request) = push_rx.try_recv() {
+            let response
+                = match state.add_pushed_task(project, &request.task_name, request.parent_task_id.as_deref()) {
+                    Ok((_, new_count)) => {
+                        if let Some((_, progress_state)) = progress.as_ref() {
+                            progress_state.add_to_total(new_count);
+                        }
+                        PushResponse::Ok
+                    }
+                    Err(e) => PushResponse::Error(e.to_string()),
+                };
 
-        let mut task_ids
-            = Vec::with_capacity(ready_tasks.len());
+            let _ = request.response_tx.send(response);
+        }
+
+        let ready_tasks: Vec<TaskId>
+            = {
+                let resolved
+                    = state.resolved.read().unwrap();
+
+                let completed
+                    = state.completed.read().unwrap();
+
+                let script_finished
+                    = state.script_finished.read().unwrap();
+
+                let running: HashSet<TaskId>
+                    = running_handles.keys().cloned().collect();
+
+                resolved
+                    .tasks
+                    .iter()
+                    .filter(|(task_id, prerequisites)| {
+                        !completed.contains(*task_id)
+                            && !script_finished.contains(*task_id)
+                            && !running.contains(*task_id)
+                            && prerequisites.iter().all(|p| completed.contains(p))
+                    })
+                    .map(|(task_id, _)| task_id.clone())
+                    .collect()
+            };
 
         for task_id in ready_tasks {
+            let original_targets
+                = state.original_targets.read().unwrap();
+
             let is_target
-                = task_id == target_task;
+                = original_targets.contains(&task_id);
 
-            let task_args
-                = if is_target { args } else { &[] };
+            drop(original_targets);
 
-            if let Some(prepared) = prepared_tasks.get(task_id) {
+            let task_args: Vec<String>
+                = if &task_id == root_task { args.to_vec() } else { vec![] };
+
+            let prepared_opt
+                = {
+                    let prepared_tasks
+                        = state.prepared_tasks.read().unwrap();
+
+                    prepared_tasks.get(&task_id).cloned()
+                };
+
+            if let Some(prepared) = prepared_opt {
                 if is_target {
                     if let Some((handle, _)) = progress {
                         handle.stop();
@@ -397,12 +727,6 @@ async fn execute_tasks_impl(
                     }
                 }
 
-                let prepared
-                    = prepared.clone();
-
-                let args_vec: Vec<String>
-                    = task_args.to_vec();
-
                 let is_first
                     = is_first_printed.clone();
 
@@ -412,10 +736,16 @@ async fn execute_tasks_impl(
                 let progress_state
                     = progress.as_ref().map(|(_, state)| state.clone());
 
+                let socket
+                    = socket_name.to_string();
+
+                let task_id_str
+                    = task_display_name.clone();
+
                 let handle
                     = tokio::spawn(async move {
                         let result
-                            = execute_prepared_task(&prepared, &args_vec, is_first, &opts, is_target).await;
+                            = execute_prepared_task_with_ipc(&prepared, &task_args, is_first, &opts, is_target, &socket, &task_id_str).await;
 
                         if !is_target {
                             if let Some(state) = progress_state {
@@ -426,104 +756,155 @@ async fn execute_tasks_impl(
                         result
                     });
 
-                handles.push(handle);
-                task_ids.push(task_id.clone());
+                running_handles.insert(task_id, handle);
             } else {
-                completed.insert(task_id.clone());
+                let mut completed
+                    = state.completed.write().unwrap();
+
+                completed.insert(task_id);
             }
         }
 
-        if handles.is_empty() {
+        if running_handles.is_empty() {
+            if state.all_targets_completed() {
+                break;
+            }
+
+            tokio::select! {
+                Some(request) = push_rx.recv() => {
+                    let response
+                        = match state.add_pushed_task(project, &request.task_name, request.parent_task_id.as_deref()) {
+                            Ok((_, new_count)) => {
+                                if let Some((_, progress_state)) = progress.as_ref() {
+                                    progress_state.add_to_total(new_count);
+                                }
+                                PushResponse::Ok
+                            }
+                            Err(e) => PushResponse::Error(e.to_string()),
+                        };
+
+                    let _ = request.response_tx.send(response);
+                }
+            }
+
             continue;
         }
 
-        let results
-            = try_join_all(handles)
-                .await
-                .map_err(|e| Error::TaskJoinError(e.to_string()))?;
+        let completed_task: (TaskId, Result<ExitStatus, Error>);
 
-        for (tid, result) in task_ids.into_iter().zip(results) {
-            let status: ExitStatus
-                = result?;
+        tokio::select! {
+            Some(request) = push_rx.recv() => {
+                let response
+                    = match state.add_pushed_task(project, &request.task_name, request.parent_task_id.as_deref()) {
+                        Ok((_, new_count)) => {
+                            if let Some((_, progress_state)) = progress.as_ref() {
+                                progress_state.add_to_total(new_count);
+                            }
+                            PushResponse::Ok
+                        }
+                        Err(e) => PushResponse::Error(e.to_string()),
+                    };
 
-            if !status.success() {
-                if let Some((handle, _)) = progress {
-                    handle.stop();
-                }
-                return Ok(status);
+                let _ = request.response_tx.send(response);
+                continue;
             }
 
-            completed.insert(tid);
+            result = async {
+                use futures::future::select_all;
+                let handles: Vec<_> = running_handles.iter_mut().collect();
+                let task_ids: Vec<_> = handles.iter().map(|(id, _)| (*id).clone()).collect();
+                let futures: Vec<_> = handles.into_iter().map(|(_, h)| Box::pin(async move { h.await })).collect();
+                let (result, idx, _) = select_all(futures).await;
+                (task_ids[idx].clone(), result)
+            } => {
+                let (task_id, join_result) = result;
+                running_handles.remove(&task_id);
+
+                match join_result {
+                    Ok(task_result) => {
+                        completed_task = (task_id, task_result);
+                    }
+                    Err(e) => {
+                        if let Some((handle, _)) = progress {
+                            handle.stop();
+                        }
+                        return Err(Error::TaskJoinError(e.to_string()));
+                    }
+                }
+            }
+        }
+
+        {
+            let (task_id, task_result) = completed_task;
+            match task_result {
+                Ok(status) if status.success() => {
+                    {
+                        let mut script_finished
+                            = state.script_finished.write().unwrap();
+
+                        script_finished.insert(task_id.clone());
+                    }
+
+                    state.try_complete_task(&task_id);
+
+                    let parents_to_check: Vec<TaskId>
+                        = {
+                            let subtasks
+                                = state.subtasks.read().unwrap();
+
+                            subtasks
+                                .iter()
+                                .filter(|(_, children)| children.contains(&task_id))
+                                .map(|(parent, _)| parent.clone())
+                                .collect()
+                        };
+
+                    for parent in parents_to_check {
+                        state.try_complete_task(&parent);
+                    }
+                }
+                Ok(status) => {
+                    if let Some((handle, _)) = progress {
+                        handle.stop();
+                    }
+                    return Ok(status);
+                }
+                Err(e) => {
+                    if let Some((handle, _)) = progress {
+                        handle.stop();
+                    }
+                    return Err(e);
+                }
+            }
         }
     }
 
     Ok(ExitStatus::from_raw(0))
 }
 
-fn prepare_all_tasks(
-    project: &Project,
-    resolved: &zpm_tasks::ResolvedTasks,
-) -> Result<BTreeMap<TaskId, PreparedTask>, Error> {
-    let mut prepared
-        = BTreeMap::new();
+async fn execute_prepared_task_with_ipc(
+    prepared: &PreparedTask,
+    args: &[String],
+    is_first_printed: Arc<AtomicBool>,
+    options: &SpawnedTaskOptions,
+    is_target: bool,
+    socket_name: &str,
+    task_id_str: &str,
+) -> Result<ExitStatus, Error> {
+    let mut prepared_with_ipc
+        = prepared.clone();
 
-    let mut color_it
-        = prefix_colors();
+    prepared_with_ipc.env.insert(
+        IPC_SOCKET_ENV.to_string(),
+        socket_name.to_string(),
+    );
 
-    for task_id in resolved.tasks.keys() {
-        let task_file
-            = resolved.task_files.get(&task_id.workspace).ok_or_else(|| {
-                Error::TaskWorkspaceNotFound(task_id.workspace.clone())
-            })?;
+    prepared_with_ipc.env.insert(
+        IPC_CURRENT_TASK_ENV.to_string(),
+        task_id_str.to_string(),
+    );
 
-        let task
-            = task_file.tasks.get(task_id.task_name.as_str()).ok_or_else(|| {
-                Error::TaskNotFound {
-                    workspace: task_id.workspace.clone(),
-                    task_name: task_id.task_name.as_str().to_string(),
-                }
-            })?;
-
-        if task.script.is_empty() {
-            continue;
-        }
-
-        let workspace
-            = project.workspace_by_ident(&task_id.workspace)?;
-
-        let script
-            = task.script.join("\n");
-
-        let mut env
-            = BTreeMap::new();
-
-        env.insert(
-            "npm_lifecycle_event".to_string(),
-            task_id.task_name.as_str().to_string(),
-        );
-
-        let color
-            = color_it.next().unwrap();
-
-        let prefix
-            = color.colorize(&format!(
-                "[{}:{}]: ",
-                task_id.workspace.to_file_string(),
-                task_id.task_name.as_str()
-            ));
-
-        prepared.insert(
-            task_id.clone(),
-            PreparedTask {
-                script,
-                cwd: workspace.path.clone(),
-                env,
-                prefix,
-            },
-        );
-    }
-
-    Ok(prepared)
+    execute_prepared_task(&prepared_with_ipc, args, is_first_printed, options, is_target).await
 }
 
 fn build_task_script(script: &str, args: &[String]) -> String {

@@ -1,16 +1,13 @@
-test:
-  exit 1
+test1:
+  sleep 4
 
-test2: test
-  echo test 2
+test2:
+  sleep 10
 
-foo:
-  for x in {1..10}; do echo foo:$x; sleep 1; done
+bar:
+  yarn task push test1 test2
 
-foo2:
-  for x in {1..10}; do echo foo:$x; sleep 1; done
-
-bar: foo& foo2&
+baz: bar
   echo done!
 
 doc:

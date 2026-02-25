@@ -63,6 +63,7 @@ hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 itertools = "0.14.0"
 indexmap = {version = "2.11.0", features = ["serde"]}
+interprocess = { version = "2.2.2", features = ["tokio"] }
 mimalloc = "0.1.43"
 num = "0.4.3"
 pretty_assertions = "1.4.1"

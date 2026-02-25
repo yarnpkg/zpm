@@ -287,6 +287,27 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should hide pushed subtask output with --silent-dependencies`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, async ({path, run}) => {
+        await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+          `subtask:`,
+          `  echo "subtask-output"`,
+          ``,
+          `main:`,
+          `  yarn task push subtask`,
+          `  echo "main-output"`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        const {stdout} = await run(`task`, `run`, `--silent-dependencies`, `main`);
+        expect(stdout).toEqual(`main-output\n`);
+      }),
+    );
+
+    test(
       `it should return the exit code of the failed task`,
       makeTemporaryEnv({
         name: `test-package`,

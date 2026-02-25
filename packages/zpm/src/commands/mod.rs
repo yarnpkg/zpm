@@ -105,6 +105,7 @@ pub enum YarnCli {
     Rebuild(rebuild::Rebuild),
     Remove(remove::Remove),
     Run(run::Run),
+    TaskPush(task::push::TaskPush),
     TaskRun(task::run::TaskRun),
     Unlink(unlink::Unlink),
     Unplug(unplug::Unplug),
