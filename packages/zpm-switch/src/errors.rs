@@ -83,6 +83,15 @@ pub enum Error {
 
     #[error("Yarn cannot be used on project configured for use with {0}")]
     UnsupportedProject(&'static str),
+
+    #[error("No project found in current directory or any parent")]
+    NoProjectFound,
+
+    #[error("Daemons are not supported for local Yarn versions")]
+    DaemonNotSupportedForLocalVersions,
+
+    #[error("Failed to start daemon: {0}")]
+    FailedToStartDaemon(Arc<std::io::Error>),
 }
 
 impl From<std::str::Utf8Error> for Error {

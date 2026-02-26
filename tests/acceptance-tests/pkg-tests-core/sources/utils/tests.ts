@@ -1108,12 +1108,13 @@ export type Run = (...args: Array<string> | [...Array<string>, Partial<RunDriver
 export type Source = (script: string, callDefinition?: Record<string, any>) => Promise<Record<string, any>>;
 
 export type RunFunction = (
-  {path, run, runSwitch, source}:
+  {path, run, runSwitch, source, yarnBinary}:
   {
     path: PortablePath;
     run: Run;
     runSwitch: Run;
     source: Source;
+    yarnBinary: string;
   }
 ) => Promise<void>;
 
@@ -1121,10 +1122,12 @@ export const generatePkgDriver = ({
   getName,
   runDriver,
   runSwitchDriver,
+  getYarnBinary,
 }: {
   getName: () => string;
   runDriver: PackageRunDriver;
   runSwitchDriver?: PackageRunDriver;
+  getYarnBinary?: () => string;
 }): PackageDriver => {
   const withConfig = (definition: Record<string, any>): PackageDriver => {
     const makeTemporaryEnv: PackageDriver = (packageJson, subDefinition, fn) => {
@@ -1245,6 +1248,8 @@ export const generatePkgDriver = ({
           }
         };
 
+        const yarnBinary = getYarnBinary?.() ?? ``;
+
         try {
           // To pass [citgm](https://github.com/nodejs/citgm), we need to suppress timeout failures
           // So add env variable TEST_IGNORE_TIMEOUT_FAILURES to turn on this suppression
@@ -1256,7 +1261,7 @@ export const generatePkgDriver = ({
                 // Resolve 1s ahead of the jest timeout
                 timer = setTimeout(resolve, TEST_TIMEOUT - 1000);
               }),
-              fn!({path, run, runSwitch, source}),
+              fn!({path, run, runSwitch, source, yarnBinary}),
             ]).finally(() => {
               if (timer) {
                 clearTimeout(timer);
@@ -1264,7 +1269,7 @@ export const generatePkgDriver = ({
             });
             return;
           }
-          await fn!({path, run, runSwitch, source});
+          await fn!({path, run, runSwitch, source, yarnBinary});
         } catch (error: any) {
           error.message = `Temporary fixture folder: ${npath.fromPortablePath(path)}\n\n${error.message}`;
           throw error;

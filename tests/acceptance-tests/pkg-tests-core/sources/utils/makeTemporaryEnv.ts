@@ -44,9 +44,17 @@ const baseEnv = (nativePath: string, nativeHomePath: string, registryUrl: string
   ...env,
 });
 
+const getYarnBinaryPath = () => {
+  return process.env.TEST_BINARY
+    ?? require.resolve(`${__dirname}/../../../../../target/release/yarn-bin`);
+};
+
 const mte = generatePkgDriver({
   getName() {
     return `yarn`;
+  },
+  getYarnBinary() {
+    return getYarnBinaryPath();
   },
   async runDriver(
     path,
@@ -64,8 +72,7 @@ const mte = generatePkgDriver({
       ? [projectFolder]
       : [];
 
-    const yarnBinary = process.env.TEST_BINARY
-      ?? require.resolve(`${__dirname}/../../../../../target/release/yarn-bin`);
+    const yarnBinary = getYarnBinaryPath();
 
     const yarnBinaryArgs = yarnBinary.match(/\.[cm]?js$/)
       ? [process.execPath, yarnBinary]
