@@ -9,7 +9,6 @@ mod tasks;
 
 mod add;
 mod bin;
-mod daemon;
 mod cache_clear;
 mod config;
 mod config_get;
@@ -85,8 +84,8 @@ pub enum YarnCli {
     CacheClear(cache_clear::CacheClear),
     CacheClear2(cache_clear::CacheClear2),
     Config(config::Config),
-    Daemon(daemon::Daemon),
     ConfigGet(config_get::ConfigGet),
+    Daemon(debug::daemon::Daemon),
     ConfigSet(config_set::ConfigSet),
     Constraints(constraints::Constraints),
     Dedupe(dedupe::Dedupe),

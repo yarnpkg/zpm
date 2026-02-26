@@ -1,11 +1,18 @@
 mod errors;
 mod http;
+mod ipc;
 mod manifest;
 mod yarn_enums;
 mod yarn;
 
 pub use errors::{
   Error,
+};
+
+pub use ipc::{
+    DaemonRequest,
+    DaemonResponse,
+    socket_path,
 };
 
 pub use manifest::{

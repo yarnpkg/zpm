@@ -6,6 +6,7 @@ pub mod clipanion_commands;
 pub mod daemon_kill_all;
 pub mod daemon_kill;
 pub mod daemon_list;
+pub mod daemon_send;
 pub mod daemon_start;
 pub mod explicit;
 pub mod links_clear;

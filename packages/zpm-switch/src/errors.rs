@@ -92,6 +92,27 @@ pub enum Error {
 
     #[error("Failed to start daemon: {0}")]
     FailedToStartDaemon(Arc<std::io::Error>),
+
+    #[error("No daemon is running for this project")]
+    DaemonNotRunning,
+
+    #[error("Daemon failed to start within timeout")]
+    DaemonStartTimeout,
+
+    #[error("Failed to connect to daemon: {0}")]
+    DaemonConnectionFailed(Arc<std::io::Error>),
+
+    #[error("Invalid daemon message: {0}")]
+    InvalidDaemonMessage(String),
+
+    #[error("Failed to bind socket: {0}")]
+    FailedToBindSocket(Arc<std::io::Error>),
+
+    #[error("Failed to read from socket: {0}")]
+    SocketReadError(Arc<std::io::Error>),
+
+    #[error("Failed to write to socket: {0}")]
+    SocketWriteError(Arc<std::io::Error>),
 }
 
 impl From<std::str::Utf8Error> for Error {

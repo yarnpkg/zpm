@@ -9,6 +9,7 @@ mod daemons;
 mod errors;
 mod http;
 mod install;
+mod ipc;
 mod links;
 mod manifest;
 mod yarn_enums;

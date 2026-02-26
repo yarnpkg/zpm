@@ -19,6 +19,7 @@ enum SwitchExecCli {
     DaemonKillAllCommand(switch::daemon_kill_all::DaemonKillAllCommand),
     DaemonKillCommand(switch::daemon_kill::DaemonKillCommand),
     DaemonListCommand(switch::daemon_list::DaemonListCommand),
+    DaemonSendCommand(switch::daemon_send::DaemonSendCommand),
     DaemonStartCommand(switch::daemon_start::DaemonStartCommand),
     ExplicitCommand(switch::explicit::ExplicitCommand),
     LinksListCommand(switch::links_list::LinksListCommand),
