@@ -18,6 +18,11 @@ pub struct CacheKey {
     pub platform: String,
 }
 
+fn get_npm_registry_server() -> String {
+    std::env::var("YARNSW_NPM_REGISTRY_SERVER")
+        .unwrap_or_else(|_| "https://registry.npmjs.org".to_string())
+}
+
 impl CacheKey {
     pub fn to_npm_url(&self) -> Option<String> {
         if self.version.rc.as_ref().map_or(true, |rc| !rc.starts_with(&[VersionRc::String("git".into())])) {
@@ -30,7 +35,8 @@ impl CacheKey {
             );
 
             if self.version >= first_npm_release {
-                return Some(format!("https://registry.npmjs.org/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", self.platform, self.platform, self.version.to_file_string()));
+                let registry = get_npm_registry_server();
+                return Some(format!("{}/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", registry, self.platform, self.platform, self.version.to_file_string()));
             }
         }
 
