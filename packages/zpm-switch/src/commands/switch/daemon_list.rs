@@ -26,6 +26,7 @@ impl DaemonListCommand {
                     "cwd": d.project_cwd.to_file_string(),
                     "version": d.yarn_version.to_file_string(),
                     "pid": d.pid,
+                    "port": d.port,
                 }))
                 .collect();
 
@@ -52,6 +53,11 @@ impl DaemonListCommand {
                     ("pid".to_string(), tree::Node {
                         label: Some("PID".to_string()),
                         value: Some(AbstractValue::new(d.pid as u64)),
+                        children: None,
+                    }),
+                    ("port".to_string(), tree::Node {
+                        label: Some("Port".to_string()),
+                        value: Some(AbstractValue::new(d.port as u64)),
                         children: None,
                     }),
                 ]))),

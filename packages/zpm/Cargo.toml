@@ -57,6 +57,7 @@ hex = { workspace = true }
 p256 = { workspace = true }
 spki = { workspace = true }
 ring = { workspace = true }
+tokio-tungstenite = { workspace = true }
 url = { workspace = true }
 rand = { workspace = true }
 

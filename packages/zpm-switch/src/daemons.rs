@@ -13,6 +13,7 @@ pub struct DaemonEntry {
     pub project_cwd: Path,
     pub yarn_version: Version,
     pub pid: u32,
+    pub port: u16,
 }
 
 pub fn daemons_dir() -> Result<Path, Error> {

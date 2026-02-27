@@ -10,9 +10,10 @@ pub use errors::{
 };
 
 pub use ipc::{
+    daemon_url,
     DaemonRequest,
     DaemonResponse,
-    socket_path,
+    DAEMON_BASE_PORT,
 };
 
 pub use manifest::{

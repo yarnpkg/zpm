@@ -1,17 +1,18 @@
-use std::sync::Arc;
+use std::net::SocketAddr;
 
 use clipanion::cli;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixListener;
-use zpm_switch::{socket_path, DaemonRequest, DaemonResponse, Error as SwitchError};
-use zpm_utils::Path;
+use futures::stream::StreamExt;
+use futures::SinkExt;
+use tokio::net::TcpListener;
+use tokio_tungstenite::tungstenite::Message;
+use zpm_switch::{DaemonRequest, DaemonResponse, Error as SwitchError, DAEMON_BASE_PORT};
 
 use crate::error::Error;
 
 /// Start a background daemon process.
 ///
 /// This command starts an idle daemon that runs indefinitely until terminated.
-/// It listens on a Unix socket for IPC messages.
+/// It listens on a WebSocket server for IPC messages.
 ///
 #[cli::command]
 #[cli::path("debug", "daemon")]
@@ -20,24 +21,18 @@ pub struct Daemon {}
 
 impl Daemon {
     pub async fn execute(&self) -> Result<(), Error> {
-        let project_cwd = Path::current_dir()?;
-        let sock_path = socket_path(&project_cwd)?;
+        let (listener, port) = Self::bind_to_available_port().await?;
 
-        // Remove stale socket if it exists
-        let _ = sock_path.fs_rm();
+        // Print port to stdout so the spawner can capture it
+        println!("{}", port);
 
-        // Ensure parent directory exists
-        sock_path.fs_create_parent()?;
-
-        let listener = UnixListener::bind(sock_path.to_path_buf())
-            .map_err(|e| SwitchError::FailedToBindSocket(Arc::new(e)))?;
-
+        // Accept WebSocket connections
         loop {
             match listener.accept().await {
-                Ok((stream, _)) => {
+                Ok((stream, addr)) => {
                     tokio::spawn(async move {
-                        if let Err(e) = Self::handle_connection(stream).await {
-                            eprintln!("Error handling connection: {}", e);
+                        if let Err(e) = Self::handle_connection(stream, addr).await {
+                            eprintln!("Error handling connection from {}: {}", addr, e);
                         }
                     });
                 }
@@ -48,28 +43,65 @@ impl Daemon {
         }
     }
 
-    async fn handle_connection(stream: tokio::net::UnixStream) -> Result<(), SwitchError> {
-        let (reader, mut writer) = stream.into_split();
-        let mut reader = BufReader::new(reader);
-        let mut line = String::new();
+    /// Try to bind to ports starting from DAEMON_BASE_PORT until one is available
+    async fn bind_to_available_port() -> Result<(TcpListener, u16), Error> {
+        for port in DAEMON_BASE_PORT..=DAEMON_BASE_PORT + 100 {
+            let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+            if let Ok(listener) = TcpListener::bind(addr).await {
+                return Ok((listener, port));
+            }
+        }
 
-        while reader.read_line(&mut line).await.map_err(|e| SwitchError::SocketReadError(Arc::new(e)))? > 0 {
-            let request: DaemonRequest = serde_json::from_str(&line)
-                .map_err(|e| SwitchError::InvalidDaemonMessage(e.to_string()))?;
+        Err(SwitchError::FailedToBindSocket(std::sync::Arc::new(std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            format!("Could not bind to any port in range {}-{}", DAEMON_BASE_PORT, DAEMON_BASE_PORT + 100),
+        ))).into())
+    }
 
-            let response = Self::handle_request(request);
+    async fn handle_connection(
+        stream: tokio::net::TcpStream,
+        addr: SocketAddr,
+    ) -> Result<(), SwitchError> {
+        let ws_stream = tokio_tungstenite::accept_async(stream)
+            .await
+            .map_err(|e| SwitchError::SocketReadError(std::sync::Arc::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))))?;
 
-            let response_json = serde_json::to_string(&response)
-                .map_err(|e| SwitchError::InvalidDaemonMessage(e.to_string()))?;
+        let (mut write, mut read) = ws_stream.split();
 
-            writer.write_all(response_json.as_bytes()).await
-                .map_err(|e| SwitchError::SocketWriteError(Arc::new(e)))?;
-            writer.write_all(b"\n").await
-                .map_err(|e| SwitchError::SocketWriteError(Arc::new(e)))?;
-            writer.flush().await
-                .map_err(|e| SwitchError::SocketWriteError(Arc::new(e)))?;
+        while let Some(msg) = read.next().await {
+            let msg = match msg {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("WebSocket error from {}: {}", addr, e);
+                    break;
+                }
+            };
 
-            line.clear();
+            match msg {
+                Message::Text(text) => {
+                    let request: DaemonRequest = serde_json::from_str(&text)
+                        .map_err(|e| SwitchError::InvalidDaemonMessage(e.to_string()))?;
+
+                    let response = Self::handle_request(request);
+
+                    let response_json = serde_json::to_string(&response)
+                        .map_err(|e| SwitchError::InvalidDaemonMessage(e.to_string()))?;
+
+                    write.send(Message::Text(response_json.into())).await
+                        .map_err(|e| SwitchError::SocketWriteError(std::sync::Arc::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            e.to_string(),
+                        ))))?;
+                }
+                Message::Close(_) => break,
+                Message::Ping(data) => {
+                    write.send(Message::Pong(data)).await.ok();
+                }
+                _ => {}
+            }
         }
 
         Ok(())
