@@ -2,9 +2,10 @@ use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 
 use clipanion::cli;
+use zpm_switch::{TaskSubscription, TASK_CURRENT_ENV};
 
+use crate::daemon::DaemonClient;
 use crate::error::Error;
-use crate::ipc::{TaskIpcClient, IPC_CURRENT_TASK_ENV};
 
 #[cli::command]
 #[cli::path("tasks", "push")]
@@ -20,15 +21,28 @@ impl TaskPush {
             return Err(Error::TaskPushFailed("No tasks specified".to_string()));
         }
 
-        let mut client
-            = TaskIpcClient::connect().await?;
+        // tasks push can only be called from within a running task
+        let parent_task_id = match std::env::var(TASK_CURRENT_ENV) {
+            Ok(id) => Some(id),
+            Err(_) => {
+                return Err(Error::TaskPushFailed(
+                    format!("Not running inside a task context ({} not set)", TASK_CURRENT_ENV),
+                ));
+            }
+        };
 
-        let parent_task_id
-            = std::env::var(IPC_CURRENT_TASK_ENV).ok();
+        let mut client = DaemonClient::connect().await?;
 
-        for task in &self.tasks {
-            client.push_task(task, parent_task_id.as_deref()).await?;
-        }
+        let task_subscriptions: Vec<TaskSubscription> = self
+            .tasks
+            .iter()
+            .map(|name| TaskSubscription {
+                name: name.clone(),
+                subscriptions: vec![],
+            })
+            .collect();
+
+        client.push_tasks(task_subscriptions, parent_task_id).await?;
 
         Ok(ExitStatus::from_raw(0))
     }

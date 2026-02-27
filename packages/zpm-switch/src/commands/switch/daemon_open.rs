@@ -240,6 +240,7 @@ impl DaemonOpenCommand {
 
             match response {
                 DaemonResponse::Pong => Ok(()),
+                _ => Err(Error::InvalidDaemonMessage("Expected Pong response".to_string())),
             }
         } else {
             Err(Error::InvalidDaemonMessage("Expected text message".to_string()))

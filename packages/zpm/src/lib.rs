@@ -6,6 +6,7 @@ pub mod cache;
 pub mod commands;
 pub mod constraints;
 pub mod content_flags;
+pub mod daemon;
 pub mod descriptor_loose;
 pub mod diff_finder;
 pub mod manifest_finder;

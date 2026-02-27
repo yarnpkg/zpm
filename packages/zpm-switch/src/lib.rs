@@ -1,3 +1,4 @@
+pub mod daemons;
 mod errors;
 mod http;
 mod ipc;
@@ -11,9 +12,13 @@ pub use errors::{
 
 pub use ipc::{
     daemon_url,
+    DaemonNotification,
     DaemonRequest,
     DaemonResponse,
+    SubscriptionKind,
+    TaskSubscription,
     DAEMON_BASE_PORT,
+    TASK_CURRENT_ENV,
 };
 
 pub use manifest::{
