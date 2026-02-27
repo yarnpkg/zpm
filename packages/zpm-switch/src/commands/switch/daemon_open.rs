@@ -66,21 +66,17 @@ impl DaemonOpenCommand {
             None => get_default_yarn_version(Some(ReleaseLine::Classic)).await,
         }?;
 
-        let version = match &reference {
-            PackageManagerReference::Version(v) => v.version.clone(),
-            PackageManagerReference::Local(_) => {
-                return Err(Error::DaemonNotSupportedForLocalVersions);
+        match &reference {
+            PackageManagerReference::Version(version_ref) => {
+                let mut binary = install_package_manager(version_ref).await?;
+                self.start_with_command(&detected_root, &mut binary, &version_ref.version.to_file_string())
+                    .await
             }
-        };
-
-        // Get the yarn binary
-        let PackageManagerReference::Version(version_ref) = &reference else {
-            unreachable!()
-        };
-
-        let mut binary = install_package_manager(version_ref).await?;
-        self.start_with_command(&detected_root, &mut binary, &version.to_file_string())
-            .await
+            PackageManagerReference::Local(local_ref) => {
+                self.start_with_binary(&detected_root, &local_ref.path, "local")
+                    .await
+            }
+        }
     }
 
     async fn start_with_binary(

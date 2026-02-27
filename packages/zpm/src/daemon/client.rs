@@ -5,7 +5,7 @@ use futures::stream::StreamExt;
 use futures::SinkExt;
 use tokio::io::AsyncBufReadExt;
 use tokio_tungstenite::tungstenite::Message;
-use zpm_switch::{daemon_url, DaemonRequest, DaemonResponse, DaemonNotification, TaskSubscription};
+use zpm_switch::{daemon_url, DaemonRequest, DaemonResponse, DaemonNotification, TaskSubscription, YARN_SWITCH_PATH_ENV};
 use zpm_utils::Path;
 
 use crate::error::Error;
@@ -24,8 +24,8 @@ pub struct DaemonClient {
 
 impl DaemonClient {
     /// Connect to the daemon, starting it if necessary
-    pub async fn connect() -> Result<Self, Error> {
-        let url = get_or_start_daemon().await?;
+    pub async fn connect(project_root: &Path) -> Result<Self, Error> {
+        let url = start_daemon(project_root).await?;
         Self::connect_to_url(&url).await
     }
 
@@ -97,10 +97,12 @@ impl DaemonClient {
         &mut self,
         tasks: Vec<TaskSubscription>,
         parent_task_id: Option<String>,
+        workspace: Option<String>,
     ) -> Result<Vec<String>, Error> {
         let request = DaemonRequest::PushTasks {
             tasks,
             parent_task_id,
+            workspace,
         };
 
         match self.send_request(request).await? {
@@ -111,77 +113,41 @@ impl DaemonClient {
     }
 }
 
-/// Get the daemon URL, starting it if necessary
-async fn get_or_start_daemon() -> Result<String, Error> {
-    let project = Project::new(None).await?;
-    let project_root = project.project_cwd.clone();
-
-    // Check for existing daemon
-    if let Some(existing) = zpm_switch::daemons::get_daemon(&project_root)
-        .map_err(|e: zpm_switch::Error| Error::IpcError(e.to_string()))?
-    {
-        if zpm_switch::daemons::is_process_alive(existing.pid) {
-            // Verify daemon is responding
-            if ping_daemon(existing.port).await.is_ok() {
-                return Ok(daemon_url(existing.port));
-            }
-        }
-        // Clean up stale entry
-        let _ = zpm_switch::daemons::unregister_daemon(&project_root);
-    }
-
-    // Start new daemon
-    start_daemon(&project_root).await
-}
-
-/// Start a new daemon process
+/// Start a new daemon process using `yarn switch daemon --open`
 async fn start_daemon(project_root: &Path) -> Result<String, Error> {
-    // Find the yarn binary
-    let exe_path = std::env::current_exe()
-        .map_err(|e| Error::IpcError(e.to_string()))?;
+    let switch_path = std::env::var(YARN_SWITCH_PATH_ENV)
+        .map_err(|_| Error::IpcError(
+            "This command can only be called within a Yarn Switch context. \
+             Please run this command through `yarn` instead of calling the binary directly.".to_string()
+        ))?;
 
-    let mut child = tokio::process::Command::new(&exe_path)
-        .args(["debug", "daemon"])
+    let mut cmd = tokio::process::Command::new(&switch_path);
+    cmd.args(["switch", "daemon", "--open"])
         .current_dir(project_root.to_path_buf())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .stdin(Stdio::null())
+        .stdin(Stdio::null());
+
+    let mut child = cmd
         .spawn()
         .map_err(|e| Error::IpcError(format!("Failed to start daemon: {}", e)))?;
 
-    // Read port from stdout
+    // Read URL from stdout
     let stdout = child.stdout.take()
         .ok_or_else(|| Error::IpcError("Failed to capture daemon stdout".to_string()))?;
 
     let mut reader = tokio::io::BufReader::new(stdout).lines();
 
-    let port_str = tokio::time::timeout(Duration::from_secs(10), reader.next_line())
+    let url = tokio::time::timeout(Duration::from_secs(10), reader.next_line())
         .await
-        .map_err(|_| Error::IpcError("Timeout waiting for daemon port".to_string()))?
+        .map_err(|_| Error::IpcError("Timeout waiting for daemon URL".to_string()))?
         .map_err(|e| Error::IpcError(e.to_string()))?
-        .ok_or_else(|| Error::IpcError("Daemon closed without printing port".to_string()))?;
+        .ok_or_else(|| Error::IpcError("Daemon closed without printing URL".to_string()))?;
 
-    let port: u16 = port_str.trim().parse()
-        .map_err(|_| Error::IpcError(format!("Invalid port from daemon: {}", port_str)))?;
+    // Wait for the command to complete
+    let _ = child.wait().await;
 
-    // Wait for daemon to be ready
-    for _ in 0..100 {
-        if ping_daemon(port).await.is_ok() {
-            // Register the daemon
-            let entry = zpm_switch::daemons::DaemonEntry {
-                project_cwd: project_root.clone(),
-                yarn_version: zpm_semver::Version::new(),
-                pid: child.id().unwrap_or(0),
-                port,
-            };
-            let _ = zpm_switch::daemons::register_daemon(&entry);
-
-            return Ok(daemon_url(port));
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-
-    Err(Error::IpcError("Daemon failed to start".to_string()))
+    Ok(url.trim().to_string())
 }
 
 /// Ping the daemon to check if it's alive

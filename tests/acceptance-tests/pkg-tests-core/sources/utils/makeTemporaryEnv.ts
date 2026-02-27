@@ -115,6 +115,8 @@ const mte = generatePkgDriver({
     const switchBinary = process.env.TEST_SWITCH_BINARY
       ?? require.resolve(`${__dirname}/../../../../../target/release/yarn`);
 
+    const yarnBinBinary = getYarnBinaryPath();
+
     const switchBinaryArgs = switchBinary.match(/\.[cm]?js$/)
       ? [process.execPath, switchBinary]
       : [switchBinary];
@@ -126,6 +128,8 @@ const mte = generatePkgDriver({
         ...baseEnv(nativePath, nativeHomePath, registryUrl, rcEnv, env),
         // Point Yarn Switch to the test registry for downloading Yarn releases
         [`YARNSW_NPM_REGISTRY_SERVER`]: registryUrl,
+        // Use the local yarn-bin as the default when no packageManager field is present
+        [`YARNSW_DEFAULT`]: `local:${yarnBinBinary}`,
       },
     });
 

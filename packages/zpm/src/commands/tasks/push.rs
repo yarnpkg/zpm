@@ -6,6 +6,7 @@ use zpm_switch::{TaskSubscription, TASK_CURRENT_ENV};
 
 use crate::daemon::DaemonClient;
 use crate::error::Error;
+use crate::project::Project;
 
 #[cli::command]
 #[cli::path("tasks", "push")]
@@ -31,7 +32,11 @@ impl TaskPush {
             }
         };
 
-        let mut client = DaemonClient::connect().await?;
+        let project
+            = Project::new(None).await?;
+
+        let mut client
+            = DaemonClient::connect(&project.project_cwd).await?;
 
         let task_subscriptions: Vec<TaskSubscription> = self
             .tasks
@@ -39,11 +44,13 @@ impl TaskPush {
             .map(|name| TaskSubscription {
                 name: name.clone(),
                 subscriptions: vec![],
+                args: vec![],
             })
             .collect();
 
-        client.push_tasks(task_subscriptions, parent_task_id).await?;
+        client.push_tasks(task_subscriptions, parent_task_id, None).await?;
 
-        Ok(ExitStatus::from_raw(0))
+        // On Unix, ExitStatus::from_raw expects the raw wait status where exit code is shifted by 8
+        Ok(ExitStatus::from_raw(0 << 8))
     }
 }

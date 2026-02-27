@@ -1251,24 +1251,6 @@ export const generatePkgDriver = ({
         const yarnBinary = getYarnBinary?.() ?? ``;
 
         try {
-          // To pass [citgm](https://github.com/nodejs/citgm), we need to suppress timeout failures
-          // So add env variable TEST_IGNORE_TIMEOUT_FAILURES to turn on this suppression
-          // TODO: investigate whether this is still needed.
-          if (process.env.TEST_IGNORE_TIMEOUT_FAILURES) {
-            let timer: NodeJS.Timeout | undefined;
-            await Promise.race([
-              new Promise(resolve => {
-                // Resolve 1s ahead of the jest timeout
-                timer = setTimeout(resolve, TEST_TIMEOUT - 1000);
-              }),
-              fn!({path, run, runSwitch, source, yarnBinary}),
-            ]).finally(() => {
-              if (timer) {
-                clearTimeout(timer);
-              }
-            });
-            return;
-          }
           await fn!({path, run, runSwitch, source, yarnBinary});
         } catch (error: any) {
           error.message = `Temporary fixture folder: ${npath.fromPortablePath(path)}\n\n${error.message}`;

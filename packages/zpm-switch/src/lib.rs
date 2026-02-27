@@ -19,6 +19,7 @@ pub use ipc::{
     TaskSubscription,
     DAEMON_BASE_PORT,
     TASK_CURRENT_ENV,
+    YARN_SWITCH_PATH_ENV,
 };
 
 pub use manifest::{

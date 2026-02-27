@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clipanion::cli;
 use futures::stream::StreamExt;
@@ -8,7 +9,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::tungstenite::Message;
 use zpm_switch::{DaemonNotification, DaemonRequest, DaemonResponse, Error as SwitchError, DAEMON_BASE_PORT};
-use zpm_utils::ToFileString;
+use zpm_utils::{Path, ToFileString};
 
 use crate::daemon::{run_execution_loop, DynamicExecutionState};
 use crate::error::Error;
@@ -65,6 +66,12 @@ impl Daemon {
         let exec_state = execution_state.clone();
         tokio::spawn(async move {
             run_execution_loop(exec_project, exec_state, notification_tx).await;
+        });
+
+        // Spawn watchdog to monitor project root
+        let project_root = project.project_cwd.clone();
+        tokio::spawn(async move {
+            Self::watch_project_root(project_root).await;
         });
 
         let (listener, port) = Self::bind_to_available_port().await?;
@@ -234,7 +241,7 @@ impl Daemon {
     fn handle_request(request: DaemonRequest, state: &DaemonState) -> DaemonResponse {
         match request {
             DaemonRequest::Ping => DaemonResponse::Pong,
-            DaemonRequest::PushTasks { tasks, parent_task_id } => {
+            DaemonRequest::PushTasks { tasks, parent_task_id, workspace } => {
                 let mut task_ids = Vec::new();
 
                 for task_sub in &tasks {
@@ -242,6 +249,8 @@ impl Daemon {
                         state.project.as_ref(),
                         &task_sub.name,
                         parent_task_id.as_deref(),
+                        task_sub.args.clone(),
+                        workspace.as_deref(),
                     ) {
                         Ok((task_id, _new_count)) => {
                             let task_id_str = format!(
@@ -260,6 +269,41 @@ impl Daemon {
                 }
 
                 DaemonResponse::TasksEnqueued { task_ids }
+            }
+        }
+    }
+
+    /// Watch the project root directory and exit if it disappears or its inode changes
+    async fn watch_project_root(project_root: Path) {
+        #[cfg(unix)]
+        let initial_inode = {
+            use std::os::unix::fs::MetadataExt;
+            std::fs::metadata(project_root.to_path_buf())
+                .map(|m| m.ino())
+                .ok()
+        };
+
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+
+            let path = project_root.to_path_buf();
+
+            // Check if directory still exists
+            if !path.exists() {
+                eprintln!("Daemon shutting down: project root no longer exists");
+                std::process::exit(0);
+            }
+
+            // On Unix, also check if inode changed (directory was recreated)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                if let (Some(initial), Ok(metadata)) = (initial_inode, std::fs::metadata(&path)) {
+                    if metadata.ino() != initial {
+                        eprintln!("Daemon shutting down: project root inode changed");
+                        std::process::exit(0);
+                    }
+                }
             }
         }
     }

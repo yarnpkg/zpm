@@ -698,14 +698,14 @@ impl ScriptEnvironment {
     /// Spawns a script and returns the running process with piped stdout/stderr.
     /// Use this when you need to read output incrementally (e.g., for interlaced task output).
     pub async fn spawn_script<I, S>(&mut self, script: &str, args: I) -> Result<RunningScript, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
-        let mut final_script = script.to_string();
-
+        // Pass args as bash positional parameters ($1, $2, etc.)
+        // Format: bash -c "script" yarn-script arg1 arg2 ...
+        let mut bash_args = vec!["-c".to_string(), script.to_string(), "yarn-script".to_string()];
         for arg in args {
-            final_script.push(' ');
-            final_script.push_str(&shell_escape(arg.to_string().as_str()));
+            bash_args.push(arg.to_string());
         }
 
-        self.spawn_exec("bash", ["-c", &final_script, "yarn-script"]).await
+        self.spawn_exec("bash", bash_args.iter().map(|s| s.as_str())).await
     }
 
     /// Runs a script with inherited stdio (output goes directly to terminal).

@@ -4,6 +4,8 @@ use clipanion::cli;
 use zpm_switch::{DaemonNotification, SubscriptionKind, TaskSubscription};
 use zpm_tasks::{parse, TaskName};
 
+use zpm_utils::ToFileString;
+
 use crate::{daemon::DaemonClient, error::Error, project::Project};
 
 #[cli::command(proxy)]
@@ -28,7 +30,14 @@ impl TaskRun {
         let mut project = Project::new(None).await?;
         project.lazy_install().await?;
 
-        run_task_impl(&project, &self.name, &self.args, self.verbose_level).await
+        run_task_impl(
+            &project,
+            &self.name,
+            &self.args,
+            self.verbose_level,
+            self.silent_dependencies,
+        )
+        .await
     }
 }
 
@@ -37,11 +46,11 @@ pub async fn run_task(
     name: &str,
     _args: &[String],
     verbose_level: u8,
-    _silent_dependencies: bool,
+    silent_dependencies: bool,
     _interlaced: bool,
     _enable_timers: bool,
 ) -> Result<ExitStatus, Error> {
-    run_task_impl(project, name, _args, verbose_level).await
+    run_task_impl(project, name, _args, verbose_level, silent_dependencies).await
 }
 
 async fn run_task_impl(
@@ -49,6 +58,7 @@ async fn run_task_impl(
     name: &str,
     _args: &[String],
     verbose_level: u8,
+    silent_dependencies: bool,
 ) -> Result<ExitStatus, Error> {
     let task_name = TaskName::new(name)
         .map_err(|_| Error::TaskNameParseError(name.to_string()))?;
@@ -72,15 +82,19 @@ async fn run_task_impl(
     }
 
     // Connect to daemon
-    let mut client = DaemonClient::connect().await?;
+    let mut client
+        = DaemonClient::connect(&project.project_cwd).await?;
 
     // Push task with output and status subscriptions
     let task_subscriptions = vec![TaskSubscription {
         name: name.to_string(),
         subscriptions: vec![SubscriptionKind::Output, SubscriptionKind::Status],
+        args: _args.to_vec(),
     }];
 
-    let task_ids = client.push_tasks(task_subscriptions, None).await?;
+    // Get the workspace name to pass to daemon
+    let workspace_name = workspace.name.to_file_string();
+    let task_ids = client.push_tasks(task_subscriptions, None, Some(workspace_name)).await?;
 
     if task_ids.is_empty() {
         return Err(Error::TaskPushFailed("No tasks enqueued".to_string()));
@@ -92,27 +106,57 @@ async fn run_task_impl(
     let mut completed_tasks: HashSet<String> = HashSet::new();
     let mut exit_code = 0;
 
+    // For silent_dependencies mode, we buffer dependency output so we can show it on failure
+    let mut buffered_output: Vec<String> = Vec::new();
+    let mut had_failure = false;
+
     loop {
         let notification = client.recv_notification().await?;
 
         match notification {
             DaemonNotification::TaskOutput { task_id, line, stream: _ } => {
-                if verbose_level >= 1 {
+                let is_target = target_task_ids.contains(&task_id);
+
+                if silent_dependencies {
+                    if is_target {
+                        // Output from target task - show without prefix
+                        let mut stdout = std::io::stdout().lock();
+                        writeln!(stdout, "{}", line).ok();
+                    } else {
+                        // Output from dependency - buffer it
+                        buffered_output.push(format!("[{}]: {}", task_id, line));
+                    }
+                } else if verbose_level >= 1 {
                     let mut stdout = std::io::stdout().lock();
-                    writeln!(stdout, "[{}] {}", task_id, line).ok();
+                    writeln!(stdout, "[{}]: {}", task_id, line).ok();
                 } else {
                     let mut stdout = std::io::stdout().lock();
                     writeln!(stdout, "{}", line).ok();
                 }
             }
             DaemonNotification::TaskStarted { task_id } => {
-                if verbose_level >= 2 {
+                let is_target = target_task_ids.contains(&task_id);
+
+                if silent_dependencies && !is_target {
+                    // Buffer the start message
+                    buffered_output.push(format!("[{}]: Process started", task_id));
+                } else if verbose_level >= 2 {
                     let mut stdout = std::io::stdout().lock();
-                    writeln!(stdout, "[{}] Process started", task_id).ok();
+                    writeln!(stdout, "[{}]: Process started", task_id).ok();
                 }
             }
             DaemonNotification::TaskCompleted { task_id, exit_code: code } => {
-                if target_task_ids.contains(&task_id) {
+                let is_target = target_task_ids.contains(&task_id);
+
+                if silent_dependencies && !is_target {
+                    // Buffer the completion message
+                    buffered_output.push(format!("[{}]: Process exited (exit code {})", task_id, code));
+                } else if verbose_level >= 2 {
+                    let mut stdout = std::io::stdout().lock();
+                    writeln!(stdout, "[{}]: Process exited (exit code {})", task_id, code).ok();
+                }
+
+                if is_target {
                     completed_tasks.insert(task_id.clone());
                     if code != 0 {
                         exit_code = code;
@@ -124,14 +168,42 @@ async fn run_task_impl(
                 }
             }
             DaemonNotification::TaskFailed { task_id, error } => {
-                if target_task_ids.contains(&task_id) {
+                let is_target = target_task_ids.contains(&task_id);
+
+                if is_target {
+                    // On failure, print buffered output if we're in silent_dependencies mode
+                    if silent_dependencies && !buffered_output.is_empty() {
+                        had_failure = true;
+                        let mut stdout = std::io::stdout().lock();
+                        for line in &buffered_output {
+                            writeln!(stdout, "{}", line).ok();
+                        }
+                    }
+
                     return Err(Error::IpcError(format!("Task {} failed: {}", task_id, error)));
+                } else if silent_dependencies {
+                    // Dependency failed - print buffered output and mark failure
+                    had_failure = true;
+                    let mut stdout = std::io::stdout().lock();
+                    for line in &buffered_output {
+                        writeln!(stdout, "{}", line).ok();
+                    }
+                    buffered_output.clear();
                 }
             }
         }
     }
 
-    Ok(ExitStatus::from_raw(exit_code))
+    // If we had a failure (non-zero exit), print buffered output
+    if silent_dependencies && exit_code != 0 && !had_failure && !buffered_output.is_empty() {
+        let mut stdout = std::io::stdout().lock();
+        for line in &buffered_output {
+            writeln!(stdout, "{}", line).ok();
+        }
+    }
+
+    // On Unix, ExitStatus::from_raw expects the raw wait status where exit code is shifted by 8
+    Ok(ExitStatus::from_raw(exit_code << 8))
 }
 
 pub fn task_exists(project: &Project, task_name: &str) -> bool {

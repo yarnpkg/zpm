@@ -30,10 +30,51 @@ pub async fn run_execution_loop(
     let mut pending_completion: HashMap<TaskId, i32> = HashMap::new();
 
     loop {
+        // Check for tasks that should be marked as failed due to failed prerequisites
+        let tasks_to_fail: Vec<TaskId> = {
+            let resolved = state.resolved.read().unwrap();
+            let completed = state.completed.read().unwrap();
+            let failed = state.failed.read().unwrap();
+            let running: HashSet<TaskId> = running_handles.keys().cloned().collect();
+
+            resolved
+                .tasks
+                .iter()
+                .filter(|(task_id, prerequisites)| {
+                    !completed.contains(*task_id)
+                        && !failed.contains(*task_id)
+                        && !running.contains(*task_id)
+                        && prerequisites.iter().any(|p| failed.contains(p))
+                })
+                .map(|(task_id, _)| task_id.clone())
+                .collect()
+        };
+
+        // Mark tasks as failed and send notifications
+        for task_id in tasks_to_fail {
+            {
+                let mut failed = state.failed.write().unwrap();
+                let mut completed = state.completed.write().unwrap();
+                failed.insert(task_id.clone());
+                completed.insert(task_id.clone());
+            }
+
+            let task_id_str = format!(
+                "{}:{}",
+                task_id.workspace.to_file_string(),
+                task_id.task_name.as_str()
+            );
+            let _ = notification_tx.send(DaemonNotification::TaskCompleted {
+                task_id: task_id_str,
+                exit_code: 1,  // Tasks failed due to dependency failure get exit code 1
+            });
+        }
+
         // Check for ready tasks
         let ready_tasks: Vec<TaskId> = {
             let resolved = state.resolved.read().unwrap();
             let completed = state.completed.read().unwrap();
+            let failed = state.failed.read().unwrap();
             let script_finished = state.script_finished.read().unwrap();
             let running: HashSet<TaskId> = running_handles.keys().cloned().collect();
 
@@ -42,9 +83,10 @@ pub async fn run_execution_loop(
                 .iter()
                 .filter(|(task_id, prerequisites)| {
                     !completed.contains(*task_id)
+                        && !failed.contains(*task_id)
                         && !script_finished.contains(*task_id)
                         && !running.contains(*task_id)
-                        && prerequisites.iter().all(|p| completed.contains(p))
+                        && prerequisites.iter().all(|p| completed.contains(p) && !failed.contains(p))
                 })
                 .map(|(task_id, _)| task_id.clone())
                 .collect()
@@ -188,35 +230,27 @@ pub async fn run_execution_loop(
                     script_finished.insert(task_id.clone());
                 }
 
-                if status.success() {
-                    // Try to complete immediately if no subtasks
-                    if state.try_complete_task(&task_id) {
-                        let task_id_str = format!(
-                            "{}:{}",
-                            task_id.workspace.to_file_string(),
-                            task_id.task_name.as_str()
-                        );
-                        let _ = notification_tx.send(DaemonNotification::TaskCompleted {
-                            task_id: task_id_str,
-                            exit_code,
-                        });
-                    } else {
-                        // Has subtasks, add to pending
-                        pending_completion.insert(task_id, exit_code);
+                // If task failed, mark as failed and propagate failure
+                if !status.success() {
+                    // Mark as completed and failed
+                    {
+                        let mut completed = state.completed.write().unwrap();
+                        let mut failed = state.failed.write().unwrap();
+                        completed.insert(task_id.clone());
+                        failed.insert(task_id.clone());
                     }
-                } else {
-                    // Task failed - send failure notification
+
                     let task_id_str = format!(
                         "{}:{}",
                         task_id.workspace.to_file_string(),
                         task_id.task_name.as_str()
                     );
-                    let _ = notification_tx.send(DaemonNotification::TaskFailed {
+                    let _ = notification_tx.send(DaemonNotification::TaskCompleted {
                         task_id: task_id_str,
-                        error: format!("Task exited with code {}", exit_code),
+                        exit_code,
                     });
 
-                    // Propagate failure to parent tasks
+                    // Propagate failure to parent tasks (subtasks relationship)
                     let parents: Vec<TaskId> = {
                         let subtasks = state.subtasks.read().unwrap();
                         subtasks
@@ -227,19 +261,43 @@ pub async fn run_execution_loop(
                     };
 
                     for parent in parents {
-                        // Remove parent from pending completion
-                        pending_completion.remove(&parent);
+                        // If parent is in pending_completion, complete it with the error code
+                        if let Some(_) = pending_completion.remove(&parent) {
+                            // Mark parent as completed and failed
+                            {
+                                let mut completed = state.completed.write().unwrap();
+                                let mut failed = state.failed.write().unwrap();
+                                completed.insert(parent.clone());
+                                failed.insert(parent.clone());
+                            }
 
-                        // Send failure notification for parent
-                        let parent_id_str = format!(
+                            let parent_id_str = format!(
+                                "{}:{}",
+                                parent.workspace.to_file_string(),
+                                parent.task_name.as_str()
+                            );
+                            let _ = notification_tx.send(DaemonNotification::TaskCompleted {
+                                task_id: parent_id_str,
+                                exit_code,
+                            });
+                        }
+                    }
+                } else {
+                    // Task succeeded - check if it can complete now or needs to wait for subtasks
+                    if state.try_complete_task(&task_id) {
+                        // No subtasks or all subtasks completed
+                        let task_id_str = format!(
                             "{}:{}",
-                            parent.workspace.to_file_string(),
-                            parent.task_name.as_str()
+                            task_id.workspace.to_file_string(),
+                            task_id.task_name.as_str()
                         );
-                        let _ = notification_tx.send(DaemonNotification::TaskFailed {
-                            task_id: parent_id_str,
-                            error: format!("Subtask failed with code {}", exit_code),
+                        let _ = notification_tx.send(DaemonNotification::TaskCompleted {
+                            task_id: task_id_str,
+                            exit_code,
                         });
+                    } else {
+                        // Has subtasks, add to pending completion
+                        pending_completion.insert(task_id, exit_code);
                     }
                 }
             }
@@ -271,7 +329,7 @@ async fn execute_task(
 
     let mut running = env
         .with_cwd(prepared.cwd.clone())
-        .spawn_script(&prepared.script, std::iter::empty::<String>())
+        .spawn_script(&prepared.script, prepared.args.iter().map(|s| s.as_str()))
         .await?;
 
     let child_stdout = running

@@ -1,4 +1,16 @@
-import {ppath, xfs} from '@yarnpkg/fslib';
+import {ppath, xfs}  from '@yarnpkg/fslib';
+
+import {RunFunction} from '../../../../pkg-tests-core/sources/utils/tests';
+
+function cleanupDaemon(cb: RunFunction): RunFunction {
+  return async args => {
+    try {
+      await cb(args);
+    } finally {
+      await args.runSwitch(`switch`, `daemon`, `--kill-all`);
+    }
+  };
+}
 
 describe(`Commands`, () => {
   describe(`tasks run`, () => {
@@ -6,7 +18,7 @@ describe(`Commands`, () => {
       `it should run a simple task`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `build:`,
           `  echo "building"`,
@@ -14,16 +26,16 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`tasks`, `run`, `build`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `build`);
         expect(stdout).toEqual(`building\n`);
-      }),
+      })),
     );
 
     test(
       `it should run a task with dependencies in order`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `setup:`,
           `  echo "setup"`,
@@ -34,16 +46,16 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`tasks`, `run`, `build`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `build`);
         expect(stdout).toEqual(`setup\nbuild\n`);
-      }),
+      })),
     );
 
     test(
       `it should show prefixes with verbose level 1`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `build:`,
           `  echo "building"`,
@@ -51,16 +63,16 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`tasks`, `run`, `-v`, `build`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `-v`, `build`);
         expect(stdout).toEqual(`[test-package:build]: building\n`);
-      }),
+      })),
     );
 
     test(
       `it should show prologue and epilogue with verbose level 2`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `build:`,
           `  echo "building"`,
@@ -68,16 +80,16 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`tasks`, `run`, `-vv`, `build`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `-vv`, `build`);
         expect(stdout).toEqual(`[test-package:build]: Process started\n[test-package:build]: building\n[test-package:build]: Process exited (exit code 0)\n`);
-      }),
+      })),
     );
 
     test(
       `it should hide dependency output with --silent-dependencies`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `setup:`,
           `  echo "setup-output"`,
@@ -88,16 +100,16 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`tasks`, `run`, `--silent-dependencies`, `build`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `--silent-dependencies`, `build`);
         expect(stdout).toEqual(`build-output\n`);
-      }),
+      })),
     );
 
     test(
       `it should show dependency output on failure even with --silent-dependencies`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `setup:`,
           `  echo "setup-failure-output"`,
@@ -109,18 +121,18 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        await expect(run(`tasks`, `run`, `--silent-dependencies`, `build`)).rejects.toMatchObject({
+        await expect(runSwitch(`tasks`, `run`, `--silent-dependencies`, `build`)).rejects.toMatchObject({
           stdout: `[test-package:setup]: Process started\n[test-package:setup]: setup-failure-output\n[test-package:setup]: Process exited (exit code 1)\n`,
           code: 1,
         });
-      }),
+      })),
     );
 
     test(
       `it should forward yarn run to task run with silent dependencies`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `setup:`,
           `  echo "setup-output"`,
@@ -131,16 +143,16 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`run`, `build`);
+        const {stdout} = await runSwitch(`run`, `build`);
         expect(stdout).toEqual(`build-output\n`);
-      }),
+      })),
     );
 
     test(
       `it should forward yarn run to task run and show verbose output on failure`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `setup:`,
           `  echo "setup-failure-output"`,
@@ -152,18 +164,18 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        await expect(run(`run`, `build`)).rejects.toMatchObject({
+        await expect(runSwitch(`run`, `build`)).rejects.toMatchObject({
           stdout: `[test-package:setup]: Process started\n[test-package:setup]: setup-failure-output\n[test-package:setup]: Process exited (exit code 1)\n`,
           code: 1,
         });
-      }),
+      })),
     );
 
     test(
       `it should pass arguments to the target task`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `greet:`,
           `  echo "Hello $1"`,
@@ -171,16 +183,16 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`tasks`, `run`, `greet`, `World`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `greet`, `World`);
         expect(stdout).toEqual(`Hello World\n`);
-      }),
+      })),
     );
 
     test(
       `it should fail when the task does not exist`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `build:`,
           `  echo "building"`,
@@ -188,30 +200,30 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        await expect(run(`tasks`, `run`, `nonexistent`)).rejects.toMatchObject({
+        await expect(runSwitch(`tasks`, `run`, `nonexistent`)).rejects.toMatchObject({
           code: 1,
         });
-      }),
+      })),
     );
 
     test(
       `it should fail when there is no taskfile`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await run(`install`);
 
-        await expect(run(`tasks`, `run`, `build`)).rejects.toMatchObject({
+        await expect(runSwitch(`tasks`, `run`, `build`)).rejects.toMatchObject({
           code: 1,
         });
-      }),
+      })),
     );
 
     test(
       `it should run parallel dependencies concurrently`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `task-a:`,
           `  sleep 0.1 && echo "task-a"`,
@@ -225,13 +237,13 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`tasks`, `run`, `build`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `build`);
 
         const lines = stdout.trim().split(`\n`);
         expect(lines).toHaveLength(3);
         expect([lines[0], lines[1]].sort()).toEqual([`task-a`, `task-b`]);
         expect(lines[2]).toEqual(`build`);
-      }),
+      })),
     );
 
     test(
@@ -242,7 +254,7 @@ describe(`Commands`, () => {
       }, {
         [`packages/pkg-a`]: {name: `pkg-a`},
         [`packages/pkg-b`]: {name: `pkg-b`, dependencies: {[`pkg-a`]: `workspace:*`}},
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `packages/pkg-a/taskfile` as any), [
           `build:`,
           `  echo "building-pkg-a"`,
@@ -255,9 +267,9 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`tasks`, `run`, `build`, {cwd: ppath.join(path, `packages/pkg-b` as any)});
+        const {stdout} = await runSwitch(`tasks`, `run`, `build`, {cwd: ppath.join(path, `packages/pkg-b` as any)});
         expect(stdout).toEqual(`building-pkg-a\nbuilding-pkg-b\n`);
-      }),
+      })),
     );
 
     test(
@@ -268,7 +280,7 @@ describe(`Commands`, () => {
       }, {
         [`packages/pkg-a`]: {name: `pkg-a`},
         [`packages/pkg-b`]: {name: `pkg-b`, dependencies: {[`pkg-a`]: `workspace:*`}},
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `packages/pkg-a/taskfile` as any), [
           `build:`,
           `  echo "building-pkg-a"`,
@@ -281,16 +293,16 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`tasks`, `run`, `--silent-dependencies`, `build`, {cwd: ppath.join(path, `packages/pkg-b` as any)});
+        const {stdout} = await runSwitch(`tasks`, `run`, `--silent-dependencies`, `build`, {cwd: ppath.join(path, `packages/pkg-b` as any)});
         expect(stdout).toEqual(`building-pkg-b\n`);
-      }),
+      })),
     );
 
     test(
       `it should hide pushed subtask output with --silent-dependencies`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `subtask:`,
           `  echo "subtask-output"`,
@@ -302,16 +314,16 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await run(`tasks`, `run`, `--silent-dependencies`, `main`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `--silent-dependencies`, `main`);
         expect(stdout).toEqual(`main-output\n`);
-      }),
+      })),
     );
 
     test(
       `it should return the exit code of the failed task`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, async ({path, run}) => {
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `build:`,
           `  exit 42`,
@@ -319,10 +331,10 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        await expect(run(`tasks`, `run`, `build`)).rejects.toMatchObject({
+        await expect(runSwitch(`tasks`, `run`, `build`)).rejects.toMatchObject({
           code: 42,
         });
-      }),
+      })),
     );
   });
 });

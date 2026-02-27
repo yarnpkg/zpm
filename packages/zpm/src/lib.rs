@@ -19,7 +19,6 @@ pub mod graph;
 pub mod http_npm;
 pub mod http;
 pub mod install;
-pub mod ipc;
 pub mod linker;
 pub mod lockfile;
 pub mod manifest;

@@ -6,6 +6,9 @@ pub const DAEMON_BASE_PORT: u16 = 12197;
 /// Environment variable for the current task ID
 pub const TASK_CURRENT_ENV: &str = "ZPM_TASK_CURRENT";
 
+/// Environment variable containing the path to the yarn-switch binary
+pub const YARN_SWITCH_PATH_ENV: &str = "YARN_SWITCH_PATH";
+
 /// A task to be pushed with optional subscriptions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,6 +16,8 @@ pub struct TaskSubscription {
     pub name: String,
     #[serde(default)]
     pub subscriptions: Vec<SubscriptionKind>,
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 /// The kinds of notifications a client can subscribe to
@@ -32,6 +37,9 @@ pub enum DaemonRequest {
         tasks: Vec<TaskSubscription>,
         #[serde(default)]
         parent_task_id: Option<String>,
+        /// The workspace context (e.g., the name of the workspace the client is in)
+        #[serde(default)]
+        workspace: Option<String>,
     },
 }
 

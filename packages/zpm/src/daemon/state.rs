@@ -130,6 +130,7 @@ pub struct PreparedTask {
     pub cwd: Path,
     pub env: BTreeMap<String, String>,
     pub prefix: String,
+    pub args: Vec<String>,
 }
 
 pub struct DynamicExecutionState {
@@ -137,6 +138,7 @@ pub struct DynamicExecutionState {
     pub target_tasks: RwLock<HashSet<TaskId>>,
     pub original_targets: RwLock<HashSet<TaskId>>,
     pub completed: RwLock<HashSet<TaskId>>,
+    pub failed: RwLock<HashSet<TaskId>>,
     pub script_finished: RwLock<HashSet<TaskId>>,
     pub subtasks: RwLock<HashMap<TaskId, HashSet<TaskId>>>,
     pub prepared_tasks: RwLock<BTreeMap<TaskId, PreparedTask>>,
@@ -153,6 +155,7 @@ impl DynamicExecutionState {
             target_tasks: RwLock::new(HashSet::new()),
             original_targets: RwLock::new(HashSet::new()),
             completed: RwLock::new(HashSet::new()),
+            failed: RwLock::new(HashSet::new()),
             script_finished: RwLock::new(HashSet::new()),
             subtasks: RwLock::new(HashMap::new()),
             prepared_tasks: RwLock::new(BTreeMap::new()),
@@ -172,6 +175,7 @@ impl DynamicExecutionState {
             target_tasks: RwLock::new(target_tasks),
             original_targets: RwLock::new(original_targets),
             completed: RwLock::new(HashSet::new()),
+            failed: RwLock::new(HashSet::new()),
             script_finished: RwLock::new(HashSet::new()),
             subtasks: RwLock::new(HashMap::new()),
             prepared_tasks: RwLock::new(BTreeMap::new()),
@@ -213,11 +217,17 @@ impl DynamicExecutionState {
         }
     }
 
-    pub fn add_pushed_task(&self, project: &Project, task_name: &str, parent_task_id: Option<&str>) -> Result<(TaskId, usize), Error> {
+    pub fn add_pushed_task(&self, project: &Project, task_name: &str, parent_task_id: Option<&str>, args: Vec<String>, workspace_override: Option<&str>) -> Result<(TaskId, usize), Error> {
         let task_name = TaskName::new(task_name)
             .map_err(|_| Error::TaskNameParseError(task_name.to_string()))?;
 
-        let workspace = project.active_workspace()?;
+        // Use workspace_override if provided, otherwise use active workspace
+        let workspace = if let Some(ws_name) = workspace_override {
+            let ident = Ident::new(ws_name);
+            project.workspace_by_ident(&ident)?
+        } else {
+            project.active_workspace()?
+        };
 
         let task_id = TaskId {
             workspace: workspace.name.clone(),
@@ -264,6 +274,14 @@ impl DynamicExecutionState {
         }
 
         let new_task_count = self.prepare_new_tasks(project)?;
+
+        // Set args for the target task
+        if !args.is_empty() {
+            let mut prepared = self.prepared_tasks.write().unwrap();
+            if let Some(task) = prepared.get_mut(&task_id) {
+                task.args = args;
+            }
+        }
 
         Ok((task_id, new_task_count))
     }
@@ -324,6 +342,7 @@ impl DynamicExecutionState {
                     cwd: workspace.path.clone(),
                     env,
                     prefix,
+                    args: vec![],
                 },
             );
 

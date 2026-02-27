@@ -378,9 +378,6 @@ pub enum Error {
     #[error("Invalid task name: {0}")]
     TaskNameParseError(String),
 
-    #[error("Not running inside a task context (ZPM_TASK_IPC_SOCKET not set)")]
-    NotInTaskContext,
-
     #[error("IPC connection failed: {0}")]
     IpcConnectionFailed(String),
 
