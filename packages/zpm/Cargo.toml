@@ -60,6 +60,7 @@ ring = { workspace = true }
 tokio-tungstenite = { workspace = true }
 url = { workspace = true }
 rand = { workspace = true }
+uuid = { version = "1.21.0", features = ["v4"] }
 
 [dev-dependencies]
 divan = { workspace = true, package = "codspeed-divan-compat" }

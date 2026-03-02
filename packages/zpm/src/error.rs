@@ -387,6 +387,9 @@ pub enum Error {
     #[error("Task push failed: {0}")]
     TaskPushFailed(String),
 
+    #[error("Missing context_id: task operations require a context_id (either provided directly or inherited from parent task)")]
+    MissingContextId,
+
     #[error("JSON serialization error: {0}")]
     JsonSerializeError(String),
 

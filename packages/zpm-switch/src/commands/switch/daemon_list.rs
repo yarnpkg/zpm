@@ -4,7 +4,6 @@ use zpm_utils::{tree, AbstractValue, ToFileString};
 
 use crate::{daemons, errors::Error};
 
-/// List all live daemons
 #[cli::command]
 #[cli::path("switch", "daemon")]
 #[cli::category("Daemon management")]

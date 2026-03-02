@@ -8,7 +8,6 @@ use crate::{
     manifest::find_closest_package_manager,
 };
 
-/// Stop the daemon for the current project
 #[cli::command]
 #[cli::path("switch", "daemon")]
 #[cli::category("Daemon management")]
@@ -37,7 +36,6 @@ impl DaemonKillCommand {
         };
 
         if !daemons::is_process_alive(daemon.pid) {
-            // Clean up stale entry
             daemons::unregister_daemon(&detected_root)?;
             println!(
                 "{} Daemon was not running (cleaned up stale entry)",

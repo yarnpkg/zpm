@@ -28,7 +28,6 @@ impl ExplicitCommand {
         binary.stdout(Stdio::inherit());
         binary.args(args);
 
-        // Set the YARN_SWITCH_PATH env var so yarn-bin can call back to yarn-switch
         if let Ok(switch_path) = std::env::current_exe() {
             binary.env(YARN_SWITCH_PATH_ENV, switch_path);
         }

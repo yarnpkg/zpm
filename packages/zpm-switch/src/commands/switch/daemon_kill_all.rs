@@ -3,7 +3,6 @@ use zpm_utils::{DataType, ToHumanString};
 
 use crate::{daemons, errors::Error};
 
-/// Stop all running daemons
 #[cli::command]
 #[cli::path("switch", "daemon")]
 #[cli::category("Daemon management")]
@@ -31,7 +30,6 @@ impl DaemonKillAllCommand {
 
         for daemon in all_daemons {
             if !daemons::is_process_alive(daemon.pid) {
-                // Clean up stale entry
                 daemons::unregister_daemon(&daemon.project_cwd)?;
                 stale += 1;
                 continue;

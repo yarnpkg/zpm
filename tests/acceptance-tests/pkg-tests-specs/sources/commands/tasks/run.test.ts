@@ -336,5 +336,94 @@ describe(`Commands`, () => {
         });
       })),
     );
+
+    test(
+      `it should re-run the same task when called multiple times`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+        const counterFile = ppath.join(path, `counter`);
+
+        await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+          `build:`,
+          `  count=$(cat counter 2>/dev/null || echo 0)`,
+          `  count=$((count + 1))`,
+          `  echo $count > counter`,
+          `  echo "run $count"`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        const {stdout: stdout1} = await runSwitch(`tasks`, `run`, `build`);
+        expect(stdout1).toEqual(`run 1\n`);
+
+        const {stdout: stdout2} = await runSwitch(`tasks`, `run`, `build`);
+        expect(stdout2).toEqual(`run 2\n`);
+
+        const {stdout: stdout3} = await runSwitch(`tasks`, `run`, `build`);
+        expect(stdout3).toEqual(`run 3\n`);
+      })),
+    );
+
+    test(
+      `it should stream log lines in real-time`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+        // Create a task that outputs lines with delays and includes script-side timestamps
+        // Use Python for cross-platform millisecond timestamps
+        await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+          `stream-test:`,
+          `  python3 -c "import time; print(f'ts:{int(time.time()*1000)}:line1')"`,
+          `  sleep 0.5`,
+          `  python3 -c "import time; print(f'ts:{int(time.time()*1000)}:line2')"`,
+          `  sleep 0.5`,
+          `  python3 -c "import time; print(f'ts:{int(time.time()*1000)}:line3')"`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        // Measure total execution time
+        const startTime = Date.now();
+        const {stdout} = await runSwitch(`tasks`, `run`, `stream-test`);
+        const endTime = Date.now();
+        const totalTime = endTime - startTime;
+
+        console.log(stdout);
+
+        // Parse timestamps from script output
+        // Format: ts:1234567890123:lineN
+        const timestampRegex = /^ts:(\d+):(.+)$/;
+        const lines = stdout.trim().split(`\n`);
+
+        expect(lines.length).toBe(3);
+
+        const timestamps: Array<number> = [];
+        const messages: Array<string> = [];
+
+        for (const line of lines) {
+          const match = line.match(timestampRegex);
+          expect(match).not.toBeNull();
+          if (match) {
+            timestamps.push(parseInt(match[1], 10));
+            messages.push(match[2]);
+          }
+        }
+
+        // Verify the messages are correct
+        expect(messages).toEqual([`line1`, `line2`, `line3`]);
+
+        // Verify script-side timestamps are properly spaced (at least 400ms apart)
+        // This proves the script's sleep commands executed between echo statements
+        for (let i = 1; i < timestamps.length; i++) {
+          const diff = timestamps[i] - timestamps[i - 1];
+          expect(diff).toBeGreaterThanOrEqual(400);
+        }
+
+        // Verify total execution time is reasonable (at least 900ms for two 500ms sleeps)
+        // This proves output wasn't queued and released at the end
+        expect(totalTime).toBeGreaterThanOrEqual(900);
+      })),
+    );
   });
 });

@@ -109,7 +109,6 @@ pub fn is_process_alive(pid: u32) -> bool {
 
     #[cfg(not(any(unix, windows)))]
     {
-        // Fallback: assume alive
         true
     }
 }
