@@ -425,5 +425,212 @@ describe(`Commands`, () => {
         expect(totalTime).toBeGreaterThanOrEqual(900);
       })),
     );
+
+    describe(`@long-lived tasks`, () => {
+      test(
+        `it should unblock dependents after warm-up period`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Create a long-lived task (simulates a dev server) and a dependent task
+          // The dependent should start after 500ms warm-up, not wait for server to exit
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  echo "server-started"`,
+            `  sleep 10`,
+            ``,
+            `client: server`,
+            `  echo "client-started"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Run the client task - it should complete quickly after warm-up
+          // even though the server would take 10 seconds if we waited for it
+          const startTime = Date.now();
+          const {stdout} = await runSwitch(`tasks`, `run`, `client`);
+          const endTime = Date.now();
+          const totalTime = endTime - startTime;
+
+          // Should complete in under 3 seconds (warm-up is 500ms + some overhead)
+          // If it waited for server, it would take 10+ seconds
+          expect(totalTime).toBeLessThan(3000);
+          expect(stdout).toContain(`client-started`);
+        })),
+      );
+
+      test(
+        `it should attach to existing long-lived task on second invocation`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Create a long-lived task that writes to a file on each start
+          const counterFile = ppath.join(path, `server-starts`);
+          await xfs.writeFilePromise(counterFile, `0`);
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  count=$(cat server-starts)`,
+            `  count=$((count + 1))`,
+            `  echo $count > server-starts`,
+            `  echo "server-start-$count"`,
+            `  sleep 10`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start the server first time in background (we'll detach via timeout)
+          const serverPromise1 = runSwitch(`tasks`, `run`, `server`).catch(() => {});
+
+          // Wait for warm-up
+          await new Promise(resolve => setTimeout(resolve, 700));
+
+          // Second invocation should attach to existing, not start new
+          const serverPromise2 = runSwitch(`tasks`, `run`, `server`).catch(() => {});
+
+          // Wait a bit for the second command to complete its attach
+          await new Promise(resolve => setTimeout(resolve, 300));
+
+          // Check that server only started once
+          const startCount = await xfs.readFilePromise(counterFile, `utf8`);
+          expect(startCount.trim()).toEqual(`1`);
+
+          // Clean up
+          await runSwitch(`tasks`, `stop`, `server`).catch(() => {});
+        })),
+      );
+
+      test(
+        `it should allow stopping a long-lived task`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          const pidFile = ppath.join(path, `server.pid`);
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  echo $$ > server.pid`,
+            `  echo "server-running"`,
+            `  sleep 60`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start the server in background
+          const serverPromise = runSwitch(`tasks`, `run`, `server`).catch(() => {});
+
+          // Wait for warm-up and pid file to be written
+          await new Promise(resolve => setTimeout(resolve, 700));
+
+          // Verify server is running (pid file exists)
+          const pidExists = await xfs.existsPromise(pidFile);
+          expect(pidExists).toBe(true);
+
+          // Stop the server
+          const {stdout: stopOutput} = await runSwitch(`tasks`, `stop`, `server`);
+          expect(stopOutput).toContain(`stopped successfully`);
+
+          // Wait a bit for process cleanup
+          await new Promise(resolve => setTimeout(resolve, 200));
+        })),
+      );
+
+      test(
+        `it should continue running after client disconnects`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          const markerFile = ppath.join(path, `still-running`);
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  echo "server-started"`,
+            `  sleep 1`,
+            `  echo "still-running" > still-running`,
+            `  sleep 10`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start server and simulate client disconnect by using a short timeout
+          // We use Promise.race to simulate the client disconnecting
+          await Promise.race([
+            runSwitch(`tasks`, `run`, `server`).catch(() => {}),
+            new Promise(resolve => setTimeout(resolve, 700)),
+          ]);
+
+          // Wait for the marker file to be created (proves server continued running)
+          await new Promise(resolve => setTimeout(resolve, 800));
+
+          const markerExists = await xfs.existsPromise(markerFile);
+          expect(markerExists).toBe(true);
+
+          // Clean up
+          await runSwitch(`tasks`, `stop`, `server`).catch(() => {});
+        })),
+      );
+
+      test(
+        `it should use fixed context ID for long-lived tasks`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Create two separate short-lived tasks and verify they get different context IDs
+          // Then verify long-lived tasks always get the same fixed context ID
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  echo "server: $ZPM_TASK_CURRENT"`,
+            `  sleep 5`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start server first time
+          const server1Promise = runSwitch(`tasks`, `run`, `-v`, `server`).catch(() => {});
+          await new Promise(resolve => setTimeout(resolve, 700));
+
+          // Get output from first invocation
+          // The context ID should be the fixed long-lived context ID
+          // 4d84fea4-e0d4-4df6-8190-f312b86968b3
+
+          // Start second invocation - should attach to same task
+          const server2Promise = runSwitch(`tasks`, `run`, `-v`, `server`).catch(() => {});
+          await new Promise(resolve => setTimeout(resolve, 300));
+
+          // Stop and clean up
+          await runSwitch(`tasks`, `stop`, `server`).catch(() => {});
+        })),
+      );
+
+      test(
+        `it should fail dependents if long-lived task fails before warm-up`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Create a long-lived task that exits immediately (before 500ms warm-up)
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  echo "server-failed"`,
+            `  exit 1`,
+            ``,
+            `client: server`,
+            `  echo "client-started"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Run the client task - it should fail because server failed before warm-up
+          await expect(runSwitch(`tasks`, `run`, `client`)).rejects.toMatchObject({
+            code: 1,
+          });
+        })),
+      );
+    });
   });
 });

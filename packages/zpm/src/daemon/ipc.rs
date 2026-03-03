@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 pub const DAEMON_BASE_PORT: u16 = 12197;
 pub const TASK_CURRENT_ENV: &str = "ZPM_TASK_CURRENT";
 pub const DAEMON_SERVER_ENV: &str = "YARN_DAEMON_SERVER";
+pub const LONG_LIVED_CONTEXT_ID: &str = "4d84fea4-e0d4-4df6-8190-f312b86968b3";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +48,10 @@ pub enum DaemonRequest {
     GetTaskOutput {
         task_id: String,
     },
+    StopTask {
+        task_name: String,
+        workspace: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +59,13 @@ pub enum DaemonRequest {
 pub struct BufferedOutputLine {
     pub line: String,
     pub stream: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachedLongLivedTask {
+    pub task_id: String,
+    pub started_at_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,10 +77,16 @@ pub enum DaemonResponse {
         task_ids: Vec<String>,
         /// Total number of dependency tasks (excluding target tasks)
         dependency_count: usize,
+        /// Long-lived tasks that we attached to (already running)
+        attached_long_lived: Vec<AttachedLongLivedTask>,
     },
     TaskOutput {
         task_id: String,
         lines: Vec<BufferedOutputLine>,
+    },
+    TaskStopped {
+        success: bool,
+        error: Option<String>,
     },
     Error {
         message: String,
@@ -93,6 +111,9 @@ pub enum DaemonNotification {
     TaskFailed {
         task_id: String,
         error: String,
+    },
+    TaskWarmUpComplete {
+        task_id: String,
     },
 }
 

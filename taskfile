@@ -20,5 +20,6 @@ producer:
 foo: bar& bar2&
   echo "foo"
 
+@long-lived
 doc:
   cd documentation && yarn astro dev

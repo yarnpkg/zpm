@@ -12,6 +12,7 @@ use super::super::ipc::{
     BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest, DaemonRequestEnvelope,
     DaemonResponse, SubscriptionScope,
 };
+use super::super::long_lived::LongLivedRegistry;
 use super::super::scheduler::Scheduler;
 use super::super::subscriptions::{SubscriptionGuard, SubscriptionRegistry};
 use crate::project::Project;
@@ -23,6 +24,7 @@ pub struct ConnectionContext {
     pub scheduler: Arc<Scheduler>,
     pub subscription_registry: Arc<SubscriptionRegistry>,
     pub output_buffer: OutputBuffer,
+    pub long_lived_registry: Arc<LongLivedRegistry>,
 }
 
 pub async fn handle_connection(
@@ -133,6 +135,7 @@ pub async fn handle_connection(
                                 &ctx.project,
                                 &ctx.output_buffer,
                                 &ctx.subscription_registry,
+                                &ctx.long_lived_registry,
                                 subscription_id,
                             );
 

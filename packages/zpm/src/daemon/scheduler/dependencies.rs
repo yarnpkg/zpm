@@ -1,18 +1,21 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use zpm_tasks::ResolvedTasks;
 
-use super::state::ContextualTaskId;
+use super::state::{ContextualTaskId, PreparedTask};
 
 /// Find tasks that are ready to execute.
 /// A task is ready when all its prerequisites are completed (in the same context).
+/// For long-lived prerequisites, being "warmed up" counts as ready for dependents.
 pub fn find_ready_tasks(
     resolved: &ResolvedTasks,
     completed: &HashSet<ContextualTaskId>,
     failed: &HashSet<ContextualTaskId>,
     script_finished: &HashSet<ContextualTaskId>,
+    warm_up_complete: &HashSet<ContextualTaskId>,
     running: &HashSet<ContextualTaskId>,
     targets: &HashSet<ContextualTaskId>,
+    prepared: &BTreeMap<ContextualTaskId, PreparedTask>,
 ) -> Vec<ContextualTaskId> {
     // Collect all contexts that have pending work (including newly added targets)
     let active_contexts: HashSet<&String> = completed
@@ -40,13 +43,35 @@ pub fn find_ready_tasks(
                 continue;
             }
 
-            // Check if all prerequisites are completed (in the same context)
-            let all_prereqs_completed = prerequisites.iter().all(|prereq| {
-                let ctx_prereq = ContextualTaskId::new(prereq.clone(), context_id.clone());
-                completed.contains(&ctx_prereq) && !failed.contains(&ctx_prereq)
+            // Check if all prerequisites are ready (in the same context)
+            // For regular tasks, "ready" means completed.
+            // For long-lived tasks, "ready" means warm-up complete.
+            let all_prereqs_ready = prerequisites.iter().all(|prereq| {
+                let ctx_prereq
+                    = ContextualTaskId::new(prereq.clone(), context_id.clone());
+
+                if failed.contains(&ctx_prereq) {
+                    return false;
+                }
+
+                if completed.contains(&ctx_prereq) {
+                    return true;
+                }
+
+                let is_long_lived
+                    = prepared
+                        .get(&ctx_prereq)
+                        .map(|p| p.is_long_lived)
+                        .unwrap_or(false);
+
+                if is_long_lived && warm_up_complete.contains(&ctx_prereq) {
+                    return true;
+                }
+
+                false
             });
 
-            if all_prereqs_completed {
+            if all_prereqs_ready {
                 ready.push(ctx_task_id);
             }
         }

@@ -10,11 +10,37 @@ use zpm_utils::Path;
 
 use super::events::ExecutorEvent;
 use super::executor::ExecutorPool;
+use super::long_lived::LongLivedRegistry;
 use super::scheduler::{format_contextual_task_id, ContextualTaskId, Scheduler};
 use super::server::{bind_to_available_port, run_accept_loop, ConnectionContext, OutputBuffer};
 use super::subscriptions::SubscriptionRegistry;
 use crate::error::Error;
 use crate::project::Project;
+
+use zpm_primitives::Ident;
+use zpm_tasks::{TaskId, TaskName};
+
+const LONG_LIVED_WARMUP_MS: u64 = 500;
+const OUTPUT_BUFFER_MAX_LINES: usize = 1000;
+
+fn parse_base_task_id(contextual_task_id: &str) -> Option<TaskId> {
+    let (task_part, _context_id)
+        = contextual_task_id.rsplit_once('@')?;
+
+    let (workspace_str, task_name_str)
+        = task_part.split_once(':')?;
+
+    let task_name
+        = TaskName::new(task_name_str).ok()?;
+
+    let workspace
+        = Ident::new(workspace_str);
+
+    Some(TaskId {
+        workspace,
+        task_name,
+    })
+}
 
 pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
     let (listener, port)
@@ -35,6 +61,9 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
     let subscription_registry
         = Arc::new(SubscriptionRegistry::new());
 
+    let long_lived_registry
+        = Arc::new(LongLivedRegistry::new());
+
     let scheduler_for_loop
         = scheduler.clone();
 
@@ -49,6 +78,13 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
 
     let output_buffer_for_events
         = output_buffer.clone();
+
+    let long_lived_registry_for_events
+        = long_lived_registry.clone();
+
+    let scheduler_for_events
+        = scheduler.clone();
+
     tokio::spawn(async move {
         while let Some(event) = loop_event_rx.recv().await {
             if let ExecutorEvent::Output { task_id, line, stream } = &event {
@@ -62,6 +98,13 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
                         line: line.to_string(),
                         stream: stream.as_str().to_string(),
                     });
+
+                    if lines.len() > OUTPUT_BUFFER_MAX_LINES {
+                        let excess
+                            = lines.len() - OUTPUT_BUFFER_MAX_LINES;
+
+                        lines.drain(0..excess);
+                    }
                 }
             }
 
@@ -89,7 +132,42 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
                 };
 
             if let Some(n) = notification {
-                subscription_registry_for_events.broadcast(n);
+                subscription_registry_for_events.broadcast(n.clone());
+
+                if let DaemonNotification::TaskStarted { task_id } = &n {
+                    if let Some(ctx_task_id) = scheduler_for_events.parse_contextual_task_id(task_id) {
+                        if scheduler_for_events.is_long_lived(&ctx_task_id) {
+                            let task_id_clone
+                                = task_id.clone();
+
+                            let ctx_task_id_clone
+                                = ctx_task_id.clone();
+
+                            let registry_clone
+                                = long_lived_registry_for_events.clone();
+
+                            let sub_registry_clone
+                                = subscription_registry_for_events.clone();
+
+                            let scheduler_clone
+                                = scheduler_for_events.clone();
+
+                            tokio::spawn(async move {
+                                tokio::time::sleep(Duration::from_millis(LONG_LIVED_WARMUP_MS)).await;
+
+                                if let Some(base_task_id) = parse_base_task_id(&task_id_clone) {
+                                    registry_clone.mark_warm_up_complete(&base_task_id);
+                                }
+
+                                scheduler_clone.mark_warm_up_complete(&ctx_task_id_clone);
+
+                                sub_registry_clone.broadcast(DaemonNotification::TaskWarmUpComplete {
+                                    task_id: task_id_clone,
+                                });
+                            });
+                        }
+                    }
+                }
             }
         }
     });
@@ -244,6 +322,7 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
         scheduler,
         subscription_registry,
         output_buffer,
+        long_lived_registry,
     });
 
     run_accept_loop(listener, ctx).await;

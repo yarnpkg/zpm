@@ -12,7 +12,7 @@ use tokio_tungstenite::tungstenite::Message;
 use zpm_switch::YARN_SWITCH_PATH_ENV;
 
 use super::ipc::{
-    BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest,
+    AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest,
     DaemonRequestEnvelope, DaemonResponse, SubscriptionScope, TaskSubscription,
     DAEMON_SERVER_ENV,
 };
@@ -28,6 +28,8 @@ pub struct PushTasksResult {
     pub task_ids: Vec<String>,
     /// Total number of dependency tasks (excluding target tasks)
     pub dependency_count: usize,
+    /// Long-lived tasks that we attached to (already running)
+    pub attached_long_lived: Vec<AttachedLongLivedTask>,
 }
 
 /// Handle to a standalone daemon process that can be killed when no longer needed
@@ -275,9 +277,10 @@ impl DaemonClient {
             };
 
         match self.send_request(request).await? {
-            DaemonResponse::TasksEnqueued { task_ids, dependency_count } => Ok(PushTasksResult {
+            DaemonResponse::TasksEnqueued { task_ids, dependency_count, attached_long_lived } => Ok(PushTasksResult {
                 task_ids,
                 dependency_count,
+                attached_long_lived,
             }),
             DaemonResponse::Error { message } => Err(Error::TaskPushFailed(message)),
             _ => Err(Error::IpcError("Unexpected response".to_string())),
@@ -295,6 +298,24 @@ impl DaemonClient {
 
         match self.send_request(request).await? {
             DaemonResponse::TaskOutput { lines, .. } => Ok(lines),
+            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
+            _ => Err(Error::IpcError("Unexpected response".to_string())),
+        }
+    }
+
+    pub async fn stop_task(
+        &mut self,
+        task_name: &str,
+        workspace: Option<String>,
+    ) -> Result<(bool, Option<String>), Error> {
+        let request
+            = DaemonRequest::StopTask {
+                task_name: task_name.to_string(),
+                workspace,
+            };
+
+        match self.send_request(request).await? {
+            DaemonResponse::TaskStopped { success, error } => Ok((success, error)),
             DaemonResponse::Error { message } => Err(Error::IpcError(message)),
             _ => Err(Error::IpcError("Unexpected response".to_string())),
         }

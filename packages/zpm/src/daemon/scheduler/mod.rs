@@ -4,7 +4,8 @@ mod state;
 use std::collections::HashSet;
 use std::sync::RwLock;
 
-use zpm_tasks::TaskId;
+use zpm_primitives::Ident;
+use zpm_tasks::{TaskId, TaskName};
 use zpm_utils::ToFileString;
 
 pub use state::{ContextualTaskId, PreparedTask};
@@ -39,21 +40,27 @@ impl Scheduler {
     }
 
     pub fn ready_tasks(&self, running: &HashSet<ContextualTaskId>) -> Vec<(ContextualTaskId, Option<PreparedTask>)> {
-        let state = self.state.read().unwrap();
+        let state
+            = self.state.read().unwrap();
 
-        let ready_ids = dependencies::find_ready_tasks(
-            &state.resolved,
-            &state.completed,
-            &state.failed,
-            &state.script_finished,
-            running,
-            &state.targets,
-        );
+        let ready_ids
+            = dependencies::find_ready_tasks(
+                &state.resolved,
+                &state.completed,
+                &state.failed,
+                &state.script_finished,
+                &state.warm_up_complete,
+                running,
+                &state.targets,
+                &state.prepared,
+            );
 
         ready_ids
             .into_iter()
             .map(|ctx_task_id| {
-                let prepared = state.prepared.get(&ctx_task_id).cloned();
+                let prepared
+                    = state.prepared.get(&ctx_task_id).cloned();
+
                 (ctx_task_id, prepared)
             })
             .collect()
@@ -114,6 +121,46 @@ impl Scheduler {
     pub fn has_prepared_task(&self, task_id: &ContextualTaskId) -> bool {
         let state = self.state.read().unwrap();
         state.prepared.contains_key(task_id)
+    }
+
+    pub fn parse_contextual_task_id(&self, task_id_str: &str) -> Option<ContextualTaskId> {
+        let (task_part, context_id)
+            = task_id_str.rsplit_once('@')?;
+
+        let (workspace_str, task_name_str)
+            = task_part.split_once(':')?;
+
+        let task_name
+            = TaskName::new(task_name_str).ok()?;
+
+        let workspace
+            = Ident::new(workspace_str);
+
+        Some(ContextualTaskId::new(
+            TaskId {
+                workspace,
+                task_name,
+            },
+            context_id.to_string(),
+        ))
+    }
+
+    pub fn is_long_lived(&self, task_id: &ContextualTaskId) -> bool {
+        let state
+            = self.state.read().unwrap();
+
+        state
+            .prepared
+            .get(task_id)
+            .map(|p| p.is_long_lived)
+            .unwrap_or(false)
+    }
+
+    pub fn mark_warm_up_complete(&self, task_id: &ContextualTaskId) {
+        let mut state
+            = self.state.write().unwrap();
+
+        state.warm_up_complete.insert(task_id.clone());
     }
 }
 

@@ -35,18 +35,31 @@ impl SubscriptionFilter {
                 DaemonNotification::TaskStarted { task_id } => (task_id, self.status_scope),
                 DaemonNotification::TaskCompleted { task_id, .. } => (task_id, self.status_scope),
                 DaemonNotification::TaskFailed { task_id, .. } => (task_id, self.status_scope),
+                DaemonNotification::TaskWarmUpComplete { task_id } => (task_id, self.status_scope),
             };
 
+        let is_explicit_target
+            = self.target_task_ids.contains(task_id);
+
         if let Some(ref ctx) = self.context_id {
-            if !task_id.ends_with(&format!("@{}", ctx)) {
+            if !is_explicit_target && !task_id.ends_with(&format!("@{}", ctx)) {
                 return false;
             }
         }
 
         match scope {
             SubscriptionScope::None => false,
-            SubscriptionScope::TargetOnly => self.target_task_ids.contains(task_id),
-            SubscriptionScope::FullTree => true,
+            SubscriptionScope::TargetOnly => is_explicit_target,
+            SubscriptionScope::FullTree => {
+                if is_explicit_target {
+                    return true;
+                }
+
+                match &self.context_id {
+                    Some(ctx) => task_id.ends_with(&format!("@{}", ctx)),
+                    None => true,
+                }
+            }
         }
     }
 

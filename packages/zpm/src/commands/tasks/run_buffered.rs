@@ -4,13 +4,10 @@ use clipanion::cli;
 use uuid::Uuid;
 use zpm_utils::ToFileString;
 
+use super::helpers::{format_task_id, is_long_lived_task, print_attach_header, print_detach_footer};
 use crate::daemon::{DaemonClient, DaemonNotification, StandaloneDaemonHandle, SubscriptionScope, TaskSubscription};
 use crate::error::Error;
 use crate::project::Project;
-
-fn display_task_id(task_id: &str) -> &str {
-    task_id.rsplit_once('@').map(|(base, _)| base).unwrap_or(task_id)
-}
 
 #[cli::command(proxy)]
 #[cli::path("tasks", "run")]
@@ -81,9 +78,20 @@ impl TaskRunBuffered {
             return Err(Error::TaskPushFailed("No tasks enqueued".to_string()));
         }
 
+        for attached in &result.attached_long_lived {
+            print_attach_header(attached);
+        }
+
+        if !result.attached_long_lived.is_empty() {
+            println!();
+        }
+
         let target_task_ids: HashSet<_>
             = result.task_ids.into_iter()
                 .collect();
+
+        let has_long_lived_target
+            = target_task_ids.iter().any(|id| is_long_lived_task(id));
 
         let mut completed_tasks
             = HashSet::new();
@@ -91,9 +99,37 @@ impl TaskRunBuffered {
         let mut exit_code
             = 0;
 
+        let mut is_first_line
+            = true;
+
         loop {
             let notification
-                = client.recv_notification().await?;
+                = tokio::select! {
+                    biased;
+
+                    _ = tokio::signal::ctrl_c() => {
+                        if has_long_lived_target {
+                            println!();
+
+                            if !is_first_line {
+                                println!();
+                            }
+
+                            print_detach_footer(&self.name);
+
+                            client.close();
+
+                            if self.standalone {
+                                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                            }
+
+                            return Ok(ExitStatus::from_raw(0));
+                        } else {
+                            continue;
+                        }
+                    }
+                    n = client.recv_notification() => n?,
+                };
 
             match notification {
                 DaemonNotification::TaskOutputLine { .. } => {},
@@ -103,7 +139,7 @@ impl TaskRunBuffered {
                         let mut stdout
                             = std::io::stdout().lock();
 
-                        writeln!(stdout, "[{}]: Process started", display_task_id(&task_id)).ok();
+                        writeln!(stdout, "[{}]: Process started", format_task_id(&task_id)).ok();
                     }
                 },
 
@@ -112,11 +148,21 @@ impl TaskRunBuffered {
                         let mut stdout
                             = std::io::stdout().lock();
 
-                        for output_line in lines {
-                            if self.verbose_level >= 1 {
-                                writeln!(stdout, "[{}]: {}", display_task_id(&task_id), output_line.line).ok();
-                            } else {
-                                writeln!(stdout, "{}", output_line.line).ok();
+                        if !lines.is_empty() {
+                            if is_first_line {
+                                if !result.attached_long_lived.is_empty() {
+                                    writeln!(stdout, "").ok();
+                                }
+
+                                is_first_line = false;
+                            }
+
+                            for output_line in lines {
+                                if self.verbose_level >= 1 {
+                                    writeln!(stdout, "[{}]: {}", format_task_id(&task_id), output_line.line).ok();
+                                } else {
+                                    writeln!(stdout, "{}", output_line.line).ok();
+                                }
                             }
                         }
                     }
@@ -125,7 +171,7 @@ impl TaskRunBuffered {
                         let mut stdout
                             = std::io::stdout().lock();
 
-                        writeln!(stdout, "[{}]: Process exited (exit code {})", display_task_id(&task_id), code).ok();
+                        writeln!(stdout, "[{}]: Process exited (exit code {})", format_task_id(&task_id), code).ok();
                     }
 
                     if target_task_ids.contains(&task_id) {
@@ -146,9 +192,11 @@ impl TaskRunBuffered {
                         if self.standalone {
                             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                         }
-                        return Err(Error::IpcError(format!("Task {} failed: {}", display_task_id(&task_id), error)));
+                        return Err(Error::IpcError(format!("Task {} failed: {}", format_task_id(&task_id), error)));
                     }
                 },
+
+                DaemonNotification::TaskWarmUpComplete { .. } => {},
             }
         }
 

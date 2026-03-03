@@ -29,6 +29,7 @@ pub struct PreparedTask {
     pub env: BTreeMap<String, String>,
     pub prefix: String,
     pub args: Vec<String>,
+    pub is_long_lived: bool,
 }
 
 pub struct SchedulerState {
@@ -42,6 +43,8 @@ pub struct SchedulerState {
     pub failed: HashSet<ContextualTaskId>,
     /// Tasks whose scripts have finished (context-specific)
     pub script_finished: HashSet<ContextualTaskId>,
+    /// Long-lived tasks that have completed their warm-up period (context-specific)
+    pub warm_up_complete: HashSet<ContextualTaskId>,
     /// Parent-child subtask relationships (context-specific)
     pub subtasks: HashMap<ContextualTaskId, HashSet<ContextualTaskId>>,
     /// Prepared task execution info (context-specific)
@@ -59,6 +62,7 @@ impl SchedulerState {
             completed: HashSet::new(),
             failed: HashSet::new(),
             script_finished: HashSet::new(),
+            warm_up_complete: HashSet::new(),
             subtasks: HashMap::new(),
             prepared: BTreeMap::new(),
         }
@@ -213,6 +217,9 @@ impl SchedulerState {
                     task_id.task_name.as_str()
                 ));
 
+            let is_long_lived
+                = task.attributes.iter().any(|attr| attr.name == "long-lived");
+
             self.prepared.insert(
                 ctx_task_id,
                 PreparedTask {
@@ -221,6 +228,7 @@ impl SchedulerState {
                     env,
                     prefix,
                     args: vec![],
+                    is_long_lived,
                 },
             );
 
@@ -259,6 +267,7 @@ impl SchedulerState {
         self.completed.remove(task_id);
         self.script_finished.remove(task_id);
         self.failed.remove(task_id);
+        self.warm_up_complete.remove(task_id);
         self.targets.remove(task_id);
         self.subtasks.remove(task_id);
     }
