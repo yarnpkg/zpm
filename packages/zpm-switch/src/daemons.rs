@@ -17,24 +17,28 @@ pub struct DaemonEntry {
 }
 
 pub fn daemons_dir() -> Result<Path, Error> {
-    let daemons_dir = Path::home_dir()?
-        .ok_or(Error::MissingHomeFolder)?
-        .with_join_str(".yarn/switch/daemons");
+    let daemons_dir
+        = Path::home_dir()?
+            .ok_or(Error::MissingHomeFolder)?
+            .with_join_str(".yarn/switch/daemons");
 
     Ok(daemons_dir)
 }
 
 fn daemon_file_path(project_cwd: &Path) -> Result<Path, Error> {
-    let hash = Hash64::from_data(project_cwd.to_file_string().as_bytes());
+    let hash
+        = Hash64::from_data(project_cwd.to_file_string().as_bytes());
 
-    let daemon_path = daemons_dir()?
-        .with_join_str(format!("{}.json", hash.short()));
+    let daemon_path
+        = daemons_dir()?
+            .with_join_str(format!("{}.json", hash.short()));
 
     Ok(daemon_path)
 }
 
 pub fn register_daemon(entry: &DaemonEntry) -> Result<(), Error> {
-    let daemon_path = daemon_file_path(&entry.project_cwd)?;
+    let daemon_path
+        = daemon_file_path(&entry.project_cwd)?;
 
     daemon_path
         .fs_create_parent()?
@@ -44,7 +48,8 @@ pub fn register_daemon(entry: &DaemonEntry) -> Result<(), Error> {
 }
 
 pub fn unregister_daemon(project_cwd: &Path) -> Result<(), Error> {
-    let daemon_path = daemon_file_path(project_cwd)?;
+    let daemon_path
+        = daemon_file_path(project_cwd)?;
 
     daemon_path
         .fs_rm()
@@ -54,30 +59,34 @@ pub fn unregister_daemon(project_cwd: &Path) -> Result<(), Error> {
 }
 
 pub fn get_daemon(project_cwd: &Path) -> Result<Option<DaemonEntry>, Error> {
-    let daemon_path = daemon_file_path(project_cwd)?;
+    let daemon_path
+        = daemon_file_path(project_cwd)?;
 
-    let daemon = daemon_path
-        .fs_read_text()
-        .ok_missing()?
-        .and_then(|content| JsonDocument::hydrate_from_str::<DaemonEntry>(&content).ok());
+    let daemon
+        = daemon_path
+            .fs_read_text()
+            .ok_missing()?
+            .and_then(|content| JsonDocument::hydrate_from_str::<DaemonEntry>(&content).ok());
 
     Ok(daemon)
 }
 
 pub fn list_daemons() -> Result<BTreeSet<DaemonEntry>, Error> {
-    let daemons_dir = daemons_dir()?;
+    let daemons_dir
+        = daemons_dir()?;
 
     let Some(dir_entries) = daemons_dir.fs_read_dir().ok_missing()? else {
         return Ok(BTreeSet::new());
     };
 
-    let daemons = dir_entries
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().map_or(false, |f| f.is_file()))
-        .filter_map(|entry| Path::try_from(entry.path()).ok())
-        .filter_map(|path| path.fs_read_text().ok())
-        .filter_map(|content| JsonDocument::hydrate_from_str::<DaemonEntry>(&content).ok())
-        .collect::<BTreeSet<_>>();
+    let daemons
+        = dir_entries
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().map_or(false, |f| f.is_file()))
+            .filter_map(|entry| Path::try_from(entry.path()).ok())
+            .filter_map(|path| path.fs_read_text().ok())
+            .filter_map(|content| JsonDocument::hydrate_from_str::<DaemonEntry>(&content).ok())
+            .collect::<BTreeSet<_>>();
 
     Ok(daemons)
 }
@@ -85,7 +94,6 @@ pub fn list_daemons() -> Result<BTreeSet<DaemonEntry>, Error> {
 pub fn is_process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        // On Unix, sending signal 0 checks if process exists without killing it
         unsafe { libc::kill(pid as i32, 0) == 0 }
     }
 
@@ -145,7 +153,8 @@ pub fn kill_process(pid: u32) -> bool {
 }
 
 pub fn cleanup_stale_daemons() -> Result<(), Error> {
-    let daemons = list_daemons()?;
+    let daemons
+        = list_daemons()?;
 
     for daemon in daemons {
         if !is_process_alive(daemon.pid) {

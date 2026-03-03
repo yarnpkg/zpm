@@ -73,35 +73,39 @@ impl SchedulerState {
         workspace_override: Option<&str>,
         context_id: Option<&str>,
     ) -> Result<(ContextualTaskId, Vec<ContextualTaskId>), Error> {
-        let task_name = TaskName::new(task_name)
-            .map_err(|_| Error::TaskNameParseError(task_name.to_string()))?;
+        let task_name
+            = TaskName::new(task_name)
+                .map_err(|_| Error::TaskNameParseError(task_name.to_string()))?;
 
-        let workspace = if let Some(ws_name) = workspace_override {
-            let ident = Ident::new(ws_name);
-            project.workspace_by_ident(&ident)?
-        } else {
-            project.active_workspace()?
-        };
+        let workspace
+            = if let Some(ws_name) = workspace_override {
+                let ident
+                    = Ident::new(ws_name);
 
-        let task_id = TaskId {
-            workspace: workspace.name.clone(),
-            task_name,
-        };
+                project.workspace_by_ident(&ident)?
+            } else {
+                project.active_workspace()?
+            };
 
-        // Determine context_id: use provided, inherit from parent, or error
-        let ctx_id = if let Some(ctx) = context_id {
-            ctx.to_string()
-        } else if let Some(parent_str) = parent_task_id {
-            // Parse context from parent task ID (format: workspace:task@context)
-            self.parse_context_id(parent_str)
-                .ok_or_else(|| Error::MissingContextId)?
-        } else {
-            return Err(Error::MissingContextId);
-        };
+        let task_id
+            = TaskId {
+                workspace: workspace.name.clone(),
+                task_name,
+            };
 
-        let ctx_task_id = ContextualTaskId::new(task_id.clone(), ctx_id.clone());
+        let ctx_id
+            = if let Some(ctx) = context_id {
+                ctx.to_string()
+            } else if let Some(parent_str) = parent_task_id {
+                self.parse_context_id(parent_str)
+                    .ok_or_else(|| Error::MissingContextId)?
+            } else {
+                return Err(Error::MissingContextId);
+            };
 
-        // Register as subtask of parent if applicable
+        let ctx_task_id
+            = ContextualTaskId::new(task_id.clone(), ctx_id.clone());
+
         if let Some(parent_str) = parent_task_id {
             if let Some(parent_ctx_id) = self.parse_contextual_task_id(project, parent_str) {
                 self.subtasks
@@ -111,22 +115,22 @@ impl SchedulerState {
             }
         }
 
-        // If task is currently being processed (targeted but not completed), deduplicate
         if self.targets.contains(&ctx_task_id) && !self.completed.contains(&ctx_task_id) {
             return Ok((ctx_task_id, vec![]));
         }
 
-        // Clear previous execution state for the task to allow re-run
         self.clear_task_state(&ctx_task_id);
 
-        let new_resolved = project.resolve_task(&task_id)?;
+        let new_resolved
+            = project.resolve_task(&task_id)?;
 
-        // Collect all resolved task IDs (including transitive dependencies)
-        let mut resolved_ctx_task_ids: Vec<ContextualTaskId> = Vec::new();
+        let mut resolved_ctx_task_ids: Vec<ContextualTaskId>
+            = Vec::new();
 
-        // Clear execution state for all resolved transitive dependencies
         for (tid, prereqs) in new_resolved.tasks {
-            let ctx_tid = ContextualTaskId::new(tid.clone(), ctx_id.clone());
+            let ctx_tid
+                = ContextualTaskId::new(tid.clone(), ctx_id.clone());
+
             self.clear_task_state(&ctx_tid);
             resolved_ctx_task_ids.push(ctx_tid);
             self.resolved.tasks.entry(tid).or_insert(prereqs);
@@ -150,15 +154,21 @@ impl SchedulerState {
     }
 
     pub fn prepare_new_tasks(&mut self, project: &Project, context_id: &str) -> Result<usize, Error> {
-        let colors: Vec<&DataType> = prefix_colors().take(5).collect();
-        let mut color_index = self.prepared.len();
+        let colors: Vec<&DataType>
+            = prefix_colors().take(5).collect();
 
-        let mut new_count = 0;
+        let mut color_index
+            = self.prepared.len();
 
-        let task_ids: Vec<TaskId> = self.resolved.tasks.keys().cloned().collect();
+        let mut new_count
+            = 0;
+
+        let task_ids: Vec<TaskId>
+            = self.resolved.tasks.keys().cloned().collect();
 
         for task_id in task_ids {
-            let ctx_task_id = ContextualTaskId::new(task_id.clone(), context_id.to_string());
+            let ctx_task_id
+                = ContextualTaskId::new(task_id.clone(), context_id.to_string());
 
             if self.prepared.contains_key(&ctx_task_id) {
                 continue;
@@ -180,24 +190,28 @@ impl SchedulerState {
                 continue;
             };
 
-            let script = task.script.join("\n");
+            let script
+                = task.script.join("\n");
 
-            let mut env = BTreeMap::new();
+            let mut env
+                = BTreeMap::new();
 
             env.insert(
                 "npm_lifecycle_event".to_string(),
                 task_id.task_name.as_str().to_string(),
             );
 
-            let color = colors[color_index % colors.len()];
+            let color
+                = colors[color_index % colors.len()];
 
             color_index += 1;
 
-            let prefix = color.colorize(&format!(
-                "[{}:{}]: ",
-                task_id.workspace.to_file_string(),
-                task_id.task_name.as_str()
-            ));
+            let prefix
+                = color.colorize(&format!(
+                    "[{}:{}]: ",
+                    task_id.workspace.to_file_string(),
+                    task_id.task_name.as_str()
+                ));
 
             self.prepared.insert(
                 ctx_task_id,
@@ -246,18 +260,24 @@ impl SchedulerState {
         self.script_finished.remove(task_id);
         self.failed.remove(task_id);
         self.targets.remove(task_id);
-        // Also clear any subtask registrations from previous runs
         self.subtasks.remove(task_id);
     }
 
-    /// Parse a contextual task ID string like "workspace:task@context"
     fn parse_contextual_task_id(&self, project: &Project, task_id_str: &str) -> Option<ContextualTaskId> {
-        let (task_part, context_id) = task_id_str.rsplit_once('@')?;
-        let (workspace_str, task_name_str) = task_part.split_once(':')?;
+        let (task_part, context_id)
+            = task_id_str.rsplit_once('@')?;
 
-        let task_name = TaskName::new(task_name_str).ok()?;
-        let ident = Ident::new(workspace_str);
-        let workspace = project.workspace_by_ident(&ident).ok()?;
+        let (workspace_str, task_name_str)
+            = task_part.split_once(':')?;
+
+        let task_name
+            = TaskName::new(task_name_str).ok()?;
+
+        let ident
+            = Ident::new(workspace_str);
+
+        let workspace
+            = project.workspace_by_ident(&ident).ok()?;
 
         Some(ContextualTaskId::new(
             TaskId {
@@ -268,9 +288,10 @@ impl SchedulerState {
         ))
     }
 
-    /// Extract just the context_id from a contextual task ID string
     fn parse_context_id(&self, task_id_str: &str) -> Option<String> {
-        let (_, context_id) = task_id_str.rsplit_once('@')?;
+        let (_, context_id)
+            = task_id_str.rsplit_once('@')?;
+
         Some(context_id.to_string())
     }
 }

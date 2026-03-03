@@ -14,9 +14,14 @@ pub fn handle_push_tasks(
     subscription_registry: &SubscriptionRegistry,
     subscription_id: Option<SubscriptionId>,
 ) -> DaemonResponse {
-    let mut task_ids = Vec::new();
-    let mut dependency_ids = Vec::new();
-    let mut total_dependency_count = 0;
+    let mut task_ids
+        = Vec::new();
+
+    let mut dependency_ids
+        = Vec::new();
+
+    let mut total_dependency_count
+        = 0;
 
     for task_sub in tasks {
         match scheduler.add_task(
@@ -28,12 +33,15 @@ pub fn handle_push_tasks(
             context_id,
         ) {
             Ok((ctx_task_id, resolved_ctx_task_ids)) => {
-                let target_id_str = format_contextual_task_id(&ctx_task_id);
+                let target_id_str
+                    = format_contextual_task_id(&ctx_task_id);
+
                 task_ids.push(target_id_str.clone());
 
-                // Collect dependency IDs (excluding target)
                 for resolved_id in &resolved_ctx_task_ids {
-                    let resolved_str = format_contextual_task_id(resolved_id);
+                    let resolved_str
+                        = format_contextual_task_id(resolved_id);
+
                     if resolved_str != target_id_str {
                         dependency_ids.push(resolved_str);
                     }
@@ -49,9 +57,6 @@ pub fn handle_push_tasks(
         }
     }
 
-    // Atomically register task IDs with subscription BEFORE returning
-    // This ensures the subscription filter is ready before any notifications
-    // can be generated for these tasks
     if let Some(sub_id) = subscription_id {
         subscription_registry.add_tasks_to_subscription(
             sub_id,

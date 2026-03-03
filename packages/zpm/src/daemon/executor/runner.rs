@@ -23,7 +23,8 @@ impl TaskRunner {
         self,
         output_tx: mpsc::UnboundedSender<OutputLine>,
     ) -> Result<ExitStatus, Error> {
-        let mut env = ScriptEnvironment::new()?;
+        let mut env
+            = ScriptEnvironment::new()?;
 
         for (key, value) in &self.prepared.env {
             env = env.with_env_variable(key, value);
@@ -32,28 +33,34 @@ impl TaskRunner {
         env = env.with_env_variable(TASK_CURRENT_ENV, &self.task_id);
         env = env.with_env_variable(DAEMON_SERVER_ENV, &self.daemon_url);
 
-        let mut running = env
-            .with_cwd(self.prepared.cwd.clone())
-            .spawn_script(
-                &self.prepared.script,
-                self.prepared.args.iter().map(|s| s.as_str()),
-            )
-            .await?;
+        let mut running
+            = env
+                .with_cwd(self.prepared.cwd.clone())
+                .spawn_script(
+                    &self.prepared.script,
+                    self.prepared.args.iter().map(|s| s.as_str()),
+                )
+                .await?;
 
-        let child_stdout = running
-            .child
-            .stdout
-            .take()
-            .expect("Failed to capture stdout");
-        let child_stderr = running
-            .child
-            .stderr
-            .take()
-            .expect("Failed to capture stderr");
+        let child_stdout
+            = running
+                .child
+                .stdout
+                .take()
+                .expect("Failed to capture stdout");
+
+        let child_stderr
+            = running
+                .child
+                .stderr
+                .take()
+                .expect("Failed to capture stderr");
 
         stream_output(child_stdout, child_stderr, output_tx).await;
 
-        let status = running.child.wait().await?;
+        let status
+            = running.child.wait().await?;
+
         Ok(status)
     }
 }

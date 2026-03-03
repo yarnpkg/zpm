@@ -9,12 +9,10 @@ use crate::daemon::{DaemonClient, DaemonNotification, StandaloneDaemonHandle, Su
 use crate::error::Error;
 use crate::project::Project;
 
-/// Strip the context suffix (@uuid) from a task ID for display purposes
 fn display_task_id(task_id: &str) -> &str {
     task_id.rsplit_once('@').map(|(base, _)| base).unwrap_or(task_id)
 }
 
-/// Get current timestamp in ISO 8601 format with milliseconds
 fn current_timestamp() -> String {
     Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string()
 }
@@ -45,40 +43,44 @@ impl TaskRunInterlaced {
 
         let workspace
             = project.active_workspace()?;
+
         let workspace_name
             = workspace.name.to_file_string();
 
-        // Keep the handle alive to prevent the daemon from being killed until we're done
         let _daemon_handle: Option<StandaloneDaemonHandle>;
 
-        let mut client = if self.standalone {
-            let (c, handle) = DaemonClient::connect_standalone(&project.project_cwd).await?;
-            _daemon_handle = Some(handle);
-            c
-        } else {
-            _daemon_handle = None;
-            DaemonClient::connect(&project.project_cwd).await?
-        };
+        let mut client
+            = if self.standalone {
+                let (c, handle)
+                    = DaemonClient::connect_standalone(&project.project_cwd).await?;
 
-        // Generate a unique context ID for this run
-        let context_id = Uuid::new_v4().to_string();
+                _daemon_handle = Some(handle);
+                c
+            } else {
+                _daemon_handle = None;
+                DaemonClient::connect(&project.project_cwd).await?
+            };
 
-        // Subscribe to Output and Status for ALL tasks (full tree)
-        let task_subscriptions = vec![TaskSubscription {
-            name: self.name.to_string(),
-            args: self.args.to_vec(),
-        }];
+        let context_id
+            = Uuid::new_v4().to_string();
 
-        let result = client
-            .push_tasks_with_subscriptions(
-                task_subscriptions,
-                None,
-                Some(workspace_name),
-                SubscriptionScope::FullTree,
-                SubscriptionScope::FullTree,
-                Some(context_id),
-            )
-            .await?;
+        let task_subscriptions
+            = vec![TaskSubscription {
+                name: self.name.to_string(),
+                args: self.args.to_vec(),
+            }];
+
+        let result
+            = client
+                .push_tasks_with_subscriptions(
+                    task_subscriptions,
+                    None,
+                    Some(workspace_name),
+                    SubscriptionScope::FullTree,
+                    SubscriptionScope::FullTree,
+                    Some(context_id),
+                )
+                .await?;
 
         if result.task_ids.is_empty() {
             return Err(Error::TaskPushFailed("No tasks enqueued".to_string()));
@@ -156,7 +158,6 @@ impl TaskRunInterlaced {
                 DaemonNotification::TaskFailed { task_id, error } => {
                     if target_task_ids.contains(&task_id) {
                         client.close();
-                        // Give time for close handshake when using standalone daemon
                         if self.standalone {
                             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                         }
@@ -166,9 +167,7 @@ impl TaskRunInterlaced {
             }
         }
 
-        // Close the WebSocket connection gracefully before the daemon handle is dropped
         client.close();
-        // Give time for close handshake when using standalone daemon
         if self.standalone {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }

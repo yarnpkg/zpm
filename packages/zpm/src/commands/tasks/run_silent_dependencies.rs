@@ -9,7 +9,6 @@ use crate::daemon::{DaemonClient, DaemonNotification, ProgressState, StandaloneD
 use crate::error::Error;
 use crate::project::Project;
 
-/// Strip the context suffix (@uuid) from a task ID for display purposes
 fn display_task_id(task_id: &str) -> &str {
     task_id.rsplit_once('@').map(|(base, _)| base).unwrap_or(task_id)
 }
@@ -52,40 +51,44 @@ impl TaskRunSilentDependencies {
 
         let workspace
             = project.active_workspace()?;
+
         let workspace_name
             = workspace.name.to_file_string();
 
-        // Keep the handle alive to prevent the daemon from being killed until we're done
         let _daemon_handle: Option<StandaloneDaemonHandle>;
 
-        let mut client = if self.standalone {
-            let (c, handle) = DaemonClient::connect_standalone(&project.project_cwd).await?;
-            _daemon_handle = Some(handle);
-            c
-        } else {
-            _daemon_handle = None;
-            DaemonClient::connect(&project.project_cwd).await?
-        };
+        let mut client
+            = if self.standalone {
+                let (c, handle)
+                    = DaemonClient::connect_standalone(&project.project_cwd).await?;
 
-        // Generate a unique context ID for this run
-        let context_id = Uuid::new_v4().to_string();
+                _daemon_handle = Some(handle);
+                c
+            } else {
+                _daemon_handle = None;
+                DaemonClient::connect(&project.project_cwd).await?
+            };
 
-        // Subscribe to Output for target task only, but Status for ALL tasks
-        let task_subscriptions = vec![TaskSubscription {
-            name: self.name.to_string(),
-            args: self.args.to_vec(),
-        }];
+        let context_id
+            = Uuid::new_v4().to_string();
 
-        let result = client
-            .push_tasks_with_subscriptions(
-                task_subscriptions,
-                None,
-                Some(workspace_name),
-                SubscriptionScope::TargetOnly,  // Output only for target
-                SubscriptionScope::FullTree,    // Status for all tasks
-                Some(context_id),
-            )
-            .await?;
+        let task_subscriptions
+            = vec![TaskSubscription {
+                name: self.name.to_string(),
+                args: self.args.to_vec(),
+            }];
+
+        let result
+            = client
+                .push_tasks_with_subscriptions(
+                    task_subscriptions,
+                    None,
+                    Some(workspace_name),
+                    SubscriptionScope::TargetOnly,
+                    SubscriptionScope::FullTree,
+                    Some(context_id),
+                )
+                .await?;
 
         if result.task_ids.is_empty() {
             return Err(Error::TaskPushFailed("No tasks enqueued".to_string()));
@@ -95,20 +98,24 @@ impl TaskRunSilentDependencies {
             = result.task_ids.into_iter()
                 .collect();
 
-        // Set up progress display if we have dependencies and a terminal
-        let show_progress = is_terminal() && result.dependency_count > 0;
+        let show_progress
+            = is_terminal() && result.dependency_count > 0;
 
-        let mut progress_handle = if show_progress {
-            let progress_state = Arc::new(ProgressState::new(result.dependency_count));
-            let progress_state_clone = progress_state.clone();
+        let mut progress_handle
+            = if show_progress {
+                let progress_state
+                    = Arc::new(ProgressState::new(result.dependency_count));
 
-            Some((
-                start_progress(move |frame_idx| progress_state_clone.format_progress(frame_idx)),
-                progress_state,
-            ))
-        } else {
-            None
-        };
+                let progress_state_clone
+                    = progress_state.clone();
+
+                Some((
+                    start_progress(move |frame_idx| progress_state_clone.format_progress(frame_idx)),
+                    progress_state,
+                ))
+            } else {
+                None
+            };
 
         let mut completed_tasks
             = HashSet::new();
@@ -122,7 +129,6 @@ impl TaskRunSilentDependencies {
 
             match notification {
                 DaemonNotification::TaskOutputLine { line, .. } => {
-                    // Only receive output for target task (per subscription)
                     let mut stdout
                         = std::io::stdout().lock();
 
@@ -130,15 +136,14 @@ impl TaskRunSilentDependencies {
                 },
 
                 DaemonNotification::TaskStarted { task_id } => {
-                    let is_target = target_task_ids.contains(&task_id);
+                    let is_target
+                        = target_task_ids.contains(&task_id);
 
                     if is_target {
-                        // Target task started - stop progress display
                         if let Some((ref mut handle, _)) = progress_handle {
                             handle.stop();
                         }
                     } else {
-                        // Dependency task started - track in progress
                         if let Some((_, ref progress_state)) = progress_handle {
                             progress_state.add_task(display_task_id(&task_id));
                         }
@@ -150,13 +155,11 @@ impl TaskRunSilentDependencies {
                         = target_task_ids.contains(&task_id);
 
                     if !is_target {
-                        // Dependency task completed - update progress
                         if let Some((_, ref progress_state)) = progress_handle {
                             progress_state.remove_task(display_task_id(&task_id));
                         }
 
                         if code != 0 {
-                            // Dependency failed - stop progress and show its output
                             if let Some((ref mut handle, _)) = progress_handle {
                                 handle.stop();
                             }
@@ -192,7 +195,6 @@ impl TaskRunSilentDependencies {
                     let is_target
                         = target_task_ids.contains(&task_id);
 
-                    // Stop progress on any failure
                     if let Some((ref mut handle, _)) = progress_handle {
                         handle.stop();
                     }
@@ -210,7 +212,6 @@ impl TaskRunSilentDependencies {
 
                     if is_target {
                         client.close();
-                        // Give time for close handshake when using standalone daemon
                         if self.standalone {
                             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                         }
@@ -220,9 +221,7 @@ impl TaskRunSilentDependencies {
             }
         }
 
-        // Close the WebSocket connection gracefully before the daemon handle is dropped
         client.close();
-        // Give time for close handshake when using standalone daemon
         if self.standalone {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
