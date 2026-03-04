@@ -13,7 +13,7 @@ use zpm_switch::YARN_SWITCH_PATH_ENV;
 
 use super::ipc::{
     AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest,
-    DaemonRequestEnvelope, DaemonResponse, SubscriptionScope, TaskSubscription,
+    DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskSubscription,
     DAEMON_SERVER_ENV,
 };
 use zpm_utils::Path;
@@ -316,6 +316,17 @@ impl DaemonClient {
 
         match self.send_request(request).await? {
             DaemonResponse::TaskStopped { success, error } => Ok((success, error)),
+            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
+            _ => Err(Error::IpcError("Unexpected response".to_string())),
+        }
+    }
+
+    pub async fn list_long_lived_tasks(&mut self) -> Result<Vec<LongLivedTaskInfo>, Error> {
+        let request
+            = DaemonRequest::ListLongLivedTasks;
+
+        match self.send_request(request).await? {
+            DaemonResponse::LongLivedTaskList { tasks } => Ok(tasks),
             DaemonResponse::Error { message } => Err(Error::IpcError(message)),
             _ => Err(Error::IpcError("Unexpected response".to_string())),
         }

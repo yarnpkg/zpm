@@ -4471,6 +4471,7 @@ checksum = "1966f8ac2c1f76987d69a74d0e0f929241c10e78136434e3be70ff7f58f64214"
 name = "zpm"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "base64",
  "brotli",
  "bytes",
@@ -4705,6 +4706,7 @@ dependencies = [
  "fundu",
  "hex",
  "indexmap 2.13.0",
+ "libc",
  "num",
  "ouroboros",
  "rkyv",

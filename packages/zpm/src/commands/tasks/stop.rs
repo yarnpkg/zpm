@@ -7,10 +7,18 @@ use crate::daemon::DaemonClient;
 use crate::error::Error;
 use crate::project::Project;
 
+/// Stop a running long-lived task
+///
+/// This command stops a long-lived task that is currently running in the
+/// background. The task will be terminated and its status will be set to
+/// "stopped".
+///
+/// Use `yarn tasks list` to see the names of running tasks that can be stopped.
 #[cli::command]
 #[cli::path("tasks", "stop")]
-#[cli::category("Scripting commands")]
+#[cli::category("Task management commands")]
 pub struct TaskStop {
+    /// Name of the task to stop
     name: String,
 }
 

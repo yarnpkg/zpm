@@ -1,0 +1,251 @@
+use std::collections::HashSet;
+use std::os::unix::process::ExitStatusExt;
+use std::process::ExitStatus;
+
+use async_trait::async_trait;
+use uuid::Uuid;
+use zpm_utils::ToFileString;
+
+use super::helpers::{is_long_lived_task, print_attach_header, print_detach_footer};
+use crate::daemon::{
+    DaemonClient, DaemonNotification, PushTasksResult, StandaloneDaemonHandle, SubscriptionScope,
+    TaskSubscription,
+};
+use crate::error::Error;
+use crate::project::Project;
+
+pub struct TaskRunConfig {
+    pub output_subscription: SubscriptionScope,
+    pub status_subscription: SubscriptionScope,
+}
+
+pub struct TaskRunContext {
+    pub client: DaemonClient,
+    pub result: PushTasksResult,
+    pub target_task_ids: HashSet<String>,
+    pub completed_tasks: HashSet<String>,
+    pub exit_code: i32,
+    pub is_first_line: bool,
+    pub verbose_level: u8,
+}
+
+impl TaskRunContext {
+    pub fn has_attached(&self) -> bool {
+        !self.result.attached_long_lived.is_empty()
+    }
+
+    pub fn has_long_lived_target(&self) -> bool {
+        self.target_task_ids.iter().any(|id| is_long_lived_task(id))
+    }
+
+    pub fn is_target(&self, task_id: &str) -> bool {
+        self.target_task_ids.contains(task_id)
+    }
+
+    pub fn mark_completed(&mut self, task_id: String, code: i32) {
+        if self.target_task_ids.contains(&task_id) {
+            self.completed_tasks.insert(task_id);
+            if code != 0 {
+                self.exit_code = code;
+            }
+        }
+    }
+
+    pub fn all_completed(&self) -> bool {
+        self.completed_tasks.len() >= self.target_task_ids.len()
+    }
+}
+
+#[async_trait]
+pub trait TaskRunHandler: Send {
+    fn config(&self) -> TaskRunConfig;
+
+    fn on_tasks_pushed(&mut self, ctx: &TaskRunContext) {
+        let _ = ctx;
+    }
+
+    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, task_id: &str, line: &str);
+
+    async fn on_task_started(&mut self, ctx: &mut TaskRunContext, task_id: &str, is_target: bool);
+
+    async fn on_task_completed(
+        &mut self,
+        ctx: &mut TaskRunContext,
+        task_id: &str,
+        exit_code: i32,
+        is_target: bool,
+    );
+
+    async fn on_task_failed(
+        &mut self,
+        ctx: &mut TaskRunContext,
+        task_id: &str,
+        error: &str,
+        is_target: bool,
+    ) -> Option<Error>;
+
+    fn on_ctrl_c(&mut self);
+}
+
+pub async fn run_task(
+    handler: &mut impl TaskRunHandler,
+    name: &str,
+    args: &[String],
+    standalone: bool,
+    verbose_level: u8,
+) -> Result<ExitStatus, Error> {
+    let mut project
+        = Project::new(None).await?;
+
+    project.lazy_install().await?;
+
+    let workspace
+        = project.active_workspace()?;
+
+    let workspace_name
+        = workspace.name.to_file_string();
+
+    let _daemon_handle: Option<StandaloneDaemonHandle>;
+
+    let mut client
+        = if standalone {
+            let (c, handle)
+                = DaemonClient::connect_standalone(&project.project_cwd).await?;
+
+            _daemon_handle = Some(handle);
+            c
+        } else {
+            _daemon_handle = None;
+            DaemonClient::connect(&project.project_cwd).await?
+        };
+
+    let context_id
+        = Uuid::new_v4().to_string();
+
+    let task_subscriptions
+        = vec![TaskSubscription {
+            name: name.to_string(),
+            args: args.to_vec(),
+        }];
+
+    let config
+        = handler.config();
+
+    let mut ctx
+        = TaskRunContext {
+            result: client
+                .push_tasks_with_subscriptions(
+                    task_subscriptions,
+                    None,
+                    Some(workspace_name),
+                    config.output_subscription,
+                    config.status_subscription,
+                    Some(context_id),
+                )
+                .await?,
+            client,
+            target_task_ids: HashSet::new(),
+            completed_tasks: HashSet::new(),
+            exit_code: 0,
+            is_first_line: true,
+            verbose_level,
+        };
+
+    if ctx.result.task_ids.is_empty() {
+        return Err(Error::TaskPushFailed("No tasks enqueued".to_string()));
+    }
+
+    for attached in &ctx.result.attached_long_lived {
+        print_attach_header(attached);
+    }
+
+    ctx.target_task_ids
+        = ctx.result.task_ids.clone().into_iter().collect();
+
+    handler.on_tasks_pushed(&ctx);
+
+    loop {
+        let notification
+            = tokio::select! {
+                biased;
+
+                _ = tokio::signal::ctrl_c() => {
+                    if ctx.has_long_lived_target() {
+                        handler.on_ctrl_c();
+
+                        println!();
+
+                        if !ctx.is_first_line {
+                            println!();
+                        }
+
+                        print_detach_footer(name);
+
+                        ctx.client.close();
+
+                        if standalone {
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        }
+
+                        return Ok(ExitStatus::from_raw(0));
+                    } else {
+                        continue;
+                    }
+                }
+                n = ctx.client.recv_notification() => n?,
+            };
+
+        match notification {
+            DaemonNotification::TaskOutputLine { task_id, line, .. } => {
+                handler.on_output_line(&mut ctx, &task_id, &line).await;
+            }
+
+            DaemonNotification::TaskStarted { task_id } => {
+                let is_target
+                    = ctx.is_target(&task_id);
+
+                handler.on_task_started(&mut ctx, &task_id, is_target).await;
+            }
+
+            DaemonNotification::TaskCompleted { task_id, exit_code } => {
+                let is_target
+                    = ctx.is_target(&task_id);
+
+                handler
+                    .on_task_completed(&mut ctx, &task_id, exit_code, is_target)
+                    .await;
+
+                ctx.mark_completed(task_id, exit_code);
+
+                if ctx.all_completed() {
+                    break;
+                }
+            }
+
+            DaemonNotification::TaskFailed { task_id, error } => {
+                let is_target
+                    = ctx.is_target(&task_id);
+
+                if let Some(err) = handler.on_task_failed(&mut ctx, &task_id, &error, is_target).await {
+                    ctx.client.close();
+
+                    if standalone {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+
+                    return Err(err);
+                }
+            }
+
+            DaemonNotification::TaskWarmUpComplete { .. } => {}
+        }
+    }
+
+    ctx.client.close();
+
+    if standalone {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    Ok(ExitStatus::from_raw(ctx.exit_code << 8))
+}

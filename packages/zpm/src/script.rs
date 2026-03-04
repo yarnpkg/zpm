@@ -338,6 +338,7 @@ pub struct ScriptEnvironment {
     node_args: Vec<String>,
     target_output: TargetOutput,
     stdin: Option<String>,
+    signal_delegation: bool,
 }
 
 impl ScriptEnvironment {
@@ -349,6 +350,7 @@ impl ScriptEnvironment {
             node_args: Vec::new(),
             target_output: TargetOutput::default(),
             stdin: None,
+            signal_delegation: false,
         };
 
         if let Ok(val) = std::env::var("YARNSW_DETECTED_ROOT") {
@@ -422,6 +424,19 @@ impl ScriptEnvironment {
 
     pub fn with_stdin(mut self, stdin: Option<String>) -> Self {
         self.stdin = stdin;
+        self
+    }
+
+    /// Enables signal delegation mode.
+    ///
+    /// When enabled, SIGINT is ignored in the parent process while waiting
+    /// for child processes to complete. This allows the child to handle
+    /// the signal and exit gracefully, with its exit code properly propagated.
+    ///
+    /// This is useful when the parent is a wrapper (like yarn-switch) that
+    /// should delegate signal handling to the actual command being run.
+    pub fn enable_signal_delegation(mut self) -> Self {
+        self.signal_delegation = true;
         self
     }
 
@@ -623,6 +638,15 @@ impl ScriptEnvironment {
             }
         }
 
+        // If signal delegation is enabled, ignore SIGINT while waiting for the child.
+        // This allows the child to handle the signal and exit gracefully.
+        #[cfg(unix)]
+        let _guard = if self.signal_delegation {
+            Some(zpm_utils::IgnoreSigint::new())
+        } else {
+            None
+        };
+
         let output = match &self.target_output {
             TargetOutput::Inherit => {
                 Output {
@@ -724,6 +748,15 @@ impl ScriptEnvironment {
         cmd.stdout(std::process::Stdio::inherit());
         cmd.stderr(std::process::Stdio::inherit());
         cmd.stdin(std::process::Stdio::inherit());
+
+        // If signal delegation is enabled, ignore SIGINT while waiting for the child.
+        // This allows the child to handle the signal and exit gracefully.
+        #[cfg(unix)]
+        let _guard = if self.signal_delegation {
+            Some(zpm_utils::IgnoreSigint::new())
+        } else {
+            None
+        };
 
         let status = cmd.status().await
             .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;

@@ -5,10 +5,19 @@ use clipanion::cli;
 use crate::daemon::{DaemonClient, TaskSubscription, DAEMON_SERVER_ENV, TASK_CURRENT_ENV};
 use crate::error::Error;
 
+/// Push tasks to be executed from within a running task
+///
+/// This command allows a running task to schedule additional tasks to be
+/// executed by the daemon. It can only be called from within a task context
+/// (i.e., when running inside a task that was started by the daemon).
+///
+/// This is useful for dynamically spawning subtasks based on runtime conditions,
+/// such as triggering build steps after certain conditions are met.
 #[cli::command]
 #[cli::path("tasks", "push")]
-#[cli::category("Scripting commands")]
+#[cli::category("Task management commands")]
 pub struct TaskPush {
+    /// Names of the tasks to push for execution
     #[cli::positional]
     tasks: Vec<String>,
 }

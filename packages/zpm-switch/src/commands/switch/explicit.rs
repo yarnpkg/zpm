@@ -32,8 +32,20 @@ impl ExplicitCommand {
             binary.env(YARN_SWITCH_PATH_ENV, switch_path);
         }
 
+        let mut child
+            = binary.spawn()
+                .map_err(|err| Error::FailedToExecuteBinary(binary.get_program().to_string_lossy().to_string(), Arc::new(err)))?;
+
+        // Ignore SIGINT while waiting for the child process.
+        // This ensures the child's exit code is properly propagated
+        // instead of the parent being killed by SIGINT.
+        // Note: We must spawn BEFORE setting SIG_IGN, otherwise the child
+        // inherits the ignored signal disposition and won't receive Ctrl-C.
+        #[cfg(unix)]
+        let _guard = zpm_utils::IgnoreSigint::new();
+
         let exit_code
-            = binary.status()
+            = child.wait()
                 .map_err(|err| Error::FailedToExecuteBinary(binary.get_program().to_string_lossy().to_string(), Arc::new(err)))?;
 
         Ok(exit_code)

@@ -102,4 +102,11 @@ impl LongLivedRegistry {
             .find(|e| e.contextual_task_id == contextual_task_id)
             .cloned()
     }
+
+    pub fn list_all_entries(&self) -> Vec<LongLivedEntry> {
+        let inner
+            = self.inner.read().unwrap();
+
+        inner.entries.values().cloned().collect()
+    }
 }

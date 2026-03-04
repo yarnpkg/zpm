@@ -1,210 +1,134 @@
-use std::{collections::HashSet, io::Write, os::unix::process::ExitStatusExt, process::ExitStatus};
+use std::io::Write;
+use std::process::ExitStatus;
 
+use async_trait::async_trait;
 use clipanion::cli;
-use uuid::Uuid;
-use zpm_utils::ToFileString;
 
-use super::helpers::{format_task_id, is_long_lived_task, print_attach_header, print_detach_footer};
-use crate::daemon::{DaemonClient, DaemonNotification, StandaloneDaemonHandle, SubscriptionScope, TaskSubscription};
+use super::helpers::format_task_id;
+use super::runner::{run_task, TaskRunConfig, TaskRunContext, TaskRunHandler};
+use crate::daemon::SubscriptionScope;
 use crate::error::Error;
-use crate::project::Project;
 
+struct BufferedHandler;
+
+#[async_trait]
+impl TaskRunHandler for BufferedHandler {
+    fn config(&self) -> TaskRunConfig {
+        TaskRunConfig {
+            output_subscription: SubscriptionScope::None,
+            status_subscription: SubscriptionScope::FullTree,
+        }
+    }
+
+    async fn on_output_line(&mut self, _ctx: &mut TaskRunContext, _task_id: &str, _line: &str) {}
+
+    async fn on_task_started(&mut self, ctx: &mut TaskRunContext, task_id: &str, _is_target: bool) {
+        if ctx.verbose_level >= 2 {
+            let mut stdout
+                = std::io::stdout().lock();
+
+            writeln!(stdout, "[{}]: Process started", format_task_id(task_id)).ok();
+        }
+    }
+
+    async fn on_task_completed(
+        &mut self,
+        ctx: &mut TaskRunContext,
+        task_id: &str,
+        exit_code: i32,
+        _is_target: bool,
+    ) {
+        if let Ok(lines) = ctx.client.get_task_output(task_id).await {
+            let mut stdout
+                = std::io::stdout().lock();
+
+            if !lines.is_empty() {
+                if ctx.is_first_line {
+                    if ctx.has_attached() {
+                        writeln!(stdout, "").ok();
+                    }
+
+                    ctx.is_first_line = false;
+                }
+
+                for output_line in lines {
+                    if ctx.verbose_level >= 1 {
+                        writeln!(stdout, "[{}]: {}", format_task_id(task_id), output_line.line).ok();
+                    } else {
+                        writeln!(stdout, "{}", output_line.line).ok();
+                    }
+                }
+            }
+        }
+
+        if ctx.verbose_level >= 2 {
+            let mut stdout
+                = std::io::stdout().lock();
+
+            writeln!(stdout, "[{}]: Process exited (exit code {})", format_task_id(task_id), exit_code).ok();
+        }
+    }
+
+    async fn on_task_failed(
+        &mut self,
+        _ctx: &mut TaskRunContext,
+        task_id: &str,
+        error: &str,
+        is_target: bool,
+    ) -> Option<Error> {
+        if is_target {
+            Some(Error::IpcError(format!("Task {} failed: {}", format_task_id(task_id), error)))
+        } else {
+            None
+        }
+    }
+
+    fn on_ctrl_c(&mut self) {}
+}
+
+/// Run a task with buffered output
+///
+/// This command runs a task with buffered output mode. In this mode, the output
+/// from each task (including dependencies) is collected and displayed only after
+/// the task completes. This provides cleaner output when running multiple tasks
+/// that might produce interleaved output.
+///
+/// The buffered mode is useful for CI environments or when you want to see the
+/// complete output of each task as a unit rather than interleaved lines.
 #[cli::command(proxy)]
 #[cli::path("tasks", "run")]
-#[cli::category("Scripting commands")]
+#[cli::category("Task management commands")]
 pub struct TaskRunBuffered {
+    /// Enable buffered output mode
     #[cli::option("--buffered")]
     _buffered: bool,
 
+    /// Increase the verbosity level (can be repeated)
     #[cli::option("-v,--verbose", default = if zpm_utils::is_terminal() {2} else {0}, counter)]
     verbose_level: u8,
 
+    /// Run the task without connecting to the daemon
     #[cli::option("--standalone", default = false)]
     standalone: bool,
 
+    /// Name of the task to run
     name: String,
+
+    /// Arguments to pass to the task
     args: Vec<String>,
 }
 
 impl TaskRunBuffered {
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let mut project
-            = Project::new(None).await?;
+        let mut handler
+            = BufferedHandler;
 
-        project.lazy_install().await?;
-
-        let workspace
-            = project.active_workspace()?;
-
-        let workspace_name
-            = workspace.name.to_file_string();
-
-        let _daemon_handle: Option<StandaloneDaemonHandle>;
-
-        let mut client
-            = if self.standalone {
-                let (c, handle)
-                    = DaemonClient::connect_standalone(&project.project_cwd).await?;
-
-                _daemon_handle = Some(handle);
-                c
-            } else {
-                _daemon_handle = None;
-                DaemonClient::connect(&project.project_cwd).await?
-            };
-
-        let context_id
-            = Uuid::new_v4().to_string();
-
-        let task_subscriptions
-            = vec![TaskSubscription {
-                name: self.name.to_string(),
-                args: self.args.to_vec(),
-            }];
-
-        let result
-            = client
-                .push_tasks_with_subscriptions(
-                    task_subscriptions,
-                    None,
-                    Some(workspace_name),
-                    SubscriptionScope::None,
-                    SubscriptionScope::FullTree,
-                    Some(context_id),
-                )
-                .await?;
-
-        if result.task_ids.is_empty() {
-            return Err(Error::TaskPushFailed("No tasks enqueued".to_string()));
-        }
-
-        for attached in &result.attached_long_lived {
-            print_attach_header(attached);
-        }
-
-        if !result.attached_long_lived.is_empty() {
-            println!();
-        }
-
-        let target_task_ids: HashSet<_>
-            = result.task_ids.into_iter()
-                .collect();
-
-        let has_long_lived_target
-            = target_task_ids.iter().any(|id| is_long_lived_task(id));
-
-        let mut completed_tasks
-            = HashSet::new();
-
-        let mut exit_code
-            = 0;
-
-        let mut is_first_line
-            = true;
-
-        loop {
-            let notification
-                = tokio::select! {
-                    biased;
-
-                    _ = tokio::signal::ctrl_c() => {
-                        if has_long_lived_target {
-                            println!();
-
-                            if !is_first_line {
-                                println!();
-                            }
-
-                            print_detach_footer(&self.name);
-
-                            client.close();
-
-                            if self.standalone {
-                                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                            }
-
-                            return Ok(ExitStatus::from_raw(0));
-                        } else {
-                            continue;
-                        }
-                    }
-                    n = client.recv_notification() => n?,
-                };
-
-            match notification {
-                DaemonNotification::TaskOutputLine { .. } => {},
-
-                DaemonNotification::TaskStarted { task_id } => {
-                    if self.verbose_level >= 2 {
-                        let mut stdout
-                            = std::io::stdout().lock();
-
-                        writeln!(stdout, "[{}]: Process started", format_task_id(&task_id)).ok();
-                    }
-                },
-
-                DaemonNotification::TaskCompleted { task_id, exit_code: code } => {
-                    if let Ok(lines) = client.get_task_output(&task_id).await {
-                        let mut stdout
-                            = std::io::stdout().lock();
-
-                        if !lines.is_empty() {
-                            if is_first_line {
-                                if !result.attached_long_lived.is_empty() {
-                                    writeln!(stdout, "").ok();
-                                }
-
-                                is_first_line = false;
-                            }
-
-                            for output_line in lines {
-                                if self.verbose_level >= 1 {
-                                    writeln!(stdout, "[{}]: {}", format_task_id(&task_id), output_line.line).ok();
-                                } else {
-                                    writeln!(stdout, "{}", output_line.line).ok();
-                                }
-                            }
-                        }
-                    }
-
-                    if self.verbose_level >= 2 {
-                        let mut stdout
-                            = std::io::stdout().lock();
-
-                        writeln!(stdout, "[{}]: Process exited (exit code {})", format_task_id(&task_id), code).ok();
-                    }
-
-                    if target_task_ids.contains(&task_id) {
-                        completed_tasks.insert(task_id);
-                        if code != 0 {
-                            exit_code = code;
-                        }
-                    }
-
-                    if completed_tasks.len() >= target_task_ids.len() {
-                        break;
-                    }
-                },
-
-                DaemonNotification::TaskFailed { task_id, error } => {
-                    if target_task_ids.contains(&task_id) {
-                        client.close();
-                        if self.standalone {
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        }
-                        return Err(Error::IpcError(format!("Task {} failed: {}", format_task_id(&task_id), error)));
-                    }
-                },
-
-                DaemonNotification::TaskWarmUpComplete { .. } => {},
-            }
-        }
-
-        client.close();
-        if self.standalone {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-
-        Ok(ExitStatus::from_raw(exit_code << 8))
+        run_task(
+            &mut handler,
+            &self.name,
+            &self.args,
+            self.standalone,
+            self.verbose_level,
+        ).await
     }
 }

@@ -17,8 +17,9 @@ pub use executor::{ExecutorPool, OutputLine, TaskRunner};
 pub use handlers::dispatch_request;
 pub use ipc::{
     daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification,
-    DaemonRequest, DaemonRequestEnvelope, DaemonResponse, SubscriptionScope, TaskSubscription,
-    DAEMON_BASE_PORT, DAEMON_SERVER_ENV, LONG_LIVED_CONTEXT_ID, TASK_CURRENT_ENV,
+    DaemonRequest, DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, LongLivedTaskStatus,
+    SubscriptionScope, TaskSubscription, DAEMON_BASE_PORT, DAEMON_SERVER_ENV, LONG_LIVED_CONTEXT_ID,
+    TASK_CURRENT_ENV,
 };
 pub use presentation::{prefix_colors, ProgressState};
 pub use scheduler::{format_task_id, PreparedTask, Scheduler};

@@ -1,3 +1,4 @@
+mod list_long_lived_tasks;
 mod push_tasks;
 mod stop_task;
 
@@ -10,6 +11,7 @@ use super::server::OutputBuffer;
 use super::subscriptions::{SubscriptionId, SubscriptionRegistry};
 use crate::project::Project;
 
+pub use list_long_lived_tasks::handle_list_long_lived_tasks;
 pub use push_tasks::handle_push_tasks;
 pub use stop_task::handle_stop_task;
 
@@ -59,6 +61,9 @@ pub fn dispatch_request(
                 project,
                 long_lived_registry,
             )
+        }
+        DaemonRequest::ListLongLivedTasks => {
+            handle_list_long_lived_tasks(project, long_lived_registry)
         }
     }
 }

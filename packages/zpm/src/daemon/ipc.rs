@@ -52,6 +52,7 @@ pub enum DaemonRequest {
         task_name: String,
         workspace: Option<String>,
     },
+    ListLongLivedTasks,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +67,31 @@ pub struct BufferedOutputLine {
 pub struct AttachedLongLivedTask {
     pub task_id: String,
     pub started_at_ms: u64,
+}
+
+/// Status of a long-lived task
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LongLivedTaskStatus {
+    /// Task is not running
+    Stopped,
+    /// Task is running
+    Running {
+        started_at_ms: u64,
+        process_id: Option<u32>,
+    },
+}
+
+/// Information about a long-lived task
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LongLivedTaskInfo {
+    /// The workspace name
+    pub workspace: String,
+    /// The task name
+    pub task_name: String,
+    /// Current status
+    pub status: LongLivedTaskStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +113,9 @@ pub enum DaemonResponse {
     TaskStopped {
         success: bool,
         error: Option<String>,
+    },
+    LongLivedTaskList {
+        tasks: Vec<LongLivedTaskInfo>,
     },
     Error {
         message: String,
