@@ -1,7 +1,9 @@
 use std::process::ExitStatus;
+use std::sync::Arc;
 
 use tokio::sync::mpsc;
 use super::super::ipc::{TASK_CURRENT_ENV, DAEMON_SERVER_ENV};
+use super::super::process_registry::ProcessRegistry;
 
 use super::super::scheduler::PreparedTask;
 use super::output::{stream_output, OutputLine};
@@ -12,11 +14,12 @@ pub struct TaskRunner {
     prepared: PreparedTask,
     task_id: String,
     daemon_url: String,
+    process_registry: Arc<ProcessRegistry>,
 }
 
 impl TaskRunner {
-    pub fn new(prepared: PreparedTask, task_id: String, daemon_url: String) -> Self {
-        Self { prepared, task_id, daemon_url }
+    pub fn new(prepared: PreparedTask, task_id: String, daemon_url: String, process_registry: Arc<ProcessRegistry>) -> Self {
+        Self { prepared, task_id, daemon_url, process_registry }
     }
 
     pub async fn run(
@@ -42,6 +45,12 @@ impl TaskRunner {
                 )
                 .await?;
 
+        // Register the process PID for signal propagation
+        let pid = running.child.id();
+        if let Some(pid) = pid {
+            self.process_registry.register(pid);
+        }
+
         let child_stdout
             = running
                 .child
@@ -60,6 +69,11 @@ impl TaskRunner {
 
         let status
             = running.child.wait().await?;
+
+        // Unregister the process PID after it exits
+        if let Some(pid) = pid {
+            self.process_registry.unregister(pid);
+        }
 
         Ok(status)
     }

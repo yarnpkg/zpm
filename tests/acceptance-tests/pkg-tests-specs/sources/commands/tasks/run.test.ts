@@ -632,5 +632,113 @@ describe(`Commands`, () => {
         })),
       );
     });
+
+    describe(`daemon signal propagation`, () => {
+      test(
+        `it should terminate child processes when daemon receives SIGTERM`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run, runSwitch}) => {
+          const pidFile = ppath.join(path, `task.pid`);
+          const runningMarker = ppath.join(path, `running`);
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `long-task:`,
+            `  echo $$ > task.pid`,
+            `  touch running`,
+            `  sleep 60`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start the task in background
+          const taskPromise = runSwitch(`tasks`, `run`, `long-task`).catch(() => {});
+
+          // Wait for task to start and write its PID
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          // Verify task is running
+          const taskRunning = await xfs.existsPromise(runningMarker);
+          expect(taskRunning).toBe(true);
+
+          // Read the task PID
+          const taskPid = parseInt(await xfs.readFilePromise(pidFile, `utf8`), 10);
+
+          // Kill the daemon (which should propagate signals to children)
+          await runSwitch(`switch`, `daemon`, `--kill-all`);
+
+          // Wait for signal propagation and process cleanup
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          // Check if the task process is still running
+          let processStillRunning = false;
+          try {
+            // Sending signal 0 checks if process exists without actually sending a signal
+            process.kill(taskPid, 0);
+            processStillRunning = true;
+          } catch {
+            // Process doesn't exist, which is expected
+            processStillRunning = false;
+          }
+
+          expect(processStillRunning).toBe(false);
+        }),
+      );
+
+      test(
+        `it should send SIGKILL after 5 seconds if SIGTERM is ignored`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run, runSwitch}) => {
+          const pidFile = ppath.join(path, `task.pid`);
+          const runningMarker = ppath.join(path, `running`);
+
+          // Create a task that traps SIGTERM and ignores it
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `stubborn-task:`,
+            `  trap '' TERM`,
+            `  echo $$ > task.pid`,
+            `  touch running`,
+            `  sleep 120`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start the task in background
+          const taskPromise = runSwitch(`tasks`, `run`, `stubborn-task`).catch(() => {});
+
+          // Wait for task to start and write its PID
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          // Verify task is running
+          const taskRunning = await xfs.existsPromise(runningMarker);
+          expect(taskRunning).toBe(true);
+
+          // Read the task PID
+          const taskPid = parseInt(await xfs.readFilePromise(pidFile, `utf8`), 10);
+
+          // Kill the daemon - it should send SIGTERM, wait 5s, then SIGKILL
+          const startTime = Date.now();
+          await runSwitch(`switch`, `daemon`, `--kill-all`);
+
+          // Wait for the full signal propagation cycle (SIGTERM + 5s + SIGKILL + cleanup)
+          await new Promise(resolve => setTimeout(resolve, 7000));
+          const elapsed = Date.now() - startTime;
+
+          // Check if the task process is still running
+          let processStillRunning = false;
+          try {
+            process.kill(taskPid, 0);
+            processStillRunning = true;
+          } catch {
+            processStillRunning = false;
+          }
+
+          // Process should be killed even though it ignored SIGTERM
+          expect(processStillRunning).toBe(false);
+        }),
+        15000, // Increase timeout for this test (5s wait + overhead)
+      );
+    });
   });
 });

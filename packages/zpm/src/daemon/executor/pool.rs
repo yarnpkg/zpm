@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::process::ExitStatus;
+use std::sync::Arc;
 
 use futures::future::select_all;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::super::events::ExecutorEvent;
+use super::super::process_registry::ProcessRegistry;
 use super::super::scheduler::{format_contextual_task_id, ContextualTaskId, PreparedTask};
 use super::output::OutputLine;
 use super::runner::TaskRunner;
@@ -15,14 +17,16 @@ pub struct ExecutorPool {
     handles: HashMap<ContextualTaskId, JoinHandle<Result<(ContextualTaskId, ExitStatus), Error>>>,
     event_tx: mpsc::UnboundedSender<ExecutorEvent>,
     daemon_url: String,
+    process_registry: Arc<ProcessRegistry>,
 }
 
 impl ExecutorPool {
-    pub fn new(event_tx: mpsc::UnboundedSender<ExecutorEvent>, daemon_url: String) -> Self {
+    pub fn new(event_tx: mpsc::UnboundedSender<ExecutorEvent>, daemon_url: String, process_registry: Arc<ProcessRegistry>) -> Self {
         Self {
             handles: HashMap::new(),
             event_tx,
             daemon_url,
+            process_registry,
         }
     }
 
@@ -31,6 +35,7 @@ impl ExecutorPool {
         let event_tx = self.event_tx.clone();
         let task_id_clone = task_id.clone();
         let daemon_url = self.daemon_url.clone();
+        let process_registry = self.process_registry.clone();
 
         let _ = event_tx.send(ExecutorEvent::Started {
             task_id: task_id_str.clone(),
@@ -52,7 +57,7 @@ impl ExecutorPool {
         });
 
         let handle = tokio::spawn(async move {
-            let runner = TaskRunner::new(prepared, task_id_str, daemon_url);
+            let runner = TaskRunner::new(prepared, task_id_str, daemon_url, process_registry);
             let result = runner.run(output_tx).await;
             result.map(|status| (task_id_clone, status))
         });

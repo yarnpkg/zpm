@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 use super::ipc::{daemon_url, BufferedOutputLine, DaemonNotification};
+use super::process_registry::ProcessRegistry;
 use zpm_utils::Path;
 
 use super::events::ExecutorEvent;
@@ -64,8 +65,17 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
     let long_lived_registry
         = Arc::new(LongLivedRegistry::new());
 
+    let process_registry
+        = Arc::new(ProcessRegistry::new());
+
     let scheduler_for_loop
         = scheduler.clone();
+
+    let process_registry_for_executor
+        = process_registry.clone();
+
+    let process_registry_for_signal
+        = process_registry.clone();
 
     let (loop_event_tx, mut loop_event_rx)
         = mpsc::unbounded_channel::<ExecutorEvent>();
@@ -174,7 +184,7 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
 
     tokio::spawn(async move {
         let mut executor_pool
-            = ExecutorPool::new(loop_event_tx, daemon_url_str);
+            = ExecutorPool::new(loop_event_tx, daemon_url_str, process_registry_for_executor);
 
         let mut pending_completion: HashMap<ContextualTaskId, i32>
             = HashMap::new();
@@ -316,6 +326,11 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
         watch_project_root(project_root, initial_inode).await;
     });
 
+    // Signal handler for graceful shutdown
+    tokio::spawn(async move {
+        wait_for_shutdown_signal(process_registry_for_signal).await;
+    });
+
     let ctx
         = Arc::new(ConnectionContext {
         project,
@@ -341,4 +356,66 @@ async fn watch_project_root(project_root: Path, initial_inode: u64) {
             std::process::exit(0);
         }
     }
+}
+
+#[cfg(unix)]
+async fn wait_for_shutdown_signal(process_registry: Arc<ProcessRegistry>) {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut sigterm = signal(SignalKind::terminate())
+        .expect("Failed to register SIGTERM handler");
+    let mut sigint = signal(SignalKind::interrupt())
+        .expect("Failed to register SIGINT handler");
+
+    tokio::select! {
+        _ = sigterm.recv() => {}
+        _ = sigint.recv() => {}
+    }
+
+    graceful_shutdown(process_registry).await;
+}
+
+#[cfg(not(unix))]
+async fn wait_for_shutdown_signal(process_registry: Arc<ProcessRegistry>) {
+    use tokio::signal::ctrl_c;
+
+    let _ = ctrl_c().await;
+    graceful_shutdown(process_registry).await;
+}
+
+async fn graceful_shutdown(process_registry: Arc<ProcessRegistry>) {
+    let pids = process_registry.get_all_pids();
+
+    if pids.is_empty() {
+        std::process::exit(0);
+    }
+
+    // First, send SIGTERM to all child processes for graceful shutdown
+    #[cfg(unix)]
+    {
+        for &pid in &pids {
+            let _ = std::process::Command::new("kill")
+                .arg("-TERM")
+                .arg(pid.to_string())
+                .status();
+        }
+    }
+
+    // Wait 5 seconds for processes to terminate gracefully
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    // Check which processes are still running and send SIGKILL
+    let remaining_pids = process_registry.get_all_pids();
+
+    #[cfg(unix)]
+    {
+        for pid in remaining_pids {
+            let _ = std::process::Command::new("kill")
+                .arg("-9")
+                .arg(pid.to_string())
+                .status();
+        }
+    }
+
+    std::process::exit(0);
 }
