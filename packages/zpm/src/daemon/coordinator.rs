@@ -80,6 +80,10 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
     let (loop_event_tx, mut loop_event_rx)
         = mpsc::unbounded_channel::<ExecutorEvent>();
 
+    // Channel to notify the main loop when warm-up completes
+    let (warmup_tx, mut warmup_rx)
+        = mpsc::unbounded_channel::<()>();
+
     let subscription_registry_for_loop
         = subscription_registry.clone();
 
@@ -94,6 +98,9 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
 
     let scheduler_for_events
         = scheduler.clone();
+
+    let warmup_tx_for_events
+        = warmup_tx.clone();
 
     tokio::spawn(async move {
         while let Some(event) = loop_event_rx.recv().await {
@@ -162,6 +169,9 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
                             let scheduler_clone
                                 = scheduler_for_events.clone();
 
+                            let warmup_tx_clone
+                                = warmup_tx_for_events.clone();
+
                             tokio::spawn(async move {
                                 tokio::time::sleep(Duration::from_millis(LONG_LIVED_WARMUP_MS)).await;
 
@@ -170,6 +180,9 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
                                 }
 
                                 scheduler_clone.mark_warm_up_complete(&ctx_task_id_clone);
+
+                                // Notify the main loop to check for newly-ready tasks
+                                let _ = warmup_tx_clone.send(());
 
                                 sub_registry_clone.broadcast(DaemonNotification::TaskWarmUpComplete {
                                     task_id: task_id_clone,
@@ -232,85 +245,95 @@ pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
                 continue;
             }
 
-            if let Some((task_id, result)) = executor_pool.wait_next().await {
-                tokio::time::sleep(Duration::from_millis(10)).await;
+            // Use select! to wait for either:
+            // - A task completion from the executor
+            // - A warm-up notification (to re-check ready tasks)
+            tokio::select! {
+                result = executor_pool.wait_next() => {
+                    if let Some((task_id, result)) = result {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
 
-                match result {
-                    Ok(status) => {
-                        let exit_code
-                            = status.code().unwrap_or(-1);
+                        match result {
+                            Ok(status) => {
+                                let exit_code
+                                    = status.code().unwrap_or(-1);
 
-                        scheduler_for_loop.mark_script_finished(&task_id);
+                                scheduler_for_loop.mark_script_finished(&task_id);
 
-                        if !status.success() {
-                            scheduler_for_loop.mark_failed(&task_id);
+                                if !status.success() {
+                                    scheduler_for_loop.mark_failed(&task_id);
 
-                            let task_id_str
-                                = format_contextual_task_id(&task_id);
-
-                            subscription_registry_for_loop
-                                .broadcast(DaemonNotification::TaskCompleted {
-                                    task_id: task_id_str,
-                                    exit_code,
-                                });
-
-                            let parents
-                                = scheduler_for_loop.find_parents(&task_id);
-
-                            for parent in parents {
-                                if pending_completion.remove(&parent).is_some() {
-                                    scheduler_for_loop.mark_failed(&parent);
-
-                                    let parent_id_str
-                                        = format_contextual_task_id(&parent);
+                                    let task_id_str
+                                        = format_contextual_task_id(&task_id);
 
                                     subscription_registry_for_loop
                                         .broadcast(DaemonNotification::TaskCompleted {
-                                            task_id: parent_id_str,
+                                            task_id: task_id_str,
                                             exit_code,
                                         });
-                                }
-                            }
-                        } else {
-                            if scheduler_for_loop.try_complete_task(&task_id) {
-                                let task_id_str
-                                    = format_contextual_task_id(&task_id);
 
-                                subscription_registry_for_loop
-                                    .broadcast(DaemonNotification::TaskCompleted {
-                                        task_id: task_id_str,
-                                        exit_code,
-                                    });
+                                    let parents
+                                        = scheduler_for_loop.find_parents(&task_id);
 
-                                let parents
-                                    = scheduler_for_loop.find_parents(&task_id);
-
-                                for parent in parents {
-                                    if let Some(&parent_exit_code) = pending_completion.get(&parent)
-                                    {
-                                        if scheduler_for_loop.try_complete_task(&parent) {
-                                            pending_completion.remove(&parent);
+                                    for parent in parents {
+                                        if pending_completion.remove(&parent).is_some() {
+                                            scheduler_for_loop.mark_failed(&parent);
 
                                             let parent_id_str
                                                 = format_contextual_task_id(&parent);
 
-                                            subscription_registry_for_loop.broadcast(
-                                                DaemonNotification::TaskCompleted {
+                                            subscription_registry_for_loop
+                                                .broadcast(DaemonNotification::TaskCompleted {
                                                     task_id: parent_id_str,
-                                                    exit_code: parent_exit_code,
-                                                },
-                                            );
+                                                    exit_code,
+                                                });
                                         }
                                     }
+                                } else {
+                                    if scheduler_for_loop.try_complete_task(&task_id) {
+                                        let task_id_str
+                                            = format_contextual_task_id(&task_id);
+
+                                        subscription_registry_for_loop
+                                            .broadcast(DaemonNotification::TaskCompleted {
+                                                task_id: task_id_str,
+                                                exit_code,
+                                            });
+
+                                        let parents
+                                            = scheduler_for_loop.find_parents(&task_id);
+
+                                        for parent in parents {
+                                            if let Some(&parent_exit_code) = pending_completion.get(&parent)
+                                            {
+                                                if scheduler_for_loop.try_complete_task(&parent) {
+                                                    pending_completion.remove(&parent);
+
+                                                    let parent_id_str
+                                                        = format_contextual_task_id(&parent);
+
+                                                    subscription_registry_for_loop.broadcast(
+                                                        DaemonNotification::TaskCompleted {
+                                                            task_id: parent_id_str,
+                                                            exit_code: parent_exit_code,
+                                                        },
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        pending_completion.insert(task_id, exit_code);
+                                    }
                                 }
-                            } else {
-                                pending_completion.insert(task_id, exit_code);
+                            }
+                            Err(e) => {
+                                eprintln!("Task execution error: {}", e);
                             }
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Task execution error: {}", e);
-                    }
+                }
+                _ = warmup_rx.recv() => {
+                    // Warm-up completed; loop will re-check ready tasks
                 }
             }
         }
