@@ -13,6 +13,7 @@ use super::super::ipc::{
     DaemonResponse, SubscriptionScope,
 };
 use super::super::long_lived::LongLivedRegistry;
+use super::super::process_registry::ProcessRegistry;
 use super::super::scheduler::Scheduler;
 use super::super::subscriptions::{SubscriptionGuard, SubscriptionRegistry};
 use crate::project::Project;
@@ -25,6 +26,7 @@ pub struct ConnectionContext {
     pub subscription_registry: Arc<SubscriptionRegistry>,
     pub output_buffer: OutputBuffer,
     pub long_lived_registry: Arc<LongLivedRegistry>,
+    pub process_registry: Arc<ProcessRegistry>,
 }
 
 pub async fn handle_connection(
@@ -135,8 +137,9 @@ pub async fn handle_connection(
                                 &ctx.output_buffer,
                                 &ctx.subscription_registry,
                                 &ctx.long_lived_registry,
+                                &ctx.process_registry,
                                 subscription_id,
-                            );
+                            ).await;
 
                         let message
                             = DaemonMessage::response(request_id, response);

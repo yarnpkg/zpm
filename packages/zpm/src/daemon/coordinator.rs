@@ -22,7 +22,6 @@ use zpm_primitives::Ident;
 use zpm_tasks::{TaskId, TaskName};
 
 const LONG_LIVED_WARMUP_MS: u64 = 500;
-const OUTPUT_BUFFER_MAX_LINES: usize = 1000;
 
 fn parse_base_task_id(contextual_task_id: &str) -> Option<TaskId> {
     let (task_part, _context_id)
@@ -67,6 +66,13 @@ async fn run_daemon_internal(project: Arc<Project>, port_tx: Option<tokio::sync:
         println!("{}", port);
         let _ = std::io::stdout().flush();
     }
+
+    // Get daemon configuration values
+    let output_buffer_max_lines
+        = project.config.settings.daemon_output_buffer_max_lines.value;
+
+    let max_closed_tasks
+        = project.config.settings.daemon_max_closed_tasks.value;
 
     let scheduler
         = Arc::new(Scheduler::new());
@@ -117,6 +123,13 @@ async fn run_daemon_internal(project: Arc<Project>, port_tx: Option<tokio::sync:
     let warmup_tx_for_events
         = warmup_tx.clone();
 
+    // Track closed task IDs in order for cleanup
+    let closed_tasks: Arc<RwLock<Vec<String>>>
+        = Arc::new(RwLock::new(Vec::new()));
+
+    let closed_tasks_for_events
+        = closed_tasks.clone();
+
     tokio::spawn(async move {
         while let Some(event) = loop_event_rx.recv().await {
             if let ExecutorEvent::Output { task_id, line, stream } = &event {
@@ -132,15 +145,32 @@ async fn run_daemon_internal(project: Arc<Project>, port_tx: Option<tokio::sync:
                             stream: stream.as_str().to_string(),
                         });
 
-                        if lines.len() > OUTPUT_BUFFER_MAX_LINES {
+                        if lines.len() > output_buffer_max_lines {
                             let excess
-                                = lines.len() - OUTPUT_BUFFER_MAX_LINES;
+                                = lines.len() - output_buffer_max_lines;
 
                             lines.drain(0..excess);
                         }
                     }
                     Err(e) => {
                         eprintln!("Failed to acquire output buffer lock: {}", e);
+                    }
+                }
+            }
+
+            // Track task completion for output buffer cleanup
+            if let ExecutorEvent::Finished { task_id, .. } | ExecutorEvent::Failed { task_id, .. } = &event {
+                if let (Ok(mut closed), Ok(mut buffer)) = (closed_tasks_for_events.write(), output_buffer_for_events.write()) {
+                    closed.push(task_id.clone());
+
+                    // Clean up oldest closed task buffers if we exceed the limit
+                    while closed.len() > max_closed_tasks {
+                        if let Some(oldest_task_id) = closed.first().cloned() {
+                            buffer.remove(&oldest_task_id);
+                            closed.remove(0);
+                        } else {
+                            break;
+                        }
                     }
                 }
             }
@@ -381,6 +411,7 @@ async fn run_daemon_internal(project: Arc<Project>, port_tx: Option<tokio::sync:
         subscription_registry,
         output_buffer,
         long_lived_registry,
+        process_registry,
     });
 
     run_accept_loop(listener, ctx).await;

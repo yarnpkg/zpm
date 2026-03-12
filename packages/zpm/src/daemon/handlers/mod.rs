@@ -1,3 +1,4 @@
+mod cancel_context;
 mod list_long_lived_tasks;
 mod push_tasks;
 mod stop_task;
@@ -6,22 +7,25 @@ use std::sync::Arc;
 
 use super::ipc::{BufferedOutputLine, DaemonRequest, DaemonResponse};
 use super::long_lived::LongLivedRegistry;
+use super::process_registry::ProcessRegistry;
 use super::scheduler::Scheduler;
 use super::server::OutputBuffer;
 use super::subscriptions::{SubscriptionId, SubscriptionRegistry};
 use crate::project::Project;
 
+pub use cancel_context::handle_cancel_context;
 pub use list_long_lived_tasks::handle_list_long_lived_tasks;
 pub use push_tasks::handle_push_tasks;
 pub use stop_task::handle_stop_task;
 
-pub fn dispatch_request(
+pub async fn dispatch_request(
     request: DaemonRequest,
     scheduler: &Scheduler,
     project: &Project,
     output_buffer: &OutputBuffer,
     subscription_registry: &SubscriptionRegistry,
     long_lived_registry: &Arc<LongLivedRegistry>,
+    process_registry: &Arc<ProcessRegistry>,
     subscription_id: Option<SubscriptionId>,
 ) -> DaemonResponse {
     match request {
@@ -43,7 +47,7 @@ pub fn dispatch_request(
             subscription_registry,
             long_lived_registry,
             subscription_id,
-        ),
+        ).await,
         DaemonRequest::GetTaskOutput { task_id } => {
             let lines: Vec<BufferedOutputLine>
                 = output_buffer
@@ -64,6 +68,13 @@ pub fn dispatch_request(
         }
         DaemonRequest::ListLongLivedTasks => {
             handle_list_long_lived_tasks(project, long_lived_registry)
+        }
+        DaemonRequest::CancelContext { context_id } => {
+            handle_cancel_context(
+                &context_id,
+                scheduler,
+                process_registry,
+            )
         }
     }
 }

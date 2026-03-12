@@ -36,10 +36,26 @@ pub fn handle_stop_task(
         };
 
     if let Some(pid) = entry.process_id {
-        let _ = std::process::Command::new("kill")
-            .arg("-TERM")
-            .arg(pid.to_string())
-            .status();
+        #[cfg(unix)]
+        {
+            // Use killpg to kill the entire process group (since children are spawned with process_group(0))
+            let result = unsafe { libc::killpg(pid as i32, libc::SIGTERM) };
+            if result != 0 {
+                // If killpg fails (e.g., group doesn't exist), try killing the process directly
+                let result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+                if result != 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) {
+                    long_lived_registry.remove(&task_id);
+                    return DaemonResponse::TaskStopped {
+                        success: false,
+                        error: Some(format!(
+                            "Failed to send SIGTERM to process {}: {}",
+                            pid,
+                            std::io::Error::last_os_error()
+                        )),
+                    };
+                }
+            }
+        }
 
         long_lived_registry.remove(&task_id);
 

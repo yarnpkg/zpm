@@ -53,6 +53,10 @@ pub enum DaemonRequest {
         workspace: Option<String>,
     },
     ListLongLivedTasks,
+    /// Cancel all tasks in a given context (used for Ctrl+C handling)
+    CancelContext {
+        context_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,6 +120,9 @@ pub enum DaemonResponse {
     },
     LongLivedTaskList {
         tasks: Vec<LongLivedTaskInfo>,
+    },
+    ContextCancelled {
+        cancelled_count: usize,
     },
     Error {
         message: String,

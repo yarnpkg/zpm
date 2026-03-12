@@ -11,7 +11,7 @@ use super::super::scheduler::{format_contextual_task_id, Scheduler};
 use super::super::subscriptions::{SubscriptionId, SubscriptionRegistry};
 use crate::project::Project;
 
-pub fn handle_push_tasks(
+pub async fn handle_push_tasks(
     tasks: &[TaskSubscription],
     parent_task_id: Option<&str>,
     workspace: Option<&str>,
@@ -71,7 +71,7 @@ pub fn handle_push_tasks(
                             }
                             // contextual_task_id is empty - another caller is currently registering
                             // Wait briefly and retry
-                            std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS));
+                            tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
                         }
                         None => {
                             // We've claimed the registration, proceed to create the task

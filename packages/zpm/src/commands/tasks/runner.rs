@@ -129,6 +129,9 @@ pub async fn run_task(
     let context_id
         = Uuid::new_v4().to_string();
 
+    let context_id_for_cancel
+        = context_id.clone();
+
     let task_subscriptions
         = vec![TaskSubscription {
             name: name.to_string(),
@@ -196,7 +199,19 @@ pub async fn run_task(
 
                         return Ok(ExitStatus::from_raw(0));
                     } else {
-                        continue;
+                        // Cancel all tasks in this context
+                        handler.on_ctrl_c();
+
+                        let _ = ctx.client.cancel_context(&context_id_for_cancel).await;
+
+                        ctx.client.close();
+
+                        if standalone {
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        }
+
+                        // Exit with SIGINT code (130 = 128 + 2)
+                        return Ok(ExitStatus::from_raw(130 << 8));
                     }
                 }
                 n = ctx.client.recv_notification() => n?,

@@ -10,6 +10,7 @@ use tokio::io::AsyncBufReadExt;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::AbortHandle;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use zpm_switch::YARN_SWITCH_PATH_ENV;
 
 use super::coordinator::start_daemon_inline;
@@ -111,9 +112,9 @@ impl DaemonClient {
 
         for _ in 0..max_attempts {
             match tokio_tungstenite::connect_async(&url).await {
-                Ok(_) => {
+                Ok((ws_stream, _)) => {
                     let client
-                        = Self::connect_to_url(&url).await?;
+                        = Self::connect_with_stream(ws_stream);
 
                     return Ok((client, StandaloneDaemonHandle { abort_handle }));
                 }
@@ -130,6 +131,10 @@ impl DaemonClient {
                 .await
                 .map_err(|e| Error::IpcConnectionFailed(e.to_string()))?;
 
+        Ok(Self::connect_with_stream(ws_stream))
+    }
+
+    pub fn connect_with_stream(ws_stream: WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>) -> Self {
         let (write, read)
             = ws_stream.split();
 
@@ -219,13 +224,13 @@ impl DaemonClient {
             }
         });
 
-        Ok(Self {
+        Self {
             outgoing_tx,
             notification_rx,
             pending_requests,
             next_request_id,
             closing,
-        })
+        }
     }
 
     pub async fn send_request(&mut self, request: DaemonRequest) -> Result<DaemonResponse, Error> {
@@ -367,6 +372,19 @@ impl DaemonClient {
 
         match self.send_request(request).await? {
             DaemonResponse::LongLivedTaskList { tasks } => Ok(tasks),
+            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
+            _ => Err(Error::IpcError("Unexpected response".to_string())),
+        }
+    }
+
+    pub async fn cancel_context(&mut self, context_id: &str) -> Result<usize, Error> {
+        let request
+            = DaemonRequest::CancelContext {
+                context_id: context_id.to_string(),
+            };
+
+        match self.send_request(request).await? {
+            DaemonResponse::ContextCancelled { cancelled_count } => Ok(cancelled_count),
             DaemonResponse::Error { message } => Err(Error::IpcError(message)),
             _ => Err(Error::IpcError("Unexpected response".to_string())),
         }

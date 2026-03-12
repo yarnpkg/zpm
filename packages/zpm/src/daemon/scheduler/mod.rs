@@ -162,6 +162,29 @@ impl Scheduler {
 
         state.warm_up_complete.insert(task_id.clone());
     }
+
+    /// Cancel all tasks in a given context.
+    /// Returns the list of task IDs that were cancelled (not yet completed).
+    pub fn cancel_context(&self, context_id: &str) -> Vec<String> {
+        let mut state = self.state.write().expect("scheduler lock poisoned");
+
+        let tasks_to_cancel: Vec<ContextualTaskId> = state
+            .prepared
+            .keys()
+            .filter(|ctx_task_id| ctx_task_id.context_id == context_id && !state.completed.contains(ctx_task_id))
+            .cloned()
+            .collect();
+
+        let mut cancelled_ids = Vec::new();
+
+        for task_id in tasks_to_cancel {
+            state.failed.insert(task_id.clone());
+            state.completed.insert(task_id.clone());
+            cancelled_ids.push(format_contextual_task_id(&task_id));
+        }
+
+        cancelled_ids
+    }
 }
 
 /// Format a TaskId (without context) as "workspace:taskname"

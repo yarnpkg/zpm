@@ -45,10 +45,10 @@ impl TaskRunner {
                 )
                 .await?;
 
-        // Register the process PID for signal propagation
+        // Register the process PID for signal propagation and context-based cancellation
         let pid = running.child.id();
         if let Some(pid) = pid {
-            self.process_registry.register(pid);
+            self.process_registry.register_with_task(pid, self.task_id.clone());
         }
 
         let child_stdout
@@ -72,7 +72,7 @@ impl TaskRunner {
 
         // Unregister the process PID after it exits
         if let Some(pid) = pid {
-            self.process_registry.unregister(pid);
+            self.process_registry.unregister_with_task(pid, &self.task_id);
         }
 
         Ok(status)
