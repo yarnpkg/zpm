@@ -23,3 +23,8 @@ foo: bar& bar2&
 @long-lived
 doc:
   cd documentation && yarn astro dev
+
+@long-livewd
+long:
+  echo foo
+  sleep 10

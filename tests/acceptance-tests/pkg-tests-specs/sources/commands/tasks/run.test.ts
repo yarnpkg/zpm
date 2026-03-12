@@ -389,8 +389,6 @@ describe(`Commands`, () => {
         const endTime = Date.now();
         const totalTime = endTime - startTime;
 
-        console.log(stdout);
-
         // Parse timestamps from script output
         // Format: ts:1234567890123:lineN
         const timestampRegex = /^ts:(\d+):(.+)$/;

@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::HashSet;
+use std::pin::Pin;
 use std::process::ExitStatus;
 use std::sync::Arc;
 
-use futures::future::select_all;
+use futures::stream::{FuturesUnordered, StreamExt};
+use futures::Future;
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 
 use super::super::events::ExecutorEvent;
 use super::super::process_registry::ProcessRegistry;
@@ -13,8 +14,12 @@ use super::output::OutputLine;
 use super::runner::TaskRunner;
 use crate::error::Error;
 
+type TaskResult = (ContextualTaskId, Result<(ContextualTaskId, ExitStatus), Error>);
+type TaskFuture = Pin<Box<dyn Future<Output = TaskResult> + Send>>;
+
 pub struct ExecutorPool {
-    handles: HashMap<ContextualTaskId, JoinHandle<Result<(ContextualTaskId, ExitStatus), Error>>>,
+    tasks: FuturesUnordered<TaskFuture>,
+    running: HashSet<ContextualTaskId>,
     event_tx: mpsc::UnboundedSender<ExecutorEvent>,
     daemon_url: String,
     process_registry: Arc<ProcessRegistry>,
@@ -23,7 +28,8 @@ pub struct ExecutorPool {
 impl ExecutorPool {
     pub fn new(event_tx: mpsc::UnboundedSender<ExecutorEvent>, daemon_url: String, process_registry: Arc<ProcessRegistry>) -> Self {
         Self {
-            handles: HashMap::new(),
+            tasks: FuturesUnordered::new(),
+            running: HashSet::new(),
             event_tx,
             daemon_url,
             process_registry,
@@ -34,6 +40,7 @@ impl ExecutorPool {
         let task_id_str = format_contextual_task_id(&task_id);
         let event_tx = self.event_tx.clone();
         let task_id_clone = task_id.clone();
+        let task_id_for_result = task_id.clone();
         let daemon_url = self.daemon_url.clone();
         let process_registry = self.process_registry.clone();
 
@@ -56,59 +63,44 @@ impl ExecutorPool {
             }
         });
 
-        let handle = tokio::spawn(async move {
+        self.running.insert(task_id.clone());
+
+        let future: TaskFuture = Box::pin(async move {
             let runner = TaskRunner::new(prepared, task_id_str, daemon_url, process_registry);
             let result = runner.run(output_tx).await;
-            result.map(|status| (task_id_clone, status))
+            (task_id_for_result, result.map(|status| (task_id_clone, status)))
         });
 
-        self.handles.insert(task_id, handle);
+        self.tasks.push(future);
     }
 
     pub fn running_tasks(&self) -> impl Iterator<Item = &ContextualTaskId> {
-        self.handles.keys()
+        self.running.iter()
     }
 
     pub fn running_count(&self) -> usize {
-        self.handles.len()
+        self.running.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.handles.is_empty()
+        self.running.is_empty()
     }
 
     pub async fn wait_next(&mut self) -> Option<(ContextualTaskId, Result<ExitStatus, Error>)> {
-        if self.handles.is_empty() {
+        if self.running.is_empty() {
             return None;
         }
 
-        let handles: Vec<_> = self.handles.drain().collect();
-        let task_ids: Vec<_> = handles.iter().map(|(id, _)| id.clone()).collect();
-        let futures: Vec<_> = handles
-            .into_iter()
-            .map(|(_, h)| Box::pin(async move { h.await }))
-            .collect();
+        // FuturesUnordered::next() is cancel-safe: dropping the future
+        // does not remove any tasks from the stream
+        let (completed_task_id, result) = self.tasks.next().await?;
 
-        let (result, idx, remaining) = select_all(futures).await;
+        self.running.remove(&completed_task_id);
 
-        for (future, task_id) in remaining.into_iter().zip(
-            task_ids
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| *i != idx)
-                .map(|(_, id)| id.clone()),
-        ) {
-            self.handles.insert(
-                task_id,
-                tokio::spawn(async move { future.await.unwrap() }),
-            );
-        }
-
-        let completed_task_id = task_ids[idx].clone();
         let task_id_str = format_contextual_task_id(&completed_task_id);
 
         match result {
-            Ok(Ok((_, status))) => {
+            Ok((_, status)) => {
                 let exit_code = status.code().unwrap_or(-1);
                 let _ = self.event_tx.send(ExecutorEvent::Finished {
                     task_id: task_id_str,
@@ -116,22 +108,12 @@ impl ExecutorPool {
                 });
                 Some((completed_task_id, Ok(status)))
             }
-            Ok(Err(e)) => {
-                let _ = self.event_tx.send(ExecutorEvent::Failed {
-                    task_id: task_id_str,
-                    error: e.to_string(),
-                });
-                Some((completed_task_id, Err(e)))
-            }
             Err(e) => {
                 let _ = self.event_tx.send(ExecutorEvent::Failed {
                     task_id: task_id_str,
                     error: e.to_string(),
                 });
-                Some((
-                    completed_task_id,
-                    Err(Error::TaskJoinError(e.to_string())),
-                ))
+                Some((completed_task_id, Err(e)))
             }
         }
     }
