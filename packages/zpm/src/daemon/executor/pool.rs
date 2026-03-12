@@ -1,3 +1,10 @@
+// ============================================================================
+// ExecutorPool - Command-Based
+//
+// Sends all events as commands to the coordinator instead of using a
+// separate event channel. This eliminates the spawned event processing task.
+// ============================================================================
+
 use std::collections::HashSet;
 use std::pin::Pin;
 use std::process::ExitStatus;
@@ -6,9 +13,8 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use futures::Future;
 use tokio::sync::mpsc;
 
-use super::super::coordinator::CoordinatorCommand;
-use super::super::events::ExecutorEvent;
-use super::super::scheduler::{format_contextual_task_id, ContextualTaskId, PreparedTask};
+use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
+use super::super::coordinator_state::{format_contextual_task_id, ContextualTaskId, PreparedTask};
 use super::output::OutputLine;
 use super::runner::TaskRunner;
 use crate::error::Error;
@@ -16,24 +22,20 @@ use crate::error::Error;
 type TaskResult = (ContextualTaskId, Result<(ContextualTaskId, ExitStatus), Error>);
 type TaskFuture = Pin<Box<dyn Future<Output = TaskResult> + Send>>;
 
+/// ExecutorPool that communicates exclusively via commands.
+/// No separate event channel - all notifications go through the coordinator.
 pub struct ExecutorPool {
     tasks: FuturesUnordered<TaskFuture>,
     running: HashSet<ContextualTaskId>,
-    event_tx: mpsc::UnboundedSender<ExecutorEvent>,
     daemon_url: String,
-    command_tx: mpsc::UnboundedSender<CoordinatorCommand>,
+    command_tx: CommandSender,
 }
 
 impl ExecutorPool {
-    pub fn new(
-        event_tx: mpsc::UnboundedSender<ExecutorEvent>,
-        daemon_url: String,
-        command_tx: mpsc::UnboundedSender<CoordinatorCommand>,
-    ) -> Self {
+    pub fn new(daemon_url: String, command_tx: CommandSender) -> Self {
         Self {
             tasks: FuturesUnordered::new(),
             running: HashSet::new(),
-            event_tx,
             daemon_url,
             command_tx,
         }
@@ -41,31 +43,34 @@ impl ExecutorPool {
 
     pub fn spawn(&mut self, task_id: ContextualTaskId, prepared: PreparedTask) {
         let task_id_str = format_contextual_task_id(&task_id);
-        let event_tx = self.event_tx.clone();
         let task_id_clone = task_id.clone();
         let task_id_for_result = task_id.clone();
         let daemon_url = self.daemon_url.clone();
         let command_tx = self.command_tx.clone();
 
-        if event_tx.send(ExecutorEvent::Started {
+        // Send TaskStarted command directly
+        let _ = command_tx.send(CoordinatorCommand::TaskStarted {
             task_id: task_id_str.clone(),
-        }).is_err() {
-            eprintln!("Failed to send task started event for {}: event channel closed", task_id_str);
-        }
+        });
 
+        // Create output channel that forwards to commands
         let (output_tx, mut output_rx) = mpsc::unbounded_channel::<OutputLine>();
 
-        let event_tx_output = event_tx.clone();
+        let command_tx_for_output = command_tx.clone();
         let task_id_for_output = task_id_str.clone();
 
+        // Spawn output forwarder that sends commands instead of events
         tokio::spawn(async move {
             while let Some(output) = output_rx.recv().await {
-                if event_tx_output.send(ExecutorEvent::Output {
-                    task_id: task_id_for_output.clone(),
-                    line: output.line,
-                    stream: output.stream,
-                }).is_err() {
-                    // Event channel closed, stop processing output
+                if command_tx_for_output
+                    .send(CoordinatorCommand::TaskOutput {
+                        task_id: task_id_for_output.clone(),
+                        line: output.line,
+                        stream: output.stream,
+                    })
+                    .is_err()
+                {
+                    // Command channel closed, stop processing output
                     break;
                 }
             }
@@ -86,47 +91,24 @@ impl ExecutorPool {
         self.running.iter()
     }
 
-    pub fn running_count(&self) -> usize {
-        self.running.len()
-    }
-
     pub fn is_empty(&self) -> bool {
         self.running.is_empty()
     }
 
+    /// Wait for the next task to complete.
+    /// Does NOT send completion events - the coordinator handles that
+    /// based on the returned result.
     pub async fn wait_next(&mut self) -> Option<(ContextualTaskId, Result<ExitStatus, Error>)> {
         if self.running.is_empty() {
             return None;
         }
 
-        // FuturesUnordered::next() is cancel-safe: dropping the future
-        // does not remove any tasks from the stream
         let (completed_task_id, result) = self.tasks.next().await?;
-
         self.running.remove(&completed_task_id);
 
-        let task_id_str = format_contextual_task_id(&completed_task_id);
-
         match result {
-            Ok((_, status)) => {
-                let exit_code = status.code().unwrap_or(-1);
-                if self.event_tx.send(ExecutorEvent::Finished {
-                    task_id: task_id_str.clone(),
-                    exit_code,
-                }).is_err() {
-                    eprintln!("Failed to send task finished event for {}: event channel closed", task_id_str);
-                }
-                Some((completed_task_id, Ok(status)))
-            }
-            Err(e) => {
-                if self.event_tx.send(ExecutorEvent::Failed {
-                    task_id: task_id_str.clone(),
-                    error: e.to_string(),
-                }).is_err() {
-                    eprintln!("Failed to send task failed event for {}: event channel closed", task_id_str);
-                }
-                Some((completed_task_id, Err(e)))
-            }
+            Ok((_, status)) => Some((completed_task_id, Ok(status))),
+            Err(e) => Some((completed_task_id, Err(e))),
         }
     }
 }

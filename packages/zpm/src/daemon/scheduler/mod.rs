@@ -1,4 +1,4 @@
-mod dependencies;
+pub mod dependencies;
 mod state;
 
 use std::collections::HashSet;

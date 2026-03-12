@@ -1,74 +1,100 @@
-use std::collections::HashMap;
+// ============================================================================
+// Connection Handler - Command-Based
+//
+// All state access goes through commands. No Arc<RwLock> references.
+// Subscriptions are created via commands and cleaned up via commands.
+// ============================================================================
+
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use futures::stream::StreamExt;
 use futures::SinkExt;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::super::coordinator::CoordinatorCommand;
-use super::super::handlers::dispatch_request;
+use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
+use super::super::coordinator_state::SubscriptionId;
+use super::super::handlers::{create_subscription_if_needed, dispatch_request};
 use super::super::ipc::{
-    BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest, DaemonRequestEnvelope,
+    DaemonMessage, DaemonNotification, DaemonRequest, DaemonRequestEnvelope,
     DaemonResponse, SubscriptionScope,
 };
-use super::super::long_lived::LongLivedRegistry;
-use super::super::process_registry::ProcessRegistry;
-use super::super::scheduler::Scheduler;
-use super::super::subscriptions::{SubscriptionGuard, SubscriptionRegistry};
 use crate::project::Project;
 
-pub type OutputBuffer = Arc<RwLock<HashMap<String, Vec<BufferedOutputLine>>>>;
+// ============================================================================
+// Connection Context
+// ============================================================================
 
-/// Sender type for coordinator commands
-pub type CommandSender = mpsc::UnboundedSender<CoordinatorCommand>;
-
+/// Connection context with only immutable data and command channel.
+/// All mutable state access goes through commands.
 pub struct ConnectionContext {
     pub project: Arc<Project>,
-    pub scheduler: Arc<Scheduler>,
-    pub subscription_registry: Arc<SubscriptionRegistry>,
-    pub output_buffer: OutputBuffer,
-    pub long_lived_registry: Arc<LongLivedRegistry>,
-    pub process_registry: Arc<ProcessRegistry>,
-    /// Channel for sending commands to the coordinator
     pub command_tx: CommandSender,
 }
+
+// ============================================================================
+// Subscription Guard
+// ============================================================================
+
+/// Guard that removes subscription when dropped (via command)
+struct SubscriptionGuard {
+    subscription_id: SubscriptionId,
+    command_tx: CommandSender,
+}
+
+impl SubscriptionGuard {
+    fn new(subscription_id: SubscriptionId, command_tx: CommandSender) -> Self {
+        Self {
+            subscription_id,
+            command_tx,
+        }
+    }
+}
+
+impl Drop for SubscriptionGuard {
+    fn drop(&mut self) {
+        let _ = self.command_tx.send(CoordinatorCommand::RemoveSubscription {
+            subscription_id: self.subscription_id,
+        });
+    }
+}
+
+// ============================================================================
+// Connection Handler
+// ============================================================================
 
 pub async fn handle_connection(
     stream: tokio::net::TcpStream,
     addr: SocketAddr,
     ctx: Arc<ConnectionContext>,
 ) -> Result<(), zpm_switch::Error> {
-    let ws_stream
-        = tokio_tungstenite::accept_async(stream)
-            .await
-            .map_err(|e| {
-                zpm_switch::Error::SocketReadError(std::sync::Arc::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )))
-            })?;
+    let ws_stream = tokio_tungstenite::accept_async(stream)
+        .await
+        .map_err(|e| {
+            zpm_switch::Error::SocketReadError(std::sync::Arc::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )))
+        })?;
 
-    let (mut write, mut read)
-        = ws_stream.split();
+    let (mut write, mut read) = ws_stream.split();
 
-    let mut _subscription_guards: Vec<SubscriptionGuard>
-        = Vec::new();
+    // Subscription guards - cleaned up when connection drops
+    let mut subscription_guards: Vec<SubscriptionGuard> = Vec::new();
 
-    let mut notification_receivers: Vec<mpsc::UnboundedReceiver<DaemonNotification>>
-        = Vec::new();
+    // Notification receivers from subscriptions
+    let mut notification_receivers: Vec<mpsc::UnboundedReceiver<DaemonNotification>> = Vec::new();
 
     loop {
-        let notification_future
-            = poll_notifications(&mut notification_receivers);
+        let notification_future = poll_notifications(&mut notification_receivers);
 
         tokio::select! {
             biased;
 
+            // Handle incoming messages
             msg_opt = read.next() => {
-                let msg
-                    = match msg_opt {
+                let msg = match msg_opt {
                     Some(Ok(m)) => m,
                     Some(Err(e)) => {
                         eprintln!("WebSocket error from {}: {}", addr, e);
@@ -79,81 +105,76 @@ pub async fn handle_connection(
 
                 match msg {
                     Message::Text(text) => {
-                        let envelope: DaemonRequestEnvelope
-                            = match serde_json::from_str(&text) {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    let error_response
-                                        = DaemonMessage::response(
-                                            0,
-                                            DaemonResponse::Error {
-                                                message: format!("Invalid request: {}", e),
-                                            },
-                                        );
+                        let envelope: DaemonRequestEnvelope = match serde_json::from_str(&text) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                let error_response = DaemonMessage::response(
+                                    0,
+                                    DaemonResponse::Error {
+                                        message: format!("Invalid request: {}", e),
+                                    },
+                                );
 
-                                    if let Ok(error_json) = serde_json::to_string(&error_response) {
-                                        let _ = write.send(Message::Text(error_json.into())).await;
-                                    }
-                                    continue;
+                                if let Ok(error_json) = serde_json::to_string(&error_response) {
+                                    let _ = write.send(Message::Text(error_json.into())).await;
                                 }
-                            };
+                                continue;
+                            }
+                        };
 
-                        let request_id
-                            = envelope.request_id;
+                        let request_id = envelope.request_id;
+                        let request = envelope.request;
 
-                        let request
-                            = envelope.request;
-
-                        let subscription_id
-                            = if let DaemonRequest::PushTasks {
-                                output_subscription,
-                                status_subscription,
-                                context_id,
-                                ..
-                            } = &request
+                        // Create subscription if needed (via command)
+                        let subscription_id = if let DaemonRequest::PushTasks {
+                            output_subscription,
+                            status_subscription,
+                            context_id,
+                            ..
+                        } = &request
+                        {
+                            if *output_subscription != SubscriptionScope::None
+                                || *status_subscription != SubscriptionScope::None
                             {
-                                if *output_subscription != SubscriptionScope::None
-                                    || *status_subscription != SubscriptionScope::None
+                                match create_subscription_if_needed(
+                                    *output_subscription,
+                                    *status_subscription,
+                                    context_id.clone(),
+                                    &ctx.command_tx,
+                                )
+                                .await
                                 {
-                                    let (sub_id, rx)
-                                        = ctx.subscription_registry.create_subscription(
-                                            *output_subscription,
-                                            *status_subscription,
-                                            context_id.clone(),
+                                    Some((sub_id, rx)) => {
+                                        let guard = SubscriptionGuard::new(
+                                            sub_id,
+                                            ctx.command_tx.clone(),
                                         );
-
-                                    let guard
-                                        = SubscriptionGuard::new(sub_id, ctx.subscription_registry.clone());
-
-                                    _subscription_guards.push(guard);
-                                    notification_receivers.push(rx);
-                                    Some(sub_id)
-                                } else {
-                                    None
+                                        subscription_guards.push(guard);
+                                        notification_receivers.push(rx);
+                                        Some(sub_id)
+                                    }
+                                    None => None,
                                 }
                             } else {
                                 None
-                            };
+                            }
+                        } else {
+                            None
+                        };
 
-                        let response
-                            = dispatch_request(
-                                request,
-                                &ctx.scheduler,
-                                &ctx.project,
-                                &ctx.output_buffer,
-                                &ctx.subscription_registry,
-                                &ctx.long_lived_registry,
-                                &ctx.process_registry,
-                                subscription_id,
-                                &ctx.command_tx,
-                            ).await;
+                        // Dispatch request via commands
+                        let response = dispatch_request(
+                            request,
+                            &ctx.project,
+                            subscription_id,
+                            &ctx.command_tx,
+                        )
+                        .await;
 
-                        let message
-                            = DaemonMessage::response(request_id, response);
+                        let message = DaemonMessage::response(request_id, response);
 
-                        let response_json
-                            = serde_json::to_string(&message)
-                                .map_err(|e| zpm_switch::Error::InvalidDaemonMessage(e.to_string()))?;
+                        let response_json = serde_json::to_string(&message)
+                            .map_err(|e| zpm_switch::Error::InvalidDaemonMessage(e.to_string()))?;
 
                         write
                             .send(Message::Text(response_json.into()))
@@ -175,13 +196,12 @@ pub async fn handle_connection(
                 }
             }
 
+            // Handle notifications from subscriptions
             Some(notification) = notification_future => {
-                let message
-                    = DaemonMessage::notification(notification);
+                let message = DaemonMessage::notification(notification);
 
-                let notification_json
-                    = serde_json::to_string(&message)
-                        .map_err(|e| zpm_switch::Error::InvalidDaemonMessage(e.to_string()))?;
+                let notification_json = serde_json::to_string(&message)
+                    .map_err(|e| zpm_switch::Error::InvalidDaemonMessage(e.to_string()))?;
 
                 if write.send(Message::Text(notification_json.into())).await.is_err() {
                     break;
@@ -190,8 +210,38 @@ pub async fn handle_connection(
         }
     }
 
+    // subscription_guards dropped here, sending RemoveSubscription commands
     Ok(())
 }
+
+// ============================================================================
+// Accept Loop
+// ============================================================================
+
+pub async fn run_accept_loop(
+    listener: tokio::net::TcpListener,
+    ctx: Arc<ConnectionContext>,
+) {
+    loop {
+        match listener.accept().await {
+            Ok((stream, addr)) => {
+                let ctx = ctx.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_connection(stream, addr, ctx).await {
+                        eprintln!("Connection error from {}: {}", addr, e);
+                    }
+                });
+            }
+            Err(e) => {
+                eprintln!("Failed to accept connection: {}", e);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Notification Polling
+// ============================================================================
 
 async fn poll_notifications(
     receivers: &mut [mpsc::UnboundedReceiver<DaemonNotification>],

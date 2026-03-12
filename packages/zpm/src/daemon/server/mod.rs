@@ -1,14 +1,13 @@
-mod connection;
+pub mod connection;
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use tokio::net::TcpListener;
+
 use super::ipc::DAEMON_BASE_PORT;
-
-pub use connection::{handle_connection, ConnectionContext, OutputBuffer};
-
 use crate::error::Error;
+
+// Re-exports from connection module are available via super::server::connection
 
 pub async fn bind_to_available_port() -> Result<(TcpListener, u16), Error> {
     for port in DAEMON_BASE_PORT..=DAEMON_BASE_PORT + 100 {
@@ -27,25 +26,4 @@ pub async fn bind_to_available_port() -> Result<(TcpListener, u16), Error> {
         ),
     )))
     .into())
-}
-
-pub async fn run_accept_loop(
-    listener: TcpListener,
-    ctx: Arc<ConnectionContext>,
-) {
-    loop {
-        match listener.accept().await {
-            Ok((stream, addr)) => {
-                let ctx_clone = ctx.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, addr, ctx_clone).await {
-                        eprintln!("Error handling connection from {}: {}", addr, e);
-                    }
-                });
-            }
-            Err(e) => {
-                eprintln!("Failed to accept connection: {}", e);
-            }
-        }
-    }
 }

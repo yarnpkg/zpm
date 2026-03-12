@@ -1,209 +1,243 @@
+// ============================================================================
+// Race-Free Coordinator (v2)
+//
+// This coordinator owns ALL mutable state directly (no Arc<RwLock>).
+// All state mutations happen in a single async task via command processing.
+// Race conditions are structurally impossible.
+// ============================================================================
+
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use tokio::sync::{mpsc, oneshot};
-use super::ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskSubscription};
-use super::process_registry::ProcessRegistry;
-use zpm_utils::Path;
-
-use super::events::ExecutorEvent;
-use super::executor::ExecutorPool;
-use super::long_lived::LongLivedRegistry;
-use super::scheduler::{format_contextual_task_id, ContextualTaskId, Scheduler};
-use super::server::{bind_to_available_port, run_accept_loop, ConnectionContext, OutputBuffer};
-use super::subscriptions::SubscriptionRegistry;
-use crate::error::Error;
-use crate::project::Project;
-
 use zpm_primitives::Ident;
 use zpm_tasks::{TaskId, TaskName};
+use zpm_utils::{Path, ToFileString};
+
+use super::coordinator_commands::{
+    CancelContextResult, CommandSender, CoordinatorCommand, LongLivedTaskInfo,
+    PushTasksResult, StopTaskResult,
+};
+use super::coordinator_state::{
+    format_contextual_task_id, parse_base_task_id, CoordinatorState, ContextualTaskId, PreparedTask,
+};
+use super::executor::ExecutorPool;
+use super::ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskSubscription, LONG_LIVED_CONTEXT_ID};
+use super::scheduler::dependencies;
+use super::server::{bind_to_available_port, connection::{run_accept_loop, ConnectionContext}};
+use crate::error::Error;
+use crate::project::Project;
 
 const LONG_LIVED_WARMUP_MS: u64 = 500;
 
 // ============================================================================
-// Coordinator Command Types
+// Main Entry Points
 // ============================================================================
 
-/// Commands sent from handlers to the coordinator for serialized execution.
-/// This eliminates race conditions by ensuring all state mutations happen
-/// in a single async task.
-#[derive(Debug)]
-pub enum CoordinatorCommand {
-    /// Add new tasks to the scheduler.
-    PushTasks {
-        tasks: Vec<TaskSubscription>,
-        parent_task_id: Option<String>,
-        workspace: Option<String>,
-        context_id: Option<String>,
-        response_tx: oneshot::Sender<PushTasksResult>,
-    },
-
-    /// Cancel all tasks in a context and kill running processes.
-    CancelContext {
-        context_id: String,
-        response_tx: oneshot::Sender<CancelContextResult>,
-    },
-
-    /// Stop a specific long-lived task by name.
-    StopTask {
-        task_name: String,
-        workspace: Option<String>,
-        response_tx: oneshot::Sender<StopTaskResult>,
-    },
-
-    /// Register a PID for a task that has just spawned.
-    /// Sent by TaskRunner after spawn_script() returns.
-    RegisterPid {
-        task_id: String,
-        pid: u32,
-    },
-
-    /// Unregister a PID when a task exits.
-    /// Sent by TaskRunner when process exits.
-    UnregisterPid {
-        task_id: String,
-        pid: u32,
-    },
+pub async fn start_daemon_inline(project: Arc<Project>, port_tx: oneshot::Sender<u16>) -> Result<(), Error> {
+    run_daemon_internal(project, Some(port_tx)).await
 }
 
-/// Result of pushing tasks to the scheduler.
-#[derive(Debug)]
-pub struct PushTasksResult {
-    /// The directly requested task IDs
-    pub task_ids: Vec<String>,
-    /// Dependency task IDs (excluding target tasks)
-    pub dependency_ids: Vec<String>,
-    /// Long-lived tasks that we attached to (already running)
-    pub attached_long_lived: Vec<AttachedLongLivedTask>,
-    /// Error message if the operation failed
-    pub error: Option<String>,
+pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
+    run_daemon_internal(project, None).await
 }
 
-/// Result of cancelling a context.
-#[derive(Debug)]
-pub struct CancelContextResult {
-    /// Number of tasks cancelled
-    pub cancelled_count: usize,
-}
+async fn run_daemon_internal(
+    project: Arc<Project>,
+    port_tx: Option<oneshot::Sender<u16>>,
+) -> Result<(), Error> {
+    let (listener, port) = bind_to_available_port().await?;
+    let daemon_url_str = daemon_url(port);
 
-/// Result of stopping a task.
-#[derive(Debug)]
-pub struct StopTaskResult {
-    pub success: bool,
-    pub error: Option<String>,
-}
-
-// ============================================================================
-// Spawning Tasks State
-// ============================================================================
-
-/// Entry for a task that is currently spawning (between spawn() and PID registration).
-#[derive(Debug)]
-struct SpawningEntry {
-    /// When the spawn was initiated (for debugging/metrics)
-    #[allow(dead_code)]
-    spawned_at: Instant,
-    /// If true, kill the process when the PID arrives
-    pending_cancel: bool,
-}
-
-/// Tracks tasks currently being spawned (no PID yet).
-/// This state is owned exclusively by the coordinator to eliminate race conditions.
-#[derive(Debug, Default)]
-struct SpawningTasks {
-    tasks: HashMap<String, SpawningEntry>,
-}
-
-impl SpawningTasks {
-    fn new() -> Self {
-        Self::default()
+    // Send port through channel or print to stdout
+    if let Some(tx) = port_tx {
+        let _ = tx.send(port);
+    } else {
+        println!("{}", port);
+        let _ = std::io::stdout().flush();
     }
 
-    /// Mark a task as spawning (called before executor_pool.spawn()).
-    fn mark_spawning(&mut self, task_id: String) {
-        self.tasks.insert(task_id, SpawningEntry {
-            spawned_at: Instant::now(),
-            pending_cancel: false,
-        });
-    }
+    // Get configuration
+    let output_buffer_max_lines = project.config.settings.daemon_output_buffer_max_lines.value;
+    let max_closed_tasks = project.config.settings.daemon_max_closed_tasks.value;
 
-    /// Mark a spawning task for cancellation. Returns true if the task was found.
-    fn mark_pending_cancel(&mut self, task_id: &str) -> bool {
-        if let Some(entry) = self.tasks.get_mut(task_id) {
-            entry.pending_cancel = true;
-            true
-        } else {
-            false
+    // Create the command channel
+    let (command_tx, command_rx) = mpsc::unbounded_channel::<CoordinatorCommand>();
+
+    // Spawn the coordinator loop
+    let project_for_loop = project.clone();
+    let command_tx_for_executor = command_tx.clone();
+
+    tokio::spawn(async move {
+        run_coordinator_loop(
+            project_for_loop,
+            command_rx,
+            command_tx_for_executor,
+            daemon_url_str,
+            output_buffer_max_lines,
+            max_closed_tasks,
+        ).await;
+    });
+
+    // Project root watcher (unchanged)
+    let project_root = project.project_cwd.clone();
+    let initial_inode = project_root.fs_metadata()?.ino();
+
+    tokio::spawn(async move {
+        watch_project_root(project_root, initial_inode).await;
+    });
+
+    // Signal handler
+    let command_tx_for_signal = command_tx.clone();
+    tokio::spawn(async move {
+        wait_for_shutdown_signal(command_tx_for_signal).await;
+    });
+
+    // Create simplified connection context (no Arc<RwLock> for mutable state)
+    let ctx = Arc::new(ConnectionContext {
+        project,
+        command_tx,
+    });
+
+    // Run accept loop with simplified context
+    run_accept_loop(listener, ctx).await;
+
+    Ok(())
+}
+
+// ============================================================================
+// Simplified Connection Context
+// ============================================================================
+
+
+// ============================================================================
+// Coordinator Loop
+// ============================================================================
+
+async fn run_coordinator_loop(
+    project: Arc<Project>,
+    mut command_rx: mpsc::UnboundedReceiver<CoordinatorCommand>,
+    command_tx: CommandSender,
+    daemon_url: String,
+    output_buffer_max_lines: usize,
+    max_closed_tasks: usize,
+) {
+    // Create unified state - owned by this task, no locks
+    let mut state = CoordinatorState::new(output_buffer_max_lines, max_closed_tasks);
+
+    // Create executor pool
+    let mut executor_pool = ExecutorPool::new(daemon_url, command_tx);
+
+    // Pending completion tracking (waiting for subtasks)
+    let mut pending_completion: HashMap<ContextualTaskId, i32> = HashMap::new();
+
+    loop {
+        // Process ready tasks and failures FIRST
+        process_ready_tasks(&mut state, &mut executor_pool);
+
+        // Process warm-up deadlines
+        let warm_up_completed = state.process_warm_up_deadlines();
+        for (ctx_task_id, base_task_id) in warm_up_completed {
+            state.warm_up_complete.insert(ctx_task_id.clone());
+            state.mark_long_lived_warm_up_complete(&base_task_id);
+
+            let task_id_str = format_contextual_task_id(&ctx_task_id);
+            state.broadcast(DaemonNotification::TaskWarmUpComplete {
+                task_id: task_id_str,
+            });
+        }
+
+        // Wait for next event
+        tokio::select! {
+            biased;
+
+            // Commands have highest priority
+            Some(cmd) = command_rx.recv() => {
+                let should_shutdown = handle_command(
+                    cmd,
+                    &mut state,
+                    &mut executor_pool,
+                    &mut pending_completion,
+                    &project,
+                ).await;
+
+                if should_shutdown {
+                    break;
+                }
+            }
+
+            // Task completions from executor
+            result = executor_pool.wait_next(), if !executor_pool.is_empty() => {
+                if let Some((task_id, result)) = result {
+                    handle_task_completion(
+                        task_id,
+                        result,
+                        &mut state,
+                        &mut pending_completion,
+                    );
+                }
+            }
+
+            // Periodic wake-up for ready task checking and warm-up deadlines
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                // Loop will re-check ready tasks and warm-up deadlines
+            }
         }
     }
-
-    /// Remove and return a spawning entry (called when PID arrives).
-    fn take(&mut self, task_id: &str) -> Option<SpawningEntry> {
-        self.tasks.remove(task_id)
-    }
-
-    /// Get all spawning task IDs for a given context.
-    fn get_spawning_for_context(&self, context_id: &str) -> Vec<String> {
-        let suffix = format!("@{}", context_id);
-        self.tasks.keys()
-            .filter(|id| id.ends_with(&suffix))
-            .cloned()
-            .collect()
-    }
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/// Kill a process group. Uses SIGTERM first.
-#[cfg(unix)]
-fn kill_process_group(pid: u32) {
-    let result = unsafe { libc::killpg(pid as i32, libc::SIGTERM) };
-    if result != 0 {
-        // If killpg fails (e.g., group doesn't exist), try killing the process directly
-        let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-    }
-}
-
-#[cfg(not(unix))]
-fn kill_process_group(_pid: u32) {
-    // No-op on non-Unix platforms
 }
 
 // ============================================================================
 // Command Handler
 // ============================================================================
 
-/// Handle a command from a handler. This function runs in the coordinator loop
-/// and has exclusive access to coordinator-owned state.
-async fn handle_coordinator_command(
+/// Handle a single command. Returns true if coordinator should shut down.
+async fn handle_command(
     cmd: CoordinatorCommand,
-    scheduler: &Scheduler,
-    process_registry: &ProcessRegistry,
-    spawning_tasks: &mut SpawningTasks,
-    subscription_registry: &SubscriptionRegistry,
+    state: &mut CoordinatorState,
+    executor_pool: &mut ExecutorPool,
+    pending_completion: &mut HashMap<ContextualTaskId, i32>,
     project: &Project,
-    long_lived_registry: &LongLivedRegistry,
-) {
+) -> bool {
     match cmd {
-        CoordinatorCommand::CancelContext { context_id, response_tx } => {
-            // Step 1: Mark all tasks as failed in scheduler
-            let cancelled_ids = scheduler.cancel_context(&context_id);
+        // ====================================================================
+        // Task Management
+        // ====================================================================
 
-            // Step 2: Get and kill registered PIDs
-            let pids = process_registry.take_pids_for_context(&context_id);
+        CoordinatorCommand::PushTasks {
+            tasks,
+            parent_task_id,
+            workspace,
+            context_id,
+            response_tx,
+        } => {
+            let result = execute_push_tasks(
+                &tasks,
+                parent_task_id.as_deref(),
+                workspace.as_deref(),
+                context_id.as_deref(),
+                state,
+                project,
+            );
+            let _ = response_tx.send(result);
+        }
+
+        CoordinatorCommand::CancelContext { context_id, response_tx } => {
+            // 1. Mark tasks as failed in scheduler
+            let cancelled_ids = state.cancel_context(&context_id);
+
+            // 2. Get and kill registered PIDs
+            let pids = state.take_pids_for_context(&context_id);
             for pid in &pids {
                 kill_process_group(*pid);
             }
 
-            // Step 3: Mark spawning tasks for deferred kill
-            let spawning_ids = spawning_tasks.get_spawning_for_context(&context_id);
+            // 3. Mark spawning tasks for deferred kill
+            let spawning_ids = state.get_spawning_for_context(&context_id);
             for task_id in &spawning_ids {
-                spawning_tasks.mark_pending_cancel(task_id);
+                state.mark_spawning_pending_cancel(task_id);
             }
 
             let _ = response_tx.send(CancelContextResult {
@@ -212,132 +246,360 @@ async fn handle_coordinator_command(
         }
 
         CoordinatorCommand::StopTask { task_name, workspace, response_tx } => {
-            // Build the task ID
-            let task_id = match build_task_id_for_stop(&task_name, workspace.as_deref(), project) {
-                Some(tid) => tid,
-                None => {
-                    let _ = response_tx.send(StopTaskResult {
-                        success: false,
-                        error: Some(format!("Could not resolve task: {}", task_name)),
-                    });
-                    return;
-                }
-            };
-
-            // Check if task exists in long-lived registry
-            let entry = match long_lived_registry.get_existing(&task_id) {
-                Some(e) => e,
-                None => {
-                    let _ = response_tx.send(StopTaskResult {
-                        success: false,
-                        error: Some(format!("No running long-lived task found: {}", task_name)),
-                    });
-                    return;
-                }
-            };
-
-            // Check if task is in spawning state
-            if spawning_tasks.mark_pending_cancel(&entry.contextual_task_id) {
-                long_lived_registry.remove(&task_id);
-                let _ = response_tx.send(StopTaskResult {
-                    success: true,
-                    error: Some("Task is spawning, will be killed shortly".to_string()),
-                });
-                return;
-            }
-
-            // Try to take the PID atomically
-            if let Some(pid) = process_registry.take_pid_for_task(&entry.contextual_task_id) {
-                kill_process_group(pid);
-                long_lived_registry.remove(&task_id);
-                let _ = response_tx.send(StopTaskResult {
-                    success: true,
-                    error: None,
-                });
-            } else if entry.process_id.is_some() {
-                // Task completed naturally between lookup and stop
-                long_lived_registry.remove(&task_id);
-                let _ = response_tx.send(StopTaskResult {
-                    success: true,
-                    error: Some("Task already completed before stop request was processed".to_string()),
-                });
-            } else {
-                // No PID was ever recorded
-                long_lived_registry.remove(&task_id);
-                let _ = response_tx.send(StopTaskResult {
-                    success: true,
-                    error: Some("Task had no process ID, removed from registry".to_string()),
-                });
-            }
-        }
-
-        CoordinatorCommand::PushTasks { tasks, parent_task_id, workspace, context_id, response_tx } => {
-            // Delegate to the existing push_tasks logic
-            // For now, use the existing handler logic via the scheduler
-            let result = execute_push_tasks(
-                &tasks,
-                parent_task_id.as_deref(),
-                workspace.as_deref(),
-                context_id.as_deref(),
-                scheduler,
-                project,
-                long_lived_registry,
-                subscription_registry,
-            ).await;
-
+            let result = handle_stop_task(&task_name, workspace.as_deref(), state, project);
             let _ = response_tx.send(result);
         }
 
+        // ====================================================================
+        // Process Management
+        // ====================================================================
+
         CoordinatorCommand::RegisterPid { task_id, pid } => {
-            // Check if this task was cancelled while spawning
-            if let Some(entry) = spawning_tasks.take(&task_id) {
-                if entry.pending_cancel {
-                    // Task was cancelled while spawning - kill immediately
+            // Check if cancelled while spawning
+            if let Some(pending_cancel) = state.take_spawning(&task_id) {
+                if pending_cancel {
                     kill_process_group(pid);
-                    return;
+                    return false;
                 }
             }
-
-            // Normal registration
-            process_registry.register_with_task(pid, task_id);
+            state.register_pid(pid, task_id);
         }
 
         CoordinatorCommand::UnregisterPid { task_id, pid } => {
-            // Clean up spawning state if still present (shouldn't happen normally)
-            spawning_tasks.take(&task_id);
-            process_registry.unregister_with_task(pid, &task_id);
+            state.take_spawning(&task_id);
+            state.unregister_pid(pid, &task_id);
+        }
+
+        // ====================================================================
+        // Executor Events (integrated into command loop)
+        // ====================================================================
+
+        CoordinatorCommand::TaskStarted { task_id } => {
+            // Broadcast notification
+            state.broadcast(DaemonNotification::TaskStarted {
+                task_id: task_id.clone(),
+            });
+
+            // Schedule warm-up for long-lived tasks
+            if let Some(ctx_task_id) = state.parse_contextual_task_id_simple(&task_id) {
+                if state.is_long_lived(&ctx_task_id) {
+                    if let Some(base_task_id) = parse_base_task_id(&task_id) {
+                        state.schedule_warm_up(
+                            ctx_task_id,
+                            base_task_id,
+                            Duration::from_millis(LONG_LIVED_WARMUP_MS),
+                        );
+                    }
+                }
+            }
+        }
+
+        CoordinatorCommand::TaskOutput { task_id, line, stream } => {
+            // Buffer output
+            state.buffer_output(task_id.clone(), BufferedOutputLine {
+                line: line.clone(),
+                stream: stream.as_str().to_string(),
+            });
+
+            // Broadcast notification
+            state.broadcast(DaemonNotification::TaskOutputLine {
+                task_id,
+                line,
+                stream: stream.as_str().to_string(),
+            });
+        }
+
+        CoordinatorCommand::TaskScriptFinished { task_id, exit_code } => {
+            if let Some(ctx_task_id) = state.parse_contextual_task_id_simple(&task_id) {
+                state.mark_script_finished(&ctx_task_id);
+
+                if exit_code != 0 {
+                    handle_task_failure(&ctx_task_id, exit_code, state, pending_completion);
+                } else {
+                    handle_task_success(&ctx_task_id, exit_code, state, pending_completion);
+                }
+
+                // Mark task as closed for output buffer cleanup
+                state.mark_task_closed(task_id);
+            }
+        }
+
+        CoordinatorCommand::TaskFailed { task_id, error } => {
+            state.broadcast(DaemonNotification::TaskFailed {
+                task_id: task_id.clone(),
+                error,
+            });
+
+            if let Some(ctx_task_id) = state.parse_contextual_task_id_simple(&task_id) {
+                handle_task_failure(&ctx_task_id, 1, state, pending_completion);
+            }
+
+            state.mark_task_closed(task_id);
+        }
+
+        // ====================================================================
+        // Query Commands
+        // ====================================================================
+
+        CoordinatorCommand::GetTaskOutput { task_id, response_tx } => {
+            let lines = state.get_task_output(&task_id);
+            let _ = response_tx.send(lines);
+        }
+
+        CoordinatorCommand::ListLongLivedTasks { response_tx } => {
+            let entries = state.list_long_lived();
+            let infos: Vec<LongLivedTaskInfo> = entries
+                .into_iter()
+                .map(|e| LongLivedTaskInfo {
+                    task_id: format!("{}:{}", e.task_id.workspace.to_file_string(), e.task_id.task_name.as_str()),
+                    contextual_task_id: e.contextual_task_id,
+                    warm_up_complete: e.warm_up_complete,
+                    started_at_ms: e.started_at
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0),
+                })
+                .collect();
+            let _ = response_tx.send(infos);
+        }
+
+        // ====================================================================
+        // Subscription Commands
+        // ====================================================================
+
+        CoordinatorCommand::CreateSubscription {
+            output_scope,
+            status_scope,
+            context_id,
+            response_tx,
+        } => {
+            let (id, rx) = state.create_subscription(output_scope, status_scope, context_id);
+            let _ = response_tx.send((id, rx));
+        }
+
+        CoordinatorCommand::AddTasksToSubscription {
+            subscription_id,
+            target_task_ids,
+            dependency_task_ids,
+        } => {
+            state.add_tasks_to_subscription(subscription_id, target_task_ids, dependency_task_ids);
+        }
+
+        CoordinatorCommand::RemoveSubscription { subscription_id } => {
+            state.remove_subscription(subscription_id);
+        }
+
+        // ====================================================================
+        // Shutdown
+        // ====================================================================
+
+        CoordinatorCommand::Shutdown { response_tx } => {
+            let pids = state.get_all_pids();
+            let _ = response_tx.send(pids);
+            return true; // Signal shutdown
+        }
+    }
+
+    false
+}
+
+// ============================================================================
+// Ready Task Processing
+// ============================================================================
+
+fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool) {
+    let running: HashSet<_> = executor_pool.running_tasks().cloned().collect();
+
+    // Find tasks to fail (dependencies failed)
+    let tasks_to_fail = find_tasks_to_fail(state, &running);
+    for task_id in tasks_to_fail {
+        state.mark_failed(&task_id);
+
+        let task_id_str = format_contextual_task_id(&task_id);
+        state.broadcast(DaemonNotification::TaskCompleted {
+            task_id: task_id_str,
+            exit_code: 1,
+        });
+    }
+
+    // Find ready tasks
+    let ready_tasks = find_ready_tasks(state, &running);
+
+    for (task_id, prepared_opt) in ready_tasks {
+        // Atomic check - no race possible, we own the state
+        if !state.should_spawn_task(&task_id) {
+            continue;
+        }
+
+        if let Some(prepared) = prepared_opt {
+            let task_id_str = format_contextual_task_id(&task_id);
+
+            // Mark as spawning BEFORE spawn
+            state.mark_spawning(task_id_str);
+
+            // Spawn task
+            executor_pool.spawn(task_id, prepared);
+        } else {
+            // No script - complete immediately
+            state.mark_completed(&task_id);
+
+            let task_id_str = format_contextual_task_id(&task_id);
+            state.broadcast(DaemonNotification::TaskCompleted {
+                task_id: task_id_str,
+                exit_code: 0,
+            });
         }
     }
 }
 
-/// Build a TaskId for stop_task command
-fn build_task_id_for_stop(task_name: &str, workspace: Option<&str>, project: &Project) -> Option<TaskId> {
-    let task_name = TaskName::new(task_name).ok()?;
+fn find_ready_tasks(
+    state: &CoordinatorState,
+    running: &HashSet<ContextualTaskId>,
+) -> Vec<(ContextualTaskId, Option<PreparedTask>)> {
+    let ready_ids = dependencies::find_ready_tasks(
+        &state.resolved,
+        &state.completed,
+        &state.failed,
+        &state.script_finished,
+        &state.warm_up_complete,
+        running,
+        &state.targets,
+        &state.prepared,
+    );
 
-    let workspace = if let Some(ws_name) = workspace {
-        let ident = Ident::new(ws_name);
-        project.workspace_by_ident(&ident).ok()?.name.clone()
-    } else {
-        project.active_workspace().ok()?.name.clone()
-    };
-
-    Some(TaskId { workspace, task_name })
+    ready_ids
+        .into_iter()
+        .map(|ctx_task_id| {
+            let prepared = state.prepared.get(&ctx_task_id).cloned();
+            (ctx_task_id, prepared)
+        })
+        .collect()
 }
 
-/// Execute push_tasks logic within the coordinator
-async fn execute_push_tasks(
+fn find_tasks_to_fail(
+    state: &CoordinatorState,
+    running: &HashSet<ContextualTaskId>,
+) -> Vec<ContextualTaskId> {
+    dependencies::find_tasks_to_fail(
+        &state.resolved,
+        &state.completed,
+        &state.failed,
+        running,
+    )
+}
+
+// ============================================================================
+// Task Completion Handling
+// ============================================================================
+
+fn handle_task_completion(
+    task_id: ContextualTaskId,
+    result: Result<std::process::ExitStatus, Error>,
+    state: &mut CoordinatorState,
+    pending_completion: &mut HashMap<ContextualTaskId, i32>,
+) {
+    match result {
+        Ok(status) => {
+            let exit_code = status.code().unwrap_or(-1);
+            state.mark_script_finished(&task_id);
+
+            if !status.success() {
+                handle_task_failure(&task_id, exit_code, state, pending_completion);
+            } else {
+                handle_task_success(&task_id, exit_code, state, pending_completion);
+            }
+        }
+        Err(e) => {
+            eprintln!("Task execution error: {}", e);
+        }
+    }
+}
+
+fn handle_task_failure(
+    task_id: &ContextualTaskId,
+    exit_code: i32,
+    state: &mut CoordinatorState,
+    pending_completion: &mut HashMap<ContextualTaskId, i32>,
+) {
+    state.mark_failed(task_id);
+
+    let task_id_str = format_contextual_task_id(task_id);
+    state.broadcast(DaemonNotification::TaskCompleted {
+        task_id: task_id_str,
+        exit_code,
+    });
+
+    // Propagate failure to parents
+    let parents = state.find_parents(task_id);
+    for parent in parents {
+        if pending_completion.remove(&parent).is_some() {
+            state.mark_failed(&parent);
+
+            let parent_id_str = format_contextual_task_id(&parent);
+            state.broadcast(DaemonNotification::TaskCompleted {
+                task_id: parent_id_str,
+                exit_code,
+            });
+        }
+    }
+}
+
+fn handle_task_success(
+    task_id: &ContextualTaskId,
+    exit_code: i32,
+    state: &mut CoordinatorState,
+    pending_completion: &mut HashMap<ContextualTaskId, i32>,
+) {
+    if state.try_complete_task(task_id) {
+        let task_id_str = format_contextual_task_id(task_id);
+        state.broadcast(DaemonNotification::TaskCompleted {
+            task_id: task_id_str,
+            exit_code,
+        });
+
+        // Try to complete parents
+        let parents = state.find_parents(task_id);
+        for parent in parents {
+            if let Some(&parent_exit_code) = pending_completion.get(&parent) {
+                if state.try_complete_task(&parent) {
+                    pending_completion.remove(&parent);
+
+                    let parent_id_str = format_contextual_task_id(&parent);
+                    state.broadcast(DaemonNotification::TaskCompleted {
+                        task_id: parent_id_str,
+                        exit_code: parent_exit_code,
+                    });
+                }
+            }
+        }
+    } else {
+        // Check if any subtask has already failed
+        if state.has_failed_subtask(task_id) {
+            state.mark_failed(task_id);
+
+            let task_id_str = format_contextual_task_id(task_id);
+            state.broadcast(DaemonNotification::TaskCompleted {
+                task_id: task_id_str,
+                exit_code: 1,
+            });
+        } else {
+            pending_completion.insert(task_id.clone(), exit_code);
+        }
+    }
+}
+
+// ============================================================================
+// Push Tasks Handler
+// ============================================================================
+
+fn execute_push_tasks(
     tasks: &[TaskSubscription],
     parent_task_id: Option<&str>,
     workspace: Option<&str>,
     context_id: Option<&str>,
-    scheduler: &Scheduler,
+    state: &mut CoordinatorState,
     project: &Project,
-    long_lived_registry: &LongLivedRegistry,
-    _subscription_registry: &SubscriptionRegistry,
 ) -> PushTasksResult {
-    use super::ipc::LONG_LIVED_CONTEXT_ID;
-    use std::time::SystemTime;
-
     let mut task_ids = Vec::new();
     let mut dependency_ids = Vec::new();
     let mut attached_long_lived = Vec::new();
@@ -350,11 +612,10 @@ async fn execute_push_tasks(
             .and_then(|tid| check_if_long_lived(project, tid))
             .unwrap_or(false);
 
-        // For long-lived tasks, use atomic check-and-claim
+        // For long-lived tasks, check if already running
         if is_long_lived {
             if let Some(ref tid) = task_id {
-                // Check if already running
-                if let Some(existing) = long_lived_registry.get_existing(tid) {
+                if let Some(existing) = state.get_long_lived(tid) {
                     if !existing.contextual_task_id.is_empty() {
                         task_ids.push(existing.contextual_task_id.clone());
 
@@ -381,7 +642,7 @@ async fn execute_push_tasks(
             context_id
         };
 
-        match scheduler.add_task(
+        match state.add_task(
             project,
             &task_sub.name,
             parent_task_id,
@@ -394,7 +655,7 @@ async fn execute_push_tasks(
 
                 if is_long_lived {
                     if let Some(ref tid) = task_id {
-                        long_lived_registry.register(tid.clone(), target_id_str.clone());
+                        state.register_long_lived(tid.clone(), target_id_str.clone());
                     }
                 }
 
@@ -426,7 +687,67 @@ async fn execute_push_tasks(
     }
 }
 
-/// Build a TaskId for push_tasks command
+// ============================================================================
+// Stop Task Handler
+// ============================================================================
+
+fn handle_stop_task(
+    task_name: &str,
+    workspace: Option<&str>,
+    state: &mut CoordinatorState,
+    project: &Project,
+) -> StopTaskResult {
+    let task_id = match build_task_id_for_stop(task_name, workspace, project) {
+        Some(tid) => tid,
+        None => {
+            return StopTaskResult {
+                success: false,
+                error: Some(format!("Could not resolve task: {}", task_name)),
+            };
+        }
+    };
+
+    let entry = match state.get_long_lived(&task_id) {
+        Some(e) => e,
+        None => {
+            return StopTaskResult {
+                success: false,
+                error: Some(format!("No running long-lived task found: {}", task_name)),
+            };
+        }
+    };
+
+    // Check if spawning
+    if state.mark_spawning_pending_cancel(&entry.contextual_task_id) {
+        state.remove_long_lived(&task_id);
+        return StopTaskResult {
+            success: true,
+            error: Some("Task is spawning, will be killed shortly".to_string()),
+        };
+    }
+
+    // Try to take and kill PID
+    if let Some(pid) = state.take_pid_for_task(&entry.contextual_task_id) {
+        kill_process_group(pid);
+        state.remove_long_lived(&task_id);
+        return StopTaskResult {
+            success: true,
+            error: None,
+        };
+    }
+
+    // No PID - task may have completed
+    state.remove_long_lived(&task_id);
+    StopTaskResult {
+        success: true,
+        error: Some("Task had no process ID, removed from registry".to_string()),
+    }
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
 fn build_task_id_for_push(task_name: &str, workspace: Option<&str>, project: &Project) -> Option<TaskId> {
     let task_name = TaskName::new(task_name).ok()?;
 
@@ -440,7 +761,10 @@ fn build_task_id_for_push(task_name: &str, workspace: Option<&str>, project: &Pr
     Some(TaskId { workspace, task_name })
 }
 
-/// Check if a task is long-lived
+fn build_task_id_for_stop(task_name: &str, workspace: Option<&str>, project: &Project) -> Option<TaskId> {
+    build_task_id_for_push(task_name, workspace, project)
+}
+
 fn check_if_long_lived(project: &Project, task_id: &TaskId) -> Option<bool> {
     let workspace = project.workspace_by_ident(&task_id.workspace).ok()?;
     let task_file_path = workspace.taskfile_path();
@@ -451,482 +775,26 @@ fn check_if_long_lived(project: &Project, task_id: &TaskId) -> Option<bool> {
     Some(task.attributes.iter().any(|attr| attr.name == "long-lived"))
 }
 
-// ============================================================================
-// Existing Functions
-// ============================================================================
-
-fn parse_base_task_id(contextual_task_id: &str) -> Option<TaskId> {
-    let (task_part, _context_id)
-        = contextual_task_id.rsplit_once('@')?;
-
-    let (workspace_str, task_name_str)
-        = task_part.split_once(':')?;
-
-    let task_name
-        = TaskName::new(task_name_str).ok()?;
-
-    let workspace
-        = Ident::new(workspace_str);
-
-    Some(TaskId {
-        workspace,
-        task_name,
-    })
-}
-
-/// Starts the daemon inline (in the current process) and returns the port via a channel.
-/// This is used for standalone mode where we want to run the daemon in the same process.
-pub async fn start_daemon_inline(project: Arc<Project>, port_tx: tokio::sync::oneshot::Sender<u16>) -> Result<(), Error> {
-    run_daemon_internal(project, Some(port_tx)).await
-}
-
-pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
-    run_daemon_internal(project, None).await
-}
-
-async fn run_daemon_internal(project: Arc<Project>, port_tx: Option<tokio::sync::oneshot::Sender<u16>>) -> Result<(), Error> {
-    let (listener, port)
-        = bind_to_available_port().await?;
-
-    let daemon_url_str
-        = daemon_url(port);
-
-    // If a port sender is provided, send the port through it; otherwise print to stdout
-    if let Some(tx) = port_tx {
-        let _ = tx.send(port);
-    } else {
-        println!("{}", port);
-        let _ = std::io::stdout().flush();
+#[cfg(unix)]
+fn kill_process_group(pid: u32) {
+    let result = unsafe { libc::killpg(pid as i32, libc::SIGTERM) };
+    if result != 0 {
+        let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
     }
-
-    // Get daemon configuration values
-    let output_buffer_max_lines
-        = project.config.settings.daemon_output_buffer_max_lines.value;
-
-    let max_closed_tasks
-        = project.config.settings.daemon_max_closed_tasks.value;
-
-    let scheduler
-        = Arc::new(Scheduler::new());
-
-    let output_buffer: OutputBuffer
-        = Arc::new(RwLock::new(HashMap::new()));
-
-    let subscription_registry
-        = Arc::new(SubscriptionRegistry::new());
-
-    let long_lived_registry
-        = Arc::new(LongLivedRegistry::new());
-
-    let process_registry
-        = Arc::new(ProcessRegistry::new());
-
-    // Command channel for handler-to-coordinator communication
-    let (command_tx, mut command_rx)
-        = mpsc::unbounded_channel::<CoordinatorCommand>();
-
-    let scheduler_for_loop
-        = scheduler.clone();
-
-    let process_registry_for_loop
-        = process_registry.clone();
-
-    let process_registry_for_signal
-        = process_registry.clone();
-
-    // Clone command_tx for use in executor pool
-    let command_tx_for_executor
-        = command_tx.clone();
-
-    let long_lived_registry_for_loop
-        = long_lived_registry.clone();
-
-    let project_for_loop
-        = project.clone();
-
-    let (loop_event_tx, mut loop_event_rx)
-        = mpsc::unbounded_channel::<ExecutorEvent>();
-
-    // Channel to notify the main loop when warm-up completes
-    let (warmup_tx, mut warmup_rx)
-        = mpsc::unbounded_channel::<()>();
-
-    let subscription_registry_for_loop
-        = subscription_registry.clone();
-
-    let subscription_registry_for_events
-        = subscription_registry.clone();
-
-    let output_buffer_for_events
-        = output_buffer.clone();
-
-    let long_lived_registry_for_events
-        = long_lived_registry.clone();
-
-    let scheduler_for_events
-        = scheduler.clone();
-
-    let warmup_tx_for_events
-        = warmup_tx.clone();
-
-    // Track closed task IDs in order for cleanup
-    let closed_tasks: Arc<RwLock<Vec<String>>>
-        = Arc::new(RwLock::new(Vec::new()));
-
-    let closed_tasks_for_events
-        = closed_tasks.clone();
-
-    tokio::spawn(async move {
-        while let Some(event) = loop_event_rx.recv().await {
-            if let ExecutorEvent::Output { task_id, line, stream } = &event {
-                match output_buffer_for_events.write() {
-                    Ok(mut buffer) => {
-                        let lines: &mut Vec<BufferedOutputLine>
-                            = buffer
-                                .entry(task_id.to_string())
-                                .or_insert_with(Vec::new);
-
-                        lines.push(BufferedOutputLine {
-                            line: line.to_string(),
-                            stream: stream.as_str().to_string(),
-                        });
-
-                        if lines.len() > output_buffer_max_lines {
-                            let excess
-                                = lines.len() - output_buffer_max_lines;
-
-                            lines.drain(0..excess);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to acquire output buffer lock: {}", e);
-                    }
-                }
-            }
-
-            // Track task completion for output buffer cleanup
-            if let ExecutorEvent::Finished { task_id, .. } | ExecutorEvent::Failed { task_id, .. } = &event {
-                if let (Ok(mut closed), Ok(mut buffer)) = (closed_tasks_for_events.write(), output_buffer_for_events.write()) {
-                    closed.push(task_id.clone());
-
-                    // Clean up oldest closed task buffers if we exceed the limit
-                    while closed.len() > max_closed_tasks {
-                        if let Some(oldest_task_id) = closed.first().cloned() {
-                            buffer.remove(&oldest_task_id);
-                            closed.remove(0);
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            }
-
-            let notification
-                = match &event {
-                    ExecutorEvent::Started { task_id } => {
-                        Some(DaemonNotification::TaskStarted {
-                            task_id: task_id.clone(),
-                        })
-                    }
-                    ExecutorEvent::Output { task_id, line, stream } => {
-                        Some(DaemonNotification::TaskOutputLine {
-                            task_id: task_id.clone(),
-                            line: line.clone(),
-                            stream: stream.as_str().to_string(),
-                        })
-                    }
-                    ExecutorEvent::Finished { .. } => None,
-                    ExecutorEvent::Failed { task_id, error } => {
-                        Some(DaemonNotification::TaskFailed {
-                            task_id: task_id.clone(),
-                            error: error.clone(),
-                        })
-                    }
-                };
-
-            if let Some(n) = notification {
-                subscription_registry_for_events.broadcast(n.clone());
-
-                if let DaemonNotification::TaskStarted { task_id } = &n {
-                    if let Some(ctx_task_id) = scheduler_for_events.parse_contextual_task_id(task_id) {
-                        if scheduler_for_events.is_long_lived(&ctx_task_id) {
-                            let task_id_clone
-                                = task_id.clone();
-
-                            let ctx_task_id_clone
-                                = ctx_task_id.clone();
-
-                            let registry_clone
-                                = long_lived_registry_for_events.clone();
-
-                            let sub_registry_clone
-                                = subscription_registry_for_events.clone();
-
-                            let scheduler_clone
-                                = scheduler_for_events.clone();
-
-                            let warmup_tx_clone
-                                = warmup_tx_for_events.clone();
-
-                            tokio::spawn(async move {
-                                tokio::time::sleep(Duration::from_millis(LONG_LIVED_WARMUP_MS)).await;
-
-                                // Check if the task has failed or completed during warm-up
-                                // If so, skip marking warm-up complete to avoid incorrect state
-                                if scheduler_clone.is_failed(&ctx_task_id_clone) || scheduler_clone.is_completed(&ctx_task_id_clone) {
-                                    return;
-                                }
-
-                                if let Some(base_task_id) = parse_base_task_id(&task_id_clone) {
-                                    registry_clone.mark_warm_up_complete(&base_task_id);
-                                }
-
-                                scheduler_clone.mark_warm_up_complete(&ctx_task_id_clone);
-
-                                // Notify the main loop to check for newly-ready tasks
-                                let _ = warmup_tx_clone.send(());
-
-                                sub_registry_clone.broadcast(DaemonNotification::TaskWarmUpComplete {
-                                    task_id: task_id_clone,
-                                });
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    tokio::spawn(async move {
-        let mut executor_pool
-            = ExecutorPool::new(loop_event_tx, daemon_url_str, command_tx_for_executor);
-
-        let mut pending_completion: HashMap<ContextualTaskId, i32>
-            = HashMap::new();
-
-        // Track tasks currently spawning (between spawn() and PID registration)
-        let mut spawning_tasks
-            = SpawningTasks::new();
-
-        loop {
-            // Process ready tasks and failures
-            let running: HashSet<_>
-                = executor_pool.running_tasks().cloned().collect();
-
-            let tasks_to_fail
-                = scheduler_for_loop.tasks_to_fail(&running);
-
-            for task_id in tasks_to_fail {
-                scheduler_for_loop.mark_failed(&task_id);
-
-                let task_id_str
-                    = format_contextual_task_id(&task_id);
-
-                subscription_registry_for_loop.broadcast(DaemonNotification::TaskCompleted {
-                    task_id: task_id_str,
-                    exit_code: 1,
-                });
-            }
-
-            let ready_tasks
-                = scheduler_for_loop.ready_tasks(&running);
-
-            for (task_id, prepared_opt) in ready_tasks {
-                // Guard against TOCTOU race: cancel_context() may have marked this task
-                // as failed/completed after ready_tasks() returned but before we spawn.
-                // Re-check atomically before spawning.
-                if !scheduler_for_loop.should_spawn_task(&task_id) {
-                    continue;
-                }
-
-                if let Some(prepared) = prepared_opt {
-                    let task_id_str
-                        = format_contextual_task_id(&task_id);
-
-                    // Mark as spawning BEFORE calling spawn() to track the window
-                    spawning_tasks.mark_spawning(task_id_str);
-                    executor_pool.spawn(task_id, prepared);
-                } else {
-                    scheduler_for_loop.mark_completed(&task_id);
-
-                    let task_id_str
-                        = format_contextual_task_id(&task_id);
-
-                    subscription_registry_for_loop.broadcast(DaemonNotification::TaskCompleted {
-                        task_id: task_id_str,
-                        exit_code: 0,
-                    });
-                }
-            }
-
-            // Use biased select to prioritize commands over other events
-            tokio::select! {
-                biased;
-
-                // Handle commands from handlers (highest priority)
-                Some(cmd) = command_rx.recv() => {
-                    handle_coordinator_command(
-                        cmd,
-                        &scheduler_for_loop,
-                        &process_registry_for_loop,
-                        &mut spawning_tasks,
-                        &subscription_registry_for_loop,
-                        &project_for_loop,
-                        &long_lived_registry_for_loop,
-                    ).await;
-                }
-
-                // Handle task completions from executor
-                result = executor_pool.wait_next(), if !executor_pool.is_empty() => {
-                    if let Some((task_id, result)) = result {
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-
-                        match result {
-                            Ok(status) => {
-                                let exit_code
-                                    = status.code().unwrap_or(-1);
-
-                                scheduler_for_loop.mark_script_finished(&task_id);
-
-                                if !status.success() {
-                                    scheduler_for_loop.mark_failed(&task_id);
-
-                                    let task_id_str
-                                        = format_contextual_task_id(&task_id);
-
-                                    subscription_registry_for_loop
-                                        .broadcast(DaemonNotification::TaskCompleted {
-                                            task_id: task_id_str,
-                                            exit_code,
-                                        });
-
-                                    let parents
-                                        = scheduler_for_loop.find_parents(&task_id);
-
-                                    for parent in parents {
-                                        if pending_completion.remove(&parent).is_some() {
-                                            scheduler_for_loop.mark_failed(&parent);
-
-                                            let parent_id_str
-                                                = format_contextual_task_id(&parent);
-
-                                            subscription_registry_for_loop
-                                                .broadcast(DaemonNotification::TaskCompleted {
-                                                    task_id: parent_id_str,
-                                                    exit_code,
-                                                });
-                                        }
-                                    }
-                                } else {
-                                    if scheduler_for_loop.try_complete_task(&task_id) {
-                                        let task_id_str
-                                            = format_contextual_task_id(&task_id);
-
-                                        subscription_registry_for_loop
-                                            .broadcast(DaemonNotification::TaskCompleted {
-                                                task_id: task_id_str,
-                                                exit_code,
-                                            });
-
-                                        let parents
-                                            = scheduler_for_loop.find_parents(&task_id);
-
-                                        for parent in parents {
-                                            if let Some(&parent_exit_code) = pending_completion.get(&parent)
-                                            {
-                                                if scheduler_for_loop.try_complete_task(&parent) {
-                                                    pending_completion.remove(&parent);
-
-                                                    let parent_id_str
-                                                        = format_contextual_task_id(&parent);
-
-                                                    subscription_registry_for_loop.broadcast(
-                                                        DaemonNotification::TaskCompleted {
-                                                            task_id: parent_id_str,
-                                                            exit_code: parent_exit_code,
-                                                        },
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        // Check if any subtask has already failed
-                                        // This handles the case where the subtask failed before
-                                        // the parent script finished
-                                        if scheduler_for_loop.has_failed_subtask(&task_id) {
-                                            scheduler_for_loop.mark_failed(&task_id);
-
-                                            let task_id_str
-                                                = format_contextual_task_id(&task_id);
-
-                                            subscription_registry_for_loop
-                                                .broadcast(DaemonNotification::TaskCompleted {
-                                                    task_id: task_id_str,
-                                                    exit_code: 1,
-                                                });
-                                        } else {
-                                            pending_completion.insert(task_id, exit_code);
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Task execution error: {}", e);
-                            }
-                        }
-                    }
-                }
-
-                // Handle warm-up notifications
-                _ = warmup_rx.recv() => {
-                    // Warm-up completed; loop will re-check ready tasks
-                }
-
-                // Idle polling when no tasks are running
-                _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                    // Periodic wake-up to check for ready tasks
-                }
-            }
-        }
-    });
-
-    let project_root
-        = project.project_cwd.clone();
-
-    let initial_inode
-        = project_root.fs_metadata()?.ino();
-
-    tokio::spawn(async move {
-        watch_project_root(project_root, initial_inode).await;
-    });
-
-    // Signal handler for graceful shutdown
-    tokio::spawn(async move {
-        wait_for_shutdown_signal(process_registry_for_signal).await;
-    });
-
-    let ctx
-        = Arc::new(ConnectionContext {
-        project,
-        scheduler,
-        subscription_registry,
-        output_buffer,
-        long_lived_registry,
-        process_registry,
-        command_tx,
-    });
-
-    run_accept_loop(listener, ctx).await;
-
-    Ok(())
 }
+
+#[cfg(not(unix))]
+fn kill_process_group(_pid: u32) {}
+
+// ============================================================================
+// Watchers and Signal Handlers
+// ============================================================================
 
 async fn watch_project_root(project_root: Path, initial_inode: u64) {
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
 
-        let current_inode
-            = project_root.fs_metadata().map(|m| m.ino()).ok();
+        let current_inode = project_root.fs_metadata().map(|m| m.ino()).ok();
 
         if current_inode != Some(initial_inode) {
             std::process::exit(0);
@@ -935,89 +803,69 @@ async fn watch_project_root(project_root: Path, initial_inode: u64) {
 }
 
 #[cfg(unix)]
-async fn wait_for_shutdown_signal(process_registry: Arc<ProcessRegistry>) {
+async fn wait_for_shutdown_signal(command_tx: CommandSender) {
     use tokio::signal::unix::{signal, SignalKind};
 
-    let sigterm = match signal(SignalKind::terminate()) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to register SIGTERM handler: {}", e);
-            return;
+    let sigterm = signal(SignalKind::terminate()).ok();
+    let sigint = signal(SignalKind::interrupt()).ok();
+
+    match (sigterm, sigint) {
+        (Some(mut term), Some(mut int)) => {
+            tokio::select! {
+                _ = term.recv() => {}
+                _ = int.recv() => {}
+            }
         }
-    };
-
-    let sigint = match signal(SignalKind::interrupt()) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to register SIGINT handler: {}", e);
-            return;
+        _ => {
+            tokio::signal::ctrl_c().await.ok();
         }
-    };
-
-    tokio::pin!(sigterm);
-    tokio::pin!(sigint);
-
-    tokio::select! {
-        _ = sigterm.recv() => {}
-        _ = sigint.recv() => {}
     }
 
-    graceful_shutdown(process_registry).await;
+    graceful_shutdown(command_tx).await;
 }
 
 #[cfg(not(unix))]
-async fn wait_for_shutdown_signal(process_registry: Arc<ProcessRegistry>) {
-    use tokio::signal::ctrl_c;
-
-    let _ = ctrl_c().await;
-    graceful_shutdown(process_registry).await;
+async fn wait_for_shutdown_signal(command_tx: CommandSender) {
+    let _ = tokio::signal::ctrl_c().await;
+    graceful_shutdown(command_tx).await;
 }
 
-async fn graceful_shutdown(process_registry: Arc<ProcessRegistry>) {
-    let pids = process_registry.get_all_pids();
+async fn graceful_shutdown(command_tx: CommandSender) {
+    let (response_tx, response_rx) = oneshot::channel();
+
+    if command_tx.send(CoordinatorCommand::Shutdown { response_tx }).is_err() {
+        std::process::exit(0);
+    }
+
+    let pids = response_rx.await.unwrap_or_default();
 
     if pids.is_empty() {
         std::process::exit(0);
     }
 
-    // First, send SIGTERM to all child process groups for graceful shutdown
-    // Since we spawn children with process_group(0), each child is in its own group
-    // where the group ID equals the child's PID
+    // Send SIGTERM
     #[cfg(unix)]
     {
         for &pid in &pids {
-            // Use killpg to kill the entire process group (negative pid means process group)
             let result = unsafe { libc::killpg(pid as i32, libc::SIGTERM) };
             if result != 0 {
-                // If killpg fails (e.g., group doesn't exist), try killing the process directly
-                let result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-                if result != 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) {
-                    eprintln!("Failed to send SIGTERM to process {}: {}", pid, std::io::Error::last_os_error());
-                }
+                let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
             }
         }
     }
 
-    // Wait 5 seconds for processes to terminate gracefully
+    // Wait 5 seconds
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    // Check which processes are still running and send SIGKILL
-    let remaining_pids = process_registry.get_all_pids();
-
+    // Send SIGKILL to remaining
     #[cfg(unix)]
     {
-        for pid in remaining_pids {
-            // Check if process is still alive before sending SIGKILL
+        for &pid in &pids {
             let alive = unsafe { libc::kill(pid as i32, 0) == 0 };
             if alive {
-                // Use killpg to kill the entire process group
                 let result = unsafe { libc::killpg(pid as i32, libc::SIGKILL) };
                 if result != 0 {
-                    // If killpg fails, try killing the process directly
-                    let result = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
-                    if result != 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) {
-                        eprintln!("Failed to send SIGKILL to process {}: {}", pid, std::io::Error::last_os_error());
-                    }
+                    let _ = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
                 }
             }
         }
@@ -1025,3 +873,4 @@ async fn graceful_shutdown(process_registry: Arc<ProcessRegistry>) {
 
     std::process::exit(0);
 }
+

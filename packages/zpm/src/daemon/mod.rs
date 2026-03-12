@@ -1,21 +1,21 @@
 mod client;
 mod coordinator;
+mod coordinator_commands;
+mod coordinator_state;
 mod events;
 mod executor;
 mod handlers;
 mod ipc;
-mod long_lived;
 mod presentation;
-mod process_registry;
 mod scheduler;
 mod server;
-mod subscriptions;
 
 pub use client::{DaemonClient, PushTasksResult, StandaloneDaemonHandle};
 pub use coordinator::run_daemon;
-pub use events::{ExecutorEvent, SchedulerEvent, Stream};
+pub use coordinator_commands::{CommandSender, CoordinatorCommand};
+pub use coordinator_state::SubscriptionId;
+pub use events::Stream;
 pub use executor::{ExecutorPool, OutputLine, TaskRunner};
-pub use handlers::dispatch_request;
 pub use ipc::{
     daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification,
     DaemonRequest, DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, LongLivedTaskStatus,
@@ -23,8 +23,5 @@ pub use ipc::{
     TASK_CURRENT_ENV,
 };
 pub use presentation::{prefix_colors, ProgressState};
-pub use scheduler::{format_task_id, PreparedTask, Scheduler};
-pub use server::{bind_to_available_port, run_accept_loop, ConnectionContext};
-pub use long_lived::{LongLivedEntry, LongLivedRegistry};
-pub use process_registry::ProcessRegistry;
-pub use subscriptions::{SubscriptionGuard, SubscriptionId, SubscriptionRegistry};
+pub use scheduler::{format_task_id, ContextualTaskId, PreparedTask, Scheduler};
+pub use server::bind_to_available_port;
