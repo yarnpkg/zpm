@@ -760,14 +760,6 @@ pub fn format_contextual_task_id(ctx_task_id: &ContextualTaskId) -> String {
     )
 }
 
-pub fn format_task_id(task_id: &TaskId) -> String {
-    format!(
-        "{}:{}",
-        task_id.workspace.to_file_string(),
-        task_id.task_name.as_str()
-    )
-}
-
 pub fn parse_base_task_id(contextual_task_id: &str) -> Option<TaskId> {
     let (task_part, _context_id) = contextual_task_id.rsplit_once('@')?;
     let (workspace_str, task_name_str) = task_part.split_once(':')?;

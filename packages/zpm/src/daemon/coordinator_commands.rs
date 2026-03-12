@@ -77,12 +77,6 @@ pub enum CoordinatorCommand {
         stream: Stream,
     },
 
-    /// Task script finished (may still have subtasks).
-    TaskScriptFinished {
-        task_id: String,
-        exit_code: i32,
-    },
-
     /// Task failed with an error.
     TaskFailed {
         task_id: String,

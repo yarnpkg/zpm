@@ -309,21 +309,6 @@ async fn handle_command(
             });
         }
 
-        CoordinatorCommand::TaskScriptFinished { task_id, exit_code } => {
-            if let Some(ctx_task_id) = state.parse_contextual_task_id_simple(&task_id) {
-                state.mark_script_finished(&ctx_task_id);
-
-                if exit_code != 0 {
-                    handle_task_failure(&ctx_task_id, exit_code, state, pending_completion);
-                } else {
-                    handle_task_success(&ctx_task_id, exit_code, state, pending_completion);
-                }
-
-                // Mark task as closed for output buffer cleanup
-                state.mark_task_closed(task_id);
-            }
-        }
-
         CoordinatorCommand::TaskFailed { task_id, error } => {
             state.broadcast(DaemonNotification::TaskFailed {
                 task_id: task_id.clone(),
@@ -511,6 +496,7 @@ fn handle_task_completion(
         }
         Err(e) => {
             eprintln!("Task execution error: {}", e);
+            handle_task_failure(&task_id, 1, state, pending_completion);
         }
     }
 }

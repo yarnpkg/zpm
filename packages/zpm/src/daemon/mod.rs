@@ -23,5 +23,5 @@ pub use ipc::{
     TASK_CURRENT_ENV,
 };
 pub use presentation::{prefix_colors, ProgressState};
-pub use scheduler::{format_task_id, ContextualTaskId, PreparedTask, Scheduler};
+pub use scheduler::{ContextualTaskId, PreparedTask};
 pub use server::bind_to_available_port;
