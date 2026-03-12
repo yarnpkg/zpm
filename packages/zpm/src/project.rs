@@ -73,6 +73,7 @@ pub struct Project {
     pub last_modified_at: LastModifiedAt,
     pub install_state: Option<InstallState>,
     pub http_client: std::sync::Arc<HttpClient>,
+    pub clone_limiter: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 impl Project {
@@ -144,6 +145,16 @@ impl Project {
             config.settings.enable_global_cache.source = config.settings.enable_migration_mode.source;
         }
 
+        let clone_concurrency
+            = config.settings.clone_concurrency.value;
+
+        if clone_concurrency == 0 {
+            return Err(Error::InvalidConfigValue("cloneConcurrency".to_string(), "must be >= 1".to_string()));
+        }
+
+        let clone_limiter
+            = Arc::new(tokio::sync::Semaphore::new(clone_concurrency));
+
         let root_workspace
             = Workspace::from_root_path(&project_cwd)?;
 
@@ -181,6 +192,7 @@ impl Project {
             last_modified_at,
             install_state: None,
             http_client,
+            clone_limiter,
         })
     }
 

@@ -18,7 +18,7 @@ ln -s target/release local
 
 Other parts of the infra such as the tests use this symlink to find the binaries to spawn.
 
-## Running integration tests
+## Running integration tests
 
 The ZPM codebase can run all tests from the Yarn Berry repository. To do that, clone github.com/yarnpkg/berry inside your home folder then run the following command from the ZPM repository:
 
@@ -38,7 +38,7 @@ In such cases you may need to tweak the test in the Berry repository to make it 
 >
 > In the meantime you can run them manually by going to the [workflow page](https://github.com/yarnpkg/zpm/actions/workflows/tests.yml) and clicking "Run workflow" with the relevant branch selected.
 
-## Running unit tests
+## Running unit tests
 
 Unit tests are run using the standard `cargo test` command. We try not to rely too much on unit tests as they are prone to break should we swap their API shape, but in some cases, like when working on internal libraries, it is useful to have them.
 
