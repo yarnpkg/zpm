@@ -6,7 +6,7 @@ use zpm_tasks::{TaskId, TaskName};
 use std::time::SystemTime;
 
 use super::super::ipc::{AttachedLongLivedTask, DaemonResponse, TaskSubscription, LONG_LIVED_CONTEXT_ID};
-use super::super::long_lived::LongLivedRegistry;
+use super::super::long_lived::{LongLivedEntry, LongLivedRegistry};
 use super::super::scheduler::{format_contextual_task_id, Scheduler};
 use super::super::subscriptions::{SubscriptionId, SubscriptionRegistry};
 use crate::project::Project;
@@ -49,39 +49,24 @@ pub fn handle_push_tasks(
             if let Some(ref tid) = task_id {
                 // try_claim_registration atomically checks if task exists and claims it if not
                 // We retry a few times if we see an in-progress registration (empty contextual_task_id)
-                const MAX_RETRIES: u32 = 20;
-                const RETRY_DELAY_MS: u64 = 50;
+                const MAX_RETRIES: u32 = 50;
+                const RETRY_DELAY_MS: u64 = 100;
 
-                let mut claimed = false;
+                enum RegistrationResult {
+                    AttachedToExisting(LongLivedEntry),
+                    WeClaimedRegistration,
+                    TimedOut,
+                }
+
+                let mut result = RegistrationResult::TimedOut;
+
                 for _ in 0..MAX_RETRIES {
                     match long_lived_registry.try_claim_registration(tid) {
                         Some(existing) => {
                             // Task already exists
                             if !existing.contextual_task_id.is_empty() {
                                 // Registration is complete, attach to existing task
-                                task_ids.push(existing.contextual_task_id.clone());
-
-                                let started_at_ms
-                                    = existing
-                                        .started_at
-                                        .duration_since(SystemTime::UNIX_EPOCH)
-                                        .map(|d| d.as_millis() as u64)
-                                        .unwrap_or(0);
-
-                                attached_long_lived.push(AttachedLongLivedTask {
-                                    task_id: existing.contextual_task_id.clone(),
-                                    started_at_ms,
-                                });
-
-                                if let Some(sub_id) = subscription_id {
-                                    subscription_registry.add_tasks_to_subscription(
-                                        sub_id,
-                                        vec![existing.contextual_task_id],
-                                        vec![],
-                                    );
-                                }
-
-                                claimed = true;
+                                result = RegistrationResult::AttachedToExisting(existing);
                                 break;
                             }
                             // contextual_task_id is empty - another caller is currently registering
@@ -90,13 +75,51 @@ pub fn handle_push_tasks(
                         }
                         None => {
                             // We've claimed the registration, proceed to create the task
+                            result = RegistrationResult::WeClaimedRegistration;
                             break;
                         }
                     }
                 }
 
-                if claimed {
-                    continue;
+                match result {
+                    RegistrationResult::AttachedToExisting(existing) => {
+                        task_ids.push(existing.contextual_task_id.clone());
+
+                        let started_at_ms
+                            = existing
+                                .started_at
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0);
+
+                        attached_long_lived.push(AttachedLongLivedTask {
+                            task_id: existing.contextual_task_id.clone(),
+                            started_at_ms,
+                        });
+
+                        if let Some(sub_id) = subscription_id {
+                            subscription_registry.add_tasks_to_subscription(
+                                sub_id,
+                                vec![existing.contextual_task_id],
+                                vec![],
+                            );
+                        }
+
+                        continue;
+                    }
+                    RegistrationResult::WeClaimedRegistration => {
+                        // Fall through to create the task
+                    }
+                    RegistrationResult::TimedOut => {
+                        // Timed out waiting for another caller to complete registration
+                        // This shouldn't normally happen, but return an error to be safe
+                        return DaemonResponse::Error {
+                            message: format!(
+                                "Timed out waiting for long-lived task registration: {}",
+                                task_sub.name
+                            ),
+                        };
+                    }
                 }
             }
         }
