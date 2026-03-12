@@ -50,7 +50,7 @@ impl TaskRunHandler for SilentDependenciesHandler {
         }
     }
 
-    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, _task_id: &str, line: &str) {
+    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, _task_id: &str, line: &str, _stream: &str) {
         let mut stdout
             = std::io::stdout().lock();
 

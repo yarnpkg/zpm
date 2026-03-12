@@ -65,7 +65,7 @@ pub trait TaskRunHandler: Send {
         let _ = ctx;
     }
 
-    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, task_id: &str, line: &str);
+    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, task_id: &str, line: &str, stream: &str);
 
     async fn on_task_started(&mut self, ctx: &mut TaskRunContext, task_id: &str, is_target: bool);
 
@@ -203,8 +203,8 @@ pub async fn run_task(
             };
 
         match notification {
-            DaemonNotification::TaskOutputLine { task_id, line, .. } => {
-                handler.on_output_line(&mut ctx, &task_id, &line).await;
+            DaemonNotification::TaskOutputLine { task_id, line, stream } => {
+                handler.on_output_line(&mut ctx, &task_id, &line, &stream).await;
             }
 
             DaemonNotification::TaskStarted { task_id } => {

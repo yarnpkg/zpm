@@ -20,7 +20,7 @@ impl TaskRunHandler for BufferedHandler {
         }
     }
 
-    async fn on_output_line(&mut self, _ctx: &mut TaskRunContext, _task_id: &str, _line: &str) {}
+    async fn on_output_line(&mut self, _ctx: &mut TaskRunContext, _task_id: &str, _line: &str, _stream: &str) {}
 
     async fn on_task_started(&mut self, ctx: &mut TaskRunContext, task_id: &str, _is_target: bool) {
         if ctx.verbose_level >= 2 {

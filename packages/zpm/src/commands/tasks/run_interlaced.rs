@@ -3,6 +3,7 @@ use std::process::ExitStatus;
 
 use async_trait::async_trait;
 use clipanion::cli;
+use serde_json::json;
 
 use super::helpers::{format_task_id, format_timestamp};
 use super::runner::{run_task, TaskRunConfig, TaskRunContext, TaskRunHandler};
@@ -11,6 +12,7 @@ use crate::error::Error;
 
 struct InterlacedHandler {
     timestamps: bool,
+    json: bool,
 }
 
 #[async_trait]
@@ -22,9 +24,19 @@ impl TaskRunHandler for InterlacedHandler {
         }
     }
 
-    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, task_id: &str, line: &str) {
+    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, task_id: &str, line: &str, stream: &str) {
         let mut stdout
             = std::io::stdout().lock();
+
+        if self.json {
+            writeln!(stdout, "{}", json!({
+                "type": "output",
+                "taskId": format_task_id(task_id),
+                "stream": stream,
+                "line": line,
+            })).ok();
+            return;
+        }
 
         if ctx.is_first_line {
             if ctx.has_attached() {
@@ -48,6 +60,17 @@ impl TaskRunHandler for InterlacedHandler {
     }
 
     async fn on_task_started(&mut self, ctx: &mut TaskRunContext, task_id: &str, _is_target: bool) {
+        if self.json {
+            let mut stdout
+                = std::io::stdout().lock();
+
+            writeln!(stdout, "{}", json!({
+                "type": "task-started",
+                "taskId": format_task_id(task_id),
+            })).ok();
+            return;
+        }
+
         if ctx.verbose_level >= 2 {
             let mut stdout
                 = std::io::stdout().lock();
@@ -67,6 +90,18 @@ impl TaskRunHandler for InterlacedHandler {
         exit_code: i32,
         _is_target: bool,
     ) {
+        if self.json {
+            let mut stdout
+                = std::io::stdout().lock();
+
+            writeln!(stdout, "{}", json!({
+                "type": "task-completed",
+                "taskId": format_task_id(task_id),
+                "exitCode": exit_code,
+            })).ok();
+            return;
+        }
+
         if ctx.verbose_level >= 2 {
             let mut stdout
                 = std::io::stdout().lock();
@@ -86,6 +121,17 @@ impl TaskRunHandler for InterlacedHandler {
         error: &str,
         is_target: bool,
     ) -> Option<Error> {
+        if self.json {
+            let mut stdout
+                = std::io::stdout().lock();
+
+            writeln!(stdout, "{}", json!({
+                "type": "task-failed",
+                "taskId": format_task_id(task_id),
+                "error": error,
+            })).ok();
+        }
+
         if is_target {
             Some(Error::IpcError(format!("Task {} failed: {}", format_task_id(task_id), error)))
         } else {
@@ -116,6 +162,10 @@ pub struct TaskRunInterlaced {
     #[cli::option("--timestamps", default = false)]
     timestamps: bool,
 
+    /// Output JSON objects (one per line) for each task event
+    #[cli::option("--json", default = false)]
+    json: bool,
+
     /// Run the task without connecting to the daemon
     #[cli::option("--standalone", default = false)]
     standalone: bool,
@@ -132,16 +182,15 @@ impl TaskRunInterlaced {
         let mut handler
             = InterlacedHandler {
                 timestamps: self.timestamps,
+                json: self.json,
             };
 
-        let x = run_task(
+        run_task(
             &mut handler,
             &self.name,
             &self.args,
             self.standalone,
             self.verbose_level,
-        ).await;
-
-        x
+        ).await
     }
 }

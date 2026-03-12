@@ -106,6 +106,121 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should output JSON with --json flag`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, async ({path, run, runSwitch}) => {
+        await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+          `build:`,
+          `  echo "building"`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `build`);
+        const lines = stdout.trim().split(`\n`);
+
+        expect(lines.length).toBe(3);
+
+        const events = lines.map(line => JSON.parse(line));
+
+        expect(events[0]).toEqual({
+          type: `task-started`,
+          taskId: `test-package:build`,
+        });
+        expect(events[1]).toEqual({
+          type: `output`,
+          taskId: `test-package:build`,
+          stream: `stdout`,
+          line: `building`,
+        });
+        expect(events[2]).toEqual({
+          type: `task-completed`,
+          taskId: `test-package:build`,
+          exitCode: 0,
+        });
+      }),
+    );
+
+    test(
+      `it should output JSON for stderr with --json flag`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, async ({path, run, runSwitch}) => {
+        await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+          `build:`,
+          `  echo "error message" >&2`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `build`);
+        const lines = stdout.trim().split(`\n`);
+        const events = lines.map(line => JSON.parse(line));
+
+        const outputEvent = events.find(e => e.type === `output`);
+        expect(outputEvent).toEqual({
+          type: `output`,
+          taskId: `test-package:build`,
+          stream: `stderr`,
+          line: `error message`,
+        });
+      }),
+    );
+
+    test(
+      `it should output JSON for task dependencies with --json flag`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, async ({path, run, runSwitch}) => {
+        await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+          `setup:`,
+          `  echo "setup"`,
+          ``,
+          `build: setup`,
+          `  echo "build"`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `build`);
+        const lines = stdout.trim().split(`\n`);
+        const events = lines.map(line => JSON.parse(line));
+
+        // Should have events for both tasks
+        const taskStartedEvents = events.filter(e => e.type === `task-started`);
+        const taskCompletedEvents = events.filter(e => e.type === `task-completed`);
+
+        expect(taskStartedEvents.length).toBe(2);
+        expect(taskCompletedEvents.length).toBe(2);
+
+        // Verify setup runs before build
+        const setupStartIdx = events.findIndex(e => e.type === `task-started` && e.taskId === `test-package:setup`);
+        const buildStartIdx = events.findIndex(e => e.type === `task-started` && e.taskId === `test-package:build`);
+        expect(setupStartIdx).toBeLessThan(buildStartIdx);
+      }),
+    );
+
+    test(
+      `it should output JSON for failed tasks with --json flag`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, async ({path, run, runSwitch}) => {
+        await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+          `build:`,
+          `  echo "failing"`,
+          `  exit 1`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        await expect(runSwitch(`tasks`, `run`, `--standalone`, `--json`, `build`)).rejects.toMatchObject({
+          code: 1,
+        });
+      }),
+    );
+
+    test(
       `it should show dependency output on failure even with --silent-dependencies`,
       makeTemporaryEnv({
         name: `test-package`,
