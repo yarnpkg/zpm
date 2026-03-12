@@ -74,8 +74,8 @@ pub enum CoordinatorCommand {
 pub struct PushTasksResult {
     /// The directly requested task IDs
     pub task_ids: Vec<String>,
-    /// Total number of dependency tasks (excluding target tasks)
-    pub dependency_count: usize,
+    /// Dependency task IDs (excluding target tasks)
+    pub dependency_ids: Vec<String>,
     /// Long-lived tasks that we attached to (already running)
     pub attached_long_lived: Vec<AttachedLongLivedTask>,
     /// Error message if the operation failed
@@ -339,7 +339,7 @@ async fn execute_push_tasks(
     use std::time::SystemTime;
 
     let mut task_ids = Vec::new();
-    let mut total_dependency_count = 0;
+    let mut dependency_ids = Vec::new();
     let mut attached_long_lived = Vec::new();
 
     for task_sub in tasks {
@@ -398,13 +398,19 @@ async fn execute_push_tasks(
                     }
                 }
 
-                task_ids.push(target_id_str);
-                total_dependency_count += resolved_ctx_task_ids.len().saturating_sub(1);
+                task_ids.push(target_id_str.clone());
+
+                for resolved_id in &resolved_ctx_task_ids {
+                    let resolved_str = format_contextual_task_id(resolved_id);
+                    if resolved_str != target_id_str {
+                        dependency_ids.push(resolved_str);
+                    }
+                }
             }
             Err(e) => {
                 return PushTasksResult {
                     task_ids: vec![],
-                    dependency_count: 0,
+                    dependency_ids: vec![],
                     attached_long_lived: vec![],
                     error: Some(e.to_string()),
                 };
@@ -414,7 +420,7 @@ async fn execute_push_tasks(
 
     PushTasksResult {
         task_ids,
-        dependency_count: total_dependency_count,
+        dependency_ids,
         attached_long_lived,
         error: None,
     }

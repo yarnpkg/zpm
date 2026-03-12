@@ -119,7 +119,9 @@ impl SchedulerState {
             }
         }
 
-        if self.targets.contains(&ctx_task_id) && !self.completed.contains(&ctx_task_id) {
+        // If task is already in targets for this context, don't re-add it.
+        // This prevents running the same task twice when pushed multiple times.
+        if self.targets.contains(&ctx_task_id) {
             return Ok((ctx_task_id, vec![]));
         }
 
