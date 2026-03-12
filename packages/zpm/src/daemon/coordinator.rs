@@ -43,15 +43,30 @@ fn parse_base_task_id(contextual_task_id: &str) -> Option<TaskId> {
     })
 }
 
+/// Starts the daemon inline (in the current process) and returns the port via a channel.
+/// This is used for standalone mode where we want to run the daemon in the same process.
+pub async fn start_daemon_inline(project: Arc<Project>, port_tx: tokio::sync::oneshot::Sender<u16>) -> Result<(), Error> {
+    run_daemon_internal(project, Some(port_tx)).await
+}
+
 pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
+    run_daemon_internal(project, None).await
+}
+
+async fn run_daemon_internal(project: Arc<Project>, port_tx: Option<tokio::sync::oneshot::Sender<u16>>) -> Result<(), Error> {
     let (listener, port)
         = bind_to_available_port().await?;
 
     let daemon_url_str
         = daemon_url(port);
 
-    println!("{}", port);
-    let _ = std::io::stdout().flush();
+    // If a port sender is provided, send the port through it; otherwise print to stdout
+    if let Some(tx) = port_tx {
+        let _ = tx.send(port);
+    } else {
+        println!("{}", port);
+        let _ = std::io::stdout().flush();
+    }
 
     let scheduler
         = Arc::new(Scheduler::new());

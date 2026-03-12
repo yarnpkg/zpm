@@ -1,24 +1,12 @@
 import {ppath, xfs}  from '@yarnpkg/fslib';
 
-import {RunFunction} from '../../../../pkg-tests-core/sources/utils/tests';
-
-function cleanupDaemon(cb: RunFunction): RunFunction {
-  return async args => {
-    try {
-      await cb(args);
-    } finally {
-      await args.runSwitch(`switch`, `daemon`, `--kill-all`);
-    }
-  };
-}
-
 describe(`Commands`, () => {
   describe(`tasks push`, () => {
     test(
       `it should fail when not running inside a task context`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+      }, async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `build:`,
           `  echo "building"`,
@@ -30,14 +18,14 @@ describe(`Commands`, () => {
           code: 1,
           stdout: expect.stringContaining(`Not running inside a task context`),
         });
-      })),
+      }),
     );
 
     test(
       `it should allow pushing a task from within a running task`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+      }, async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `setup:`,
           `  echo "setup-done"`,
@@ -49,17 +37,17 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await runSwitch(`tasks`, `run`, `trigger`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `trigger`);
         expect(stdout).toContain(`trigger-done`);
         expect(stdout).toContain(`setup-done`);
-      })),
+      }),
     );
 
     test(
       `it should allow pushing multiple tasks at once`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+      }, async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `task-a:`,
           `  echo "task-a-done"`,
@@ -74,18 +62,18 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await runSwitch(`tasks`, `run`, `trigger`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `trigger`);
         expect(stdout).toContain(`trigger-done`);
         expect(stdout).toContain(`task-a-done`);
         expect(stdout).toContain(`task-b-done`);
-      })),
+      }),
     );
 
     test(
       `it should fail when pushing a nonexistent task`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+      }, async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `trigger:`,
           `  set -e`,
@@ -95,17 +83,17 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        await expect(runSwitch(`tasks`, `run`, `trigger`)).rejects.toMatchObject({
+        await expect(runSwitch(`tasks`, `run`, `--standalone`, `trigger`)).rejects.toMatchObject({
           code: 1,
         });
-      })),
+      }),
     );
 
     test(
       `it should wait for pushed tasks to complete before task run exits`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+      }, async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `slow-task:`,
           `  sleep 0.2 && echo "slow-task-done"`,
@@ -117,17 +105,17 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await runSwitch(`tasks`, `run`, `trigger`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `trigger`);
         expect(stdout).toContain(`trigger-done`);
         expect(stdout).toContain(`slow-task-done`);
-      })),
+      }),
     );
 
     test(
       `it should handle pushed tasks with dependencies`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+      }, async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `dep-task:`,
           `  echo "dep-task-done"`,
@@ -142,18 +130,18 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await runSwitch(`tasks`, `run`, `trigger`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `trigger`);
         expect(stdout).toContain(`trigger-done`);
         expect(stdout).toContain(`dep-task-done`);
         expect(stdout).toContain(`main-task-done`);
-      })),
+      }),
     );
 
     test(
       `it should fail the task run when a pushed task fails`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+      }, async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `failing-task:`,
           `  echo "about-to-fail"`,
@@ -167,17 +155,17 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        await expect(runSwitch(`tasks`, `run`, `trigger`)).rejects.toMatchObject({
+        await expect(runSwitch(`tasks`, `run`, `--standalone`, `trigger`)).rejects.toMatchObject({
           code: 1,
         });
-      })),
+      }),
     );
 
     test(
       `it should not run the same task twice when pushed multiple times`,
       makeTemporaryEnv({
         name: `test-package`,
-      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+      }, async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `counter:`,
           `  echo "counter-ran"`,
@@ -190,11 +178,11 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        const {stdout} = await runSwitch(`tasks`, `run`, `trigger`);
+        const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `trigger`);
         expect(stdout).toContain(`trigger-done`);
         const matches = stdout.match(/counter-ran/g);
         expect(matches).toHaveLength(1);
-      })),
+      }),
     );
   });
 });

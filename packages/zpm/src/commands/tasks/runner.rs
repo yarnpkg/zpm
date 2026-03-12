@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -105,18 +106,24 @@ pub async fn run_task(
     let workspace_name
         = workspace.name.to_file_string();
 
+    let project_cwd
+        = project.project_cwd.clone();
+
     let _daemon_handle: Option<StandaloneDaemonHandle>;
 
     let mut client
         = if standalone {
+            let project
+                = Arc::new(project);
+
             let (c, handle)
-                = DaemonClient::connect_standalone(&project.project_cwd).await?;
+                = DaemonClient::connect_standalone(project).await?;
 
             _daemon_handle = Some(handle);
             c
         } else {
             _daemon_handle = None;
-            DaemonClient::connect(&project.project_cwd).await?
+            DaemonClient::connect(&project_cwd).await?
         };
 
     let context_id

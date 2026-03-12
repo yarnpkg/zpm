@@ -8,17 +8,20 @@ use futures::stream::StreamExt;
 use futures::SinkExt;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::task::AbortHandle;
 use tokio_tungstenite::tungstenite::Message;
 use zpm_switch::YARN_SWITCH_PATH_ENV;
 
+use super::coordinator::start_daemon_inline;
 use super::ipc::{
     AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest,
     DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskSubscription,
-    DAEMON_SERVER_ENV,
+    DAEMON_SERVER_ENV, daemon_url,
 };
 use zpm_utils::Path;
 
 use crate::error::Error;
+use crate::project::Project;
 
 type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<DaemonResponse>>>>;
 
@@ -32,26 +35,20 @@ pub struct PushTasksResult {
     pub attached_long_lived: Vec<AttachedLongLivedTask>,
 }
 
-/// Handle to a standalone daemon process that can be killed when no longer needed
+/// Handle to a standalone daemon running in-process that can be aborted when no longer needed
 pub struct StandaloneDaemonHandle {
-    pid: u32,
+    abort_handle: AbortHandle,
 }
 
 impl StandaloneDaemonHandle {
-    pub fn kill(&self) {
-        #[cfg(unix)]
-        {
-            let _ = std::process::Command::new("kill")
-                .arg("-9")
-                .arg(format!("-{}", self.pid))
-                .status();
-        }
+    pub fn abort(&self) {
+        self.abort_handle.abort();
     }
 }
 
 impl Drop for StandaloneDaemonHandle {
     fn drop(&mut self) {
-        self.kill();
+        self.abort();
     }
 }
 
@@ -79,15 +76,52 @@ impl DaemonClient {
         Self::connect_to_url(&url).await
     }
 
-    /// Start a new standalone daemon that is not registered and will be killed when the handle is dropped
-    pub async fn connect_standalone(project_root: &Path) -> Result<(Self, StandaloneDaemonHandle), Error> {
-        let (url, pid)
-            = start_standalone_daemon(project_root).await?;
+    /// Start a new standalone daemon in-process that will be aborted when the handle is dropped
+    pub async fn connect_standalone(project: Arc<Project>) -> Result<(Self, StandaloneDaemonHandle), Error> {
+        let (port_tx, port_rx)
+            = oneshot::channel::<u16>();
 
-        let client
-            = Self::connect_to_url(&url).await?;
+        let project_clone
+            = project.clone();
 
-        Ok((client, StandaloneDaemonHandle { pid }))
+        let join_handle
+            = tokio::spawn(async move {
+                if let Err(e) = start_daemon_inline(project_clone, port_tx).await {
+                    eprintln!("Standalone daemon error: {}", e);
+                }
+            });
+
+        let abort_handle
+            = join_handle.abort_handle();
+
+        let port
+            = port_rx
+                .await
+                .map_err(|_| Error::IpcError("Daemon failed to start".to_string()))?;
+
+        let url
+            = daemon_url(port);
+
+        // Poll until daemon is ready
+        let max_attempts
+            = 100;
+
+        let poll_interval
+            = Duration::from_millis(50);
+
+        for _ in 0..max_attempts {
+            match tokio_tungstenite::connect_async(&url).await {
+                Ok(_) => {
+                    let client
+                        = Self::connect_to_url(&url).await?;
+
+                    return Ok((client, StandaloneDaemonHandle { abort_handle }));
+                }
+                Err(_) => tokio::time::sleep(poll_interval).await,
+            }
+        }
+
+        Err(Error::IpcError("Timeout waiting for daemon to be ready".to_string()))
     }
 
     pub async fn connect_to_url(url: &str) -> Result<Self, Error> {
@@ -378,66 +412,3 @@ async fn start_daemon(project_root: &Path) -> Result<String, Error> {
     Ok(url.trim().to_string())
 }
 
-async fn start_standalone_daemon(project_root: &Path) -> Result<(String, u32), Error> {
-    let current_exe
-        = std::env::current_exe()
-            .map_err(|e| Error::IpcError(format!("Failed to get current executable: {}", e)))?;
-
-    let mut cmd
-        = tokio::process::Command::new(current_exe);
-
-    cmd.args(["debug", "daemon"])
-        .current_dir(project_root.to_path_buf())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null());
-
-    #[cfg(unix)]
-    cmd.process_group(0);
-
-    let mut child
-        = cmd
-            .spawn()
-            .map_err(|e| Error::IpcError(format!("Failed to start standalone daemon: {}", e)))?;
-
-    let pid
-        = child.id().ok_or_else(|| Error::IpcError("Failed to get daemon PID".to_string()))?;
-
-    let stdout
-        = child
-            .stdout
-            .take()
-            .ok_or_else(|| Error::IpcError("Failed to capture daemon stdout".to_string()))?;
-
-    let mut reader
-        = tokio::io::BufReader::new(stdout).lines();
-
-    let port_line
-        = tokio::time::timeout(Duration::from_secs(10), reader.next_line())
-            .await
-            .map_err(|_| Error::IpcError("Timeout waiting for daemon port".to_string()))?
-            .map_err(|e| Error::IpcError(e.to_string()))?
-            .ok_or_else(|| Error::IpcError("Daemon closed without printing port".to_string()))?;
-
-    let port: u16
-        = port_line.trim().parse()
-            .map_err(|_| Error::IpcError(format!("Invalid port from daemon: {}", port_line)))?;
-
-    let url
-        = format!("ws://127.0.0.1:{}", port);
-
-    let max_attempts
-        = 100;
-
-    let poll_interval
-        = Duration::from_millis(50);
-
-    for _ in 0..max_attempts {
-        match tokio_tungstenite::connect_async(&url).await {
-            Ok(_) => return Ok((url, pid)),
-            Err(_) => tokio::time::sleep(poll_interval).await,
-        }
-    }
-
-    Err(Error::IpcError("Timeout waiting for daemon to be ready".to_string()))
-}
