@@ -675,6 +675,10 @@ impl ScriptEnvironment {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
+        // Put the child in its own process group so we can kill the entire group if needed
+        #[cfg(unix)]
+        cmd.process_group(0);
+
         let mut child = cmd.spawn()
             .map_err(|e| Error::SpawnFailed { name: program.to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 

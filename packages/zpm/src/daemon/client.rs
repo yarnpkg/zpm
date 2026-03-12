@@ -256,9 +256,15 @@ impl DaemonClient {
             .send(Message::Text(json.into()))
             .map_err(|e| Error::IpcError(e.to_string()))?;
 
-        response_rx
-            .await
-            .map_err(|_| Error::IpcError("Connection closed while waiting for response".to_string()))
+        const REQUEST_TIMEOUT_SECS: u64 = 30;
+
+        tokio::time::timeout(
+            Duration::from_secs(REQUEST_TIMEOUT_SECS),
+            response_rx,
+        )
+        .await
+        .map_err(|_| Error::IpcError("Request timed out".to_string()))?
+        .map_err(|_| Error::IpcError("Connection closed while waiting for response".to_string()))
     }
 
     pub async fn recv_notification(&mut self) -> Result<DaemonNotification, Error> {

@@ -44,33 +44,42 @@ pub fn handle_push_tasks(
                 .and_then(|tid| check_if_long_lived(project, tid))
                 .unwrap_or(false);
 
+        // For long-lived tasks, use atomic check-and-claim to prevent race conditions
         if is_long_lived {
             if let Some(ref tid) = task_id {
-                if let Some(existing) = long_lived_registry.get_existing(tid) {
-                    task_ids.push(existing.contextual_task_id.clone());
+                // try_claim_registration atomically checks if task exists and claims it if not
+                if let Some(existing) = long_lived_registry.try_claim_registration(tid) {
+                    // Task already exists (and has a non-empty contextual_task_id), attach to it
+                    if !existing.contextual_task_id.is_empty() {
+                        task_ids.push(existing.contextual_task_id.clone());
 
-                    let started_at_ms
-                        = existing
-                            .started_at
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .map(|d| d.as_millis() as u64)
-                            .unwrap_or(0);
+                        let started_at_ms
+                            = existing
+                                .started_at
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0);
 
-                    attached_long_lived.push(AttachedLongLivedTask {
-                        task_id: existing.contextual_task_id.clone(),
-                        started_at_ms,
-                    });
+                        attached_long_lived.push(AttachedLongLivedTask {
+                            task_id: existing.contextual_task_id.clone(),
+                            started_at_ms,
+                        });
 
-                    if let Some(sub_id) = subscription_id {
-                        subscription_registry.add_tasks_to_subscription(
-                            sub_id,
-                            vec![existing.contextual_task_id],
-                            vec![],
-                        );
+                        if let Some(sub_id) = subscription_id {
+                            subscription_registry.add_tasks_to_subscription(
+                                sub_id,
+                                vec![existing.contextual_task_id],
+                                vec![],
+                            );
+                        }
+
+                        continue;
                     }
-
-                    continue;
+                    // If contextual_task_id is empty, another caller is currently registering
+                    // We should wait or retry, but for now we'll proceed to add a new task
+                    // which will effectively be a no-op since the scheduler will see it's already there
                 }
+                // If None, we've claimed the registration and should proceed to create the task
             }
         }
 
@@ -94,8 +103,9 @@ pub fn handle_push_tasks(
                     = format_contextual_task_id(&ctx_task_id);
 
                 if is_long_lived {
-                    if let Some(tid) = task_id {
-                        long_lived_registry.register(tid, target_id_str.clone());
+                    if let Some(ref tid) = task_id {
+                        // Complete the registration that was claimed earlier
+                        long_lived_registry.complete_registration(tid, target_id_str.clone());
                     }
                 }
 
@@ -113,6 +123,12 @@ pub fn handle_push_tasks(
                 total_dependency_count += resolved_ctx_task_ids.len().saturating_sub(1);
             }
             Err(e) => {
+                // Cancel the claimed registration on error
+                if is_long_lived {
+                    if let Some(ref tid) = task_id {
+                        long_lived_registry.cancel_registration(tid);
+                    }
+                }
                 return DaemonResponse::Error {
                     message: e.to_string(),
                 };

@@ -44,6 +44,13 @@ pub fn register_daemon(entry: &DaemonEntry) -> Result<(), Error> {
         .fs_create_parent()?
         .fs_write(JsonDocument::to_string(entry)?)?;
 
+    // Set restrictive permissions (owner read/write only) to protect sensitive daemon info
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        daemon_path.fs_set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+
     Ok(())
 }
 

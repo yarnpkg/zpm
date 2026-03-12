@@ -56,14 +56,14 @@ impl TaskRunner {
                 .child
                 .stdout
                 .take()
-                .expect("Failed to capture stdout");
+                .ok_or_else(|| Error::TaskExecutionFailed("Failed to capture stdout".to_string()))?;
 
         let child_stderr
             = running
                 .child
                 .stderr
                 .take()
-                .expect("Failed to capture stderr");
+                .ok_or_else(|| Error::TaskExecutionFailed("Failed to capture stderr".to_string()))?;
 
         stream_output(child_stdout, child_stderr, output_tx).await;
 

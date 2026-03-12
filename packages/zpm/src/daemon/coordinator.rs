@@ -120,22 +120,27 @@ async fn run_daemon_internal(project: Arc<Project>, port_tx: Option<tokio::sync:
     tokio::spawn(async move {
         while let Some(event) = loop_event_rx.recv().await {
             if let ExecutorEvent::Output { task_id, line, stream } = &event {
-                if let Ok(mut buffer) = output_buffer_for_events.write() {
-                    let lines: &mut Vec<BufferedOutputLine>
-                        = buffer
-                            .entry(task_id.to_string())
-                            .or_insert_with(Vec::new);
+                match output_buffer_for_events.write() {
+                    Ok(mut buffer) => {
+                        let lines: &mut Vec<BufferedOutputLine>
+                            = buffer
+                                .entry(task_id.to_string())
+                                .or_insert_with(Vec::new);
 
-                    lines.push(BufferedOutputLine {
-                        line: line.to_string(),
-                        stream: stream.as_str().to_string(),
-                    });
+                        lines.push(BufferedOutputLine {
+                            line: line.to_string(),
+                            stream: stream.as_str().to_string(),
+                        });
 
-                    if lines.len() > OUTPUT_BUFFER_MAX_LINES {
-                        let excess
-                            = lines.len() - OUTPUT_BUFFER_MAX_LINES;
+                        if lines.len() > OUTPUT_BUFFER_MAX_LINES {
+                            let excess
+                                = lines.len() - OUTPUT_BUFFER_MAX_LINES;
 
-                        lines.drain(0..excess);
+                            lines.drain(0..excess);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to acquire output buffer lock: {}", e);
                     }
                 }
             }
@@ -400,10 +405,24 @@ async fn watch_project_root(project_root: Path, initial_inode: u64) {
 async fn wait_for_shutdown_signal(process_registry: Arc<ProcessRegistry>) {
     use tokio::signal::unix::{signal, SignalKind};
 
-    let mut sigterm = signal(SignalKind::terminate())
-        .expect("Failed to register SIGTERM handler");
-    let mut sigint = signal(SignalKind::interrupt())
-        .expect("Failed to register SIGINT handler");
+    let sigterm = match signal(SignalKind::terminate()) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Failed to register SIGTERM handler: {}", e);
+            return;
+        }
+    };
+
+    let sigint = match signal(SignalKind::interrupt()) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Failed to register SIGINT handler: {}", e);
+            return;
+        }
+    };
+
+    tokio::pin!(sigterm);
+    tokio::pin!(sigint);
 
     tokio::select! {
         _ = sigterm.recv() => {}
@@ -428,14 +447,21 @@ async fn graceful_shutdown(process_registry: Arc<ProcessRegistry>) {
         std::process::exit(0);
     }
 
-    // First, send SIGTERM to all child processes for graceful shutdown
+    // First, send SIGTERM to all child process groups for graceful shutdown
+    // Since we spawn children with process_group(0), each child is in its own group
+    // where the group ID equals the child's PID
     #[cfg(unix)]
     {
         for &pid in &pids {
-            let _ = std::process::Command::new("kill")
-                .arg("-TERM")
-                .arg(pid.to_string())
-                .status();
+            // Use killpg to kill the entire process group (negative pid means process group)
+            let result = unsafe { libc::killpg(pid as i32, libc::SIGTERM) };
+            if result != 0 {
+                // If killpg fails (e.g., group doesn't exist), try killing the process directly
+                let result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+                if result != 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) {
+                    eprintln!("Failed to send SIGTERM to process {}: {}", pid, std::io::Error::last_os_error());
+                }
+            }
         }
     }
 
@@ -448,10 +474,19 @@ async fn graceful_shutdown(process_registry: Arc<ProcessRegistry>) {
     #[cfg(unix)]
     {
         for pid in remaining_pids {
-            let _ = std::process::Command::new("kill")
-                .arg("-9")
-                .arg(pid.to_string())
-                .status();
+            // Check if process is still alive before sending SIGKILL
+            let alive = unsafe { libc::kill(pid as i32, 0) == 0 };
+            if alive {
+                // Use killpg to kill the entire process group
+                let result = unsafe { libc::killpg(pid as i32, libc::SIGKILL) };
+                if result != 0 {
+                    // If killpg fails, try killing the process directly
+                    let result = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+                    if result != 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) {
+                        eprintln!("Failed to send SIGKILL to process {}: {}", pid, std::io::Error::last_os_error());
+                    }
+                }
+            }
         }
     }
 

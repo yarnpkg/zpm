@@ -53,6 +53,61 @@ impl LongLivedRegistry {
         inner.entries.get(task_id).cloned()
     }
 
+    /// Atomically checks if a long-lived task exists, and if not, marks it as pending registration.
+    /// Returns `Some(existing_entry)` if the task already exists, or `None` if this caller
+    /// should proceed to create and register the task.
+    ///
+    /// This prevents race conditions where two concurrent callers both see "doesn't exist"
+    /// and both try to create the same task.
+    pub fn try_claim_registration(&self, task_id: &TaskId) -> Option<LongLivedEntry> {
+        let mut inner
+            = self.inner.write().unwrap();
+
+        // If the task already exists, return it
+        if let Some(entry) = inner.entries.get(task_id) {
+            return Some(entry.clone());
+        }
+
+        // Insert a placeholder entry to claim this task
+        // The contextual_task_id will be updated when register() is called
+        inner.entries.insert(
+            task_id.clone(),
+            LongLivedEntry {
+                task_id: task_id.clone(),
+                contextual_task_id: String::new(), // Placeholder, will be filled in
+                warm_up_complete: false,
+                process_id: None,
+                started_at: SystemTime::now(),
+            },
+        );
+
+        None
+    }
+
+    /// Updates a previously claimed registration with the actual contextual task ID.
+    /// Should be called after try_claim_registration returns None and the task has been scheduled.
+    pub fn complete_registration(&self, task_id: &TaskId, contextual_task_id: String) {
+        let mut inner
+            = self.inner.write().unwrap();
+
+        if let Some(entry) = inner.entries.get_mut(task_id) {
+            entry.contextual_task_id = contextual_task_id;
+        }
+    }
+
+    /// Removes a claimed registration if scheduling fails.
+    pub fn cancel_registration(&self, task_id: &TaskId) {
+        let mut inner
+            = self.inner.write().unwrap();
+
+        // Only remove if the contextual_task_id is still empty (placeholder)
+        if let Some(entry) = inner.entries.get(task_id) {
+            if entry.contextual_task_id.is_empty() {
+                inner.entries.remove(task_id);
+            }
+        }
+    }
+
     pub fn set_process_id(&self, task_id: &TaskId, process_id: u32) {
         let mut inner
             = self.inner.write().unwrap();

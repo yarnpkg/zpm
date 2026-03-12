@@ -83,10 +83,9 @@ pub async fn handle_connection(
                                             },
                                         );
 
-                                    let error_json
-                                        = serde_json::to_string(&error_response).unwrap();
-
-                                    write.send(Message::Text(error_json.into())).await.ok();
+                                    if let Ok(error_json) = serde_json::to_string(&error_response) {
+                                        let _ = write.send(Message::Text(error_json.into())).await;
+                                    }
                                     continue;
                                 }
                             };

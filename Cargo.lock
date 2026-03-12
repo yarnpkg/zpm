@@ -4494,6 +4494,7 @@ dependencies = [
  "indexmap 2.13.0",
  "interprocess",
  "itertools 0.14.0",
+ "libc",
  "open",
  "p256",
  "rand",
