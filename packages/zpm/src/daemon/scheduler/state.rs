@@ -244,7 +244,8 @@ impl SchedulerState {
         }
 
         if let Some(task_subtasks) = self.subtasks.get(task_id) {
-            task_subtasks.iter().all(|s| self.completed.contains(s))
+            // All subtasks must be completed AND none of them can have failed
+            task_subtasks.iter().all(|s| self.completed.contains(s) && !self.failed.contains(s))
         } else {
             true
         }

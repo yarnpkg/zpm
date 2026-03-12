@@ -7,6 +7,7 @@ use futures::SinkExt;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
+use super::super::coordinator::CoordinatorCommand;
 use super::super::handlers::dispatch_request;
 use super::super::ipc::{
     BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest, DaemonRequestEnvelope,
@@ -20,6 +21,9 @@ use crate::project::Project;
 
 pub type OutputBuffer = Arc<RwLock<HashMap<String, Vec<BufferedOutputLine>>>>;
 
+/// Sender type for coordinator commands
+pub type CommandSender = mpsc::UnboundedSender<CoordinatorCommand>;
+
 pub struct ConnectionContext {
     pub project: Arc<Project>,
     pub scheduler: Arc<Scheduler>,
@@ -27,6 +31,8 @@ pub struct ConnectionContext {
     pub output_buffer: OutputBuffer,
     pub long_lived_registry: Arc<LongLivedRegistry>,
     pub process_registry: Arc<ProcessRegistry>,
+    /// Channel for sending commands to the coordinator
+    pub command_tx: CommandSender,
 }
 
 pub async fn handle_connection(
@@ -139,6 +145,7 @@ pub async fn handle_connection(
                                 &ctx.long_lived_registry,
                                 &ctx.process_registry,
                                 subscription_id,
+                                &ctx.command_tx,
                             ).await;
 
                         let message

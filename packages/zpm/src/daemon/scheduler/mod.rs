@@ -118,6 +118,18 @@ impl Scheduler {
             .collect()
     }
 
+    /// Check if any subtask of the given task has failed.
+    /// Used to propagate failures when a parent script finishes successfully
+    /// but a subtask had already failed.
+    pub fn has_failed_subtask(&self, task_id: &ContextualTaskId) -> bool {
+        let state = self.state.read().expect("scheduler lock poisoned");
+        if let Some(subtasks) = state.subtasks.get(task_id) {
+            subtasks.iter().any(|s| state.failed.contains(s))
+        } else {
+            false
+        }
+    }
+
     pub fn all_targets_completed(&self) -> bool {
         let state = self.state.read().expect("scheduler lock poisoned");
         state.all_targets_completed()

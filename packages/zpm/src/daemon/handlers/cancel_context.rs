@@ -1,35 +1,34 @@
-use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot};
 
+use super::super::coordinator::CoordinatorCommand;
 use super::super::ipc::DaemonResponse;
-use super::super::process_registry::ProcessRegistry;
-use super::super::scheduler::Scheduler;
 
-pub fn handle_cancel_context(
+/// Handle a context cancellation request by sending a command to the coordinator.
+/// This ensures all state mutations happen in a single async task, eliminating
+/// race conditions with spawning tasks.
+pub async fn handle_cancel_context(
     context_id: &str,
-    scheduler: &Scheduler,
-    process_registry: &Arc<ProcessRegistry>,
+    command_tx: &mpsc::UnboundedSender<CoordinatorCommand>,
 ) -> DaemonResponse {
-    // Mark all tasks in the context as failed
-    let cancelled_ids = scheduler.cancel_context(context_id);
-    let cancelled_count = cancelled_ids.len();
+    let (response_tx, response_rx) = oneshot::channel();
 
-    // Atomically claim and remove all PIDs for this context.
-    // This prevents race conditions where a task might complete naturally between
-    // checking for its PID and attempting to kill it, which could result in
-    // sending signals to a reused PID belonging to a different process.
-    let pids = process_registry.take_pids_for_context(context_id);
-
-    #[cfg(unix)]
-    {
-        for pid in pids {
-            // Use killpg to kill the entire process group (since children are spawned with process_group(0))
-            let result = unsafe { libc::killpg(pid as i32, libc::SIGTERM) };
-            if result != 0 {
-                // If killpg fails (e.g., group doesn't exist), try killing the process directly
-                let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-            }
-        }
+    // Send the cancel command to the coordinator
+    if command_tx.send(CoordinatorCommand::CancelContext {
+        context_id: context_id.to_string(),
+        response_tx,
+    }).is_err() {
+        return DaemonResponse::Error {
+            message: "Coordinator channel closed".to_string(),
+        };
     }
 
-    DaemonResponse::ContextCancelled { cancelled_count }
+    // Wait for the coordinator to process the cancellation
+    match response_rx.await {
+        Ok(result) => DaemonResponse::ContextCancelled {
+            cancelled_count: result.cancelled_count,
+        },
+        Err(_) => DaemonResponse::Error {
+            message: "Coordinator did not respond".to_string(),
+        },
+    }
 }

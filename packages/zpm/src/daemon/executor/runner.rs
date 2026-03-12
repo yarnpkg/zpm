@@ -1,10 +1,9 @@
 use std::process::ExitStatus;
-use std::sync::Arc;
 
 use tokio::sync::mpsc;
-use super::super::ipc::{TASK_CURRENT_ENV, DAEMON_SERVER_ENV};
-use super::super::process_registry::ProcessRegistry;
 
+use super::super::coordinator::CoordinatorCommand;
+use super::super::ipc::{TASK_CURRENT_ENV, DAEMON_SERVER_ENV};
 use super::super::scheduler::PreparedTask;
 use super::output::{stream_output, OutputLine};
 use crate::error::Error;
@@ -14,12 +13,17 @@ pub struct TaskRunner {
     prepared: PreparedTask,
     task_id: String,
     daemon_url: String,
-    process_registry: Arc<ProcessRegistry>,
+    command_tx: mpsc::UnboundedSender<CoordinatorCommand>,
 }
 
 impl TaskRunner {
-    pub fn new(prepared: PreparedTask, task_id: String, daemon_url: String, process_registry: Arc<ProcessRegistry>) -> Self {
-        Self { prepared, task_id, daemon_url, process_registry }
+    pub fn new(
+        prepared: PreparedTask,
+        task_id: String,
+        daemon_url: String,
+        command_tx: mpsc::UnboundedSender<CoordinatorCommand>,
+    ) -> Self {
+        Self { prepared, task_id, daemon_url, command_tx }
     }
 
     pub async fn run(
@@ -45,10 +49,15 @@ impl TaskRunner {
                 )
                 .await?;
 
-        // Register the process PID for signal propagation and context-based cancellation
+        // Register the process PID via the coordinator command channel.
+        // This ensures the coordinator can track spawning tasks and handle
+        // race conditions with context cancellation.
         let pid = running.child.id();
         if let Some(pid) = pid {
-            self.process_registry.register_with_task(pid, self.task_id.clone());
+            let _ = self.command_tx.send(CoordinatorCommand::RegisterPid {
+                task_id: self.task_id.clone(),
+                pid,
+            });
         }
 
         let child_stdout
@@ -72,7 +81,10 @@ impl TaskRunner {
 
         // Unregister the process PID after it exits
         if let Some(pid) = pid {
-            self.process_registry.unregister_with_task(pid, &self.task_id);
+            let _ = self.command_tx.send(CoordinatorCommand::UnregisterPid {
+                task_id: self.task_id.clone(),
+                pid,
+            });
         }
 
         Ok(status)

@@ -5,6 +5,9 @@ mod stop_task;
 
 use std::sync::Arc;
 
+use tokio::sync::mpsc;
+
+use super::coordinator::CoordinatorCommand;
 use super::ipc::{BufferedOutputLine, DaemonRequest, DaemonResponse};
 use super::long_lived::LongLivedRegistry;
 use super::process_registry::ProcessRegistry;
@@ -25,8 +28,10 @@ pub async fn dispatch_request(
     output_buffer: &OutputBuffer,
     subscription_registry: &SubscriptionRegistry,
     long_lived_registry: &Arc<LongLivedRegistry>,
+    #[allow(unused_variables)]
     process_registry: &Arc<ProcessRegistry>,
     subscription_id: Option<SubscriptionId>,
+    command_tx: &mpsc::UnboundedSender<CoordinatorCommand>,
 ) -> DaemonResponse {
     match request {
         DaemonRequest::Ping => DaemonResponse::Pong,
@@ -62,10 +67,8 @@ pub async fn dispatch_request(
             handle_stop_task(
                 &task_name,
                 workspace.as_deref(),
-                project,
-                long_lived_registry,
-                process_registry,
-            )
+                command_tx,
+            ).await
         }
         DaemonRequest::ListLongLivedTasks => {
             handle_list_long_lived_tasks(project, long_lived_registry)
@@ -73,9 +76,8 @@ pub async fn dispatch_request(
         DaemonRequest::CancelContext { context_id } => {
             handle_cancel_context(
                 &context_id,
-                scheduler,
-                process_registry,
-            )
+                command_tx,
+            ).await
         }
     }
 }

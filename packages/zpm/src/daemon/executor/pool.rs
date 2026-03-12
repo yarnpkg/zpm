@@ -1,14 +1,13 @@
 use std::collections::HashSet;
 use std::pin::Pin;
 use std::process::ExitStatus;
-use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::Future;
 use tokio::sync::mpsc;
 
+use super::super::coordinator::CoordinatorCommand;
 use super::super::events::ExecutorEvent;
-use super::super::process_registry::ProcessRegistry;
 use super::super::scheduler::{format_contextual_task_id, ContextualTaskId, PreparedTask};
 use super::output::OutputLine;
 use super::runner::TaskRunner;
@@ -22,17 +21,21 @@ pub struct ExecutorPool {
     running: HashSet<ContextualTaskId>,
     event_tx: mpsc::UnboundedSender<ExecutorEvent>,
     daemon_url: String,
-    process_registry: Arc<ProcessRegistry>,
+    command_tx: mpsc::UnboundedSender<CoordinatorCommand>,
 }
 
 impl ExecutorPool {
-    pub fn new(event_tx: mpsc::UnboundedSender<ExecutorEvent>, daemon_url: String, process_registry: Arc<ProcessRegistry>) -> Self {
+    pub fn new(
+        event_tx: mpsc::UnboundedSender<ExecutorEvent>,
+        daemon_url: String,
+        command_tx: mpsc::UnboundedSender<CoordinatorCommand>,
+    ) -> Self {
         Self {
             tasks: FuturesUnordered::new(),
             running: HashSet::new(),
             event_tx,
             daemon_url,
-            process_registry,
+            command_tx,
         }
     }
 
@@ -42,7 +45,7 @@ impl ExecutorPool {
         let task_id_clone = task_id.clone();
         let task_id_for_result = task_id.clone();
         let daemon_url = self.daemon_url.clone();
-        let process_registry = self.process_registry.clone();
+        let command_tx = self.command_tx.clone();
 
         if event_tx.send(ExecutorEvent::Started {
             task_id: task_id_str.clone(),
@@ -71,7 +74,7 @@ impl ExecutorPool {
         self.running.insert(task_id.clone());
 
         let future: TaskFuture = Box::pin(async move {
-            let runner = TaskRunner::new(prepared, task_id_str, daemon_url, process_registry);
+            let runner = TaskRunner::new(prepared, task_id_str, daemon_url, command_tx);
             let result = runner.run(output_tx).await;
             (task_id_for_result, result.map(|status| (task_id_clone, status)))
         });
