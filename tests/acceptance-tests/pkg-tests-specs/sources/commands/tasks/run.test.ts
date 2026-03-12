@@ -754,15 +754,9 @@ describe(`Commands`, () => {
         }, async ({path, run, runSwitch}) => {
           // Diamond pattern: target depends on B and C, both depend on D
           // D should only run once, not twice
-          const counterFile = ppath.join(path, `d-counter`);
-          await xfs.writeFilePromise(counterFile, `0`);
-
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `task-d:`,
-            `  count=$(cat d-counter)`,
-            `  count=$((count + 1))`,
-            `  echo $count > d-counter`,
-            `  echo "task-d:$count"`,
+            `  echo "task-d"`,
             ``,
             `task-b: task-d`,
             `  echo "task-b"`,
@@ -776,23 +770,29 @@ describe(`Commands`, () => {
 
           await run(`install`);
 
-          const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `target`);
-          const lines = stdout.trim().split(`\n`);
+          const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `target`);
+          const events = stdout.trim().split(`\n`).map(line => JSON.parse(line));
 
-          // D should run exactly once
-          expect(lines.filter(l => l.startsWith(`task-d`)).length).toBe(1);
-          expect(lines[0]).toBe(`task-d:1`);
+          // D should be started exactly once
+          const taskDStarted = events.filter(e => e.type === `task-started` && e.taskId === `test-package:task-d`);
+          expect(taskDStarted.length).toBe(1);
 
-          // B and C should each run once (in any order)
-          expect(lines.filter(l => l === `task-b`).length).toBe(1);
-          expect(lines.filter(l => l === `task-c`).length).toBe(1);
+          // All tasks should complete exactly once
+          const completedTasks = events.filter(e => e.type === `task-completed`).map(e => e.taskId);
+          expect(completedTasks.sort()).toEqual([
+            `test-package:target`,
+            `test-package:task-b`,
+            `test-package:task-c`,
+            `test-package:task-d`,
+          ]);
 
-          // Target should run last
-          expect(lines[lines.length - 1]).toBe(`target`);
-
-          // Counter should show D ran once
-          const finalCount = await xfs.readFilePromise(counterFile, `utf8`);
-          expect(finalCount.trim()).toBe(`1`);
+          // D should start before B and C
+          const startEvents = events.filter(e => e.type === `task-started`);
+          const dStartIdx = startEvents.findIndex(e => e.taskId === `test-package:task-d`);
+          const bStartIdx = startEvents.findIndex(e => e.taskId === `test-package:task-b`);
+          const cStartIdx = startEvents.findIndex(e => e.taskId === `test-package:task-c`);
+          expect(dStartIdx).toBeLessThan(bStartIdx);
+          expect(dStartIdx).toBeLessThan(cStartIdx);
         }),
       );
 
@@ -821,11 +821,16 @@ describe(`Commands`, () => {
 
           await run(`install`);
 
-          const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `level-5`);
-          const lines = stdout.trim().split(`\n`);
+          const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `level-5`);
+          const events = stdout.trim().split(`\n`).map(line => JSON.parse(line));
 
-          // Should execute in correct order
-          expect(lines).toEqual([
+          // Extract task-started events in order
+          const startOrder = events
+            .filter(e => e.type === `task-started`)
+            .map(e => e.taskId.replace(`test-package:`, ``));
+
+          // Should start in correct dependency order
+          expect(startOrder).toEqual([
             `level-1`,
             `level-2`,
             `level-3`,
@@ -858,17 +863,24 @@ describe(`Commands`, () => {
 
           await run(`install`);
 
-          const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `target`);
-          const lines = stdout.trim().split(`\n`);
+          const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `target`);
+          const events = stdout.trim().split(`\n`).map(line => JSON.parse(line));
 
-          // dep-c must come first
-          expect(lines[0]).toBe(`dep-c`);
+          const startEvents = events.filter(e => e.type === `task-started`);
+          const completedEvents = events.filter(e => e.type === `task-completed`);
 
-          // dep-a and dep-b can be in any order, but both before target
-          expect(lines.slice(1, 3).sort()).toEqual([`dep-a`, `dep-b`]);
+          // dep-c must start first
+          expect(startEvents[0].taskId).toBe(`test-package:dep-c`);
 
-          // target must come last
-          expect(lines[lines.length - 1]).toBe(`target`);
+          // dep-c must complete before dep-a and dep-b start
+          const cCompletedIdx = events.findIndex(e => e.type === `task-completed` && e.taskId === `test-package:dep-c`);
+          const aStartIdx = events.findIndex(e => e.type === `task-started` && e.taskId === `test-package:dep-a`);
+          const bStartIdx = events.findIndex(e => e.type === `task-started` && e.taskId === `test-package:dep-b`);
+          expect(cCompletedIdx).toBeLessThan(aStartIdx);
+          expect(cCompletedIdx).toBeLessThan(bStartIdx);
+
+          // target must complete last
+          expect(completedEvents[completedEvents.length - 1].taskId).toBe(`test-package:target`);
         }),
       );
     });
@@ -894,9 +906,23 @@ describe(`Commands`, () => {
 
           await run(`install`);
 
-          await expect(runSwitch(`tasks`, `run`, `--standalone`, `-vv`, `target`)).rejects.toMatchObject({
-            code: 1,
-          });
+          const result = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `target`).catch(e => e);
+          expect(result.code).toBe(1);
+
+          const events = result.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // Only failing-base should have started
+          const startedTasks = events.filter((e: any) => e.type === `task-started`).map((e: any) => e.taskId);
+          expect(startedTasks).toEqual([`test-package:failing-base`]);
+
+          // middle and target should never have started
+          expect(startedTasks).not.toContain(`test-package:middle`);
+          expect(startedTasks).not.toContain(`test-package:target`);
+
+          // failing-base should have completed with non-zero exit code
+          const failingBaseCompleted = events.find((e: any) => e.type === `task-completed` && e.taskId === `test-package:failing-base`);
+          expect(failingBaseCompleted).toBeDefined();
+          expect(failingBaseCompleted.exitCode).toBe(1);
         }),
       );
 
@@ -921,9 +947,14 @@ describe(`Commands`, () => {
 
           await run(`install`);
 
-          await expect(runSwitch(`tasks`, `run`, `--standalone`, `target`)).rejects.toMatchObject({
-            code: 1,
-          });
+          const result = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `target`).catch(e => e);
+          expect(result.code).toBe(1);
+
+          const events = result.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // target should never have started (its dependency failed)
+          const startedTasks = events.filter((e: any) => e.type === `task-started`).map((e: any) => e.taskId);
+          expect(startedTasks).not.toContain(`test-package:target`);
         }),
       );
 
