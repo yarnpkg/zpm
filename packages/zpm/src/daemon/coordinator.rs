@@ -225,6 +225,12 @@ async fn run_daemon_internal(project: Arc<Project>, port_tx: Option<tokio::sync:
                             tokio::spawn(async move {
                                 tokio::time::sleep(Duration::from_millis(LONG_LIVED_WARMUP_MS)).await;
 
+                                // Check if the task has failed or completed during warm-up
+                                // If so, skip marking warm-up complete to avoid incorrect state
+                                if scheduler_clone.is_failed(&ctx_task_id_clone) || scheduler_clone.is_completed(&ctx_task_id_clone) {
+                                    return;
+                                }
+
                                 if let Some(base_task_id) = parse_base_task_id(&task_id_clone) {
                                     registry_clone.mark_warm_up_complete(&base_task_id);
                                 }
@@ -275,6 +281,13 @@ async fn run_daemon_internal(project: Arc<Project>, port_tx: Option<tokio::sync:
                 = scheduler_for_loop.ready_tasks(&running);
 
             for (task_id, prepared_opt) in ready_tasks {
+                // Guard against TOCTOU race: cancel_context() may have marked this task
+                // as failed/completed after ready_tasks() returned but before we spawn.
+                // Re-check atomically before spawning.
+                if !scheduler_for_loop.should_spawn_task(&task_id) {
+                    continue;
+                }
+
                 if let Some(prepared) = prepared_opt {
                     executor_pool.spawn(task_id, prepared);
                 } else {

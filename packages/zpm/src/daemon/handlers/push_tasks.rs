@@ -1,15 +1,20 @@
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use zpm_primitives::Ident;
 use zpm_tasks::{TaskId, TaskName};
 
-use std::time::SystemTime;
-
 use super::super::ipc::{AttachedLongLivedTask, DaemonResponse, TaskSubscription, LONG_LIVED_CONTEXT_ID};
-use super::super::long_lived::{LongLivedEntry, LongLivedRegistry};
+use super::super::long_lived::{LongLivedRegistry, RegistrationResult};
 use super::super::scheduler::{format_contextual_task_id, Scheduler};
 use super::super::subscriptions::{SubscriptionId, SubscriptionRegistry};
 use crate::project::Project;
+
+/// Timeout for waiting for another caller to complete long-lived task registration.
+/// This should be generous enough to handle slow task resolution, but not so long
+/// that it blocks indefinitely. The orphan detection in LongLivedRegistry will
+/// clean up truly stuck registrations after ORPHAN_TIMEOUT (30s).
+const REGISTRATION_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub async fn handle_push_tasks(
     tasks: &[TaskSubscription],
@@ -47,39 +52,12 @@ pub async fn handle_push_tasks(
         // For long-lived tasks, use atomic check-and-claim to prevent race conditions
         if is_long_lived {
             if let Some(ref tid) = task_id {
-                // try_claim_registration atomically checks if task exists and claims it if not
-                // We retry a few times if we see an in-progress registration (empty contextual_task_id)
-                const MAX_RETRIES: u32 = 50;
-                const RETRY_DELAY_MS: u64 = 100;
-
-                enum RegistrationResult {
-                    AttachedToExisting(LongLivedEntry),
-                    WeClaimedRegistration,
-                    TimedOut,
-                }
-
-                let mut result = RegistrationResult::TimedOut;
-
-                for _ in 0..MAX_RETRIES {
-                    match long_lived_registry.try_claim_registration(tid) {
-                        Some(existing) => {
-                            // Task already exists
-                            if !existing.contextual_task_id.is_empty() {
-                                // Registration is complete, attach to existing task
-                                result = RegistrationResult::AttachedToExisting(existing);
-                                break;
-                            }
-                            // contextual_task_id is empty - another caller is currently registering
-                            // Wait briefly and retry
-                            tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
-                        }
-                        None => {
-                            // We've claimed the registration, proceed to create the task
-                            result = RegistrationResult::WeClaimedRegistration;
-                            break;
-                        }
-                    }
-                }
+                // Use the async wait_for_registration which is more efficient than polling.
+                // It uses tokio::sync::Notify to wake up when registration state changes,
+                // and handles orphaned registrations (from crashed callers) automatically.
+                let result = long_lived_registry
+                    .wait_for_registration(tid, REGISTRATION_WAIT_TIMEOUT)
+                    .await;
 
                 match result {
                     RegistrationResult::AttachedToExisting(existing) => {
@@ -107,12 +85,12 @@ pub async fn handle_push_tasks(
 
                         continue;
                     }
-                    RegistrationResult::WeClaimedRegistration => {
+                    RegistrationResult::Claimed => {
                         // Fall through to create the task
                     }
                     RegistrationResult::TimedOut => {
-                        // Timed out waiting for another caller to complete registration
-                        // This shouldn't normally happen, but return an error to be safe
+                        // Timed out waiting for another caller to complete registration.
+                        // This is rare since orphan detection (30s) will clean up stuck registrations.
                         return DaemonResponse::Error {
                             message: format!(
                                 "Timed out waiting for long-lived task registration: {}",

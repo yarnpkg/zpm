@@ -13,8 +13,11 @@ pub fn handle_cancel_context(
     let cancelled_ids = scheduler.cancel_context(context_id);
     let cancelled_count = cancelled_ids.len();
 
-    // Kill all running processes for this context
-    let pids = process_registry.get_pids_for_context(context_id);
+    // Atomically claim and remove all PIDs for this context.
+    // This prevents race conditions where a task might complete naturally between
+    // checking for its PID and attempting to kill it, which could result in
+    // sending signals to a reused PID belonging to a different process.
+    let pids = process_registry.take_pids_for_context(context_id);
 
     #[cfg(unix)]
     {

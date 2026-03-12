@@ -93,6 +93,16 @@ impl Scheduler {
         state.completed.insert(task_id.clone());
     }
 
+    pub fn is_failed(&self, task_id: &ContextualTaskId) -> bool {
+        let state = self.state.read().expect("scheduler lock poisoned");
+        state.failed.contains(task_id)
+    }
+
+    pub fn is_completed(&self, task_id: &ContextualTaskId) -> bool {
+        let state = self.state.read().expect("scheduler lock poisoned");
+        state.completed.contains(task_id)
+    }
+
     pub fn try_complete_task(&self, task_id: &ContextualTaskId) -> bool {
         let mut state = self.state.write().expect("scheduler lock poisoned");
         state.try_complete_task(task_id)
@@ -161,6 +171,17 @@ impl Scheduler {
             = self.state.write().expect("scheduler lock poisoned");
 
         state.warm_up_complete.insert(task_id.clone());
+    }
+
+    /// Atomically checks if a task is still eligible to be spawned.
+    /// This guards against TOCTOU race conditions between ready_tasks() and spawn(),
+    /// where cancel_context() might have marked the task as failed/completed
+    /// after ready_tasks() returned but before spawn() was called.
+    ///
+    /// Returns true if the task should be spawned, false if it has been cancelled/failed/completed.
+    pub fn should_spawn_task(&self, task_id: &ContextualTaskId) -> bool {
+        let state = self.state.read().expect("scheduler lock poisoned");
+        !state.completed.contains(task_id) && !state.failed.contains(task_id)
     }
 
     /// Cancel all tasks in a given context.

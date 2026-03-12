@@ -64,6 +64,7 @@ pub async fn dispatch_request(
                 workspace.as_deref(),
                 project,
                 long_lived_registry,
+                process_registry,
             )
         }
         DaemonRequest::ListLongLivedTasks => {
