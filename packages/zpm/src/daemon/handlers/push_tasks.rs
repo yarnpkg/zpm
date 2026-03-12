@@ -48,38 +48,56 @@ pub fn handle_push_tasks(
         if is_long_lived {
             if let Some(ref tid) = task_id {
                 // try_claim_registration atomically checks if task exists and claims it if not
-                if let Some(existing) = long_lived_registry.try_claim_registration(tid) {
-                    // Task already exists (and has a non-empty contextual_task_id), attach to it
-                    if !existing.contextual_task_id.is_empty() {
-                        task_ids.push(existing.contextual_task_id.clone());
+                // We retry a few times if we see an in-progress registration (empty contextual_task_id)
+                const MAX_RETRIES: u32 = 20;
+                const RETRY_DELAY_MS: u64 = 50;
 
-                        let started_at_ms
-                            = existing
-                                .started_at
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .map(|d| d.as_millis() as u64)
-                                .unwrap_or(0);
+                let mut claimed = false;
+                for _ in 0..MAX_RETRIES {
+                    match long_lived_registry.try_claim_registration(tid) {
+                        Some(existing) => {
+                            // Task already exists
+                            if !existing.contextual_task_id.is_empty() {
+                                // Registration is complete, attach to existing task
+                                task_ids.push(existing.contextual_task_id.clone());
 
-                        attached_long_lived.push(AttachedLongLivedTask {
-                            task_id: existing.contextual_task_id.clone(),
-                            started_at_ms,
-                        });
+                                let started_at_ms
+                                    = existing
+                                        .started_at
+                                        .duration_since(SystemTime::UNIX_EPOCH)
+                                        .map(|d| d.as_millis() as u64)
+                                        .unwrap_or(0);
 
-                        if let Some(sub_id) = subscription_id {
-                            subscription_registry.add_tasks_to_subscription(
-                                sub_id,
-                                vec![existing.contextual_task_id],
-                                vec![],
-                            );
+                                attached_long_lived.push(AttachedLongLivedTask {
+                                    task_id: existing.contextual_task_id.clone(),
+                                    started_at_ms,
+                                });
+
+                                if let Some(sub_id) = subscription_id {
+                                    subscription_registry.add_tasks_to_subscription(
+                                        sub_id,
+                                        vec![existing.contextual_task_id],
+                                        vec![],
+                                    );
+                                }
+
+                                claimed = true;
+                                break;
+                            }
+                            // contextual_task_id is empty - another caller is currently registering
+                            // Wait briefly and retry
+                            std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS));
                         }
-
-                        continue;
+                        None => {
+                            // We've claimed the registration, proceed to create the task
+                            break;
+                        }
                     }
-                    // If contextual_task_id is empty, another caller is currently registering
-                    // We should wait or retry, but for now we'll proceed to add a new task
-                    // which will effectively be a no-op since the scheduler will see it's already there
                 }
-                // If None, we've claimed the registration and should proceed to create the task
+
+                if claimed {
+                    continue;
+                }
             }
         }
 

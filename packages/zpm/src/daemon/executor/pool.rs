@@ -44,9 +44,11 @@ impl ExecutorPool {
         let daemon_url = self.daemon_url.clone();
         let process_registry = self.process_registry.clone();
 
-        let _ = event_tx.send(ExecutorEvent::Started {
+        if event_tx.send(ExecutorEvent::Started {
             task_id: task_id_str.clone(),
-        });
+        }).is_err() {
+            eprintln!("Failed to send task started event for {}: event channel closed", task_id_str);
+        }
 
         let (output_tx, mut output_rx) = mpsc::unbounded_channel::<OutputLine>();
 
@@ -55,11 +57,14 @@ impl ExecutorPool {
 
         tokio::spawn(async move {
             while let Some(output) = output_rx.recv().await {
-                let _ = event_tx_output.send(ExecutorEvent::Output {
+                if event_tx_output.send(ExecutorEvent::Output {
                     task_id: task_id_for_output.clone(),
                     line: output.line,
                     stream: output.stream,
-                });
+                }).is_err() {
+                    // Event channel closed, stop processing output
+                    break;
+                }
             }
         });
 
@@ -102,17 +107,21 @@ impl ExecutorPool {
         match result {
             Ok((_, status)) => {
                 let exit_code = status.code().unwrap_or(-1);
-                let _ = self.event_tx.send(ExecutorEvent::Finished {
-                    task_id: task_id_str,
+                if self.event_tx.send(ExecutorEvent::Finished {
+                    task_id: task_id_str.clone(),
                     exit_code,
-                });
+                }).is_err() {
+                    eprintln!("Failed to send task finished event for {}: event channel closed", task_id_str);
+                }
                 Some((completed_task_id, Ok(status)))
             }
             Err(e) => {
-                let _ = self.event_tx.send(ExecutorEvent::Failed {
-                    task_id: task_id_str,
+                if self.event_tx.send(ExecutorEvent::Failed {
+                    task_id: task_id_str.clone(),
                     error: e.to_string(),
-                });
+                }).is_err() {
+                    eprintln!("Failed to send task failed event for {}: event channel closed", task_id_str);
+                }
                 Some((completed_task_id, Err(e)))
             }
         }

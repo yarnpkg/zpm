@@ -32,7 +32,7 @@ impl LongLivedRegistry {
 
     pub fn register(&self, task_id: TaskId, contextual_task_id: String) {
         let mut inner
-            = self.inner.write().unwrap();
+            = self.inner.write().expect("long-lived registry lock poisoned");
 
         inner.entries.insert(
             task_id.clone(),
@@ -48,7 +48,7 @@ impl LongLivedRegistry {
 
     pub fn get_existing(&self, task_id: &TaskId) -> Option<LongLivedEntry> {
         let inner
-            = self.inner.read().unwrap();
+            = self.inner.read().expect("long-lived registry lock poisoned");
 
         inner.entries.get(task_id).cloned()
     }
@@ -61,7 +61,7 @@ impl LongLivedRegistry {
     /// and both try to create the same task.
     pub fn try_claim_registration(&self, task_id: &TaskId) -> Option<LongLivedEntry> {
         let mut inner
-            = self.inner.write().unwrap();
+            = self.inner.write().expect("long-lived registry lock poisoned");
 
         // If the task already exists, return it
         if let Some(entry) = inner.entries.get(task_id) {
@@ -88,7 +88,7 @@ impl LongLivedRegistry {
     /// Should be called after try_claim_registration returns None and the task has been scheduled.
     pub fn complete_registration(&self, task_id: &TaskId, contextual_task_id: String) {
         let mut inner
-            = self.inner.write().unwrap();
+            = self.inner.write().expect("long-lived registry lock poisoned");
 
         if let Some(entry) = inner.entries.get_mut(task_id) {
             entry.contextual_task_id = contextual_task_id;
@@ -98,7 +98,7 @@ impl LongLivedRegistry {
     /// Removes a claimed registration if scheduling fails.
     pub fn cancel_registration(&self, task_id: &TaskId) {
         let mut inner
-            = self.inner.write().unwrap();
+            = self.inner.write().expect("long-lived registry lock poisoned");
 
         // Only remove if the contextual_task_id is still empty (placeholder)
         if let Some(entry) = inner.entries.get(task_id) {
@@ -110,7 +110,7 @@ impl LongLivedRegistry {
 
     pub fn set_process_id(&self, task_id: &TaskId, process_id: u32) {
         let mut inner
-            = self.inner.write().unwrap();
+            = self.inner.write().expect("long-lived registry lock poisoned");
 
         if let Some(entry) = inner.entries.get_mut(task_id) {
             entry.process_id = Some(process_id);
@@ -119,7 +119,7 @@ impl LongLivedRegistry {
 
     pub fn mark_warm_up_complete(&self, task_id: &TaskId) -> bool {
         let mut inner
-            = self.inner.write().unwrap();
+            = self.inner.write().expect("long-lived registry lock poisoned");
 
         if let Some(entry) = inner.entries.get_mut(task_id) {
             entry.warm_up_complete = true;
@@ -131,7 +131,7 @@ impl LongLivedRegistry {
 
     pub fn is_warm_up_complete(&self, task_id: &TaskId) -> bool {
         let inner
-            = self.inner.read().unwrap();
+            = self.inner.read().expect("long-lived registry lock poisoned");
 
         inner
             .entries
@@ -142,14 +142,14 @@ impl LongLivedRegistry {
 
     pub fn remove(&self, task_id: &TaskId) -> Option<LongLivedEntry> {
         let mut inner
-            = self.inner.write().unwrap();
+            = self.inner.write().expect("long-lived registry lock poisoned");
 
         inner.entries.remove(task_id)
     }
 
     pub fn get_by_contextual_id(&self, contextual_task_id: &str) -> Option<LongLivedEntry> {
         let inner
-            = self.inner.read().unwrap();
+            = self.inner.read().expect("long-lived registry lock poisoned");
 
         inner
             .entries
@@ -160,7 +160,7 @@ impl LongLivedRegistry {
 
     pub fn list_all_entries(&self) -> Vec<LongLivedEntry> {
         let inner
-            = self.inner.read().unwrap();
+            = self.inner.read().expect("long-lived registry lock poisoned");
 
         inner.entries.values().cloned().collect()
     }

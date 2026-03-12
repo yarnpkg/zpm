@@ -23,10 +23,13 @@ pub async fn stream_output(
             line = stdout_reader.next_line() => {
                 match line {
                     Ok(Some(line)) => {
-                        let _ = tx.send(OutputLine {
+                        if tx.send(OutputLine {
                             line,
                             stream: Stream::Stdout,
-                        });
+                        }).is_err() {
+                            // Receiver dropped, stop processing
+                            return;
+                        }
                     }
                     Ok(None) => break,
                     Err(_) => break,
@@ -35,10 +38,13 @@ pub async fn stream_output(
             line = stderr_reader.next_line() => {
                 match line {
                     Ok(Some(line)) => {
-                        let _ = tx.send(OutputLine {
+                        if tx.send(OutputLine {
                             line,
                             stream: Stream::Stderr,
-                        });
+                        }).is_err() {
+                            // Receiver dropped, stop processing
+                            return;
+                        }
                     }
                     Ok(None) => {}
                     Err(_) => {}
@@ -47,10 +53,14 @@ pub async fn stream_output(
         }
     }
 
+    // Drain remaining stderr after stdout closes
     while let Ok(Some(line)) = stderr_reader.next_line().await {
-        let _ = tx.send(OutputLine {
+        if tx.send(OutputLine {
             line,
             stream: Stream::Stderr,
-        });
+        }).is_err() {
+            // Receiver dropped, stop processing
+            return;
+        }
     }
 }

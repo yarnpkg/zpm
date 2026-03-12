@@ -110,7 +110,7 @@ impl SubscriptionRegistry {
             = SubscriptionFilter::new(output_scope, status_scope, context_id);
 
         let mut inner
-            = self.inner.write().unwrap();
+            = self.inner.write().expect("subscription registry lock poisoned");
 
         let id
             = SubscriptionId(inner.next_id);
@@ -132,7 +132,7 @@ impl SubscriptionRegistry {
         dependency_task_ids: Vec<String>,
     ) {
         let mut inner
-            = self.inner.write().unwrap();
+            = self.inner.write().expect("subscription registry lock poisoned");
 
         if let Some(entry) = inner.subscriptions.get_mut(&subscription_id) {
             for task_id in target_task_ids {
@@ -146,14 +146,14 @@ impl SubscriptionRegistry {
 
     pub fn remove_subscription(&self, subscription_id: SubscriptionId) {
         let mut inner
-            = self.inner.write().unwrap();
+            = self.inner.write().expect("subscription registry lock poisoned");
 
         inner.subscriptions.remove(&subscription_id);
     }
 
     pub fn broadcast(&self, notification: DaemonNotification) {
         let inner
-            = self.inner.read().unwrap();
+            = self.inner.read().expect("subscription registry lock poisoned");
 
         for entry in inner.subscriptions.values() {
             if entry.filter.matches(&notification) {

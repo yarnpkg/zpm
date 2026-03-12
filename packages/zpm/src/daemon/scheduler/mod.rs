@@ -35,13 +35,13 @@ impl Scheduler {
         workspace_override: Option<&str>,
         context_id: Option<&str>,
     ) -> Result<(ContextualTaskId, Vec<ContextualTaskId>), Error> {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().expect("scheduler lock poisoned");
         state.add_task(project, task_name, parent_task_id, args, workspace_override, context_id)
     }
 
     pub fn ready_tasks(&self, running: &HashSet<ContextualTaskId>) -> Vec<(ContextualTaskId, Option<PreparedTask>)> {
         let state
-            = self.state.read().unwrap();
+            = self.state.read().expect("scheduler lock poisoned");
 
         let ready_ids
             = dependencies::find_ready_tasks(
@@ -67,7 +67,7 @@ impl Scheduler {
     }
 
     pub fn tasks_to_fail(&self, running: &HashSet<ContextualTaskId>) -> Vec<ContextualTaskId> {
-        let state = self.state.read().unwrap();
+        let state = self.state.read().expect("scheduler lock poisoned");
 
         dependencies::find_tasks_to_fail(
             &state.resolved,
@@ -78,28 +78,28 @@ impl Scheduler {
     }
 
     pub fn mark_script_finished(&self, task_id: &ContextualTaskId) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().expect("scheduler lock poisoned");
         state.script_finished.insert(task_id.clone());
     }
 
     pub fn mark_completed(&self, task_id: &ContextualTaskId) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().expect("scheduler lock poisoned");
         state.completed.insert(task_id.clone());
     }
 
     pub fn mark_failed(&self, task_id: &ContextualTaskId) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().expect("scheduler lock poisoned");
         state.failed.insert(task_id.clone());
         state.completed.insert(task_id.clone());
     }
 
     pub fn try_complete_task(&self, task_id: &ContextualTaskId) -> bool {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().expect("scheduler lock poisoned");
         state.try_complete_task(task_id)
     }
 
     pub fn find_parents(&self, task_id: &ContextualTaskId) -> Vec<ContextualTaskId> {
-        let state = self.state.read().unwrap();
+        let state = self.state.read().expect("scheduler lock poisoned");
         state
             .subtasks
             .iter()
@@ -109,17 +109,17 @@ impl Scheduler {
     }
 
     pub fn all_targets_completed(&self) -> bool {
-        let state = self.state.read().unwrap();
+        let state = self.state.read().expect("scheduler lock poisoned");
         state.all_targets_completed()
     }
 
     pub fn get_prepared_task(&self, task_id: &ContextualTaskId) -> Option<PreparedTask> {
-        let state = self.state.read().unwrap();
+        let state = self.state.read().expect("scheduler lock poisoned");
         state.prepared.get(task_id).cloned()
     }
 
     pub fn has_prepared_task(&self, task_id: &ContextualTaskId) -> bool {
-        let state = self.state.read().unwrap();
+        let state = self.state.read().expect("scheduler lock poisoned");
         state.prepared.contains_key(task_id)
     }
 
@@ -147,7 +147,7 @@ impl Scheduler {
 
     pub fn is_long_lived(&self, task_id: &ContextualTaskId) -> bool {
         let state
-            = self.state.read().unwrap();
+            = self.state.read().expect("scheduler lock poisoned");
 
         state
             .prepared
@@ -158,7 +158,7 @@ impl Scheduler {
 
     pub fn mark_warm_up_complete(&self, task_id: &ContextualTaskId) {
         let mut state
-            = self.state.write().unwrap();
+            = self.state.write().expect("scheduler lock poisoned");
 
         state.warm_up_complete.insert(task_id.clone());
     }
