@@ -72,6 +72,7 @@ impl SubscriptionFilter {
             DaemonNotification::TaskStarted { task_id } => (task_id, self.status_scope),
             DaemonNotification::TaskCompleted { task_id, .. } => (task_id, self.status_scope),
             DaemonNotification::TaskFailed { task_id, .. } => (task_id, self.status_scope),
+            DaemonNotification::TaskCancelled { task_id } => (task_id, self.status_scope),
             DaemonNotification::TaskWarmUpComplete { task_id } => (task_id, self.status_scope),
         };
 
@@ -136,19 +137,21 @@ pub enum TaskState {
     WaitingForSubtasks { exit_code: i32 },
     /// Task completed successfully
     Completed,
-    /// Task failed (either script failure or dependency failure)
+    /// Task failed (script failure or process-level failure)
     Failed,
+    /// Task was cancelled because a dependency failed
+    Cancelled,
 }
 
 impl TaskState {
     pub fn is_terminal(&self) -> bool {
-        matches!(self, TaskState::Completed | TaskState::Failed)
+        matches!(self, TaskState::Completed | TaskState::Failed | TaskState::Cancelled)
     }
 
     pub fn is_script_finished(&self) -> bool {
         matches!(
             self,
-            TaskState::WaitingForSubtasks { .. } | TaskState::Completed | TaskState::Failed
+            TaskState::WaitingForSubtasks { .. } | TaskState::Completed | TaskState::Failed | TaskState::Cancelled
         )
     }
 }
@@ -519,6 +522,10 @@ impl CoordinatorState {
 
     pub fn mark_failed(&mut self, task_id: &ContextualTaskId) {
         self.ensure_task_info(task_id).state = TaskState::Failed;
+    }
+
+    pub fn mark_cancelled(&mut self, task_id: &ContextualTaskId) {
+        self.ensure_task_info(task_id).state = TaskState::Cancelled;
     }
 
     pub fn mark_warm_up_complete(&mut self, task_id: &ContextualTaskId) {

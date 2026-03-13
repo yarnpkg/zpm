@@ -148,6 +148,9 @@ pub enum DaemonNotification {
         task_id: String,
         error: String,
     },
+    TaskCancelled {
+        task_id: String,
+    },
     TaskWarmUpComplete {
         task_id: String,
     },

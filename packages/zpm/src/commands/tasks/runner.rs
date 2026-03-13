@@ -85,6 +85,15 @@ pub trait TaskRunHandler: Send {
         is_target: bool,
     ) -> Option<Error>;
 
+    async fn on_task_cancelled(
+        &mut self,
+        ctx: &mut TaskRunContext,
+        task_id: &str,
+        is_target: bool,
+    ) {
+        let _ = (ctx, task_id, is_target);
+    }
+
     fn on_ctrl_c(&mut self);
 }
 
@@ -256,6 +265,21 @@ pub async fn run_task(
                     }
 
                     return Err(err);
+                }
+            }
+
+            DaemonNotification::TaskCancelled { task_id } => {
+                let is_target
+                    = ctx.is_target(&task_id);
+
+                handler
+                    .on_task_cancelled(&mut ctx, &task_id, is_target)
+                    .await;
+
+                ctx.mark_completed(task_id, 1);
+
+                if ctx.all_completed() {
+                    break;
                 }
             }
 

@@ -139,6 +139,23 @@ impl TaskRunHandler for InterlacedHandler {
         }
     }
 
+    async fn on_task_cancelled(
+        &mut self,
+        _ctx: &mut TaskRunContext,
+        task_id: &str,
+        _is_target: bool,
+    ) {
+        if self.json {
+            let mut stdout
+                = std::io::stdout().lock();
+
+            writeln!(stdout, "{}", json!({
+                "type": "task-cancelled",
+                "taskId": format_task_id(task_id),
+            })).ok();
+        }
+    }
+
     fn on_ctrl_c(&mut self) {}
 }
 

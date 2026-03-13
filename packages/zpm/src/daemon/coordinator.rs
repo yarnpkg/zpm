@@ -82,12 +82,13 @@ async fn run_daemon_internal(
         ).await;
     });
 
-    // Project root watcher (unchanged)
+    // Project root watcher
     let project_root = project.project_cwd.clone();
     let initial_inode = project_root.fs_metadata()?.ino();
+    let command_tx_for_watcher = command_tx.clone();
 
     tokio::spawn(async move {
-        watch_project_root(project_root, initial_inode).await;
+        watch_project_root(project_root, initial_inode, command_tx_for_watcher).await;
     });
 
     // Signal handler
@@ -310,7 +311,7 @@ async fn handle_command(
             });
 
             if let Some(ctx_task_id) = state.parse_contextual_task_id_simple(&task_id) {
-                handle_task_failure(&ctx_task_id, 1, state);
+                state.mark_failed(&ctx_task_id);
             }
 
             state.mark_task_closed(task_id);
@@ -389,15 +390,14 @@ async fn handle_command(
 fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool) {
     let running: HashSet<_> = executor_pool.running_tasks().cloned().collect();
 
-    // Find tasks to fail (dependencies failed)
-    let tasks_to_fail = find_tasks_to_fail(state, &running);
-    for task_id in tasks_to_fail {
-        state.mark_failed(&task_id);
+    // Find tasks to cancel (dependencies failed)
+    let tasks_to_cancel = find_tasks_to_fail(state, &running);
+    for task_id in tasks_to_cancel {
+        state.mark_cancelled(&task_id);
 
         let task_id_str = format_contextual_task_id(&task_id);
-        state.broadcast(DaemonNotification::TaskCompleted {
+        state.broadcast(DaemonNotification::TaskCancelled {
             task_id: task_id_str,
-            exit_code: 1,
         });
     }
 
@@ -751,14 +751,15 @@ fn kill_process_group(_pid: u32) {}
 // Watchers and Signal Handlers
 // ============================================================================
 
-async fn watch_project_root(project_root: Path, initial_inode: u64) {
+async fn watch_project_root(project_root: Path, initial_inode: u64, command_tx: CommandSender) {
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
 
         let current_inode = project_root.fs_metadata().map(|m| m.ino()).ok();
 
         if current_inode != Some(initial_inode) {
-            std::process::exit(0);
+            graceful_shutdown(command_tx).await;
+            return;
         }
     }
 }
