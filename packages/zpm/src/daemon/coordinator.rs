@@ -19,7 +19,7 @@ use zpm_utils::{Path, ToFileString};
 
 use super::coordinator_commands::{
     CancelContextResult, CommandSender, CoordinatorCommand, LongLivedTaskInfo,
-    PushTasksResult, StopTaskResult,
+    PushTasksResult, StopTaskResult, TaskCompletionResult,
 };
 use super::coordinator_state::{
     format_contextual_task_id, parse_base_task_id, CoordinatorState, ContextualTaskId, PreparedTask,
@@ -152,7 +152,8 @@ async fn run_coordinator_loop(
         tokio::select! {
             biased;
 
-            // Commands have highest priority
+            // Commands have highest priority - ALL events come through here now,
+            // including TaskCompleted. This ensures proper FIFO ordering.
             Some(cmd) = command_rx.recv() => {
                 let should_shutdown = handle_command(
                     cmd,
@@ -166,15 +167,10 @@ async fn run_coordinator_loop(
                 }
             }
 
-            // Task completions from executor
-            result = executor_pool.wait_next(), if !executor_pool.is_empty() => {
-                if let Some((task_id, result)) = result {
-                    handle_task_completion(
-                        task_id,
-                        result,
-                        &mut state,
-                    );
-                }
+            // Poll executor futures to keep them running and update bookkeeping.
+            // Completion events are sent through command_rx, not returned here.
+            _ = executor_pool.poll_next(), if !executor_pool.is_empty() => {
+                // Bookkeeping updated inside poll_next()
             }
 
             // Periodic wake-up for ready task checking and warm-up deadlines
@@ -193,7 +189,7 @@ async fn run_coordinator_loop(
 async fn handle_command(
     cmd: CoordinatorCommand,
     state: &mut CoordinatorState,
-    _executor_pool: &mut ExecutorPool,
+    executor_pool: &mut ExecutorPool,
     project: &Project,
 ) -> bool {
     match cmd {
@@ -314,6 +310,22 @@ async fn handle_command(
                 line,
                 stream: stream.as_str().to_string(),
             });
+        }
+
+        CoordinatorCommand::TaskCompleted { task_id, result } => {
+            // Parse the contextual task ID
+            if let Some(ctx_task_id) = state.parse_contextual_task_id_simple(&task_id) {
+                // Remove from executor's running set BEFORE updating state
+                // This ensures find_ready_tasks sees consistent state
+                executor_pool.mark_completed(&ctx_task_id);
+
+                let completion_result = match result {
+                    TaskCompletionResult::Exited(status) => Ok(status),
+                    TaskCompletionResult::Error(e) => Err(Error::TaskExecutionFailed(e)),
+                };
+
+                handle_task_completion(ctx_task_id, completion_result, state);
+            }
         }
 
         // ====================================================================

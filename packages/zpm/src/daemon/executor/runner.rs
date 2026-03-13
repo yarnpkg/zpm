@@ -2,17 +2,15 @@
 // TaskRunner - Command-Based
 //
 // Sends PID registration and unregistration via commands.
-// Output is sent through the output channel (forwarded to commands by pool).
+// Output is sent directly through the command channel.
 // ============================================================================
 
 use std::process::ExitStatus;
 
-use tokio::sync::mpsc;
-
 use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
 use super::super::coordinator_state::PreparedTask;
 use super::super::ipc::{DAEMON_SERVER_ENV, TASK_CURRENT_ENV};
-use super::output::{stream_output, OutputLine};
+use super::output::stream_output;
 use crate::error::Error;
 use crate::script::ScriptEnvironment;
 
@@ -38,7 +36,7 @@ impl TaskRunner {
         }
     }
 
-    pub async fn run(self, output_tx: mpsc::UnboundedSender<OutputLine>) -> Result<ExitStatus, Error> {
+    pub async fn run(self) -> Result<ExitStatus, Error> {
         let mut env = ScriptEnvironment::new()?;
 
         for (key, value) in &self.prepared.env {
@@ -77,7 +75,7 @@ impl TaskRunner {
             .take()
             .ok_or_else(|| Error::TaskExecutionFailed("Failed to capture stderr".to_string()))?;
 
-        stream_output(child_stdout, child_stderr, output_tx).await;
+        stream_output(child_stdout, child_stderr, self.task_id.clone(), self.command_tx.clone()).await;
 
         let status = running.child.wait().await?;
 

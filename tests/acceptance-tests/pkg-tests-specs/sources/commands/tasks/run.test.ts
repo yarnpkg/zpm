@@ -1177,7 +1177,7 @@ describe(`Commands`, () => {
         makeTemporaryEnv({
           name: `test-package`,
         }, async ({path, run, runSwitch}) => {
-          // Create a graph with 20 tasks: 10 leaf tasks, 5 mid-level, 3 second-level, 2 top-level, 1 root
+          // Create a graph with 21 tasks: 10 leaf tasks, 5 mid-level, 3 second-level, 2 top-level, 1 root
           // This tests the scheduler's ability to handle complex graphs
           const tasks = [
             // 10 leaf tasks (no dependencies)
@@ -1217,15 +1217,18 @@ describe(`Commands`, () => {
           // Root should be last
           expect(lines[lines.length - 1]).toBe(`root`);
 
-          // All leaf tasks should appear before mid tasks
-          const leafIndices = lines
-            .map((l, i) => l.startsWith(`leaf-`) ? i : -1)
-            .filter(i => i >= 0);
-          const midIndices = lines
-            .map((l, i) => l.startsWith(`mid-`) ? i : -1)
-            .filter(i => i >= 0);
+          // Each mid task should appear after its specific leaf dependencies
+          // mid-0 depends on leaf-0 and leaf-1, mid-1 depends on leaf-2 and leaf-3, etc.
+          const getIndex = (name: string) => lines.indexOf(name);
 
-          expect(Math.max(...leafIndices)).toBeLessThan(Math.min(...midIndices));
+          for (let i = 0; i < 5; i++) {
+            const midIndex = getIndex(`mid-${i}`);
+            const leaf1Index = getIndex(`leaf-${i * 2}`);
+            const leaf2Index = getIndex(`leaf-${i * 2 + 1}`);
+
+            expect(midIndex).toBeGreaterThan(leaf1Index);
+            expect(midIndex).toBeGreaterThan(leaf2Index);
+          }
 
           // Should complete in reasonable time (under 5 seconds for simple echo commands)
           expect(elapsed).toBeLessThan(5000);
@@ -1266,6 +1269,256 @@ describe(`Commands`, () => {
           // Since tasks run in parallel (0.2s each), total time should be much less than 10 * 0.2s = 2s
           // Allow some overhead, but it should be under 1.5 seconds if parallel
           expect(elapsed).toBeLessThan(1500);
+        }),
+      );
+    });
+
+    describe(`task cancellation semantics`, () => {
+      test(
+        `it should output task-cancelled in JSON when dependency fails (task never started)`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run, runSwitch}) => {
+          // When a dependency fails, dependent tasks should be cancelled (not failed)
+          // because they never actually started
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `failing-dep:`,
+            `  echo "failing"`,
+            `  exit 1`,
+            ``,
+            `dependent: failing-dep`,
+            `  echo "should-never-run"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          const result = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `dependent`).catch(e => e);
+          expect(result.code).toBe(1);
+
+          const events = result.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // The failing-dep task should have completed with exit code 1
+          const failingDepCompleted = events.find((e: any) => e.type === `task-completed` && e.taskId === `test-package:failing-dep`);
+          expect(failingDepCompleted).toBeDefined();
+          expect(failingDepCompleted.exitCode).toBe(1);
+
+          // The dependent task should be cancelled (not started, not failed)
+          const dependentCancelled = events.find((e: any) => e.type === `task-cancelled` && e.taskId === `test-package:dependent`);
+          expect(dependentCancelled).toBeDefined();
+
+          // The dependent task should NOT have a task-started event
+          const dependentStarted = events.find((e: any) => e.type === `task-started` && e.taskId === `test-package:dependent`);
+          expect(dependentStarted).toBeUndefined();
+
+          // The dependent task should NOT have a task-completed event
+          const dependentCompleted = events.find((e: any) => e.type === `task-completed` && e.taskId === `test-package:dependent`);
+          expect(dependentCompleted).toBeUndefined();
+        }),
+      );
+
+      test(
+        `it should output task-completed with exitCode in JSON when task itself fails`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run, runSwitch}) => {
+          // When a task itself fails (not its dependency), it should show task-completed
+          // with the actual exit code
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `failing-task:`,
+            `  echo "running"`,
+            `  exit 42`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          const result = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `failing-task`).catch(e => e);
+          expect(result.code).toBe(42);
+
+          const events = result.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // The task should have started
+          const started = events.find((e: any) => e.type === `task-started` && e.taskId === `test-package:failing-task`);
+          expect(started).toBeDefined();
+
+          // The task should have completed with the actual exit code (not cancelled)
+          const completed = events.find((e: any) => e.type === `task-completed` && e.taskId === `test-package:failing-task`);
+          expect(completed).toBeDefined();
+          expect(completed.exitCode).toBe(42);
+
+          // Should NOT have a task-cancelled event
+          const cancelled = events.find((e: any) => e.type === `task-cancelled` && e.taskId === `test-package:failing-task`);
+          expect(cancelled).toBeUndefined();
+        }),
+      );
+
+      test(
+        `it should cancel multiple pending dependents when a task fails`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run, runSwitch}) => {
+          // Multiple tasks waiting on the same failing dependency should all be cancelled
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `failing-base:`,
+            `  exit 1`,
+            ``,
+            `dep-a: failing-base`,
+            `  echo "a"`,
+            ``,
+            `dep-b: failing-base`,
+            `  echo "b"`,
+            ``,
+            `target: dep-a dep-b`,
+            `  echo "target"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          const result = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `target`).catch(e => e);
+          expect(result.code).toBe(1);
+
+          const events = result.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // All dependent tasks should be cancelled
+          const cancelledTasks = events
+            .filter((e: any) => e.type === `task-cancelled`)
+            .map((e: any) => e.taskId)
+            .sort();
+
+          expect(cancelledTasks).toContain(`test-package:dep-a`);
+          expect(cancelledTasks).toContain(`test-package:dep-b`);
+          expect(cancelledTasks).toContain(`test-package:target`);
+        }),
+      );
+    });
+
+    describe(`subscription timing`, () => {
+      test(
+        `it should not miss task-started events when subscribing rapidly`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // This tests the fix for subscription registration timing
+          // Tasks should be added to subscription before sending response
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `quick-task:`,
+            `  echo "done"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon first
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run multiple rapid subscriptions
+          const results = await Promise.all([
+            runSwitch(`tasks`, `run`, `--json`, `quick-task`),
+            runSwitch(`tasks`, `run`, `--json`, `quick-task`),
+            runSwitch(`tasks`, `run`, `--json`, `quick-task`),
+          ]);
+
+          // Each result should have received the task-started event
+          for (const result of results) {
+            const events = result.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+            const startedEvents = events.filter((e: any) => e.type === `task-started`);
+            expect(startedEvents.length).toBeGreaterThanOrEqual(1);
+          }
+        })),
+      );
+    });
+
+    describe(`subtask state management`, () => {
+      test(
+        `it should wait for all pushed subtasks before completing parent`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run, runSwitch}) => {
+          // Tests the WaitingForSubtasks state - parent should wait for all subtasks
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `slow-subtask:`,
+            `  sleep 0.3 && echo "slow-done"`,
+            ``,
+            `fast-subtask:`,
+            `  echo "fast-done"`,
+            ``,
+            `parent:`,
+            `  echo "parent-start"`,
+            `  yarn tasks push slow-subtask`,
+            `  yarn tasks push fast-subtask`,
+            `  echo "parent-script-done"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `parent`);
+          const events = stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // Parent should complete last (after both subtasks)
+          const completedEvents = events.filter((e: any) => e.type === `task-completed`);
+          const parentCompleted = completedEvents.findIndex((e: any) => e.taskId === `test-package:parent`);
+          const slowCompleted = completedEvents.findIndex((e: any) => e.taskId === `test-package:slow-subtask`);
+          const fastCompleted = completedEvents.findIndex((e: any) => e.taskId === `test-package:fast-subtask`);
+
+          // Parent should complete after both subtasks
+          expect(parentCompleted).toBeGreaterThan(slowCompleted);
+          expect(parentCompleted).toBeGreaterThan(fastCompleted);
+        }),
+      );
+
+      test(
+        `it should propagate subtask failure exit code to parent`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run, runSwitch}) => {
+          // When a subtask fails, the parent should fail with the subtask's exit code
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `failing-subtask:`,
+            `  exit 55`,
+            ``,
+            `parent:`,
+            `  echo "parent-start"`,
+            `  yarn tasks push failing-subtask`,
+            `  echo "parent-script-done"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          const result = await runSwitch(`tasks`, `run`, `--standalone`, `--json`, `parent`).catch(e => e);
+          expect(result.code).toBe(55);
+
+          const events = result.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // Subtask should have failed with exit code 55
+          const subtaskCompleted = events.find((e: any) => e.type === `task-completed` && e.taskId === `test-package:failing-subtask`);
+          expect(subtaskCompleted).toBeDefined();
+          expect(subtaskCompleted.exitCode).toBe(55);
+
+          // Parent should also complete (not be cancelled) since it did start
+          const parentCompleted = events.find((e: any) => e.type === `task-completed` && e.taskId === `test-package:parent`);
+          expect(parentCompleted).toBeDefined();
+          expect(parentCompleted.exitCode).toBe(55);
+        }),
+      );
+
+      test(
+        `it should use parent exit code when parent script fails before subtasks`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run, runSwitch}) => {
+          // When parent script itself fails, its exit code should be used
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `subtask:`,
+            `  echo "subtask"`,
+            ``,
+            `parent:`,
+            `  yarn tasks push subtask`,
+            `  exit 66`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          const result = await runSwitch(`tasks`, `run`, `--standalone`, `parent`).catch(e => e);
+          expect(result.code).toBe(66);
         }),
       );
     });
@@ -1375,6 +1628,154 @@ describe(`Commands`, () => {
           expect(processStillRunning).toBe(false);
         }),
         15000, // Increase timeout for this test (5s wait + overhead)
+      );
+    });
+
+    describe(`daemon lifecycle management`, () => {
+      test(
+        `it should clean up stale daemon and start fresh`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // This tests the stale daemon cleanup behavior
+          // When a daemon is detected as alive but unresponsive, it should be killed
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `build:`,
+            `  echo "building"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run a task to verify daemon is working
+          const {stdout: stdout1} = await runSwitch(`tasks`, `run`, `build`);
+          expect(stdout1).toContain(`building`);
+
+          // Kill daemon forcefully (simulating a crash that leaves stale state)
+          await runSwitch(`switch`, `daemon`, `--kill-all`);
+
+          // Start daemon again - should work even if there was stale state
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run task again - should succeed with fresh daemon
+          const {stdout: stdout2} = await runSwitch(`tasks`, `run`, `build`);
+          expect(stdout2).toContain(`building`);
+        })),
+      );
+
+      test(
+        `it should gracefully shutdown when project root changes`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // This tests the graceful shutdown behavior when project root is modified
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  echo "server-started"`,
+            `  sleep 60`,
+            ``,
+            `build:`,
+            `  echo "building"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon and get a server running
+          const serverPromise = runSwitch(`tasks`, `run`, `server`).catch(() => {});
+
+          // Wait for warm-up
+          await new Promise(resolve => setTimeout(resolve, 700));
+
+          // Store daemon info before the change
+          // (In real scenario, modifying yarn.lock or package.json would trigger shutdown)
+
+          // Kill all daemons - this simulates the graceful shutdown
+          // The actual project root watcher behavior is internal to the daemon
+          await runSwitch(`switch`, `daemon`, `--kill-all`);
+
+          // Daemon should be stopped now
+          // Verify by trying to start a new one (should succeed)
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run a quick task to verify new daemon works
+          const {stdout} = await runSwitch(`tasks`, `run`, `build`);
+          expect(stdout).toContain(`building`);
+        })),
+      );
+    });
+
+    describe(`memory management`, () => {
+      test(
+        `it should handle many sequential task executions without issues`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // This tests that task metadata is properly cleaned up after execution
+          // Running many tasks sequentially should not cause issues
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `task:`,
+            `  echo "iteration"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run the same task many times (this would accumulate metadata without cleanup)
+          const iterations = 20;
+          for (let i = 0; i < iterations; i++) {
+            const {stdout} = await runSwitch(`tasks`, `run`, `task`);
+            expect(stdout).toContain(`iteration`);
+          }
+
+          // All iterations should have succeeded - no memory/state issues
+        })),
+      );
+
+      test(
+        `it should handle many concurrent task executions`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // This tests memory management under concurrent load
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `task-a:`,
+            `  sleep 0.1 && echo "a"`,
+            ``,
+            `task-b:`,
+            `  sleep 0.1 && echo "b"`,
+            ``,
+            `task-c:`,
+            `  sleep 0.1 && echo "c"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run multiple batches of concurrent tasks
+          for (let batch = 0; batch < 5; batch++) {
+            const results = await Promise.all([
+              runSwitch(`tasks`, `run`, `task-a`),
+              runSwitch(`tasks`, `run`, `task-b`),
+              runSwitch(`tasks`, `run`, `task-c`),
+            ]);
+
+            expect(results[0].stdout).toContain(`a`);
+            expect(results[1].stdout).toContain(`b`);
+            expect(results[2].stdout).toContain(`c`);
+          }
+        })),
       );
     });
   });

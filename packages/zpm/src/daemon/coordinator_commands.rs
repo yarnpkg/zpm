@@ -78,6 +78,13 @@ pub enum CoordinatorCommand {
         stream: Stream,
     },
 
+    /// Task completed (success or failure).
+    /// Sent AFTER all output has been streamed, ensuring proper ordering.
+    TaskCompleted {
+        task_id: String,
+        result: TaskCompletionResult,
+    },
+
     // ========================================================================
     // Query Commands (from handlers)
     // ========================================================================
@@ -130,6 +137,15 @@ pub enum CoordinatorCommand {
 // ============================================================================
 // Response Types
 // ============================================================================
+
+/// Result of a task completion from the executor.
+#[derive(Debug)]
+pub enum TaskCompletionResult {
+    /// Task exited with a status code
+    Exited(std::process::ExitStatus),
+    /// Task failed to execute
+    Error(String),
+}
 
 /// Result of pushing tasks to the scheduler.
 #[derive(Debug)]

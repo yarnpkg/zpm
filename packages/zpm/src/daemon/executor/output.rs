@@ -1,19 +1,15 @@
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::ChildStderr;
 use tokio::process::ChildStdout;
-use tokio::sync::mpsc;
 
+use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
 use super::super::events::Stream;
-
-pub struct OutputLine {
-    pub line: String,
-    pub stream: Stream,
-}
 
 pub async fn stream_output(
     stdout: ChildStdout,
     stderr: ChildStderr,
-    tx: mpsc::UnboundedSender<OutputLine>,
+    task_id: String,
+    command_tx: CommandSender,
 ) {
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
@@ -25,7 +21,8 @@ pub async fn stream_output(
             line = stdout_reader.next_line(), if !stdout_done => {
                 match line {
                     Ok(Some(line)) => {
-                        if tx.send(OutputLine {
+                        if command_tx.send(CoordinatorCommand::TaskOutput {
+                            task_id: task_id.clone(),
                             line,
                             stream: Stream::Stdout,
                         }).is_err() {
@@ -38,7 +35,8 @@ pub async fn stream_output(
             line = stderr_reader.next_line(), if !stderr_done => {
                 match line {
                     Ok(Some(line)) => {
-                        if tx.send(OutputLine {
+                        if command_tx.send(CoordinatorCommand::TaskOutput {
+                            task_id: task_id.clone(),
                             line,
                             stream: Stream::Stderr,
                         }).is_err() {
