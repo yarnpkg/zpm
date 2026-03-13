@@ -45,8 +45,8 @@ impl DaemonOpenCommand {
                     println!("ws://127.0.0.1:{}", existing.port);
                     return Ok(());
                 }
-                // Process alive but not answering — terminate it before replacing
-                daemons::kill_process(existing.pid);
+                // Process alive but not answering — terminate it and its children before replacing
+                daemons::kill_daemon_gracefully(existing.pid);
             }
 
             daemons::unregister_daemon(&detected_root)?;
@@ -187,7 +187,7 @@ impl DaemonOpenCommand {
             = format!("ws://127.0.0.1:{}", port);
 
         // Just attempt to establish a WebSocket connection - if it succeeds, daemon is ready
-        tokio_tungstenite::connect_async(&url)
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url)
             .await
             .map_err(|e| {
                 Error::DaemonConnectionFailed(Arc::new(std::io::Error::new(
@@ -195,6 +195,9 @@ impl DaemonOpenCommand {
                     e.to_string(),
                 )))
             })?;
+
+        // Close the connection properly to avoid connection resets
+        ws.close(None).await.ok();
 
         Ok(())
     }

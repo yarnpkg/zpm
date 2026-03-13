@@ -53,6 +53,10 @@ pub async fn dispatch_request(
         DaemonRequest::CancelContext { context_id } => {
             handle_cancel_context(context_id, command_tx).await
         }
+
+        DaemonRequest::GetStats => {
+            handle_get_stats(command_tx).await
+        }
     }
 }
 
@@ -224,6 +228,32 @@ async fn handle_cancel_context(context_id: String, command_tx: &CommandSender) -
     match response_rx.await {
         Ok(result) => DaemonResponse::ContextCancelled {
             cancelled_count: result.cancelled_count,
+        },
+        Err(_) => DaemonResponse::Error {
+            message: "Coordinator did not respond".to_string(),
+        },
+    }
+}
+
+async fn handle_get_stats(command_tx: &CommandSender) -> DaemonResponse {
+    let (response_tx, response_rx) = oneshot::channel();
+
+    if command_tx
+        .send(CoordinatorCommand::GetStats { response_tx })
+        .is_err()
+    {
+        return DaemonResponse::Error {
+            message: "Coordinator channel closed".to_string(),
+        };
+    }
+
+    match response_rx.await {
+        Ok(result) => DaemonResponse::Stats {
+            tasks_count: result.tasks_count,
+            prepared_count: result.prepared_count,
+            subtasks_count: result.subtasks_count,
+            output_buffer_count: result.output_buffer_count,
+            closed_tasks_count: result.closed_tasks_count,
         },
         Err(_) => DaemonResponse::Error {
             message: "Coordinator did not respond".to_string(),

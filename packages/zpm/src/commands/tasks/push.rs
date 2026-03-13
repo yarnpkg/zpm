@@ -63,6 +63,6 @@ impl TaskPush {
 
         client.push_tasks(task_subscriptions, parent_task_id, None, None).await?;
 
-        Ok(ExitStatus::from_raw(0 << 8))
+        Ok(ExitStatus::from_raw(0))
     }
 }

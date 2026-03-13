@@ -159,6 +159,62 @@ pub fn kill_process(pid: u32) -> bool {
     }
 }
 
+/// Kill a daemon process and all its children (process group).
+/// Sends SIGTERM first, waits for the process to exit, then sends SIGKILL if needed.
+/// Returns true if the process was successfully killed.
+pub fn kill_daemon_gracefully(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        // First, send SIGTERM to the daemon process itself
+        // The daemon's signal handler should propagate to children
+        let term_result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+        if term_result != 0 {
+            // Process doesn't exist or we don't have permission
+            return false;
+        }
+
+        // Wait up to 6 seconds for the daemon to shut down gracefully
+        // (daemon waits 5s internally for children to exit, plus 1s buffer)
+        for _ in 0..60 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if !is_process_alive(pid) {
+                return true;
+            }
+        }
+
+        // If still alive after 6 seconds, send SIGKILL to the process group
+        // Use negative PID to target the entire process group
+        let pgid = unsafe { libc::getpgid(pid as i32) };
+        if pgid > 0 {
+            let _ = unsafe { libc::killpg(pgid, libc::SIGKILL) };
+        }
+        // Also send SIGKILL directly to the daemon in case it's not the process group leader
+        let _ = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+
+        // Wait a bit for the process to actually die
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if !is_process_alive(pid) {
+                return true;
+            }
+        }
+
+        // Return true even if we couldn't verify death - we did our best
+        true
+    }
+
+    #[cfg(windows)]
+    {
+        // On Windows, just use TerminateProcess (no graceful shutdown)
+        kill_process(pid)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        false
+    }
+}
+
 pub fn cleanup_stale_daemons() -> Result<(), Error> {
     let daemons
         = list_daemons()?;

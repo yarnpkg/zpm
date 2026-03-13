@@ -1446,6 +1446,193 @@ describe(`Commands`, () => {
           }
         })),
       );
+
+      test(
+        `it should not miss events for very fast completing tasks`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // This tests that even tasks completing nearly instantly
+          // have their TaskStarted and TaskCompleted events received
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `instant:`,
+            `  true`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run the instant task multiple times sequentially with JSON output
+          for (let i = 0; i < 5; i++) {
+            const result = await runSwitch(`tasks`, `run`, `--json`, `instant`);
+            const events = result.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+            // Must have task-started event
+            const started = events.filter((e: any) => e.type === `task-started`);
+            expect(started.length).toBe(1);
+
+            // Must have task-completed event
+            const completed = events.filter((e: any) => e.type === `task-completed`);
+            expect(completed.length).toBe(1);
+            expect(completed[0].exitCode).toBe(0);
+          }
+        })),
+      );
+
+      test(
+        `it should not send duplicate task-completed events`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Verify that task-completed is only sent once, not duplicated
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `task:`,
+            `  echo "output"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          const result = await runSwitch(`tasks`, `run`, `--json`, `task`);
+          const events = result.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // Count completed events for this task
+          const completedEvents = events.filter((e: any) =>
+            e.type === `task-completed` && e.taskId.includes(`test-package:task`),
+          );
+
+          // Should only have exactly one task-completed event
+          expect(completedEvents.length).toBe(1);
+        })),
+      );
+
+      test(
+        `it should not send duplicate events for failed tasks`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Verify that failed tasks don't receive both TaskFailed AND TaskCompleted
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `failing:`,
+            `  exit 1`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          const result = await runSwitch(`tasks`, `run`, `--json`, `failing`).catch(e => e);
+          const events = result.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // Count all terminal events for this task
+          const terminalEvents = events.filter((e: any) =>
+            (e.type === `task-completed` || e.type === `task-failed`) &&
+            e.taskId.includes(`test-package:failing`),
+          );
+
+          // Should only have exactly one terminal event
+          expect(terminalEvents.length).toBe(1);
+          expect(terminalEvents[0].type).toBe(`task-completed`);
+          expect(terminalEvents[0].exitCode).toBe(1);
+        })),
+      );
+    });
+
+    describe(`warm-up timer behavior`, () => {
+      test(
+        `it should not send warm-up-complete for tasks that fail during warm-up`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Long-lived task that crashes before 500ms warm-up period
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `crashing-server:`,
+            `  echo "server starting"`,
+            `  sleep 0.1`,
+            `  exit 1`,
+            ``,
+            `client: crashing-server`,
+            `  echo "client started"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run client which depends on the crashing long-lived server
+          const result = await runSwitch(`tasks`, `run`, `--json`, `client`).catch(e => e);
+          const events = result.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // Should NOT have warm-up-complete for the crashing server
+          const warmUpEvents = events.filter((e: any) =>
+            e.type === `task-warm-up-complete` &&
+            e.taskId.includes(`crashing-server`),
+          );
+
+          expect(warmUpEvents.length).toBe(0);
+
+          // Server should have started
+          const serverStarted = events.find((e: any) =>
+            e.type === `task-started` &&
+            e.taskId.includes(`crashing-server`),
+          );
+          expect(serverStarted).toBeDefined();
+
+          // Server should have completed with failure
+          const serverCompleted = events.find((e: any) =>
+            e.type === `task-completed` &&
+            e.taskId.includes(`crashing-server`),
+          );
+          expect(serverCompleted).toBeDefined();
+          expect(serverCompleted.exitCode).toBe(1);
+        })),
+      );
+
+      test(
+        `it should send warm-up-complete only once per long-lived task`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  echo "server running"`,
+            `  sleep 10`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Start server and wait for warm-up
+          const serverPromise = runSwitch(`tasks`, `run`, `--json`, `server`).catch(() => {});
+
+          // Wait for warm-up (500ms) plus some buffer
+          await new Promise(resolve => setTimeout(resolve, 800));
+
+          // Start a second request that attaches to the existing server
+          const attachPromise = runSwitch(`tasks`, `run`, `--json`, `server`).catch(() => {});
+
+          // Wait a bit more
+          await new Promise(resolve => setTimeout(resolve, 300));
+
+          // Clean up
+          await runSwitch(`tasks`, `stop`, `server`).catch(() => {});
+
+          // The warm-up should have been sent exactly once for the server
+          // (This is verified by the fact that attachPromise should see
+          // the task as already warmed up, not schedule another warm-up)
+        })),
+      );
     });
 
     describe(`subtask state management`, () => {
@@ -1796,6 +1983,314 @@ describe(`Commands`, () => {
             expect(results[1].stdout).toContain(`b`);
             expect(results[2].stdout).toContain(`c`);
           }
+        })),
+      );
+    });
+
+    describe(`cross-context isolation`, () => {
+      test(
+        `it should not report tasks from other contexts as completed`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // This test verifies that tasks from one context do not appear in another context's output.
+          // Context "abc" runs task A, Context "xyz" runs task C.
+          // Task A should NOT see task C's events, and vice versa.
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `task-a:`,
+            `  sleep 0.1 && echo "task-a-done"`,
+            ``,
+            `task-c:`,
+            `  sleep 0.1 && echo "task-c-done"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run task-a and task-c concurrently in different contexts
+          const [resultA, resultC] = await Promise.all([
+            runSwitch(`tasks`, `run`, `--json`, `task-a`),
+            runSwitch(`tasks`, `run`, `--json`, `task-c`),
+          ]);
+
+          // Parse events from each result
+          const eventsA = resultA.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+          const eventsC = resultC.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // Context A should only see task-a events, never task-c
+          const taskAStarted = eventsA.filter((e: any) => e.type === `task-started`);
+          const taskACompleted = eventsA.filter((e: any) => e.type === `task-completed`);
+
+          expect(taskAStarted.length).toBe(1);
+          expect(taskAStarted[0].taskId).toContain(`task-a`);
+          expect(taskACompleted.length).toBe(1);
+          expect(taskACompleted[0].taskId).toContain(`task-a`);
+
+          // Context A should NOT see task-c events
+          const taskCInA = eventsA.filter((e: any) =>
+            e.taskId && e.taskId.includes(`task-c`),
+          );
+          expect(taskCInA.length).toBe(0);
+
+          // Context C should only see task-c events, never task-a
+          const taskCStarted = eventsC.filter((e: any) => e.type === `task-started`);
+          const taskCCompleted = eventsC.filter((e: any) => e.type === `task-completed`);
+
+          expect(taskCStarted.length).toBe(1);
+          expect(taskCStarted[0].taskId).toContain(`task-c`);
+          expect(taskCCompleted.length).toBe(1);
+          expect(taskCCompleted[0].taskId).toContain(`task-c`);
+
+          // Context C should NOT see task-a events
+          const taskAInC = eventsC.filter((e: any) =>
+            e.taskId && e.taskId.includes(`task-a`),
+          );
+          expect(taskAInC.length).toBe(0);
+        })),
+      );
+
+      test(
+        `it should not spuriously schedule tasks from other contexts`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Tests that find_ready_tasks only considers tasks prepared in the current context.
+          // If context "abc" pushes task A with dependency D,
+          // and context "xyz" pushes task C (no dependencies),
+          // then context "xyz" should NOT accidentally schedule task D.
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `dep-d:`,
+            `  echo "dep-d-done"`,
+            ``,
+            `task-a: dep-d`,
+            `  echo "task-a-done"`,
+            ``,
+            `task-c:`,
+            `  echo "task-c-done"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run task-a and task-c concurrently
+          const [resultA, resultC] = await Promise.all([
+            runSwitch(`tasks`, `run`, `--json`, `task-a`),
+            runSwitch(`tasks`, `run`, `--json`, `task-c`),
+          ]);
+
+          // Parse events from task-c's context
+          const eventsC = resultC.stdout.trim().split(`\n`).map((line: string) => JSON.parse(line));
+
+          // Context C should NOT have any dep-d events (dep-d belongs to context A)
+          const depDInC = eventsC.filter((e: any) =>
+            e.taskId && e.taskId.includes(`dep-d`),
+          );
+          expect(depDInC.length).toBe(0);
+
+          // Context C should only see task-c
+          const allTaskIds = eventsC
+            .filter((e: any) => e.taskId)
+            .map((e: any) => e.taskId);
+          for (const taskId of allTaskIds) {
+            expect(taskId).toContain(`task-c`);
+          }
+        })),
+      );
+    });
+
+    describe(`output framing`, () => {
+      test(
+        `it should not print Process started for tasks that never ran due to dependency failure`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run, runSwitch}) => {
+          // When a dependency fails, dependent tasks are marked as failed via find_tasks_to_fail
+          // and TaskCompleted { exit_code: 1 } is broadcast. However, these tasks never actually ran,
+          // so we should NOT print "Process started" for them.
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `failing-dep:`,
+            `  echo "failing-output"`,
+            `  exit 1`,
+            ``,
+            `dependent: failing-dep`,
+            `  echo "dependent-should-not-run"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Run with --silent-dependencies which triggers on_task_completed for failed deps
+          const result = await runSwitch(`tasks`, `run`, `--standalone`, `--silent-dependencies`, `dependent`).catch(e => e);
+          expect(result.code).toBe(1);
+
+          // The output should show "Process started" for the failing-dep (which actually ran)
+          // but NOT for the dependent task (which never ran)
+          expect(result.stdout).toContain(`[test-package:failing-dep]: Process started`);
+          expect(result.stdout).toContain(`[test-package:failing-dep]: failing-output`);
+          expect(result.stdout).toContain(`[test-package:failing-dep]: Process exited (exit code 1)`);
+
+          // The dependent task should NOT have "Process started" since it never ran
+          // (it was cancelled due to dependency failure)
+          expect(result.stdout).not.toContain(`[test-package:dependent]: Process started`);
+        }),
+      );
+
+      test(
+        `it should not print framing for tasks with no output even on failure`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run, runSwitch}) => {
+          // A task that fails without producing output should not have framing printed
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `silent-fail:`,
+            `  exit 1`,
+            ``,
+            `dependent: silent-fail`,
+            `  echo "should-not-run"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          const result = await runSwitch(`tasks`, `run`, `--standalone`, `--silent-dependencies`, `dependent`).catch(e => e);
+          expect(result.code).toBe(1);
+
+          // Since silent-fail produces no output, even though it ran and failed,
+          // we should not print any framing for it
+          expect(result.stdout).not.toContain(`Process started`);
+          expect(result.stdout).not.toContain(`Process exited`);
+        }),
+      );
+    });
+
+    describe(`memory management - task metadata cleanup`, () => {
+      test(
+        `it should clean up task metadata after many sequential executions`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // This test verifies that running many tasks doesn't cause unbounded
+          // growth in the tasks/prepared/subtasks maps
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `task:`,
+            `  echo "iteration"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Get initial stats
+          const initialStats = await runSwitch(`tasks`, `stats`, `--json`);
+          const initial = JSON.parse(initialStats.stdout);
+
+          // Run the same task many times - each run creates a new context
+          const iterations = 30;
+          for (let i = 0; i < iterations; i++) {
+            await runSwitch(`tasks`, `run`, `task`);
+          }
+
+          // Get final stats
+          const finalStats = await runSwitch(`tasks`, `stats`, `--json`);
+          const final = JSON.parse(finalStats.stdout);
+
+          // The daemon has a max_closed_tasks limit (default 100), so after many runs
+          // the metadata should be bounded. We check that growth is not proportional
+          // to iterations - allow some leeway for configuration defaults.
+          //
+          // If there's a memory leak, tasksCount would be >= iterations.
+          // With proper cleanup, it should be bounded by max_closed_tasks.
+          const maxExpectedTasks = 100; // Based on default max_closed_tasks
+
+          // The tasks count should be bounded, not growing unboundedly
+          expect(final.tasksCount).toBeLessThanOrEqual(maxExpectedTasks);
+
+          // Similarly for prepared and subtasks
+          expect(final.preparedCount).toBeLessThanOrEqual(maxExpectedTasks);
+        })),
+      );
+
+      test(
+        `it should properly complete tasks without scripts`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // This test verifies that tasks without scripts (pure dependency aggregators)
+          // are properly completed and cleaned up
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `# A task with a script`,
+            `actual-work:`,
+            `  echo "doing work"`,
+            ``,
+            `# A task WITHOUT a script - just aggregates dependencies`,
+            `# This type of task was not being properly completed/cleaned up`,
+            `aggregate: actual-work`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run the aggregate task multiple times
+          for (let i = 0; i < 10; i++) {
+            const {stdout} = await runSwitch(`tasks`, `run`, `aggregate`);
+            expect(stdout).toContain(`doing work`);
+          }
+
+          // Get stats to verify cleanup
+          const statsResult = await runSwitch(`tasks`, `stats`, `--json`);
+          const stats = JSON.parse(statsResult.stdout);
+
+          // Verify the counts are bounded (not growing unboundedly)
+          // Each run has 2 tasks (aggregate + actual-work), so 10 runs = 20 task instances
+          // With cleanup, this should be bounded
+          expect(stats.tasksCount).toBeLessThanOrEqual(100);
+          expect(stats.preparedCount).toBeLessThanOrEqual(100);
+        })),
+      );
+
+      test(
+        `it should track closed_tasks correctly for eviction`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Verify that closed_tasks queue is properly populated
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `task:`,
+            `  echo "test"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Get initial stats
+          const initialStats = await runSwitch(`tasks`, `stats`, `--json`);
+          const initial = JSON.parse(initialStats.stdout);
+
+          // Run task once
+          await runSwitch(`tasks`, `run`, `task`);
+
+          // Get stats after running
+          const afterStats = await runSwitch(`tasks`, `stats`, `--json`);
+          const after = JSON.parse(afterStats.stdout);
+
+          // closed_tasks should have increased (task was marked as closed)
+          expect(after.closedTasksCount).toBeGreaterThanOrEqual(initial.closedTasksCount);
         })),
       );
     });

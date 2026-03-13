@@ -57,6 +57,8 @@ pub enum DaemonRequest {
     CancelContext {
         context_id: String,
     },
+    /// Get internal state statistics (for debugging/testing memory management)
+    GetStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +125,18 @@ pub enum DaemonResponse {
     },
     ContextCancelled {
         cancelled_count: usize,
+    },
+    Stats {
+        /// Number of entries in the tasks HashMap
+        tasks_count: usize,
+        /// Number of entries in the prepared BTreeMap
+        prepared_count: usize,
+        /// Number of entries in the subtasks HashMap
+        subtasks_count: usize,
+        /// Number of entries in the output_buffer HashMap
+        output_buffer_count: usize,
+        /// Number of entries in the closed_tasks queue
+        closed_tasks_count: usize,
     },
     Error {
         message: String,

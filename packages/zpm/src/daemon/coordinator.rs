@@ -19,7 +19,7 @@ use zpm_utils::{Path, ToFileString};
 
 use super::coordinator_commands::{
     CancelContextResult, CommandSender, CoordinatorCommand, LongLivedTaskInfo,
-    PushTasksResult, StopTaskResult, TaskCompletionResult,
+    PushTasksResult, StatsResult, StopTaskResult, TaskCompletionResult,
 };
 use super::coordinator_state::{
     format_contextual_task_id, parse_base_task_id, CoordinatorState, ContextualTaskId, PreparedTask,
@@ -352,6 +352,17 @@ async fn handle_command(
                 })
                 .collect();
             let _ = response_tx.send(infos);
+        }
+
+        CoordinatorCommand::GetStats { response_tx } => {
+            let (tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count) = state.get_stats();
+            let _ = response_tx.send(StatsResult {
+                tasks_count,
+                prepared_count,
+                subtasks_count,
+                output_buffer_count,
+                closed_tasks_count,
+            });
         }
 
         // ====================================================================

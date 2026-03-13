@@ -112,6 +112,7 @@ pub enum YarnCli {
     TaskRunInterlaced(tasks::run_interlaced::TaskRunInterlaced),
     TaskRunBuffered(tasks::run_buffered::TaskRunBuffered),
     TaskRunSilentDependencies(tasks::run_silent_dependencies::TaskRunSilentDependencies),
+    TaskStats(tasks::stats::TaskStats),
     TaskStop(tasks::stop::TaskStop),
     Unlink(unlink::Unlink),
     Unplug(unplug::Unplug),

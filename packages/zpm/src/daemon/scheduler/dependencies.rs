@@ -6,6 +6,10 @@ use crate::daemon::coordinator_state::CoordinatorState;
 /// Find tasks that are ready to execute.
 /// A task is ready when all its prerequisites are completed (in the same context).
 /// For long-lived prerequisites, being "warmed up" counts as ready for dependents.
+///
+/// This function returns both tasks with scripts (in `prepared`) and tasks without
+/// scripts (dependency aggregators). Tasks without scripts will have None as their
+/// PreparedTask in the coordinator's ready task list.
 pub fn find_ready_tasks(
     state: &CoordinatorState,
     running: &HashSet<ContextualTaskId>,
@@ -25,8 +29,16 @@ pub fn find_ready_tasks(
         for (task_id, prerequisites) in &state.resolved.tasks {
             let ctx_task_id = ContextualTaskId::new(task_id.clone(), context_id.clone());
 
-            // Only consider tasks that were explicitly prepared in this context
-            if !state.prepared.contains_key(&ctx_task_id) {
+            // A task can be ready if it's either:
+            // 1. In the prepared map (has a script to run), OR
+            // 2. Is a target task that's not in prepared (no script, just aggregates dependencies)
+            //
+            // For non-target tasks without scripts, they are implicitly "completed" since
+            // there's nothing to run - their prerequisites just propagate to their dependents.
+            let is_prepared = state.prepared.contains_key(&ctx_task_id);
+            let is_target_without_script = !is_prepared && state.is_target(&ctx_task_id);
+
+            if !is_prepared && !is_target_without_script {
                 continue;
             }
 
@@ -95,8 +107,11 @@ pub fn find_tasks_to_fail(
         for (task_id, prerequisites) in &state.resolved.tasks {
             let ctx_task_id = ContextualTaskId::new(task_id.clone(), context_id.clone());
 
-            // Only consider tasks that were explicitly prepared in this context
-            if !state.prepared.contains_key(&ctx_task_id) {
+            // Consider tasks that are either prepared OR are target tasks without scripts
+            let is_prepared = state.prepared.contains_key(&ctx_task_id);
+            let is_target_without_script = !is_prepared && state.is_target(&ctx_task_id);
+
+            if !is_prepared && !is_target_without_script {
                 continue;
             }
 

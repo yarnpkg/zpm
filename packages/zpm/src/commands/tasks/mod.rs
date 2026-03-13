@@ -6,6 +6,7 @@ pub mod push;
 pub mod run_buffered;
 pub mod run_interlaced;
 pub mod run_silent_dependencies;
+pub mod stats;
 pub mod stop;
 
 use zpm_tasks::{parse, TaskName};

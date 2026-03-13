@@ -347,7 +347,9 @@ impl CoordinatorState {
         }
 
         self.set_as_target(&ctx_task_id);
-        self.prepare_new_tasks(project, &ctx_id)?;
+        // Only prepare tasks that were resolved as part of THIS add_task call
+        // (not all tasks in resolved.tasks which may include tasks from other contexts)
+        self.prepare_specific_tasks(project, &ctx_id, &resolved_ctx_task_ids)?;
 
         if !args.is_empty() {
             if let Some(task) = self.prepared.get_mut(&ctx_task_id) {
@@ -358,19 +360,29 @@ impl CoordinatorState {
         Ok((ctx_task_id, resolved_ctx_task_ids))
     }
 
-    fn prepare_new_tasks(&mut self, project: &Project, context_id: &str) -> Result<usize, Error> {
+    /// Prepare only the specific tasks that were resolved for this context.
+    /// This prevents preparing tasks from other contexts that happen to be in resolved.tasks.
+    fn prepare_specific_tasks(
+        &mut self,
+        project: &Project,
+        context_id: &str,
+        tasks_to_prepare: &[ContextualTaskId],
+    ) -> Result<usize, Error> {
         let colors: Vec<&DataType> = prefix_colors().take(5).collect();
         let mut color_index = self.prepared.len();
         let mut new_count = 0;
 
-        let task_ids: Vec<TaskId> = self.resolved.tasks.keys().cloned().collect();
-
-        for task_id in task_ids {
-            let ctx_task_id = ContextualTaskId::new(task_id.clone(), context_id.to_string());
-
-            if self.prepared.contains_key(&ctx_task_id) {
+        for ctx_task_id in tasks_to_prepare {
+            // Skip if wrong context (shouldn't happen but defensive check)
+            if ctx_task_id.context_id != context_id {
                 continue;
             }
+
+            if self.prepared.contains_key(ctx_task_id) {
+                continue;
+            }
+
+            let task_id = &ctx_task_id.task_id;
 
             let Some(task_file) = self.resolved.task_files.get(&task_id.workspace) else {
                 continue;
@@ -408,7 +420,7 @@ impl CoordinatorState {
             let is_long_lived = task.attributes.iter().any(|attr| attr.name == "long-lived");
 
             self.prepared.insert(
-                ctx_task_id,
+                ctx_task_id.clone(),
                 PreparedTask {
                     script,
                     cwd: workspace.path.clone(),
@@ -870,6 +882,28 @@ impl CoordinatorState {
                 }
             }
         }
+    }
+
+    // ========================================================================
+    // Statistics Operations (for debugging/testing)
+    // ========================================================================
+
+    pub fn get_stats(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.tasks.len(),
+            self.prepared.len(),
+            self.subtasks.len(),
+            self.output_buffer.len(),
+            self.closed_tasks.len(),
+        )
+    }
+
+    pub fn get_output_buffer_count(&self) -> usize {
+        self.output_buffer.len()
+    }
+
+    pub fn get_closed_tasks_count(&self) -> usize {
+        self.closed_tasks.len()
     }
 }
 

@@ -389,6 +389,38 @@ impl DaemonClient {
             _ => Err(Error::IpcError("Unexpected response".to_string())),
         }
     }
+
+    /// Get internal state statistics from the daemon (for debugging/testing)
+    pub async fn get_stats(&mut self) -> Result<DaemonStatsResult, Error> {
+        let request = DaemonRequest::GetStats;
+
+        match self.send_request(request).await? {
+            DaemonResponse::Stats {
+                tasks_count,
+                prepared_count,
+                subtasks_count,
+                output_buffer_count,
+                closed_tasks_count,
+            } => Ok(DaemonStatsResult {
+                tasks_count,
+                prepared_count,
+                subtasks_count,
+                output_buffer_count,
+                closed_tasks_count,
+            }),
+            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
+            _ => Err(Error::IpcError("Unexpected response".to_string())),
+        }
+    }
+}
+
+/// Result of getting daemon statistics
+pub struct DaemonStatsResult {
+    pub tasks_count: usize,
+    pub prepared_count: usize,
+    pub subtasks_count: usize,
+    pub output_buffer_count: usize,
+    pub closed_tasks_count: usize,
 }
 
 async fn start_daemon(project_root: &Path) -> Result<String, Error> {

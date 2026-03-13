@@ -35,7 +35,7 @@ impl DaemonKillAllCommand {
                 continue;
             }
 
-            if daemons::kill_process(daemon.pid) {
+            if daemons::kill_daemon_gracefully(daemon.pid) {
                 daemons::unregister_daemon(&daemon.project_cwd)?;
                 println!(
                     "{} Stopped daemon for {} (PID: {})",

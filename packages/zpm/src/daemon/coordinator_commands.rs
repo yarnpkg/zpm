@@ -100,6 +100,11 @@ pub enum CoordinatorCommand {
         response_tx: oneshot::Sender<Vec<LongLivedTaskInfo>>,
     },
 
+    /// Get internal state statistics.
+    GetStats {
+        response_tx: oneshot::Sender<StatsResult>,
+    },
+
     // ========================================================================
     // Subscription Commands (from connection handlers)
     // ========================================================================
@@ -181,6 +186,16 @@ pub struct LongLivedTaskInfo {
     pub contextual_task_id: String,
     pub warm_up_complete: bool,
     pub started_at_ms: u64,
+}
+
+/// Internal state statistics for debugging/testing.
+#[derive(Debug, Clone)]
+pub struct StatsResult {
+    pub tasks_count: usize,
+    pub prepared_count: usize,
+    pub subtasks_count: usize,
+    pub output_buffer_count: usize,
+    pub closed_tasks_count: usize,
 }
 
 // ============================================================================

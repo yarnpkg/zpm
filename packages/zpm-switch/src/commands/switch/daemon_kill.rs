@@ -44,7 +44,7 @@ impl DaemonKillCommand {
             return Ok(());
         }
 
-        if daemons::kill_process(daemon.pid) {
+        if daemons::kill_daemon_gracefully(daemon.pid) {
             daemons::unregister_daemon(&detected_root)?;
             println!(
                 "{} Stopped daemon for {} (PID: {})",
