@@ -397,8 +397,9 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
 
         let task_id_str = format_contextual_task_id(&task_id);
         state.broadcast(DaemonNotification::TaskCancelled {
-            task_id: task_id_str,
+            task_id: task_id_str.clone(),
         });
+        state.mark_task_closed(task_id_str);
     }
 
     // Find ready tasks
@@ -490,9 +491,10 @@ fn handle_task_failure(
 
     let task_id_str = format_contextual_task_id(task_id);
     state.broadcast(DaemonNotification::TaskCompleted {
-        task_id: task_id_str,
+        task_id: task_id_str.clone(),
         exit_code,
     });
+    state.mark_task_closed(task_id_str);
 
     // Propagate failure to parents that are waiting for subtasks
     let parents = state.find_parents(task_id);
@@ -502,9 +504,10 @@ fn handle_task_failure(
 
             let parent_id_str = format_contextual_task_id(&parent);
             state.broadcast(DaemonNotification::TaskCompleted {
-                task_id: parent_id_str,
+                task_id: parent_id_str.clone(),
                 exit_code,
             });
+            state.mark_task_closed(parent_id_str);
         }
     }
 }
@@ -517,9 +520,10 @@ fn handle_task_success(
     if state.try_complete_task(task_id) {
         let task_id_str = format_contextual_task_id(task_id);
         state.broadcast(DaemonNotification::TaskCompleted {
-            task_id: task_id_str,
+            task_id: task_id_str.clone(),
             exit_code,
         });
+        state.mark_task_closed(task_id_str);
 
         // Try to complete parents that are waiting for subtasks
         let parents = state.find_parents(task_id);
@@ -528,9 +532,10 @@ fn handle_task_success(
                 if state.try_complete_task(&parent) {
                     let parent_id_str = format_contextual_task_id(&parent);
                     state.broadcast(DaemonNotification::TaskCompleted {
-                        task_id: parent_id_str,
+                        task_id: parent_id_str.clone(),
                         exit_code: parent_exit_code,
                     });
+                    state.mark_task_closed(parent_id_str);
                 }
             }
         }
@@ -541,9 +546,10 @@ fn handle_task_success(
 
             let task_id_str = format_contextual_task_id(task_id);
             state.broadcast(DaemonNotification::TaskCompleted {
-                task_id: task_id_str,
+                task_id: task_id_str.clone(),
                 exit_code: 1,
             });
+            state.mark_task_closed(task_id_str);
         }
         // Otherwise task stays in WaitingForSubtasks state until all subtasks complete
     }
