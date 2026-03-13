@@ -244,6 +244,27 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should not duplicate target task output on failure with --silent-dependencies`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, async ({path, run, runSwitch}) => {
+        await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+          `build:`,
+          `  echo "build-output"`,
+          `  exit 1`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        // Target task output should appear exactly once (streamed live), not duplicated
+        await expect(runSwitch(`tasks`, `run`, `--standalone`, `--silent-dependencies`, `build`)).rejects.toMatchObject({
+          stdout: `build-output\n`,
+          code: 1,
+        });
+      }),
+    );
+
+    test(
       `it should forward yarn run to task run with silent dependencies`,
       makeTemporaryEnv({
         name: `test-package`,

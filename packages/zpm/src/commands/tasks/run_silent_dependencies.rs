@@ -105,22 +105,10 @@ impl TaskRunHandler for SilentDependenciesHandler {
                 }
             }
         } else if exit_code != 0 {
-            // Target task failed - print its output
+            // Target task failed.
+            // Output was already printed live via on_output_line (TargetOnly subscription),
+            // so do NOT replay it from the buffer — that would duplicate every line.
             self.stop_progress();
-
-            let lines = ctx.client.get_task_output(task_id).await.ok();
-
-            if lines.as_ref().map_or(false, |l| !l.is_empty()) {
-                let mut stdout = std::io::stdout().lock();
-
-                writeln!(stdout, "[{}]: Process started", format_task_id(task_id)).ok();
-
-                for output_line in lines.unwrap() {
-                    writeln!(stdout, "[{}]: {}", format_task_id(task_id), output_line.line).ok();
-                }
-
-                writeln!(stdout, "[{}]: Process exited (exit code {})", format_task_id(task_id), exit_code).ok();
-            }
         }
     }
 
