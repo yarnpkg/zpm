@@ -114,31 +114,6 @@ impl TaskRunHandler for InterlacedHandler {
         }
     }
 
-    async fn on_task_failed(
-        &mut self,
-        _ctx: &mut TaskRunContext,
-        task_id: &str,
-        error: &str,
-        is_target: bool,
-    ) -> Option<Error> {
-        if self.json {
-            let mut stdout
-                = std::io::stdout().lock();
-
-            writeln!(stdout, "{}", json!({
-                "type": "task-failed",
-                "taskId": format_task_id(task_id),
-                "error": error,
-            })).ok();
-        }
-
-        if is_target {
-            Some(Error::IpcError(format!("Task {} failed: {}", format_task_id(task_id), error)))
-        } else {
-            None
-        }
-    }
-
     async fn on_task_cancelled(
         &mut self,
         _ctx: &mut TaskRunContext,

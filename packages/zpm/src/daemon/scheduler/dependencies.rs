@@ -45,7 +45,7 @@ pub fn find_ready_tasks(
             let all_prereqs_ready = prerequisites.iter().all(|prereq| {
                 let ctx_prereq = ContextualTaskId::new(prereq.clone(), context_id.clone());
 
-                if state.is_failed(&ctx_prereq) {
+                if state.is_failed_or_cancelled(&ctx_prereq) {
                     return false;
                 }
 
@@ -106,10 +106,10 @@ pub fn find_tasks_to_fail(
                 continue;
             }
 
-            // Check if any prerequisite failed (in the same context)
+            // Check if any prerequisite failed or was cancelled (in the same context)
             let any_prereq_failed = prerequisites.iter().any(|prereq| {
                 let ctx_prereq = ContextualTaskId::new(prereq.clone(), context_id.clone());
-                state.is_failed(&ctx_prereq)
+                state.is_failed_or_cancelled(&ctx_prereq)
             });
 
             if any_prereq_failed {

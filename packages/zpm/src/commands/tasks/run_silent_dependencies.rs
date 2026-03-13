@@ -104,36 +104,23 @@ impl TaskRunHandler for SilentDependenciesHandler {
                     writeln!(stdout, "[{}]: Process exited (exit code {})", format_task_id(task_id), exit_code).ok();
                 }
             }
-        }
-    }
+        } else if exit_code != 0 {
+            // Target task failed - print its output
+            self.stop_progress();
 
-    async fn on_task_failed(
-        &mut self,
-        ctx: &mut TaskRunContext,
-        task_id: &str,
-        error: &str,
-        is_target: bool,
-    ) -> Option<Error> {
-        self.stop_progress();
+            let lines = ctx.client.get_task_output(task_id).await.ok();
 
-        let lines
-            = ctx.client.get_task_output(task_id).await.ok();
+            if lines.as_ref().map_or(false, |l| !l.is_empty()) {
+                let mut stdout = std::io::stdout().lock();
 
-        let mut stdout
-            = std::io::stdout().lock();
+                writeln!(stdout, "[{}]: Process started", format_task_id(task_id)).ok();
 
-        writeln!(stdout, "[{}]: Process started", format_task_id(task_id)).ok();
+                for output_line in lines.unwrap() {
+                    writeln!(stdout, "[{}]: {}", format_task_id(task_id), output_line.line).ok();
+                }
 
-        if let Some(lines) = lines {
-            for output_line in lines {
-                writeln!(stdout, "[{}]: {}", format_task_id(task_id), output_line.line).ok();
+                writeln!(stdout, "[{}]: Process exited (exit code {})", format_task_id(task_id), exit_code).ok();
             }
-        }
-
-        if is_target {
-            Some(Error::IpcError(format!("Task {} failed: {}", format_task_id(task_id), error)))
-        } else {
-            None
         }
     }
 

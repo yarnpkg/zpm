@@ -316,19 +316,6 @@ async fn handle_command(
             });
         }
 
-        CoordinatorCommand::TaskFailed { task_id, error } => {
-            state.broadcast(DaemonNotification::TaskFailed {
-                task_id: task_id.clone(),
-                error,
-            });
-
-            if let Some(ctx_task_id) = state.parse_contextual_task_id_simple(&task_id) {
-                state.mark_failed(&ctx_task_id);
-            }
-
-            state.mark_task_closed(task_id);
-        }
-
         // ====================================================================
         // Query Commands
         // ====================================================================

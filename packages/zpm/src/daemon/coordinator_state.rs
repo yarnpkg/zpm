@@ -71,7 +71,6 @@ impl SubscriptionFilter {
             DaemonNotification::TaskOutputLine { task_id, .. } => (task_id, self.output_scope),
             DaemonNotification::TaskStarted { task_id } => (task_id, self.status_scope),
             DaemonNotification::TaskCompleted { task_id, .. } => (task_id, self.status_scope),
-            DaemonNotification::TaskFailed { task_id, .. } => (task_id, self.status_scope),
             DaemonNotification::TaskCancelled { task_id } => (task_id, self.status_scope),
             DaemonNotification::TaskWarmUpComplete { task_id } => (task_id, self.status_scope),
         };
@@ -450,6 +449,19 @@ impl CoordinatorState {
         matches!(self.get_state(task_id), TaskState::Failed)
     }
 
+    pub fn is_cancelled(&self, task_id: &ContextualTaskId) -> bool {
+        matches!(self.get_state(task_id), TaskState::Cancelled)
+    }
+
+    /// Returns true if the task failed or was cancelled (dependency failure cascade).
+    /// Use this for dependency checking where cancelled tasks should block dependents.
+    pub fn is_failed_or_cancelled(&self, task_id: &ContextualTaskId) -> bool {
+        matches!(
+            self.get_state(task_id),
+            TaskState::Failed | TaskState::Cancelled
+        )
+    }
+
     pub fn is_terminal(&self, task_id: &ContextualTaskId) -> bool {
         self.get_state(task_id).is_terminal()
     }
@@ -485,7 +497,7 @@ impl CoordinatorState {
         }
 
         if let Some(task_subtasks) = self.subtasks.get(task_id) {
-            task_subtasks.iter().all(|s| self.is_completed(s) && !self.is_failed(s))
+            task_subtasks.iter().all(|s| self.is_completed(s) && !self.is_failed_or_cancelled(s))
         } else {
             true
         }
@@ -541,7 +553,7 @@ impl CoordinatorState {
 
     pub fn has_failed_subtask(&self, task_id: &ContextualTaskId) -> bool {
         if let Some(subtasks) = self.subtasks.get(task_id) {
-            subtasks.iter().any(|s| self.is_failed(s))
+            subtasks.iter().any(|s| self.is_failed_or_cancelled(s))
         } else {
             false
         }
@@ -849,6 +861,13 @@ impl CoordinatorState {
         while self.closed_tasks.len() > self.max_closed_tasks {
             if let Some(oldest_task_id) = self.closed_tasks.pop_front() {
                 self.output_buffer.remove(&oldest_task_id);
+
+                // Also clean up task metadata to prevent unbounded memory growth
+                if let Some(ctx_id) = self.parse_contextual_task_id_simple(&oldest_task_id) {
+                    self.tasks.remove(&ctx_id);
+                    self.prepared.remove(&ctx_id);
+                    self.subtasks.remove(&ctx_id);
+                }
             }
         }
     }

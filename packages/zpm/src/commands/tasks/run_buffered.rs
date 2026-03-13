@@ -69,20 +69,6 @@ impl TaskRunHandler for BufferedHandler {
         }
     }
 
-    async fn on_task_failed(
-        &mut self,
-        _ctx: &mut TaskRunContext,
-        task_id: &str,
-        error: &str,
-        is_target: bool,
-    ) -> Option<Error> {
-        if is_target {
-            Some(Error::IpcError(format!("Task {} failed: {}", format_task_id(task_id), error)))
-        } else {
-            None
-        }
-    }
-
     fn on_ctrl_c(&mut self) {}
 }
 

@@ -45,6 +45,8 @@ impl DaemonOpenCommand {
                     println!("ws://127.0.0.1:{}", existing.port);
                     return Ok(());
                 }
+                // Process alive but not answering — terminate it before replacing
+                daemons::kill_process(existing.pid);
             }
 
             daemons::unregister_daemon(&detected_root)?;

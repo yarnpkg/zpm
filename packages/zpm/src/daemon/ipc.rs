@@ -144,10 +144,6 @@ pub enum DaemonNotification {
         task_id: String,
         exit_code: i32,
     },
-    TaskFailed {
-        task_id: String,
-        error: String,
-    },
     TaskCancelled {
         task_id: String,
     },

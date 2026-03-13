@@ -77,14 +77,6 @@ pub trait TaskRunHandler: Send {
         is_target: bool,
     );
 
-    async fn on_task_failed(
-        &mut self,
-        ctx: &mut TaskRunContext,
-        task_id: &str,
-        error: &str,
-        is_target: bool,
-    ) -> Option<Error>;
-
     async fn on_task_cancelled(
         &mut self,
         ctx: &mut TaskRunContext,
@@ -250,21 +242,6 @@ pub async fn run_task(
 
                 if ctx.all_completed() {
                     break;
-                }
-            }
-
-            DaemonNotification::TaskFailed { task_id, error } => {
-                let is_target
-                    = ctx.is_target(&task_id);
-
-                if let Some(err) = handler.on_task_failed(&mut ctx, &task_id, &error, is_target).await {
-                    ctx.client.close();
-
-                    if standalone {
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    }
-
-                    return Err(err);
                 }
             }
 

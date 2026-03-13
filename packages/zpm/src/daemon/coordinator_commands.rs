@@ -78,12 +78,6 @@ pub enum CoordinatorCommand {
         stream: Stream,
     },
 
-    /// Task failed with an error.
-    TaskFailed {
-        task_id: String,
-        error: String,
-    },
-
     // ========================================================================
     // Query Commands (from handlers)
     // ========================================================================
