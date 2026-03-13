@@ -46,7 +46,8 @@ impl DaemonOpenCommand {
                     return Ok(());
                 }
                 // Process alive but not answering — terminate it and its children before replacing
-                daemons::kill_daemon_gracefully(existing.pid);
+                let pid = existing.pid;
+                let _ = tokio::task::spawn_blocking(move || daemons::kill_daemon_gracefully(pid)).await;
             }
 
             daemons::unregister_daemon(&detected_root)?;

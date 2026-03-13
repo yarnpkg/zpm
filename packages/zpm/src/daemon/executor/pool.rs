@@ -45,11 +45,6 @@ impl ExecutorPool {
         let daemon_url = self.daemon_url.clone();
         let command_tx = self.command_tx.clone();
 
-        // Send TaskStarted command directly
-        let _ = command_tx.send(CoordinatorCommand::TaskStarted {
-            task_id: task_id_str.clone(),
-        });
-
         self.running.insert(task_id.clone());
 
         let future: TaskFuture = Box::pin(async move {
