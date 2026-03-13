@@ -1,7 +1,7 @@
 import {npath, ppath, xfs} from '@yarnpkg/fslib';
-import {spawn} from 'child_process';
+import {spawn}             from 'child_process';
 
-import {RunFunction} from '../../../../pkg-tests-core/sources/utils/tests';
+import {RunFunction}       from '../../../../pkg-tests-core/sources/utils/tests';
 
 function cleanupDaemon(cb: RunFunction): RunFunction {
   return async args => {
@@ -49,7 +49,7 @@ describe(`Commands`, () => {
             }
           });
 
-          child.on(`error`, (err) => {
+          child.on(`error`, err => {
             clearTimeout(timeout);
             reject(err);
           });
@@ -59,8 +59,8 @@ describe(`Commands`, () => {
         child.kill(`SIGINT`);
 
         // Wait for the process to exit and check the exit code
-        const exitCode = await new Promise<number | null>((resolve) => {
-          child.on(`close`, (code) => {
+        const exitCode = await new Promise<number | null>(resolve => {
+          child.on(`close`, code => {
             resolve(code);
           });
         });

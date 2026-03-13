@@ -6,7 +6,7 @@
 // Race conditions are structurally impossible.
 // ============================================================================
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
@@ -131,9 +131,6 @@ async fn run_coordinator_loop(
     // Create executor pool
     let mut executor_pool = ExecutorPool::new(daemon_url, command_tx);
 
-    // Pending completion tracking (waiting for subtasks)
-    let mut pending_completion: HashMap<ContextualTaskId, i32> = HashMap::new();
-
     loop {
         // Process ready tasks and failures FIRST
         process_ready_tasks(&mut state, &mut executor_pool);
@@ -141,7 +138,7 @@ async fn run_coordinator_loop(
         // Process warm-up deadlines
         let warm_up_completed = state.process_warm_up_deadlines();
         for (ctx_task_id, base_task_id) in warm_up_completed {
-            state.warm_up_complete.insert(ctx_task_id.clone());
+            state.mark_warm_up_complete(&ctx_task_id);
             state.mark_long_lived_warm_up_complete(&base_task_id);
 
             let task_id_str = format_contextual_task_id(&ctx_task_id);
@@ -160,7 +157,6 @@ async fn run_coordinator_loop(
                     cmd,
                     &mut state,
                     &mut executor_pool,
-                    &mut pending_completion,
                     &project,
                 ).await;
 
@@ -176,7 +172,6 @@ async fn run_coordinator_loop(
                         task_id,
                         result,
                         &mut state,
-                        &mut pending_completion,
                     );
                 }
             }
@@ -197,8 +192,7 @@ async fn run_coordinator_loop(
 async fn handle_command(
     cmd: CoordinatorCommand,
     state: &mut CoordinatorState,
-    executor_pool: &mut ExecutorPool,
-    pending_completion: &mut HashMap<ContextualTaskId, i32>,
+    _executor_pool: &mut ExecutorPool,
     project: &Project,
 ) -> bool {
     match cmd {
@@ -316,7 +310,7 @@ async fn handle_command(
             });
 
             if let Some(ctx_task_id) = state.parse_contextual_task_id_simple(&task_id) {
-                handle_task_failure(&ctx_task_id, 1, state, pending_completion);
+                handle_task_failure(&ctx_task_id, 1, state);
             }
 
             state.mark_task_closed(task_id);
@@ -441,16 +435,7 @@ fn find_ready_tasks(
     state: &CoordinatorState,
     running: &HashSet<ContextualTaskId>,
 ) -> Vec<(ContextualTaskId, Option<PreparedTask>)> {
-    let ready_ids = dependencies::find_ready_tasks(
-        &state.resolved,
-        &state.completed,
-        &state.failed,
-        &state.script_finished,
-        &state.warm_up_complete,
-        running,
-        &state.targets,
-        &state.prepared,
-    );
+    let ready_ids = dependencies::find_ready_tasks(state, running);
 
     ready_ids
         .into_iter()
@@ -465,12 +450,7 @@ fn find_tasks_to_fail(
     state: &CoordinatorState,
     running: &HashSet<ContextualTaskId>,
 ) -> Vec<ContextualTaskId> {
-    dependencies::find_tasks_to_fail(
-        &state.resolved,
-        &state.completed,
-        &state.failed,
-        running,
-    )
+    dependencies::find_tasks_to_fail(state, running)
 }
 
 // ============================================================================
@@ -481,22 +461,22 @@ fn handle_task_completion(
     task_id: ContextualTaskId,
     result: Result<std::process::ExitStatus, Error>,
     state: &mut CoordinatorState,
-    pending_completion: &mut HashMap<ContextualTaskId, i32>,
 ) {
     match result {
         Ok(status) => {
             let exit_code = status.code().unwrap_or(-1);
-            state.mark_script_finished(&task_id);
+            // Mark script finished with exit code (stored in WaitingForSubtasks state)
+            state.mark_script_finished_with_code(&task_id, exit_code);
 
             if !status.success() {
-                handle_task_failure(&task_id, exit_code, state, pending_completion);
+                handle_task_failure(&task_id, exit_code, state);
             } else {
-                handle_task_success(&task_id, exit_code, state, pending_completion);
+                handle_task_success(&task_id, exit_code, state);
             }
         }
         Err(e) => {
             eprintln!("Task execution error: {}", e);
-            handle_task_failure(&task_id, 1, state, pending_completion);
+            handle_task_failure(&task_id, 1, state);
         }
     }
 }
@@ -505,7 +485,6 @@ fn handle_task_failure(
     task_id: &ContextualTaskId,
     exit_code: i32,
     state: &mut CoordinatorState,
-    pending_completion: &mut HashMap<ContextualTaskId, i32>,
 ) {
     state.mark_failed(task_id);
 
@@ -515,10 +494,10 @@ fn handle_task_failure(
         exit_code,
     });
 
-    // Propagate failure to parents
+    // Propagate failure to parents that are waiting for subtasks
     let parents = state.find_parents(task_id);
     for parent in parents {
-        if pending_completion.remove(&parent).is_some() {
+        if state.get_waiting_exit_code(&parent).is_some() {
             state.mark_failed(&parent);
 
             let parent_id_str = format_contextual_task_id(&parent);
@@ -534,7 +513,6 @@ fn handle_task_success(
     task_id: &ContextualTaskId,
     exit_code: i32,
     state: &mut CoordinatorState,
-    pending_completion: &mut HashMap<ContextualTaskId, i32>,
 ) {
     if state.try_complete_task(task_id) {
         let task_id_str = format_contextual_task_id(task_id);
@@ -543,13 +521,11 @@ fn handle_task_success(
             exit_code,
         });
 
-        // Try to complete parents
+        // Try to complete parents that are waiting for subtasks
         let parents = state.find_parents(task_id);
         for parent in parents {
-            if let Some(&parent_exit_code) = pending_completion.get(&parent) {
+            if let Some(parent_exit_code) = state.get_waiting_exit_code(&parent) {
                 if state.try_complete_task(&parent) {
-                    pending_completion.remove(&parent);
-
                     let parent_id_str = format_contextual_task_id(&parent);
                     state.broadcast(DaemonNotification::TaskCompleted {
                         task_id: parent_id_str,
@@ -568,9 +544,8 @@ fn handle_task_success(
                 task_id: task_id_str,
                 exit_code: 1,
             });
-        } else {
-            pending_completion.insert(task_id.clone(), exit_code);
         }
+        // Otherwise task stays in WaitingForSubtasks state until all subtasks complete
     }
 }
 

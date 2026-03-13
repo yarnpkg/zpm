@@ -517,7 +517,7 @@ describe(`Commands`, () => {
         for (const line of lines) {
           const match = line.match(timestampRegex);
           expect(match).not.toBeNull();
-          if (match) {
+          if (match?.[1] && match[2]) {
             timestamps.push(parseInt(match[1], 10));
             messages.push(match[2]);
           }
@@ -529,7 +529,7 @@ describe(`Commands`, () => {
         // Verify script-side timestamps are properly spaced (at least 400ms apart)
         // This proves the script's sleep commands executed between echo statements
         for (let i = 1; i < timestamps.length; i++) {
-          const diff = timestamps[i] - timestamps[i - 1];
+          const diff = timestamps[i]! - timestamps[i - 1]!;
           expect(diff).toBeGreaterThanOrEqual(400);
         }
 
@@ -1185,7 +1185,7 @@ describe(`Commands`, () => {
             ``,
             // 5 mid-level tasks (each depends on 2 leaf tasks)
             ...Array.from({length: 5}, (_, i) =>
-              `mid-${i}: leaf-${i * 2} leaf-${i * 2 + 1}\n  echo "mid-${i}"`
+              `mid-${i}: leaf-${i * 2} leaf-${i * 2 + 1}\n  echo "mid-${i}"`,
             ),
             ``,
             // 3 second-level tasks
@@ -1241,7 +1241,7 @@ describe(`Commands`, () => {
           const parallelCount = 10;
           const tasks = [
             ...Array.from({length: parallelCount}, (_, i) =>
-              `parallel-${i}:\n  sleep 0.2 && echo "parallel-${i}"`
+              `parallel-${i}:\n  sleep 0.2 && echo "parallel-${i}"`,
             ),
             ``,
             `root: ${Array.from({length: parallelCount}, (_, i) => `parallel-${i}&`).join(` `)}\n  echo "root"`,

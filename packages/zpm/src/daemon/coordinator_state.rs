@@ -124,6 +124,57 @@ struct SpawningEntry {
 }
 
 // ============================================================================
+// Task State (Unified State Machine)
+// ============================================================================
+
+/// Core task execution state
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskState {
+    /// Task is prepared but not yet running
+    Pending,
+    /// Script has exited, waiting for subtasks to complete
+    WaitingForSubtasks { exit_code: i32 },
+    /// Task completed successfully
+    Completed,
+    /// Task failed (either script failure or dependency failure)
+    Failed,
+}
+
+impl TaskState {
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, TaskState::Completed | TaskState::Failed)
+    }
+
+    pub fn is_script_finished(&self) -> bool {
+        matches!(
+            self,
+            TaskState::WaitingForSubtasks { .. } | TaskState::Completed | TaskState::Failed
+        )
+    }
+}
+
+/// Task information including state and metadata
+#[derive(Debug, Clone)]
+pub struct TaskInfo {
+    /// Current execution state
+    pub state: TaskState,
+    /// Whether this task was explicitly requested (vs. being a dependency)
+    pub is_target: bool,
+    /// For long-lived tasks: has the warm-up period completed?
+    pub warm_up_complete: bool,
+}
+
+impl Default for TaskInfo {
+    fn default() -> Self {
+        Self {
+            state: TaskState::Pending,
+            is_target: false,
+            warm_up_complete: false,
+        }
+    }
+}
+
+// ============================================================================
 // Warm-up Deadline Tracking
 // ============================================================================
 
@@ -144,16 +195,8 @@ pub struct CoordinatorState {
     // ========== SCHEDULER STATE ==========
     /// Shared task definitions (keyed by TaskId, not context-specific)
     pub resolved: ResolvedTasks,
-    /// Tasks that have been directly requested (context-specific)
-    pub targets: HashSet<ContextualTaskId>,
-    /// Tasks that have fully completed (context-specific)
-    pub completed: HashSet<ContextualTaskId>,
-    /// Tasks that have failed (context-specific)
-    pub failed: HashSet<ContextualTaskId>,
-    /// Tasks whose scripts have finished (context-specific)
-    pub script_finished: HashSet<ContextualTaskId>,
-    /// Long-lived tasks that have completed their warm-up period
-    pub warm_up_complete: HashSet<ContextualTaskId>,
+    /// Unified task state tracking (replaces individual HashSets)
+    pub tasks: HashMap<ContextualTaskId, TaskInfo>,
     /// Parent-child subtask relationships
     pub subtasks: HashMap<ContextualTaskId, HashSet<ContextualTaskId>>,
     /// Prepared task execution info
@@ -202,11 +245,7 @@ impl CoordinatorState {
                 tasks: BTreeMap::new(),
                 task_files: BTreeMap::new(),
             },
-            targets: HashSet::new(),
-            completed: HashSet::new(),
-            failed: HashSet::new(),
-            script_finished: HashSet::new(),
-            warm_up_complete: HashSet::new(),
+            tasks: HashMap::new(),
             subtasks: HashMap::new(),
             prepared: BTreeMap::new(),
 
@@ -284,7 +323,7 @@ impl CoordinatorState {
         }
 
         // If task is already in targets for this context, don't re-add
-        if self.targets.contains(&ctx_task_id) {
+        if self.is_target(&ctx_task_id) {
             return Ok((ctx_task_id, vec![]));
         }
 
@@ -305,7 +344,7 @@ impl CoordinatorState {
             self.resolved.task_files.entry(ident).or_insert(tf);
         }
 
-        self.targets.insert(ctx_task_id.clone());
+        self.set_as_target(&ctx_task_id);
         self.prepare_new_tasks(project, &ctx_id)?;
 
         if !args.is_empty() {
@@ -385,46 +424,105 @@ impl CoordinatorState {
     }
 
     fn clear_task_state(&mut self, task_id: &ContextualTaskId) {
-        self.completed.remove(task_id);
-        self.script_finished.remove(task_id);
-        self.failed.remove(task_id);
-        self.warm_up_complete.remove(task_id);
-        self.targets.remove(task_id);
+        self.tasks.remove(task_id);
         self.subtasks.remove(task_id);
     }
 
+    // ========================================================================
+    // Task State Queries
+    // ========================================================================
+
+    pub fn get_state(&self, task_id: &ContextualTaskId) -> TaskState {
+        self.tasks
+            .get(task_id)
+            .map(|info| info.state)
+            .unwrap_or(TaskState::Pending)
+    }
+
+    pub fn is_completed(&self, task_id: &ContextualTaskId) -> bool {
+        matches!(self.get_state(task_id), TaskState::Completed)
+    }
+
+    pub fn is_failed(&self, task_id: &ContextualTaskId) -> bool {
+        matches!(self.get_state(task_id), TaskState::Failed)
+    }
+
+    pub fn is_terminal(&self, task_id: &ContextualTaskId) -> bool {
+        self.get_state(task_id).is_terminal()
+    }
+
+    pub fn is_script_finished(&self, task_id: &ContextualTaskId) -> bool {
+        self.get_state(task_id).is_script_finished()
+    }
+
+    pub fn is_warm_up_complete(&self, task_id: &ContextualTaskId) -> bool {
+        self.tasks
+            .get(task_id)
+            .map(|info| info.warm_up_complete)
+            .unwrap_or(false)
+    }
+
+    pub fn is_target(&self, task_id: &ContextualTaskId) -> bool {
+        self.tasks
+            .get(task_id)
+            .map(|info| info.is_target)
+            .unwrap_or(false)
+    }
+
+    pub fn get_waiting_exit_code(&self, task_id: &ContextualTaskId) -> Option<i32> {
+        match self.tasks.get(task_id)?.state {
+            TaskState::WaitingForSubtasks { exit_code } => Some(exit_code),
+            _ => None,
+        }
+    }
+
     pub fn is_task_fully_completed(&self, task_id: &ContextualTaskId) -> bool {
-        if !self.script_finished.contains(task_id) {
+        if !self.is_script_finished(task_id) {
             return false;
         }
 
         if let Some(task_subtasks) = self.subtasks.get(task_id) {
-            task_subtasks.iter().all(|s| self.completed.contains(s) && !self.failed.contains(s))
+            task_subtasks.iter().all(|s| self.is_completed(s) && !self.is_failed(s))
         } else {
             true
         }
     }
 
+    // ========================================================================
+    // Task State Mutations
+    // ========================================================================
+
+    fn ensure_task_info(&mut self, task_id: &ContextualTaskId) -> &mut TaskInfo {
+        self.tasks.entry(task_id.clone()).or_default()
+    }
+
+    pub fn set_as_target(&mut self, task_id: &ContextualTaskId) {
+        self.ensure_task_info(task_id).is_target = true;
+    }
+
+    pub fn mark_script_finished_with_code(&mut self, task_id: &ContextualTaskId, exit_code: i32) {
+        self.ensure_task_info(task_id).state = TaskState::WaitingForSubtasks { exit_code };
+    }
+
     pub fn try_complete_task(&mut self, task_id: &ContextualTaskId) -> bool {
         if self.is_task_fully_completed(task_id) {
-            self.completed.insert(task_id.clone());
+            self.ensure_task_info(task_id).state = TaskState::Completed;
             true
         } else {
             false
         }
     }
 
-    pub fn mark_script_finished(&mut self, task_id: &ContextualTaskId) {
-        self.script_finished.insert(task_id.clone());
-    }
-
     pub fn mark_completed(&mut self, task_id: &ContextualTaskId) {
-        self.completed.insert(task_id.clone());
+        self.ensure_task_info(task_id).state = TaskState::Completed;
     }
 
     pub fn mark_failed(&mut self, task_id: &ContextualTaskId) {
-        self.failed.insert(task_id.clone());
-        self.completed.insert(task_id.clone());
+        self.ensure_task_info(task_id).state = TaskState::Failed;
+    }
+
+    pub fn mark_warm_up_complete(&mut self, task_id: &ContextualTaskId) {
+        self.ensure_task_info(task_id).warm_up_complete = true;
     }
 
     pub fn is_long_lived(&self, task_id: &ContextualTaskId) -> bool {
@@ -436,7 +534,7 @@ impl CoordinatorState {
 
     pub fn has_failed_subtask(&self, task_id: &ContextualTaskId) -> bool {
         if let Some(subtasks) = self.subtasks.get(task_id) {
-            subtasks.iter().any(|s| self.failed.contains(s))
+            subtasks.iter().any(|s| self.is_failed(s))
         } else {
             false
         }
@@ -453,7 +551,7 @@ impl CoordinatorState {
     /// Atomically check if a task should be spawned.
     /// No race possible - we own the state.
     pub fn should_spawn_task(&self, task_id: &ContextualTaskId) -> bool {
-        !self.completed.contains(task_id) && !self.failed.contains(task_id)
+        !self.is_terminal(task_id)
     }
 
     /// Cancel all tasks in a context. Returns cancelled task IDs.
@@ -462,7 +560,7 @@ impl CoordinatorState {
             .prepared
             .keys()
             .filter(|ctx_task_id| {
-                ctx_task_id.context_id == context_id && !self.completed.contains(ctx_task_id)
+                ctx_task_id.context_id == context_id && !self.is_terminal(ctx_task_id)
             })
             .cloned()
             .collect();
@@ -470,8 +568,7 @@ impl CoordinatorState {
         let mut cancelled_ids = Vec::new();
 
         for task_id in tasks_to_cancel {
-            self.failed.insert(task_id.clone());
-            self.completed.insert(task_id.clone());
+            self.mark_failed(&task_id);
             cancelled_ids.push(format_contextual_task_id(&task_id));
         }
 
@@ -650,20 +747,23 @@ impl CoordinatorState {
     pub fn process_warm_up_deadlines(&mut self) -> Vec<(ContextualTaskId, TaskId)> {
         let now = Instant::now();
         let mut completed = Vec::new();
+        let mut to_remove = Vec::new();
 
-        self.warm_up_deadlines.retain(|deadline| {
+        // First pass: identify expired deadlines
+        for (idx, deadline) in self.warm_up_deadlines.iter().enumerate() {
             if now >= deadline.deadline {
+                to_remove.push(idx);
                 // Check if task hasn't failed/completed during warm-up
-                if !self.failed.contains(&deadline.contextual_task_id)
-                    && !self.completed.contains(&deadline.contextual_task_id)
-                {
+                if !self.is_terminal(&deadline.contextual_task_id) {
                     completed.push((deadline.contextual_task_id.clone(), deadline.base_task_id.clone()));
                 }
-                false // Remove from list
-            } else {
-                true // Keep in list
             }
-        });
+        }
+
+        // Second pass: remove expired deadlines (in reverse to preserve indices)
+        for idx in to_remove.into_iter().rev() {
+            self.warm_up_deadlines.swap_remove(idx);
+        }
 
         completed
     }
