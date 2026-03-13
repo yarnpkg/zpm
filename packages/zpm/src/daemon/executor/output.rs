@@ -17,50 +17,41 @@ pub async fn stream_output(
 ) {
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
+    let mut stdout_done = false;
+    let mut stderr_done = false;
 
     loop {
         tokio::select! {
-            line = stdout_reader.next_line() => {
+            line = stdout_reader.next_line(), if !stdout_done => {
                 match line {
                     Ok(Some(line)) => {
                         if tx.send(OutputLine {
                             line,
                             stream: Stream::Stdout,
                         }).is_err() {
-                            // Receiver dropped, stop processing
                             return;
                         }
                     }
-                    Ok(None) => break,
-                    Err(_) => break,
+                    Ok(None) | Err(_) => { stdout_done = true; }
                 }
             }
-            line = stderr_reader.next_line() => {
+            line = stderr_reader.next_line(), if !stderr_done => {
                 match line {
                     Ok(Some(line)) => {
                         if tx.send(OutputLine {
                             line,
                             stream: Stream::Stderr,
                         }).is_err() {
-                            // Receiver dropped, stop processing
                             return;
                         }
                     }
-                    Ok(None) => {}
-                    Err(_) => {}
+                    Ok(None) | Err(_) => { stderr_done = true; }
                 }
             }
         }
-    }
 
-    // Drain remaining stderr after stdout closes
-    while let Ok(Some(line)) = stderr_reader.next_line().await {
-        if tx.send(OutputLine {
-            line,
-            stream: Stream::Stderr,
-        }).is_err() {
-            // Receiver dropped, stop processing
-            return;
+        if stdout_done && stderr_done {
+            break;
         }
     }
 }
