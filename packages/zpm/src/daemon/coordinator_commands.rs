@@ -29,6 +29,7 @@ pub enum CoordinatorCommand {
         parent_task_id: Option<String>,
         workspace: Option<String>,
         context_id: Option<String>,
+        subscription_id: Option<SubscriptionId>,
         response_tx: oneshot::Sender<PushTasksResult>,
     },
 

@@ -76,6 +76,7 @@ async fn handle_push_tasks(
             parent_task_id,
             workspace,
             context_id,
+            subscription_id,
             response_tx,
         })
         .is_err()
@@ -90,15 +91,6 @@ async fn handle_push_tasks(
             if let Some(error) = result.error {
                 DaemonResponse::Error { message: error }
             } else {
-                // Add tasks to subscription if one was created
-                if let Some(sub_id) = subscription_id {
-                    let _ = command_tx.send(CoordinatorCommand::AddTasksToSubscription {
-                        subscription_id: sub_id,
-                        target_task_ids: result.task_ids.clone(),
-                        dependency_task_ids: result.dependency_ids.clone(),
-                    });
-                }
-
                 DaemonResponse::TasksEnqueued {
                     task_ids: result.task_ids,
                     dependency_count: result.dependency_ids.len(),

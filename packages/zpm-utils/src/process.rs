@@ -21,6 +21,13 @@ impl IgnoreSigint {
     pub fn new() -> Self {
         // SAFETY: We're setting SIG_IGN which is always safe
         let prev_handler = unsafe { libc::signal(libc::SIGINT, libc::SIG_IGN) };
+        // If signal() returns SIG_ERR, use SIG_DFL as safe fallback so Drop
+        // restores a known-valid handler rather than attempting to set SIG_ERR.
+        let prev_handler = if prev_handler == libc::SIG_ERR {
+            libc::SIG_DFL
+        } else {
+            prev_handler
+        };
         Self { prev_handler }
     }
 }

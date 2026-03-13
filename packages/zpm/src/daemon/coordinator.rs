@@ -206,6 +206,7 @@ async fn handle_command(
             parent_task_id,
             workspace,
             context_id,
+            subscription_id,
             response_tx,
         } => {
             let result = execute_push_tasks(
@@ -216,6 +217,17 @@ async fn handle_command(
                 state,
                 project,
             );
+
+            // Add tasks to subscription BEFORE sending the response to avoid race
+            // where TaskStarted is processed before the subscription filter is set
+            if let Some(sub_id) = subscription_id {
+                state.add_tasks_to_subscription(
+                    sub_id,
+                    result.task_ids.clone(),
+                    result.dependency_ids.clone(),
+                );
+            }
+
             let _ = response_tx.send(result);
         }
 
@@ -425,9 +437,10 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
 
             let task_id_str = format_contextual_task_id(&task_id);
             state.broadcast(DaemonNotification::TaskCompleted {
-                task_id: task_id_str,
+                task_id: task_id_str.clone(),
                 exit_code: 0,
             });
+            state.mark_task_closed(task_id_str);
         }
     }
 }
