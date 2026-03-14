@@ -163,7 +163,7 @@ impl TaskGraph {
         }
 
         self.set_as_target(&ctx_task_id);
-        self.prepare_specific_tasks(project, &ctx_id, &resolved_ctx_task_ids)?;
+        self.prepare_specific_tasks(project, &resolved_ctx_task_ids)?;
 
         if !args.is_empty() {
             if let Some(task) = self.prepared.get_mut(&ctx_task_id) {
@@ -178,7 +178,6 @@ impl TaskGraph {
     fn prepare_specific_tasks(
         &mut self,
         project: &Project,
-        context_id: &str,
         tasks_to_prepare: &[ContextualTaskId],
     ) -> Result<usize, Error> {
         let colors: Vec<&DataType> = prefix_colors().take(5).collect();
@@ -186,10 +185,6 @@ impl TaskGraph {
         let mut new_count = 0;
 
         for ctx_task_id in tasks_to_prepare {
-            if ctx_task_id.context_id != context_id {
-                continue;
-            }
-
             if self.prepared.contains_key(ctx_task_id) {
                 continue;
             }
