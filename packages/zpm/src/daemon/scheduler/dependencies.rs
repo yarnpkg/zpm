@@ -115,9 +115,9 @@ pub fn find_tasks_to_fail(
                 continue;
             }
 
-            // Skip if already completed, failed, or running
+            // Skip if already completed, failed, script finished (e.g. waiting for subtasks), or running
             let task_state = state.get_state(&ctx_task_id);
-            if task_state.is_terminal() || running.contains(&ctx_task_id) {
+            if task_state.is_terminal() || task_state.is_script_finished() || running.contains(&ctx_task_id) {
                 continue;
             }
 

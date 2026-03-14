@@ -244,19 +244,24 @@ pub async fn run_accept_loop(
 // ============================================================================
 
 async fn poll_notifications(
-    receivers: &mut [mpsc::UnboundedReceiver<DaemonNotification>],
+    receivers: &mut Vec<mpsc::UnboundedReceiver<DaemonNotification>>,
 ) -> Option<DaemonNotification> {
     if receivers.is_empty() {
         std::future::pending::<Option<DaemonNotification>>().await
     } else {
         futures::future::poll_fn(|cx| {
-            for rx in receivers.iter_mut() {
-                match rx.poll_recv(cx) {
+            let mut i = 0;
+            while i < receivers.len() {
+                match receivers[i].poll_recv(cx) {
                     std::task::Poll::Ready(Some(notif)) => {
                         return std::task::Poll::Ready(Some(notif));
                     }
-                    std::task::Poll::Ready(None) => {}
-                    std::task::Poll::Pending => {}
+                    std::task::Poll::Ready(None) => {
+                        receivers.swap_remove(i);
+                    }
+                    std::task::Poll::Pending => {
+                        i += 1;
+                    }
                 }
             }
             std::task::Poll::Pending
