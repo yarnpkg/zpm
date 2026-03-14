@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
+use super::super::scheduler::ContextualTaskId;
+
 // ============================================================================
 // Spawning Task State
 // ============================================================================
@@ -21,10 +23,10 @@ struct SpawningEntry {
 pub struct ProcessRegistry {
     /// All registered PIDs
     pids: HashSet<u32>,
-    /// Mapping from task_id string to PID
-    task_to_pid: HashMap<String, u32>,
+    /// Mapping from task to PID
+    task_to_pid: HashMap<ContextualTaskId, u32>,
     /// Tasks currently spawning (between spawn() and PID registration)
-    spawning: HashMap<String, SpawningEntry>,
+    spawning: HashMap<ContextualTaskId, SpawningEntry>,
 }
 
 impl ProcessRegistry {
@@ -40,12 +42,12 @@ impl ProcessRegistry {
     // PID Operations
     // ========================================================================
 
-    pub fn register_pid(&mut self, pid: u32, task_id: String) {
+    pub fn register_pid(&mut self, pid: u32, task_id: ContextualTaskId) {
         self.pids.insert(pid);
         self.task_to_pid.insert(task_id, pid);
     }
 
-    pub fn unregister_pid(&mut self, pid: u32, task_id: &str) {
+    pub fn unregister_pid(&mut self, pid: u32, task_id: &ContextualTaskId) {
         self.pids.remove(&pid);
         self.task_to_pid.remove(task_id);
     }
@@ -54,18 +56,17 @@ impl ProcessRegistry {
         self.pids.iter().cloned().collect()
     }
 
-    pub fn take_pid_for_task(&mut self, task_id: &str) -> Option<u32> {
+    pub fn take_pid_for_task(&mut self, task_id: &ContextualTaskId) -> Option<u32> {
         let pid = self.task_to_pid.remove(task_id)?;
         self.pids.remove(&pid);
         Some(pid)
     }
 
     pub fn take_pids_for_context(&mut self, context_id: &str) -> Vec<u32> {
-        let suffix = format!("@{}", context_id);
-        let task_ids_to_remove: Vec<String> = self
+        let task_ids_to_remove: Vec<ContextualTaskId> = self
             .task_to_pid
             .keys()
-            .filter(|task_id| task_id.ends_with(&suffix))
+            .filter(|ctx| ctx.context_id == context_id)
             .cloned()
             .collect();
 
@@ -84,14 +85,14 @@ impl ProcessRegistry {
     // Spawning Operations
     // ========================================================================
 
-    pub fn mark_spawning(&mut self, task_id: String) {
+    pub fn mark_spawning(&mut self, task_id: ContextualTaskId) {
         self.spawning.insert(task_id, SpawningEntry {
             spawned_at: Instant::now(),
             pending_cancel: false,
         });
     }
 
-    pub fn mark_spawning_pending_cancel(&mut self, task_id: &str) -> bool {
+    pub fn mark_spawning_pending_cancel(&mut self, task_id: &ContextualTaskId) -> bool {
         if let Some(entry) = self.spawning.get_mut(task_id) {
             entry.pending_cancel = true;
             true
@@ -100,15 +101,14 @@ impl ProcessRegistry {
         }
     }
 
-    pub fn take_spawning(&mut self, task_id: &str) -> Option<bool> {
+    pub fn take_spawning(&mut self, task_id: &ContextualTaskId) -> Option<bool> {
         self.spawning.remove(task_id).map(|e| e.pending_cancel)
     }
 
-    pub fn get_spawning_for_context(&self, context_id: &str) -> Vec<String> {
-        let suffix = format!("@{}", context_id);
+    pub fn get_spawning_for_context(&self, context_id: &str) -> Vec<ContextualTaskId> {
         self.spawning
             .keys()
-            .filter(|id| id.ends_with(&suffix))
+            .filter(|ctx| ctx.context_id == context_id)
             .cloned()
             .collect()
     }

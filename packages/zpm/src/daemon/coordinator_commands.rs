@@ -10,6 +10,7 @@ use tokio::sync::{mpsc, oneshot};
 use super::coordinator_state::SubscriptionId;
 use super::events::Stream;
 use super::ipc::{AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, SubscriptionScope, TaskSubscription};
+use super::scheduler::ContextualTaskId;
 
 // ============================================================================
 // Command Types
@@ -52,13 +53,13 @@ pub enum CoordinatorCommand {
 
     /// Register a PID for a task that has just spawned.
     RegisterPid {
-        task_id: String,
+        task_id: ContextualTaskId,
         pid: u32,
     },
 
     /// Unregister a PID when a task exits.
     UnregisterPid {
-        task_id: String,
+        task_id: ContextualTaskId,
         pid: u32,
     },
 
@@ -68,12 +69,12 @@ pub enum CoordinatorCommand {
 
     /// Task has started executing.
     TaskStarted {
-        task_id: String,
+        task_id: ContextualTaskId,
     },
 
     /// Task produced output.
     TaskOutput {
-        task_id: String,
+        task_id: ContextualTaskId,
         line: String,
         stream: Stream,
     },
@@ -81,8 +82,15 @@ pub enum CoordinatorCommand {
     /// Task completed (success or failure).
     /// Sent AFTER all output has been streamed, ensuring proper ordering.
     TaskCompleted {
-        task_id: String,
+        task_id: ContextualTaskId,
         result: TaskCompletionResult,
+    },
+
+    /// Long-lived task warm-up period elapsed.
+    /// Sent by a spawned timer after LONG_LIVED_WARMUP_MS.
+    WarmUpComplete {
+        task_id: ContextualTaskId,
+        base_task_id: zpm_tasks::TaskId,
     },
 
     // ========================================================================

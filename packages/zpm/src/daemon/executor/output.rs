@@ -3,12 +3,13 @@ use tokio::process::ChildStderr;
 use tokio::process::ChildStdout;
 
 use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
+use super::super::coordinator_state::ContextualTaskId;
 use super::super::events::Stream;
 
 pub async fn stream_output(
     stdout: ChildStdout,
     stderr: ChildStderr,
-    task_id: String,
+    task_id: ContextualTaskId,
     command_tx: CommandSender,
 ) {
     let mut stdout_reader = BufReader::new(stdout).lines();

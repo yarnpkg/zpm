@@ -8,7 +8,7 @@
 use std::process::ExitStatus;
 
 use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
-use super::super::coordinator_state::PreparedTask;
+use super::super::coordinator_state::{format_contextual_task_id, ContextualTaskId, PreparedTask};
 use super::super::ipc::{DAEMON_SERVER_ENV, TASK_CURRENT_ENV};
 use super::output::stream_output;
 use crate::error::Error;
@@ -16,7 +16,7 @@ use crate::script::ScriptEnvironment;
 
 pub struct TaskRunner {
     prepared: PreparedTask,
-    task_id: String,
+    task_id: ContextualTaskId,
     daemon_url: String,
     command_tx: CommandSender,
 }
@@ -24,7 +24,7 @@ pub struct TaskRunner {
 impl TaskRunner {
     pub fn new(
         prepared: PreparedTask,
-        task_id: String,
+        task_id: ContextualTaskId,
         daemon_url: String,
         command_tx: CommandSender,
     ) -> Self {
@@ -39,11 +39,13 @@ impl TaskRunner {
     pub async fn run(self) -> Result<ExitStatus, Error> {
         let mut env = ScriptEnvironment::new()?;
 
+        let task_id_str = format_contextual_task_id(&self.task_id);
+
         for (key, value) in &self.prepared.env {
             env = env.with_env_variable(key, value);
         }
 
-        env = env.with_env_variable(TASK_CURRENT_ENV, &self.task_id);
+        env = env.with_env_variable(TASK_CURRENT_ENV, &task_id_str);
         env = env.with_env_variable(DAEMON_SERVER_ENV, &self.daemon_url);
 
         let mut running = env

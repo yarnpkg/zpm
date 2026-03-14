@@ -476,17 +476,7 @@ pub fn format_contextual_task_id(ctx_task_id: &ContextualTaskId) -> String {
     )
 }
 
-pub fn parse_base_task_id(contextual_task_id: &str) -> Option<TaskId> {
-    let (task_part, _context_id) = contextual_task_id.rsplit_once('@')?;
-    let (workspace_str, task_name_str) = task_part.split_once(':')?;
-
-    let task_name = TaskName::new(task_name_str).ok()?;
-    let workspace = Ident::new(workspace_str);
-
-    Some(TaskId { workspace, task_name })
-}
-
-pub fn parse_contextual_task_id_simple(task_id_str: &str) -> Option<ContextualTaskId> {
+fn parse_contextual_task_id_simple(task_id_str: &str) -> Option<ContextualTaskId> {
     let (task_part, context_id) = task_id_str.rsplit_once('@')?;
     let (workspace_str, task_name_str) = task_part.split_once(':')?;
 

@@ -26,7 +26,7 @@ use super::coordinator_commands::{
     PushTasksResult, StatsResult, StopTaskResult, TaskCompletionResult,
 };
 use super::coordinator_state::{
-    format_contextual_task_id, parse_base_task_id, parse_contextual_task_id_simple,
+    format_contextual_task_id,
     CoordinatorState, ContextualTaskId,
 };
 use super::executor::ExecutorPool;
@@ -130,56 +130,22 @@ async fn run_coordinator_loop(
     let mut state = CoordinatorState::new(output_buffer_max_lines, max_closed_tasks);
 
     // Create executor pool
-    let mut executor_pool = ExecutorPool::new(daemon_url, command_tx);
+    let mut executor_pool = ExecutorPool::new(daemon_url, command_tx.clone());
 
-    loop {
-        // Process ready tasks and failures FIRST
+    while let Some(cmd) = command_rx.recv().await {
+        let should_shutdown = handle_command(
+            cmd,
+            &mut state,
+            &mut executor_pool,
+            &project,
+            &command_tx,
+        ).await;
+
+        if should_shutdown {
+            break;
+        }
+
         process_ready_tasks(&mut state, &mut executor_pool);
-
-        // Process warm-up deadlines (cross-domain: long_lived → graph + subscriptions)
-        let expired = state.long_lived.drain_expired_deadlines();
-        for warm_up in expired {
-            if !state.graph.is_terminal(&warm_up.contextual_task_id) {
-                state.graph.mark_warm_up_complete(&warm_up.contextual_task_id);
-                state.long_lived.mark_warm_up_complete(&warm_up.base_task_id);
-
-                let task_id_str = format_contextual_task_id(&warm_up.contextual_task_id);
-                state.subscriptions.broadcast(DaemonNotification::TaskWarmUpComplete {
-                    task_id: task_id_str,
-                });
-            }
-        }
-
-        // Wait for next event
-        tokio::select! {
-            biased;
-
-            // Commands have highest priority - ALL events come through here now,
-            // including TaskCompleted. This ensures proper FIFO ordering.
-            Some(cmd) = command_rx.recv() => {
-                let should_shutdown = handle_command(
-                    cmd,
-                    &mut state,
-                    &mut executor_pool,
-                    &project,
-                ).await;
-
-                if should_shutdown {
-                    break;
-                }
-            }
-
-            // Poll executor futures to keep them running and update bookkeeping.
-            // Completion events are sent through command_rx, not returned here.
-            _ = executor_pool.poll_next(), if !executor_pool.is_empty() => {
-                // Bookkeeping updated inside poll_next()
-            }
-
-            // Periodic wake-up for ready task checking and warm-up deadlines
-            _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                // Loop will re-check ready tasks and warm-up deadlines
-            }
-        }
     }
 }
 
@@ -193,6 +159,7 @@ async fn handle_command(
     state: &mut CoordinatorState,
     executor_pool: &mut ExecutorPool,
     project: &Project,
+    command_tx: &CommandSender,
 ) -> bool {
     match cmd {
         // ====================================================================
@@ -281,52 +248,64 @@ async fn handle_command(
 
         CoordinatorCommand::TaskStarted { task_id } => {
             // Broadcast notification
+            let task_id_str = format_contextual_task_id(&task_id);
             state.subscriptions.broadcast(DaemonNotification::TaskStarted {
-                task_id: task_id.clone(),
+                task_id: task_id_str,
             });
 
-            // Schedule warm-up for long-lived tasks
-            if let Some(ctx_task_id) = parse_contextual_task_id_simple(&task_id) {
-                if state.graph.is_long_lived(&ctx_task_id) {
-                    if let Some(base_task_id) = parse_base_task_id(&task_id) {
-                        state.long_lived.schedule_warm_up(
-                            ctx_task_id,
-                            base_task_id,
-                            Duration::from_millis(LONG_LIVED_WARMUP_MS),
-                        );
-                    }
-                }
+            // Spawn delayed warm-up command for long-lived tasks
+            if state.graph.is_long_lived(&task_id) {
+                let base_task_id = task_id.task_id.clone();
+                let tx = command_tx.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(LONG_LIVED_WARMUP_MS)).await;
+                    let _ = tx.send(CoordinatorCommand::WarmUpComplete {
+                        task_id,
+                        base_task_id,
+                    });
+                });
             }
         }
 
         CoordinatorCommand::TaskOutput { task_id, line, stream } => {
+            let task_id_str = format_contextual_task_id(&task_id);
+
             // Buffer output
-            state.output.append(task_id.clone(), BufferedOutputLine {
+            state.output.append(task_id_str.clone(), BufferedOutputLine {
                 line: line.clone(),
                 stream: stream.as_str().to_string(),
             });
 
             // Broadcast notification
             state.subscriptions.broadcast(DaemonNotification::TaskOutputLine {
-                task_id,
+                task_id: task_id_str,
                 line,
                 stream: stream.as_str().to_string(),
             });
         }
 
         CoordinatorCommand::TaskCompleted { task_id, result } => {
-            // Parse the contextual task ID
-            if let Some(ctx_task_id) = parse_contextual_task_id_simple(&task_id) {
-                // Remove from executor's running set BEFORE updating state
-                // This ensures find_ready_tasks sees consistent state
-                executor_pool.mark_completed(&ctx_task_id);
+            // Remove from executor's running set BEFORE updating state
+            // This ensures find_ready_tasks sees consistent state
+            executor_pool.mark_completed(&task_id);
 
-                let completion_result = match result {
-                    TaskCompletionResult::Exited(status) => Ok(status),
-                    TaskCompletionResult::Error(e) => Err(Error::TaskExecutionFailed(e)),
-                };
+            let completion_result = match result {
+                TaskCompletionResult::Exited(status) => Ok(status),
+                TaskCompletionResult::Error(e) => Err(Error::TaskExecutionFailed(e)),
+            };
 
-                handle_task_completion(ctx_task_id, completion_result, state);
+            handle_task_completion(task_id, completion_result, state);
+        }
+
+        CoordinatorCommand::WarmUpComplete { task_id, base_task_id } => {
+            if !state.graph.is_terminal(&task_id) {
+                state.graph.mark_warm_up_complete(&task_id);
+                state.long_lived.mark_warm_up_complete(&base_task_id);
+
+                let task_id_str = format_contextual_task_id(&task_id);
+                state.subscriptions.broadcast(DaemonNotification::TaskWarmUpComplete {
+                    task_id: task_id_str,
+                });
             }
         }
 
@@ -345,7 +324,7 @@ async fn handle_command(
                 .into_iter()
                 .map(|e| LongLivedTaskInfo {
                     task_id: format!("{}:{}", e.task_id.workspace.to_file_string(), e.task_id.task_name.as_str()),
-                    contextual_task_id: e.contextual_task_id,
+                    contextual_task_id: format_contextual_task_id(&e.contextual_task_id),
                     warm_up_complete: e.warm_up_complete,
                     started_at_ms: e.started_at
                         .duration_since(SystemTime::UNIX_EPOCH)
@@ -446,10 +425,8 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
         }
 
         if let Some(prepared) = prepared_opt {
-            let task_id_str = format_contextual_task_id(&task_id);
-
             // Mark as spawning BEFORE spawn
-            state.processes.mark_spawning(task_id_str);
+            state.processes.mark_spawning(task_id.clone());
 
             // Spawn task
             executor_pool.spawn(task_id, prepared);
@@ -591,22 +568,21 @@ fn execute_push_tasks(
         if is_long_lived {
             if let Some(ref tid) = task_id {
                 if let Some(existing) = state.long_lived.get(tid) {
-                    if !existing.contextual_task_id.is_empty() {
-                        task_ids.push(existing.contextual_task_id.clone());
+                    let existing_id_str = format_contextual_task_id(&existing.contextual_task_id);
+                    task_ids.push(existing_id_str.clone());
 
-                        let started_at_ms = existing
-                            .started_at
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .map(|d| d.as_millis() as u64)
-                            .unwrap_or(0);
+                    let started_at_ms = existing
+                        .started_at
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
 
-                        attached_long_lived.push(AttachedLongLivedTask {
-                            task_id: existing.contextual_task_id.clone(),
-                            started_at_ms,
-                        });
+                    attached_long_lived.push(AttachedLongLivedTask {
+                        task_id: existing_id_str,
+                        started_at_ms,
+                    });
 
-                        continue;
-                    }
+                    continue;
                 }
             }
         }
@@ -630,7 +606,7 @@ fn execute_push_tasks(
 
                 if is_long_lived {
                     if let Some(ref tid) = task_id {
-                        state.long_lived.register(tid.clone(), target_id_str.clone());
+                        state.long_lived.register(tid.clone(), ctx_task_id.clone());
                     }
                 }
 
@@ -682,8 +658,8 @@ fn handle_stop_task(
         }
     };
 
-    let entry = match state.long_lived.get(&task_id) {
-        Some(e) => e,
+    let contextual_task_id = match state.long_lived.get(&task_id) {
+        Some(e) => e.contextual_task_id.clone(),
         None => {
             return StopTaskResult {
                 success: false,
@@ -693,7 +669,7 @@ fn handle_stop_task(
     };
 
     // Check if spawning
-    if state.processes.mark_spawning_pending_cancel(&entry.contextual_task_id) {
+    if state.processes.mark_spawning_pending_cancel(&contextual_task_id) {
         state.long_lived.remove(&task_id);
         return StopTaskResult {
             success: true,
@@ -702,7 +678,7 @@ fn handle_stop_task(
     }
 
     // Try to take and kill PID
-    if let Some(pid) = state.processes.take_pid_for_task(&entry.contextual_task_id) {
+    if let Some(pid) = state.processes.take_pid_for_task(&contextual_task_id) {
         kill_process_group(pid);
         state.long_lived.remove(&task_id);
         return StopTaskResult {

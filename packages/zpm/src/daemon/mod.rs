@@ -15,7 +15,6 @@ pub use coordinator::run_daemon;
 pub use coordinator_commands::{CommandSender, CoordinatorCommand};
 pub use coordinator_state::SubscriptionId;
 pub use events::Stream;
-pub use executor::{ExecutorPool, TaskRunner};
 pub use ipc::{
     daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification,
     DaemonRequest, DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, LongLivedTaskStatus,

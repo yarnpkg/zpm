@@ -20,10 +20,7 @@ pub use long_lived_registry::LongLivedRegistry;
 pub use output_buffer::OutputBuffer;
 pub use process_registry::ProcessRegistry;
 pub use subscription_manager::{SubscriptionId, SubscriptionManager};
-pub use task_graph::{
-    format_contextual_task_id, parse_base_task_id, parse_contextual_task_id_simple,
-    TaskGraph,
-};
+pub use task_graph::{format_contextual_task_id, TaskGraph};
 
 // Re-export scheduler types that are used across the coordinator
 pub use super::scheduler::{ContextualTaskId, PreparedTask};
