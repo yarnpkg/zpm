@@ -4,6 +4,10 @@
 // This coordinator owns ALL mutable state directly (no Arc<RwLock>).
 // All state mutations happen in a single async task via command processing.
 // Race conditions are structurally impossible.
+//
+// State is decomposed into focused sub-structs (graph, processes,
+// long_lived, subscriptions, output). Cross-domain operations happen
+// here, making them explicit and reviewable.
 // ============================================================================
 
 use std::collections::HashSet;
@@ -22,7 +26,8 @@ use super::coordinator_commands::{
     PushTasksResult, StatsResult, StopTaskResult, TaskCompletionResult,
 };
 use super::coordinator_state::{
-    format_contextual_task_id, parse_base_task_id, CoordinatorState, ContextualTaskId, PreparedTask,
+    format_contextual_task_id, parse_base_task_id, parse_contextual_task_id_simple,
+    CoordinatorState, ContextualTaskId,
 };
 use super::executor::ExecutorPool;
 use super::ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskSubscription, LONG_LIVED_CONTEXT_ID};
@@ -110,11 +115,6 @@ async fn run_daemon_internal(
 }
 
 // ============================================================================
-// Simplified Connection Context
-// ============================================================================
-
-
-// ============================================================================
 // Coordinator Loop
 // ============================================================================
 
@@ -136,16 +136,18 @@ async fn run_coordinator_loop(
         // Process ready tasks and failures FIRST
         process_ready_tasks(&mut state, &mut executor_pool);
 
-        // Process warm-up deadlines
-        let warm_up_completed = state.process_warm_up_deadlines();
-        for (ctx_task_id, base_task_id) in warm_up_completed {
-            state.mark_warm_up_complete(&ctx_task_id);
-            state.mark_long_lived_warm_up_complete(&base_task_id);
+        // Process warm-up deadlines (cross-domain: long_lived → graph + subscriptions)
+        let expired = state.long_lived.drain_expired_deadlines();
+        for warm_up in expired {
+            if !state.graph.is_terminal(&warm_up.contextual_task_id) {
+                state.graph.mark_warm_up_complete(&warm_up.contextual_task_id);
+                state.long_lived.mark_warm_up_complete(&warm_up.base_task_id);
 
-            let task_id_str = format_contextual_task_id(&ctx_task_id);
-            state.broadcast(DaemonNotification::TaskWarmUpComplete {
-                task_id: task_id_str,
-            });
+                let task_id_str = format_contextual_task_id(&warm_up.contextual_task_id);
+                state.subscriptions.broadcast(DaemonNotification::TaskWarmUpComplete {
+                    task_id: task_id_str,
+                });
+            }
         }
 
         // Wait for next event
@@ -217,7 +219,7 @@ async fn handle_command(
             // Add tasks to subscription BEFORE sending the response to avoid race
             // where TaskStarted is processed before the subscription filter is set
             if let Some(sub_id) = subscription_id {
-                state.add_tasks_to_subscription(
+                state.subscriptions.add_tasks(
                     sub_id,
                     result.task_ids.clone(),
                     result.dependency_ids.clone(),
@@ -228,19 +230,19 @@ async fn handle_command(
         }
 
         CoordinatorCommand::CancelContext { context_id, response_tx } => {
-            // 1. Mark tasks as failed in scheduler
-            let cancelled_ids = state.cancel_context(&context_id);
+            // 1. Mark tasks as failed in graph
+            let cancelled_ids = state.graph.cancel_context(&context_id);
 
             // 2. Get and kill registered PIDs
-            let pids = state.take_pids_for_context(&context_id);
+            let pids = state.processes.take_pids_for_context(&context_id);
             for pid in &pids {
                 kill_process_group(*pid);
             }
 
             // 3. Mark spawning tasks for deferred kill
-            let spawning_ids = state.get_spawning_for_context(&context_id);
+            let spawning_ids = state.processes.get_spawning_for_context(&context_id);
             for task_id in &spawning_ids {
-                state.mark_spawning_pending_cancel(task_id);
+                state.processes.mark_spawning_pending_cancel(task_id);
             }
 
             let _ = response_tx.send(CancelContextResult {
@@ -259,18 +261,18 @@ async fn handle_command(
 
         CoordinatorCommand::RegisterPid { task_id, pid } => {
             // Check if cancelled while spawning
-            if let Some(pending_cancel) = state.take_spawning(&task_id) {
+            if let Some(pending_cancel) = state.processes.take_spawning(&task_id) {
                 if pending_cancel {
                     kill_process_group(pid);
                     return false;
                 }
             }
-            state.register_pid(pid, task_id);
+            state.processes.register_pid(pid, task_id);
         }
 
         CoordinatorCommand::UnregisterPid { task_id, pid } => {
-            state.take_spawning(&task_id);
-            state.unregister_pid(pid, &task_id);
+            state.processes.take_spawning(&task_id);
+            state.processes.unregister_pid(pid, &task_id);
         }
 
         // ====================================================================
@@ -279,15 +281,15 @@ async fn handle_command(
 
         CoordinatorCommand::TaskStarted { task_id } => {
             // Broadcast notification
-            state.broadcast(DaemonNotification::TaskStarted {
+            state.subscriptions.broadcast(DaemonNotification::TaskStarted {
                 task_id: task_id.clone(),
             });
 
             // Schedule warm-up for long-lived tasks
-            if let Some(ctx_task_id) = state.parse_contextual_task_id_simple(&task_id) {
-                if state.is_long_lived(&ctx_task_id) {
+            if let Some(ctx_task_id) = parse_contextual_task_id_simple(&task_id) {
+                if state.graph.is_long_lived(&ctx_task_id) {
                     if let Some(base_task_id) = parse_base_task_id(&task_id) {
-                        state.schedule_warm_up(
+                        state.long_lived.schedule_warm_up(
                             ctx_task_id,
                             base_task_id,
                             Duration::from_millis(LONG_LIVED_WARMUP_MS),
@@ -299,13 +301,13 @@ async fn handle_command(
 
         CoordinatorCommand::TaskOutput { task_id, line, stream } => {
             // Buffer output
-            state.buffer_output(task_id.clone(), BufferedOutputLine {
+            state.output.append(task_id.clone(), BufferedOutputLine {
                 line: line.clone(),
                 stream: stream.as_str().to_string(),
             });
 
             // Broadcast notification
-            state.broadcast(DaemonNotification::TaskOutputLine {
+            state.subscriptions.broadcast(DaemonNotification::TaskOutputLine {
                 task_id,
                 line,
                 stream: stream.as_str().to_string(),
@@ -314,7 +316,7 @@ async fn handle_command(
 
         CoordinatorCommand::TaskCompleted { task_id, result } => {
             // Parse the contextual task ID
-            if let Some(ctx_task_id) = state.parse_contextual_task_id_simple(&task_id) {
+            if let Some(ctx_task_id) = parse_contextual_task_id_simple(&task_id) {
                 // Remove from executor's running set BEFORE updating state
                 // This ensures find_ready_tasks sees consistent state
                 executor_pool.mark_completed(&ctx_task_id);
@@ -333,12 +335,12 @@ async fn handle_command(
         // ====================================================================
 
         CoordinatorCommand::GetTaskOutput { task_id, response_tx } => {
-            let lines = state.get_task_output(&task_id);
+            let lines = state.output.get(&task_id);
             let _ = response_tx.send(lines);
         }
 
         CoordinatorCommand::ListLongLivedTasks { response_tx } => {
-            let entries = state.list_long_lived();
+            let entries = state.long_lived.list();
             let infos: Vec<LongLivedTaskInfo> = entries
                 .into_iter()
                 .map(|e| LongLivedTaskInfo {
@@ -355,13 +357,12 @@ async fn handle_command(
         }
 
         CoordinatorCommand::GetStats { response_tx } => {
-            let (tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count) = state.get_stats();
             let _ = response_tx.send(StatsResult {
-                tasks_count,
-                prepared_count,
-                subtasks_count,
-                output_buffer_count,
-                closed_tasks_count,
+                tasks_count: state.graph.tasks_count(),
+                prepared_count: state.graph.prepared_count(),
+                subtasks_count: state.graph.subtasks_count(),
+                output_buffer_count: state.output.buffer_count(),
+                closed_tasks_count: state.output.closed_tasks_count(),
             });
         }
 
@@ -375,7 +376,7 @@ async fn handle_command(
             context_id,
             response_tx,
         } => {
-            let (id, rx) = state.create_subscription(output_scope, status_scope, context_id);
+            let (id, rx) = state.subscriptions.create(output_scope, status_scope, context_id);
             let _ = response_tx.send((id, rx));
         }
 
@@ -384,11 +385,11 @@ async fn handle_command(
             target_task_ids,
             dependency_task_ids,
         } => {
-            state.add_tasks_to_subscription(subscription_id, target_task_ids, dependency_task_ids);
+            state.subscriptions.add_tasks(subscription_id, target_task_ids, dependency_task_ids);
         }
 
         CoordinatorCommand::RemoveSubscription { subscription_id } => {
-            state.remove_subscription(subscription_id);
+            state.subscriptions.remove(subscription_id);
         }
 
         // ====================================================================
@@ -396,7 +397,7 @@ async fn handle_command(
         // ====================================================================
 
         CoordinatorCommand::Shutdown { response_tx } => {
-            let pids = state.get_all_pids();
+            let pids = state.processes.get_all_pids();
             let _ = response_tx.send(pids);
             return true; // Signal shutdown
         }
@@ -413,23 +414,34 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
     let running: HashSet<_> = executor_pool.running_tasks().cloned().collect();
 
     // Find tasks to cancel (dependencies failed)
-    let tasks_to_cancel = find_tasks_to_fail(state, &running);
+    let tasks_to_cancel = dependencies::find_tasks_to_fail(&state.graph, &running);
     for task_id in tasks_to_cancel {
-        state.mark_cancelled(&task_id);
+        state.graph.mark_cancelled(&task_id);
 
         let task_id_str = format_contextual_task_id(&task_id);
-        state.broadcast(DaemonNotification::TaskCancelled {
+        state.subscriptions.broadcast(DaemonNotification::TaskCancelled {
             task_id: task_id_str.clone(),
         });
-        state.mark_task_closed(task_id_str);
+        // Cross-domain: output eviction → graph cleanup
+        let evicted = state.output.mark_closed(task_id_str);
+        for id in evicted {
+            state.graph.evict_closed_task(&id);
+        }
     }
 
     // Find ready tasks
-    let ready_tasks = find_ready_tasks(state, &running);
+    let ready_ids = dependencies::find_ready_tasks(&state.graph, &running);
+    let ready_tasks: Vec<_> = ready_ids
+        .into_iter()
+        .map(|ctx_task_id| {
+            let prepared = state.graph.prepared.get(&ctx_task_id).cloned();
+            (ctx_task_id, prepared)
+        })
+        .collect();
 
     for (task_id, prepared_opt) in ready_tasks {
         // Atomic check - no race possible, we own the state
-        if !state.should_spawn_task(&task_id) {
+        if !state.graph.should_spawn_task(&task_id) {
             continue;
         }
 
@@ -437,44 +449,26 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
             let task_id_str = format_contextual_task_id(&task_id);
 
             // Mark as spawning BEFORE spawn
-            state.mark_spawning(task_id_str);
+            state.processes.mark_spawning(task_id_str);
 
             // Spawn task
             executor_pool.spawn(task_id, prepared);
         } else {
             // No script - complete immediately
-            state.mark_completed(&task_id);
+            state.graph.mark_completed(&task_id);
 
             let task_id_str = format_contextual_task_id(&task_id);
-            state.broadcast(DaemonNotification::TaskCompleted {
+            state.subscriptions.broadcast(DaemonNotification::TaskCompleted {
                 task_id: task_id_str.clone(),
                 exit_code: 0,
             });
-            state.mark_task_closed(task_id_str);
+            // Cross-domain: output eviction → graph cleanup
+            let evicted = state.output.mark_closed(task_id_str);
+            for id in evicted {
+                state.graph.evict_closed_task(&id);
+            }
         }
     }
-}
-
-fn find_ready_tasks(
-    state: &CoordinatorState,
-    running: &HashSet<ContextualTaskId>,
-) -> Vec<(ContextualTaskId, Option<PreparedTask>)> {
-    let ready_ids = dependencies::find_ready_tasks(state, running);
-
-    ready_ids
-        .into_iter()
-        .map(|ctx_task_id| {
-            let prepared = state.prepared.get(&ctx_task_id).cloned();
-            (ctx_task_id, prepared)
-        })
-        .collect()
-}
-
-fn find_tasks_to_fail(
-    state: &CoordinatorState,
-    running: &HashSet<ContextualTaskId>,
-) -> Vec<ContextualTaskId> {
-    dependencies::find_tasks_to_fail(state, running)
 }
 
 // ============================================================================
@@ -489,8 +483,7 @@ fn handle_task_completion(
     match result {
         Ok(status) => {
             let exit_code = status.code().unwrap_or(-1);
-            // Mark script finished with exit code (stored in WaitingForSubtasks state)
-            state.mark_script_finished_with_code(&task_id, exit_code);
+            state.graph.mark_script_finished_with_code(&task_id, exit_code);
 
             if !status.success() {
                 handle_task_failure(&task_id, exit_code, state);
@@ -505,32 +498,36 @@ fn handle_task_completion(
     }
 }
 
+/// Helper to broadcast completion and evict closed task state.
+fn broadcast_and_close(task_id_str: String, exit_code: i32, state: &mut CoordinatorState) {
+    state.subscriptions.broadcast(DaemonNotification::TaskCompleted {
+        task_id: task_id_str.clone(),
+        exit_code,
+    });
+    let evicted = state.output.mark_closed(task_id_str);
+    for id in evicted {
+        state.graph.evict_closed_task(&id);
+    }
+}
+
 fn handle_task_failure(
     task_id: &ContextualTaskId,
     exit_code: i32,
     state: &mut CoordinatorState,
 ) {
-    state.mark_failed(task_id);
+    state.graph.mark_failed(task_id);
 
     let task_id_str = format_contextual_task_id(task_id);
-    state.broadcast(DaemonNotification::TaskCompleted {
-        task_id: task_id_str.clone(),
-        exit_code,
-    });
-    state.mark_task_closed(task_id_str);
+    broadcast_and_close(task_id_str, exit_code, state);
 
     // Propagate failure to parents that are waiting for subtasks
-    let parents = state.find_parents(task_id);
+    let parents = state.graph.find_parents(task_id);
     for parent in parents {
-        if state.get_waiting_exit_code(&parent).is_some() {
-            state.mark_failed(&parent);
+        if state.graph.get_waiting_exit_code(&parent).is_some() {
+            state.graph.mark_failed(&parent);
 
             let parent_id_str = format_contextual_task_id(&parent);
-            state.broadcast(DaemonNotification::TaskCompleted {
-                task_id: parent_id_str.clone(),
-                exit_code,
-            });
-            state.mark_task_closed(parent_id_str);
+            broadcast_and_close(parent_id_str, exit_code, state);
         }
     }
 }
@@ -540,39 +537,27 @@ fn handle_task_success(
     exit_code: i32,
     state: &mut CoordinatorState,
 ) {
-    if state.try_complete_task(task_id) {
+    if state.graph.try_complete_task(task_id) {
         let task_id_str = format_contextual_task_id(task_id);
-        state.broadcast(DaemonNotification::TaskCompleted {
-            task_id: task_id_str.clone(),
-            exit_code,
-        });
-        state.mark_task_closed(task_id_str);
+        broadcast_and_close(task_id_str, exit_code, state);
 
         // Try to complete parents that are waiting for subtasks
-        let parents = state.find_parents(task_id);
+        let parents = state.graph.find_parents(task_id);
         for parent in parents {
-            if let Some(parent_exit_code) = state.get_waiting_exit_code(&parent) {
-                if state.try_complete_task(&parent) {
+            if let Some(parent_exit_code) = state.graph.get_waiting_exit_code(&parent) {
+                if state.graph.try_complete_task(&parent) {
                     let parent_id_str = format_contextual_task_id(&parent);
-                    state.broadcast(DaemonNotification::TaskCompleted {
-                        task_id: parent_id_str.clone(),
-                        exit_code: parent_exit_code,
-                    });
-                    state.mark_task_closed(parent_id_str);
+                    broadcast_and_close(parent_id_str, parent_exit_code, state);
                 }
             }
         }
     } else {
         // Check if any subtask has already failed
-        if state.has_failed_subtask(task_id) {
-            state.mark_failed(task_id);
+        if state.graph.has_failed_subtask(task_id) {
+            state.graph.mark_failed(task_id);
 
             let task_id_str = format_contextual_task_id(task_id);
-            state.broadcast(DaemonNotification::TaskCompleted {
-                task_id: task_id_str.clone(),
-                exit_code: 1,
-            });
-            state.mark_task_closed(task_id_str);
+            broadcast_and_close(task_id_str, 1, state);
         }
         // Otherwise task stays in WaitingForSubtasks state until all subtasks complete
     }
@@ -605,7 +590,7 @@ fn execute_push_tasks(
         // For long-lived tasks, check if already running
         if is_long_lived {
             if let Some(ref tid) = task_id {
-                if let Some(existing) = state.get_long_lived(tid) {
+                if let Some(existing) = state.long_lived.get(tid) {
                     if !existing.contextual_task_id.is_empty() {
                         task_ids.push(existing.contextual_task_id.clone());
 
@@ -632,7 +617,7 @@ fn execute_push_tasks(
             context_id
         };
 
-        match state.add_task(
+        match state.graph.add_task(
             project,
             &task_sub.name,
             parent_task_id,
@@ -645,7 +630,7 @@ fn execute_push_tasks(
 
                 if is_long_lived {
                     if let Some(ref tid) = task_id {
-                        state.register_long_lived(tid.clone(), target_id_str.clone());
+                        state.long_lived.register(tid.clone(), target_id_str.clone());
                     }
                 }
 
@@ -697,7 +682,7 @@ fn handle_stop_task(
         }
     };
 
-    let entry = match state.get_long_lived(&task_id) {
+    let entry = match state.long_lived.get(&task_id) {
         Some(e) => e,
         None => {
             return StopTaskResult {
@@ -708,8 +693,8 @@ fn handle_stop_task(
     };
 
     // Check if spawning
-    if state.mark_spawning_pending_cancel(&entry.contextual_task_id) {
-        state.remove_long_lived(&task_id);
+    if state.processes.mark_spawning_pending_cancel(&entry.contextual_task_id) {
+        state.long_lived.remove(&task_id);
         return StopTaskResult {
             success: true,
             error: Some("Task is spawning, will be killed shortly".to_string()),
@@ -717,9 +702,9 @@ fn handle_stop_task(
     }
 
     // Try to take and kill PID
-    if let Some(pid) = state.take_pid_for_task(&entry.contextual_task_id) {
+    if let Some(pid) = state.processes.take_pid_for_task(&entry.contextual_task_id) {
         kill_process_group(pid);
-        state.remove_long_lived(&task_id);
+        state.long_lived.remove(&task_id);
         return StopTaskResult {
             success: true,
             error: None,
@@ -727,7 +712,7 @@ fn handle_stop_task(
     }
 
     // No PID - task may have completed
-    state.remove_long_lived(&task_id);
+    state.long_lived.remove(&task_id);
     StopTaskResult {
         success: true,
         error: Some("Task had no process ID, removed from registry".to_string()),
@@ -864,4 +849,3 @@ async fn graceful_shutdown(command_tx: CommandSender) {
 
     std::process::exit(0);
 }
-

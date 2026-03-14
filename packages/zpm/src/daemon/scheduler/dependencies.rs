@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use super::state::ContextualTaskId;
-use crate::daemon::coordinator_state::CoordinatorState;
+use crate::daemon::coordinator_state::TaskGraph;
 
 /// Find tasks that are ready to execute.
 /// A task is ready when all its prerequisites are completed (in the same context).
@@ -11,11 +11,11 @@ use crate::daemon::coordinator_state::CoordinatorState;
 /// scripts (dependency aggregators). Tasks without scripts will have None as their
 /// PreparedTask in the coordinator's ready task list.
 pub fn find_ready_tasks(
-    state: &CoordinatorState,
+    graph: &TaskGraph,
     running: &HashSet<ContextualTaskId>,
 ) -> Vec<ContextualTaskId> {
     // Collect all contexts that have pending work
-    let active_contexts: HashSet<&String> = state
+    let active_contexts: HashSet<&String> = graph
         .tasks
         .keys()
         .chain(running.iter())
@@ -26,7 +26,7 @@ pub fn find_ready_tasks(
 
     // For each context, check which tasks are ready
     for context_id in active_contexts {
-        for (task_id, prerequisites) in &state.resolved.tasks {
+        for (task_id, prerequisites) in &graph.resolved.tasks {
             let ctx_task_id = ContextualTaskId::new(task_id.clone(), context_id.clone());
 
             // A task can be ready if it's either:
@@ -35,15 +35,15 @@ pub fn find_ready_tasks(
             //
             // For non-target tasks without scripts, they are implicitly "completed" since
             // there's nothing to run - their prerequisites just propagate to their dependents.
-            let is_prepared = state.prepared.contains_key(&ctx_task_id);
-            let is_target_without_script = !is_prepared && state.is_target(&ctx_task_id);
+            let is_prepared = graph.prepared.contains_key(&ctx_task_id);
+            let is_target_without_script = !is_prepared && graph.is_target(&ctx_task_id);
 
             if !is_prepared && !is_target_without_script {
                 continue;
             }
 
             // Skip if already completed, failed, finished, or running
-            let task_state = state.get_state(&ctx_task_id);
+            let task_state = graph.get_state(&ctx_task_id);
             if task_state.is_terminal()
                 || task_state.is_script_finished()
                 || running.contains(&ctx_task_id)
@@ -57,21 +57,21 @@ pub fn find_ready_tasks(
             let all_prereqs_ready = prerequisites.iter().all(|prereq| {
                 let ctx_prereq = ContextualTaskId::new(prereq.clone(), context_id.clone());
 
-                if state.is_failed_or_cancelled(&ctx_prereq) {
+                if graph.is_failed_or_cancelled(&ctx_prereq) {
                     return false;
                 }
 
-                if state.is_completed(&ctx_prereq) {
+                if graph.is_completed(&ctx_prereq) {
                     return true;
                 }
 
-                let is_long_lived = state
+                let is_long_lived = graph
                     .prepared
                     .get(&ctx_prereq)
                     .map(|p| p.is_long_lived)
                     .unwrap_or(false);
 
-                if is_long_lived && state.is_warm_up_complete(&ctx_prereq) {
+                if is_long_lived && graph.is_warm_up_complete(&ctx_prereq) {
                     return true;
                 }
 
@@ -89,11 +89,11 @@ pub fn find_ready_tasks(
 
 /// Find tasks that should be marked as failed because a prerequisite failed.
 pub fn find_tasks_to_fail(
-    state: &CoordinatorState,
+    graph: &TaskGraph,
     running: &HashSet<ContextualTaskId>,
 ) -> Vec<ContextualTaskId> {
     // Collect all contexts that have pending work
-    let active_contexts: HashSet<&String> = state
+    let active_contexts: HashSet<&String> = graph
         .tasks
         .keys()
         .chain(running.iter())
@@ -104,19 +104,19 @@ pub fn find_tasks_to_fail(
 
     // For each context, check which tasks should fail
     for context_id in active_contexts {
-        for (task_id, prerequisites) in &state.resolved.tasks {
+        for (task_id, prerequisites) in &graph.resolved.tasks {
             let ctx_task_id = ContextualTaskId::new(task_id.clone(), context_id.clone());
 
             // Consider tasks that are either prepared OR are target tasks without scripts
-            let is_prepared = state.prepared.contains_key(&ctx_task_id);
-            let is_target_without_script = !is_prepared && state.is_target(&ctx_task_id);
+            let is_prepared = graph.prepared.contains_key(&ctx_task_id);
+            let is_target_without_script = !is_prepared && graph.is_target(&ctx_task_id);
 
             if !is_prepared && !is_target_without_script {
                 continue;
             }
 
             // Skip if already completed, failed, script finished (e.g. waiting for subtasks), or running
-            let task_state = state.get_state(&ctx_task_id);
+            let task_state = graph.get_state(&ctx_task_id);
             if task_state.is_terminal() || task_state.is_script_finished() || running.contains(&ctx_task_id) {
                 continue;
             }
@@ -124,7 +124,7 @@ pub fn find_tasks_to_fail(
             // Check if any prerequisite failed or was cancelled (in the same context)
             let any_prereq_failed = prerequisites.iter().any(|prereq| {
                 let ctx_prereq = ContextualTaskId::new(prereq.clone(), context_id.clone());
-                state.is_failed_or_cancelled(&ctx_prereq)
+                graph.is_failed_or_cancelled(&ctx_prereq)
             });
 
             if any_prereq_failed {

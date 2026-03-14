@@ -1,0 +1,505 @@
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use zpm_primitives::Ident;
+use zpm_tasks::{ResolvedTasks, TaskId, TaskName};
+use zpm_utils::{DataType, ToFileString};
+
+use super::super::presentation::prefix_colors;
+use super::super::scheduler::{ContextualTaskId, PreparedTask};
+use crate::error::Error;
+use crate::project::Project;
+
+// ============================================================================
+// Task State (Unified State Machine)
+// ============================================================================
+
+/// Core task execution state
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskState {
+    /// Task is prepared but not yet running
+    Pending,
+    /// Script has exited, waiting for subtasks to complete
+    WaitingForSubtasks { exit_code: i32 },
+    /// Task completed successfully
+    Completed,
+    /// Task failed (script failure or process-level failure)
+    Failed,
+    /// Task was cancelled because a dependency failed
+    Cancelled,
+}
+
+impl TaskState {
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, TaskState::Completed | TaskState::Failed | TaskState::Cancelled)
+    }
+
+    pub fn is_script_finished(&self) -> bool {
+        matches!(
+            self,
+            TaskState::WaitingForSubtasks { .. } | TaskState::Completed | TaskState::Failed | TaskState::Cancelled
+        )
+    }
+}
+
+/// Task information including state and metadata
+#[derive(Debug, Clone)]
+pub struct TaskInfo {
+    /// Current execution state
+    pub state: TaskState,
+    /// Whether this task was explicitly requested (vs. being a dependency)
+    pub is_target: bool,
+    /// For long-lived tasks: has the warm-up period completed?
+    pub warm_up_complete: bool,
+}
+
+impl Default for TaskInfo {
+    fn default() -> Self {
+        Self {
+            state: TaskState::Pending,
+            is_target: false,
+            warm_up_complete: false,
+        }
+    }
+}
+
+// ============================================================================
+// Task Graph
+// ============================================================================
+
+/// Owns the dependency/scheduling data and the task state machine.
+/// Only modified by the coordinator event loop — no locks needed.
+pub struct TaskGraph {
+    /// Shared task definitions (keyed by TaskId, not context-specific)
+    pub resolved: ResolvedTasks,
+    /// Unified task state tracking
+    pub tasks: HashMap<ContextualTaskId, TaskInfo>,
+    /// Parent-child subtask relationships
+    pub subtasks: HashMap<ContextualTaskId, HashSet<ContextualTaskId>>,
+    /// Prepared task execution info
+    pub prepared: BTreeMap<ContextualTaskId, PreparedTask>,
+}
+
+impl TaskGraph {
+    pub fn new() -> Self {
+        Self {
+            resolved: ResolvedTasks {
+                tasks: BTreeMap::new(),
+                task_files: BTreeMap::new(),
+            },
+            tasks: HashMap::new(),
+            subtasks: HashMap::new(),
+            prepared: BTreeMap::new(),
+        }
+    }
+
+    // ========================================================================
+    // Task Registration
+    // ========================================================================
+
+    pub fn add_task(
+        &mut self,
+        project: &Project,
+        task_name: &str,
+        parent_task_id: Option<&str>,
+        args: Vec<String>,
+        workspace_override: Option<&str>,
+        context_id: Option<&str>,
+    ) -> Result<(ContextualTaskId, Vec<ContextualTaskId>), Error> {
+        let task_name = TaskName::new(task_name)
+            .map_err(|_| Error::TaskNameParseError(task_name.to_string()))?;
+
+        let workspace = if let Some(ws_name) = workspace_override {
+            let ident = Ident::new(ws_name);
+            project.workspace_by_ident(&ident)?
+        } else {
+            project.active_workspace()?
+        };
+
+        let task_id = TaskId {
+            workspace: workspace.name.clone(),
+            task_name,
+        };
+
+        let ctx_id = if let Some(ctx) = context_id {
+            ctx.to_string()
+        } else if let Some(parent_str) = parent_task_id {
+            self.parse_context_id(parent_str)
+                .ok_or_else(|| Error::MissingContextId)?
+        } else {
+            return Err(Error::MissingContextId);
+        };
+
+        let ctx_task_id = ContextualTaskId::new(task_id.clone(), ctx_id.clone());
+
+        if let Some(parent_str) = parent_task_id {
+            if let Some(parent_ctx_id) = self.parse_contextual_task_id(project, parent_str) {
+                self.subtasks
+                    .entry(parent_ctx_id)
+                    .or_default()
+                    .insert(ctx_task_id.clone());
+            }
+        }
+
+        // If task is already in targets for this context, don't re-add
+        if self.is_target(&ctx_task_id) {
+            return Ok((ctx_task_id, vec![]));
+        }
+
+        self.clear_task_state(&ctx_task_id);
+
+        let new_resolved = project.resolve_task(&task_id)?;
+
+        let mut resolved_ctx_task_ids: Vec<ContextualTaskId> = Vec::new();
+
+        for (tid, prereqs) in new_resolved.tasks {
+            let ctx_tid = ContextualTaskId::new(tid.clone(), ctx_id.clone());
+            self.clear_task_state(&ctx_tid);
+            resolved_ctx_task_ids.push(ctx_tid);
+            self.resolved.tasks.entry(tid).or_insert(prereqs);
+        }
+
+        for (ident, tf) in new_resolved.task_files {
+            self.resolved.task_files.entry(ident).or_insert(tf);
+        }
+
+        self.set_as_target(&ctx_task_id);
+        self.prepare_specific_tasks(project, &ctx_id, &resolved_ctx_task_ids)?;
+
+        if !args.is_empty() {
+            if let Some(task) = self.prepared.get_mut(&ctx_task_id) {
+                task.args = args;
+            }
+        }
+
+        Ok((ctx_task_id, resolved_ctx_task_ids))
+    }
+
+    /// Prepare only the specific tasks that were resolved for this context.
+    fn prepare_specific_tasks(
+        &mut self,
+        project: &Project,
+        context_id: &str,
+        tasks_to_prepare: &[ContextualTaskId],
+    ) -> Result<usize, Error> {
+        let colors: Vec<&DataType> = prefix_colors().take(5).collect();
+        let mut color_index = self.prepared.len();
+        let mut new_count = 0;
+
+        for ctx_task_id in tasks_to_prepare {
+            if ctx_task_id.context_id != context_id {
+                continue;
+            }
+
+            if self.prepared.contains_key(ctx_task_id) {
+                continue;
+            }
+
+            let task_id = &ctx_task_id.task_id;
+
+            let Some(task_file) = self.resolved.task_files.get(&task_id.workspace) else {
+                continue;
+            };
+
+            let Some(task) = task_file.tasks.get(task_id.task_name.as_str()) else {
+                continue;
+            };
+
+            if task.script.is_empty() {
+                continue;
+            }
+
+            let Ok(workspace) = project.workspace_by_ident(&task_id.workspace) else {
+                continue;
+            };
+
+            let script = task.script.join("\n");
+            let mut env = BTreeMap::new();
+
+            env.insert(
+                "npm_lifecycle_event".to_string(),
+                task_id.task_name.as_str().to_string(),
+            );
+
+            let color = colors[color_index % colors.len()];
+            color_index += 1;
+
+            let prefix = color.colorize(&format!(
+                "[{}:{}]: ",
+                task_id.workspace.to_file_string(),
+                task_id.task_name.as_str()
+            ));
+
+            let is_long_lived = task.attributes.iter().any(|attr| attr.name == "long-lived");
+
+            self.prepared.insert(
+                ctx_task_id.clone(),
+                PreparedTask {
+                    script,
+                    cwd: workspace.path.clone(),
+                    env,
+                    prefix,
+                    args: vec![],
+                    is_long_lived,
+                },
+            );
+
+            new_count += 1;
+        }
+
+        Ok(new_count)
+    }
+
+    fn clear_task_state(&mut self, task_id: &ContextualTaskId) {
+        self.tasks.remove(task_id);
+        self.subtasks.remove(task_id);
+    }
+
+    // ========================================================================
+    // Task State Queries
+    // ========================================================================
+
+    pub fn get_state(&self, task_id: &ContextualTaskId) -> TaskState {
+        self.tasks
+            .get(task_id)
+            .map(|info| info.state)
+            .unwrap_or(TaskState::Pending)
+    }
+
+    pub fn is_completed(&self, task_id: &ContextualTaskId) -> bool {
+        matches!(self.get_state(task_id), TaskState::Completed)
+    }
+
+    #[allow(dead_code)]
+    pub fn is_failed(&self, task_id: &ContextualTaskId) -> bool {
+        matches!(self.get_state(task_id), TaskState::Failed)
+    }
+
+    #[allow(dead_code)]
+    pub fn is_cancelled(&self, task_id: &ContextualTaskId) -> bool {
+        matches!(self.get_state(task_id), TaskState::Cancelled)
+    }
+
+    pub fn is_failed_or_cancelled(&self, task_id: &ContextualTaskId) -> bool {
+        matches!(
+            self.get_state(task_id),
+            TaskState::Failed | TaskState::Cancelled
+        )
+    }
+
+    pub fn is_terminal(&self, task_id: &ContextualTaskId) -> bool {
+        self.get_state(task_id).is_terminal()
+    }
+
+    pub fn is_script_finished(&self, task_id: &ContextualTaskId) -> bool {
+        self.get_state(task_id).is_script_finished()
+    }
+
+    pub fn is_warm_up_complete(&self, task_id: &ContextualTaskId) -> bool {
+        self.tasks
+            .get(task_id)
+            .map(|info| info.warm_up_complete)
+            .unwrap_or(false)
+    }
+
+    pub fn is_target(&self, task_id: &ContextualTaskId) -> bool {
+        self.tasks
+            .get(task_id)
+            .map(|info| info.is_target)
+            .unwrap_or(false)
+    }
+
+    pub fn get_waiting_exit_code(&self, task_id: &ContextualTaskId) -> Option<i32> {
+        match self.tasks.get(task_id)?.state {
+            TaskState::WaitingForSubtasks { exit_code } => Some(exit_code),
+            _ => None,
+        }
+    }
+
+    pub fn is_task_fully_completed(&self, task_id: &ContextualTaskId) -> bool {
+        if !self.is_script_finished(task_id) {
+            return false;
+        }
+
+        if let Some(task_subtasks) = self.subtasks.get(task_id) {
+            task_subtasks.iter().all(|s| self.is_completed(s) && !self.is_failed_or_cancelled(s))
+        } else {
+            true
+        }
+    }
+
+    pub fn is_long_lived(&self, task_id: &ContextualTaskId) -> bool {
+        self.prepared
+            .get(task_id)
+            .map(|p| p.is_long_lived)
+            .unwrap_or(false)
+    }
+
+    pub fn has_failed_subtask(&self, task_id: &ContextualTaskId) -> bool {
+        if let Some(subtasks) = self.subtasks.get(task_id) {
+            subtasks.iter().any(|s| self.is_failed_or_cancelled(s))
+        } else {
+            false
+        }
+    }
+
+    pub fn find_parents(&self, task_id: &ContextualTaskId) -> Vec<ContextualTaskId> {
+        self.subtasks
+            .iter()
+            .filter(|(_, children)| children.contains(task_id))
+            .map(|(parent, _)| parent.clone())
+            .collect()
+    }
+
+    pub fn should_spawn_task(&self, task_id: &ContextualTaskId) -> bool {
+        !self.is_terminal(task_id)
+    }
+
+    // ========================================================================
+    // Task State Mutations
+    // ========================================================================
+
+    fn ensure_task_info(&mut self, task_id: &ContextualTaskId) -> &mut TaskInfo {
+        self.tasks.entry(task_id.clone()).or_default()
+    }
+
+    pub fn set_as_target(&mut self, task_id: &ContextualTaskId) {
+        self.ensure_task_info(task_id).is_target = true;
+    }
+
+    pub fn mark_script_finished_with_code(&mut self, task_id: &ContextualTaskId, exit_code: i32) {
+        self.ensure_task_info(task_id).state = TaskState::WaitingForSubtasks { exit_code };
+    }
+
+    pub fn try_complete_task(&mut self, task_id: &ContextualTaskId) -> bool {
+        if self.is_task_fully_completed(task_id) {
+            self.ensure_task_info(task_id).state = TaskState::Completed;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn mark_completed(&mut self, task_id: &ContextualTaskId) {
+        self.ensure_task_info(task_id).state = TaskState::Completed;
+    }
+
+    pub fn mark_failed(&mut self, task_id: &ContextualTaskId) {
+        self.ensure_task_info(task_id).state = TaskState::Failed;
+    }
+
+    pub fn mark_cancelled(&mut self, task_id: &ContextualTaskId) {
+        self.ensure_task_info(task_id).state = TaskState::Cancelled;
+    }
+
+    pub fn mark_warm_up_complete(&mut self, task_id: &ContextualTaskId) {
+        self.ensure_task_info(task_id).warm_up_complete = true;
+    }
+
+    /// Cancel all tasks in a context. Returns cancelled task IDs.
+    pub fn cancel_context(&mut self, context_id: &str) -> Vec<String> {
+        let tasks_to_cancel: Vec<ContextualTaskId> = self
+            .prepared
+            .keys()
+            .filter(|ctx_task_id| {
+                ctx_task_id.context_id == context_id && !self.is_terminal(ctx_task_id)
+            })
+            .cloned()
+            .collect();
+
+        let mut cancelled_ids = Vec::new();
+
+        for task_id in tasks_to_cancel {
+            self.mark_failed(&task_id);
+            cancelled_ids.push(format_contextual_task_id(&task_id));
+        }
+
+        cancelled_ids
+    }
+
+    /// Remove all state for a closed task (used by output buffer eviction).
+    pub fn evict_closed_task(&mut self, task_id_str: &str) {
+        if let Some(ctx_id) = parse_contextual_task_id_simple(task_id_str) {
+            self.tasks.remove(&ctx_id);
+            self.prepared.remove(&ctx_id);
+            self.subtasks.remove(&ctx_id);
+        }
+    }
+
+    // ========================================================================
+    // ID Parsing Helpers
+    // ========================================================================
+
+    fn parse_contextual_task_id(&self, project: &Project, task_id_str: &str) -> Option<ContextualTaskId> {
+        let (task_part, context_id) = task_id_str.rsplit_once('@')?;
+        let (workspace_str, task_name_str) = task_part.split_once(':')?;
+
+        let task_name = TaskName::new(task_name_str).ok()?;
+        let ident = Ident::new(workspace_str);
+        let workspace = project.workspace_by_ident(&ident).ok()?;
+
+        Some(ContextualTaskId::new(
+            TaskId {
+                workspace: workspace.name.clone(),
+                task_name,
+            },
+            context_id.to_string(),
+        ))
+    }
+
+    fn parse_context_id(&self, task_id_str: &str) -> Option<String> {
+        let (_, context_id) = task_id_str.rsplit_once('@')?;
+        Some(context_id.to_string())
+    }
+
+    // ========================================================================
+    // Statistics
+    // ========================================================================
+
+    pub fn tasks_count(&self) -> usize {
+        self.tasks.len()
+    }
+
+    pub fn prepared_count(&self) -> usize {
+        self.prepared.len()
+    }
+
+    pub fn subtasks_count(&self) -> usize {
+        self.subtasks.len()
+    }
+}
+
+// ============================================================================
+// Formatting Helpers (free functions)
+// ============================================================================
+
+pub fn format_contextual_task_id(ctx_task_id: &ContextualTaskId) -> String {
+    format!(
+        "{}:{}@{}",
+        ctx_task_id.task_id.workspace.to_file_string(),
+        ctx_task_id.task_id.task_name.as_str(),
+        ctx_task_id.context_id
+    )
+}
+
+pub fn parse_base_task_id(contextual_task_id: &str) -> Option<TaskId> {
+    let (task_part, _context_id) = contextual_task_id.rsplit_once('@')?;
+    let (workspace_str, task_name_str) = task_part.split_once(':')?;
+
+    let task_name = TaskName::new(task_name_str).ok()?;
+    let workspace = Ident::new(workspace_str);
+
+    Some(TaskId { workspace, task_name })
+}
+
+pub fn parse_contextual_task_id_simple(task_id_str: &str) -> Option<ContextualTaskId> {
+    let (task_part, context_id) = task_id_str.rsplit_once('@')?;
+    let (workspace_str, task_name_str) = task_part.split_once(':')?;
+
+    let task_name = TaskName::new(task_name_str).ok()?;
+    let workspace = Ident::new(workspace_str);
+
+    Some(ContextualTaskId::new(
+        TaskId { workspace, task_name },
+        context_id.to_string(),
+    ))
+}
