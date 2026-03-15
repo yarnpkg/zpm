@@ -4436,6 +4436,7 @@ name = "zpm-switch"
 version = "6.0.0-rc.15"
 dependencies = [
  "assert_cmd",
+ "base64",
  "chrono",
  "clipanion",
  "regex",

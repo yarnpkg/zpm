@@ -8,6 +8,7 @@ name = "yarn"
 path = "src/main.rs"
 
 [dependencies]
+base64 = { workspace = true }
 clipanion = { workspace = true, features = ["serde"] }
 regex = { workspace = true }
 reqwest = { workspace = true, default-features = false, features = ["hickory-dns", "rustls-tls"] }

@@ -30,7 +30,7 @@ impl CacheKey {
             );
 
             if self.version >= first_npm_release {
-                return Some(format!("https://registry.npmjs.org/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", self.platform, self.platform, self.version.to_file_string()));
+                return Some(format!("@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", self.platform, self.platform, self.version.to_file_string()));
             }
         }
 
