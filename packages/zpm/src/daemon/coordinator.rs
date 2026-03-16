@@ -1,18 +1,17 @@
 // ============================================================================
-// Race-Free Coordinator (v2)
+// Race-Free Coordinator (v3)
 //
 // This coordinator owns ALL mutable state directly (no Arc<RwLock>).
 // All state mutations happen in a single async task via command processing.
 // Race conditions are structurally impossible.
 //
-// State is decomposed into focused sub-structs (graph, processes,
-// long_lived, subscriptions, output). Cross-domain operations happen
-// here, making them explicit and reviewable.
+// Lifecycle transitions are handled by CoordinatorState methods that return
+// TransitionEffects. The coordinator loop is a thin dispatcher that applies
+// effects (broadcasts notifications, kills PIDs).
 // ============================================================================
 
 use std::collections::HashSet;
 use std::io::Write;
-use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -27,10 +26,11 @@ use super::coordinator_commands::{
 };
 use super::coordinator_state::{
     format_contextual_task_id,
-    CoordinatorState, ContextualTaskId, TaskGraph,
+    CoordinatorState, TaskGraph, TransitionEffects,
 };
 use super::executor::ExecutorPool;
 use super::ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskSubscription, LONG_LIVED_CONTEXT_ID};
+use super::platform;
 use super::scheduler::dependencies;
 use super::server::{bind_to_available_port, connection::{run_accept_loop, ConnectionContext}};
 use crate::error::Error;
@@ -89,11 +89,10 @@ async fn run_daemon_internal(
 
     // Project root watcher
     let project_root = project.project_cwd.clone();
-    let initial_inode = project_root.fs_metadata()?.ino();
     let command_tx_for_watcher = command_tx.clone();
 
     tokio::spawn(async move {
-        watch_project_root(project_root, initial_inode, command_tx_for_watcher).await;
+        watch_project_root(project_root, command_tx_for_watcher).await;
     });
 
     // Signal handler
@@ -150,6 +149,20 @@ async fn run_coordinator_loop(
 }
 
 // ============================================================================
+// Apply Effects (thin I/O layer)
+// ============================================================================
+
+/// Broadcast notifications and kill PIDs from transition effects.
+fn apply_effects(effects: TransitionEffects, subscriptions: &super::coordinator_state::SubscriptionManager) {
+    for notification in effects.notifications {
+        subscriptions.broadcast(notification);
+    }
+    for pid in effects.pids_to_kill {
+        platform::kill_process_group(pid);
+    }
+}
+
+// ============================================================================
 // Command Handler
 // ============================================================================
 
@@ -197,31 +210,15 @@ async fn handle_command(
         }
 
         CoordinatorCommand::CancelContext { context_id, response_tx } => {
-            // 1. Mark tasks as failed in graph
-            let cancelled_ids = state.graph.cancel_context(&context_id);
+            let effects = state.cancel_context(&context_id);
+            let cancelled_count = effects.notifications.len();
+            apply_effects(effects, &state.subscriptions);
 
-            // 2. Evict cancelled tasks so they enter the closed_tasks queue
-            for id_str in &cancelled_ids {
-                let evicted = state.output.mark_closed(id_str.clone());
-                for evicted_id in evicted {
-                    state.graph.evict_closed_task(&evicted_id);
-                }
-            }
-
-            // 3. Get and kill registered PIDs
-            let pids = state.processes.take_pids_for_context(&context_id);
-            for pid in &pids {
-                kill_process_group(*pid);
-            }
-
-            // 4. Mark spawning tasks for deferred kill
+            // Mark spawning tasks for deferred kill (already done inside cancel_context)
             let spawning_ids = state.processes.get_spawning_for_context(&context_id);
-            for task_id in &spawning_ids {
-                state.processes.mark_spawning_pending_cancel(task_id);
-            }
 
             let _ = response_tx.send(CancelContextResult {
-                cancelled_count: cancelled_ids.len() + spawning_ids.len(),
+                cancelled_count: cancelled_count + spawning_ids.len(),
             });
         }
 
@@ -238,7 +235,7 @@ async fn handle_command(
             // Check if cancelled while spawning
             if let Some(pending_cancel) = state.processes.take_spawning(&task_id) {
                 if pending_cancel {
-                    kill_process_group(pid);
+                    platform::kill_process_group(pid);
                     return false;
                 }
             }
@@ -251,7 +248,7 @@ async fn handle_command(
         }
 
         // ====================================================================
-        // Executor Events (integrated into command loop)
+        // Executor Events
         // ====================================================================
 
         CoordinatorCommand::TaskStarted { task_id } => {
@@ -294,27 +291,23 @@ async fn handle_command(
 
         CoordinatorCommand::TaskCompleted { task_id, result } => {
             // Remove from executor's running set BEFORE updating state
-            // This ensures find_ready_tasks sees consistent state
             executor_pool.mark_completed(&task_id);
 
-            let completion_result = match result {
-                TaskCompletionResult::Exited(status) => Ok(status),
-                TaskCompletionResult::Error(e) => Err(Error::TaskExecutionFailed(e)),
+            let exit_code = match result {
+                TaskCompletionResult::Exited(status) => status.code().unwrap_or(-1),
+                TaskCompletionResult::Error(e) => {
+                    eprintln!("Task execution error: {}", e);
+                    1
+                }
             };
 
-            handle_task_completion(task_id, completion_result, state);
+            let effects = state.task_script_finished(&task_id, exit_code);
+            apply_effects(effects, &state.subscriptions);
         }
 
         CoordinatorCommand::WarmUpComplete { task_id, base_task_id } => {
-            if !state.graph.is_terminal(&task_id) {
-                state.graph.mark_warm_up_complete(&task_id);
-                state.long_lived.mark_warm_up_complete(&base_task_id);
-
-                let task_id_str = format_contextual_task_id(&task_id);
-                state.subscriptions.broadcast(DaemonNotification::TaskWarmUpComplete {
-                    task_id: task_id_str,
-                });
-            }
+            let effects = state.warm_up_complete(&task_id, &base_task_id);
+            apply_effects(effects, &state.subscriptions);
         }
 
         // ====================================================================
@@ -407,17 +400,8 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
     // Find tasks to cancel (dependencies failed)
     let tasks_to_cancel = dependencies::find_tasks_to_fail(&state.graph, &running);
     for task_id in tasks_to_cancel {
-        state.graph.mark_cancelled(&task_id);
-
-        let task_id_str = format_contextual_task_id(&task_id);
-        state.subscriptions.broadcast(DaemonNotification::TaskCancelled {
-            task_id: task_id_str.clone(),
-        });
-        // Cross-domain: output eviction → graph cleanup
-        let evicted = state.output.mark_closed(task_id_str);
-        for id in evicted {
-            state.graph.evict_closed_task(&id);
-        }
+        let effects = state.cancel_task(&task_id);
+        apply_effects(effects, &state.subscriptions);
     }
 
     // Find ready tasks
@@ -444,111 +428,9 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
             executor_pool.spawn(task_id, prepared);
         } else {
             // No script - complete immediately
-            state.graph.mark_completed(&task_id);
-
-            let task_id_str = format_contextual_task_id(&task_id);
-            state.subscriptions.broadcast(DaemonNotification::TaskCompleted {
-                task_id: task_id_str.clone(),
-                exit_code: 0,
-            });
-            // Cross-domain: output eviction → graph cleanup
-            let evicted = state.output.mark_closed(task_id_str);
-            for id in evicted {
-                state.graph.evict_closed_task(&id);
-            }
+            let effects = state.complete_no_script(&task_id);
+            apply_effects(effects, &state.subscriptions);
         }
-    }
-}
-
-// ============================================================================
-// Task Completion Handling
-// ============================================================================
-
-fn handle_task_completion(
-    task_id: ContextualTaskId,
-    result: Result<std::process::ExitStatus, Error>,
-    state: &mut CoordinatorState,
-) {
-    match result {
-        Ok(status) => {
-            let exit_code = status.code().unwrap_or(-1);
-            state.graph.mark_script_finished_with_code(&task_id, exit_code);
-
-            if !status.success() {
-                handle_task_failure(&task_id, exit_code, state);
-            } else {
-                handle_task_success(&task_id, exit_code, state);
-            }
-        }
-        Err(e) => {
-            eprintln!("Task execution error: {}", e);
-            handle_task_failure(&task_id, 1, state);
-        }
-    }
-}
-
-/// Helper to broadcast completion and evict closed task state.
-fn broadcast_and_close(task_id_str: String, exit_code: i32, state: &mut CoordinatorState) {
-    state.subscriptions.broadcast(DaemonNotification::TaskCompleted {
-        task_id: task_id_str.clone(),
-        exit_code,
-    });
-    let evicted = state.output.mark_closed(task_id_str);
-    for id in evicted {
-        state.graph.evict_closed_task(&id);
-    }
-}
-
-fn handle_task_failure(
-    task_id: &ContextualTaskId,
-    exit_code: i32,
-    state: &mut CoordinatorState,
-) {
-    state.graph.mark_failed(task_id);
-
-    let task_id_str = format_contextual_task_id(task_id);
-    broadcast_and_close(task_id_str, exit_code, state);
-
-    // Propagate failure to parents that are waiting for subtasks
-    let parents = state.graph.find_parents(task_id);
-    for parent in parents {
-        if state.graph.get_waiting_exit_code(&parent).is_some() {
-            state.graph.mark_failed(&parent);
-
-            let parent_id_str = format_contextual_task_id(&parent);
-            broadcast_and_close(parent_id_str, exit_code, state);
-        }
-    }
-}
-
-fn handle_task_success(
-    task_id: &ContextualTaskId,
-    exit_code: i32,
-    state: &mut CoordinatorState,
-) {
-    if state.graph.try_complete_task(task_id) {
-        let task_id_str = format_contextual_task_id(task_id);
-        broadcast_and_close(task_id_str, exit_code, state);
-
-        // Try to complete parents that are waiting for subtasks
-        let parents = state.graph.find_parents(task_id);
-        for parent in parents {
-            if let Some(parent_exit_code) = state.graph.get_waiting_exit_code(&parent) {
-                if state.graph.try_complete_task(&parent) {
-                    let parent_id_str = format_contextual_task_id(&parent);
-                    broadcast_and_close(parent_id_str, parent_exit_code, state);
-                }
-            }
-        }
-    } else {
-        // Check if any subtask has already failed
-        if state.graph.has_failed_subtask(task_id) {
-            state.graph.mark_failed(task_id);
-
-            let task_id_str = format_contextual_task_id(task_id);
-            broadcast_and_close(task_id_str, 1, state);
-        }
-        // Otherwise task stays in WaitingForSubtasks state until all subtasks complete
     }
 }
 
@@ -569,14 +451,13 @@ fn execute_push_tasks(
     let mut attached_long_lived = Vec::new();
 
     for task_sub in tasks {
-        let task_id = build_task_id_for_push(&task_sub.name, workspace, project);
+        let task_id = build_task_id(&task_sub.name, workspace, project);
 
-        // Check if this is a long-lived task by looking at the already-resolved
-        // task files in the graph, or the workspace taskfile cache. This avoids
-        // synchronous file I/O on the coordinator loop for most cases.
+        // Check if this is a long-lived task. Use filesystem fallback on first
+        // push when the graph cache hasn't been populated yet.
         let is_long_lived = task_id
             .as_ref()
-            .map(|tid| check_if_long_lived_from_graph(&state.graph, tid))
+            .map(|tid| resolve_is_long_lived(&state.graph, project, tid))
             .unwrap_or(false);
 
         // For long-lived tasks, check if already running
@@ -624,7 +505,7 @@ fn execute_push_tasks(
                 let is_long_lived = state.graph.is_long_lived(&ctx_task_id) || is_long_lived;
 
                 if is_long_lived {
-                    // Re-register under LONG_LIVED_CONTEXT_ID if needed
+                    // Register in long-lived registry
                     if let Some(ref tid) = task_id {
                         state.long_lived.register(tid.clone(), ctx_task_id.clone());
                     }
@@ -668,7 +549,7 @@ fn handle_stop_task(
     state: &mut CoordinatorState,
     project: &Project,
 ) -> StopTaskResult {
-    let task_id = match build_task_id_for_stop(task_name, workspace, project) {
+    let task_id = match build_task_id(task_name, workspace, project) {
         Some(tid) => tid,
         None => {
             return StopTaskResult {
@@ -688,30 +569,12 @@ fn handle_stop_task(
         }
     };
 
-    // Check if spawning
-    if state.processes.mark_spawning_pending_cancel(&contextual_task_id) {
-        state.long_lived.remove(&task_id);
-        return StopTaskResult {
-            success: true,
-            error: Some("Task is spawning, will be killed shortly".to_string()),
-        };
-    }
+    let effects = state.stop_long_lived(&task_id, &contextual_task_id);
+    apply_effects(effects, &state.subscriptions);
 
-    // Try to take and kill PID
-    if let Some(pid) = state.processes.take_pid_for_task(&contextual_task_id) {
-        kill_process_group(pid);
-        state.long_lived.remove(&task_id);
-        return StopTaskResult {
-            success: true,
-            error: None,
-        };
-    }
-
-    // No PID - task may have completed
-    state.long_lived.remove(&task_id);
     StopTaskResult {
         success: true,
-        error: Some("Task had no process ID, removed from registry".to_string()),
+        error: None,
     }
 }
 
@@ -719,7 +582,7 @@ fn handle_stop_task(
 // Helper Functions
 // ============================================================================
 
-fn build_task_id_for_push(task_name: &str, workspace: Option<&str>, project: &Project) -> Option<TaskId> {
+fn build_task_id(task_name: &str, workspace: Option<&str>, project: &Project) -> Option<TaskId> {
     let task_name = TaskName::new(task_name).ok()?;
 
     let workspace = if let Some(ws_name) = workspace {
@@ -732,12 +595,25 @@ fn build_task_id_for_push(task_name: &str, workspace: Option<&str>, project: &Pr
     Some(TaskId { workspace, task_name })
 }
 
-fn build_task_id_for_stop(task_name: &str, workspace: Option<&str>, project: &Project) -> Option<TaskId> {
-    build_task_id_for_push(task_name, workspace, project)
+/// Check if a task is long-lived, with filesystem fallback for first push.
+fn resolve_is_long_lived(graph: &TaskGraph, project: &Project, task_id: &TaskId) -> bool {
+    // Fast path: check graph cache (populated after first add_task)
+    if check_if_long_lived_from_graph(graph, task_id) {
+        return true;
+    }
+
+    // Slow path: resolve from disk (only needed on first push per task)
+    project.resolve_task(task_id)
+        .ok()
+        .and_then(|resolved| {
+            resolved.task_files.get(&task_id.workspace)
+                .and_then(|tf| tf.tasks.get(task_id.task_name.as_str()))
+                .map(|task| task.attributes.iter().any(|a| a.name == "long-lived"))
+        })
+        .unwrap_or(false)
 }
 
 /// Check if a task is long-lived by examining already-resolved task files in the graph.
-/// This avoids synchronous file I/O on the coordinator loop.
 fn check_if_long_lived_from_graph(graph: &TaskGraph, task_id: &TaskId) -> bool {
     if let Some(task_file) = graph.resolved.task_files.get(&task_id.workspace) {
         if let Some(task) = task_file.tasks.get(task_id.task_name.as_str()) {
@@ -747,30 +623,38 @@ fn check_if_long_lived_from_graph(graph: &TaskGraph, task_id: &TaskId) -> bool {
     false
 }
 
-#[cfg(unix)]
-fn kill_process_group(pid: u32) {
-    let result = unsafe { libc::killpg(pid as i32, libc::SIGTERM) };
-    if result != 0 {
-        let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-    }
-}
-
-#[cfg(not(unix))]
-fn kill_process_group(_pid: u32) {}
-
 // ============================================================================
 // Watchers and Signal Handlers
 // ============================================================================
 
-async fn watch_project_root(project_root: Path, initial_inode: u64, command_tx: CommandSender) {
-    loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+async fn watch_project_root(project_root: Path, command_tx: CommandSender) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let initial_inode = match project_root.fs_metadata().map(|m| m.ino()) {
+            Ok(ino) => ino,
+            Err(_) => return,
+        };
 
-        let current_inode = project_root.fs_metadata().map(|m| m.ino()).ok();
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
 
-        if current_inode != Some(initial_inode) {
-            graceful_shutdown(command_tx).await;
-            return;
+            let current_inode = project_root.fs_metadata().map(|m| m.ino()).ok();
+
+            if current_inode != Some(initial_inode) {
+                graceful_shutdown(command_tx).await;
+                return;
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        // On non-Unix platforms, just keep the watcher alive without inode checking
+        let _ = command_tx;
+        let _ = project_root;
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
         }
     }
 }
@@ -817,30 +701,17 @@ async fn graceful_shutdown(command_tx: CommandSender) {
     }
 
     // Send SIGTERM
-    #[cfg(unix)]
-    {
-        for &pid in &pids {
-            let result = unsafe { libc::killpg(pid as i32, libc::SIGTERM) };
-            if result != 0 {
-                let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-            }
-        }
+    for &pid in &pids {
+        platform::kill_process_group(pid);
     }
 
     // Wait 5 seconds
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    // Send SIGKILL to remaining
-    #[cfg(unix)]
-    {
-        for &pid in &pids {
-            let alive = unsafe { libc::kill(pid as i32, 0) == 0 };
-            if alive {
-                let result = unsafe { libc::killpg(pid as i32, libc::SIGKILL) };
-                if result != 0 {
-                    let _ = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
-                }
-            }
+    // Force kill remaining
+    for &pid in &pids {
+        if platform::is_process_alive(pid) {
+            platform::kill_process(pid);
         }
     }
 

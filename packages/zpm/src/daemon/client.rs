@@ -263,13 +263,21 @@ impl DaemonClient {
 
         const REQUEST_TIMEOUT_SECS: u64 = 30;
 
-        tokio::time::timeout(
+        let result = tokio::time::timeout(
             Duration::from_secs(REQUEST_TIMEOUT_SECS),
             response_rx,
         )
-        .await
-        .map_err(|_| Error::IpcError("Request timed out".to_string()))?
-        .map_err(|_| Error::IpcError("Connection closed while waiting for response".to_string()))
+        .await;
+
+        match result {
+            Err(_) => {
+                // Timeout: clean up the stale pending request to prevent unbounded growth
+                self.pending_requests.lock().await.remove(&request_id);
+                Err(Error::IpcError("Request timed out".to_string()))
+            }
+            Ok(Err(_)) => Err(Error::IpcError("Connection closed while waiting for response".to_string())),
+            Ok(Ok(resp)) => Ok(resp),
+        }
     }
 
     pub async fn recv_notification(&mut self) -> Result<DaemonNotification, Error> {

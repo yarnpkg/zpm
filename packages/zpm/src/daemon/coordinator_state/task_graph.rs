@@ -390,27 +390,6 @@ impl TaskGraph {
         self.ensure_task_info(task_id).warm_up_complete = true;
     }
 
-    /// Cancel all tasks in a context. Returns cancelled task IDs.
-    pub fn cancel_context(&mut self, context_id: &str) -> Vec<String> {
-        let tasks_to_cancel: Vec<ContextualTaskId> = self
-            .prepared
-            .keys()
-            .filter(|ctx_task_id| {
-                ctx_task_id.context_id == context_id && !self.is_terminal(ctx_task_id)
-            })
-            .cloned()
-            .collect();
-
-        let mut cancelled_ids = Vec::new();
-
-        for task_id in tasks_to_cancel {
-            self.mark_failed(&task_id);
-            cancelled_ids.push(format_contextual_task_id(&task_id));
-        }
-
-        cancelled_ids
-    }
-
     /// Remove all state for a closed task (used by output buffer eviction).
     pub fn evict_closed_task(&mut self, task_id_str: &str) {
         if let Some(ctx_id) = parse_contextual_task_id_simple(task_id_str) {

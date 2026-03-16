@@ -6,6 +6,7 @@ mod events;
 mod executor;
 mod handlers;
 mod ipc;
+mod platform;
 mod presentation;
 mod scheduler;
 mod server;
