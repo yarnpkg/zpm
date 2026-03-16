@@ -77,6 +77,8 @@ export enum RequestType {
   BulkAdvisories = `bulkAdvisories`,
   NodeDistIndex = `nodeDistIndex`,
   NodeDistTarball = `nodeDistTarball`,
+  YarnSwitchInfo = `yarnSwitchInfo`,
+  YarnSwitchTarball = `yarnSwitchTarball`,
 }
 
 export type Request = {
@@ -119,6 +121,13 @@ export type Request = {
 } | {
   type: RequestType.NodeDistTarball;
   name: string;
+} | {
+  type: RequestType.YarnSwitchInfo;
+  platform: string;
+} | {
+  type: RequestType.YarnSwitchTarball;
+  platform: string;
+  version: string;
 };
 
 export class Login {
@@ -705,6 +714,74 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
 
       stream.pipeline(tar, gzip, response, () => {});
     },
+
+    async [RequestType.YarnSwitchInfo](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.YarnSwitchInfo)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const {platform} = parsedRequest;
+      const name = `@yarnpkg/yarn-${platform}`;
+      const serverUrl = await startPackageServer();
+
+      // Return package info with available versions
+      const data = JSON.stringify({
+        name,
+        versions: {
+          [`6.0.0`]: {
+            name,
+            version: `6.0.0`,
+            bin: {yarn: `yarn-bin`},
+            dist: {
+              shasum: `fake-shasum-6.0.0`,
+              tarball: `${serverUrl}/@yarnpkg/yarn-${platform}/-/yarn-${platform}-6.0.0.tgz`,
+            },
+          },
+        },
+        [`dist-tags`]: {
+          latest: `6.0.0`,
+        },
+      });
+
+      response.writeHead(200, {[`Content-Type`]: `application/json`});
+      response.end(data);
+    },
+
+    async [RequestType.YarnSwitchTarball](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.YarnSwitchTarball)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const {platform, version} = parsedRequest;
+
+      response.writeHead(200, {
+        [`Content-Type`]: `application/octet-stream`,
+        [`Transfer-Encoding`]: `chunked`,
+      });
+
+      // Create a fake yarn binary tarball that contains:
+      // - package/package.json with bin entry
+      // - package/yarn-bin (executable that outputs version info)
+      const tar = tarStream.pack();
+
+      // Add package.json
+      const packageJson = JSON.stringify({
+        name: `@yarnpkg/yarn-${platform}`,
+        version,
+        bin: {yarn: `yarn-bin`},
+      });
+      tar.entry({name: `package/package.json`}, packageJson);
+
+      // Add fake yarn-bin executable
+      const fakeYarnBin = `#!/usr/bin/env bash
+echo "Fake Yarn ${version}"
+exit 0
+`;
+      tar.entry({name: `package/yarn-bin`, mode: 0o755}, fakeYarnBin);
+
+      tar.finalize();
+
+      const gzip = zlib.createGzip();
+      stream.pipeline(tar, gzip, response, () => {});
+    },
   };
 
   const sendError = (res: ServerResponse, statusCode: number, errorMessage: string): void => {
@@ -736,6 +813,19 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       return {
         type: RequestType.NodeDistTarball,
         name: match[2]!,
+      };
+    } else if ((match = url.match(/^\/@yarnpkg\/yarn-([a-z0-9-]+)\/-\/yarn-\1-(.+)\.tgz$/))) {
+      // Yarn Switch tarball: /@yarnpkg/yarn-{platform}/-/yarn-{platform}-{version}.tgz
+      return {
+        type: RequestType.YarnSwitchTarball,
+        platform: match[1]!,
+        version: match[2]!,
+      };
+    } else if ((match = url.match(/^\/@yarnpkg\/yarn-([a-z0-9-]+)$/))) {
+      // Yarn Switch package info: /@yarnpkg/yarn-{platform}
+      return {
+        type: RequestType.YarnSwitchInfo,
+        platform: match[1]!,
       };
     } else {
       let registry: {registry: string} | undefined;
@@ -1018,20 +1108,26 @@ export type Run = (...args: Array<string> | [...Array<string>, Partial<RunDriver
 export type Source = (script: string, callDefinition?: Record<string, any>) => Promise<Record<string, any>>;
 
 export type RunFunction = (
-  {path, run, source}:
+  {path, run, runSwitch, source, yarnBinary}:
   {
     path: PortablePath;
     run: Run;
+    runSwitch: Run;
     source: Source;
+    yarnBinary: string;
   }
 ) => Promise<void>;
 
 export const generatePkgDriver = ({
   getName,
   runDriver,
+  runSwitchDriver,
+  getYarnBinary,
 }: {
   getName: () => string;
   runDriver: PackageRunDriver;
+  runSwitchDriver?: PackageRunDriver;
+  getYarnBinary?: () => string;
 }): PackageDriver => {
   const withConfig = (definition: Record<string, any>): PackageDriver => {
     const makeTemporaryEnv: PackageDriver = (packageJson, subDefinition, fn) => {
@@ -1092,6 +1188,29 @@ export const generatePkgDriver = ({
           };
         };
 
+        const runSwitch = async (...args: Array<any>) => {
+          if (!runSwitchDriver)
+            throw new Error(`runSwitch is not available - no runSwitchDriver was provided`);
+
+          let callDefinition = {};
+
+          if (args.length > 0 && typeof args[args.length - 1] === `object`)
+            callDefinition = args.pop();
+
+          const {stdout, stderr, ...rest} = await runSwitchDriver(path, args, {
+            registryUrl,
+            ...definition,
+            ...subDefinition,
+            ...callDefinition,
+          });
+
+          return {
+            stdout: cleanup(stdout),
+            stderr: cleanup(stderr),
+            ...rest,
+          };
+        };
+
         const source = async (script: string, callDefinition: Record<string, any> = {}): Promise<Record<string, any>> => {
           const scriptWrapper = `
             Promise.resolve().then(async () => ${script}).then(result => {
@@ -1129,26 +1248,10 @@ export const generatePkgDriver = ({
           }
         };
 
+        const yarnBinary = getYarnBinary?.() ?? ``;
+
         try {
-          // To pass [citgm](https://github.com/nodejs/citgm), we need to suppress timeout failures
-          // So add env variable TEST_IGNORE_TIMEOUT_FAILURES to turn on this suppression
-          // TODO: investigate whether this is still needed.
-          if (process.env.TEST_IGNORE_TIMEOUT_FAILURES) {
-            let timer: NodeJS.Timeout | undefined;
-            await Promise.race([
-              new Promise(resolve => {
-                // Resolve 1s ahead of the jest timeout
-                timer = setTimeout(resolve, TEST_TIMEOUT - 1000);
-              }),
-              fn!({path, run, source}),
-            ]).finally(() => {
-              if (timer) {
-                clearTimeout(timer);
-              }
-            });
-            return;
-          }
-          await fn!({path, run, source});
+          await fn!({path, run, runSwitch, source, yarnBinary});
         } catch (error: any) {
           error.message = `Temporary fixture folder: ${npath.fromPortablePath(path)}\n\n${error.message}`;
           throw error;

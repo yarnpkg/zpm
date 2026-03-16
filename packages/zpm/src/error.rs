@@ -378,9 +378,6 @@ pub enum Error {
     #[error("Invalid task name: {0}")]
     TaskNameParseError(String),
 
-    #[error("Not running inside a task context (ZPM_TASK_IPC_SOCKET not set)")]
-    NotInTaskContext,
-
     #[error("IPC connection failed: {0}")]
     IpcConnectionFailed(String),
 
@@ -389,6 +386,12 @@ pub enum Error {
 
     #[error("Task push failed: {0}")]
     TaskPushFailed(String),
+
+    #[error("Task execution failed: {0}")]
+    TaskExecutionFailed(String),
+
+    #[error("Missing context_id: task operations require a context_id (either provided directly or inherited from parent task)")]
+    MissingContextId,
 
     #[error("JSON serialization error: {0}")]
     JsonSerializeError(String),

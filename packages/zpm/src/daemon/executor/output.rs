@@ -1,0 +1,56 @@
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::ChildStderr;
+use tokio::process::ChildStdout;
+
+use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
+use super::super::coordinator_state::ContextualTaskId;
+use super::super::events::Stream;
+
+pub async fn stream_output(
+    stdout: ChildStdout,
+    stderr: ChildStderr,
+    task_id: ContextualTaskId,
+    command_tx: CommandSender,
+) {
+    let mut stdout_reader = BufReader::new(stdout).lines();
+    let mut stderr_reader = BufReader::new(stderr).lines();
+    let mut stdout_done = false;
+    let mut stderr_done = false;
+
+    loop {
+        tokio::select! {
+            line = stdout_reader.next_line(), if !stdout_done => {
+                match line {
+                    Ok(Some(line)) => {
+                        if command_tx.send(CoordinatorCommand::TaskOutput {
+                            task_id: task_id.clone(),
+                            line,
+                            stream: Stream::Stdout,
+                        }).is_err() {
+                            return;
+                        }
+                    }
+                    Ok(None) | Err(_) => { stdout_done = true; }
+                }
+            }
+            line = stderr_reader.next_line(), if !stderr_done => {
+                match line {
+                    Ok(Some(line)) => {
+                        if command_tx.send(CoordinatorCommand::TaskOutput {
+                            task_id: task_id.clone(),
+                            line,
+                            stream: Stream::Stderr,
+                        }).is_err() {
+                            return;
+                        }
+                    }
+                    Ok(None) | Err(_) => { stderr_done = true; }
+                }
+            }
+        }
+
+        if stdout_done && stderr_done {
+            break;
+        }
+    }
+}

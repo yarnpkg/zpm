@@ -1,4 +1,5 @@
 use zpm_primitives::Ident;
+use zpm_utils::ToFileString;
 
 use crate::ast::{TaskId, TaskName};
 
@@ -46,10 +47,10 @@ pub enum Error {
 
 fn format_cycle(cycle: &[TaskId]) -> String {
     let mut parts: Vec<String>
-        = cycle.iter().map(|t| t.to_string()).collect();
+        = cycle.iter().map(|t| t.to_file_string()).collect();
 
     if let Some(first) = cycle.first() {
-        parts.push(first.to_string());
+        parts.push(first.to_file_string());
     }
 
     parts.join(" -> ")
