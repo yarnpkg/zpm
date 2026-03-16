@@ -742,6 +742,59 @@ describe(`Commands`, () => {
       );
 
       test(
+        `it should use daemon (not standalone) for long-lived tasks via yarn run`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // This test verifies that `yarn run <task>` (the implicit path through
+          // TaskRunSilentDependencies::new) uses the Switch daemon rather than
+          // spawning an ephemeral standalone daemon. If standalone mode is
+          // incorrectly used, the long-lived task dies when the first command
+          // exits, so the second invocation would start a new process instead
+          // of attaching to the existing one.
+
+          const counterFile = ppath.join(path, `server-starts`);
+          await xfs.writeFilePromise(counterFile, `0`);
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  count=$(cat server-starts)`,
+            `  count=$((count + 1))`,
+            `  echo $count > server-starts`,
+            `  echo "server-start-$count"`,
+            `  sleep 10`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // First invocation via `yarn run` (the implicit path).
+          // This goes through TaskRunSilentDependencies::new() which computes
+          // `standalone` from environment variables.
+          const server1 = runSwitch(`run`, `server`).catch(() => {});
+
+          // Wait for warm-up + script execution
+          await new Promise(resolve => setTimeout(resolve, 1200));
+
+          // Second invocation via `yarn run` should attach to the same
+          // daemon-managed long-lived task, not start a new one.
+          const server2 = runSwitch(`run`, `server`).catch(() => {});
+
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          // If the daemon was used correctly, the server was started only once.
+          // If standalone mode was incorrectly triggered, the first ephemeral
+          // daemon died after server1 settled, and server2 would have spawned
+          // a fresh process (count = 2).
+          const startCount = await xfs.readFilePromise(counterFile, `utf8`);
+          expect(startCount.trim()).toEqual(`1`);
+
+          // Clean up
+          await runSwitch(`tasks`, `stop`, `server`).catch(() => {});
+        })),
+      );
+
+      test(
         `it should fail dependents if long-lived task fails before warm-up`,
         makeTemporaryEnv({
           name: `test-package`,
