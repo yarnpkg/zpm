@@ -105,11 +105,21 @@ impl CoordinatorState {
 
     /// Called when a task's script exits. Routes to complete_task or fail_task
     /// based on exit code and subtask state.
+    ///
+    /// Guards against already-terminal tasks: if the task was stopped and
+    /// then re-added before the old process's TaskCompleted arrived, the
+    /// task_id now refers to the new run. Ignore the stale completion.
     pub fn task_script_finished(
         &mut self,
         task_id: &ContextualTaskId,
         exit_code: i32,
     ) -> TransitionEffects {
+        // Guard: ignore completions for tasks that are already terminal
+        // (e.g. a stopped task whose process finally exited after re-add)
+        if self.graph.is_terminal(task_id) {
+            return TransitionEffects::default();
+        }
+
         self.graph.mark_script_finished_with_code(task_id, exit_code);
 
         if exit_code != 0 {
@@ -301,8 +311,14 @@ impl CoordinatorState {
     // Transition: stop_long_lived
     // ========================================================================
 
-    /// Stop a long-lived task by task ID. Cleans up registries and returns
-    /// the PID to kill (if any).
+    /// Stop a long-lived task by task ID. Removes the long-lived registry
+    /// entry and returns the PID to kill.
+    ///
+    /// Does NOT call close_task — the process is still alive after we send
+    /// SIGTERM. When it actually exits, TaskCompleted will fire and the
+    /// normal task_script_finished → fail_task → close_task path handles
+    /// the full cleanup. This avoids double-eviction of output buffers
+    /// and lets add_task re-register the task cleanly on restart.
     pub fn stop_long_lived(
         &mut self,
         task_id: &zpm_tasks::TaskId,
@@ -310,15 +326,18 @@ impl CoordinatorState {
     ) -> TransitionEffects {
         let mut effects = TransitionEffects::default();
 
-        // Check if spawning
+        // Remove from long-lived registry first so that a subsequent
+        // PushTasks for the same task doesn't attach to the dying instance.
+        self.long_lived.remove(task_id);
+
+        // Check if spawning (between spawn and PID registration)
         if self.processes.mark_spawning_pending_cancel(contextual_task_id) {
-            self.long_lived.remove(task_id);
             return effects;
         }
 
-        // close_task handles output, long_lived, and process cleanup
-        let close = self.close_task(contextual_task_id);
-        if let Some(pid) = close.pid {
+        // Take the PID so we can kill it, but leave graph/output state intact
+        // for the TaskCompleted path to clean up properly.
+        if let Some(pid) = self.processes.take_pid_for_task(contextual_task_id) {
             effects.pids_to_kill.push(pid);
         }
 

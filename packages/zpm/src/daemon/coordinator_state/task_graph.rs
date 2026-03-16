@@ -140,8 +140,11 @@ impl TaskGraph {
             }
         }
 
-        // If task is already in targets for this context, don't re-add
-        if self.is_target(&ctx_task_id) {
+        // If task is already an active target for this context, don't re-add.
+        // But if the task has reached a terminal state (e.g. a long-lived task
+        // that was stopped and then restarted), allow re-adding by falling
+        // through to clear_task_state which resets the old entry.
+        if self.is_target(&ctx_task_id) && !self.is_terminal(&ctx_task_id) {
             return Ok((ctx_task_id, vec![]));
         }
 

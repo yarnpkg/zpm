@@ -795,6 +795,114 @@ describe(`Commands`, () => {
       );
 
       test(
+        `it should not double-spawn a long-lived dependency resolved transitively`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Regression test: when task A depends on long-lived task B, pushing
+          // only A should not spawn two instances of B. Previously, add_task
+          // would prepare B under A's context (B@<ctx>) in addition to the
+          // long-lived context (B@__long_lived__), causing process_ready_tasks
+          // to spawn both.
+          const counterFile = ppath.join(path, `server-starts`);
+          await xfs.writeFilePromise(counterFile, `0`);
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  count=$(cat server-starts)`,
+            `  count=$((count + 1))`,
+            `  echo $count > server-starts`,
+            `  echo "server-start-$count"`,
+            `  sleep 10`,
+            ``,
+            `client: server`,
+            `  echo "client-done"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Push only "client" - server is pulled in as a transitive dependency.
+          // It should start exactly once under the long-lived context.
+          const clientResult = await runSwitch(`tasks`, `run`, `client`);
+
+          // Wait a bit to let any duplicate spawn settle
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          const startCount = await xfs.readFilePromise(counterFile, `utf8`);
+          expect(startCount.trim()).toEqual(`1`);
+
+          expect(clientResult.stdout).toContain(`client-done`);
+
+          // Clean up
+          await runSwitch(`tasks`, `stop`, `server`).catch(() => {});
+        })),
+      );
+
+      test(
+        `it should allow re-running a long-lived task after stopping it`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Regression test for stop_long_lived double-cleanup: stop_long_lived
+          // calls close_task (evicting output, removing registries) before the
+          // process has actually exited. When the process later exits,
+          // task_script_finished runs close_task a second time. This could
+          // corrupt state such that re-starting the same long-lived task fails
+          // or produces ghost entries.
+          const counterFile = ppath.join(path, `server-starts`);
+          await xfs.writeFilePromise(counterFile, `0`);
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  count=$(cat server-starts)`,
+            `  count=$((count + 1))`,
+            `  echo $count > server-starts`,
+            `  echo "server-running-$count"`,
+            `  sleep 60`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start → warm-up → stop → restart cycle
+          const run1 = runSwitch(`tasks`, `run`, `server`).catch(() => {});
+          await new Promise(resolve => setTimeout(resolve, 1200));
+
+          // Stop the server
+          const {stdout: stopOutput} = await runSwitch(`tasks`, `stop`, `server`);
+          expect(stopOutput).toContain(`stopped successfully`);
+
+          // Wait for process to actually die and TaskCompleted to be processed
+          await new Promise(resolve => setTimeout(resolve, 1500));
+
+          // Verify the long-lived registry is clean (tasks list should be empty)
+          const {stdout: listOutput1} = await runSwitch(`tasks`, `--json`);
+          const tasks1 = listOutput1.trim() === `` ? [] : listOutput1.trim().split(`\n`).map((l: string) => JSON.parse(l));
+
+          // After stop + process death, the long-lived registry should be clean.
+          expect(tasks1).toHaveLength(0);
+
+          // Re-start the same long-lived task — should work cleanly.
+          // If stop_long_lived corrupted state (double close_task eviction,
+          // stale graph entries under LONG_LIVED_CONTEXT_ID), this second
+          // run will either fail silently or not actually start a new process.
+          const run2 = runSwitch(`tasks`, `run`, `server`).catch(() => {});
+          await new Promise(resolve => setTimeout(resolve, 1500));
+
+          // Verify server was started a second time (count == 2).
+          // If stop_long_lived left the task in a terminal state in the graph
+          // under LONG_LIVED_CONTEXT_ID, add_task cannot re-add it and the
+          // second invocation silently fails — counter stays at 1.
+          const startCount = await xfs.readFilePromise(counterFile, `utf8`);
+          expect(startCount.trim()).toEqual(`2`);
+
+          // Clean up
+          await runSwitch(`tasks`, `stop`, `server`).catch(() => {});
+        })),
+      );
+
+      test(
         `it should fail dependents if long-lived task fails before warm-up`,
         makeTemporaryEnv({
           name: `test-package`,
@@ -1462,6 +1570,59 @@ describe(`Commands`, () => {
           expect(cancelledTasks).toContain(`test-package:dep-b`);
           expect(cancelledTasks).toContain(`test-package:target`);
         }),
+      );
+
+      test(
+        `it should cancel no-script aggregator tasks when context is cancelled`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Regression test: cancel_context only iterated prepared.keys(),
+          // but tasks with no script (pure dependency aggregators) exist in
+          // graph.tasks without a prepared entry. If cancel_context misses
+          // them, they complete normally after the subscriber is gone,
+          // broadcasting to dead channels and leaking state.
+          //
+          // The setup: "target" has no script (aggregator) and depends on
+          // "slow-dep" which sleeps. We cancel the context while slow-dep
+          // is running, expecting both target and slow-dep to be cancelled.
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `slow-dep:`,
+            `  echo "slow-dep-started"`,
+            `  sleep 30`,
+            ``,
+            `target: slow-dep`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Run the target task (which has no script) in background
+          const taskPromise = runSwitch(`tasks`, `run`, `--json`, `target`).catch(e => e);
+
+          // Wait for slow-dep to start
+          await new Promise(resolve => setTimeout(resolve, 800));
+
+          // Get stats to confirm task metadata exists before cancellation
+          const {stdout: statsBefore} = await runSwitch(`tasks`, `stats`, `--json`);
+          const before = JSON.parse(statsBefore);
+          expect(before.tasksCount).toBeGreaterThan(0);
+
+          // Cancel by killing the daemon (which triggers context cleanup)
+          await runSwitch(`switch`, `daemon`, `--kill`);
+
+          const result = await taskPromise;
+
+          // The key assertion: after cancellation + cleanup, the internal state
+          // should not have leaked entries. Start a fresh daemon and verify.
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          const {stdout: statsAfter} = await runSwitch(`tasks`, `stats`, `--json`);
+          const after = JSON.parse(statsAfter);
+
+          // Fresh daemon should have clean state — zero tasks
+          expect(after.tasksCount).toBe(0);
+        })),
       );
     });
 
