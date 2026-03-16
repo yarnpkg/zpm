@@ -3,6 +3,12 @@ use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 use std::sync::Arc;
 
+/// Create an ExitStatus from a logical exit code.
+/// On Unix, `from_raw` expects a wait status where the exit code is in bits 8-15.
+fn exit_status_from_code(code: i32) -> ExitStatus {
+    ExitStatus::from_raw(code << 8)
+}
+
 use async_trait::async_trait;
 use uuid::Uuid;
 use zpm_utils::ToFileString;
@@ -198,7 +204,7 @@ pub async fn run_task(
                             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                         }
 
-                        return Ok(ExitStatus::from_raw(0));
+                        return Ok(exit_status_from_code(0));
                     } else {
                         // Cancel all tasks in this context
                         handler.on_ctrl_c();
@@ -212,7 +218,7 @@ pub async fn run_task(
                         }
 
                         // Exit with SIGINT code (130 = 128 + 2)
-                        return Ok(ExitStatus::from_raw(130 << 8));
+                        return Ok(exit_status_from_code(130));
                     }
                 }
                 n = ctx.client.recv_notification() => n?,
@@ -270,5 +276,5 @@ pub async fn run_task(
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
-    Ok(ExitStatus::from_raw(ctx.exit_code << 8))
+    Ok(exit_status_from_code(ctx.exit_code))
 }

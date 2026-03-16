@@ -194,6 +194,7 @@ pub struct LongLivedTaskInfo {
     pub contextual_task_id: String,
     pub warm_up_complete: bool,
     pub started_at_ms: u64,
+    pub process_id: Option<u32>,
 }
 
 /// Internal state statistics for debugging/testing.

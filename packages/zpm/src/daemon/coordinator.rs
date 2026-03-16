@@ -27,7 +27,7 @@ use super::coordinator_commands::{
 };
 use super::coordinator_state::{
     format_contextual_task_id,
-    CoordinatorState, ContextualTaskId,
+    CoordinatorState, ContextualTaskId, TaskGraph,
 };
 use super::executor::ExecutorPool;
 use super::ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskSubscription, LONG_LIVED_CONTEXT_ID};
@@ -200,13 +200,21 @@ async fn handle_command(
             // 1. Mark tasks as failed in graph
             let cancelled_ids = state.graph.cancel_context(&context_id);
 
-            // 2. Get and kill registered PIDs
+            // 2. Evict cancelled tasks so they enter the closed_tasks queue
+            for id_str in &cancelled_ids {
+                let evicted = state.output.mark_closed(id_str.clone());
+                for evicted_id in evicted {
+                    state.graph.evict_closed_task(&evicted_id);
+                }
+            }
+
+            // 3. Get and kill registered PIDs
             let pids = state.processes.take_pids_for_context(&context_id);
             for pid in &pids {
                 kill_process_group(*pid);
             }
 
-            // 3. Mark spawning tasks for deferred kill
+            // 4. Mark spawning tasks for deferred kill
             let spawning_ids = state.processes.get_spawning_for_context(&context_id);
             for task_id in &spawning_ids {
                 state.processes.mark_spawning_pending_cancel(task_id);
@@ -322,14 +330,18 @@ async fn handle_command(
             let entries = state.long_lived.list();
             let infos: Vec<LongLivedTaskInfo> = entries
                 .into_iter()
-                .map(|e| LongLivedTaskInfo {
-                    task_id: format!("{}:{}", e.task_id.workspace.to_file_string(), e.task_id.task_name.as_str()),
-                    contextual_task_id: format_contextual_task_id(&e.contextual_task_id),
-                    warm_up_complete: e.warm_up_complete,
-                    started_at_ms: e.started_at
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0),
+                .map(|e| {
+                    let process_id = state.processes.get_pid_for_task(&e.contextual_task_id);
+                    LongLivedTaskInfo {
+                        task_id: format!("{}:{}", e.task_id.workspace.to_file_string(), e.task_id.task_name.as_str()),
+                        contextual_task_id: format_contextual_task_id(&e.contextual_task_id),
+                        warm_up_complete: e.warm_up_complete,
+                        started_at_ms: e.started_at
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0),
+                        process_id,
+                    }
                 })
                 .collect();
             let _ = response_tx.send(infos);
@@ -559,9 +571,12 @@ fn execute_push_tasks(
     for task_sub in tasks {
         let task_id = build_task_id_for_push(&task_sub.name, workspace, project);
 
+        // Check if this is a long-lived task by looking at the already-resolved
+        // task files in the graph, or the workspace taskfile cache. This avoids
+        // synchronous file I/O on the coordinator loop for most cases.
         let is_long_lived = task_id
             .as_ref()
-            .and_then(|tid| check_if_long_lived(project, tid))
+            .map(|tid| check_if_long_lived_from_graph(&state.graph, tid))
             .unwrap_or(false);
 
         // For long-lived tasks, check if already running
@@ -604,7 +619,12 @@ fn execute_push_tasks(
             Ok((ctx_task_id, resolved_ctx_task_ids)) => {
                 let target_id_str = format_contextual_task_id(&ctx_task_id);
 
+                // After add_task, check is_long_lived from the prepared task
+                // (which was populated by prepare_specific_tasks without extra I/O)
+                let is_long_lived = state.graph.is_long_lived(&ctx_task_id) || is_long_lived;
+
                 if is_long_lived {
+                    // Re-register under LONG_LIVED_CONTEXT_ID if needed
                     if let Some(ref tid) = task_id {
                         state.long_lived.register(tid.clone(), ctx_task_id.clone());
                     }
@@ -716,14 +736,15 @@ fn build_task_id_for_stop(task_name: &str, workspace: Option<&str>, project: &Pr
     build_task_id_for_push(task_name, workspace, project)
 }
 
-fn check_if_long_lived(project: &Project, task_id: &TaskId) -> Option<bool> {
-    let workspace = project.workspace_by_ident(&task_id.workspace).ok()?;
-    let task_file_path = workspace.taskfile_path();
-    let content = task_file_path.fs_read_text().ok()?;
-    let task_file = zpm_tasks::parse(&content).ok()?;
-    let task = task_file.tasks.get(task_id.task_name.as_str())?;
-
-    Some(task.attributes.iter().any(|attr| attr.name == "long-lived"))
+/// Check if a task is long-lived by examining already-resolved task files in the graph.
+/// This avoids synchronous file I/O on the coordinator loop.
+fn check_if_long_lived_from_graph(graph: &TaskGraph, task_id: &TaskId) -> bool {
+    if let Some(task_file) = graph.resolved.task_files.get(&task_id.workspace) {
+        if let Some(task) = task_file.tasks.get(task_id.task_name.as_str()) {
+            return task.attributes.iter().any(|attr| attr.name == "long-lived");
+        }
+    }
+    false
 }
 
 #[cfg(unix)]

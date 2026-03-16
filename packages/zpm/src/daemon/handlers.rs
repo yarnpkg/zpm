@@ -191,7 +191,7 @@ async fn handle_list_long_lived_tasks(
 
                     let status = LongLivedTaskStatus::Running {
                         started_at_ms: info.started_at_ms,
-                        process_id: None,
+                        process_id: info.process_id,
                     };
 
                     super::ipc::LongLivedTaskInfo {

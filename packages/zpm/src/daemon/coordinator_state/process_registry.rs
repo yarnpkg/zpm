@@ -56,6 +56,10 @@ impl ProcessRegistry {
         self.pids.iter().cloned().collect()
     }
 
+    pub fn get_pid_for_task(&self, task_id: &ContextualTaskId) -> Option<u32> {
+        self.task_to_pid.get(task_id).copied()
+    }
+
     pub fn take_pid_for_task(&mut self, task_id: &ContextualTaskId) -> Option<u32> {
         let pid = self.task_to_pid.remove(task_id)?;
         self.pids.remove(&pid);

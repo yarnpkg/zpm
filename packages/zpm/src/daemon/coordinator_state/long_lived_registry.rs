@@ -14,8 +14,6 @@ pub struct LongLivedEntry {
     pub task_id: TaskId,
     pub contextual_task_id: ContextualTaskId,
     pub warm_up_complete: bool,
-    #[allow(dead_code)]
-    pub process_id: Option<u32>,
     pub started_at: SystemTime,
 }
 
@@ -47,7 +45,6 @@ impl LongLivedRegistry {
                 task_id,
                 contextual_task_id,
                 warm_up_complete: false,
-                process_id: None,
                 started_at: SystemTime::now(),
             },
         );

@@ -129,7 +129,12 @@ impl DaemonOpenCommand {
 
         daemons::register_daemon(&entry)?;
 
-        self.wait_for_ready(port).await?;
+        if let Err(e) = self.wait_for_ready(port).await {
+            // Daemon failed to become ready — kill it and clean up registry
+            let _ = tokio::task::spawn_blocking(move || daemons::kill_daemon_gracefully(pid)).await;
+            daemons::unregister_daemon(&detected_root)?;
+            return Err(e);
+        }
 
         println!("ws://127.0.0.1:{}", port);
 

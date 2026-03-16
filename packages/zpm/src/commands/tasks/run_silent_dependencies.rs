@@ -166,12 +166,15 @@ pub struct TaskRunSilentDependencies {
 
 impl TaskRunSilentDependencies {
     pub fn new(cli_environment: &Environment, name: String, args: Vec<String>) -> Self {
+        // Use standalone mode when not running under a Switch daemon context
+        let standalone = std::env::var(crate::daemon::DAEMON_SERVER_ENV).is_err();
+
         Self {
             cli_environment: cli_environment.clone(),
             cli_path: vec!["tasks".to_string(), "run".to_string()],
             _silent_dependencies: true,
             verbose_level: 0,
-            standalone: false,
+            standalone,
             name,
             args,
         }
