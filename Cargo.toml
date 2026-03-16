@@ -42,6 +42,7 @@ chrono = { version = "0.4.38", features = ["serde"] }
 crc32fast = "1.4.2"
 convert_case = "0.8.0"
 dashmap = "6"
+libc = "0.2"
 clipanion = { git = "https://github.com/arcanis/clipanion-rs.git", features = ["serde", "tokens"] }
 colored = "3.0.0"
 dialoguer = "0.11.0"
@@ -78,6 +79,7 @@ rayon = "1.10.0"
 rkyv = { version = "0.8", features = ["bytecheck"] }
 reqwest = { version = "0.12.26", default-features = false, features = ["gzip", "http2", "hickory-dns", "rustls-tls"] }
 regex = "1.10.6"
+reflink-copy = "0.1.29"
 ring = "0.17.14"
 rstest = "0.26.1"
 serde_plain = "1.0.2"

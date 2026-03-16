@@ -769,6 +769,66 @@ impl Path {
         Ok(self)
     }
 
+    pub fn fs_clonefile(&self, new_path: &Path) -> Result<&Self, PathError> {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = reflink_copy::reflink_or_copy(self.to_path_buf(), new_path.to_path_buf())?;
+            return Ok(self);
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            fn clone_tree_linux(src: &Path, dst: &Path) -> Result<(), PathError> {
+                let metadata = src.fs_symlink_metadata()?;
+                let file_type = metadata.file_type();
+
+                if file_type.is_symlink() {
+                    let target = src.fs_read_link()?;
+                    dst.fs_create_parent()?;
+                    dst.fs_symlink(&target)?;
+                    return Ok(());
+                }
+
+                if file_type.is_dir() {
+                    dst.fs_create_dir_all()?;
+
+                    for entry in src.fs_read_dir()? {
+                        let entry = entry?;
+                        let entry_path = Path::try_from(entry.path())?;
+                        let entry_name = Path::try_from(entry.file_name())?;
+                        let entry_dest = dst.with_join(&entry_name);
+                        clone_tree_linux(&entry_path, &entry_dest)?;
+                    }
+
+                    return Ok(());
+                }
+
+                if file_type.is_file() {
+                    let mode = metadata.permissions().mode();
+
+                    dst.fs_create_parent()?;
+                    let _ = reflink_copy::reflink_or_copy(src.to_path_buf(), dst.to_path_buf())?;
+                    dst.fs_set_permissions(std::fs::Permissions::from_mode(mode))?;
+
+                    return Ok(());
+                }
+
+                Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "unsupported file type").into())
+            }
+
+            clone_tree_linux(self, new_path)?;
+            return Ok(self);
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            let _ = new_path;
+            Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "clonefile is only supported on macOS and Linux").into())
+        }
+    }
+
     /**
      * Move a file or directory to a new location, copying it if the source and
      * destination are on different devices.

@@ -1,11 +1,13 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
+use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt, time::{SystemTime, UNIX_EPOCH}, vec};
 
 use zpm_formats::iter_ext::IterExt;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, FilterDescriptor, Locator};
-use zpm_utils::{Path, PathError, System};
+use zpm_utils::{Path, PathError, System, ToFileString};
+use sha2::{Digest, Sha512};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use hex;
 
 use crate::{
     build,
@@ -117,6 +119,131 @@ pub fn fs_extract_archive(destination: &Path, package_data: &PackageData) -> Res
         Ok(true)
     } else {
         Ok(false)
+    }
+}
+
+// Helper function to compute SHA512 hash and return as hex string
+fn compute_sha512_hex(input: &str) -> String {
+    let mut hasher = Sha512::new();
+    hasher.update(input.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+// Generates a Yarn Berry-compatible hash. Used for Sharp packages
+pub fn yarn_berry_hash(locator: &Locator) -> Result<String, Error> {
+    let package_version = locator.reference.to_file_string();
+
+    // Extract scope without '@' prefix, or empty string if no scope
+    let package_scope = locator.ident.scope()
+        .and_then(|scope| scope.strip_prefix('@'))
+        .unwrap_or("");
+
+    // Step 1: Hash the package identifier (scope + name)
+    let package_identifier = format!("{}{}", package_scope, locator.ident.name());
+    let identifier_hash = compute_sha512_hex(&package_identifier);
+
+    // Step 2: Hash the combination of identifier hash and version
+    let combined_input = format!("{}{}", identifier_hash, package_version);
+    let final_hash = compute_sha512_hex(&combined_input);
+
+    // Return first 10 characters to match Yarn Berry's hash length
+    Ok(final_hash[..10].to_string())
+}
+
+pub fn fs_materialize_unplugged_from_global_cache(project: &Project, locator: &Locator, dest_wrapper: &Path, dest_package_root: &Path, package_data: &PackageData) -> Result<bool, Error> {
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (project, locator, dest_wrapper);
+        return fs_extract_archive(dest_package_root, package_data);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        let dest_ready = dest_package_root
+            .with_join_str(".ready");
+
+        if dest_ready.fs_exists() {
+            return Ok(false);
+        }
+
+        let PackageData::Zip {..} = package_data else {
+            return Ok(false);
+        };
+
+        let global_base = project
+            .global_unplugged_path();
+
+        global_base
+            .fs_create_dir_all()?;
+
+        let physical = locator
+            .physical_locator();
+
+        let global_wrapper_name = format!(
+            "{}-{}-{}",
+            physical.ident.slug(),
+            physical.reference.slug(),
+            yarn_berry_hash(&physical)?,
+        );
+
+        let global_wrapper = global_base
+            .with_join_str(&global_wrapper_name);
+
+        let package_subpath = package_data
+            .package_subpath();
+
+        let global_package_root = global_wrapper
+            .with_join(&package_subpath);
+
+        let global_ready = global_package_root
+            .with_join_str(".ready");
+
+        if !global_ready.fs_exists() {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+
+            let tmp_wrapper = global_base.with_join_str(format!(
+                ".{}.tmp-{}-{}",
+                global_wrapper_name,
+                std::process::id(),
+                nonce,
+            ));
+
+            let tmp_package_root = tmp_wrapper
+                .with_join(&package_subpath);
+
+            if fs_extract_archive(&tmp_package_root, package_data).is_ok() {
+                let _ = tmp_wrapper
+                    .fs_concurrent_move(&global_wrapper);
+            }
+
+            if !global_ready.fs_exists() {
+                let _ = tmp_wrapper.fs_rm();
+                return fs_extract_archive(dest_package_root, package_data);
+            }
+
+            let _ = tmp_wrapper.fs_rm();
+        }
+
+        if dest_wrapper.fs_exists() && !dest_ready.fs_exists() {
+            dest_wrapper.fs_rm()?;
+        }
+
+        dest_wrapper
+            .fs_create_parent()?;
+
+        match global_wrapper.fs_clonefile(dest_wrapper) {
+            Ok(_) => Ok(true),
+            Err(_) => {
+                if dest_wrapper.fs_exists() {
+                    let _ = dest_wrapper.fs_rm();
+                }
+
+                fs_extract_archive(dest_package_root, package_data)
+            },
+        }
     }
 }
 

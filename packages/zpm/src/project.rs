@@ -260,6 +260,11 @@ impl Project {
             .with_join_str("cache")
     }
 
+    pub fn global_unplugged_path(&self) -> Path {
+        self.config.settings.global_folder.value
+            .with_join_str("unplugged")
+    }
+
     pub fn local_cache_path(&self) -> Path {
         self.project_cwd
             .with_join_str(".yarn")

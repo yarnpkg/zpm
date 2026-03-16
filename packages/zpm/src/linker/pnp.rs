@@ -4,8 +4,6 @@ use zpm_config::PnpFallbackMode;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Ident, Locator, Reference};
 use zpm_utils::{IoResultExt, Path, SyncEntryKind, ToHumanString};
-use sha2::{Sha512, Digest};
-use hex;
 use itertools::Itertools;
 use serde::{Serialize, Serializer};
 use serde_with::serde_as;
@@ -50,34 +48,6 @@ fn make_virtual_path(base: &Path, component: &str, to: &Path) -> Path {
         .with_join_str(final_components.join("/"));
 
     full_virtual_path
-}
-
-// Helper function to compute SHA512 hash and return as hex string
-fn compute_sha512_hex(input: &str) -> String {
-    let mut hasher = Sha512::new();
-    hasher.update(input.as_bytes());
-    hex::encode(hasher.finalize())
-}
-
-// Generates a Yarn Berry-compatible hash. Used for Sharp packages
-fn yarn_berry_hash(locator: &Locator) -> Result<String, Error> {
-    let package_version = locator.reference.to_file_string();
-
-    // Extract scope without '@' prefix, or empty string if no scope
-    let package_scope = locator.ident.scope()
-        .and_then(|scope| scope.strip_prefix('@'))
-        .unwrap_or("");
-
-    // Step 1: Hash the package identifier (scope + name)
-    let package_identifier = format!("{}{}", package_scope, locator.ident.name());
-    let identifier_hash = compute_sha512_hex(&package_identifier);
-
-    // Step 2: Hash the combination of identifier hash and version
-    let combined_input = format!("{}{}", identifier_hash, package_version);
-    let final_hash = compute_sha512_hex(&combined_input);
-
-    // Return first 10 characters to match Yarn Berry's hash length
-    Ok(final_hash[..10].to_string())
 }
 
 #[serde_as]
@@ -334,7 +304,7 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
             is_physically_on_disk = true;
         } else if package_build_info.must_extract {
             let package_unplugged_wrapper_path = unplugged_path
-                .with_join_str(format!("{}-{}-{}", locator.ident.slug(), locator.reference.slug(), yarn_berry_hash(locator)?));
+                .with_join_str(format!("{}-{}-{}", locator.ident.slug(), locator.reference.slug(), linker::helpers::yarn_berry_hash(locator)?));
 
             package_location_abs = package_unplugged_wrapper_path
                 .with_join(&physical_package_data.package_subpath());
@@ -347,7 +317,10 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
                     package_location_abs.clone(),
                 );
 
-                is_freshly_unplugged = linker::helpers::fs_extract_archive(
+                is_freshly_unplugged = linker::helpers::fs_materialize_unplugged_from_global_cache(
+                    project,
+                    locator,
+                    &package_unplugged_wrapper_path,
                     &package_location_abs,
                     physical_package_data,
                 )?;
