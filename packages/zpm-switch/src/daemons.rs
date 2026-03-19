@@ -73,7 +73,11 @@ pub fn get_daemon(project_cwd: &Path) -> Result<Option<DaemonEntry>, Error> {
         = daemon_path
             .fs_read_text()
             .ok_missing()?
-            .and_then(|content| JsonDocument::hydrate_from_str::<DaemonEntry>(&content).ok());
+            .and_then(|content| {
+                JsonDocument::hydrate_from_str::<DaemonEntry>(&content)
+                    .map_err(|e| eprintln!("Warning: failed to parse daemon file {:?}: {}", daemon_path, e))
+                    .ok()
+            });
 
     Ok(daemon)
 }
@@ -91,7 +95,11 @@ pub fn list_daemons() -> Result<BTreeSet<DaemonEntry>, Error> {
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.file_type().map_or(false, |f| f.is_file()))
             .filter_map(|entry| Path::try_from(entry.path()).ok())
-            .filter_map(|path| path.fs_read_text().ok())
+            .filter_map(|path| {
+                path.fs_read_text()
+                    .map_err(|e| eprintln!("Warning: failed to read daemon file {:?}: {}", path, e))
+                    .ok()
+            })
             .filter_map(|content| JsonDocument::hydrate_from_str::<DaemonEntry>(&content).ok())
             .collect::<BTreeSet<_>>();
 
@@ -199,8 +207,8 @@ pub fn kill_daemon_gracefully(pid: u32) -> bool {
             }
         }
 
-        // Return true even if we couldn't verify death - we did our best
-        true
+        // Return false if we couldn't verify death after SIGKILL
+        !is_process_alive(pid)
     }
 
     #[cfg(windows)]
@@ -231,4 +239,18 @@ pub fn cleanup_stale_daemons() -> Result<(), Error> {
 pub fn list_live_daemons() -> Result<BTreeSet<DaemonEntry>, Error> {
     cleanup_stale_daemons()?;
     list_daemons()
+}
+
+/// Kill a daemon and unregister it, returning true if successful.
+pub async fn kill_and_unregister_daemon(daemon: &DaemonEntry) -> Result<bool, Error> {
+    let pid = daemon.pid;
+    let success = tokio::task::spawn_blocking(move || kill_daemon_gracefully(pid))
+        .await
+        .unwrap_or(false);
+
+    if success {
+        unregister_daemon(&daemon.project_cwd)?;
+    }
+
+    Ok(success)
 }

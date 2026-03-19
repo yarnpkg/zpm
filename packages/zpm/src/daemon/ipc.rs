@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use super::scheduler::ContextualTaskId;
 
 pub const DAEMON_BASE_PORT: u16 = 12197;
-pub const TASK_CURRENT_ENV: &str = "ZPM_TASK_CURRENT";
-pub const DAEMON_SERVER_ENV: &str = "YARN_DAEMON_SERVER";
+pub const CURRENT_TASK_ENV_NAME: &str = "YARN_CURRENT_TASK";
+pub const DAEMON_SERVER_ENV_NAME: &str = "YARN_DAEMON_SERVER";
 pub const LONG_LIVED_CONTEXT_ID: &str = "4d84fea4-e0d4-4df6-8190-f312b86968b3";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -9,7 +9,7 @@ use std::process::ExitStatus;
 
 use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
 use super::super::coordinator_state::{ContextualTaskId, PreparedTask};
-use super::super::ipc::{DAEMON_SERVER_ENV, TASK_CURRENT_ENV};
+use super::super::ipc::{DAEMON_SERVER_ENV_NAME, CURRENT_TASK_ENV_NAME};
 use zpm_utils::ToFileString;
 use super::output::stream_output;
 use crate::error::Error;
@@ -46,8 +46,8 @@ impl TaskRunner {
             env = env.with_env_variable(key, value);
         }
 
-        env = env.with_env_variable(TASK_CURRENT_ENV, &task_id_str);
-        env = env.with_env_variable(DAEMON_SERVER_ENV, &self.daemon_url);
+        env = env.with_env_variable(CURRENT_TASK_ENV_NAME, &task_id_str);
+        env = env.with_env_variable(DAEMON_SERVER_ENV_NAME, &self.daemon_url);
 
         let mut running = env
             .with_cwd(self.prepared.cwd.clone())

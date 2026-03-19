@@ -1,8 +1,7 @@
-use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 
 use clipanion::cli;
-use crate::daemon::{DaemonClient, TaskSubscription, DAEMON_SERVER_ENV, TASK_CURRENT_ENV};
+use crate::daemon::{DaemonClient, TaskSubscription, DAEMON_SERVER_ENV_NAME, CURRENT_TASK_ENV_NAME};
 use crate::error::Error;
 
 /// Push tasks to be executed from within a running task
@@ -29,21 +28,21 @@ impl TaskPush {
         }
 
         let parent_task_id
-            = match std::env::var(TASK_CURRENT_ENV) {
+            = match std::env::var(CURRENT_TASK_ENV_NAME) {
                 Ok(id) => Some(id),
                 Err(_) => {
                     return Err(Error::TaskPushFailed(
-                        format!("Not running inside a task context ({} not set)", TASK_CURRENT_ENV),
+                        format!("Not running inside a task context ({} not set)", CURRENT_TASK_ENV_NAME),
                     ));
                 }
             };
 
         let daemon_url
-            = match std::env::var(DAEMON_SERVER_ENV) {
+            = match std::env::var(DAEMON_SERVER_ENV_NAME) {
                 Ok(url) => url,
                 Err(_) => {
                     return Err(Error::TaskPushFailed(
-                        format!("Not running inside a daemon context ({} not set)", DAEMON_SERVER_ENV),
+                        format!("Not running inside a daemon context ({} not set)", DAEMON_SERVER_ENV_NAME),
                     ));
                 }
             };
@@ -63,6 +62,6 @@ impl TaskPush {
 
         client.push_tasks(task_subscriptions, parent_task_id, None, None).await?;
 
-        Ok(ExitStatus::from_raw(0))
+        Ok(super::runner::exit_status_from_code(0))
     }
 }

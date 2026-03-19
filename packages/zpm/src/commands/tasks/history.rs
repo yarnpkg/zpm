@@ -1,4 +1,4 @@
-use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
+use std::process::ExitStatus;
 
 use clipanion::cli;
 use zpm_utils::ToFileString;
@@ -39,7 +39,7 @@ impl TaskHistory {
             self.print_human(&events);
         }
 
-        Ok(ExitStatus::from_raw(0))
+        Ok(super::runner::exit_status_from_code(0))
     }
 
     fn print_human(&self, events: &[TaskEvent]) {

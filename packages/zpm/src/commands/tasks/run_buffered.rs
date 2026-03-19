@@ -43,13 +43,7 @@ impl TaskRunHandler for BufferedHandler {
                 = std::io::stdout().lock();
 
             if !lines.is_empty() {
-                if ctx.is_first_line {
-                    if ctx.has_attached() {
-                        writeln!(stdout, "").ok();
-                    }
-
-                    ctx.is_first_line = false;
-                }
+                ctx.emit_first_line_separator(&mut stdout);
 
                 for output_line in lines {
                     if ctx.verbose_level >= 1 {

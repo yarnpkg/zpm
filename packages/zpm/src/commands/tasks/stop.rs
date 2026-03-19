@@ -1,4 +1,4 @@
-use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
+use std::process::ExitStatus;
 
 use clipanion::cli;
 use zpm_utils::ToFileString;
@@ -43,13 +43,13 @@ impl TaskStop {
 
         if success {
             println!("Task {} stopped successfully", self.name);
-            Ok(ExitStatus::from_raw(0))
+            Ok(super::runner::exit_status_from_code(0))
         } else {
             let err_msg
                 = error.unwrap_or_else(|| "Unknown error".to_string());
 
             eprintln!("Failed to stop task {}: {}", self.name, err_msg);
-            Ok(ExitStatus::from_raw(1 << 8))
+            Ok(super::runner::exit_status_from_code(1))
         }
     }
 }

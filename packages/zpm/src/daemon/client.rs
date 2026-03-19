@@ -17,7 +17,7 @@ use super::coordinator::start_daemon_inline;
 use super::ipc::{
     AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest,
     DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskEvent,
-    TaskSubscription, DAEMON_SERVER_ENV, daemon_url,
+    TaskSubscription, DAEMON_SERVER_ENV_NAME, daemon_url,
 };
 use zpm_utils::Path;
 
@@ -71,7 +71,7 @@ pub struct DaemonClient {
 impl DaemonClient {
     pub async fn connect(project_root: &Path) -> Result<Self, Error> {
         let url
-            = match std::env::var(DAEMON_SERVER_ENV) {
+            = match std::env::var(DAEMON_SERVER_ENV_NAME) {
                 Ok(url) => url,
                 Err(_) => start_daemon(project_root).await?,
             };
@@ -235,6 +235,20 @@ impl DaemonClient {
         }
     }
 
+    /// Send a request and extract the expected response variant.
+    /// Handles the common `DaemonResponse::Error` and unexpected response cases.
+    async fn request<T>(
+        &mut self,
+        request: DaemonRequest,
+        extract: impl FnOnce(DaemonResponse) -> Option<T>,
+    ) -> Result<T, Error> {
+        let response = self.send_request(request).await?;
+        match response {
+            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
+            other => extract(other).ok_or_else(|| Error::IpcError("Unexpected response".to_string())),
+        }
+    }
+
     pub async fn send_request(&mut self, request: DaemonRequest) -> Result<DaemonResponse, Error> {
         let request_id
             = self.next_request_id.fetch_add(1, Ordering::Relaxed);
@@ -346,16 +360,10 @@ impl DaemonClient {
         &mut self,
         task_id: &ContextualTaskId,
     ) -> Result<Vec<BufferedOutputLine>, Error> {
-        let request
-            = DaemonRequest::GetTaskOutput {
-                task_id: task_id.clone(),
-            };
-
-        match self.send_request(request).await? {
-            DaemonResponse::TaskOutput { lines, .. } => Ok(lines),
-            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
-            _ => Err(Error::IpcError("Unexpected response".to_string())),
-        }
+        self.request(
+            DaemonRequest::GetTaskOutput { task_id: task_id.clone() },
+            |r| match r { DaemonResponse::TaskOutput { lines, .. } => Some(lines), _ => None },
+        ).await
     }
 
     pub async fn stop_task(
@@ -363,75 +371,42 @@ impl DaemonClient {
         task_name: &str,
         workspace: Option<String>,
     ) -> Result<(bool, Option<String>), Error> {
-        let request
-            = DaemonRequest::StopTask {
-                task_name: task_name.to_string(),
-                workspace,
-            };
-
-        match self.send_request(request).await? {
-            DaemonResponse::TaskStopped { success, error } => Ok((success, error)),
-            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
-            _ => Err(Error::IpcError("Unexpected response".to_string())),
-        }
+        self.request(
+            DaemonRequest::StopTask { task_name: task_name.to_string(), workspace },
+            |r| match r { DaemonResponse::TaskStopped { success, error } => Some((success, error)), _ => None },
+        ).await
     }
 
     pub async fn list_long_lived_tasks(&mut self) -> Result<Vec<LongLivedTaskInfo>, Error> {
-        let request
-            = DaemonRequest::ListLongLivedTasks;
-
-        match self.send_request(request).await? {
-            DaemonResponse::LongLivedTaskList { tasks } => Ok(tasks),
-            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
-            _ => Err(Error::IpcError("Unexpected response".to_string())),
-        }
+        self.request(
+            DaemonRequest::ListLongLivedTasks,
+            |r| match r { DaemonResponse::LongLivedTaskList { tasks } => Some(tasks), _ => None },
+        ).await
     }
 
     pub async fn cancel_context(&mut self, context_id: &str) -> Result<usize, Error> {
-        let request
-            = DaemonRequest::CancelContext {
-                context_id: context_id.to_string(),
-            };
-
-        match self.send_request(request).await? {
-            DaemonResponse::ContextCancelled { cancelled_count } => Ok(cancelled_count),
-            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
-            _ => Err(Error::IpcError("Unexpected response".to_string())),
-        }
+        self.request(
+            DaemonRequest::CancelContext { context_id: context_id.to_string() },
+            |r| match r { DaemonResponse::ContextCancelled { cancelled_count } => Some(cancelled_count), _ => None },
+        ).await
     }
 
     /// Get internal state statistics from the daemon (for debugging/testing)
     pub async fn get_stats(&mut self) -> Result<DaemonStatsResult, Error> {
-        let request = DaemonRequest::GetStats;
-
-        match self.send_request(request).await? {
-            DaemonResponse::Stats {
-                tasks_count,
-                prepared_count,
-                subtasks_count,
-                output_buffer_count,
-                closed_tasks_count,
-            } => Ok(DaemonStatsResult {
-                tasks_count,
-                prepared_count,
-                subtasks_count,
-                output_buffer_count,
-                closed_tasks_count,
-            }),
-            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
-            _ => Err(Error::IpcError("Unexpected response".to_string())),
-        }
+        self.request(DaemonRequest::GetStats, |r| match r {
+            DaemonResponse::Stats { tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count } => {
+                Some(DaemonStatsResult { tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count })
+            }
+            _ => None,
+        }).await
     }
 
     /// Get the recent task event history from the daemon
     pub async fn get_task_history(&mut self) -> Result<Vec<TaskEvent>, Error> {
-        let request = DaemonRequest::GetTaskHistory;
-
-        match self.send_request(request).await? {
-            DaemonResponse::TaskHistory { events } => Ok(events),
-            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
-            _ => Err(Error::IpcError("Unexpected response".to_string())),
-        }
+        self.request(
+            DaemonRequest::GetTaskHistory,
+            |r| match r { DaemonResponse::TaskHistory { events } => Some(events), _ => None },
+        ).await
     }
 }
 
@@ -488,4 +463,3 @@ async fn start_daemon(project_root: &Path) -> Result<String, Error> {
 
     Ok(url.trim().to_string())
 }
-

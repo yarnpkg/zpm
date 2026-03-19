@@ -20,8 +20,6 @@ use super::super::ipc::{
     DaemonMessage, DaemonNotification, DaemonRequest, DaemonRequestEnvelope,
     DaemonResponse, SubscriptionScope,
 };
-use crate::project::Project;
-
 // ============================================================================
 // Connection Context
 // ============================================================================
@@ -29,7 +27,6 @@ use crate::project::Project;
 /// Connection context with only immutable data and command channel.
 /// All mutable state access goes through commands.
 pub struct ConnectionContext {
-    pub project: Arc<Project>,
     pub command_tx: CommandSender,
 }
 
@@ -165,7 +162,6 @@ pub async fn handle_connection(
                         // Dispatch request via commands
                         let response = dispatch_request(
                             request,
-                            &ctx.project,
                             subscription_id,
                             &ctx.command_tx,
                         )

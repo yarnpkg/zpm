@@ -26,7 +26,7 @@ pub use long_lived_registry::LongLivedRegistry;
 pub use output_buffer::OutputBuffer;
 pub use process_registry::ProcessRegistry;
 pub use subscription_manager::{SubscriptionId, SubscriptionManager};
-pub use task_graph::TaskGraph;
+pub use task_graph::{TaskGraph, LONG_LIVED_ATTRIBUTE};
 
 // Re-export scheduler types that are used across the coordinator
 pub use super::scheduler::{ContextualTaskId, PreparedTask};

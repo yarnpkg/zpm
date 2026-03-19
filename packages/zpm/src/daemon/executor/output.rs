@@ -30,7 +30,11 @@ pub async fn stream_output(
                             return;
                         }
                     }
-                    Ok(None) | Err(_) => { stdout_done = true; }
+                    Ok(None) => { stdout_done = true; }
+                    Err(e) => {
+                        eprintln!("stdout read error for task {:?}: {}", task_id, e);
+                        stdout_done = true;
+                    }
                 }
             }
             line = stderr_reader.next_line(), if !stderr_done => {
@@ -44,7 +48,11 @@ pub async fn stream_output(
                             return;
                         }
                     }
-                    Ok(None) | Err(_) => { stderr_done = true; }
+                    Ok(None) => { stderr_done = true; }
+                    Err(e) => {
+                        eprintln!("stderr read error for task {:?}: {}", task_id, e);
+                        stderr_done = true;
+                    }
                 }
             }
         }

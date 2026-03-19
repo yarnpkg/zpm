@@ -1,4 +1,4 @@
-use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
+use std::process::ExitStatus;
 
 use clipanion::cli;
 use colored::Colorize;
@@ -44,7 +44,7 @@ impl TaskList {
             self.print_human(&tasks);
         }
 
-        Ok(ExitStatus::from_raw(0))
+        Ok(super::runner::exit_status_from_code(0))
     }
 
     fn print_json(&self, tasks: &[LongLivedTaskInfo]) {

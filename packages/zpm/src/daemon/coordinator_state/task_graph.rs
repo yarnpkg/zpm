@@ -10,6 +10,8 @@ use super::super::scheduler::{ContextualTaskId, PreparedTask};
 use crate::error::Error;
 use crate::project::Project;
 
+pub const LONG_LIVED_ATTRIBUTE: &str = "long-lived";
+
 // ============================================================================
 // Task State (Unified State Machine)
 // ============================================================================
@@ -76,6 +78,8 @@ pub struct TaskGraph {
     pub tasks: HashMap<ContextualTaskId, TaskInfo>,
     /// Parent-child subtask relationships
     pub subtasks: HashMap<ContextualTaskId, HashSet<ContextualTaskId>>,
+    /// Reverse index: child → set of parents (for O(1) parent lookup)
+    pub parents: HashMap<ContextualTaskId, HashSet<ContextualTaskId>>,
     /// Prepared task execution info
     pub prepared: BTreeMap<ContextualTaskId, PreparedTask>,
 }
@@ -89,6 +93,7 @@ impl TaskGraph {
             },
             tasks: HashMap::new(),
             subtasks: HashMap::new(),
+            parents: HashMap::new(),
             prepared: BTreeMap::new(),
         }
     }
@@ -134,15 +139,6 @@ impl TaskGraph {
 
         let ctx_task_id = ContextualTaskId::new(task_id.clone(), ctx_id.clone());
 
-        if let Some(parent_str) = parent_task_id {
-            if let Some(parent_ctx_id) = self.parse_contextual_task_id(project, parent_str) {
-                self.subtasks
-                    .entry(parent_ctx_id)
-                    .or_default()
-                    .insert(ctx_task_id.clone());
-            }
-        }
-
         // If the task already has an entry in this context (any state,
         // including terminal), skip re-adding. This prevents duplicate
         // pushes of already-completed tasks within the same context.
@@ -150,6 +146,19 @@ impl TaskGraph {
         // For long-lived task restarts, the coordinator must call
         // clear_task_state before add_task to remove the stale entry.
         if self.tasks.contains_key(&ctx_task_id) {
+            // Still register the parent-child link even for duplicate pushes
+            if let Some(parent_str) = parent_task_id {
+                if let Some(parent_ctx_id) = self.parse_contextual_task_id(project, parent_str) {
+                    self.subtasks
+                        .entry(parent_ctx_id.clone())
+                        .or_default()
+                        .insert(ctx_task_id.clone());
+                    self.parents
+                        .entry(ctx_task_id.clone())
+                        .or_default()
+                        .insert(parent_ctx_id);
+                }
+            }
             return Ok((ctx_task_id, vec![]));
         }
 
@@ -162,6 +171,21 @@ impl TaskGraph {
             self.clear_task_state(&ctx_tid);
             resolved_ctx_task_ids.push(ctx_tid);
             self.resolved.tasks.entry(tid).or_insert(prereqs);
+        }
+
+        // Register the parent-child link AFTER clear_task_state calls,
+        // which would otherwise wipe the parent entry we just added.
+        if let Some(parent_str) = parent_task_id {
+            if let Some(parent_ctx_id) = self.parse_contextual_task_id(project, parent_str) {
+                self.subtasks
+                    .entry(parent_ctx_id.clone())
+                    .or_default()
+                    .insert(ctx_task_id.clone());
+                self.parents
+                    .entry(ctx_task_id.clone())
+                    .or_default()
+                    .insert(parent_ctx_id);
+            }
         }
 
         for (ident, tf) in new_resolved.task_files {
@@ -227,7 +251,7 @@ impl TaskGraph {
                 task_id.task_name.as_str()
             ));
 
-            let is_long_lived = task.attributes.iter().any(|attr| attr.name == "long-lived");
+            let is_long_lived = task.attributes.iter().any(|attr| attr.name == LONG_LIVED_ATTRIBUTE);
 
             self.prepared.insert(
                 ctx_task_id.clone(),
@@ -250,7 +274,15 @@ impl TaskGraph {
 
     pub fn clear_task_state(&mut self, task_id: &ContextualTaskId) {
         self.tasks.remove(task_id);
-        self.subtasks.remove(task_id);
+        // Remove forward subtask links and their reverse parent entries
+        if let Some(children) = self.subtasks.remove(task_id) {
+            for child in &children {
+                if let Some(parents) = self.parents.get_mut(child) {
+                    parents.remove(task_id);
+                }
+            }
+        }
+        self.parents.remove(task_id);
     }
 
     // ========================================================================
@@ -343,11 +375,10 @@ impl TaskGraph {
     }
 
     pub fn find_parents(&self, task_id: &ContextualTaskId) -> Vec<ContextualTaskId> {
-        self.subtasks
-            .iter()
-            .filter(|(_, children)| children.contains(task_id))
-            .map(|(parent, _)| parent.clone())
-            .collect()
+        self.parents
+            .get(task_id)
+            .map(|parents| parents.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     pub fn should_spawn_task(&self, task_id: &ContextualTaskId) -> bool {
@@ -399,7 +430,14 @@ impl TaskGraph {
     pub fn evict_closed_task(&mut self, task_id: &ContextualTaskId) {
         self.tasks.remove(task_id);
         self.prepared.remove(task_id);
-        self.subtasks.remove(task_id);
+        if let Some(children) = self.subtasks.remove(task_id) {
+            for child in &children {
+                if let Some(parents) = self.parents.get_mut(child) {
+                    parents.remove(task_id);
+                }
+            }
+        }
+        self.parents.remove(task_id);
     }
 
     // ========================================================================

@@ -12,7 +12,27 @@ use zpm_utils::ToFileString;
 use super::coordinator_commands::{CommandSender, CoordinatorCommand};
 use super::coordinator_state::SubscriptionId;
 use super::ipc::{DaemonRequest, DaemonResponse, LongLivedTaskStatus, SubscriptionScope};
-use crate::project::Project;
+
+// ============================================================================
+// Command Channel Helper
+// ============================================================================
+
+async fn send_command<T>(
+    command_tx: &CommandSender,
+    build_command: impl FnOnce(oneshot::Sender<T>) -> CoordinatorCommand,
+) -> Result<T, DaemonResponse> {
+    let (response_tx, response_rx) = oneshot::channel();
+
+    command_tx
+        .send(build_command(response_tx))
+        .map_err(|_| DaemonResponse::Error {
+            message: "Coordinator channel closed".to_string(),
+        })?;
+
+    response_rx.await.map_err(|_| DaemonResponse::Error {
+        message: "Coordinator did not respond".to_string(),
+    })
+}
 
 // ============================================================================
 // Request Dispatcher
@@ -22,7 +42,6 @@ use crate::project::Project;
 /// NO direct access to scheduler, output_buffer, or any other mutable state.
 pub async fn dispatch_request(
     request: DaemonRequest,
-    project: &Project,
     subscription_id: Option<SubscriptionId>,
     command_tx: &CommandSender,
 ) -> DaemonResponse {
@@ -49,7 +68,7 @@ pub async fn dispatch_request(
         }
 
         DaemonRequest::ListLongLivedTasks => {
-            handle_list_long_lived_tasks(project, command_tx).await
+            handle_list_long_lived_tasks(command_tx).await
         }
 
         DaemonRequest::CancelContext { context_id } => {
@@ -115,25 +134,14 @@ async fn handle_push_tasks(
 }
 
 async fn handle_get_task_output(task_id: super::scheduler::ContextualTaskId, command_tx: &CommandSender) -> DaemonResponse {
-    let (response_tx, response_rx) = oneshot::channel();
-
-    if command_tx
-        .send(CoordinatorCommand::GetTaskOutput {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::GetTaskOutput {
             task_id: task_id.clone(),
             response_tx,
-        })
-        .is_err()
-    {
-        return DaemonResponse::Error {
-            message: "Coordinator channel closed".to_string(),
-        };
-    }
-
-    match response_rx.await {
+        }
+    }).await {
         Ok(lines) => DaemonResponse::TaskOutput { task_id, lines },
-        Err(_) => DaemonResponse::Error {
-            message: "Coordinator did not respond".to_string(),
-        },
+        Err(e) => e,
     }
 }
 
@@ -142,48 +150,27 @@ async fn handle_stop_task(
     workspace: Option<String>,
     command_tx: &CommandSender,
 ) -> DaemonResponse {
-    let (response_tx, response_rx) = oneshot::channel();
-
-    if command_tx
-        .send(CoordinatorCommand::StopTask {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::StopTask {
             task_name,
             workspace,
             response_tx,
-        })
-        .is_err()
-    {
-        return DaemonResponse::Error {
-            message: "Coordinator channel closed".to_string(),
-        };
-    }
-
-    match response_rx.await {
+        }
+    }).await {
         Ok(result) => DaemonResponse::TaskStopped {
             success: result.success,
             error: result.error,
         },
-        Err(_) => DaemonResponse::Error {
-            message: "Coordinator did not respond".to_string(),
-        },
+        Err(e) => e,
     }
 }
 
 async fn handle_list_long_lived_tasks(
-    _project: &Project,
     command_tx: &CommandSender,
 ) -> DaemonResponse {
-    let (response_tx, response_rx) = oneshot::channel();
-
-    if command_tx
-        .send(CoordinatorCommand::ListLongLivedTasks { response_tx })
-        .is_err()
-    {
-        return DaemonResponse::Error {
-            message: "Coordinator channel closed".to_string(),
-        };
-    }
-
-    match response_rx.await {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::ListLongLivedTasks { response_tx }
+    }).await {
         Ok(entries) => {
             let tasks: Vec<super::ipc::LongLivedTaskInfo> = entries
                 .into_iter()
@@ -203,50 +190,28 @@ async fn handle_list_long_lived_tasks(
 
             DaemonResponse::LongLivedTaskList { tasks }
         }
-        Err(_) => DaemonResponse::Error {
-            message: "Coordinator did not respond".to_string(),
-        },
+        Err(e) => e,
     }
 }
 
 async fn handle_cancel_context(context_id: String, command_tx: &CommandSender) -> DaemonResponse {
-    let (response_tx, response_rx) = oneshot::channel();
-
-    if command_tx
-        .send(CoordinatorCommand::CancelContext {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::CancelContext {
             context_id,
             response_tx,
-        })
-        .is_err()
-    {
-        return DaemonResponse::Error {
-            message: "Coordinator channel closed".to_string(),
-        };
-    }
-
-    match response_rx.await {
+        }
+    }).await {
         Ok(result) => DaemonResponse::ContextCancelled {
             cancelled_count: result.cancelled_count,
         },
-        Err(_) => DaemonResponse::Error {
-            message: "Coordinator did not respond".to_string(),
-        },
+        Err(e) => e,
     }
 }
 
 async fn handle_get_stats(command_tx: &CommandSender) -> DaemonResponse {
-    let (response_tx, response_rx) = oneshot::channel();
-
-    if command_tx
-        .send(CoordinatorCommand::GetStats { response_tx })
-        .is_err()
-    {
-        return DaemonResponse::Error {
-            message: "Coordinator channel closed".to_string(),
-        };
-    }
-
-    match response_rx.await {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::GetStats { response_tx }
+    }).await {
         Ok(result) => DaemonResponse::Stats {
             tasks_count: result.tasks_count,
             prepared_count: result.prepared_count,
@@ -254,29 +219,16 @@ async fn handle_get_stats(command_tx: &CommandSender) -> DaemonResponse {
             output_buffer_count: result.output_buffer_count,
             closed_tasks_count: result.closed_tasks_count,
         },
-        Err(_) => DaemonResponse::Error {
-            message: "Coordinator did not respond".to_string(),
-        },
+        Err(e) => e,
     }
 }
 
 async fn handle_get_task_history(command_tx: &CommandSender) -> DaemonResponse {
-    let (response_tx, response_rx) = oneshot::channel();
-
-    if command_tx
-        .send(CoordinatorCommand::GetTaskHistory { response_tx })
-        .is_err()
-    {
-        return DaemonResponse::Error {
-            message: "Coordinator channel closed".to_string(),
-        };
-    }
-
-    match response_rx.await {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::GetTaskHistory { response_tx }
+    }).await {
         Ok(events) => DaemonResponse::TaskHistory { events },
-        Err(_) => DaemonResponse::Error {
-            message: "Coordinator did not respond".to_string(),
-        },
+        Err(e) => e,
     }
 }
 

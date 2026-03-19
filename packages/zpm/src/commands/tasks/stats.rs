@@ -1,4 +1,4 @@
-use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
+use std::process::ExitStatus;
 
 use clipanion::cli;
 
@@ -49,6 +49,6 @@ impl TaskStats {
             println!("  closed_tasks:  {}", stats.closed_tasks_count);
         }
 
-        Ok(ExitStatus::from_raw(0))
+        Ok(super::runner::exit_status_from_code(0))
     }
 }

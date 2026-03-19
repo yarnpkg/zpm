@@ -54,13 +54,7 @@ impl TaskRunHandler for SilentDependenciesHandler {
         let mut stdout
             = std::io::stdout().lock();
 
-        if ctx.is_first_line {
-            if ctx.has_attached() {
-                writeln!(stdout, "").ok();
-            }
-
-            ctx.is_first_line = false;
-        }
+        ctx.emit_first_line_separator(&mut stdout);
 
         writeln!(stdout, "{}", line).ok();
     }

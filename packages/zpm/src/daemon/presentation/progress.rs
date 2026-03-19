@@ -79,18 +79,18 @@ impl ProgressState {
     }
 
     pub fn add_task(&self, task_name: &str) {
-        self.running_tasks.lock().unwrap().insert(task_name.to_string());
+        self.running_tasks.lock().unwrap_or_else(|e| e.into_inner()).insert(task_name.to_string());
     }
 
     pub fn remove_task(&self, task_name: &str) {
-        self.running_tasks.lock().unwrap().remove(task_name);
+        self.running_tasks.lock().unwrap_or_else(|e| e.into_inner()).remove(task_name);
         self.completed.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn format_progress(&self, frame_idx: usize) -> String {
         let total = self.total.load(Ordering::Relaxed);
         let completed = self.completed.load(Ordering::Relaxed);
-        let running = self.running_tasks.lock().unwrap().len();
+        let running = self.running_tasks.lock().unwrap_or_else(|e| e.into_inner()).len();
         let scheduled = total.saturating_sub(running).saturating_sub(completed);
 
         let label = &self.gradient_frames[frame_idx % self.gradient_frames.len()];

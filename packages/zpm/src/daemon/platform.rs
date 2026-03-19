@@ -15,7 +15,9 @@ pub fn kill_process_group(pid: u32) {
 }
 
 #[cfg(not(unix))]
-pub fn kill_process_group(_pid: u32) {}
+pub fn kill_process_group(_pid: u32) {
+    unimplemented!("daemon platform operations are not supported on this OS")
+}
 
 /// Send SIGKILL to a process (Unix) or terminate the process (Windows).
 #[cfg(unix)]
@@ -27,7 +29,9 @@ pub fn kill_process(pid: u32) {
 }
 
 #[cfg(not(unix))]
-pub fn kill_process(_pid: u32) {}
+pub fn kill_process(_pid: u32) {
+    unimplemented!("daemon platform operations are not supported on this OS")
+}
 
 /// Check if a process is still alive.
 #[cfg(unix)]
@@ -37,5 +41,5 @@ pub fn is_process_alive(pid: u32) -> bool {
 
 #[cfg(not(unix))]
 pub fn is_process_alive(_pid: u32) -> bool {
-    false
+    unimplemented!("daemon platform operations are not supported on this OS")
 }

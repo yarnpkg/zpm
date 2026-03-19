@@ -19,8 +19,8 @@ pub use events::Stream;
 pub use ipc::{
     daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification,
     DaemonRequest, DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, LongLivedTaskStatus,
-    SubscriptionScope, TaskEvent, TaskEventState, TaskSubscription, DAEMON_BASE_PORT, DAEMON_SERVER_ENV,
-    LONG_LIVED_CONTEXT_ID, TASK_CURRENT_ENV,
+    SubscriptionScope, TaskEvent, TaskEventState, TaskSubscription, DAEMON_BASE_PORT, DAEMON_SERVER_ENV_NAME,
+    LONG_LIVED_CONTEXT_ID, CURRENT_TASK_ENV_NAME,
 };
 pub use presentation::{prefix_colors, ProgressState};
 pub use scheduler::{ContextualTaskId, PreparedTask};

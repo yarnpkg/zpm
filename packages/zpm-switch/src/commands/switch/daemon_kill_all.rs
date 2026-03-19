@@ -35,13 +35,9 @@ impl DaemonKillAllCommand {
                 continue;
             }
 
-            let pid = daemon.pid;
-            let success = tokio::task::spawn_blocking(move || daemons::kill_daemon_gracefully(pid))
-                .await
-                .unwrap_or(false);
+            let success = daemons::kill_and_unregister_daemon(&daemon).await?;
 
             if success {
-                daemons::unregister_daemon(&daemon.project_cwd)?;
                 println!(
                     "{} Stopped daemon for {} (PID: {})",
                     DataType::Success.colorize("✓"),

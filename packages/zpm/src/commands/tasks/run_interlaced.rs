@@ -38,13 +38,7 @@ impl TaskRunHandler for InterlacedHandler {
             return;
         }
 
-        if ctx.is_first_line {
-            if ctx.has_attached() {
-                writeln!(stdout, "").ok();
-            }
-
-            ctx.is_first_line = false;
-        }
+        ctx.emit_first_line_separator(&mut stdout);
 
         if self.timestamps {
             if ctx.verbose_level >= 1 {

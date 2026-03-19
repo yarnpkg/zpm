@@ -25,7 +25,7 @@ use super::coordinator_commands::{
     PushTasksResult, StatsResult, StopTaskResult, TaskCompletionResult,
 };
 use super::coordinator_state::{
-    now_ms, ContextualTaskId, CoordinatorState, TaskGraph, TransitionEffects,
+    now_ms, ContextualTaskId, CoordinatorState, TaskGraph, TransitionEffects, LONG_LIVED_ATTRIBUTE,
 };
 use super::executor::ExecutorPool;
 use super::ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskEvent, TaskEventState, TaskSubscription, LONG_LIVED_CONTEXT_ID};
@@ -70,6 +70,9 @@ async fn run_daemon_internal(
     // Create the command channel
     let (command_tx, command_rx) = mpsc::unbounded_channel::<CoordinatorCommand>();
 
+    // Shutdown signal: when notified, the accept loop exits cleanly
+    let shutdown_notify = Arc::new(tokio::sync::Notify::new());
+
     // Spawn the coordinator loop
     let project_for_loop = project.clone();
     let command_tx_for_executor = command_tx.clone();
@@ -89,25 +92,29 @@ async fn run_daemon_internal(
     // Project root watcher
     let project_root = project.project_cwd.clone();
     let command_tx_for_watcher = command_tx.clone();
+    let shutdown_for_watcher = shutdown_notify.clone();
 
     tokio::spawn(async move {
-        watch_project_root(project_root, command_tx_for_watcher).await;
+        watch_project_root(project_root, command_tx_for_watcher, shutdown_for_watcher).await;
     });
 
     // Signal handler
     let command_tx_for_signal = command_tx.clone();
+    let shutdown_for_signal = shutdown_notify.clone();
     tokio::spawn(async move {
-        wait_for_shutdown_signal(command_tx_for_signal).await;
+        wait_for_shutdown_signal(command_tx_for_signal, shutdown_for_signal).await;
     });
 
     // Create simplified connection context (no Arc<RwLock> for mutable state)
     let ctx = Arc::new(ConnectionContext {
-        project,
         command_tx,
     });
 
-    // Run accept loop with simplified context
-    run_accept_loop(listener, ctx).await;
+    // Run accept loop until shutdown is signaled
+    tokio::select! {
+        _ = run_accept_loop(listener, ctx) => {}
+        _ = shutdown_notify.notified() => {}
+    }
 
     Ok(())
 }
@@ -200,6 +207,12 @@ fn record_events_from_effects(effects: &TransitionEffects, event_history: &mut s
     }
 }
 
+/// Record events and apply effects (broadcast + kill) in one step.
+fn dispatch_effects(effects: TransitionEffects, state: &mut CoordinatorState) {
+    record_events_from_effects(&effects, &mut state.event_history);
+    apply_effects(effects, &state.subscriptions);
+}
+
 // ============================================================================
 // Command Handler
 // ============================================================================
@@ -251,8 +264,7 @@ async fn handle_command(
         CoordinatorCommand::CancelContext { context_id, response_tx } => {
             let effects = state.cancel_context(&context_id);
             let cancelled_count = effects.notifications.len();
-            record_events_from_effects(&effects, &mut state.event_history);
-            apply_effects(effects, &state.subscriptions);
+            dispatch_effects(effects, state);
 
             // Mark spawning tasks for deferred kill (already done inside cancel_context)
             let spawning_ids = state.processes.get_spawning_for_context(&context_id);
@@ -364,8 +376,7 @@ async fn handle_command(
             };
 
             let effects = state.task_script_finished(&task_id, exit_code, signal);
-            record_events_from_effects(&effects, &mut state.event_history);
-            apply_effects(effects, &state.subscriptions);
+            dispatch_effects(effects, state);
         }
 
         CoordinatorCommand::WarmUpComplete { task_id, base_task_id } => {
@@ -481,8 +492,7 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
     let tasks_to_cancel = dependencies::find_tasks_to_fail(&state.graph, &running);
     for task_id in tasks_to_cancel {
         let effects = state.cancel_task(&task_id);
-        record_events_from_effects(&effects, &mut state.event_history);
-        apply_effects(effects, &state.subscriptions);
+        dispatch_effects(effects, state);
     }
 
     // Find ready tasks
@@ -504,8 +514,7 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
         if prepared.script.is_empty() {
             // No script - complete immediately
             let effects = state.complete_no_script(&task_id);
-            record_events_from_effects(&effects, &mut state.event_history);
-            apply_effects(effects, &state.subscriptions);
+            dispatch_effects(effects, state);
         } else {
             // Mark as spawning BEFORE spawn
             state.processes.mark_spawning(task_id.clone());
@@ -673,8 +682,7 @@ fn handle_stop_task(
     };
 
     let effects = state.stop_long_lived(&task_id, &contextual_task_id);
-    record_events_from_effects(&effects, &mut state.event_history);
-    apply_effects(effects, &state.subscriptions);
+    dispatch_effects(effects, state);
 
     StopTaskResult {
         success: true,
@@ -712,7 +720,7 @@ fn resolve_is_long_lived(graph: &TaskGraph, project: &Project, task_id: &TaskId)
         .and_then(|resolved| {
             resolved.task_files.get(&task_id.workspace)
                 .and_then(|tf| tf.tasks.get(task_id.task_name.as_str()))
-                .map(|task| task.attributes.iter().any(|a| a.name == "long-lived"))
+                .map(|task| task.attributes.iter().any(|a| a.name == LONG_LIVED_ATTRIBUTE))
         })
         .unwrap_or(false)
 }
@@ -721,7 +729,7 @@ fn resolve_is_long_lived(graph: &TaskGraph, project: &Project, task_id: &TaskId)
 fn check_if_long_lived_from_graph(graph: &TaskGraph, task_id: &TaskId) -> bool {
     if let Some(task_file) = graph.resolved.task_files.get(&task_id.workspace) {
         if let Some(task) = task_file.tasks.get(task_id.task_name.as_str()) {
-            return task.attributes.iter().any(|attr| attr.name == "long-lived");
+            return task.attributes.iter().any(|attr| attr.name == LONG_LIVED_ATTRIBUTE);
         }
     }
     false
@@ -731,7 +739,7 @@ fn check_if_long_lived_from_graph(graph: &TaskGraph, task_id: &TaskId) -> bool {
 // Watchers and Signal Handlers
 // ============================================================================
 
-async fn watch_project_root(project_root: Path, command_tx: CommandSender) {
+async fn watch_project_root(project_root: Path, command_tx: CommandSender, shutdown_notify: Arc<tokio::sync::Notify>) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -746,7 +754,7 @@ async fn watch_project_root(project_root: Path, command_tx: CommandSender) {
             let current_inode = project_root.fs_metadata().map(|m| m.ino()).ok();
 
             if current_inode != Some(initial_inode) {
-                graceful_shutdown(command_tx).await;
+                graceful_shutdown(command_tx, shutdown_notify).await;
                 return;
             }
         }
@@ -757,6 +765,7 @@ async fn watch_project_root(project_root: Path, command_tx: CommandSender) {
         // On non-Unix platforms, just keep the watcher alive without inode checking
         let _ = command_tx;
         let _ = project_root;
+        let _ = shutdown_notify;
         loop {
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
@@ -764,7 +773,7 @@ async fn watch_project_root(project_root: Path, command_tx: CommandSender) {
 }
 
 #[cfg(unix)]
-async fn wait_for_shutdown_signal(command_tx: CommandSender) {
+async fn wait_for_shutdown_signal(command_tx: CommandSender, shutdown_notify: Arc<tokio::sync::Notify>) {
     use tokio::signal::unix::{signal, SignalKind};
 
     let sigterm = signal(SignalKind::terminate()).ok();
@@ -782,42 +791,41 @@ async fn wait_for_shutdown_signal(command_tx: CommandSender) {
         }
     }
 
-    graceful_shutdown(command_tx).await;
+    graceful_shutdown(command_tx, shutdown_notify).await;
 }
 
 #[cfg(not(unix))]
-async fn wait_for_shutdown_signal(command_tx: CommandSender) {
+async fn wait_for_shutdown_signal(command_tx: CommandSender, shutdown_notify: Arc<tokio::sync::Notify>) {
     let _ = tokio::signal::ctrl_c().await;
-    graceful_shutdown(command_tx).await;
+    graceful_shutdown(command_tx, shutdown_notify).await;
 }
 
-async fn graceful_shutdown(command_tx: CommandSender) {
+async fn graceful_shutdown(command_tx: CommandSender, shutdown_notify: Arc<tokio::sync::Notify>) {
     let (response_tx, response_rx) = oneshot::channel();
 
     if command_tx.send(CoordinatorCommand::Shutdown { response_tx }).is_err() {
-        std::process::exit(0);
+        shutdown_notify.notify_one();
+        return;
     }
 
     let pids = response_rx.await.unwrap_or_default();
 
-    if pids.is_empty() {
-        std::process::exit(0);
-    }
+    if !pids.is_empty() {
+        // Send SIGTERM
+        for &pid in &pids {
+            platform::kill_process_group(pid);
+        }
 
-    // Send SIGTERM
-    for &pid in &pids {
-        platform::kill_process_group(pid);
-    }
+        // Wait 5 seconds
+        tokio::time::sleep(Duration::from_secs(5)).await;
 
-    // Wait 5 seconds
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    // Force kill remaining
-    for &pid in &pids {
-        if platform::is_process_alive(pid) {
-            platform::kill_process(pid);
+        // Force kill remaining
+        for &pid in &pids {
+            if platform::is_process_alive(pid) {
+                platform::kill_process(pid);
+            }
         }
     }
 
-    std::process::exit(0);
+    shutdown_notify.notify_one();
 }

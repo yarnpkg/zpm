@@ -1,11 +1,12 @@
 use std::collections::HashSet;
+use std::io::Write;
 use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 use std::sync::Arc;
 
 /// Create an ExitStatus from a logical exit code.
 /// On Unix, `from_raw` expects a wait status where the exit code is in bits 8-15.
-fn exit_status_from_code(code: i32) -> ExitStatus {
+pub fn exit_status_from_code(code: i32) -> ExitStatus {
     ExitStatus::from_raw(code << 8)
 }
 
@@ -43,6 +44,15 @@ impl TaskRunContext {
 
     pub fn has_long_lived_target(&self) -> bool {
         self.target_task_ids.iter().any(|id| is_long_lived_task(id))
+    }
+
+    pub fn emit_first_line_separator(&mut self, stdout: &mut std::io::StdoutLock) {
+        if self.is_first_line {
+            if self.has_attached() {
+                writeln!(stdout, "").ok();
+            }
+            self.is_first_line = false;
+        }
     }
 
     pub fn is_target(&self, task_id: &ContextualTaskId) -> bool {
