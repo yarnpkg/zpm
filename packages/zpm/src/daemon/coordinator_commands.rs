@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::coordinator_state::SubscriptionId;
 use super::events::Stream;
-use super::ipc::{AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, SubscriptionScope, TaskSubscription};
+use super::ipc::{AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, SubscriptionScope, TaskEvent, TaskSubscription};
 use super::scheduler::ContextualTaskId;
 
 // ============================================================================
@@ -70,6 +70,7 @@ pub enum CoordinatorCommand {
     /// Task has started executing.
     TaskStarted {
         task_id: ContextualTaskId,
+        pid: Option<u32>,
     },
 
     /// Task produced output.
@@ -111,6 +112,11 @@ pub enum CoordinatorCommand {
     /// Get internal state statistics.
     GetStats {
         response_tx: oneshot::Sender<StatsResult>,
+    },
+
+    /// Get the recent task event history.
+    GetTaskHistory {
+        response_tx: oneshot::Sender<Vec<TaskEvent>>,
     },
 
     // ========================================================================

@@ -202,10 +202,6 @@ impl TaskGraph {
                 continue;
             };
 
-            if task.script.is_empty() {
-                continue;
-            }
-
             let Ok(workspace) = project.workspace_by_ident(&task_id.workspace) else {
                 continue;
             };

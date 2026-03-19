@@ -1,6 +1,7 @@
 mod helpers;
 mod runner;
 
+pub mod history;
 pub mod list;
 pub mod push;
 pub mod run_buffered;

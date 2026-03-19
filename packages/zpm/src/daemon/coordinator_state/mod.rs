@@ -12,12 +12,14 @@
 // keeping this module free of channels, Tokio types, and process management.
 // ============================================================================
 
+mod event_history;
 mod long_lived_registry;
 mod output_buffer;
 mod process_registry;
 mod subscription_manager;
 mod task_graph;
 
+pub use event_history::{EventHistory, now_ms};
 pub use long_lived_registry::LongLivedRegistry;
 pub use output_buffer::OutputBuffer;
 pub use process_registry::ProcessRegistry;
@@ -27,7 +29,10 @@ pub use task_graph::{format_contextual_task_id, TaskGraph};
 // Re-export scheduler types that are used across the coordinator
 pub use super::scheduler::{ContextualTaskId, PreparedTask};
 
+use std::collections::BTreeSet;
+
 use super::ipc::DaemonNotification;
+use zpm_tasks::TaskId;
 
 // ============================================================================
 // Transition Effects
@@ -62,6 +67,7 @@ pub struct CoordinatorState {
     pub long_lived: LongLivedRegistry,
     pub subscriptions: SubscriptionManager,
     pub output: OutputBuffer,
+    pub event_history: EventHistory,
 }
 
 impl CoordinatorState {
@@ -72,6 +78,7 @@ impl CoordinatorState {
             long_lived: LongLivedRegistry::new(),
             subscriptions: SubscriptionManager::new(),
             output: OutputBuffer::new(output_buffer_max_lines, max_closed_tasks),
+            event_history: EventHistory::new(),
         }
     }
 
@@ -113,6 +120,7 @@ impl CoordinatorState {
         &mut self,
         task_id: &ContextualTaskId,
         exit_code: i32,
+        signal: Option<i32>,
     ) -> TransitionEffects {
         // Guard: ignore completions for tasks that are already terminal
         // (e.g. a stopped task whose process finally exited after re-add)
@@ -123,7 +131,7 @@ impl CoordinatorState {
         self.graph.mark_script_finished_with_code(task_id, exit_code);
 
         if exit_code != 0 {
-            self.fail_task(task_id, exit_code)
+            self.fail_task(task_id, exit_code, signal)
         } else {
             self.try_complete_or_wait(task_id, exit_code)
         }
@@ -139,8 +147,8 @@ impl CoordinatorState {
         if self.graph.try_complete_task(task_id) {
             self.on_task_completed(task_id, exit_code)
         } else if self.graph.has_failed_subtask(task_id) {
-            // Subtask already failed - fail the parent
-            self.fail_task(task_id, 1)
+            // Subtask already failed - fail the parent (no signal for propagated failure)
+            self.fail_task(task_id, 1, None)
         } else {
             // Task stays in WaitingForSubtasks until all subtasks complete
             TransitionEffects::default()
@@ -159,6 +167,7 @@ impl CoordinatorState {
         effects.notifications.push(DaemonNotification::TaskCompleted {
             task_id: close.task_id_str,
             exit_code,
+            signal: None,
         });
         if let Some(pid) = close.pid {
             effects.pids_to_kill.push(pid);
@@ -188,6 +197,7 @@ impl CoordinatorState {
         &mut self,
         task_id: &ContextualTaskId,
         exit_code: i32,
+        signal: Option<i32>,
     ) -> TransitionEffects {
         let mut effects = TransitionEffects::default();
 
@@ -197,16 +207,18 @@ impl CoordinatorState {
         effects.notifications.push(DaemonNotification::TaskCompleted {
             task_id: close.task_id_str,
             exit_code,
+            signal,
         });
         if let Some(pid) = close.pid {
             effects.pids_to_kill.push(pid);
         }
 
         // Propagate failure to parents that are waiting for subtasks
+        // (propagated failures have no signal — only the original task does)
         let parents = self.graph.find_parents(task_id);
         for parent in parents {
             if self.graph.get_waiting_exit_code(&parent).is_some() {
-                let parent_effects = self.fail_task(&parent, exit_code);
+                let parent_effects = self.fail_task(&parent, exit_code, None);
                 effects.notifications.extend(parent_effects.notifications);
                 effects.pids_to_kill.extend(parent_effects.pids_to_kill);
             }
@@ -245,10 +257,13 @@ impl CoordinatorState {
 
     /// Cancel all non-terminal tasks in a context. Collects PIDs to kill
     /// and marks spawning tasks for deferred kill.
+    ///
+    /// Tasks are cancelled in topological order (dependencies before dependents),
+    /// with alphabetical ordering as tiebreaker within the same topological level.
     pub fn cancel_context(&mut self, context_id: &str) -> TransitionEffects {
         let mut effects = TransitionEffects::default();
 
-        // 1. Cancel all non-terminal tasks in graph
+        // 1. Collect all non-terminal tasks in this context
         let tasks_to_cancel: Vec<ContextualTaskId> = self.graph
             .prepared
             .keys()
@@ -258,17 +273,20 @@ impl CoordinatorState {
             .cloned()
             .collect();
 
-        for task_id in &tasks_to_cancel {
+        // 2. Sort in topological order (dependencies first, alphabetical tiebreak)
+        let sorted = topological_sort(&tasks_to_cancel, &self.graph.resolved.tasks);
+
+        for task_id in &sorted {
             let task_effects = self.cancel_task(task_id);
             effects.notifications.extend(task_effects.notifications);
             effects.pids_to_kill.extend(task_effects.pids_to_kill);
         }
 
-        // 2. Get and collect registered PIDs for running tasks in this context
+        // 3. Get and collect registered PIDs for running tasks in this context
         let pids = self.processes.take_pids_for_context(context_id);
         effects.pids_to_kill.extend(pids);
 
-        // 3. Mark spawning tasks for deferred kill
+        // 4. Mark spawning tasks for deferred kill
         let spawning_ids = self.processes.get_spawning_for_context(context_id);
         for task_id in &spawning_ids {
             self.processes.mark_spawning_pending_cancel(task_id);
@@ -360,8 +378,76 @@ impl CoordinatorState {
         effects.notifications.push(DaemonNotification::TaskCompleted {
             task_id: close.task_id_str,
             exit_code: 0,
+            signal: None,
         });
 
         effects
     }
+}
+
+// ============================================================================
+// Topological Sort
+// ============================================================================
+
+/// Sort contextual task IDs in topological order (dependencies before dependents),
+/// using alphabetical ordering as tiebreaker within the same topological level.
+///
+/// Uses Kahn's algorithm with a BTreeSet queue for deterministic ordering.
+fn topological_sort(
+    tasks: &[ContextualTaskId],
+    resolved: &std::collections::BTreeMap<TaskId, Vec<TaskId>>,
+) -> Vec<ContextualTaskId> {
+    use std::collections::HashMap;
+
+    if tasks.is_empty() {
+        return Vec::new();
+    }
+
+    // Build set of TaskIds in the cancel set for quick lookup
+    let task_set: HashMap<&TaskId, &ContextualTaskId> = tasks
+        .iter()
+        .map(|ct| (&ct.task_id, ct))
+        .collect();
+
+    // Compute in-degrees (how many prerequisites of each task are also in the set)
+    // and reverse adjacency (prerequisite -> its dependents within the set)
+    let mut in_degree: HashMap<&TaskId, usize> = HashMap::new();
+    let mut dependents: HashMap<&TaskId, Vec<&TaskId>> = HashMap::new();
+
+    for ct in tasks {
+        in_degree.entry(&ct.task_id).or_insert(0);
+        if let Some(prereqs) = resolved.get(&ct.task_id) {
+            for prereq in prereqs {
+                if task_set.contains_key(prereq) {
+                    *in_degree.entry(&ct.task_id).or_insert(0) += 1;
+                    dependents.entry(prereq).or_default().push(&ct.task_id);
+                }
+            }
+        }
+    }
+
+    // Kahn's algorithm with BTreeSet for alphabetical tiebreak
+    let mut queue: BTreeSet<&TaskId> = BTreeSet::new();
+    for (&task_id, &deg) in &in_degree {
+        if deg == 0 {
+            queue.insert(task_id);
+        }
+    }
+
+    let mut result = Vec::with_capacity(tasks.len());
+    while let Some(task_id) = queue.pop_first() {
+        result.push(task_set[task_id].clone());
+        if let Some(deps) = dependents.get(task_id) {
+            for dep in deps {
+                if let Some(deg) = in_degree.get_mut(dep) {
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.insert(dep);
+                    }
+                }
+            }
+        }
+    }
+
+    result
 }

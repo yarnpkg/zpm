@@ -57,6 +57,10 @@ pub async fn dispatch_request(
         DaemonRequest::GetStats => {
             handle_get_stats(command_tx).await
         }
+
+        DaemonRequest::GetTaskHistory => {
+            handle_get_task_history(command_tx).await
+        }
     }
 }
 
@@ -255,6 +259,26 @@ async fn handle_get_stats(command_tx: &CommandSender) -> DaemonResponse {
             output_buffer_count: result.output_buffer_count,
             closed_tasks_count: result.closed_tasks_count,
         },
+        Err(_) => DaemonResponse::Error {
+            message: "Coordinator did not respond".to_string(),
+        },
+    }
+}
+
+async fn handle_get_task_history(command_tx: &CommandSender) -> DaemonResponse {
+    let (response_tx, response_rx) = oneshot::channel();
+
+    if command_tx
+        .send(CoordinatorCommand::GetTaskHistory { response_tx })
+        .is_err()
+    {
+        return DaemonResponse::Error {
+            message: "Coordinator channel closed".to_string(),
+        };
+    }
+
+    match response_rx.await {
+        Ok(events) => DaemonResponse::TaskHistory { events },
         Err(_) => DaemonResponse::Error {
             message: "Coordinator did not respond".to_string(),
         },

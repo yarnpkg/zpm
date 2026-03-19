@@ -56,13 +56,14 @@ impl TaskRunner {
             )
             .await?;
 
+        // Get PID before sending TaskStarted so we can include it
+        let pid = running.child.id();
+
         // Notify that the task has started (process is now spawned)
         let _ = self.command_tx.send(CoordinatorCommand::TaskStarted {
             task_id: self.task_id.clone(),
+            pid,
         });
-
-        // Register the process PID via command
-        let pid = running.child.id();
         if let Some(pid) = pid {
             let _ = self.command_tx.send(CoordinatorCommand::RegisterPid {
                 task_id: self.task_id.clone(),

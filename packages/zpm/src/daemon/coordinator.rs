@@ -25,11 +25,11 @@ use super::coordinator_commands::{
     PushTasksResult, StatsResult, StopTaskResult, TaskCompletionResult,
 };
 use super::coordinator_state::{
-    format_contextual_task_id,
+    format_contextual_task_id, now_ms,
     CoordinatorState, TaskGraph, TransitionEffects,
 };
 use super::executor::ExecutorPool;
-use super::ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskSubscription, LONG_LIVED_CONTEXT_ID};
+use super::ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskEvent, TaskEventState, TaskSubscription, LONG_LIVED_CONTEXT_ID};
 use super::platform;
 use super::scheduler::dependencies;
 use super::server::{bind_to_available_port, connection::{run_accept_loop, ConnectionContext}};
@@ -162,6 +162,43 @@ fn apply_effects(effects: TransitionEffects, subscriptions: &super::coordinator_
     }
 }
 
+/// Record task events from transition effects into the event history.
+///
+/// Note: TaskStarted and WarmUpComplete (Live) events are recorded directly
+/// in their respective command handlers where the PID is readily available.
+fn record_events_from_effects(effects: &TransitionEffects, event_history: &mut super::coordinator_state::EventHistory) {
+    let date = now_ms();
+    for notification in &effects.notifications {
+        match notification {
+            DaemonNotification::TaskCompleted { task_id, exit_code, signal } => {
+                event_history.push(TaskEvent {
+                    date,
+                    contextual_task_id: task_id.clone(),
+                    state: if *exit_code == 0 {
+                        TaskEventState::Completed
+                    } else {
+                        TaskEventState::Failed {
+                            exit_code: Some(*exit_code),
+                            signal: *signal,
+                        }
+                    },
+                });
+            }
+            DaemonNotification::TaskCancelled { task_id } => {
+                event_history.push(TaskEvent {
+                    date,
+                    contextual_task_id: task_id.clone(),
+                    state: TaskEventState::Cancelled,
+                });
+            }
+            _ => {
+                // TaskStarted, TaskWarmUpComplete, and TaskOutputLine are
+                // either handled elsewhere or are not state changes.
+            }
+        }
+    }
+}
+
 // ============================================================================
 // Command Handler
 // ============================================================================
@@ -212,6 +249,7 @@ async fn handle_command(
         CoordinatorCommand::CancelContext { context_id, response_tx } => {
             let effects = state.cancel_context(&context_id);
             let cancelled_count = effects.notifications.len();
+            record_events_from_effects(&effects, &mut state.event_history);
             apply_effects(effects, &state.subscriptions);
 
             // Mark spawning tasks for deferred kill (already done inside cancel_context)
@@ -251,15 +289,30 @@ async fn handle_command(
         // Executor Events
         // ====================================================================
 
-        CoordinatorCommand::TaskStarted { task_id } => {
+        CoordinatorCommand::TaskStarted { task_id, pid } => {
             // Broadcast notification
             let task_id_str = format_contextual_task_id(&task_id);
             state.subscriptions.broadcast(DaemonNotification::TaskStarted {
-                task_id: task_id_str,
+                task_id: task_id_str.clone(),
+            });
+
+            let is_long_lived = state.graph.is_long_lived(&task_id);
+
+            // Record event: long-lived tasks enter WarmUp, regular tasks are Started
+            // Use pid 0 as fallback when PID is unavailable (shouldn't happen in practice)
+            let event_pid = pid.unwrap_or(0);
+            state.event_history.push(TaskEvent {
+                date: now_ms(),
+                contextual_task_id: task_id_str,
+                state: if is_long_lived {
+                    TaskEventState::WarmUp { pid: event_pid }
+                } else {
+                    TaskEventState::Started { pid: event_pid }
+                },
             });
 
             // Spawn delayed warm-up command for long-lived tasks
-            if state.graph.is_long_lived(&task_id) {
+            if is_long_lived {
                 let base_task_id = task_id.task_id.clone();
                 let tx = command_tx.clone();
                 tokio::spawn(async move {
@@ -293,20 +346,45 @@ async fn handle_command(
             // Remove from executor's running set BEFORE updating state
             executor_pool.mark_completed(&task_id);
 
-            let exit_code = match result {
-                TaskCompletionResult::Exited(status) => status.code().unwrap_or(-1),
+            let (exit_code, signal) = match result {
+                TaskCompletionResult::Exited(status) => {
+                    let code = status.code().unwrap_or(-1);
+                    #[cfg(unix)]
+                    let sig = {
+                        use std::os::unix::process::ExitStatusExt;
+                        status.signal()
+                    };
+                    #[cfg(not(unix))]
+                    let sig = None;
+                    (code, sig)
+                }
                 TaskCompletionResult::Error(e) => {
                     eprintln!("Task execution error: {}", e);
-                    1
+                    (1, None)
                 }
             };
 
-            let effects = state.task_script_finished(&task_id, exit_code);
+            let effects = state.task_script_finished(&task_id, exit_code, signal);
+            record_events_from_effects(&effects, &mut state.event_history);
             apply_effects(effects, &state.subscriptions);
         }
 
         CoordinatorCommand::WarmUpComplete { task_id, base_task_id } => {
+            // Look up PID before warm_up_complete (which doesn't modify process registry)
+            let pid = state.processes.get_pid_for_task(&task_id).unwrap_or(0);
+
             let effects = state.warm_up_complete(&task_id, &base_task_id);
+
+            // Record Live event directly here with PID from process registry
+            if !effects.notifications.is_empty() {
+                let task_id_str = format_contextual_task_id(&task_id);
+                state.event_history.push(TaskEvent {
+                    date: now_ms(),
+                    contextual_task_id: task_id_str,
+                    state: TaskEventState::Live { pid },
+                });
+            }
+
             apply_effects(effects, &state.subscriptions);
         }
 
@@ -348,6 +426,10 @@ async fn handle_command(
                 output_buffer_count: state.output.buffer_count(),
                 closed_tasks_count: state.output.closed_tasks_count(),
             });
+        }
+
+        CoordinatorCommand::GetTaskHistory { response_tx } => {
+            let _ = response_tx.send(state.event_history.list());
         }
 
         // ====================================================================
@@ -401,6 +483,7 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
     let tasks_to_cancel = dependencies::find_tasks_to_fail(&state.graph, &running);
     for task_id in tasks_to_cancel {
         let effects = state.cancel_task(&task_id);
+        record_events_from_effects(&effects, &mut state.event_history);
         apply_effects(effects, &state.subscriptions);
     }
 
@@ -408,28 +491,29 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
     let ready_ids = dependencies::find_ready_tasks(&state.graph, &running);
     let ready_tasks: Vec<_> = ready_ids
         .into_iter()
-        .map(|ctx_task_id| {
-            let prepared = state.graph.prepared.get(&ctx_task_id).cloned();
-            (ctx_task_id, prepared)
+        .filter_map(|ctx_task_id| {
+            let prepared = state.graph.prepared.get(&ctx_task_id)?.clone();
+            Some((ctx_task_id, prepared))
         })
         .collect();
 
-    for (task_id, prepared_opt) in ready_tasks {
+    for (task_id, prepared) in ready_tasks {
         // Atomic check - no race possible, we own the state
         if !state.graph.should_spawn_task(&task_id) {
             continue;
         }
 
-        if let Some(prepared) = prepared_opt {
+        if prepared.script.is_empty() {
+            // No script - complete immediately
+            let effects = state.complete_no_script(&task_id);
+            record_events_from_effects(&effects, &mut state.event_history);
+            apply_effects(effects, &state.subscriptions);
+        } else {
             // Mark as spawning BEFORE spawn
             state.processes.mark_spawning(task_id.clone());
 
             // Spawn task
             executor_pool.spawn(task_id, prepared);
-        } else {
-            // No script - complete immediately
-            let effects = state.complete_no_script(&task_id);
-            apply_effects(effects, &state.subscriptions);
         }
     }
 }
@@ -499,6 +583,16 @@ fn execute_push_tasks(
         ) {
             Ok((ctx_task_id, resolved_ctx_task_ids)) => {
                 let target_id_str = format_contextual_task_id(&ctx_task_id);
+
+                // Record "scheduled" events for all newly resolved tasks
+                let date = now_ms();
+                for resolved_id in &resolved_ctx_task_ids {
+                    state.event_history.push(TaskEvent {
+                        date,
+                        contextual_task_id: format_contextual_task_id(resolved_id),
+                        state: TaskEventState::Scheduled,
+                    });
+                }
 
                 // After add_task, check is_long_lived from the prepared task
                 // (which was populated by prepare_specific_tasks without extra I/O)
@@ -570,6 +664,7 @@ fn handle_stop_task(
     };
 
     let effects = state.stop_long_lived(&task_id, &contextual_task_id);
+    record_events_from_effects(&effects, &mut state.event_history);
     apply_effects(effects, &state.subscriptions);
 
     StopTaskResult {

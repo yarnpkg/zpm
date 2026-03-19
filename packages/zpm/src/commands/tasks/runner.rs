@@ -236,7 +236,7 @@ pub async fn run_task(
                 handler.on_task_started(&mut ctx, &task_id, is_target).await;
             }
 
-            DaemonNotification::TaskCompleted { task_id, exit_code } => {
+            DaemonNotification::TaskCompleted { task_id, exit_code, .. } => {
                 let is_target
                     = ctx.is_target(&task_id);
 

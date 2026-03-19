@@ -1,6 +1,8 @@
-import {ppath, xfs}  from '@yarnpkg/fslib';
+import {npath, ppath, xfs, PortablePath} from '@yarnpkg/fslib';
+import * as cp                           from 'child_process';
+import {delimiter}                       from 'path';
 
-import {RunFunction} from '../../../../pkg-tests-core/sources/utils/tests';
+import {RunFunction}                     from '../../../../pkg-tests-core/sources/utils/tests';
 
 function cleanupDaemon(cb: RunFunction): RunFunction {
   return async args => {
@@ -10,6 +12,53 @@ function cleanupDaemon(cb: RunFunction): RunFunction {
       await args.runSwitch(`switch`, `daemon`, `--kill-all`);
     }
   };
+}
+
+const getYarnBinBinaryPath = () =>
+  process.env.TEST_BINARY
+    ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn-bin`);
+
+/**
+ * Spawn `yarn-bin` directly via cp.spawn, returning the child process handle
+ * so callers can send signals (e.g. SIGINT). Uses yarn-bin (not the switch
+ * binary) so that SIGINT reaches the actual task runner process that calls
+ * cancel_context.
+ */
+function spawnYarnBin(testPath: PortablePath, args: Array<string>, env: Record<string, string> = {}) {
+  const nativePath = npath.fromPortablePath(testPath);
+  const yarnBin    = getYarnBinBinaryPath();
+
+  const child = cp.spawn(yarnBin, args, {
+    cwd: nativePath,
+    env: {
+      HOME: npath.dirname(nativePath),
+      PATH: `${nativePath}/bin${delimiter}${process.env.PATH}`,
+      RUST_BACKTRACE: `1`,
+      YARN_IS_TEST_ENV: `true`,
+      YARN_GLOBAL_FOLDER: `${nativePath}/.yarn/global`,
+      YARN_ENABLE_TELEMETRY: `0`,
+      YARN_ENABLE_PROGRESS_BARS: `false`,
+      YARN_ENABLE_TIMERS: `false`,
+      FORCE_COLOR: `0`,
+      NODE_OPTIONS: ``,
+      ...env,
+    },
+  });
+
+  let stdout = ``;
+  let stderr = ``;
+  child.stdout?.on(`data`, (d: Buffer) => {
+    stdout += d.toString();
+  });
+  child.stderr?.on(`data`, (d: Buffer) => {
+    stderr += d.toString();
+  });
+
+  const closed = new Promise<{stdout: string, stderr: string, code: number}>(resolve => {
+    child.on(`close`, code => resolve({stdout, stderr, code: code ?? 1}));
+  });
+
+  return {child, closed, getStdout: () => stdout, getStderr: () => stderr};
 }
 
 describe(`Commands`, () => {
@@ -876,12 +925,15 @@ describe(`Commands`, () => {
           // Wait for process to actually die and TaskCompleted to be processed
           await new Promise(resolve => setTimeout(resolve, 1500));
 
-          // Verify the long-lived registry is clean (tasks list should be empty)
-          const {stdout: listOutput1} = await runSwitch(`tasks`, `--json`);
-          const tasks1 = listOutput1.trim() === `` ? [] : listOutput1.trim().split(`\n`).map((l: string) => JSON.parse(l));
-
-          // After stop + process death, the long-lived registry should be clean.
-          expect(tasks1).toHaveLength(0);
+          // Verify via task history that the server went through the full lifecycle
+          const {stdout: historyStdout} = await runSwitch(`tasks`, `history`, `--json`);
+          const historyEvents = historyStdout.trim().split(`\n`).filter(Boolean).map((line: string) => JSON.parse(line));
+          expect(historyEvents).toMatchObject([
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`server`), state: {type: `scheduled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`server`), state: expect.objectContaining({type: `warm-up`})}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`server`), state: expect.objectContaining({type: `live`})}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`server`), state: expect.objectContaining({type: `failed`})}),
+          ]);
 
           // Re-start the same long-lived task — should work cleanly.
           // If stop_long_lived corrupted state (double close_task eviction,
@@ -1573,6 +1625,164 @@ describe(`Commands`, () => {
       );
 
       test(
+        `it should cancel no-script target via cancel_context when client receives SIGINT`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Regression test: cancel_context iterates prepared.keys(), but
+          // no-script tasks are never added to prepared (task_graph.rs:205).
+          // If cancel_context misses them, the no-script target stays in a
+          // non-terminal state inside the daemon.
+          //
+          // We send SIGINT to the client process, which calls cancel_context
+          // on the daemon, then verify the daemon is left in a clean state.
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `slow-dep:`,
+            `  echo "slow-dep-started"`,
+            `  sleep 30`,
+            ``,
+            `no-script-target: slow-dep`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start daemon explicitly (not standalone)
+          const daemon = await runSwitch(`switch`, `daemon`, `--open`);
+
+          // Spawn the client via cp.spawn so we can send SIGINT
+          const {child, closed} = spawnYarnBin(path, [`tasks`, `run`, `--json`, `no-script-target`], {
+            [`YARN_DAEMON_SERVER`]: daemon.stdout.trim(),
+          });
+
+          // Wait for slow-dep to actually start running, with diagnostic info on timeout
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          // Send SIGINT → triggers cancel_context in the daemon
+          child.kill(`SIGINT`);
+
+          const result = await closed;
+
+          // Client should exit with 130 (128 + SIGINT)
+          expect(result.code).toBe(130);
+
+          // Verify the daemon recorded the cancellation via task history.
+          const {stdout: historyStdout} = await runSwitch(`tasks`, `history`, `--json`);
+          const historyEvents = historyStdout.trim().split(`\n`).filter(Boolean).map((line: string) => JSON.parse(line));
+
+          expect(historyEvents).toEqual([
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`no-script-target`), state: {type: `scheduled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`slow-dep`), state: {type: `scheduled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`slow-dep`), state: expect.objectContaining({type: `started`})}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`slow-dep`), state: {type: `cancelled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`no-script-target`), state: {type: `cancelled`}}),
+          ]);
+        })),
+        50000,
+      );
+
+      test(
+        `it should cancel no-script target at end of chain via cancel_context on SIGINT`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Chain: slow-leaf → mid-aggregator (scripted) → outer-target (no script).
+          // After SIGINT, cancel_context should cancel all tasks including the
+          // no-script outer-target, leaving the daemon in a clean state.
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `slow-leaf:`,
+            `  echo "slow-leaf-started"`,
+            `  sleep 30`,
+            ``,
+            `mid-aggregator: slow-leaf`,
+            `  echo "mid"`,
+            ``,
+            `outer-target: mid-aggregator`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          const daemon = await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          const {child, closed} = spawnYarnBin(path, [`tasks`, `run`, `--json`, `outer-target`], {
+            [`YARN_DAEMON_SERVER`]: daemon.stdout.trim(),
+          });
+
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          child.kill(`SIGINT`);
+          const result = await closed;
+
+          expect(result.code).toBe(130);
+
+          // Verify daemon recorded the full lifecycle via task history.
+          const {stdout: historyStdout} = await runSwitch(`tasks`, `history`, `--json`);
+          const historyEvents = historyStdout.trim().split(`\n`).filter(Boolean).map((line: string) => JSON.parse(line));
+
+          expect(historyEvents).toEqual([
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`mid-aggregator`), state: {type: `scheduled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`outer-target`), state: {type: `scheduled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`slow-leaf`), state: {type: `scheduled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`slow-leaf`), state: expect.objectContaining({type: `started`})}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`slow-leaf`), state: {type: `cancelled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`mid-aggregator`), state: {type: `cancelled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`outer-target`), state: {type: `cancelled`}}),
+          ]);
+        })),
+        15000,
+      );
+
+      test(
+        `it should cancel both scripted and no-script targets via cancel_context on SIGINT`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Two targets in the same context: one scripted (in prepared), one
+          // no-script (only in tasks). cancel_context must cancel both.
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `slow-base:`,
+            `  echo "slow-base-started"`,
+            `  sleep 30`,
+            ``,
+            `scripted-target: slow-base`,
+            `  echo "should-not-run"`,
+            ``,
+            `no-script-target: slow-base`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          const daemon = await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Start a client for the no-script target
+          const {child, closed} = spawnYarnBin(path, [`tasks`, `run`, `--json`, `no-script-target`], {
+            [`YARN_DAEMON_SERVER`]: daemon.stdout.trim(),
+          });
+
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          child.kill(`SIGINT`);
+          const result = await closed;
+
+          expect(result.code).toBe(130);
+
+          // Verify the daemon recorded the full lifecycle for the no-script target via task history.
+          const {stdout: historyStdout} = await runSwitch(`tasks`, `history`, `--json`);
+          const historyEvents = historyStdout.trim().split(`\n`).filter(Boolean).map((line: string) => JSON.parse(line));
+
+          expect(historyEvents).toEqual([
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`no-script-target`), state: {type: `scheduled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`slow-base`), state: {type: `scheduled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`slow-base`), state: expect.objectContaining({type: `started`})}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`slow-base`), state: {type: `cancelled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`no-script-target`), state: {type: `cancelled`}}),
+          ]);
+        })),
+        15000,
+      );
+
+      test(
         `it should cancel no-script aggregator tasks when context is cancelled`,
         makeTemporaryEnv({
           name: `test-package`,
@@ -1602,10 +1812,14 @@ describe(`Commands`, () => {
           // Wait for slow-dep to start
           await new Promise(resolve => setTimeout(resolve, 800));
 
-          // Get stats to confirm task metadata exists before cancellation
-          const {stdout: statsBefore} = await runSwitch(`tasks`, `stats`, `--json`);
-          const before = JSON.parse(statsBefore);
-          expect(before.tasksCount).toBeGreaterThan(0);
+          // Use task history to confirm slow-dep was started before cancellation
+          const {stdout: historyBefore} = await runSwitch(`tasks`, `history`, `--json`);
+          const historyEvents = historyBefore.trim().split(`\n`).filter(Boolean).map((line: string) => JSON.parse(line));
+          expect(historyEvents).toMatchObject([
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`slow-dep`), state: {type: `scheduled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`target`), state: {type: `scheduled`}}),
+            expect.objectContaining({contextualTaskId: expect.stringContaining(`slow-dep`), state: expect.objectContaining({type: `started`})}),
+          ]);
 
           // Cancel by killing the daemon (which triggers context cleanup)
           await runSwitch(`switch`, `daemon`, `--kill`);
@@ -2410,9 +2624,9 @@ describe(`Commands`, () => {
 
           // Run the same task many times - each run creates a new context
           const iterations = 30;
-          for (let i = 0; i < iterations; i++) {
+          for (let i = 0; i < iterations; i++)
             await runSwitch(`tasks`, `run`, `task`);
-          }
+
 
           // Get final stats
           const finalStats = await runSwitch(`tasks`, `stats`, `--json`);

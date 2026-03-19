@@ -16,8 +16,8 @@ use zpm_switch::YARN_SWITCH_PATH_ENV;
 use super::coordinator::start_daemon_inline;
 use super::ipc::{
     AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest,
-    DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskSubscription,
-    DAEMON_SERVER_ENV, daemon_url,
+    DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskEvent,
+    TaskSubscription, DAEMON_SERVER_ENV, daemon_url,
 };
 use zpm_utils::Path;
 
@@ -416,6 +416,17 @@ impl DaemonClient {
                 output_buffer_count,
                 closed_tasks_count,
             }),
+            DaemonResponse::Error { message } => Err(Error::IpcError(message)),
+            _ => Err(Error::IpcError("Unexpected response".to_string())),
+        }
+    }
+
+    /// Get the recent task event history from the daemon
+    pub async fn get_task_history(&mut self) -> Result<Vec<TaskEvent>, Error> {
+        let request = DaemonRequest::GetTaskHistory;
+
+        match self.send_request(request).await? {
+            DaemonResponse::TaskHistory { events } => Ok(events),
             DaemonResponse::Error { message } => Err(Error::IpcError(message)),
             _ => Err(Error::IpcError("Unexpected response".to_string())),
         }

@@ -59,6 +59,8 @@ pub enum DaemonRequest {
     },
     /// Get internal state statistics (for debugging/testing memory management)
     GetStats,
+    /// Get the recent task event history
+    GetTaskHistory,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +88,75 @@ pub enum LongLivedTaskStatus {
         started_at_ms: u64,
         process_id: Option<u32>,
     },
+}
+
+/// Observable lifecycle state for task events.
+///
+/// Regular tasks: `Scheduled → Started → Completed / Failed / Cancelled`
+/// Long-lived tasks: `Scheduled → WarmUp → Live → Failed / Completed`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum TaskEventState {
+    /// Task was added to the daemon graph.
+    Scheduled,
+    /// Task process was spawned (regular tasks).
+    Started {
+        pid: u32,
+    },
+    /// Long-lived task process was spawned; warm-up period in progress.
+    WarmUp {
+        pid: u32,
+    },
+    /// Long-lived task warm-up completed; task is ready to serve.
+    Live {
+        pid: u32,
+    },
+    /// Task completed successfully (exit code 0).
+    Completed,
+    /// Task failed (non-zero exit code or process error).
+    Failed {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signal: Option<i32>,
+    },
+    /// Task was cancelled (dependency failure or context cancellation).
+    Cancelled,
+}
+
+impl std::fmt::Display for TaskEventState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Scheduled => write!(f, "scheduled"),
+            Self::Started { pid } => write!(f, "started (pid {})", pid),
+            Self::WarmUp { pid } => write!(f, "warm-up (pid {})", pid),
+            Self::Live { pid } => write!(f, "live (pid {})", pid),
+            Self::Completed => write!(f, "completed"),
+            Self::Failed { exit_code, signal } => {
+                write!(f, "failed")?;
+                if let Some(code) = exit_code {
+                    write!(f, " (exit code {})", code)?;
+                }
+                if let Some(sig) = signal {
+                    write!(f, " (signal {})", sig)?;
+                }
+                Ok(())
+            }
+            Self::Cancelled => write!(f, "cancelled"),
+        }
+    }
+}
+
+/// A task state change recorded by the coordinator.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskEvent {
+    /// Timestamp in milliseconds since the Unix epoch.
+    pub date: u64,
+    /// The contextual task ID (e.g. `workspace:taskname@context_id`).
+    pub contextual_task_id: String,
+    /// The new task state.
+    pub state: TaskEventState,
 }
 
 /// Information about a long-lived task
@@ -126,6 +197,9 @@ pub enum DaemonResponse {
     ContextCancelled {
         cancelled_count: usize,
     },
+    TaskHistory {
+        events: Vec<TaskEvent>,
+    },
     Stats {
         /// Number of entries in the tasks HashMap
         tasks_count: usize,
@@ -157,6 +231,8 @@ pub enum DaemonNotification {
     TaskCompleted {
         task_id: String,
         exit_code: i32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signal: Option<i32>,
     },
     TaskCancelled {
         task_id: String,
