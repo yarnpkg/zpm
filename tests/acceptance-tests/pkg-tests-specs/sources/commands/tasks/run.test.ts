@@ -762,28 +762,31 @@ describe(`Commands`, () => {
         makeTemporaryEnv({
           name: `test-package`,
         }, cleanupDaemon(async ({path, run, runSwitch}) => {
-          // Create two separate short-lived tasks and verify they get different context IDs
-          // Then verify long-lived tasks always get the same fixed context ID
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `@long-lived`,
             `server:`,
-            `  echo "server: $ZPM_TASK_CURRENT"`,
+            `  echo "server running"`,
             `  sleep 5`,
           ].join(`\n`));
 
           await run(`install`);
 
-          // Start server first time
-          const server1Promise = runSwitch(`tasks`, `run`, `-v`, `server`).catch(() => {});
+          // Start server and wait past warm-up
+          const serverPromise = runSwitch(`tasks`, `run`, `server`).catch(() => {});
           await new Promise(resolve => setTimeout(resolve, 700));
 
-          // Get output from first invocation
-          // The context ID should be the fixed long-lived context ID
-          // 4d84fea4-e0d4-4df6-8190-f312b86968b3
+          // Verify via task history that the server uses the fixed long-lived context ID
+          const {stdout: historyStdout} = await runSwitch(`tasks`, `history`, `--json`);
+          const historyEvents = historyStdout.trim().split(`\n`).filter(Boolean).map((line: string) => JSON.parse(line));
 
-          // Start second invocation - should attach to same task
-          const server2Promise = runSwitch(`tasks`, `run`, `-v`, `server`).catch(() => {});
-          await new Promise(resolve => setTimeout(resolve, 300));
+          const longLivedContextId = `4d84fea4-e0d4-4df6-8190-f312b86968b3`;
+          const expectedTaskId = `test-package:server@${longLivedContextId}`;
+
+          expect(historyEvents).toEqual([
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: {type: `scheduled`}},
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: {type: `warm-up`, pid: expect.any(Number)}},
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: {type: `live`, pid: expect.any(Number)}},
+          ]);
 
           // Stop and clean up
           await runSwitch(`tasks`, `stop`, `server`).catch(() => {});
@@ -977,6 +980,84 @@ describe(`Commands`, () => {
             code: 1,
           });
         }),
+      );
+    });
+
+    describe(`tasks stop error cases`, () => {
+      test(
+        `it should fail when stopping a non-existent task`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `build:`,
+            `  echo "building"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Try to stop a task that doesn't exist as long-lived
+          await expect(runSwitch(`tasks`, `stop`, `nonexistent`)).rejects.toMatchObject({
+            code: 1,
+          });
+        })),
+      );
+
+      test(
+        `it should fail when stopping a short-lived task`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `build:`,
+            `  echo "building"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Run a short-lived task to completion
+          await runSwitch(`tasks`, `run`, `build`);
+
+          // Try to stop a short-lived task — should fail
+          await expect(runSwitch(`tasks`, `stop`, `build`)).rejects.toMatchObject({
+            code: 1,
+          });
+        })),
+      );
+
+      test(
+        `it should fail when stopping an already-stopped task`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  echo "server-started"`,
+            `  sleep 60`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Start, wait for warm-up, stop
+          const serverPromise = runSwitch(`tasks`, `run`, `server`).catch(() => {});
+          await new Promise(resolve => setTimeout(resolve, 800));
+          await runSwitch(`tasks`, `stop`, `server`);
+
+          // Wait for cleanup
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          // Second stop should fail — task is no longer running
+          await expect(runSwitch(`tasks`, `stop`, `server`)).rejects.toMatchObject({
+            code: 1,
+          });
+        })),
       );
     });
 
@@ -2043,22 +2124,31 @@ describe(`Commands`, () => {
 
           // Start server and wait for warm-up
           const serverPromise = runSwitch(`tasks`, `run`, `--json`, `server`).catch(() => {});
-
-          // Wait for warm-up (500ms) plus some buffer
           await new Promise(resolve => setTimeout(resolve, 800));
 
           // Start a second request that attaches to the existing server
           const attachPromise = runSwitch(`tasks`, `run`, `--json`, `server`).catch(() => {});
-
-          // Wait a bit more
           await new Promise(resolve => setTimeout(resolve, 300));
 
-          // Clean up
+          // Stop and wait for process to exit
           await runSwitch(`tasks`, `stop`, `server`).catch(() => {});
+          await new Promise(resolve => setTimeout(resolve, 1500));
 
-          // The warm-up should have been sent exactly once for the server
-          // (This is verified by the fact that attachPromise should see
-          // the task as already warmed up, not schedule another warm-up)
+          // The second invocation attaches — it does NOT create a new task.
+          // So the history should show a single task going through the full
+          // lifecycle exactly once, with no duplicate "live" events.
+          const {stdout: historyStdout} = await runSwitch(`tasks`, `history`, `--json`);
+          const historyEvents = historyStdout.trim().split(`\n`).filter(Boolean).map((line: string) => JSON.parse(line));
+
+          const longLivedContextId = `4d84fea4-e0d4-4df6-8190-f312b86968b3`;
+          const expectedTaskId = `test-package:server@${longLivedContextId}`;
+
+          expect(historyEvents).toEqual([
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: {type: `scheduled`}},
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: {type: `warm-up`, pid: expect.any(Number)}},
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: {type: `live`, pid: expect.any(Number)}},
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: expect.objectContaining({type: `failed`})},
+          ]);
         })),
       );
     });
@@ -2304,11 +2394,10 @@ describe(`Commands`, () => {
       );
 
       test(
-        `it should gracefully shutdown when project root changes`,
+        `it should recover cleanly after daemon kill with running long-lived tasks`,
         makeTemporaryEnv({
           name: `test-package`,
         }, cleanupDaemon(async ({path, run, runSwitch}) => {
-          // This tests the graceful shutdown behavior when project root is modified
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `@long-lived`,
             `server:`,
@@ -2327,21 +2416,20 @@ describe(`Commands`, () => {
           // Wait for warm-up
           await new Promise(resolve => setTimeout(resolve, 700));
 
-          // Store daemon info before the change
-          // (In real scenario, modifying yarn.lock or package.json would trigger shutdown)
-
-          // Kill all daemons - this simulates the graceful shutdown
-          // The actual project root watcher behavior is internal to the daemon
+          // Kill all daemons (long-lived task is still running)
           await runSwitch(`switch`, `daemon`, `--kill-all`);
 
-          // Daemon should be stopped now
-          // Verify by trying to start a new one (should succeed)
+          // Start a fresh daemon
           await runSwitch(`switch`, `daemon`, `--open`);
           await new Promise(resolve => setTimeout(resolve, 200));
 
+          // New daemon should have clean state — no long-lived tasks at all
+          const {stdout: listStdout} = await runSwitch(`tasks`, `--json`);
+          expect(listStdout).toBe(``);
+
           // Run a quick task to verify new daemon works
           const {stdout} = await runSwitch(`tasks`, `run`, `build`);
-          expect(stdout).toContain(`building`);
+          expect(stdout).toBe(`building\n`);
         })),
       );
     });
