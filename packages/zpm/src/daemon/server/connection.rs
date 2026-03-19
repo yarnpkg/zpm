@@ -1,38 +1,24 @@
-// ============================================================================
-// Connection Handler - Command-Based
-//
-// All state access goes through commands. No Arc<RwLock> references.
-// Subscriptions are created via commands and cleaned up via commands.
-// ============================================================================
+use std::{net::SocketAddr, sync::Arc};
 
-use std::net::SocketAddr;
-use std::sync::Arc;
-
-use futures::stream::StreamExt;
-use futures::SinkExt;
+use futures::{SinkExt, stream::StreamExt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
-use super::super::coordinator_state::SubscriptionId;
-use super::super::handlers::{create_subscription_if_needed, dispatch_request};
-use super::super::ipc::{
-    DaemonMessage, DaemonNotification, DaemonRequest, DaemonRequestEnvelope,
-    DaemonResponse, SubscriptionScope,
+use super::super::{
+    coordinator_commands::{CommandSender, CoordinatorCommand},
+    coordinator_state::SubscriptionId,
+    handlers::{create_subscription_if_needed, dispatch_request},
+    ipc::{
+        DaemonMessage, DaemonNotification, DaemonRequest, DaemonRequestEnvelope,
+        DaemonResponse, SubscriptionScope,
+    },
 };
-// ============================================================================
-// Connection Context
-// ============================================================================
 
 /// Connection context with only immutable data and command channel.
 /// All mutable state access goes through commands.
 pub struct ConnectionContext {
     pub command_tx: CommandSender,
 }
-
-// ============================================================================
-// Subscription Guard
-// ============================================================================
 
 /// Guard that removes subscription when dropped (via command)
 struct SubscriptionGuard {
@@ -57,10 +43,6 @@ impl Drop for SubscriptionGuard {
     }
 }
 
-// ============================================================================
-// Connection Handler
-// ============================================================================
-
 pub async fn handle_connection(
     stream: tokio::net::TcpStream,
     addr: SocketAddr,
@@ -75,7 +57,8 @@ pub async fn handle_connection(
             )))
         })?;
 
-    let (mut write, mut read) = ws_stream.split();
+    let (mut write, mut read)
+        = ws_stream.split();
 
     // Subscription guards - cleaned up when connection drops
     let mut subscription_guards: Vec<SubscriptionGuard> = Vec::new();
@@ -84,7 +67,8 @@ pub async fn handle_connection(
     let mut notification_receivers: Vec<mpsc::UnboundedReceiver<DaemonNotification>> = Vec::new();
 
     loop {
-        let notification_future = poll_notifications(&mut notification_receivers);
+        let notification_future
+            = poll_notifications(&mut notification_receivers);
 
         tokio::select! {
             biased;
@@ -122,44 +106,13 @@ pub async fn handle_connection(
                         let request_id = envelope.request_id;
                         let request = envelope.request;
 
-                        // Create subscription if needed (via command)
-                        let subscription_id = if let DaemonRequest::PushTasks {
-                            output_subscription,
-                            status_subscription,
-                            context_id,
-                            ..
-                        } = &request
-                        {
-                            if *output_subscription != SubscriptionScope::None
-                                || *status_subscription != SubscriptionScope::None
-                            {
-                                match create_subscription_if_needed(
-                                    *output_subscription,
-                                    *status_subscription,
-                                    context_id.clone(),
-                                    &ctx.command_tx,
-                                )
-                                .await
-                                {
-                                    Some((sub_id, rx)) => {
-                                        let guard = SubscriptionGuard::new(
-                                            sub_id,
-                                            ctx.command_tx.clone(),
-                                        );
-                                        subscription_guards.push(guard);
-                                        notification_receivers.push(rx);
-                                        Some(sub_id)
-                                    }
-                                    None => None,
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
+                        let subscription_id = setup_subscription_if_needed(
+                            &request,
+                            &ctx.command_tx,
+                            &mut subscription_guards,
+                            &mut notification_receivers,
+                        ).await;
 
-                        // Dispatch request via commands
                         let response = dispatch_request(
                             request,
                             subscription_id,
@@ -167,7 +120,8 @@ pub async fn handle_connection(
                         )
                         .await;
 
-                        let message = DaemonMessage::response(request_id, response);
+                        let message
+                            = DaemonMessage::response(request_id, response);
 
                         let response_json = serde_json::to_string(&message)
                             .map_err(|e| zpm_switch::Error::InvalidDaemonMessage(e.to_string()))?;
@@ -194,7 +148,8 @@ pub async fn handle_connection(
 
             // Handle notifications from subscriptions
             Some(notification) = notification_future => {
-                let message = DaemonMessage::notification(notification);
+                let message
+                    = DaemonMessage::notification(notification);
 
                 let notification_json = serde_json::to_string(&message)
                     .map_err(|e| zpm_switch::Error::InvalidDaemonMessage(e.to_string()))?;
@@ -210,10 +165,6 @@ pub async fn handle_connection(
     Ok(())
 }
 
-// ============================================================================
-// Accept Loop
-// ============================================================================
-
 pub async fn run_accept_loop(
     listener: tokio::net::TcpListener,
     ctx: Arc<ConnectionContext>,
@@ -221,7 +172,9 @@ pub async fn run_accept_loop(
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
-                let ctx = ctx.clone();
+                let ctx
+                    = ctx.clone();
+
                 tokio::spawn(async move {
                     if let Err(e) = handle_connection(stream, addr, ctx).await {
                         eprintln!("Connection error from {}: {}", addr, e);
@@ -235,9 +188,40 @@ pub async fn run_accept_loop(
     }
 }
 
-// ============================================================================
-// Notification Polling
-// ============================================================================
+/// If the request is a PushTasks with subscriptions, create a subscription
+/// and register its guard and receiver. Returns the subscription ID if created.
+async fn setup_subscription_if_needed(
+    request: &DaemonRequest,
+    command_tx: &CommandSender,
+    guards: &mut Vec<SubscriptionGuard>,
+    receivers: &mut Vec<mpsc::UnboundedReceiver<DaemonNotification>>,
+) -> Option<SubscriptionId> {
+    let DaemonRequest::PushTasks {
+        output_subscription,
+        status_subscription,
+        context_id,
+        ..
+    } = request else {
+        return None;
+    };
+
+    if *output_subscription == SubscriptionScope::None
+        && *status_subscription == SubscriptionScope::None
+    {
+        return None;
+    }
+
+    let (sub_id, rx) = create_subscription_if_needed(
+        *output_subscription,
+        *status_subscription,
+        context_id.clone(),
+        command_tx,
+    ).await?;
+
+    guards.push(SubscriptionGuard::new(sub_id, command_tx.clone()));
+    receivers.push(rx);
+    Some(sub_id)
+}
 
 async fn poll_notifications(
     receivers: &mut Vec<mpsc::UnboundedReceiver<DaemonNotification>>,

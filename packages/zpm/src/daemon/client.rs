@@ -1,32 +1,27 @@
-use std::collections::HashMap;
-use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::{collections::HashMap, process::Stdio, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc}, time::Duration};
 
-use futures::stream::StreamExt;
-use futures::SinkExt;
-use tokio::io::AsyncBufReadExt;
-use tokio::sync::{mpsc, oneshot, Mutex};
-use tokio::task::AbortHandle;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use futures::{SinkExt, stream::StreamExt};
+use tokio::{io::AsyncBufReadExt, sync::{mpsc, oneshot, Mutex}, task::AbortHandle};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
 use zpm_switch::YARN_SWITCH_PATH_ENV;
-
-use super::coordinator::start_daemon_inline;
-use super::ipc::{
-    AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest,
-    DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskEvent,
-    TaskSubscription, DAEMON_SERVER_ENV_NAME, daemon_url,
-};
 use zpm_utils::Path;
 
-use crate::error::Error;
-use crate::project::Project;
+use super::{
+    coordinator::start_daemon_inline,
+    ipc::{
+        AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest,
+        DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskEvent,
+        TaskSubscription, DAEMON_SERVER_ENV_NAME, daemon_url,
+    },
+    scheduler::ContextualTaskId,
+};
+use crate::{
+    error::Error,
+    project::Project,
+};
 
 type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<DaemonResponse>>>>;
 
-use super::scheduler::ContextualTaskId;
 
 /// Result of pushing tasks to the daemon
 pub struct PushTasksResult {
@@ -66,6 +61,10 @@ pub struct DaemonClient {
     next_request_id: Arc<AtomicU64>,
     /// Flag to indicate that close() was called (suppresses error messages)
     closing: Arc<AtomicBool>,
+    /// Handle to abort the writer task on drop
+    writer_handle: AbortHandle,
+    /// Handle to abort the reader task on drop
+    reader_handle: AbortHandle,
 }
 
 impl DaemonClient {
@@ -106,8 +105,7 @@ impl DaemonClient {
             = daemon_url(port);
 
         // Poll until daemon is ready
-        let max_attempts
-            = 100;
+        let max_attempts = 100;
 
         let poll_interval
             = Duration::from_millis(50);
@@ -161,7 +159,7 @@ impl DaemonClient {
         let write_clone
             = write.clone();
 
-        tokio::spawn(async move {
+        let writer_handle = tokio::spawn(async move {
             let mut outgoing_rx
                 = outgoing_rx;
 
@@ -173,7 +171,7 @@ impl DaemonClient {
                     break;
                 }
             }
-        });
+        }).abort_handle();
 
         let pending_for_reader
             = pending_requests.clone();
@@ -184,7 +182,7 @@ impl DaemonClient {
         let closing_for_reader
             = closing.clone();
 
-        tokio::spawn(async move {
+        let reader_handle = tokio::spawn(async move {
             let mut read
                 = read;
 
@@ -224,7 +222,7 @@ impl DaemonClient {
                     }
                 }
             }
-        });
+        }).abort_handle();
 
         Self {
             outgoing_tx,
@@ -232,6 +230,8 @@ impl DaemonClient {
             pending_requests,
             next_request_id,
             closing,
+            writer_handle,
+            reader_handle,
         }
     }
 
@@ -407,6 +407,13 @@ impl DaemonClient {
             DaemonRequest::GetTaskHistory,
             |r| match r { DaemonResponse::TaskHistory { events } => Some(events), _ => None },
         ).await
+    }
+}
+
+impl Drop for DaemonClient {
+    fn drop(&mut self) {
+        self.writer_handle.abort();
+        self.reader_handle.abort();
     }
 }
 
