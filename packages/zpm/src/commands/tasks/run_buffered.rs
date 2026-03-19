@@ -1,5 +1,4 @@
-use std::io::Write;
-use std::process::ExitStatus;
+use std::{io::Write, process::ExitStatus};
 
 use async_trait::async_trait;
 use clipanion::cli;
@@ -100,8 +99,7 @@ pub struct TaskRunBuffered {
 
 impl TaskRunBuffered {
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let mut handler
-            = BufferedHandler;
+        let mut handler = BufferedHandler;
 
         run_task(
             &mut handler,

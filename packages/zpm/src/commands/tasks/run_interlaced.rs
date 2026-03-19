@@ -1,5 +1,4 @@
-use std::io::Write;
-use std::process::ExitStatus;
+use std::{io::Write, process::ExitStatus};
 
 use async_trait::async_trait;
 use clipanion::cli;
@@ -165,11 +164,10 @@ pub struct TaskRunInterlaced {
 
 impl TaskRunInterlaced {
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let mut handler
-            = InterlacedHandler {
-                timestamps: self.timestamps,
-                json: self.json,
-            };
+        let mut handler = InterlacedHandler {
+            timestamps: self.timestamps,
+            json: self.json,
+        };
 
         run_task(
             &mut handler,

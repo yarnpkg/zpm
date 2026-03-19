@@ -3,10 +3,6 @@ use std::collections::{HashMap, VecDeque};
 use super::super::ipc::BufferedOutputLine;
 use super::super::scheduler::ContextualTaskId;
 
-// ============================================================================
-// Output Buffer
-// ============================================================================
-
 /// Owns output storage and closed-task eviction.
 /// Only modified by the coordinator event loop — no locks needed.
 pub struct OutputBuffer {
@@ -61,10 +57,6 @@ impl OutputBuffer {
 
         evicted
     }
-
-    // ========================================================================
-    // Statistics
-    // ========================================================================
 
     pub fn buffer_count(&self) -> usize {
         self.buffer.len()

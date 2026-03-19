@@ -5,10 +5,6 @@ use tokio::sync::mpsc;
 use super::super::ipc::{DaemonNotification, SubscriptionScope};
 use super::super::scheduler::ContextualTaskId;
 
-// ============================================================================
-// Subscription State
-// ============================================================================
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SubscriptionId(pub u64);
 
@@ -78,10 +74,6 @@ struct Subscription {
     filter: SubscriptionFilter,
     sender: mpsc::UnboundedSender<DaemonNotification>,
 }
-
-// ============================================================================
-// Subscription Manager
-// ============================================================================
 
 /// Owns notification subscriptions.
 /// Only modified by the coordinator event loop — no locks needed.

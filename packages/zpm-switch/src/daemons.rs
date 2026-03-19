@@ -244,9 +244,10 @@ pub fn list_live_daemons() -> Result<BTreeSet<DaemonEntry>, Error> {
 /// Kill a daemon and unregister it, returning true if successful.
 pub async fn kill_and_unregister_daemon(daemon: &DaemonEntry) -> Result<bool, Error> {
     let pid = daemon.pid;
-    let success = tokio::task::spawn_blocking(move || kill_daemon_gracefully(pid))
-        .await
-        .unwrap_or(false);
+    let success
+        = tokio::task::spawn_blocking(move || kill_daemon_gracefully(pid))
+            .await
+            .unwrap_or(false);
 
     if success {
         unregister_daemon(&daemon.project_cwd)?;

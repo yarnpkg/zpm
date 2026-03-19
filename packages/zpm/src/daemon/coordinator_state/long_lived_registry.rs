@@ -1,13 +1,8 @@
-use std::collections::HashMap;
-use std::time::SystemTime;
+use std::{collections::HashMap, time::SystemTime};
 
 use zpm_tasks::TaskId;
 
 use super::super::scheduler::ContextualTaskId;
-
-// ============================================================================
-// Long-Lived Task State
-// ============================================================================
 
 #[derive(Debug, Clone)]
 pub struct LongLivedEntry {
@@ -16,10 +11,6 @@ pub struct LongLivedEntry {
     pub warm_up_complete: bool,
     pub started_at: SystemTime,
 }
-
-// ============================================================================
-// Long-Lived Registry
-// ============================================================================
 
 /// Owns long-lived task entries.
 /// Only modified by the coordinator event loop — no locks needed.

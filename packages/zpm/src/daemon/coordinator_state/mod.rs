@@ -1,17 +1,3 @@
-// ============================================================================
-// Coordinator State (Composed)
-//
-// This module consolidates all mutable daemon state into sub-structs
-// that are owned exclusively by the coordinator loop. No Arc<RwLock> wrappers —
-// the coordinator is the single owner, making race conditions structurally
-// impossible.
-//
-// Every terminal transition goes through `close_task`, which updates all
-// relevant registries atomically. The coordinator loop calls transition
-// methods that return `TransitionEffects` describing what I/O to perform,
-// keeping this module free of channels, Tokio types, and process management.
-// ============================================================================
-
 mod context_registry;
 mod event_history;
 mod long_lived_registry;
@@ -33,12 +19,9 @@ pub use super::scheduler::{ContextualTaskId, PreparedTask};
 
 use std::collections::BTreeSet;
 
-use super::ipc::DaemonNotification;
 use zpm_tasks::TaskId;
 
-// ============================================================================
-// Transition Effects
-// ============================================================================
+use super::ipc::DaemonNotification;
 
 /// Describes the I/O the coordinator loop should perform after a transition.
 /// Keeps CoordinatorState free of channels, Tokio types, and process management.
@@ -48,18 +31,10 @@ pub struct TransitionEffects {
     pub pids_to_kill: Vec<u32>,
 }
 
-// ============================================================================
-// Close Task Effect (internal)
-// ============================================================================
-
 struct CloseTaskEffect {
     task_id: ContextualTaskId,
     pid: Option<u32>,
 }
-
-// ============================================================================
-// Coordinator State
-// ============================================================================
 
 /// All mutable daemon state, composed from focused sub-structs.
 /// Only modified by the coordinator event loop — no locks needed.
@@ -86,10 +61,6 @@ impl CoordinatorState {
         }
     }
 
-    // ========================================================================
-    // Core: close_task (single cleanup codepath for all terminal transitions)
-    // ========================================================================
-
     /// Clean up all registries for a task that has reached a terminal state.
     /// Called by every transition that ends a task (complete, fail, cancel).
     fn close_task(&mut self, task_id: &ContextualTaskId) -> CloseTaskEffect {
@@ -115,10 +86,6 @@ impl CoordinatorState {
 
         CloseTaskEffect { task_id: task_id.clone(), pid }
     }
-
-    // ========================================================================
-    // Transition: task_script_finished
-    // ========================================================================
 
     /// Called when a task's script exits. Routes to complete_task or fail_task
     /// based on exit code and subtask state.
@@ -198,10 +165,6 @@ impl CoordinatorState {
         effects
     }
 
-    // ========================================================================
-    // Transition: fail_task
-    // ========================================================================
-
     /// Mark a task as failed, close it, and propagate failure to waiting parents.
     pub fn fail_task(
         &mut self,
@@ -237,10 +200,6 @@ impl CoordinatorState {
         effects
     }
 
-    // ========================================================================
-    // Transition: cancel_task
-    // ========================================================================
-
     /// Mark a single task as cancelled, close it, and return effects.
     pub fn cancel_task(
         &mut self,
@@ -260,10 +219,6 @@ impl CoordinatorState {
 
         effects
     }
-
-    // ========================================================================
-    // Transition: cancel_context
-    // ========================================================================
 
     /// Cancel all non-terminal tasks in a context. Collects PIDs to kill
     /// and marks spawning tasks for deferred kill.
@@ -305,10 +260,6 @@ impl CoordinatorState {
         effects
     }
 
-    // ========================================================================
-    // Transition: warm_up_complete
-    // ========================================================================
-
     /// Handle warm-up completion for a long-lived task.
     /// Returns empty effects if the task is already terminal (guards against
     /// the timer firing after task failure).
@@ -333,10 +284,6 @@ impl CoordinatorState {
 
         effects
     }
-
-    // ========================================================================
-    // Transition: stop_long_lived
-    // ========================================================================
 
     /// Stop a long-lived task by task ID. Removes the long-lived registry
     /// entry and returns the PID to kill.
@@ -371,10 +318,6 @@ impl CoordinatorState {
         effects
     }
 
-    // ========================================================================
-    // Transition: complete_no_script (task with no script completes immediately)
-    // ========================================================================
-
     /// Complete a task that has no script (dependency aggregator).
     pub fn complete_no_script(
         &mut self,
@@ -393,10 +336,6 @@ impl CoordinatorState {
         effects
     }
 }
-
-// ============================================================================
-// Topological Sort
-// ============================================================================
 
 /// Sort contextual task IDs in topological order (dependencies before dependents),
 /// using alphabetical ordering as tiebreaker within the same topological level.

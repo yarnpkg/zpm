@@ -1,8 +1,4 @@
-use std::collections::HashSet;
-use std::io::Write;
-use std::os::unix::process::ExitStatusExt;
-use std::process::ExitStatus;
-use std::sync::Arc;
+use std::{collections::HashSet, io::Write, os::unix::process::ExitStatusExt, process::ExitStatus, sync::Arc};
 
 /// Create an ExitStatus from a logical exit code.
 /// On Unix, `from_raw` expects a wait status where the exit code is in bits 8-15.
@@ -128,20 +124,19 @@ pub async fn run_task(
 
     let _daemon_handle: Option<StandaloneDaemonHandle>;
 
-    let mut client
-        = if standalone {
-            let project
-                = Arc::new(project);
+    let mut client = if standalone {
+        let project
+            = Arc::new(project);
 
-            let (c, handle)
-                = DaemonClient::connect_standalone(project).await?;
+        let (c, handle)
+            = DaemonClient::connect_standalone(project).await?;
 
-            _daemon_handle = Some(handle);
-            c
-        } else {
-            _daemon_handle = None;
-            DaemonClient::connect(&project_cwd).await?
-        };
+        _daemon_handle = Some(handle);
+        c
+    } else {
+        _daemon_handle = None;
+        DaemonClient::connect(&project_cwd).await?
+    };
 
     let context_id
         = Uuid::new_v4().to_string();
@@ -149,34 +144,32 @@ pub async fn run_task(
     let context_id_for_cancel
         = context_id.clone();
 
-    let task_subscriptions
-        = vec![TaskSubscription {
-            name: name.to_string(),
-            args: args.to_vec(),
-        }];
+    let task_subscriptions = vec![TaskSubscription {
+        name: name.to_string(),
+        args: args.to_vec(),
+    }];
 
     let config
         = handler.config();
 
-    let mut ctx
-        = TaskRunContext {
-            result: client
-                .push_tasks_with_subscriptions(
-                    task_subscriptions,
-                    None,
-                    Some(workspace_name),
-                    config.output_subscription,
-                    config.status_subscription,
-                    Some(context_id),
-                )
-                .await?,
-            client,
-            target_task_ids: HashSet::new(),
-            completed_tasks: HashSet::new(),
-            exit_code: 0,
-            is_first_line: true,
-            verbose_level,
-        };
+    let mut ctx = TaskRunContext {
+        result: client
+            .push_tasks_with_subscriptions(
+                task_subscriptions,
+                None,
+                Some(workspace_name),
+                config.output_subscription,
+                config.status_subscription,
+                Some(context_id),
+            )
+            .await?,
+        client,
+        target_task_ids: HashSet::new(),
+        completed_tasks: HashSet::new(),
+        exit_code: 0,
+        is_first_line: true,
+        verbose_level,
+    };
 
     if ctx.result.task_ids.is_empty() {
         return Err(Error::TaskPushFailed("No tasks enqueued".to_string()));

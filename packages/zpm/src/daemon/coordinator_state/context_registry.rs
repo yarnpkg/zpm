@@ -1,9 +1,5 @@
 use std::collections::HashMap;
 
-// ============================================================================
-// Context Registry
-// ============================================================================
-
 /// Tracks active contexts and their non-terminal task counts.
 ///
 /// A context is "active" as long as it has at least one non-terminal task.
@@ -42,10 +38,6 @@ impl ContextRegistry {
     pub fn is_active(&self, context_id: &str) -> bool {
         self.active.contains_key(context_id)
     }
-
-    // ========================================================================
-    // Statistics
-    // ========================================================================
 
     pub fn active_contexts_count(&self) -> usize {
         self.active.len()

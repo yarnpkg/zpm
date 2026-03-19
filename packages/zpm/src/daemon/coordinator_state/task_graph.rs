@@ -4,17 +4,19 @@ use zpm_primitives::Ident;
 use zpm_tasks::{ResolvedTasks, TaskId, TaskName};
 use zpm_utils::{DataType, FromFileString, ToFileString};
 
-use super::context_registry::ContextRegistry;
-use super::super::presentation::prefix_colors;
-use super::super::scheduler::{ContextualTaskId, PreparedTask};
-use crate::error::Error;
-use crate::project::Project;
+use super::{
+    super::{
+        presentation::prefix_colors,
+        scheduler::{ContextualTaskId, PreparedTask},
+    },
+    context_registry::ContextRegistry,
+};
+use crate::{
+    error::Error,
+    project::Project,
+};
 
 pub const LONG_LIVED_ATTRIBUTE: &str = "long-lived";
-
-// ============================================================================
-// Task State (Unified State Machine)
-// ============================================================================
 
 /// Core task execution state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,10 +67,6 @@ impl Default for TaskInfo {
     }
 }
 
-// ============================================================================
-// Task Graph
-// ============================================================================
-
 /// Owns the dependency/scheduling data and the task state machine.
 /// Only modified by the coordinator event loop — no locks needed.
 pub struct TaskGraph {
@@ -97,10 +95,6 @@ impl TaskGraph {
             prepared: BTreeMap::new(),
         }
     }
-
-    // ========================================================================
-    // Task Registration
-    // ========================================================================
 
     pub fn add_task(
         &mut self,
@@ -285,10 +279,6 @@ impl TaskGraph {
         self.parents.remove(task_id);
     }
 
-    // ========================================================================
-    // Task State Queries
-    // ========================================================================
-
     pub fn get_state(&self, task_id: &ContextualTaskId) -> TaskState {
         self.tasks
             .get(task_id)
@@ -385,10 +375,6 @@ impl TaskGraph {
         !self.is_terminal(task_id)
     }
 
-    // ========================================================================
-    // Task State Mutations
-    // ========================================================================
-
     fn ensure_task_info(&mut self, task_id: &ContextualTaskId) -> &mut TaskInfo {
         self.tasks.entry(task_id.clone()).or_default()
     }
@@ -440,10 +426,6 @@ impl TaskGraph {
         self.parents.remove(task_id);
     }
 
-    // ========================================================================
-    // ID Parsing Helpers
-    // ========================================================================
-
     fn parse_contextual_task_id(&self, project: &Project, task_id_str: &str) -> Option<ContextualTaskId> {
         let ctx_task_id = ContextualTaskId::from_file_string(task_id_str).ok()?;
 
@@ -458,10 +440,6 @@ impl TaskGraph {
             ctx_task_id.context_id,
         ))
     }
-
-    // ========================================================================
-    // Statistics
-    // ========================================================================
 
     pub fn tasks_count(&self) -> usize {
         self.tasks.len()

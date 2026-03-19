@@ -19,9 +19,11 @@ pub struct DaemonKillCommand {
 
 impl DaemonKillCommand {
     pub async fn execute(&self) -> Result<(), Error> {
-        let project_cwd = get_final_cwd()?;
+        let project_cwd
+            = get_final_cwd()?;
 
-        let find_result = find_closest_package_manager(&project_cwd)?;
+        let find_result
+            = find_closest_package_manager(&project_cwd)?;
 
         let detected_root = find_result
             .detected_root_path
@@ -44,7 +46,8 @@ impl DaemonKillCommand {
             return Ok(());
         }
 
-        let success = daemons::kill_and_unregister_daemon(&daemon).await?;
+        let success
+            = daemons::kill_and_unregister_daemon(&daemon).await?;
 
         if success {
             println!(

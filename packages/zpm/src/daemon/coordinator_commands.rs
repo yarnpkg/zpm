@@ -1,29 +1,16 @@
-// ============================================================================
-// Coordinator Commands
-//
-// All operations that modify state go through these commands.
-// This ensures serialized access - no races possible.
-// ============================================================================
-
 use tokio::sync::{mpsc, oneshot};
 
-use super::coordinator_state::SubscriptionId;
-use super::events::Stream;
-use super::ipc::{AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, SubscriptionScope, TaskEvent, TaskSubscription};
-use super::scheduler::ContextualTaskId;
-
-// ============================================================================
-// Command Types
-// ============================================================================
+use super::{
+    coordinator_state::SubscriptionId,
+    events::Stream,
+    ipc::{AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, SubscriptionScope, TaskEvent, TaskSubscription},
+    scheduler::ContextualTaskId,
+};
 
 /// Commands sent to the coordinator for serialized execution.
 /// ALL state mutations go through here - no direct access to state.
 #[derive(Debug)]
 pub enum CoordinatorCommand {
-    // ========================================================================
-    // Task Management Commands (from handlers)
-    // ========================================================================
-
     /// Add new tasks to the scheduler.
     PushTasks {
         tasks: Vec<TaskSubscription>,
@@ -47,10 +34,6 @@ pub enum CoordinatorCommand {
         response_tx: oneshot::Sender<StopTaskResult>,
     },
 
-    // ========================================================================
-    // Process Management Commands (from executor)
-    // ========================================================================
-
     /// Register a PID for a task that has just spawned.
     RegisterPid {
         task_id: ContextualTaskId,
@@ -62,10 +45,6 @@ pub enum CoordinatorCommand {
         task_id: ContextualTaskId,
         pid: u32,
     },
-
-    // ========================================================================
-    // Executor Event Commands (from executor - replaces spawned event task)
-    // ========================================================================
 
     /// Task has started executing.
     TaskStarted {
@@ -94,10 +73,6 @@ pub enum CoordinatorCommand {
         base_task_id: zpm_tasks::TaskId,
     },
 
-    // ========================================================================
-    // Query Commands (from handlers)
-    // ========================================================================
-
     /// Get buffered output for a task.
     GetTaskOutput {
         task_id: ContextualTaskId,
@@ -119,10 +94,6 @@ pub enum CoordinatorCommand {
         response_tx: oneshot::Sender<Vec<TaskEvent>>,
     },
 
-    // ========================================================================
-    // Subscription Commands (from connection handlers)
-    // ========================================================================
-
     /// Create a new subscription.
     CreateSubscription {
         output_scope: SubscriptionScope,
@@ -143,19 +114,11 @@ pub enum CoordinatorCommand {
         subscription_id: SubscriptionId,
     },
 
-    // ========================================================================
-    // Shutdown Command
-    // ========================================================================
-
     /// Request graceful shutdown, returns all PIDs.
     Shutdown {
         response_tx: oneshot::Sender<Vec<u32>>,
     },
 }
-
-// ============================================================================
-// Response Types
-// ============================================================================
 
 /// Result of a task completion from the executor.
 #[derive(Debug)]
@@ -212,9 +175,5 @@ pub struct StatsResult {
     pub output_buffer_count: usize,
     pub closed_tasks_count: usize,
 }
-
-// ============================================================================
-// Command Sender Type
-// ============================================================================
 
 pub type CommandSender = mpsc::UnboundedSender<CoordinatorCommand>;

@@ -1,10 +1,10 @@
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::ChildStderr;
-use tokio::process::ChildStdout;
+use tokio::{io::{AsyncBufReadExt, BufReader}, process::{ChildStderr, ChildStdout}};
 
-use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
-use super::super::coordinator_state::ContextualTaskId;
-use super::super::events::Stream;
+use super::super::{
+    coordinator_commands::{CommandSender, CoordinatorCommand},
+    coordinator_state::ContextualTaskId,
+    events::Stream,
+};
 
 pub async fn stream_output(
     stdout: ChildStdout,

@@ -1,21 +1,11 @@
-// ============================================================================
-// Updated Handlers (v2)
-//
-// All handlers communicate exclusively through the command channel.
-// No direct access to any mutable state - races are impossible.
-// ============================================================================
-
 use tokio::sync::oneshot;
-
 use zpm_utils::ToFileString;
 
-use super::coordinator_commands::{CommandSender, CoordinatorCommand};
-use super::coordinator_state::SubscriptionId;
-use super::ipc::{DaemonRequest, DaemonResponse, LongLivedTaskStatus, SubscriptionScope};
-
-// ============================================================================
-// Command Channel Helper
-// ============================================================================
+use super::{
+    coordinator_commands::{CommandSender, CoordinatorCommand},
+    coordinator_state::SubscriptionId,
+    ipc::{DaemonRequest, DaemonResponse, LongLivedTaskStatus, SubscriptionScope},
+};
 
 async fn send_command<T>(
     command_tx: &CommandSender,
@@ -33,10 +23,6 @@ async fn send_command<T>(
         message: "Coordinator did not respond".to_string(),
     })
 }
-
-// ============================================================================
-// Request Dispatcher
-// ============================================================================
 
 /// Dispatch a daemon request using only the command channel.
 /// NO direct access to scheduler, output_buffer, or any other mutable state.
@@ -84,10 +70,6 @@ pub async fn dispatch_request(
         }
     }
 }
-
-// ============================================================================
-// Individual Handlers
-// ============================================================================
 
 async fn handle_push_tasks(
     tasks: Vec<super::ipc::TaskSubscription>,
@@ -231,13 +213,6 @@ async fn handle_get_task_history(command_tx: &CommandSender) -> DaemonResponse {
         Err(e) => e,
     }
 }
-
-// ============================================================================
-// Subscription Creation Helper
-//
-// Called from connection handler before dispatching request.
-// Returns subscription info via command.
-// ============================================================================
 
 pub async fn create_subscription_if_needed(
     output_scope: SubscriptionScope,

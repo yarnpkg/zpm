@@ -1,10 +1,3 @@
-// ============================================================================
-// Platform-specific process operations
-//
-// Consolidates all platform-gated process operations into one module.
-// Every other file imports from here instead of writing its own #[cfg] blocks.
-// ============================================================================
-
 /// Send SIGTERM to a process group (Unix) or terminate the process (Windows).
 #[cfg(unix)]
 pub fn kill_process_group(pid: u32) {

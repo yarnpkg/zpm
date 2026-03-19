@@ -23,11 +23,14 @@ pub struct TaskHistory {
 
 impl TaskHistory {
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let project = Project::new(None).await?;
+        let project
+            = Project::new(None).await?;
 
-        let mut client = DaemonClient::connect(&project.project_cwd).await?;
+        let mut client
+            = DaemonClient::connect(&project.project_cwd).await?;
 
-        let events = client.get_task_history().await?;
+        let events
+            = client.get_task_history().await?;
 
         client.close();
 

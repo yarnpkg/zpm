@@ -1,6 +1,4 @@
-use std::process::{Command, Stdio};
-use std::sync::Arc;
-use std::time::Duration;
+use std::{process::{Command, Stdio}, sync::Arc, time::Duration};
 
 use clipanion::cli;
 use zpm_semver::Version;
@@ -172,8 +170,7 @@ impl DaemonOpenCommand {
     }
 
     async fn wait_for_ready(&self, port: u16) -> Result<(), Error> {
-        let max_attempts
-            = 100;
+        let max_attempts = 100;
         let poll_interval
             = Duration::from_millis(50);
 

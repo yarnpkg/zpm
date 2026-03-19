@@ -1,19 +1,19 @@
-// ============================================================================
-// TaskRunner - Command-Based
-//
-// Sends PID registration and unregistration via commands.
-// Output is sent directly through the command channel.
-// ============================================================================
-
 use std::process::ExitStatus;
 
-use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
-use super::super::coordinator_state::{ContextualTaskId, PreparedTask};
-use super::super::ipc::{DAEMON_SERVER_ENV_NAME, CURRENT_TASK_ENV_NAME};
 use zpm_utils::ToFileString;
-use super::output::stream_output;
-use crate::error::Error;
-use crate::script::ScriptEnvironment;
+
+use super::{
+    super::{
+        coordinator_commands::{CommandSender, CoordinatorCommand},
+        coordinator_state::{ContextualTaskId, PreparedTask},
+        ipc::{DAEMON_SERVER_ENV_NAME, CURRENT_TASK_ENV_NAME},
+    },
+    output::stream_output,
+};
+use crate::{
+    error::Error,
+    script::ScriptEnvironment,
+};
 
 pub struct TaskRunner {
     prepared: PreparedTask,

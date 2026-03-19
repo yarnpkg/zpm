@@ -16,7 +16,8 @@ pub struct DaemonListCommand {
 
 impl DaemonListCommand {
     pub async fn execute(&self) -> Result<(), Error> {
-        let daemons = daemons::list_live_daemons()?;
+        let daemons
+            = daemons::list_live_daemons()?;
 
         if self.json {
             let json_output: Vec<_> = daemons

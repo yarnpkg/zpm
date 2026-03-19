@@ -1,5 +1,4 @@
-use std::collections::VecDeque;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{collections::VecDeque, time::{SystemTime, UNIX_EPOCH}};
 
 use super::super::ipc::TaskEvent;
 

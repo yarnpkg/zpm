@@ -14,7 +14,8 @@ pub struct DaemonKillAllCommand {
 
 impl DaemonKillAllCommand {
     pub async fn execute(&self) -> Result<(), Error> {
-        let all_daemons = daemons::list_daemons()?;
+        let all_daemons
+            = daemons::list_daemons()?;
 
         if all_daemons.is_empty() {
             println!(
@@ -35,7 +36,8 @@ impl DaemonKillAllCommand {
                 continue;
             }
 
-            let success = daemons::kill_and_unregister_daemon(&daemon).await?;
+            let success
+                = daemons::kill_and_unregister_daemon(&daemon).await?;
 
             if success {
                 println!(

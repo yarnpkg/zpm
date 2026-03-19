@@ -1,16 +1,12 @@
-// ============================================================================
-// ExecutorPool - Command-Based
-//
-// Sends ALL events as commands to the coordinator, including task completion.
-// This ensures proper ordering: TaskOutput commands are always processed
-// before TaskCompleted, since they all go through the same FIFO channel.
-// ============================================================================
-
 use std::collections::HashSet;
 
-use super::super::coordinator_commands::{CommandSender, CoordinatorCommand, TaskCompletionResult};
-use super::super::coordinator_state::{ContextualTaskId, PreparedTask};
-use super::runner::TaskRunner;
+use super::{
+    super::{
+        coordinator_commands::{CommandSender, CoordinatorCommand, TaskCompletionResult},
+        coordinator_state::{ContextualTaskId, PreparedTask},
+    },
+    runner::TaskRunner,
+};
 
 /// ExecutorPool that communicates exclusively via commands.
 /// All events including completion go through the command channel.

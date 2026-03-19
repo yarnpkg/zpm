@@ -1,6 +1,4 @@
-use std::io::Write;
-use std::process::ExitStatus;
-use std::sync::Arc;
+use std::{io::Write, process::ExitStatus, sync::Arc};
 
 use async_trait::async_trait;
 use clipanion::{Environment, cli};
@@ -172,10 +170,9 @@ impl TaskRunSilentDependencies {
     }
 
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let mut handler
-            = SilentDependenciesHandler {
-                progress_handle: None,
-            };
+        let mut handler = SilentDependenciesHandler {
+            progress_handle: None,
+        };
 
         run_task(
             &mut handler,

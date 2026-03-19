@@ -1,11 +1,6 @@
-use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use std::{collections::{HashMap, HashSet}, time::Instant};
 
 use super::super::scheduler::ContextualTaskId;
-
-// ============================================================================
-// Spawning Task State
-// ============================================================================
 
 #[derive(Debug)]
 struct SpawningEntry {
@@ -13,10 +8,6 @@ struct SpawningEntry {
     spawned_at: Instant,
     pending_cancel: bool,
 }
-
-// ============================================================================
-// Process Registry
-// ============================================================================
 
 /// Owns PID tracking and the spawning state machine.
 /// Only modified by the coordinator event loop — no locks needed.
@@ -37,10 +28,6 @@ impl ProcessRegistry {
             spawning: HashMap::new(),
         }
     }
-
-    // ========================================================================
-    // PID Operations
-    // ========================================================================
 
     pub fn register_pid(&mut self, pid: u32, task_id: ContextualTaskId) {
         self.pids.insert(pid);
@@ -84,10 +71,6 @@ impl ProcessRegistry {
 
         pids
     }
-
-    // ========================================================================
-    // Spawning Operations
-    // ========================================================================
 
     pub fn mark_spawning(&mut self, task_id: ContextualTaskId) {
         self.spawning.insert(task_id, SpawningEntry {

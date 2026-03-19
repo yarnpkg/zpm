@@ -18,7 +18,8 @@ pub struct Daemon {}
 
 impl Daemon {
     pub async fn execute(&self) -> Result<(), Error> {
-        let project = Arc::new(Project::new(None).await?);
+        let project
+            = Arc::new(Project::new(None).await?);
         run_daemon(project).await
     }
 }
