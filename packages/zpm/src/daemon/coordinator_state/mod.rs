@@ -12,6 +12,7 @@
 // keeping this module free of channels, Tokio types, and process management.
 // ============================================================================
 
+mod context_registry;
 mod event_history;
 mod long_lived_registry;
 mod output_buffer;
@@ -19,12 +20,13 @@ mod process_registry;
 mod subscription_manager;
 mod task_graph;
 
+pub use context_registry::ContextRegistry;
 pub use event_history::{EventHistory, now_ms};
 pub use long_lived_registry::LongLivedRegistry;
 pub use output_buffer::OutputBuffer;
 pub use process_registry::ProcessRegistry;
 pub use subscription_manager::{SubscriptionId, SubscriptionManager};
-pub use task_graph::{format_contextual_task_id, TaskGraph};
+pub use task_graph::TaskGraph;
 
 // Re-export scheduler types that are used across the coordinator
 pub use super::scheduler::{ContextualTaskId, PreparedTask};
@@ -51,7 +53,7 @@ pub struct TransitionEffects {
 // ============================================================================
 
 struct CloseTaskEffect {
-    task_id_str: String,
+    task_id: ContextualTaskId,
     pid: Option<u32>,
 }
 
@@ -63,6 +65,7 @@ struct CloseTaskEffect {
 /// Only modified by the coordinator event loop — no locks needed.
 pub struct CoordinatorState {
     pub graph: TaskGraph,
+    pub contexts: ContextRegistry,
     pub processes: ProcessRegistry,
     pub long_lived: LongLivedRegistry,
     pub subscriptions: SubscriptionManager,
@@ -74,6 +77,7 @@ impl CoordinatorState {
     pub fn new(output_buffer_max_lines: usize, max_closed_tasks: usize) -> Self {
         Self {
             graph: TaskGraph::new(),
+            contexts: ContextRegistry::new(),
             processes: ProcessRegistry::new(),
             long_lived: LongLivedRegistry::new(),
             subscriptions: SubscriptionManager::new(),
@@ -89,21 +93,27 @@ impl CoordinatorState {
     /// Clean up all registries for a task that has reached a terminal state.
     /// Called by every transition that ends a task (complete, fail, cancel).
     fn close_task(&mut self, task_id: &ContextualTaskId) -> CloseTaskEffect {
-        let task_id_str = format_contextual_task_id(task_id);
+        // 1. Decrement the context's active task counter
+        self.contexts.decrement(&task_id.context_id);
 
-        // 1. Output buffer: mark closed, may trigger eviction of old closed tasks
-        let evicted = self.output.mark_closed(task_id_str.clone());
+        // 2. Output buffer: mark closed, may trigger eviction of old closed tasks
+        let evicted = self.output.mark_closed(task_id.clone());
         for id in &evicted {
-            self.graph.evict_closed_task(id);
+            // Only evict from the graph if the task's context is no longer active.
+            // While a context is active we must keep task entries so that
+            // duplicate pushes of already-completed tasks can be detected.
+            if !self.contexts.is_active(&id.context_id) {
+                self.graph.evict_closed_task(id);
+            }
         }
 
-        // 2. Long-lived registry (no-op if not long-lived)
+        // 3. Long-lived registry (no-op if not long-lived)
         self.long_lived.remove(&task_id.task_id);
 
-        // 3. Process registry: take PID if still registered
+        // 4. Process registry: take PID if still registered
         let pid = self.processes.take_pid_for_task(task_id);
 
-        CloseTaskEffect { task_id_str, pid }
+        CloseTaskEffect { task_id: task_id.clone(), pid }
     }
 
     // ========================================================================
@@ -165,7 +175,7 @@ impl CoordinatorState {
 
         let close = self.close_task(task_id);
         effects.notifications.push(DaemonNotification::TaskCompleted {
-            task_id: close.task_id_str,
+            task_id: close.task_id,
             exit_code,
             signal: None,
         });
@@ -205,7 +215,7 @@ impl CoordinatorState {
 
         let close = self.close_task(task_id);
         effects.notifications.push(DaemonNotification::TaskCompleted {
-            task_id: close.task_id_str,
+            task_id: close.task_id,
             exit_code,
             signal,
         });
@@ -242,7 +252,7 @@ impl CoordinatorState {
 
         let close = self.close_task(task_id);
         effects.notifications.push(DaemonNotification::TaskCancelled {
-            task_id: close.task_id_str,
+            task_id: close.task_id,
         });
         if let Some(pid) = close.pid {
             effects.pids_to_kill.push(pid);
@@ -317,9 +327,8 @@ impl CoordinatorState {
         self.graph.mark_warm_up_complete(task_id);
         self.long_lived.mark_warm_up_complete(base_task_id);
 
-        let task_id_str = format_contextual_task_id(task_id);
         effects.notifications.push(DaemonNotification::TaskWarmUpComplete {
-            task_id: task_id_str,
+            task_id: task_id.clone(),
         });
 
         effects
@@ -376,7 +385,7 @@ impl CoordinatorState {
 
         let close = self.close_task(task_id);
         effects.notifications.push(DaemonNotification::TaskCompleted {
-            task_id: close.task_id_str,
+            task_id: close.task_id,
             exit_code: 0,
             signal: None,
         });

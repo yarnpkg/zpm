@@ -8,7 +8,7 @@ use zpm_utils::{is_terminal, start_progress, ProgressHandle};
 
 use super::helpers::format_task_id;
 use super::runner::{run_task, TaskRunConfig, TaskRunContext, TaskRunHandler};
-use crate::daemon::{ProgressState, SubscriptionScope};
+use crate::daemon::{ContextualTaskId, ProgressState, SubscriptionScope};
 use crate::error::Error;
 
 struct SilentDependenciesHandler {
@@ -50,7 +50,7 @@ impl TaskRunHandler for SilentDependenciesHandler {
         }
     }
 
-    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, _task_id: &str, line: &str, _stream: &str) {
+    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, _task_id: &ContextualTaskId, line: &str, _stream: &str) {
         let mut stdout
             = std::io::stdout().lock();
 
@@ -65,7 +65,7 @@ impl TaskRunHandler for SilentDependenciesHandler {
         writeln!(stdout, "{}", line).ok();
     }
 
-    async fn on_task_started(&mut self, _ctx: &mut TaskRunContext, task_id: &str, is_target: bool) {
+    async fn on_task_started(&mut self, _ctx: &mut TaskRunContext, task_id: &ContextualTaskId, is_target: bool) {
         if is_target {
             self.stop_progress();
         } else {
@@ -78,7 +78,7 @@ impl TaskRunHandler for SilentDependenciesHandler {
     async fn on_task_completed(
         &mut self,
         ctx: &mut TaskRunContext,
-        task_id: &str,
+        task_id: &ContextualTaskId,
         exit_code: i32,
         is_target: bool,
     ) {
@@ -115,7 +115,7 @@ impl TaskRunHandler for SilentDependenciesHandler {
     async fn on_task_cancelled(
         &mut self,
         _ctx: &mut TaskRunContext,
-        task_id: &str,
+        task_id: &ContextualTaskId,
         is_target: bool,
     ) {
         if let Some((_, ref progress_state)) = self.progress_handle {

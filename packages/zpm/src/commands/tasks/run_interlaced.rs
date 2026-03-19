@@ -7,7 +7,7 @@ use serde_json::json;
 
 use super::helpers::{format_task_id, format_timestamp};
 use super::runner::{run_task, TaskRunConfig, TaskRunContext, TaskRunHandler};
-use crate::daemon::SubscriptionScope;
+use crate::daemon::{ContextualTaskId, SubscriptionScope};
 use crate::error::Error;
 
 struct InterlacedHandler {
@@ -24,7 +24,7 @@ impl TaskRunHandler for InterlacedHandler {
         }
     }
 
-    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, task_id: &str, line: &str, stream: &str) {
+    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, task_id: &ContextualTaskId, line: &str, stream: &str) {
         let mut stdout
             = std::io::stdout().lock();
 
@@ -59,7 +59,7 @@ impl TaskRunHandler for InterlacedHandler {
         }
     }
 
-    async fn on_task_started(&mut self, ctx: &mut TaskRunContext, task_id: &str, _is_target: bool) {
+    async fn on_task_started(&mut self, ctx: &mut TaskRunContext, task_id: &ContextualTaskId, _is_target: bool) {
         if self.json {
             let mut stdout
                 = std::io::stdout().lock();
@@ -86,7 +86,7 @@ impl TaskRunHandler for InterlacedHandler {
     async fn on_task_completed(
         &mut self,
         ctx: &mut TaskRunContext,
-        task_id: &str,
+        task_id: &ContextualTaskId,
         exit_code: i32,
         _is_target: bool,
     ) {
@@ -117,7 +117,7 @@ impl TaskRunHandler for InterlacedHandler {
     async fn on_task_cancelled(
         &mut self,
         _ctx: &mut TaskRunContext,
-        task_id: &str,
+        task_id: &ContextualTaskId,
         _is_target: bool,
     ) {
         if self.json {

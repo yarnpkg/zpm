@@ -6,7 +6,7 @@ use clipanion::cli;
 
 use super::helpers::format_task_id;
 use super::runner::{run_task, TaskRunConfig, TaskRunContext, TaskRunHandler};
-use crate::daemon::SubscriptionScope;
+use crate::daemon::{ContextualTaskId, SubscriptionScope};
 use crate::error::Error;
 
 struct BufferedHandler;
@@ -20,9 +20,9 @@ impl TaskRunHandler for BufferedHandler {
         }
     }
 
-    async fn on_output_line(&mut self, _ctx: &mut TaskRunContext, _task_id: &str, _line: &str, _stream: &str) {}
+    async fn on_output_line(&mut self, _ctx: &mut TaskRunContext, _task_id: &ContextualTaskId, _line: &str, _stream: &str) {}
 
-    async fn on_task_started(&mut self, ctx: &mut TaskRunContext, task_id: &str, _is_target: bool) {
+    async fn on_task_started(&mut self, ctx: &mut TaskRunContext, task_id: &ContextualTaskId, _is_target: bool) {
         if ctx.verbose_level >= 2 {
             let mut stdout
                 = std::io::stdout().lock();
@@ -34,7 +34,7 @@ impl TaskRunHandler for BufferedHandler {
     async fn on_task_completed(
         &mut self,
         ctx: &mut TaskRunContext,
-        task_id: &str,
+        task_id: &ContextualTaskId,
         exit_code: i32,
         _is_target: bool,
     ) {

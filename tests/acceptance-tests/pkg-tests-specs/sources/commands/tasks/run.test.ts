@@ -41,6 +41,7 @@ function spawnYarnBin(testPath: PortablePath, args: Array<string>, env: Record<s
       YARN_ENABLE_TIMERS: `false`,
       FORCE_COLOR: `0`,
       NODE_OPTIONS: ``,
+      YARN_DAEMON_DEFAULT_WARMUP_PERIOD: `500ms`,
       ...env,
     },
   });
@@ -411,10 +412,10 @@ describe(`Commands`, () => {
       }, async ({path, run, runSwitch}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `task-a:`,
-          `  sleep 0.1 && echo "task-a"`,
+          `  sleep 0.6 && echo "task-a"`,
           ``,
           `task-b:`,
-          `  sleep 0.2 && echo "task-b"`,
+          `  sleep 0.6 && echo "task-b"`,
           ``,
           `build: task-a& task-b&`,
           `  echo "build"`,
@@ -560,9 +561,9 @@ describe(`Commands`, () => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
           `stream-test:`,
           `  python3 -c "import time; print(f'ts:{int(time.time()*1000)}:line1')"`,
-          `  sleep 0.5`,
+          `  sleep 0.6`,
           `  python3 -c "import time; print(f'ts:{int(time.time()*1000)}:line2')"`,
-          `  sleep 0.5`,
+          `  sleep 0.6`,
           `  python3 -c "import time; print(f'ts:{int(time.time()*1000)}:line3')"`,
         ].join(`\n`));
 
@@ -596,16 +597,16 @@ describe(`Commands`, () => {
         // Verify the messages are correct
         expect(messages).toEqual([`line1`, `line2`, `line3`]);
 
-        // Verify script-side timestamps are properly spaced (at least 400ms apart)
+        // Verify script-side timestamps are properly spaced (at least 500ms apart)
         // This proves the script's sleep commands executed between echo statements
         for (let i = 1; i < timestamps.length; i++) {
           const diff = timestamps[i]! - timestamps[i - 1]!;
-          expect(diff).toBeGreaterThanOrEqual(400);
+          expect(diff).toBeGreaterThanOrEqual(500);
         }
 
-        // Verify total execution time is reasonable (at least 900ms for two 500ms sleeps)
+        // Verify total execution time is reasonable (at least 1100ms for two 600ms sleeps)
         // This proves output wasn't queued and released at the end
-        expect(totalTime).toBeGreaterThanOrEqual(900);
+        expect(totalTime).toBeGreaterThanOrEqual(1100);
       }),
     );
 
@@ -616,12 +617,12 @@ describe(`Commands`, () => {
           name: `test-package`,
         }, async ({path, run, runSwitch}) => {
           // Create a long-lived task (simulates a dev server) and a dependent task
-          // The dependent should start after 500ms warm-up, not wait for server to exit
+          // The dependent should start after the warm-up period, not wait for server to exit
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `@long-lived`,
             `server:`,
             `  echo "server-started"`,
-            `  sleep 10`,
+            `  sleep 5`,
             ``,
             `client: server`,
             `  echo "client-started"`,
@@ -636,7 +637,7 @@ describe(`Commands`, () => {
           const endTime = Date.now();
           const totalTime = endTime - startTime;
 
-          // Should complete in under 3 seconds (warm-up is 500ms + some overhead)
+          // Should complete in under 3 seconds (warm-up period + some overhead)
           // If it waited for server, it would take 10+ seconds
           expect(totalTime).toBeLessThan(3000);
           expect(stdout).toContain(`client-started`);
@@ -659,7 +660,7 @@ describe(`Commands`, () => {
             `  count=$((count + 1))`,
             `  echo $count > server-starts`,
             `  echo "server-start-$count"`,
-            `  sleep 10`,
+            `  sleep 5`,
           ].join(`\n`));
 
           await run(`install`);
@@ -697,7 +698,7 @@ describe(`Commands`, () => {
             `server:`,
             `  echo $$ > server.pid`,
             `  echo "server-running"`,
-            `  sleep 60`,
+            `  sleep 5`,
           ].join(`\n`));
 
           await run(`install`);
@@ -732,9 +733,9 @@ describe(`Commands`, () => {
             `@long-lived`,
             `server:`,
             `  echo "server-started"`,
-            `  sleep 1`,
+            `  sleep 0.6`,
             `  echo "still-running" > still-running`,
-            `  sleep 10`,
+            `  sleep 5`,
           ].join(`\n`));
 
           await run(`install`);
@@ -815,7 +816,7 @@ describe(`Commands`, () => {
             `  count=$((count + 1))`,
             `  echo $count > server-starts`,
             `  echo "server-start-$count"`,
-            `  sleep 10`,
+            `  sleep 5`,
           ].join(`\n`));
 
           await run(`install`);
@@ -826,7 +827,7 @@ describe(`Commands`, () => {
           const server1 = runSwitch(`run`, `server`).catch(() => {});
 
           // Wait for warm-up + script execution
-          await new Promise(resolve => setTimeout(resolve, 1200));
+          await new Promise(resolve => setTimeout(resolve, 1000));
 
           // Second invocation via `yarn run` should attach to the same
           // daemon-managed long-lived task, not start a new one.
@@ -866,7 +867,7 @@ describe(`Commands`, () => {
             `  count=$((count + 1))`,
             `  echo $count > server-starts`,
             `  echo "server-start-$count"`,
-            `  sleep 10`,
+            `  sleep 5`,
             ``,
             `client: server`,
             `  echo "client-done"`,
@@ -912,21 +913,21 @@ describe(`Commands`, () => {
             `  count=$((count + 1))`,
             `  echo $count > server-starts`,
             `  echo "server-running-$count"`,
-            `  sleep 60`,
+            `  sleep 5`,
           ].join(`\n`));
 
           await run(`install`);
 
-          // Start → warm-up → stop → restart cycle
+          // Start -> warm-up -> stop -> restart cycle
           const run1 = runSwitch(`tasks`, `run`, `server`).catch(() => {});
-          await new Promise(resolve => setTimeout(resolve, 1200));
+          await new Promise(resolve => setTimeout(resolve, 1000));
 
           // Stop the server
           const {stdout: stopOutput} = await runSwitch(`tasks`, `stop`, `server`);
           expect(stopOutput).toContain(`stopped successfully`);
 
           // Wait for process to actually die and TaskCompleted to be processed
-          await new Promise(resolve => setTimeout(resolve, 1500));
+          await new Promise(resolve => setTimeout(resolve, 1000));
 
           // Verify via task history that the server went through the full lifecycle
           const {stdout: historyStdout} = await runSwitch(`tasks`, `history`, `--json`);
@@ -943,7 +944,7 @@ describe(`Commands`, () => {
           // stale graph entries under LONG_LIVED_CONTEXT_ID), this second
           // run will either fail silently or not actually start a new process.
           const run2 = runSwitch(`tasks`, `run`, `server`).catch(() => {});
-          await new Promise(resolve => setTimeout(resolve, 1500));
+          await new Promise(resolve => setTimeout(resolve, 1000));
 
           // Verify server was started a second time (count == 2).
           // If stop_long_lived left the task in a terminal state in the graph
@@ -962,7 +963,7 @@ describe(`Commands`, () => {
         makeTemporaryEnv({
           name: `test-package`,
         }, async ({path, run, runSwitch}) => {
-          // Create a long-lived task that exits immediately (before 500ms warm-up)
+          // Create a long-lived task that exits immediately (before warm-up period)
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `@long-lived`,
             `server:`,
@@ -1040,17 +1041,17 @@ describe(`Commands`, () => {
             `@long-lived`,
             `server:`,
             `  echo "server-started"`,
-            `  sleep 60`,
+            `  sleep 5`,
           ].join(`\n`));
 
           await run(`install`);
 
           // Start, wait for warm-up, stop
           const serverPromise = runSwitch(`tasks`, `run`, `server`).catch(() => {});
-          await new Promise(resolve => setTimeout(resolve, 800));
+          await new Promise(resolve => setTimeout(resolve, 700));
           await runSwitch(`tasks`, `stop`, `server`);
 
-          // Wait for cleanup
+          // Wait for cleanup after stop
           await new Promise(resolve => setTimeout(resolve, 500));
 
           // Second stop should fail — task is no longer running
@@ -1167,10 +1168,10 @@ describe(`Commands`, () => {
             `  echo "dep-c"`,
             ``,
             `dep-a: dep-c`,
-            `  sleep 0.1 && echo "dep-a"`,
+            `  sleep 0.6 && echo "dep-a"`,
             ``,
             `dep-b: dep-c`,
-            `  sleep 0.1 && echo "dep-b"`,
+            `  sleep 0.6 && echo "dep-b"`,
             ``,
             `target: dep-a& dep-b&`,
             `  echo "target"`,
@@ -1254,7 +1255,7 @@ describe(`Commands`, () => {
             `  exit 1`,
             ``,
             `slow-success:`,
-            `  sleep 0.5 && echo "slow-success"`,
+            `  sleep 0.6 && echo "slow-success"`,
             ``,
             `target: fast-fail& slow-success&`,
             `  echo "target-should-not-run"`,
@@ -1385,7 +1386,7 @@ describe(`Commands`, () => {
             `  count=$((count + 1))`,
             `  echo $count > start-counter`,
             `  echo "server-$count"`,
-            `  sleep 10`,
+            `  sleep 5`,
           ].join(`\n`));
 
           await run(`install`);
@@ -1404,7 +1405,7 @@ describe(`Commands`, () => {
           ];
 
           // Wait for warm-up and some processing time
-          await new Promise(resolve => setTimeout(resolve, 1500));
+          await new Promise(resolve => setTimeout(resolve, 1200));
 
           // Check that server only started once
           const startCount = await xfs.readFilePromise(counterFile, `utf8`);
@@ -1423,13 +1424,13 @@ describe(`Commands`, () => {
           // Run multiple independent tasks concurrently
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `task-a:`,
-            `  sleep 0.2 && echo "task-a-done"`,
+            `  sleep 0.6 && echo "task-a-done"`,
             ``,
             `task-b:`,
-            `  sleep 0.2 && echo "task-b-done"`,
+            `  sleep 0.6 && echo "task-b-done"`,
             ``,
             `task-c:`,
-            `  sleep 0.2 && echo "task-c-done"`,
+            `  sleep 0.6 && echo "task-c-done"`,
           ].join(`\n`));
 
           await run(`install`);
@@ -1559,7 +1560,7 @@ describe(`Commands`, () => {
           const parallelCount = 10;
           const tasks = [
             ...Array.from({length: parallelCount}, (_, i) =>
-              `parallel-${i}:\n  sleep 0.2 && echo "parallel-${i}"`,
+              `parallel-${i}:\n  sleep 0.6 && echo "parallel-${i}"`,
             ),
             ``,
             `root: ${Array.from({length: parallelCount}, (_, i) => `parallel-${i}&`).join(` `)}\n  echo "root"`,
@@ -1581,9 +1582,9 @@ describe(`Commands`, () => {
           // Root should be last
           expect(lines[lines.length - 1]).toBe(`root`);
 
-          // Since tasks run in parallel (0.2s each), total time should be much less than 10 * 0.2s = 2s
-          // Allow some overhead, but it should be under 1.5 seconds if parallel
-          expect(elapsed).toBeLessThan(1500);
+          // Since tasks run in parallel (0.6s each), total time should be much less than 10 * 0.6s = 6s
+          // Allow some overhead, but it should be under 3 seconds if parallel
+          expect(elapsed).toBeLessThan(3000);
         }),
       );
     });
@@ -1720,7 +1721,7 @@ describe(`Commands`, () => {
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `slow-dep:`,
             `  echo "slow-dep-started"`,
-            `  sleep 30`,
+            `  sleep 5`,
             ``,
             `no-script-target: slow-dep`,
           ].join(`\n`));
@@ -1772,7 +1773,7 @@ describe(`Commands`, () => {
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `slow-leaf:`,
             `  echo "slow-leaf-started"`,
-            `  sleep 30`,
+            `  sleep 5`,
             ``,
             `mid-aggregator: slow-leaf`,
             `  echo "mid"`,
@@ -1823,7 +1824,7 @@ describe(`Commands`, () => {
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `slow-base:`,
             `  echo "slow-base-started"`,
-            `  sleep 30`,
+            `  sleep 5`,
             ``,
             `scripted-target: slow-base`,
             `  echo "should-not-run"`,
@@ -1880,7 +1881,7 @@ describe(`Commands`, () => {
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `slow-dep:`,
             `  echo "slow-dep-started"`,
-            `  sleep 30`,
+            `  sleep 5`,
             ``,
             `target: slow-dep`,
           ].join(`\n`));
@@ -1891,7 +1892,7 @@ describe(`Commands`, () => {
           const taskPromise = runSwitch(`tasks`, `run`, `--json`, `target`).catch(e => e);
 
           // Wait for slow-dep to start
-          await new Promise(resolve => setTimeout(resolve, 800));
+          await new Promise(resolve => setTimeout(resolve, 500));
 
           // Use task history to confirm slow-dep was started before cancellation
           const {stdout: historyBefore} = await runSwitch(`tasks`, `history`, `--json`);
@@ -2059,7 +2060,7 @@ describe(`Commands`, () => {
         makeTemporaryEnv({
           name: `test-package`,
         }, cleanupDaemon(async ({path, run, runSwitch}) => {
-          // Long-lived task that crashes before 500ms warm-up period
+          // Long-lived task that crashes before the warm-up period
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `@long-lived`,
             `crashing-server:`,
@@ -2114,7 +2115,7 @@ describe(`Commands`, () => {
             `@long-lived`,
             `server:`,
             `  echo "server running"`,
-            `  sleep 10`,
+            `  sleep 5`,
           ].join(`\n`));
 
           await run(`install`);
@@ -2124,7 +2125,7 @@ describe(`Commands`, () => {
 
           // Start server and wait for warm-up
           const serverPromise = runSwitch(`tasks`, `run`, `--json`, `server`).catch(() => {});
-          await new Promise(resolve => setTimeout(resolve, 800));
+          await new Promise(resolve => setTimeout(resolve, 700));
 
           // Start a second request that attaches to the existing server
           const attachPromise = runSwitch(`tasks`, `run`, `--json`, `server`).catch(() => {});
@@ -2132,7 +2133,7 @@ describe(`Commands`, () => {
 
           // Stop and wait for process to exit
           await runSwitch(`tasks`, `stop`, `server`).catch(() => {});
-          await new Promise(resolve => setTimeout(resolve, 1500));
+          await new Promise(resolve => setTimeout(resolve, 1000));
 
           // The second invocation attaches — it does NOT create a new task.
           // So the history should show a single task going through the full
@@ -2162,7 +2163,7 @@ describe(`Commands`, () => {
           // Tests the WaitingForSubtasks state - parent should wait for all subtasks
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `slow-subtask:`,
-            `  sleep 0.3 && echo "slow-done"`,
+            `  sleep 0.6 && echo "slow-done"`,
             ``,
             `fast-subtask:`,
             `  echo "fast-done"`,
@@ -2262,7 +2263,7 @@ describe(`Commands`, () => {
             `long-task:`,
             `  echo $$ > task.pid`,
             `  touch running`,
-            `  sleep 60`,
+            `  sleep 5`,
           ].join(`\n`));
 
           await run(`install`);
@@ -2315,7 +2316,7 @@ describe(`Commands`, () => {
             `  trap '' TERM`,
             `  echo $$ > task.pid`,
             `  touch running`,
-            `  sleep 120`,
+            `  sleep 5`,
           ].join(`\n`));
 
           await run(`install`);
@@ -2402,7 +2403,7 @@ describe(`Commands`, () => {
             `@long-lived`,
             `server:`,
             `  echo "server-started"`,
-            `  sleep 60`,
+            `  sleep 5`,
             ``,
             `build:`,
             `  echo "building"`,
@@ -2472,13 +2473,13 @@ describe(`Commands`, () => {
           // This tests memory management under concurrent load
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `task-a:`,
-            `  sleep 0.1 && echo "a"`,
+            `  sleep 0.6 && echo "a"`,
             ``,
             `task-b:`,
-            `  sleep 0.1 && echo "b"`,
+            `  sleep 0.6 && echo "b"`,
             ``,
             `task-c:`,
-            `  sleep 0.1 && echo "c"`,
+            `  sleep 0.6 && echo "c"`,
           ].join(`\n`));
 
           await run(`install`);
@@ -2515,10 +2516,10 @@ describe(`Commands`, () => {
 
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `task-a:`,
-            `  sleep 0.1 && echo "task-a-done"`,
+            `  sleep 0.6 && echo "task-a-done"`,
             ``,
             `task-c:`,
-            `  sleep 0.1 && echo "task-c-done"`,
+            `  sleep 0.6 && echo "task-c-done"`,
           ].join(`\n`));
 
           await run(`install`);

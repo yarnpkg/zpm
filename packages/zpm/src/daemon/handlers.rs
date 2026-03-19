@@ -7,6 +7,8 @@
 
 use tokio::sync::oneshot;
 
+use zpm_utils::ToFileString;
+
 use super::coordinator_commands::{CommandSender, CoordinatorCommand};
 use super::coordinator_state::SubscriptionId;
 use super::ipc::{DaemonRequest, DaemonResponse, LongLivedTaskStatus, SubscriptionScope};
@@ -112,7 +114,7 @@ async fn handle_push_tasks(
     }
 }
 
-async fn handle_get_task_output(task_id: String, command_tx: &CommandSender) -> DaemonResponse {
+async fn handle_get_task_output(task_id: super::scheduler::ContextualTaskId, command_tx: &CommandSender) -> DaemonResponse {
     let (response_tx, response_rx) = oneshot::channel();
 
     if command_tx
@@ -186,21 +188,14 @@ async fn handle_list_long_lived_tasks(
             let tasks: Vec<super::ipc::LongLivedTaskInfo> = entries
                 .into_iter()
                 .map(|info| {
-                    // Parse task_id (format: "workspace:taskname")
-                    let (workspace, task_name) = info
-                        .task_id
-                        .split_once(':')
-                        .map(|(w, t)| (w.to_string(), t.to_string()))
-                        .unwrap_or_else(|| ("".to_string(), info.task_id.clone()));
-
                     let status = LongLivedTaskStatus::Running {
                         started_at_ms: info.started_at_ms,
                         process_id: info.process_id,
                     };
 
                     super::ipc::LongLivedTaskInfo {
-                        workspace,
-                        task_name,
+                        workspace: info.task_id.workspace.to_file_string(),
+                        task_name: info.task_id.task_name.to_file_string(),
                         status,
                     }
                 })

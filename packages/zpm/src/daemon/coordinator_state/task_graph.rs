@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use zpm_primitives::Ident;
 use zpm_tasks::{ResolvedTasks, TaskId, TaskName};
-use zpm_utils::{DataType, ToFileString};
+use zpm_utils::{DataType, FromFileString, ToFileString};
 
+use super::context_registry::ContextRegistry;
 use super::super::presentation::prefix_colors;
 use super::super::scheduler::{ContextualTaskId, PreparedTask};
 use crate::error::Error;
@@ -104,6 +105,7 @@ impl TaskGraph {
         args: Vec<String>,
         workspace_override: Option<&str>,
         context_id: Option<&str>,
+        context_registry: &mut ContextRegistry,
     ) -> Result<(ContextualTaskId, Vec<ContextualTaskId>), Error> {
         let task_name = TaskName::new(task_name)
             .map_err(|_| Error::TaskNameParseError(task_name.to_string()))?;
@@ -123,8 +125,9 @@ impl TaskGraph {
         let ctx_id = if let Some(ctx) = context_id {
             ctx.to_string()
         } else if let Some(parent_str) = parent_task_id {
-            self.parse_context_id(parent_str)
-                .ok_or_else(|| Error::MissingContextId)?
+            ContextualTaskId::from_file_string(parent_str)
+                .map(|id| id.context_id)
+                .map_err(|_| Error::MissingContextId)?
         } else {
             return Err(Error::MissingContextId);
         };
@@ -140,15 +143,15 @@ impl TaskGraph {
             }
         }
 
-        // If task is already an active target for this context, don't re-add.
-        // But if the task has reached a terminal state (e.g. a long-lived task
-        // that was stopped and then restarted), allow re-adding by falling
-        // through to clear_task_state which resets the old entry.
-        if self.is_target(&ctx_task_id) && !self.is_terminal(&ctx_task_id) {
+        // If the task already has an entry in this context (any state,
+        // including terminal), skip re-adding. This prevents duplicate
+        // pushes of already-completed tasks within the same context.
+        //
+        // For long-lived task restarts, the coordinator must call
+        // clear_task_state before add_task to remove the stale entry.
+        if self.tasks.contains_key(&ctx_task_id) {
             return Ok((ctx_task_id, vec![]));
         }
-
-        self.clear_task_state(&ctx_task_id);
 
         let new_resolved = project.resolve_task(&task_id)?;
 
@@ -166,7 +169,7 @@ impl TaskGraph {
         }
 
         self.set_as_target(&ctx_task_id);
-        self.prepare_specific_tasks(project, &resolved_ctx_task_ids)?;
+        self.prepare_specific_tasks(project, &resolved_ctx_task_ids, context_registry)?;
 
         if !args.is_empty() {
             if let Some(task) = self.prepared.get_mut(&ctx_task_id) {
@@ -182,6 +185,7 @@ impl TaskGraph {
         &mut self,
         project: &Project,
         tasks_to_prepare: &[ContextualTaskId],
+        context_registry: &mut ContextRegistry,
     ) -> Result<usize, Error> {
         let colors: Vec<&DataType> = prefix_colors().take(5).collect();
         let mut color_index = self.prepared.len();
@@ -237,13 +241,14 @@ impl TaskGraph {
                 },
             );
 
+            context_registry.increment(&ctx_task_id.context_id);
             new_count += 1;
         }
 
         Ok(new_count)
     }
 
-    fn clear_task_state(&mut self, task_id: &ContextualTaskId) {
+    pub fn clear_task_state(&mut self, task_id: &ContextualTaskId) {
         self.tasks.remove(task_id);
         self.subtasks.remove(task_id);
     }
@@ -295,6 +300,7 @@ impl TaskGraph {
             .unwrap_or(false)
     }
 
+    #[allow(dead_code)]
     pub fn is_target(&self, task_id: &ContextualTaskId) -> bool {
         self.tasks
             .get(task_id)
@@ -390,12 +396,10 @@ impl TaskGraph {
     }
 
     /// Remove all state for a closed task (used by output buffer eviction).
-    pub fn evict_closed_task(&mut self, task_id_str: &str) {
-        if let Some(ctx_id) = parse_contextual_task_id_simple(task_id_str) {
-            self.tasks.remove(&ctx_id);
-            self.prepared.remove(&ctx_id);
-            self.subtasks.remove(&ctx_id);
-        }
+    pub fn evict_closed_task(&mut self, task_id: &ContextualTaskId) {
+        self.tasks.remove(task_id);
+        self.prepared.remove(task_id);
+        self.subtasks.remove(task_id);
     }
 
     // ========================================================================
@@ -403,25 +407,18 @@ impl TaskGraph {
     // ========================================================================
 
     fn parse_contextual_task_id(&self, project: &Project, task_id_str: &str) -> Option<ContextualTaskId> {
-        let (task_part, context_id) = task_id_str.rsplit_once('@')?;
-        let (workspace_str, task_name_str) = task_part.split_once(':')?;
+        let ctx_task_id = ContextualTaskId::from_file_string(task_id_str).ok()?;
 
-        let task_name = TaskName::new(task_name_str).ok()?;
-        let ident = Ident::new(workspace_str);
-        let workspace = project.workspace_by_ident(&ident).ok()?;
+        // Validate that the workspace exists in the project
+        let workspace = project.workspace_by_ident(&ctx_task_id.task_id.workspace).ok()?;
 
         Some(ContextualTaskId::new(
             TaskId {
                 workspace: workspace.name.clone(),
-                task_name,
+                task_name: ctx_task_id.task_id.task_name,
             },
-            context_id.to_string(),
+            ctx_task_id.context_id,
         ))
-    }
-
-    fn parse_context_id(&self, task_id_str: &str) -> Option<String> {
-        let (_, context_id) = task_id_str.rsplit_once('@')?;
-        Some(context_id.to_string())
     }
 
     // ========================================================================
@@ -441,28 +438,3 @@ impl TaskGraph {
     }
 }
 
-// ============================================================================
-// Formatting Helpers (free functions)
-// ============================================================================
-
-pub fn format_contextual_task_id(ctx_task_id: &ContextualTaskId) -> String {
-    format!(
-        "{}:{}@{}",
-        ctx_task_id.task_id.workspace.to_file_string(),
-        ctx_task_id.task_id.task_name.as_str(),
-        ctx_task_id.context_id
-    )
-}
-
-fn parse_contextual_task_id_simple(task_id_str: &str) -> Option<ContextualTaskId> {
-    let (task_part, context_id) = task_id_str.rsplit_once('@')?;
-    let (workspace_str, task_name_str) = task_part.split_once(':')?;
-
-    let task_name = TaskName::new(task_name_str).ok()?;
-    let workspace = Ident::new(workspace_str);
-
-    Some(ContextualTaskId::new(
-        TaskId { workspace, task_name },
-        context_id.to_string(),
-    ))
-}

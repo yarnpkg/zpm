@@ -1,6 +1,7 @@
 use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
 
 use clipanion::cli;
+use zpm_utils::ToFileString;
 
 use crate::daemon::{DaemonClient, TaskEvent};
 use crate::error::Error;
@@ -51,7 +52,7 @@ impl TaskHistory {
             println!(
                 "{} {} {}",
                 event.date,
-                event.contextual_task_id,
+                event.contextual_task_id.to_file_string(),
                 event.state,
             );
         }

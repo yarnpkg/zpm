@@ -26,10 +26,12 @@ use crate::project::Project;
 
 type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<DaemonResponse>>>>;
 
+use super::scheduler::ContextualTaskId;
+
 /// Result of pushing tasks to the daemon
 pub struct PushTasksResult {
     /// The directly requested task IDs
-    pub task_ids: Vec<String>,
+    pub task_ids: Vec<ContextualTaskId>,
     /// Total number of dependency tasks (excluding target tasks)
     pub dependency_count: usize,
     /// Long-lived tasks that we attached to (already running)
@@ -342,11 +344,11 @@ impl DaemonClient {
 
     pub async fn get_task_output(
         &mut self,
-        task_id: &str,
+        task_id: &ContextualTaskId,
     ) -> Result<Vec<BufferedOutputLine>, Error> {
         let request
             = DaemonRequest::GetTaskOutput {
-                task_id: task_id.to_string(),
+                task_id: task_id.clone(),
             };
 
         match self.send_request(request).await? {

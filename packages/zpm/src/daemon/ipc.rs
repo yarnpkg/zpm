@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::scheduler::ContextualTaskId;
+
 pub const DAEMON_BASE_PORT: u16 = 12197;
 pub const TASK_CURRENT_ENV: &str = "ZPM_TASK_CURRENT";
 pub const DAEMON_SERVER_ENV: &str = "YARN_DAEMON_SERVER";
@@ -46,7 +48,7 @@ pub enum DaemonRequest {
         context_id: Option<String>,
     },
     GetTaskOutput {
-        task_id: String,
+        task_id: ContextualTaskId,
     },
     StopTask {
         task_name: String,
@@ -73,7 +75,7 @@ pub struct BufferedOutputLine {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachedLongLivedTask {
-    pub task_id: String,
+    pub task_id: ContextualTaskId,
     pub started_at_ms: u64,
 }
 
@@ -154,7 +156,7 @@ pub struct TaskEvent {
     /// Timestamp in milliseconds since the Unix epoch.
     pub date: u64,
     /// The contextual task ID (e.g. `workspace:taskname@context_id`).
-    pub contextual_task_id: String,
+    pub contextual_task_id: ContextualTaskId,
     /// The new task state.
     pub state: TaskEventState,
 }
@@ -177,14 +179,14 @@ pub enum DaemonResponse {
     Pong,
     TasksEnqueued {
         /// The directly requested task IDs
-        task_ids: Vec<String>,
+        task_ids: Vec<ContextualTaskId>,
         /// Total number of dependency tasks (excluding target tasks)
         dependency_count: usize,
         /// Long-lived tasks that we attached to (already running)
         attached_long_lived: Vec<AttachedLongLivedTask>,
     },
     TaskOutput {
-        task_id: String,
+        task_id: ContextualTaskId,
         lines: Vec<BufferedOutputLine>,
     },
     TaskStopped {
@@ -221,24 +223,24 @@ pub enum DaemonResponse {
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DaemonNotification {
     TaskOutputLine {
-        task_id: String,
+        task_id: ContextualTaskId,
         line: String,
         stream: String,
     },
     TaskStarted {
-        task_id: String,
+        task_id: ContextualTaskId,
     },
     TaskCompleted {
-        task_id: String,
+        task_id: ContextualTaskId,
         exit_code: i32,
         #[serde(skip_serializing_if = "Option::is_none")]
         signal: Option<i32>,
     },
     TaskCancelled {
-        task_id: String,
+        task_id: ContextualTaskId,
     },
     TaskWarmUpComplete {
-        task_id: String,
+        task_id: ContextualTaskId,
     },
 }
 

@@ -8,8 +8,9 @@
 use std::process::ExitStatus;
 
 use super::super::coordinator_commands::{CommandSender, CoordinatorCommand};
-use super::super::coordinator_state::{format_contextual_task_id, ContextualTaskId, PreparedTask};
+use super::super::coordinator_state::{ContextualTaskId, PreparedTask};
 use super::super::ipc::{DAEMON_SERVER_ENV, TASK_CURRENT_ENV};
+use zpm_utils::ToFileString;
 use super::output::stream_output;
 use crate::error::Error;
 use crate::script::ScriptEnvironment;
@@ -39,7 +40,7 @@ impl TaskRunner {
     pub async fn run(self) -> Result<ExitStatus, Error> {
         let mut env = ScriptEnvironment::new()?;
 
-        let task_id_str = format_contextual_task_id(&self.task_id);
+        let task_id_str = self.task_id.to_file_string();
 
         for (key, value) in &self.prepared.env {
             env = env.with_env_variable(key, value);

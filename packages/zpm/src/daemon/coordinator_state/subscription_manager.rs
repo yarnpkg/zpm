@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 
 use super::super::ipc::{DaemonNotification, SubscriptionScope};
+use super::super::scheduler::ContextualTaskId;
 
 // ============================================================================
 // Subscription State
@@ -15,8 +16,8 @@ pub struct SubscriptionId(pub u64);
 pub struct SubscriptionFilter {
     pub output_scope: SubscriptionScope,
     pub status_scope: SubscriptionScope,
-    pub target_task_ids: HashSet<String>,
-    pub all_task_ids: HashSet<String>,
+    pub target_task_ids: HashSet<ContextualTaskId>,
+    pub all_task_ids: HashSet<ContextualTaskId>,
     pub context_id: Option<String>,
 }
 
@@ -43,7 +44,7 @@ impl SubscriptionFilter {
         let is_explicit_target = self.target_task_ids.contains(task_id);
 
         if let Some(ref ctx) = self.context_id {
-            if !is_explicit_target && !task_id.ends_with(&format!("@{}", ctx)) {
+            if !is_explicit_target && task_id.context_id != *ctx {
                 return false;
             }
         }
@@ -56,19 +57,19 @@ impl SubscriptionFilter {
                     return true;
                 }
                 match &self.context_id {
-                    Some(ctx) => task_id.ends_with(&format!("@{}", ctx)),
+                    Some(ctx) => task_id.context_id == *ctx,
                     None => true,
                 }
             }
         }
     }
 
-    pub fn add_target_task(&mut self, task_id: String) {
+    pub fn add_target_task(&mut self, task_id: ContextualTaskId) {
         self.target_task_ids.insert(task_id.clone());
         self.all_task_ids.insert(task_id);
     }
 
-    pub fn add_dependency_task(&mut self, task_id: String) {
+    pub fn add_dependency_task(&mut self, task_id: ContextualTaskId) {
         self.all_task_ids.insert(task_id);
     }
 }
@@ -117,8 +118,8 @@ impl SubscriptionManager {
     pub fn add_tasks(
         &mut self,
         subscription_id: SubscriptionId,
-        target_task_ids: Vec<String>,
-        dependency_task_ids: Vec<String>,
+        target_task_ids: Vec<ContextualTaskId>,
+        dependency_task_ids: Vec<ContextualTaskId>,
     ) {
         if let Some(sub) = self.subscriptions.get_mut(&subscription_id) {
             for task_id in target_task_ids {

@@ -33,6 +33,11 @@
       "description": "Maximum number of completed/failed tasks whose output buffers are kept in memory by the daemon",
       "default": 100
     },
+    "daemonDefaultWarmupPeriod": {
+      "type": "std::time::Duration",
+      "description": "Default warm-up period for long-lived tasks in the daemon. After a long-lived task starts, dependents are unblocked once this period elapses.",
+      "default": "1s"
+    },
     "defaultSemverRangePrefix": {
       "type": "zpm_semver::RangeKind",
       "description": "The default semver range prefix to use for dependencies",

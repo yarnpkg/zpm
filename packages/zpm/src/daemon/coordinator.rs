@@ -18,15 +18,14 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, oneshot};
 use zpm_primitives::Ident;
 use zpm_tasks::{TaskId, TaskName};
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::Path;
 
 use super::coordinator_commands::{
     CancelContextResult, CommandSender, CoordinatorCommand, LongLivedTaskInfo,
     PushTasksResult, StatsResult, StopTaskResult, TaskCompletionResult,
 };
 use super::coordinator_state::{
-    format_contextual_task_id, now_ms,
-    CoordinatorState, TaskGraph, TransitionEffects,
+    now_ms, ContextualTaskId, CoordinatorState, TaskGraph, TransitionEffects,
 };
 use super::executor::ExecutorPool;
 use super::ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskEvent, TaskEventState, TaskSubscription, LONG_LIVED_CONTEXT_ID};
@@ -35,8 +34,6 @@ use super::scheduler::dependencies;
 use super::server::{bind_to_available_port, connection::{run_accept_loop, ConnectionContext}};
 use crate::error::Error;
 use crate::project::Project;
-
-const LONG_LIVED_WARMUP_MS: u64 = 500;
 
 // ============================================================================
 // Main Entry Points
@@ -68,6 +65,7 @@ async fn run_daemon_internal(
     // Get configuration
     let output_buffer_max_lines = project.config.settings.daemon_output_buffer_max_lines.value;
     let max_closed_tasks = project.config.settings.daemon_max_closed_tasks.value;
+    let default_warmup_period = project.config.settings.daemon_default_warmup_period.value;
 
     // Create the command channel
     let (command_tx, command_rx) = mpsc::unbounded_channel::<CoordinatorCommand>();
@@ -84,6 +82,7 @@ async fn run_daemon_internal(
             daemon_url_str,
             output_buffer_max_lines,
             max_closed_tasks,
+            default_warmup_period,
         ).await;
     });
 
@@ -124,6 +123,7 @@ async fn run_coordinator_loop(
     daemon_url: String,
     output_buffer_max_lines: usize,
     max_closed_tasks: usize,
+    default_warmup_period: Duration,
 ) {
     // Create unified state - owned by this task, no locks
     let mut state = CoordinatorState::new(output_buffer_max_lines, max_closed_tasks);
@@ -138,6 +138,7 @@ async fn run_coordinator_loop(
             &mut executor_pool,
             &project,
             &command_tx,
+            default_warmup_period,
         ).await;
 
         if should_shutdown {
@@ -184,7 +185,7 @@ fn record_events_from_effects(effects: &TransitionEffects, event_history: &mut s
                     },
                 });
             }
-            DaemonNotification::TaskCancelled { task_id } => {
+            DaemonNotification::TaskCancelled { task_id, .. } => {
                 event_history.push(TaskEvent {
                     date,
                     contextual_task_id: task_id.clone(),
@@ -210,6 +211,7 @@ async fn handle_command(
     executor_pool: &mut ExecutorPool,
     project: &Project,
     command_tx: &CommandSender,
+    default_warmup_period: Duration,
 ) -> bool {
     match cmd {
         // ====================================================================
@@ -291,9 +293,8 @@ async fn handle_command(
 
         CoordinatorCommand::TaskStarted { task_id, pid } => {
             // Broadcast notification
-            let task_id_str = format_contextual_task_id(&task_id);
             state.subscriptions.broadcast(DaemonNotification::TaskStarted {
-                task_id: task_id_str.clone(),
+                task_id: task_id.clone(),
             });
 
             let is_long_lived = state.graph.is_long_lived(&task_id);
@@ -303,7 +304,7 @@ async fn handle_command(
             let event_pid = pid.unwrap_or(0);
             state.event_history.push(TaskEvent {
                 date: now_ms(),
-                contextual_task_id: task_id_str,
+                contextual_task_id: task_id.clone(),
                 state: if is_long_lived {
                     TaskEventState::WarmUp { pid: event_pid }
                 } else {
@@ -316,7 +317,7 @@ async fn handle_command(
                 let base_task_id = task_id.task_id.clone();
                 let tx = command_tx.clone();
                 tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_millis(LONG_LIVED_WARMUP_MS)).await;
+                    tokio::time::sleep(default_warmup_period).await;
                     let _ = tx.send(CoordinatorCommand::WarmUpComplete {
                         task_id,
                         base_task_id,
@@ -326,17 +327,15 @@ async fn handle_command(
         }
 
         CoordinatorCommand::TaskOutput { task_id, line, stream } => {
-            let task_id_str = format_contextual_task_id(&task_id);
-
             // Buffer output
-            state.output.append(task_id_str.clone(), BufferedOutputLine {
+            state.output.append(task_id.clone(), BufferedOutputLine {
                 line: line.clone(),
                 stream: stream.as_str().to_string(),
             });
 
             // Broadcast notification
             state.subscriptions.broadcast(DaemonNotification::TaskOutputLine {
-                task_id: task_id_str,
+                task_id,
                 line,
                 stream: stream.as_str().to_string(),
             });
@@ -377,10 +376,9 @@ async fn handle_command(
 
             // Record Live event directly here with PID from process registry
             if !effects.notifications.is_empty() {
-                let task_id_str = format_contextual_task_id(&task_id);
                 state.event_history.push(TaskEvent {
                     date: now_ms(),
-                    contextual_task_id: task_id_str,
+                    contextual_task_id: task_id.clone(),
                     state: TaskEventState::Live { pid },
                 });
             }
@@ -404,8 +402,8 @@ async fn handle_command(
                 .map(|e| {
                     let process_id = state.processes.get_pid_for_task(&e.contextual_task_id);
                     LongLivedTaskInfo {
-                        task_id: format!("{}:{}", e.task_id.workspace.to_file_string(), e.task_id.task_name.as_str()),
-                        contextual_task_id: format_contextual_task_id(&e.contextual_task_id),
+                        task_id: e.task_id.clone(),
+                        contextual_task_id: e.contextual_task_id.clone(),
                         warm_up_complete: e.warm_up_complete,
                         started_at_ms: e.started_at
                             .duration_since(SystemTime::UNIX_EPOCH)
@@ -548,8 +546,8 @@ fn execute_push_tasks(
         if is_long_lived {
             if let Some(ref tid) = task_id {
                 if let Some(existing) = state.long_lived.get(tid) {
-                    let existing_id_str = format_contextual_task_id(&existing.contextual_task_id);
-                    task_ids.push(existing_id_str.clone());
+                    let existing_ctx_id = existing.contextual_task_id.clone();
+                    task_ids.push(existing_ctx_id.clone());
 
                     let started_at_ms = existing
                         .started_at
@@ -558,7 +556,7 @@ fn execute_push_tasks(
                         .unwrap_or(0);
 
                     attached_long_lived.push(AttachedLongLivedTask {
-                        task_id: existing_id_str,
+                        task_id: existing_ctx_id,
                         started_at_ms,
                     });
 
@@ -573,6 +571,19 @@ fn execute_push_tasks(
             context_id
         };
 
+        // For long-lived task restarts (task was stopped, so it's no longer
+        // in the long-lived registry), clear stale graph state so add_task's
+        // dedup check allows the re-add.
+        if is_long_lived {
+            if let Some(ref tid) = task_id {
+                let ctx_tid = ContextualTaskId::new(
+                    tid.clone(),
+                    LONG_LIVED_CONTEXT_ID.to_string(),
+                );
+                state.graph.clear_task_state(&ctx_tid);
+            }
+        }
+
         match state.graph.add_task(
             project,
             &task_sub.name,
@@ -580,16 +591,15 @@ fn execute_push_tasks(
             task_sub.args.clone(),
             workspace,
             effective_context_id,
+            &mut state.contexts,
         ) {
             Ok((ctx_task_id, resolved_ctx_task_ids)) => {
-                let target_id_str = format_contextual_task_id(&ctx_task_id);
-
                 // Record "scheduled" events for all newly resolved tasks
                 let date = now_ms();
                 for resolved_id in &resolved_ctx_task_ids {
                     state.event_history.push(TaskEvent {
                         date,
-                        contextual_task_id: format_contextual_task_id(resolved_id),
+                        contextual_task_id: resolved_id.clone(),
                         state: TaskEventState::Scheduled,
                     });
                 }
@@ -605,14 +615,13 @@ fn execute_push_tasks(
                     }
                 }
 
-                task_ids.push(target_id_str.clone());
-
                 for resolved_id in &resolved_ctx_task_ids {
-                    let resolved_str = format_contextual_task_id(resolved_id);
-                    if resolved_str != target_id_str {
-                        dependency_ids.push(resolved_str);
+                    if *resolved_id != ctx_task_id {
+                        dependency_ids.push(resolved_id.clone());
                     }
                 }
+
+                task_ids.push(ctx_task_id);
             }
             Err(e) => {
                 return PushTasksResult {

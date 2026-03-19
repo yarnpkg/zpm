@@ -1,25 +1,19 @@
 use chrono::{Local, TimeZone, Utc};
 use colored::Colorize;
-use zpm_tasks::TaskId;
-use zpm_utils::{DataType, FromFileString, ToHumanString};
+use zpm_utils::{DataType, ToHumanString};
 
-use crate::daemon::{AttachedLongLivedTask, LONG_LIVED_CONTEXT_ID};
+use crate::daemon::{AttachedLongLivedTask, ContextualTaskId, LONG_LIVED_CONTEXT_ID};
 
-pub fn format_task_id(task_id: &str) -> String {
-    let base
-        = task_id.rsplit_once('@').map(|(b, _)| b).unwrap_or(task_id);
-
-    TaskId::from_file_string(base)
-        .map(|t| t.to_print_string())
-        .unwrap_or_else(|_| base.to_string())
+pub fn format_task_id(task_id: &ContextualTaskId) -> String {
+    task_id.task_id.to_print_string()
 }
 
 pub fn format_timestamp() -> String {
     DataType::Timestamp.colorize(&Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string())
 }
 
-pub fn is_long_lived_task(task_id: &str) -> bool {
-    task_id.ends_with(&format!("@{}", LONG_LIVED_CONTEXT_ID))
+pub fn is_long_lived_task(task_id: &ContextualTaskId) -> bool {
+    task_id.context_id == LONG_LIVED_CONTEXT_ID
 }
 
 pub fn format_start_time(started_at_ms: u64) -> String {

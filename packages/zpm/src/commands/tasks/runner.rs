@@ -15,8 +15,8 @@ use zpm_utils::ToFileString;
 
 use super::helpers::{is_long_lived_task, print_attach_header, print_detach_footer};
 use crate::daemon::{
-    DaemonClient, DaemonNotification, PushTasksResult, StandaloneDaemonHandle, SubscriptionScope,
-    TaskSubscription,
+    ContextualTaskId, DaemonClient, DaemonNotification, PushTasksResult, StandaloneDaemonHandle,
+    SubscriptionScope, TaskSubscription,
 };
 use crate::error::Error;
 use crate::project::Project;
@@ -29,8 +29,8 @@ pub struct TaskRunConfig {
 pub struct TaskRunContext {
     pub client: DaemonClient,
     pub result: PushTasksResult,
-    pub target_task_ids: HashSet<String>,
-    pub completed_tasks: HashSet<String>,
+    pub target_task_ids: HashSet<ContextualTaskId>,
+    pub completed_tasks: HashSet<ContextualTaskId>,
     pub exit_code: i32,
     pub is_first_line: bool,
     pub verbose_level: u8,
@@ -45,11 +45,11 @@ impl TaskRunContext {
         self.target_task_ids.iter().any(|id| is_long_lived_task(id))
     }
 
-    pub fn is_target(&self, task_id: &str) -> bool {
+    pub fn is_target(&self, task_id: &ContextualTaskId) -> bool {
         self.target_task_ids.contains(task_id)
     }
 
-    pub fn mark_completed(&mut self, task_id: String, code: i32) {
+    pub fn mark_completed(&mut self, task_id: ContextualTaskId, code: i32) {
         if self.target_task_ids.contains(&task_id) {
             self.completed_tasks.insert(task_id);
             if code != 0 {
@@ -71,14 +71,14 @@ pub trait TaskRunHandler: Send {
         let _ = ctx;
     }
 
-    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, task_id: &str, line: &str, stream: &str);
+    async fn on_output_line(&mut self, ctx: &mut TaskRunContext, task_id: &ContextualTaskId, line: &str, stream: &str);
 
-    async fn on_task_started(&mut self, ctx: &mut TaskRunContext, task_id: &str, is_target: bool);
+    async fn on_task_started(&mut self, ctx: &mut TaskRunContext, task_id: &ContextualTaskId, is_target: bool);
 
     async fn on_task_completed(
         &mut self,
         ctx: &mut TaskRunContext,
-        task_id: &str,
+        task_id: &ContextualTaskId,
         exit_code: i32,
         is_target: bool,
     );
@@ -86,7 +86,7 @@ pub trait TaskRunHandler: Send {
     async fn on_task_cancelled(
         &mut self,
         ctx: &mut TaskRunContext,
-        task_id: &str,
+        task_id: &ContextualTaskId,
         is_target: bool,
     ) {
         let _ = (ctx, task_id, is_target);

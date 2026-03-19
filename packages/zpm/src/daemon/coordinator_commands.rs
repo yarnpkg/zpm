@@ -100,7 +100,7 @@ pub enum CoordinatorCommand {
 
     /// Get buffered output for a task.
     GetTaskOutput {
-        task_id: String,
+        task_id: ContextualTaskId,
         response_tx: oneshot::Sender<Vec<BufferedOutputLine>>,
     },
 
@@ -134,8 +134,8 @@ pub enum CoordinatorCommand {
     /// Add tasks to an existing subscription.
     AddTasksToSubscription {
         subscription_id: SubscriptionId,
-        target_task_ids: Vec<String>,
-        dependency_task_ids: Vec<String>,
+        target_task_ids: Vec<ContextualTaskId>,
+        dependency_task_ids: Vec<ContextualTaskId>,
     },
 
     /// Remove a subscription.
@@ -170,9 +170,9 @@ pub enum TaskCompletionResult {
 #[derive(Debug)]
 pub struct PushTasksResult {
     /// The directly requested task IDs
-    pub task_ids: Vec<String>,
+    pub task_ids: Vec<ContextualTaskId>,
     /// Dependency task IDs (excluding target tasks)
-    pub dependency_ids: Vec<String>,
+    pub dependency_ids: Vec<ContextualTaskId>,
     /// Long-lived tasks that we attached to (already running)
     pub attached_long_lived: Vec<AttachedLongLivedTask>,
     /// Error message if the operation failed
@@ -196,8 +196,8 @@ pub struct StopTaskResult {
 /// Information about a long-lived task.
 #[derive(Debug, Clone)]
 pub struct LongLivedTaskInfo {
-    pub task_id: String,
-    pub contextual_task_id: String,
+    pub task_id: zpm_tasks::TaskId,
+    pub contextual_task_id: ContextualTaskId,
     pub warm_up_complete: bool,
     pub started_at_ms: u64,
     pub process_id: Option<u32>,

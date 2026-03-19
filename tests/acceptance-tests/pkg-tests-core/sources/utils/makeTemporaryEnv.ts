@@ -40,6 +40,8 @@ const baseEnv = (nativePath: string, nativeHomePath: string, registryUrl: string
   [`NODE_SKIP_PLATFORM_CHECK`]: `1`,
   // We don't want the PnP runtime to be accidentally injected
   [`NODE_OPTIONS`]: ``,
+  // Shorter warmup for faster tests (production default is 1s)
+  [`YARN_DAEMON_DEFAULT_WARMUP_PERIOD`]: `500ms`,
   ...rcEnv,
   ...env,
 });
