@@ -229,21 +229,30 @@ async fn poll_notifications(
     if receivers.is_empty() {
         std::future::pending::<Option<DaemonNotification>>().await
     } else {
+        let mut start = 0usize;
         futures::future::poll_fn(|cx| {
-            let mut i = 0;
-            while i < receivers.len() {
+            let mut polled = 0;
+            while polled < receivers.len() {
+                let i = (start + polled) % receivers.len();
                 match receivers[i].poll_recv(cx) {
                     std::task::Poll::Ready(Some(notif)) => {
+                        start = (i + 1) % receivers.len();
                         return std::task::Poll::Ready(Some(notif));
                     }
                     std::task::Poll::Ready(None) => {
                         receivers.swap_remove(i);
+                        // Don't increment polled: the swapped-in element
+                        // now sits at index i and still needs polling.
                     }
                     std::task::Poll::Pending => {
-                        i += 1;
+                        polled += 1;
                     }
                 }
             }
+            if receivers.is_empty() {
+                return std::task::Poll::Pending;
+            }
+            start = (start + 1) % receivers.len();
             std::task::Poll::Pending
         })
         .await

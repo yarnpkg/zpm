@@ -1,4 +1,4 @@
-import {ppath, xfs} from '@yarnpkg/fslib';
+import {ppath, xfs}  from '@yarnpkg/fslib';
 
 import {RunFunction} from '../../../../pkg-tests-core/sources/utils/tests';
 
@@ -56,7 +56,7 @@ describe(`Commands`, () => {
         const lines = stdout.trim().split(`\n`);
         expect(lines).toHaveLength(1);
 
-        expect(JSON.parse(lines[0])).toEqual({
+        expect(JSON.parse(lines[0]!)).toEqual({
           workspace: `test-package`,
           taskName: `server`,
           status: {

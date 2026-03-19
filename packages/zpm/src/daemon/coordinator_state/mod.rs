@@ -397,5 +397,7 @@ fn topological_sort(
         }
     }
 
+    debug_assert_eq!(result.len(), tasks.len(), "topological_sort: cycle detected — {} tasks not processed", tasks.len() - result.len());
+
     result
 }
