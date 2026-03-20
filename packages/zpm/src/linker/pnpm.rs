@@ -45,6 +45,17 @@ fn collect_hoistable_packages<'a>(tree: &'a ResolutionTree, patterns: &[IdentGlo
     hoistable
 }
 
+fn create_symlink_entry(link_abs_path: &Path, symlink_target: &Path) -> Result<(), Error> {
+    link_abs_path
+        .fs_rm_file_blocking()
+        .ok_missing()?
+        .unwrap_or(link_abs_path)
+        .fs_create_parent_blocking()?
+        .fs_symlink(symlink_target)?;
+
+    Ok(())
+}
+
 pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -> Result<LinkResult, Error> {
     let tree
         = &install.install_state.resolution_tree;
@@ -184,12 +195,9 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         let symlink_target = package_abs_path
             .relative_to(&link_abs_dirname);
 
-        link_abs_path
-            .fs_rm_file()
-            .ok_missing()?
-            .unwrap_or(&link_abs_path)
-            .fs_create_parent()?
-            .fs_symlink(&symlink_target)?;
+        tokio::task::spawn_blocking(move || {
+            create_symlink_entry(&link_abs_path, &symlink_target)
+        }).await??;
     }
 
     // Track which packages are direct dependencies of workspaces
@@ -230,12 +238,9 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             = package_abs_path
                 .relative_to(&link_abs_dirname);
 
-        link_abs_path
-            .fs_rm_file()
-            .ok_missing()?
-            .unwrap_or(&link_abs_path)
-            .fs_create_parent()?
-            .fs_symlink(&symlink_target)?;
+        tokio::task::spawn_blocking(move || {
+            create_symlink_entry(&link_abs_path, &symlink_target)
+        }).await??;
     }
 
     // Second pass: create symlinks in node_modules directories
@@ -294,12 +299,9 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 = dep_abs_path
                     .relative_to(&link_abs_dirname);
 
-            link_abs_path
-                .fs_rm_file()
-                .ok_missing()?
-                .unwrap_or(&link_abs_path)
-                .fs_create_parent()?
-                .fs_symlink(&symlink_target)?;
+            tokio::task::spawn_blocking(move || {
+                create_symlink_entry(&link_abs_path, &symlink_target)
+            }).await??;
         }
     }
 

@@ -54,13 +54,13 @@ impl Link {
         let manifest_path
             = root_path.with_join_str(MANIFEST_NAME);
         let manifest_content
-            = manifest_path.fs_read_prealloc()?;
+            = manifest_path.fs_read_prealloc().await?;
         let mut document
             = JsonDocument::new(manifest_content)?;
 
         for destination in &self.destinations {
             let canonical_destination
-                = destination.fs_canonicalize()?;
+                = destination.fs_canonicalize().await?;
 
             // Prevent linking a project to itself
             if root_path.contains(&canonical_destination) || canonical_destination.contains(root_path) {
@@ -100,7 +100,7 @@ impl Link {
             }
         }
 
-        manifest_path.fs_change(&document.input, false)?;
+        manifest_path.fs_change(&document.input, false).await?;
 
         Ok(())
     }

@@ -154,7 +154,7 @@ impl<TController: DiffController> DiffFinder<TController> {
 
         let directory_entries
             = abs_path
-                .fs_read_dir()?
+                .fs_read_dir_blocking()?
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()?;
 

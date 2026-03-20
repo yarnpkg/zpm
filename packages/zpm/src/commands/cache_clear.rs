@@ -1,5 +1,4 @@
 use clipanion::cli;
-use itertools::Itertools;
 use zpm_utils::{DataType, IoResultExt, Path};
 
 use crate::{error::Error, project, report::{StreamReport, StreamReportConfig, current_report, with_report_result}};
@@ -48,28 +47,34 @@ async fn clear_cache(old: bool) -> Result<(), Error> {
     });
 
     with_report_result(report, async {
-        let cache_entries
-            = project.global_cache_path()
-                .fs_read_dir()
-                .ok_missing()?;
+        let cache_entries = match project.global_cache_path()
+            .fs_read_dir()
+            .await
+            .ok_missing()?
+        {
+            Some(cache_entries) => cache_entries,
+            None => {
+                current_report().await.as_ref().map(|report| {
+                    report.info("No entries to clear from the cache.".to_string());
+                });
+                return Ok(());
+            },
+        };
 
-        let mut cleared_entries
-            = 0;
+        let mut entries_to_delete = Vec::new();
+        let mut cache_entries = cache_entries;
+        while let Some(entry) = cache_entries.next_entry().await? {
+            let entry = Path::try_from(entry.path())?;
 
-        if let Some(cache_entries) = cache_entries {
-            let cache_entries = cache_entries
-                .filter_map(|entry| entry.ok())
-                .map(|entry| Path::try_from(entry.path()))
-                .filter_map(|entry| entry.ok())
-                .filter(|entry| !old || age_filter(entry))
-                .collect_vec();
-
-            cleared_entries
-                = cache_entries.len();
-
-            for entry in &cache_entries {
-                entry.fs_rm().ok_missing()?;
+            if !old || age_filter(&entry) {
+                entries_to_delete.push(entry);
             }
+        }
+
+        let cleared_entries = entries_to_delete.len();
+
+        for entry in &entries_to_delete {
+            entry.fs_rm().await.ok_missing()?;
         }
 
         current_report().await.as_ref().map(|report| {

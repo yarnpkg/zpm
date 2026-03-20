@@ -266,7 +266,7 @@ impl Add {
             .with_join_str(project::MANIFEST_NAME);
 
         let manifest_content = manifest_path
-            .fs_read_prealloc()?;
+            .fs_read_prealloc().await?;
 
         let mut document
             = JsonDocument::new(manifest_content)?;
@@ -318,7 +318,7 @@ impl Add {
         }
 
         manifest_path
-            .fs_change(&document.input, false)?;
+            .fs_change(&document.input, false).await?;
 
         let mut project
             = project::Project::new(None).await?;

@@ -212,13 +212,13 @@ impl ZipSupport for Path {
 
         match parsed {
             pnp::fs::VPath::Native(_) => {
-                Ok(self.fs_read_text_prealloc()?)
+                Ok(self.fs_read_text_prealloc_blocking()?)
             },
 
             pnp::fs::VPath::Virtual(info) => {
                 let file_data
                     = Path::try_from(info.physical_base_path()).unwrap()
-                        .fs_read_text_prealloc()?;
+                        .fs_read_text_prealloc_blocking()?;
 
                 Ok(file_data)
             },
@@ -226,7 +226,7 @@ impl ZipSupport for Path {
             pnp::fs::VPath::Zip(info) => {
                 let zip_data
                     = Path::try_from(info.physical_base_path()).unwrap()
-                        .fs_read_prealloc()?;
+                        .fs_read_prealloc_blocking()?;
 
                 let file_data = Path::try_from(info.zip_path)?
                     .fs_read_text_from_zip_buffer(&zip_data)?;

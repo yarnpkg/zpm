@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}};
 
 use rkyv::Archive;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{diff_data, impl_file_string_from_str, impl_file_string_serialization, path_resolve::resolve_path, DataType, FromFileString, IoResultExt, PathError, PathIterator, ToFileString, ToHumanString};
 
@@ -407,20 +408,37 @@ impl Path {
         Ok(())
     }
 
-    pub fn fs_canonicalize(&self) -> Result<Path, PathError> {
+    pub fn fs_canonicalize_blocking(&self) -> Result<Path, PathError> {
         Ok(Path::try_from(std::fs::canonicalize(&self.path)?)?)
     }
 
-    pub fn fs_create_parent(&self) -> Result<&Self, PathError> {
+    pub async fn fs_canonicalize(&self) -> Result<Path, PathError> {
+        Ok(Path::try_from(tokio::fs::canonicalize(&self.path).await?)?)
+    }
+
+    pub fn fs_create_parent_blocking(&self) -> Result<&Self, PathError> {
         if let Some(parent) = self.dirname() {
-            parent.fs_create_dir_all()?;
+            parent.fs_create_dir_all_blocking()?;
         }
 
         Ok(self)
     }
 
-    pub fn fs_create_dir_all(&self) -> Result<&Self, PathError> {
+    pub async fn fs_create_parent(&self) -> Result<&Self, PathError> {
+        if let Some(parent) = self.dirname() {
+            parent.fs_create_dir_all().await?;
+        }
+
+        Ok(self)
+    }
+
+    pub fn fs_create_dir_all_blocking(&self) -> Result<&Self, PathError> {
         std::fs::create_dir_all(&self.path)?;
+        Ok(self)
+    }
+
+    pub async fn fs_create_dir_all(&self) -> Result<&Self, PathError> {
+        tokio::fs::create_dir_all(&self.path).await?;
         Ok(self)
     }
 
@@ -442,8 +460,12 @@ impl Path {
         Ok(std::fs::metadata(&self.path)?)
     }
 
-    pub fn fs_exists(&self) -> bool {
+    pub fn fs_exists_blocking(&self) -> bool {
         self.fs_metadata().is_ok()
+    }
+
+    pub async fn fs_exists(&self) -> bool {
+        tokio::fs::try_exists(&self.path).await.unwrap_or(false)
     }
 
     pub fn fs_is_symlink(&self) -> bool {
@@ -463,7 +485,7 @@ impl Path {
     }
 
     pub fn if_exists(&self) -> Option<Path> {
-        if self.fs_exists() {
+        if self.fs_exists_blocking() {
             Some(self.clone())
         } else {
             None
@@ -486,14 +508,31 @@ impl Path {
         }
     }
 
-    pub fn fs_read(&self) -> Result<Vec<u8>, PathError> {
+    pub fn fs_read_blocking(&self) -> Result<Vec<u8>, PathError> {
         Ok(std::fs::read(&self.to_path_buf())?)
     }
 
-    pub fn fs_read_prealloc(&self) -> Result<Vec<u8>, PathError> {
+    pub async fn fs_read(&self) -> Result<Vec<u8>, PathError> {
+        Ok(tokio::fs::read(self.to_path_buf()).await?)
+    }
+
+    pub fn fs_read_prealloc_blocking(&self) -> Result<Vec<u8>, PathError> {
         let metadata = self.fs_metadata()?;
 
         Ok(self.fs_read_with_size(metadata.len())?)
+    }
+
+    pub async fn fs_read_prealloc(&self) -> Result<Vec<u8>, PathError> {
+        let metadata
+            = tokio::fs::metadata(self.to_path_buf()).await?;
+
+        let mut data = Vec::with_capacity(metadata.len() as usize);
+
+        let mut file
+            = tokio::fs::File::open(self.to_path_buf()).await?;
+        file.read_to_end(&mut data).await?;
+
+        Ok(data)
     }
 
     pub fn fs_read_with_size(&self, size: u64) -> Result<Vec<u8>, PathError> {
@@ -505,14 +544,27 @@ impl Path {
         Ok(data)
     }
 
-    pub fn fs_read_text(&self) -> Result<String, PathError> {
+    pub fn fs_read_text_blocking(&self) -> Result<String, PathError> {
         Ok(std::fs::read_to_string(self.to_path_buf())?)
     }
 
-    pub fn fs_read_text_prealloc(&self) -> Result<String, PathError> {
+    pub fn fs_read_text_prealloc_blocking(&self) -> Result<String, PathError> {
         let metadata = self.fs_metadata()?;
 
         Ok(self.fs_read_text_with_size(metadata.len())?)
+    }
+
+    pub async fn fs_read_text_prealloc(&self) -> Result<String, PathError> {
+        let metadata
+            = tokio::fs::metadata(self.to_path_buf()).await?;
+
+        let mut data = String::with_capacity(metadata.len() as usize);
+
+        let mut file
+            = tokio::fs::File::open(self.to_path_buf()).await?;
+        file.read_to_string(&mut data).await?;
+
+        Ok(data)
     }
 
     pub fn fs_read_text_with_size(&self, size: u64) -> Result<String, PathError> {
@@ -524,21 +576,35 @@ impl Path {
         Ok(data)
     }
 
-    pub async fn fs_read_text_async(&self) -> Result<String, PathError> {
+    pub async fn fs_read_text(&self) -> Result<String, PathError> {
         Ok(tokio::fs::read_to_string(self.to_path_buf()).await?)
     }
 
-    pub fn fs_read_dir(&self) -> Result<std::fs::ReadDir, PathError> {
+    pub fn fs_read_dir_blocking(&self) -> Result<std::fs::ReadDir, PathError> {
         Ok(std::fs::read_dir(&self.to_path_buf())?)
     }
 
-    pub fn fs_write<T: AsRef<[u8]>>(&self, data: T) -> Result<&Self, PathError> {
+    pub async fn fs_read_dir(&self) -> Result<tokio::fs::ReadDir, PathError> {
+        Ok(tokio::fs::read_dir(&self.to_path_buf()).await?)
+    }
+
+    pub fn fs_write_blocking<T: AsRef<[u8]>>(&self, data: T) -> Result<&Self, PathError> {
         std::fs::write(self.to_path_buf(), data)?;
         Ok(self)
     }
 
-    pub fn fs_write_text<T: AsRef<str>>(&self, text: T) -> Result<&Self, PathError> {
+    pub async fn fs_write<T: AsRef<[u8]>>(&self, data: T) -> Result<&Self, PathError> {
+        tokio::fs::write(self.to_path_buf(), data).await?;
+        Ok(self)
+    }
+
+    pub fn fs_write_text_blocking<T: AsRef<str>>(&self, text: T) -> Result<&Self, PathError> {
         std::fs::write(self.to_path_buf(), text.as_ref())?;
+        Ok(self)
+    }
+
+    pub async fn fs_write_text<T: AsRef<str>>(&self, text: T) -> Result<&Self, PathError> {
+        tokio::fs::write(self.to_path_buf(), text.as_ref()).await?;
         Ok(self)
     }
 
@@ -551,7 +617,7 @@ impl Path {
         Ok(self)
     }
 
-    pub fn fs_append<T: AsRef<[u8]>>(&self, data: T) -> Result<&Self, PathError> {
+    pub fn fs_append_blocking<T: AsRef<[u8]>>(&self, data: T) -> Result<&Self, PathError> {
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .create(true)
@@ -562,8 +628,24 @@ impl Path {
         Ok(self)
     }
 
-    pub fn fs_append_text<T: AsRef<str>>(&self, text: T) -> Result<&Self, PathError> {
-        self.fs_append(text.as_ref())
+    pub async fn fs_append<T: AsRef<[u8]>>(&self, data: T) -> Result<&Self, PathError> {
+        let mut file = tokio::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&self.to_path_buf())
+            .await?;
+
+        file.write_all(data.as_ref()).await?;
+
+        Ok(self)
+    }
+
+    pub fn fs_append_text_blocking<T: AsRef<str>>(&self, text: T) -> Result<&Self, PathError> {
+        self.fs_append_blocking(text.as_ref())
+    }
+
+    pub async fn fs_append_text<T: AsRef<str>>(&self, text: T) -> Result<&Self, PathError> {
+        self.fs_append(text.as_ref()).await
     }
 
     pub fn fs_sync_dir(&self, mut entries: BTreeMap<Path, SyncEntryKind>) -> Result<&Self, SyncError> {
@@ -606,7 +688,7 @@ impl Path {
             let path_abs
                 = self.with_join(&path_rel);
 
-            for entry in path_abs.fs_read_dir()? {
+            for entry in path_abs.fs_read_dir_blocking()? {
                 let entry = entry
                     .map_err(PathError::from)?;
 
@@ -621,7 +703,7 @@ impl Path {
                     .with_join_str(&file_name);
 
                 if entries.remove(&entry_rel_path).is_none() {
-                    entry_abs_path.fs_rm()?;
+                    entry_abs_path.fs_rm_blocking()?;
                     continue;
                 };
 
@@ -647,16 +729,16 @@ impl Path {
                 => self.fs_symlink(&target),
 
             SyncEntryKind::File(data, is_exec)
-                => self.fs_change(&data, is_exec),
+                => self.fs_change_blocking(&data, is_exec),
 
             SyncEntryKind::Folder
-                => self.fs_create_dir_all(),
+                => self.fs_create_dir_all_blocking(),
         }
     }
 
     pub fn fs_expect<T: AsRef<[u8]>>(&self, expected_data: T, is_exec: bool) -> Result<&Self, PathError> {
         let current_content
-            = self.fs_read()
+            = self.fs_read_blocking()
                 .ok_missing()?;
 
         let update_content = current_content.as_ref()
@@ -697,10 +779,10 @@ impl Path {
         Ok(self)
     }
 
-    pub fn fs_change<T: AsRef<[u8]>>(&self, data: T, is_exec: bool) -> Result<&Self, PathError> {
+    pub fn fs_change_blocking<T: AsRef<[u8]>>(&self, data: T, is_exec: bool) -> Result<&Self, PathError> {
         let path_buf = self.to_path_buf();
 
-        let update_content = self.fs_read()
+        let update_content = self.fs_read_blocking()
             .ok_missing()
             .map(|current| current.map(|current| current.ne(data.as_ref())).unwrap_or(true))?;
 
@@ -731,6 +813,40 @@ impl Path {
         Ok(self)
     }
 
+    pub async fn fs_change<T: AsRef<[u8]>>(&self, data: T, is_exec: bool) -> Result<&Self, PathError> {
+        let path_buf = self.to_path_buf();
+
+        let update_content = self.fs_read().await
+            .ok_missing()
+            .map(|current| current.map(|current| current.ne(data.as_ref())).unwrap_or(true))?;
+
+        if update_content {
+            tokio::fs::write(&path_buf, data).await?;
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let current_mode
+                = tokio::fs::metadata(&path_buf).await?
+                    .permissions()
+                    .mode() & 0o666;
+
+            let expected_mode
+                = current_mode | (if is_exec {0o111} else {0});
+
+            if current_mode != expected_mode {
+                let expected_permissions
+                    = std::fs::Permissions::from_mode(expected_mode);
+
+                tokio::fs::set_permissions(&path_buf, expected_permissions).await?;
+            }
+        }
+
+        Ok(self)
+    }
+
     /**
      * Rename a file or directory to a new location.
      *
@@ -751,8 +867,8 @@ impl Path {
     pub fn fs_copy(&self, new_path: &Path) -> Result<&Self, PathError> {
         match self.fs_is_dir() {
             true => {
-                new_path.fs_create_dir_all()?;
-                for entry in self.fs_read_dir()? {
+                new_path.fs_create_dir_all_blocking()?;
+                for entry in self.fs_read_dir_blocking()? {
                     let entry = entry?;
                     let entry_path = Path::try_from(entry.path())?;
 
@@ -782,7 +898,7 @@ impl Path {
             Ok(_) => Ok(self),
             Err(err) if err.kind() == std::io::ErrorKind::CrossesDevices => {
                 self.fs_copy(new_path)?;
-                self.fs_rm()
+                self.fs_rm_blocking()
             },
             Err(err) => Err(err.into()),
         }
@@ -802,16 +918,34 @@ impl Path {
             .map(|_| self)
     }
 
-    pub fn fs_rm_file(&self) -> Result<&Self, PathError> {
+    pub fn fs_rm_file_blocking(&self) -> Result<&Self, PathError> {
         std::fs::remove_file(self.to_path_buf())?;
         Ok(self)
     }
 
-    pub fn fs_rm(&self) -> Result<&Self, PathError> {
+    pub async fn fs_rm_file(&self) -> Result<&Self, PathError> {
+        tokio::fs::remove_file(self.to_path_buf()).await?;
+        Ok(self)
+    }
+
+    pub fn fs_rm_blocking(&self) -> Result<&Self, PathError> {
         match self.fs_is_real_dir() {
             true => std::fs::remove_dir_all(self.to_path_buf()),
             false => std::fs::remove_file(self.to_path_buf()),
         }?;
+
+        Ok(self)
+    }
+
+    pub async fn fs_rm(&self) -> Result<&Self, PathError> {
+        let metadata
+            = tokio::fs::symlink_metadata(self.to_path_buf()).await?;
+
+        if metadata.is_dir() {
+            tokio::fs::remove_dir_all(self.to_path_buf()).await?;
+        } else {
+            tokio::fs::remove_file(self.to_path_buf()).await?;
+        }
 
         Ok(self)
     }

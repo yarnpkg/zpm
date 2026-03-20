@@ -104,7 +104,7 @@ async fn install_native_from_zpm(source: &cache::CacheKey, binary_name: &Path) -
 
 async fn install_node_js_from_url(source: &cache::CacheKey) -> Result<Command, Error> {
     let cache_path = cache::ensure(source, |p| async move {
-        p.with_join_str("bin.js").fs_write(fetch(&source.to_url()).await?)?;
+        p.with_join_str("bin.js").fs_write(fetch(&source.to_url()).await?).await?;
         Ok(())
     }).await?;
 

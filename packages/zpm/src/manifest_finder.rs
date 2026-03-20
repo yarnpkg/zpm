@@ -35,7 +35,7 @@ impl CachedManifestFinder {
 
         let save_state
             = save_state_path
-                .fs_read_prealloc()
+                .fs_read_prealloc_blocking()
                 .ok()
                 .and_then(|save_data| CacheState::from_slice(&save_data).ok())
                 .unwrap_or_default();
@@ -58,8 +58,8 @@ impl CachedManifestFinder {
 
     fn save_state_file(&self, data: &[u8]) -> Result<(), Error> {
         self.save_state_path
-            .fs_create_parent()?
-            .fs_write(&data)?;
+            .fs_create_parent_blocking()?
+            .fs_write_blocking(&data)?;
 
         Ok(())
     }

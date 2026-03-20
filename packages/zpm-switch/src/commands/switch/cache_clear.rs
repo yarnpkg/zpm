@@ -23,13 +23,12 @@ impl CacheClearCommand {
             = cache::cache_dir()?;
 
         if self.old {
-            let Some(cache_entries) = cache_dir.fs_read_dir().ok_missing()? else {
-                return Ok(());
+            let mut cache_entries = match cache_dir.fs_read_dir().await.ok_missing()? {
+                Some(cache_entries) => cache_entries,
+                None => return Ok(()),
             };
 
-            for entry in cache_entries {
-                let entry
-                    = entry?;
+            while let Some(entry) = cache_entries.next_entry().await? {
 
                 let entry_path
                     = Path::try_from(entry.path())?;
@@ -41,12 +40,13 @@ impl CacheClearCommand {
                 };
 
                 if entry_last_used.elapsed().unwrap() > std::time::Duration::from_secs(60 * 60 * 24 * 7) {
-                    entry_path.fs_rm().ok_missing()?;
+                    entry_path.fs_rm().await.ok_missing()?;
                 }
             }
         } else {
             cache_dir
                 .fs_rm()
+                .await
                 .ok_missing()?;
         }
 

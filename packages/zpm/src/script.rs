@@ -27,7 +27,7 @@ fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &Vec<String>
 
         bin_dir
             .with_join_str(format!("{}.cmd", name))
-            .fs_write_text(&cmd_script)?;
+            .fs_write_text_blocking(&cmd_script)?;
     } else {
         let sh_script = format!(
             "#!/bin/sh\nexec \"{}\" {} \"$@\"\n",
@@ -37,7 +37,7 @@ fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &Vec<String>
 
         bin_dir
             .with_join_str(name)
-            .fs_write_text(&sh_script)?
+            .fs_write_text_blocking(&sh_script)?
             .fs_set_permissions(Permissions::from_mode(0o755))?;
     }
 
@@ -255,7 +255,7 @@ impl ScriptResult {
 
                     // open a fd and write stdout/err into it
                     let log_write = log_path
-                        .fs_write_text(format!("=== COMMAND ===\n\n{}\n\n=== STDOUT ===\n\n{}\n=== STDERR ===\n\n{}", shell_line, stdout, stderr));
+                        .fs_write_text_blocking(format!("=== COMMAND ===\n\n{}\n\n=== STDOUT ===\n\n{}\n=== STDERR ===\n\n{}", shell_line, stdout, stderr));
 
                     if log_write.is_ok() {
                         Err(Error::ChildProcessFailedWithLog(program, log_path))
@@ -534,19 +534,19 @@ impl ScriptEnvironment {
             .expect("Expected home directory")
             .with_join_str(&dir_name);
 
-        if !dir.fs_exists() {
+        if !dir.fs_exists_blocking() {
             let temp_dir
                 = Path::temp_dir()?;
 
             temp_dir
-                .fs_create_dir_all()?;
+                .fs_create_dir_all_blocking()?;
 
             for binary in &self.binaries.binaries {
                 make_path_wrapper(&temp_dir, &binary.name, &binary.argv0, &binary.args)?;
             }
 
             dir
-                .fs_create_parent()?;
+                .fs_create_parent_blocking()?;
 
             temp_dir
                 .fs_concurrent_move(&dir)?;

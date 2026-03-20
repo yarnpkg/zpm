@@ -26,7 +26,7 @@ impl LinkCommand {
 
         set_link(&Link {
             project_cwd: detected_root_path.clone(),
-            link_target: LinkTarget::Local {bin_path: self.path.fs_canonicalize()?},
+            link_target: LinkTarget::Local {bin_path: self.path.fs_canonicalize().await?},
         })?;
 
         println!(

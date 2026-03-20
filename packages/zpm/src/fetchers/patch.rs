@@ -9,6 +9,10 @@ use crate::{
 
 use super::PackageData;
 
+fn read_text_with_zip_sync(path: zpm_utils::Path) -> Result<String, Error> {
+    Ok(path.fs_read_text_with_zip()?)
+}
+
 const BUILTIN_PATCHES: &[(&str, &[u8])] = &[
     ("fsevents", std::include_bytes!("../../patches/fsevents.brotli.dat")),
     ("resolve", std::include_bytes!("../../patches/resolve.brotli.dat")),
@@ -58,18 +62,20 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         },
 
         path if path.starts_with("~/") => {
-            project.project_cwd
-                .with_join_str(&path[2..])
-                .fs_read_text_with_zip()?
+            tokio::task::spawn_blocking({
+                let path = project.project_cwd.with_join_str(&path[2..]);
+                move || read_text_with_zip_sync(path)
+            }).await??
         },
 
         path => {
             let parent_data
                 = parent_data.expect("Expected parent data to be fetched when the patchfile is relative to the parent package");
 
-            parent_data.package_data.context_directory()
-                .with_join_str(path)
-                .fs_read_text_with_zip()?
+            tokio::task::spawn_blocking({
+                let path = parent_data.package_data.context_directory().with_join_str(path);
+                move || read_text_with_zip_sync(path)
+            }).await??
         },
     };
 
@@ -104,7 +110,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let cached_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
         // Extract owned data from references before spawn_blocking
         let original_bytes = match &original_data.package_data {
-            PackageData::Zip {archive_path, ..} => Some(archive_path.fs_read()?),
+            PackageData::Zip {archive_path, ..} => Some(archive_path.fs_read().await?),
             _ => None,
         };
 

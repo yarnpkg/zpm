@@ -15,7 +15,7 @@ pub fn find_root(initial_cwd: &Path) -> Result<Path, Error> {
         let git_path = parent
             .with_join_str(".git");
 
-        if git_path.fs_exists() {
+        if git_path.fs_exists_blocking() {
             return Ok(parent);
         }
     }

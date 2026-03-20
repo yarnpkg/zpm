@@ -190,8 +190,8 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
     ].join("");
 
     project.pnp_path()
-        .fs_create_parent()?
-        .fs_change(script, false)?;
+        .fs_create_parent_blocking()?
+        .fs_change_blocking(script, false)?;
 
     Ok(())
 }
@@ -213,13 +213,29 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
     ].join("");
 
     project.pnp_path()
-        .fs_create_parent()?
-        .fs_change(script, false)?;
+        .fs_create_parent_blocking()?
+        .fs_change_blocking(script, false)?;
 
     project.pnp_data_path()
-        .fs_create_parent()?
-        .fs_change(JsonDocument::to_string(&state)?, false)?;
+        .fs_create_parent_blocking()?
+        .fs_change_blocking(JsonDocument::to_string(&state)?, false)?;
 
+    Ok(())
+}
+
+fn collect_unplugged_entries(path: Path) -> Result<BTreeSet<Path>, Error> {
+    Ok(path.fs_read_dir_blocking()
+        .ok_missing()?
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| Path::try_from(entry.path()).ok())
+        .collect::<BTreeSet<_>>())
+}
+
+fn apply_node_modules_sync(path: Path, entries: BTreeMap<Path, SyncEntryKind>) -> Result<(), Error> {
+    path.fs_sync_dir(entries)
+        .map_err(Error::from)?;
     Ok(())
 }
 
@@ -256,14 +272,10 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
     let unplugged_path
         = project.unplugged_path();
 
-    let mut extraneous_unplugged_packages
-        = unplugged_path.fs_read_dir()
-            .ok_missing()?
-            .into_iter()
-            .flatten()
-            .filter_map(|entry| entry.ok())
-            .filter_map(|entry| Path::try_from(entry.path()).ok())
-            .collect::<BTreeSet<_>>();
+    let mut extraneous_unplugged_packages = tokio::task::spawn_blocking({
+        let unplugged_path = unplugged_path.clone();
+        move || collect_unplugged_entries(unplugged_path)
+    }).await??;
 
     let mut concrete_unplugged_packages
         = BTreeMap::new();
@@ -406,7 +418,8 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
                             .with_join_str(format!("build/{}", locator.slug()));
 
                     build_dir
-                        .fs_create_dir_all()?;
+                        .fs_create_dir_all()
+                        .await?;
 
                     build_dir.relative_to(&project.project_cwd)
                 },
@@ -428,7 +441,7 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
     }
 
     for path in extraneous_unplugged_packages {
-        path.fs_rm()?;
+        path.fs_rm().await?;
     }
 
     // Native dynamic libraries sometimes have runtime dependencies on other dynamic libraries. They
@@ -466,11 +479,15 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
             );
         }
 
-        package_location_abs
-            .with_join_str("node_modules")
-            .fs_create_dir_all()?
-            .fs_sync_dir(symlinks_to_create)
-            .map_err(Error::from)?;
+        let node_modules_path = package_location_abs
+            .with_join_str("node_modules");
+        node_modules_path
+            .fs_create_dir_all()
+            .await?;
+
+        tokio::task::spawn_blocking(move || {
+            apply_node_modules_sync(node_modules_path, symlinks_to_create)
+        }).await??;
     }
 
     for descriptor in &install.roots {
@@ -546,7 +563,7 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
     }
 
     project.pnp_loader_path()
-        .fs_change(&misc::unpack_brotli_data(PNP_MJS_TEMPLATE)?, false)?;
+        .fs_change(&misc::unpack_brotli_data(PNP_MJS_TEMPLATE)?, false).await?;
 
     let package_build_dependencies = linker::helpers::populate_build_entry_dependencies(
         &package_build_entries,

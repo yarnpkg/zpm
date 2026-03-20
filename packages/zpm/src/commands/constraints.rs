@@ -55,7 +55,7 @@ impl Constraints {
                     .with_join_str("package.json");
 
                 let manifest_content = manifest_path
-                    .fs_read_prealloc()?;
+                    .fs_read_prealloc().await?;
 
                 let mut document
                     = JsonDocument::new(manifest_content)?;
@@ -75,7 +75,7 @@ impl Constraints {
 
                 // Write the formatted result back
                 manifest_path
-                    .fs_change(&document.input, false)?;
+                    .fs_change(&document.input, false).await?;
             }
 
             let should_break = false

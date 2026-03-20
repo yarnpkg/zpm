@@ -132,8 +132,8 @@ impl<'a> Entry<'a> {
 pub fn entries_to_disk<'a>(entries: &[Entry<'a>], base: &Path) -> Result<(), Error> {
     for entry in entries {
         base.with_join(&entry.name)
-            .fs_create_parent()?
-            .fs_change(&entry.data, entry.mode & 0o111 == 0o111)?;
+            .fs_create_parent_blocking()?
+            .fs_change_blocking(&entry.data, entry.mode & 0o111 == 0o111)?;
     }
 
     Ok(())
@@ -144,7 +144,7 @@ pub fn entries_from_folder<'a>(path: &Path) -> Result<Vec<Entry<'a>>, Error> {
     let mut process_queue = vec![path.clone()];
 
     while let Some(path) = process_queue.pop() {
-        let listing = path.fs_read_dir()?;
+        let listing = path.fs_read_dir_blocking()?;
 
         for entry in listing {
             let entry = entry?;
@@ -156,7 +156,7 @@ pub fn entries_from_folder<'a>(path: &Path) -> Result<Vec<Entry<'a>>, Error> {
             }
 
             let name = Path::try_from(entry.file_name().into_string()?)?;
-            let data = path.fs_read()?;
+            let data = path.fs_read_blocking()?;
             let metadata = path.fs_metadata()?;
 
             let is_exec = metadata.permissions().mode() & 0o111 != 0;
@@ -182,7 +182,7 @@ pub fn entries_from_files<'a>(base: &Path, files: &[Path]) -> Result<Vec<Entry<'
         let abs_path = base
             .with_join(rel_path);
 
-        let data = abs_path.fs_read()?;
+        let data = abs_path.fs_read_blocking()?;
         let metadata = abs_path.fs_metadata()?;
 
         let is_exec = metadata.permissions().mode() & 0o111 != 0;

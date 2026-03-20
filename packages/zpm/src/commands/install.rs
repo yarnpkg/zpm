@@ -123,7 +123,7 @@ fn sort_workspace_dependencies(project: &project::Project) -> Result<(), Error> 
             .with_join_str("package.json");
 
         let manifest_content = manifest_path
-            .fs_read_prealloc()?;
+            .fs_read_prealloc_blocking()?;
 
         let mut document
             = JsonDocument::new(manifest_content)?;
@@ -146,7 +146,7 @@ fn sort_workspace_dependencies(project: &project::Project) -> Result<(), Error> 
 
         if any_sorted {
             manifest_path
-                .fs_change(&document.input, false)?;
+                .fs_change_blocking(&document.input, false)?;
         }
     }
 

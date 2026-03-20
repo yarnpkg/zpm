@@ -30,7 +30,7 @@ impl LogoutAll {
             };
 
             let config_content = config_path
-                .fs_read_text()?;
+                .fs_read_text().await?;
 
             let mut doc
                 = DataDocument::new(config_content.into_bytes())?;
@@ -54,7 +54,7 @@ impl LogoutAll {
                     .expect("Document was originally valid UTF-8");
 
             config_path
-                .fs_write_text(&updated_content)?;
+                .fs_write_text(&updated_content).await?;
 
             current_report().await.as_ref().map(|report| {
                 report.info("Successfully logged out from all npm registries".to_string());

@@ -311,7 +311,7 @@ impl Reporter {
         for log_path in &self.log_paths {
             writeln!(writer, "\n{}\n", log_path.to_print_string()).unwrap();
 
-            let log_content = log_path.fs_read_text().unwrap();
+            let log_content = log_path.fs_read_text_blocking().unwrap();
             writeln!(writer, "{}", log_content).unwrap();
         }
 

@@ -46,7 +46,7 @@ pub async fn prepare_project(_locator: &Locator, folder_path: &Path, params: &Pr
 fn get_package_manager(folder_path: &Path) -> Result<PackageManager, Error> {
     let yarn_lock_path = folder_path
         .with_join_str("yarn.lock")
-        .fs_read_text();
+        .fs_read_text_blocking();
 
     if let Ok(yarn_lock) = yarn_lock_path {
         if yarn_lock.starts_with("{") {
@@ -62,11 +62,11 @@ fn get_package_manager(folder_path: &Path) -> Result<PackageManager, Error> {
         }
     }
 
-    if folder_path.with_join_str("pnpm-lock.yaml").fs_exists() {
+    if folder_path.with_join_str("pnpm-lock.yaml").fs_exists_blocking() {
         return Ok(PackageManager::Pnpm);
     }
 
-    if folder_path.with_join_str("package-lock.json").fs_exists() {
+    if folder_path.with_join_str("package-lock.json").fs_exists_blocking() {
         return Ok(PackageManager::Npm);
     }
 
@@ -144,7 +144,8 @@ async fn prepare_npm_project(folder_path: &Path, params: &PrepareParams) -> Resu
 
     let pack_tgz = folder_path
         .with_join_str(pack_file)
-        .fs_read()?;
+        .fs_read()
+        .await?;
 
     Ok(pack_tgz)
 }
@@ -153,7 +154,8 @@ async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams
     // Otherwise Yarn 1 will pack the .yarn directory :(
     folder_path
         .with_join_str(".npmignore")
-        .fs_append("/.yarn\n")?;
+        .fs_append("/.yarn\n")
+        .await?;
 
     let channel_selector
         = zpm_switch::ReleaseLine::Classic
@@ -191,7 +193,7 @@ async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams
         .ok()?;
 
     let pack_tgz
-        = pack_path.fs_read()?;
+        = pack_path.fs_read().await?;
 
     Ok(pack_tgz)
 }
@@ -204,8 +206,8 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
     let lockfile_path = folder_path
         .with_join_str("yarn.lock");
 
-    if !lockfile_path.fs_exists() {
-        lockfile_path.fs_write(b"")?;
+    if !lockfile_path.fs_exists().await {
+        lockfile_path.fs_write(b"").await?;
     }
 
     let channel_selector
@@ -256,7 +258,8 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
         .ok()?;
 
     let pack_tgz = pack_path
-        .fs_read()?;
+        .fs_read()
+        .await?;
 
     Ok(pack_tgz)
 }
@@ -279,7 +282,8 @@ async fn prepare_pnpm_project(folder_path: &Path, _params: &PrepareParams) -> Re
 
     let pack_tgz = folder_path
         .with_join_str(pack_file.trim())
-        .fs_read()?;
+        .fs_read()
+        .await?;
 
     Ok(pack_tgz)
 }
@@ -318,7 +322,8 @@ async fn prepare_yarn_zpm_project(folder_path: &Path, params: &PrepareParams) ->
         .ok()?;
 
     let pack_tgz = archive_path
-        .fs_read()?;
+        .fs_read()
+        .await?;
 
     Ok(pack_tgz)
 }

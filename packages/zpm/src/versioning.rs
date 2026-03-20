@@ -136,7 +136,7 @@ impl<'a> Versioning<'a> {
             = self.project.versioning_path();
 
         let versioning_files
-            = versioning_dir.fs_read_dir()
+            = versioning_dir.fs_read_dir_blocking()
                 .ok_missing()?;
 
         let Some(versioning_files) = versioning_files else {
@@ -152,7 +152,7 @@ impl<'a> Versioning<'a> {
             }
 
             let content
-                = path.fs_read_text_prealloc()
+                = path.fs_read_text_prealloc_blocking()
                     .ok_missing()?
                     .unwrap_or_else(|| "{}".to_string());
 
@@ -238,7 +238,7 @@ impl<'a> Versioning<'a> {
             = self.project.versioning_path();
 
         let versioning_files
-            = versioning_dir.fs_read_dir()?;
+            = versioning_dir.fs_read_dir_blocking()?;
 
         for versioning_file in versioning_files {
             let versioning_file = versioning_file?;
@@ -249,7 +249,7 @@ impl<'a> Versioning<'a> {
             }
 
             let content
-                = path.fs_read_text_prealloc()
+                = path.fs_read_text_prealloc_blocking()
                     .ok_missing()?
                     .unwrap_or_else(|| "{}".to_string());
 
@@ -262,14 +262,14 @@ impl<'a> Versioning<'a> {
             }
 
             if versioning_data.releases.is_empty() {
-                path.fs_rm_file()?;
+                path.fs_rm_file_blocking()?;
                 continue;
             }
 
             let versioning_content
                 = format!("{}\n", JsonDocument::to_string_pretty(&versioning_data)?);
 
-            path.fs_change(&versioning_content, false)?;
+            path.fs_change_blocking(&versioning_content, false)?;
         }
 
         Ok(())
@@ -281,7 +281,7 @@ impl<'a> Versioning<'a> {
                 .manifest_path();
 
         let manifest_content = manifest_path
-            .fs_read_prealloc()?;
+            .fs_read_prealloc_blocking()?;
 
         let mut document
             = JsonDocument::new(manifest_content)?;
@@ -292,7 +292,7 @@ impl<'a> Versioning<'a> {
         )?;
 
         manifest_path
-            .fs_change(&document.input, false)?;
+            .fs_change_blocking(&document.input, false)?;
 
         Ok(())
     }
@@ -321,6 +321,7 @@ impl<'a> Versioning<'a> {
 
         let versioning_content
             = versioning_path.fs_read_text_prealloc()
+                .await
                 .ok_missing()?
                 .unwrap_or_else(|| "{}".to_string());
 
@@ -339,8 +340,10 @@ impl<'a> Versioning<'a> {
             = format!("{}\n", JsonDocument::to_string_pretty(&versioning_data)?);
 
         versioning_path
-            .fs_create_parent()?
-            .fs_change(&versioning_content, false)?;
+            .fs_create_parent()
+            .await?
+            .fs_change(&versioning_content, false)
+            .await?;
 
         Ok(())
     }

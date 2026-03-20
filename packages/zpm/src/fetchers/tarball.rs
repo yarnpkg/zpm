@@ -40,7 +40,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let cached_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
         let tgz_data
-            = tarball_path.fs_read()?;
+            = tarball_path.fs_read().await?;
 
         let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
             let tar_data

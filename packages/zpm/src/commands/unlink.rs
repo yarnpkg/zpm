@@ -62,7 +62,7 @@ impl Unlink {
         let manifest_path
             = root_path.with_join_str(MANIFEST_NAME);
         let manifest_content
-            = manifest_path.fs_read_prealloc()?;
+            = manifest_path.fs_read_prealloc().await?;
         let mut document
             = JsonDocument::new(manifest_content)?;
 
@@ -82,7 +82,7 @@ impl Unlink {
                 match target {
                     UnlinkTarget::Path(explicit_path) => {
                         let canonical_path
-                            = explicit_path.path.raw_path.path.fs_canonicalize()?;
+                            = explicit_path.path.raw_path.path.fs_canonicalize().await?;
 
                         if self.all {
                             let target_workspace
@@ -132,7 +132,7 @@ impl Unlink {
             )?;
         }
 
-        manifest_path.fs_change(&document.input, false)?;
+        manifest_path.fs_change(&document.input, false).await?;
 
         Ok(())
     }

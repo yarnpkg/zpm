@@ -52,8 +52,8 @@ pub fn set_link(link: &Link) -> Result<(), Error> {
         .with_join_str(format!("{}.json", hash.short()));
 
     link_path
-        .fs_create_parent()?
-        .fs_write(JsonDocument::to_string(link)?)?;
+        .fs_create_parent_blocking()?
+        .fs_write_blocking(JsonDocument::to_string(link)?)?;
 
     Ok(())
 }
@@ -66,7 +66,7 @@ pub fn unset_link(project_cwd: &Path) -> Result<(), Error> {
         .with_join_str(format!("{}.json", hash.short()));
 
     link_path
-        .fs_rm()?;
+        .fs_rm_blocking()?;
 
     Ok(())
 }
@@ -75,7 +75,7 @@ pub fn list_links() -> Result<BTreeSet<Link>, Error> {
     let links_dir
         = links_dir()?;
 
-    let Some(dir_entries) = links_dir.fs_read_dir().ok_missing()? else {
+    let Some(dir_entries) = links_dir.fs_read_dir_blocking().ok_missing()? else {
         return Ok(BTreeSet::new());
     };
 
@@ -83,7 +83,7 @@ pub fn list_links() -> Result<BTreeSet<Link>, Error> {
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().map_or(false, |f| f.is_file()))
         .filter_map(|link_path| Path::try_from(link_path.path()).ok())
-        .filter_map(|link_path| link_path.fs_read_text().ok())
+        .filter_map(|link_path| link_path.fs_read_text_blocking().ok())
         .filter_map(|contents| JsonDocument::hydrate_from_str::<Link>(&contents).ok())
         .collect::<BTreeSet<_>>();
 
@@ -98,7 +98,7 @@ pub fn get_link(path: &Path) -> Result<Option<Link>, Error> {
         .with_join_str(format!("{}.json", hash.short()));
 
     let link = link_path
-        .fs_read_text()
+        .fs_read_text_blocking()
         .ok_missing()?
         .and_then(|link| JsonDocument::hydrate_from_str::<Link>(&link).ok());
 

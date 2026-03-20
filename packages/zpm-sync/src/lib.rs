@@ -323,7 +323,7 @@ impl<'a> SyncTree<'a> {
             if self.dry_run {
                 file_ops.push(FileOp::Delete(path.clone()));
             } else {
-                path.fs_rm()?;
+                path.fs_rm_blocking()?;
             }
         }
 
@@ -346,7 +346,7 @@ impl<'a> SyncTree<'a> {
                     match template {
                         SyncTemplate::Zip {archive_path, inner_path} => {
                             let zip_buffer
-                                = archive_path.fs_read()?;
+                                = archive_path.fs_read_blocking()?;
 
                             let zip_entries
                                 = zpm_formats::zip::entries_from_zip(&zip_buffer)?
@@ -373,7 +373,7 @@ impl<'a> SyncTree<'a> {
                     }
                 } else {
                     if !check.must_create {
-                        let extraneous_entries = path.fs_read_dir()
+                        let extraneous_entries = path.fs_read_dir_blocking()
                             .ok_missing()?
                             .map(|read_dir| read_dir.collect::<Result<Vec<_>, _>>())
                             .transpose()?
@@ -390,7 +390,7 @@ impl<'a> SyncTree<'a> {
                             if self.dry_run {
                                 file_ops.push(FileOp::Delete(entry_path));
                             } else {
-                                entry_path.fs_rm()?;
+                                entry_path.fs_rm_blocking()?;
                             }
                         }
                     }
@@ -409,7 +409,7 @@ impl<'a> SyncTree<'a> {
                     if self.dry_run {
                         file_ops.push(FileOp::CreateFile(path.clone(), data[..data.len().min(20)].to_vec()));
                     } else {
-                        path.fs_write(data)?;
+                        path.fs_write_blocking(data)?;
 
                         if *is_exec {
                             path.fs_set_permissions(std::fs::Permissions::from_mode(0o755))?;

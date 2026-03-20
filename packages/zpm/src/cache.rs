@@ -1,10 +1,7 @@
-use std::fs::File;
-use std::io::Write;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::collections::HashSet;
 use std::sync::Mutex;
-use itertools::Itertools;
 use zpm_formats::{zip::ToZip, Entry};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::Locator;
@@ -347,29 +344,32 @@ impl DiskCache {
         let data
             = func().await?;
 
-        let mut file
-            = File::create(key_path.clone())?;
-
-        file.write_all(&data)?;
+        tokio::fs::write(key_path, &data).await?;
 
         Ok(data)
     }
 
     pub async fn clean(&self) -> Result<usize, Error> {
-        let accessed_files
-            = self.accessed_files.lock()
-                .map_err(|_| Error::Unsupported)?;
+        let accessed_files = self.accessed_files.lock()
+            .map_err(|_| Error::Unsupported)?
+            .clone();
 
-        let cache_entries = self.cache_path
-            .fs_read_dir()?
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut extraneous_cache_files = Vec::new();
+        let mut cache_entries
+            = tokio::fs::read_dir(self.cache_path.to_path_buf()).await?;
 
-        let extraneous_cache_files = cache_entries
-            .iter()
-            .filter(|entry| entry.file_type().unwrap().is_file())
-            .map(|entry| entry.file_name().to_os_string().into_string().unwrap())
-            .filter(|file| !accessed_files.contains(file))
-            .collect_vec();
+        while let Some(entry) = cache_entries.next_entry().await? {
+            if !entry.file_type().await?.is_file() {
+                continue;
+            }
+
+            let file
+                = entry.file_name().to_os_string().into_string().unwrap();
+
+            if !accessed_files.contains(&file) {
+                extraneous_cache_files.push(file);
+            }
+        }
 
         let extraneous_count
             = extraneous_cache_files.len();
@@ -379,9 +379,7 @@ impl DiskCache {
         }
 
         for file in extraneous_cache_files {
-            self.cache_path
-                .with_join_str(&file)
-                .fs_rm_file()?;
+            tokio::fs::remove_file(self.cache_path.with_join_str(&file).to_path_buf()).await?;
         }
 
         Ok(extraneous_count)

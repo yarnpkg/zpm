@@ -318,7 +318,7 @@ impl HttpClient {
 
         if let Some(ca_path) = config.settings.https_ca_file_path.value.as_ref() {
             let ca_content
-                = ca_path.fs_read_prealloc()?;
+                = ca_path.fs_read_prealloc_blocking()?;
 
             let certificate
                 = Certificate::from_pem(&ca_content)?;
@@ -332,10 +332,10 @@ impl HttpClient {
         ) {
             (Some(cert_path), Some(key_path)) => {
                 let cert_content
-                    = cert_path.fs_read_prealloc()?;
+                    = cert_path.fs_read_prealloc_blocking()?;
 
                 let key_content
-                    = key_path.fs_read_prealloc()?;
+                    = key_path.fs_read_prealloc_blocking()?;
 
                 let mut identity_content
                     = cert_content;

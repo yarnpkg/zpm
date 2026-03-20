@@ -53,7 +53,7 @@ pub fn cache_dir() -> Result<Path, Error> {
 pub fn cache_metadata(p: &Path) -> Result<CacheKey, Error> {
     let key_string = p
         .with_join_str("meta.json")
-        .fs_read_text()?;
+        .fs_read_text_blocking()?;
 
     let key_data: CacheKey
         = JsonDocument::hydrate_from_str(&key_string)?;
@@ -116,7 +116,7 @@ async fn pretty_download<F: Future<Output = Result<(), Error>>>(key_data: &Cache
     result
 }
 
-fn access(key_data: &CacheKey) -> Result<(Path, bool), Error> {
+async fn access(key_data: &CacheKey) -> Result<(Path, bool), Error> {
     let key_string
         = JsonDocument::to_string(key_data)?;
     let key_hash
@@ -130,28 +130,42 @@ fn access(key_data: &CacheKey) -> Result<(Path, bool), Error> {
     let ready_path = cache_path
         .with_join_str(".ready");
 
-    Ok((cache_path, ready_path.fs_exists()))
+    Ok((cache_path, ready_path.fs_exists().await))
 }
 
-pub fn check(key_data: &CacheKey) -> Result<bool, Error> {
-    Ok(access(key_data)?.1)
+pub async fn check(key_data: &CacheKey) -> Result<bool, Error> {
+    Ok(access(key_data).await?.1)
+}
+
+fn touch_ready_sync(ready_path: Path) -> Result<(), Error> {
+    ready_path
+        .fs_set_modified(std::time::SystemTime::now())?;
+    Ok(())
+}
+
+fn move_cache_sync(temp_dir: Path, cache_path: Path) -> Result<(), Error> {
+    temp_dir
+        .fs_concurrent_move(&cache_path)?;
+    Ok(())
 }
 
 pub async fn ensure<R: Future<Output = Result<(), Error>>, F: FnOnce(Path) -> R>(key_data: &CacheKey, f: F) -> Result<Path, Error> {
-    match access(key_data)? {
+    match access(key_data).await? {
         (cache_path, true) => {
             let ready_path = cache_path
                 .with_join_str(".ready");
 
             // Not a big deal if this fails, which may happen on filesystems
             // with limited permissions (read-only ones)
-            let _ = ready_path
-                .fs_set_modified(std::time::SystemTime::now());
+            let _ = tokio::task::spawn_blocking(move || touch_ready_sync(ready_path)).await;
 
             Ok(cache_path)
         },
 
         (cache_path, false) => {
+            let cache_path_for_move
+                = cache_path.clone();
+
             pretty_download(key_data, async {
                 let temp_dir
                     = Path::temp_dir()?;
@@ -163,17 +177,18 @@ pub async fn ensure<R: Future<Output = Result<(), Error>>, F: FnOnce(Path) -> R>
 
                 temp_dir
                     .with_join_str("meta.json")
-                    .fs_write(&meta_content)?;
+                    .fs_write(&meta_content).await?;
 
                 temp_dir
                     .with_join_str(".ready")
-                    .fs_write([])?;
+                    .fs_write([]).await?;
 
                 cache_path
-                    .fs_create_parent()?;
+                    .fs_create_parent().await?;
 
-                temp_dir
-                    .fs_concurrent_move(&cache_path)?;
+                tokio::task::spawn_blocking(move || {
+                    move_cache_sync(temp_dir, cache_path_for_move)
+                }).await??;
 
                 Ok(())
             }).await?;

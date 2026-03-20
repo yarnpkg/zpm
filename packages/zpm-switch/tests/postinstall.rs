@@ -37,7 +37,7 @@ fn empty_profile_file() -> Result<(), Box<dyn std::error::Error>> {
 
     let profile_content = tmp_dir
         .with_join_str(".profile")
-        .fs_read_text_prealloc()
+        .fs_read_text_prealloc_blocking()
         .expect("Failed to read .profile");
 
     assert_eq!(profile_content, format!(". \"{}/.yarn/switch/env\"\n", tmp_dir.to_file_string()));
@@ -54,7 +54,7 @@ fn profile_file_with_existing_path() -> Result<(), Box<dyn std::error::Error>> {
 
     tmp_dir
         .with_join_str(".profile")
-        .fs_write_text("# Hello world!\n")
+        .fs_write_text_blocking("# Hello world!\n")
         .expect("Failed to write .profile");
 
     cmd.args(vec!["switch", "postinstall", "--home-dir", tmp_dir.as_str()]);
@@ -65,7 +65,7 @@ fn profile_file_with_existing_path() -> Result<(), Box<dyn std::error::Error>> {
 
     let profile_content = tmp_dir
         .with_join_str(".profile")
-        .fs_read_text_prealloc()
+        .fs_read_text_prealloc_blocking()
         .expect("Failed to read .profile");
 
     assert_eq!(profile_content, format!("# Hello world!\n. \"{}/.yarn/switch/env\"\n", tmp_dir.to_file_string()));
@@ -85,7 +85,7 @@ fn profile_file_with_duplicate_path() -> Result<(), Box<dyn std::error::Error>> 
 
     tmp_dir
         .with_join_str(".profile")
-        .fs_write_text(&initial_profile_content)
+        .fs_write_text_blocking(&initial_profile_content)
         .expect("Failed to write .profile");
 
     cmd.args(vec!["switch", "postinstall", "--home-dir", tmp_dir.as_str()]);
@@ -96,7 +96,7 @@ fn profile_file_with_duplicate_path() -> Result<(), Box<dyn std::error::Error>> 
 
     let profile_content = tmp_dir
         .with_join_str(".profile")
-        .fs_read_text_prealloc()
+        .fs_read_text_prealloc_blocking()
         .expect("Failed to read .profile");
 
     assert_eq!(profile_content, initial_profile_content);

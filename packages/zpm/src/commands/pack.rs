@@ -78,8 +78,8 @@ impl Pack {
                 )?;
 
             out_path
-                .fs_create_parent()?
-                .fs_write(&pack_result.pack_file)?;
+                .fs_create_parent().await?
+                .fs_write(&pack_result.pack_file).await?;
         }
 
         Ok(())

@@ -160,7 +160,7 @@ impl PackList {
         let abs_path = self.root_path
             .with_join(rel_path);
 
-        let directory_entries = abs_path.fs_read_dir()?
+        let directory_entries = abs_path.fs_read_dir_blocking()?
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -218,7 +218,7 @@ impl PackList {
 
                 let ignore_file = abs_glob_root
                     .with_join_str(&ignore_name)
-                    .fs_read_text_prealloc()?;
+                    .fs_read_text_prealloc_blocking()?;
 
                 let patterns
                     = ignore_file
@@ -367,7 +367,7 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: &PackOpt
         .with_join_str("package.json");
 
     let manifest_content = manifest_path
-        .fs_read_prealloc()?;
+        .fs_read_prealloc_blocking()?;
     let manifest: Manifest
         = parse_manifest(&String::from_utf8_lossy(&manifest_content))?;
 

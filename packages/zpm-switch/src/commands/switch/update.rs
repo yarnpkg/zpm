@@ -26,7 +26,8 @@ impl UpdateCommand {
                 .with_join_str("yarn-install-script.sh");
 
         install_script_path
-            .fs_write(install_script)?;
+            .fs_write(install_script)
+            .await?;
 
         Command::new("bash")
             .arg(install_script_path.to_path_buf())

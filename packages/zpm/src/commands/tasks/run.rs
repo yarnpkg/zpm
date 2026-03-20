@@ -229,12 +229,12 @@ async fn run_task_impl(
     let task_file_path
         = workspace.taskfile_path();
 
-    if !task_file_path.fs_exists() {
+    if !task_file_path.fs_exists().await {
         return Err(Error::TaskFileNotFound(workspace.path.clone()));
     }
 
     let task_file_content
-        = task_file_path.fs_read_text()?;
+        = task_file_path.fs_read_text().await?;
 
     let task_file
         = parse(&task_file_content).map_err(Error::TaskParseError)?;
@@ -293,12 +293,12 @@ pub fn task_exists(project: &Project, task_name: &str) -> bool {
     let task_file_path
         = workspace.taskfile_path();
 
-    if !task_file_path.fs_exists() {
+    if !task_file_path.fs_exists_blocking() {
         return false;
     }
 
     let Ok(task_file_content)
-        = task_file_path.fs_read_text()
+        = task_file_path.fs_read_text_blocking()
     else {
         return false;
     };

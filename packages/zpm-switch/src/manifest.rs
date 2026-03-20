@@ -137,7 +137,7 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
             .with_join_str("package.json");
 
         let manifest = manifest_path
-            .fs_read_text()
+            .fs_read_text_blocking()
             .ok_missing()?;
 
         if let Some(manifest) = &manifest {
@@ -157,7 +157,7 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
             let root_file_path = parent
                 .with_join_str(root_file);
 
-            if root_file_path.fs_exists() {
+            if root_file_path.fs_exists_blocking() {
                 return Ok(FindResult {
                     detected_root_path: Some(parent),
                     detected_package_manager: None,

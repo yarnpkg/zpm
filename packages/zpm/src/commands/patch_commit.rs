@@ -37,10 +37,17 @@ impl PatchCommit {
         let mut project
             = project::Project::new(None).await?;
 
-        let locator_path = self.source
+        let mut locator_path = None;
+        for path in self.source
             .iter_path()
             .map(|path| path.with_join_str(".locator"))
-            .find(|path| path.fs_exists())
+        {
+            if path.fs_exists().await {
+                locator_path = Some(path);
+                break;
+            }
+        }
+        let locator_path = locator_path
             .ok_or_else(|| Error::NotAPatchFolder(self.source.clone()))?;
 
         let original_path = locator_path
@@ -53,7 +60,7 @@ impl PatchCommit {
             .with_join_str("user");
 
         let locator_str = locator_path
-            .fs_read_text()?;
+            .fs_read_text().await?;
         let locator
             = Locator::from_file_string(&locator_str)?;
 
@@ -103,7 +110,7 @@ impl PatchCommit {
             if let Some(workspace) = project.try_workspace_by_locator(pkg_locator)? {
                 let manifest_content
                     = workspace.manifest_path()
-                        .fs_read_prealloc()?;
+                        .fs_read_prealloc().await?;
 
                 let mut document
                     = JsonDocument::new(manifest_content)?;
@@ -124,7 +131,7 @@ impl PatchCommit {
 
                 if document.changed {
                     workspace.manifest_path()
-                        .fs_write(&document.input)?;
+                        .fs_write(&document.input).await?;
                 }
             } else {
                 for descriptor in resolution.dependencies.values() {
@@ -151,7 +158,7 @@ impl PatchCommit {
             let top_level_manifest_path
                 = project.manifest_path();
             let top_level_manifest_content
-                = top_level_manifest_path.fs_read_prealloc()?;
+                = top_level_manifest_path.fs_read_prealloc().await?;
 
             let mut document
                 = JsonDocument::new(top_level_manifest_content)?;
@@ -165,14 +172,14 @@ impl PatchCommit {
 
             if document.changed {
                 top_level_manifest_path
-                    .fs_write(document.input)?;
+                    .fs_write(document.input).await?;
             }
         }
 
         project.project_cwd
             .with_join(&patch_rel_path)
-            .fs_create_parent()?
-            .fs_write(&diff)?;
+            .fs_create_parent().await?
+            .fs_write(&diff).await?;
 
         Ok(())
     }

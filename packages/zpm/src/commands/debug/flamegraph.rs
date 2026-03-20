@@ -18,7 +18,7 @@ impl Flamegraph {
                 .ok_or(Error::HomeDirectoryNotFound)?
                 .with_join_str(".cargo/bin/samply");
 
-        if !samply_path.fs_exists() {
+        if !samply_path.fs_exists().await {
             return Err(Error::MissingSamply);
         }
 

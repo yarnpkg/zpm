@@ -93,7 +93,7 @@ impl PostinstallCommand {
 
     fn write_profile(&self, bin_dir: &Path, profile: &ShellProfile) {
         let profile_content = profile.rc_file
-            .fs_read_text_prealloc()
+            .fs_read_text_prealloc_blocking()
             .ok_missing();
 
         if let Ok(maybe_profile_content) = profile_content {
@@ -128,8 +128,8 @@ impl PostinstallCommand {
 
     fn write_env(&self, env_file: &Path, env_line: &str) -> Result<(), Error> {
         env_file
-            .fs_create_parent()?
-            .fs_write_text(env_line)?;
+            .fs_create_parent_blocking()?
+            .fs_write_text_blocking(env_line)?;
 
         Ok(())
     }
@@ -153,8 +153,8 @@ impl PostinstallCommand {
             .push_str(&rc_line);
 
         rc_file
-            .fs_create_parent()?
-            .fs_write_text(&rc_content)?;
+            .fs_create_parent_blocking()?
+            .fs_write_text_blocking(&rc_content)?;
 
         Ok(())
     }
@@ -168,7 +168,7 @@ impl PostinstallCommand {
             = Path::from_str(&github_path).unwrap();
 
         let github_path_file_write_result = github_path_file
-            .fs_append_text(format!("{}\n", bin_dir.to_file_string()));
+            .fs_append_text_blocking(format!("{}\n", bin_dir.to_file_string()));
 
         if github_path_file_write_result.is_err() {
             Note::Warning(format!("
@@ -239,7 +239,7 @@ impl PostinstallCommand {
             .with_join_str("../../../../user/platform.json");
 
         let mut volta_platform_content = volta_platform_path
-            .fs_read_prealloc()?;
+            .fs_read_prealloc_blocking()?;
 
         if volta_platform_content.is_empty() {
             volta_platform_content = "{}".as_bytes().to_vec();
@@ -254,7 +254,7 @@ impl PostinstallCommand {
         )?;
 
         volta_platform_path
-            .fs_write(&document.input)?;
+            .fs_write_blocking(&document.input)?;
 
         Ok(())
     }

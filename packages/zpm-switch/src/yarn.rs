@@ -85,7 +85,7 @@ pub async fn resolve_channel_selector(channel_selector: &ChannelSelector) -> Res
         = Path::temp_root_dir()?
             .with_join_str(&format!("yswitch-{}-{}-{}", release_line, channel, today.format("%Y%m%d")));
 
-    if let Ok(version_str) = channel_path.fs_read_text_async().await {
+    if let Ok(version_str) = channel_path.fs_read_text().await {
         let version
             = Version::from_str(&version_str)?;
 
@@ -106,7 +106,8 @@ pub async fn resolve_channel_selector(channel_selector: &ChannelSelector) -> Res
         = Version::from_str(version_str)?;
 
     channel_path
-        .fs_write_text(&version_str)?;
+        .fs_write_text(&version_str)
+        .await?;
 
     Ok(version)
 }

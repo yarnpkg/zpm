@@ -129,11 +129,11 @@ pub async fn setup_project() -> Result<Project, Error> {
         = Path::temp_dir_pattern("dlx-<>")?;
 
     temp_dir.with_join_str("package.json")
-        .fs_write_text("{}\n")?;
+        .fs_write_text("{}\n").await?;
     temp_dir.with_join_str("yarn.lock")
-        .fs_write_text("{}\n")?;
+        .fs_write_text("{}\n").await?;
     temp_dir.with_join_str(".yarnrc.yml")
-        .fs_write_text("enableGlobalCache: false\n")?;
+        .fs_write_text("enableGlobalCache: false\n").await?;
 
     let project
         = Project::new(Some(temp_dir)).await?;
@@ -146,7 +146,7 @@ pub async fn install_dependencies(workspace_path: &Path, loose_resolutions: Vec<
         .with_join_str("package.json");
 
     let manifest_content = manifest_path
-        .fs_read_prealloc()?;
+        .fs_read_prealloc().await?;
 
     let mut formatter
         = JsonDocument::new(manifest_content)?;
@@ -159,7 +159,7 @@ pub async fn install_dependencies(workspace_path: &Path, loose_resolutions: Vec<
     }
 
     manifest_path
-        .fs_change(&formatter.input, false)?;
+        .fs_change(&formatter.input, false).await?;
 
     let mut project
         = Project::new(Some(workspace_path.clone())).await?;

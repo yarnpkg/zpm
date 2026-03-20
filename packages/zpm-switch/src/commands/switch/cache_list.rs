@@ -19,13 +19,12 @@ impl CacheListCommand {
         let cache_dir
             = cache::cache_dir()?;
 
-        let Some(cache_entries) = cache_dir.fs_read_dir().ok_missing()? else {
-            return Ok(());
+        let mut cache_entries = match cache_dir.fs_read_dir().await.ok_missing()? {
+            Some(cache_entries) => cache_entries,
+            None => return Ok(()),
         };
 
-        for entry in cache_entries {
-            let entry
-                = entry?;
+        while let Some(entry) = cache_entries.next_entry().await? {
 
             let entry_path
                 = Path::try_from(entry.path())?;

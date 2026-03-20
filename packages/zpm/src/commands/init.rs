@@ -170,14 +170,14 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     let manifest_path
         = init_cwd.with_join_str("package.json");
     let manifest_content
-        = manifest_path.fs_read_prealloc()
+        = manifest_path.fs_read_prealloc().await
             .ok_missing()?
             .unwrap_or_else(|| b"{}".to_vec());
 
     let mut document
         = JsonDocument::new(manifest_content)?;
 
-    if !manifest_path.fs_exists() {
+    if !manifest_path.fs_exists().await {
         let init_name = params.name.as_ref()
             .map(|n| Ident::new(n))
             .unwrap_or_else(|| Ident::new(init_cwd.basename().unwrap_or("package")));
@@ -215,7 +215,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             .with_join_str("packages");
 
         packages_dir
-            .fs_create_dir_all()?;
+            .fs_create_dir_all().await?;
 
         document.set_path(
             &zpm_parsers::Path::from_segments(vec!["workspaces".to_string()]),
@@ -226,7 +226,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     }
 
     manifest_path
-        .fs_change(&document.input, false)?;
+        .fs_change(&document.input, false).await?;
 
     let manifest_json
         = String::from_utf8_lossy(&document.input);
@@ -240,13 +240,13 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     let readme_path
         = init_cwd.with_join_str("README.md");
 
-    if !readme_path.fs_exists() {
+    if !readme_path.fs_exists().await {
         if let Some(name) = manifest.name.as_ref() {
             let readme_content
                 = format!("# {}\n", name.as_str());
 
             readme_path
-                .fs_write_text(&readme_content)?;
+                .fs_write_text(&readme_content).await?;
 
             changed_paths.push(readme_path.clone());
         }
@@ -262,9 +262,9 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
         let lockfile_path = init_cwd
             .with_join_str("yarn.lock");
 
-        if !lockfile_path.fs_exists() {
+        if !lockfile_path.fs_exists().await {
             lockfile_path
-                .fs_write_text("")?;
+                .fs_write_text("").await?;
 
             changed_paths.push(
                 lockfile_path.clone(),
@@ -274,13 +274,13 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
         let gitignore_path = init_cwd
             .with_join_str(".gitignore");
 
-        if !gitignore_path.fs_exists() {
+        if !gitignore_path.fs_exists().await {
             let gitignore_content = [
                 "node_modules\n",
             ];
 
             gitignore_path
-                .fs_write_text(&gitignore_content.join(""))?;
+                .fs_write_text(&gitignore_content.join("")).await?;
 
             changed_paths.push(
                 gitignore_path.clone(),
@@ -290,14 +290,14 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
         let gitattributes_path = init_cwd
             .with_join_str(".gitattributes");
 
-        if !gitattributes_path.fs_exists() {
+        if !gitattributes_path.fs_exists().await {
             let gitattributes_content = [
                 "/.yarn/**         linguist-vendored\n",
                 "/.pnp.*           linguist-generated binary\n",
             ];
 
             gitattributes_path
-                .fs_write_text(&gitattributes_content.join(""))?;
+                .fs_write_text(&gitattributes_content.join("")).await?;
 
             changed_paths.push(
                 gitattributes_path.clone(),
@@ -307,7 +307,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
         let editorconfig_path = init_cwd
             .with_join_str(".editorconfig");
 
-        if !editorconfig_path.fs_exists() {
+        if !editorconfig_path.fs_exists().await {
             let editorconfig_content = [
                 "root = true\n",
                 "\n",
@@ -323,7 +323,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             ];
 
             editorconfig_path
-                .fs_write_text(&editorconfig_content.join(""))?;
+                .fs_write_text(&editorconfig_content.join("")).await?;
 
             changed_paths.push(
                 editorconfig_path.clone(),
@@ -333,7 +333,7 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
         let git_path = init_cwd
             .with_join_str(".git");
 
-        if !git_path.fs_exists() {
+        if !git_path.fs_exists().await {
             let init = ScriptEnvironment::new()?
                 .run_exec("git", ["init"])
                 .await?

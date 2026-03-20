@@ -64,7 +64,7 @@ impl SetVersionFromSources {
         let bundle_path
             = target.with_join_str("target/release/yarn-bin");
 
-        if !bundle_path.fs_exists() {
+        if !bundle_path.fs_exists().await {
             run_build(&target).await?;
 
             println!();
@@ -87,7 +87,7 @@ async fn prepare_repo(spec: &SetVersionFromSources, target: &Path) -> Result<(),
     let mut ready
         = false;
 
-    if !spec.force && target.with_join_str(".git").fs_exists() {
+    if !spec.force && target.with_join_str(".git").fs_exists().await {
         println!("Fetching the latest commits");
         println!();
 
@@ -107,12 +107,12 @@ async fn prepare_repo(spec: &SetVersionFromSources, target: &Path) -> Result<(),
         println!("Cloning the remote repository");
         println!();
 
-        if target.fs_exists() {
-            target.fs_rm()?;
+        if target.fs_exists().await {
+            target.fs_rm().await?;
         }
 
         target
-            .fs_create_dir_all()?;
+            .fs_create_dir_all().await?;
 
         run_clone(spec, target).await?;
     }

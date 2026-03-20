@@ -39,13 +39,13 @@ impl TopLevelConfiguration {
     pub fn from_project(project: &Project) -> Vec<(FilterDescriptor, PackageMeta)> {
         project.manifest_path()
             .if_exists()
-            .and_then(|path| path.fs_read_text().ok()).map(|data| JsonDocument::hydrate_from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta)
+            .and_then(|path| path.fs_read_text_blocking().ok()).map(|data| JsonDocument::hydrate_from_str::<TopLevelConfiguration>(&data).unwrap().dependencies_meta)
             .unwrap_or_default()
     }
 }
 
 pub fn fs_remove_nm(nm_path: Path) -> Result<(), Error> {
-    let entries = nm_path.fs_read_dir();
+    let entries = nm_path.fs_read_dir_blocking();
 
     match entries {
         Err(PathError::IoError {inner, ..}) if inner.kind() == std::io::ErrorKind::NotFound
@@ -69,12 +69,12 @@ pub fn fs_remove_nm(nm_path: Path) -> Result<(), Error> {
                     continue;
                 }
 
-                path.fs_rm()
+                path.fs_rm_blocking()
                     .unwrap();
             }
 
             if !has_dot_entries {
-                nm_path.fs_rm()?;
+                nm_path.fs_rm_blocking()?;
             }
 
             Ok(())
@@ -86,12 +86,12 @@ pub fn fs_extract_archive(destination: &Path, package_data: &PackageData) -> Res
     let ready_path = destination
         .with_join_str(".ready");
 
-    if !ready_path.fs_exists() && !matches!(package_data, &PackageData::MissingZip {..}) {
+    if !ready_path.fs_exists_blocking() && !matches!(package_data, &PackageData::MissingZip {..}) {
         let package_subpath
             = package_data.package_subpath();
 
         let package_bytes = match package_data {
-            PackageData::Zip {archive_path, ..} => archive_path.fs_read()?,
+            PackageData::Zip {archive_path, ..} => archive_path.fs_read_blocking()?,
             _ => panic!("Expected a zip archive"),
         };
 
@@ -106,13 +106,13 @@ pub fn fs_extract_archive(destination: &Path, package_data: &PackageData) -> Res
                 .with_join(&entry.name);
 
             target_path
-                .fs_create_parent()?
-                .fs_write(&entry.data)?
+                .fs_create_parent_blocking()?
+                .fs_write_blocking(&entry.data)?
                 .fs_set_permissions(Permissions::from_mode(entry.mode as u32))?;
         }
 
         ready_path
-            .fs_write(vec![])?;
+            .fs_write_blocking(vec![])?;
 
         Ok(true)
     } else {

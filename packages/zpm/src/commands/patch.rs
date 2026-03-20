@@ -72,7 +72,7 @@ impl Patch {
             .with_join_str("user");
 
         locator_path
-            .fs_write(original_locator.to_file_string())?;
+            .fs_write(original_locator.to_file_string()).await?;
 
         Self::unpack_package_to(&install_result, &original_locator, &original_path)?;
         Self::unpack_package_to(&install_result, &user_locator, &user_path)?;
@@ -147,7 +147,7 @@ impl Patch {
         };
 
         let archive_data = archive_path
-            .fs_read_prealloc()?;
+            .fs_read_prealloc_blocking()?;
 
         let package_subdir
             = package_directory
@@ -161,7 +161,7 @@ impl Patch {
                 .collect::<Vec<_>>();
 
         destination
-            .fs_create_dir_all()?;
+            .fs_create_dir_all_blocking()?;
 
         zpm_formats::entries_to_disk(&entries, &destination)?;
 

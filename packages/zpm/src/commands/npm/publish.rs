@@ -201,7 +201,7 @@ impl Publish {
 
         let readme
             = published_workspace.path.with_join_str("README.md")
-                .fs_read_text()
+                .fs_read_text().await
                 .ok_missing()?
                 .unwrap_or_else(|| format!("# {}\n", ident.to_file_string()));
 

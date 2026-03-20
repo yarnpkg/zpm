@@ -44,7 +44,7 @@ impl Logout {
             };
 
             let config_content = config_path
-                .fs_read_text()?;
+                .fs_read_text().await?;
 
             let updated_content = if let Some(scope) = &self.scope {
                 let scope = scope.strip_prefix('@').unwrap_or(scope);
@@ -107,7 +107,7 @@ impl Logout {
             };
 
             config_path
-                .fs_write_text(&updated_content)?;
+                .fs_write_text(&updated_content).await?;
 
             Ok(())
         }).await

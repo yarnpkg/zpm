@@ -17,7 +17,7 @@ pub struct SyncFs {
 impl SyncFs {
     pub async fn execute(&self) -> Result<(), Error> {
         let definition_file_contents
-            = self.definition_file.fs_read_text()?;
+            = self.definition_file.fs_read_text().await?;
 
         let definition: BTreeMap<Path, SyncItem<'_>>
             = JsonDocument::hydrate_from_str(&definition_file_contents)?;
@@ -30,7 +30,7 @@ impl SyncFs {
         }
 
         let ops
-            = sync_tree.run(self.destination.fs_canonicalize()?)?;
+            = sync_tree.run(self.destination.fs_canonicalize().await?)?;
 
         for op in ops {
             println!("{}", op);

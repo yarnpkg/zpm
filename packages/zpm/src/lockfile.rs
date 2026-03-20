@@ -356,7 +356,7 @@ pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
         = project_cwd
             .with_join_str("node_modules/.pnpm");
 
-    if !pnpm_dir.fs_exists() {
+    if !pnpm_dir.fs_exists_blocking() {
         return Ok(Lockfile::new());
     }
 
@@ -401,7 +401,7 @@ pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
         let manifest: Option<Manifest>
             = package_path
                 .with_join_str("package.json")
-                .fs_read_text()
+                .fs_read_text_blocking()
                 .ok()
                 .and_then(|content| JsonDocument::hydrate_from_str(&content).ok());
 

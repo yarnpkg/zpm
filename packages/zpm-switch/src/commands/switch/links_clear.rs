@@ -20,6 +20,7 @@ impl LinksClearCommand {
 
         links_dir
             .fs_rm()
+            .await
             .ok_missing()?;
 
         Ok(())

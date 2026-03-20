@@ -130,7 +130,7 @@ impl ContentFlags {
         let manifest_path
             = package_directory.with_join_str("package.json");
         let manifest_bytes
-            = manifest_path.fs_read_prealloc()?;
+            = manifest_path.fs_read_prealloc_blocking()?;
         let manifest: Manifest
             = JsonDocument::hydrate_from_slice(&manifest_bytes)?;
 
@@ -150,7 +150,7 @@ impl ContentFlags {
 
     fn extract_zip(locator: &Locator, archive_path: &Path) -> Result<Self, Error> {
         let package_bytes
-            = archive_path.fs_read()?;
+            = archive_path.fs_read_blocking()?;
 
         let first_entry
             = zpm_formats::zip::first_entry_from_zip(&package_bytes)?;

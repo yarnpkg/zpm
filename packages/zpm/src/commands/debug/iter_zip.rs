@@ -12,7 +12,8 @@ pub struct IterZip {
 impl IterZip {
     pub async fn execute(&self) -> Result<(), Error> {
         let buffer = self.path
-            .fs_read()?;
+            .fs_read()
+            .await?;
 
         let entries
             = zpm_formats::zip::entries_from_zip(&buffer)?;

@@ -79,7 +79,7 @@ fn register_workspace_bin_symlinks(workspace_nm_tree: &mut SyncTree, workspace_p
             = workspace_path
                 .with_join(bin_path);
 
-        if !target_abs_path.fs_exists() {
+        if !target_abs_path.fs_exists_blocking() {
             continue;
         }
 

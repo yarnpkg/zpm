@@ -24,7 +24,7 @@ impl CacheCheckCommand {
                 platform: get_system_string().to_string(),
             };
 
-            if !cache::check(&cache_key)? {
+            if !cache::check(&cache_key).await? {
                 return Err(Error::CacheNotFound(version.clone()));
             }
         }

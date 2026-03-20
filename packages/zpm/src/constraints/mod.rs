@@ -29,11 +29,18 @@ pub async fn check_constraints(project: &Project, fix: bool) -> Result<Constrain
         packages: constraints_packages,
     };
 
-    let config_path =
-        [".ts", ".mjs", ".cjs"].iter()
-            .map(|ext| project.project_cwd.with_join_str(&format!("yarn.config{}", ext)))
-            .find(|path| path.fs_exists())
-            .ok_or(Error::ConstraintsConfigNotFound)?;
+    let mut config_path = None;
+    for ext in [".ts", ".mjs", ".cjs"] {
+        let path = project.project_cwd
+            .with_join_str(&format!("yarn.config{}", ext));
+
+        if path.fs_exists().await {
+            config_path = Some(path);
+            break;
+        }
+    }
+    let config_path = config_path
+        .ok_or(Error::ConstraintsConfigNotFound)?;
 
     let script
         = generate_constraints_adapter(&config_path, &constraints_context, fix);
@@ -47,7 +54,8 @@ pub async fn check_constraints(project: &Project, fix: bool) -> Result<Constrain
         .with_join_str("result.json");
 
     script_path
-        .fs_write_text(&script)?;
+        .fs_write_text(&script)
+        .await?;
 
     ScriptEnvironment::new()?
         .with_cwd(project.project_cwd.clone())
@@ -58,7 +66,8 @@ pub async fn check_constraints(project: &Project, fix: bool) -> Result<Constrain
         .ok()?;
 
     let result_content = result_path
-        .fs_read_prealloc()?;
+        .fs_read_prealloc()
+        .await?;
 
     // We can't use sonic_rs here (and thus JsonDocument) due to this bug:
     // https://github.com/cloudwego/sonic-rs/issues/181

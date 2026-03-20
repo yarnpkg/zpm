@@ -49,7 +49,7 @@ impl ConfigSet {
         };
 
         let document = document_path
-            .fs_read_text()
+            .fs_read_text().await
             .ok_missing()?
             .unwrap_or_default();
 
@@ -60,7 +60,7 @@ impl ConfigSet {
         )?;
 
         document_path
-            .fs_change(&updated_document, false)?;
+            .fs_change(&updated_document, false).await?;
 
         Ok(())
     }

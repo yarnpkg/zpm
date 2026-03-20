@@ -115,7 +115,7 @@ impl Login {
             };
 
             let config_content = config_path
-                .fs_read_text()
+                .fs_read_text().await
                 .ok_missing()?
                 .unwrap_or_default();
 
@@ -140,7 +140,7 @@ impl Login {
             )?;
 
             config_path
-                .fs_write_text(&updated_content)?;
+                .fs_write_text(&updated_content).await?;
 
             current_report().await.as_ref().map(|report| {
                 report.info("Successfully logged in".to_string());

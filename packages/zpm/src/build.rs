@@ -124,11 +124,14 @@ impl BuildRequest {
 
                 build_cache_folder
                     .fs_rm()
+                    .await
                     .ok_missing()?;
 
                 build_cache_folder
-                    .fs_create_parent()?
-                    .fs_write_text(format!("{:#?}", diff_list))?;
+                    .fs_create_parent()
+                    .await?
+                    .fs_write_text(format!("{:#?}", diff_list))
+                    .await?;
             }
 
             Ok(ScriptResult::new_success())
@@ -183,7 +186,7 @@ impl BuildState {
             .build_state_path();
 
         let build_state_text = build_state_path
-            .fs_read_text_async()
+            .fs_read_text()
             .await
             .unwrap_or_else(|_| "{}".to_owned());
 
@@ -196,13 +199,13 @@ impl BuildState {
             .build_state_path();
 
         build_state_path
-            .fs_create_parent()?;
+            .fs_create_parent_blocking()?;
 
         let build_state_text
             = JsonDocument::to_string(self)?;
 
         build_state_path
-            .fs_change(build_state_text, false)?;
+            .fs_change_blocking(build_state_text, false)?;
 
         Ok(())
     }

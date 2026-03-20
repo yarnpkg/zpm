@@ -45,7 +45,7 @@ const LIBC: Option<Libc> = None;
 fn detect_libc() -> Option<Libc> {
     let ldd_contents
         = Path::from_str(LDD_PATH).unwrap()
-            .fs_read_text_prealloc()
+            .fs_read_text_prealloc_blocking()
             .ok();
 
     if let Some(ldd_contents) = ldd_contents {

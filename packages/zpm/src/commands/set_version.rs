@@ -32,7 +32,7 @@ impl SetVersion {
             .with_join_str("package.json");
 
         let manifest_content = manifest_path
-            .fs_read_prealloc()?;
+            .fs_read_prealloc().await?;
 
         let mut document
             = JsonDocument::new(manifest_content)?;
@@ -53,7 +53,7 @@ impl SetVersion {
         )?;
 
         manifest_path
-            .fs_change(&document.input, false)?;
+            .fs_change(&document.input, false).await?;
 
         println!("Switching to {}", resolved_version.to_print_string());
         println!("Saved into {}", manifest_path.to_print_string());

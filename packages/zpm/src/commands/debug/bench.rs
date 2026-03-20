@@ -14,7 +14,7 @@ fn remove_list(list: &[&str]) -> Result<(), Error> {
     for path in list {
         current_dir
             .with_join_str(*path)
-            .fs_rm()
+            .fs_rm_blocking()
             .ok_missing()?;
     }
 
@@ -89,9 +89,12 @@ impl BenchMode {
                 .with_join_str(".yarnrc.yml");
 
         yarnrc_yml
-            .fs_append_text(format!("globalFolder: '{}'\n", global_folder.to_file_string()))?
-            .fs_append_text("enableImmutableInstalls: false\n")?
-            .fs_append_text("enableScripts: false\n")?;
+            .fs_append_text(format!("globalFolder: '{}'\n", global_folder.to_file_string()))
+            .await?
+            .fs_append_text("enableImmutableInstalls: false\n")
+            .await?
+            .fs_append_text("enableScripts: false\n")
+            .await?;
 
         if self == &BenchMode::InstallReady {
             let dummy_pkg_json
@@ -99,8 +102,10 @@ impl BenchMode {
                     .with_join_str("dummy-pkg/package.json");
 
             dummy_pkg_json
-                .fs_create_parent()?
-                .fs_write("{\"name\": \"dummy-pkg\"}")?;
+                .fs_create_parent()
+                .await?
+                .fs_write("{\"name\": \"dummy-pkg\"}")
+                .await?;
         }
 
         run_cli(&["install"]).await?;
@@ -204,7 +209,8 @@ impl BenchPrepare {
     pub async fn execute(&self) -> Result<(), Error> {
         Path::current_dir()?
             .with_join_str("package.json")
-            .fs_write(&self.name.get_manifest())?;
+            .fs_write(&self.name.get_manifest())
+            .await?;
 
         self.mode.prepare_folder().await?;
 

@@ -131,7 +131,9 @@ impl LooseDescriptor {
                         = Path::try_from(&params_path)?;
 
                     let tgz_content = path
-                        .fs_read_prealloc()?;
+                        .to_path_buf();
+                    let tgz_content
+                        = std::fs::read(tgz_content)?;
 
                     let tar_content
                         = tar::unpack_tgz(&tgz_content)?;

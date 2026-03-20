@@ -623,6 +623,7 @@ impl Install {
         project.ignore_path()
             .with_join_str(".gitignore")
             .fs_change("*", false)
+            .await
             .ok_missing()?;
 
         Ok(InstallResult {
@@ -758,8 +759,8 @@ impl<'a> InstallManager<'a> {
 
         let late_checksums = missing_checksums.into_par_iter()
             .map(|(locator, archive_path)| -> Result<_, Error> {
-                let archive_data = archive_path
-                    .fs_read_prealloc()?;
+                let archive_data
+                    = std::fs::read(archive_path.to_path_buf())?;
 
                 let checksum
                     = Hash64::from_data(&archive_data);
@@ -802,11 +803,14 @@ impl<'a> InstallManager<'a> {
                                     .with_ext("zip");
 
                                 let data = archive_path
-                                    .fs_read_prealloc()?;
+                                    .fs_read()
+                                    .await?;
 
                                 quarantine_path
-                                    .fs_create_parent()?
-                                    .fs_write(&data)?;
+                                    .fs_create_parent()
+                                    .await?
+                                    .fs_write(&data)
+                                    .await?;
                             }
 
                             return Err(Error::ChecksumMismatch(entry.resolution.locator.clone()));
