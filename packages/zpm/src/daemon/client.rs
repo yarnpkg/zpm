@@ -7,7 +7,8 @@ use zpm_switch::YARN_SWITCH_PATH_ENV;
 use zpm_utils::Path;
 
 use super::{
-    coordinator::start_daemon_inline,
+    coordinator::{start_daemon_inline_with_handle, DaemonShutdownHandle},
+    coordinator_commands::CoordinatorCommand,
     ipc::{
         AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest,
         DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskEvent,
@@ -33,20 +34,56 @@ pub struct PushTasksResult {
     pub attached_long_lived: Vec<AttachedLongLivedTask>,
 }
 
-/// Handle to a standalone daemon running in-process that can be aborted when no longer needed
+/// Handle to a standalone daemon running in-process that can be aborted when no longer needed.
+///
+/// When aborted (or dropped), triggers a graceful shutdown of the coordinator
+/// so that all child processes are killed before the Tokio task is cancelled.
+/// Without this, independently-spawned executor tasks and their OS child
+/// processes would be orphaned.
 pub struct StandaloneDaemonHandle {
     abort_handle: AbortHandle,
+    shutdown_handle: Option<DaemonShutdownHandle>,
 }
 
 impl StandaloneDaemonHandle {
-    pub fn abort(&self) {
+    /// Trigger graceful shutdown asynchronously, then abort the daemon task.
+    pub async fn shutdown(&mut self) {
+        if let Some(handle) = self.shutdown_handle.take() {
+            let (response_tx, response_rx)
+                = oneshot::channel();
+
+            if handle.command_tx.send(CoordinatorCommand::Shutdown { response_tx }).is_ok() {
+                // Wait for the coordinator to process Shutdown (which kills
+                // all child processes) before we signal the accept loop.
+                let _ = response_rx.await;
+            }
+
+            handle.shutdown_notify.notify_one();
+        }
+
+        self.abort_handle.abort();
+    }
+
+    /// Fire-and-forget abort: sends Shutdown to the coordinator and aborts
+    /// the daemon task. Used by Drop when an async context is unavailable.
+    /// The coordinator kills child processes when it processes the Shutdown
+    /// command, even though we cannot await the response here.
+    fn abort_sync(&mut self) {
+        if let Some(handle) = self.shutdown_handle.take() {
+            let (response_tx, _response_rx)
+                = oneshot::channel();
+
+            let _ = handle.command_tx.send(CoordinatorCommand::Shutdown { response_tx });
+            handle.shutdown_notify.notify_one();
+        }
+
         self.abort_handle.abort();
     }
 }
 
 impl Drop for StandaloneDaemonHandle {
     fn drop(&mut self) {
-        self.abort();
+        self.abort_sync();
     }
 }
 
@@ -83,18 +120,26 @@ impl DaemonClient {
         let (port_tx, port_rx)
             = oneshot::channel::<u16>();
 
+        let (handle_tx, handle_rx)
+            = oneshot::channel::<DaemonShutdownHandle>();
+
         let project_clone
             = project.clone();
 
         let join_handle
             = tokio::spawn(async move {
-                if let Err(e) = start_daemon_inline(project_clone, port_tx).await {
+                if let Err(e) = start_daemon_inline_with_handle(project_clone, port_tx, handle_tx).await {
                     eprintln!("Standalone daemon error: {}", e);
                 }
             });
 
         let abort_handle
             = join_handle.abort_handle();
+
+        let shutdown_handle
+            = handle_rx
+                .await
+                .ok();
 
         let port
             = port_rx
@@ -116,7 +161,7 @@ impl DaemonClient {
                     let client
                         = Self::connect_with_stream(ws_stream);
 
-                    return Ok((client, StandaloneDaemonHandle { abort_handle }));
+                    return Ok((client, StandaloneDaemonHandle { abort_handle, shutdown_handle }));
                 }
                 Err(_) => tokio::time::sleep(poll_interval).await,
             }

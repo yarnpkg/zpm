@@ -24,17 +24,28 @@ use crate::{
     project::Project,
 };
 
-pub async fn start_daemon_inline(project: Arc<Project>, port_tx: oneshot::Sender<u16>) -> Result<(), Error> {
-    run_daemon_internal(project, Some(port_tx)).await
+/// Handles needed to trigger a graceful shutdown from outside.
+pub struct DaemonShutdownHandle {
+    pub command_tx: CommandSender,
+    pub shutdown_notify: Arc<tokio::sync::Notify>,
+}
+
+pub async fn start_daemon_inline_with_handle(
+    project: Arc<Project>,
+    port_tx: oneshot::Sender<u16>,
+    handle_tx: oneshot::Sender<DaemonShutdownHandle>,
+) -> Result<(), Error> {
+    run_daemon_internal(project, Some(port_tx), Some(handle_tx)).await
 }
 
 pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
-    run_daemon_internal(project, None).await
+    run_daemon_internal(project, None, None).await
 }
 
 async fn run_daemon_internal(
     project: Arc<Project>,
     port_tx: Option<oneshot::Sender<u16>>,
+    handle_tx: Option<oneshot::Sender<DaemonShutdownHandle>>,
 ) -> Result<(), Error> {
     let (listener, port)
         = bind_to_available_port().await?;
@@ -62,6 +73,14 @@ async fn run_daemon_internal(
     // Shutdown signal: when notified, the accept loop exits cleanly
     let shutdown_notify
         = Arc::new(tokio::sync::Notify::new());
+
+    // Send the shutdown handle to the caller if requested
+    if let Some(tx) = handle_tx {
+        let _ = tx.send(DaemonShutdownHandle {
+            command_tx: command_tx.clone(),
+            shutdown_notify: shutdown_notify.clone(),
+        });
+    }
 
     // Spawn the coordinator loop
     let project_for_loop
@@ -309,16 +328,20 @@ async fn handle_command(
             if is_long_lived {
                 let base_task_id
                     = task_id.task_id.clone();
+                let base_task_id_for_timer
+                    = base_task_id.clone();
                 let tx
                     = command_tx.clone();
 
-                tokio::spawn(async move {
+                let handle = tokio::spawn(async move {
                     tokio::time::sleep(default_warmup_period).await;
                     let _ = tx.send(CoordinatorCommand::WarmUpComplete {
                         task_id,
-                        base_task_id,
+                        base_task_id: base_task_id_for_timer,
                     });
                 });
+
+                state.long_lived.set_warmup_handle(base_task_id, handle.abort_handle());
             }
         }
 
@@ -454,6 +477,14 @@ async fn handle_command(
         CoordinatorCommand::Shutdown { response_tx } => {
             let pids
                 = state.processes.get_all_pids();
+
+            // Kill all child processes directly. This ensures cleanup even
+            // when the caller cannot await the response (e.g. Drop path of
+            // StandaloneDaemonHandle).
+            for &pid in &pids {
+                platform::kill_process_group(pid);
+            }
+
             let _ = response_tx.send(pids);
             return true;
         }

@@ -263,6 +263,10 @@ impl CoordinatorState {
     /// Handle warm-up completion for a long-lived task.
     /// Returns empty effects if the task is already terminal (guards against
     /// the timer firing after task failure).
+    ///
+    /// Stale timers from a previous run are prevented by aborting the timer's
+    /// tokio task when the long-lived task is stopped (see `stop_long_lived`
+    /// and `LongLivedRegistry::remove`).
     pub fn warm_up_complete(
         &mut self,
         task_id: &ContextualTaskId,

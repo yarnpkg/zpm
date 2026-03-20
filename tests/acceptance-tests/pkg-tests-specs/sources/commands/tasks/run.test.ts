@@ -2152,6 +2152,76 @@ describe(`Commands`, () => {
           ]);
         })),
       );
+
+      test(
+        `it should not let a stale warm-up timer mark a restarted long-lived task as live prematurely`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, cleanupDaemon(async ({path, run, runSwitch}) => {
+          // Regression test: when a long-lived task is stopped and immediately
+          // restarted, the old warm-up timer (from the first run) must be
+          // cancelled so it doesn't fire for the new instance. Both runs share
+          // the same ContextualTaskId because long-lived tasks use a fixed
+          // context ID.
+          //
+          // Timeline (warmup = 500ms):
+          //   t=0:     start server → timer #1 fires at t=500ms
+          //   t=100ms: stop server → timer #1 is cancelled, process exits
+          //   t=~120ms: restart server → timer #2 fires at t=~620ms
+          //
+          // Without timer cancellation, timer #1 would fire at t=500ms and
+          // produce a duplicate "live" event for the new instance.
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  echo "server-started"`,
+            `  sleep 10`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          await runSwitch(`switch`, `daemon`, `--open`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Start the server (first run) → timer #1 set for now+500ms
+          const run1 = runSwitch(`tasks`, `run`, `server`).catch(() => {});
+
+          // Stop quickly — 100ms into the 500ms warm-up
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await runSwitch(`tasks`, `stop`, `server`);
+
+          // Restart IMMEDIATELY after stop. The process exits almost instantly
+          // on SIGTERM (`sleep 10` doesn't trap signals), so TaskCompleted has
+          // already been processed. clear_task_state removes the Failed state,
+          // add_task creates a fresh Pending entry. Timer #1 was cancelled when
+          // the task was stopped.
+          const run2 = runSwitch(`tasks`, `run`, `server`).catch(() => {});
+
+          // Wait long enough for timer #2 to fire (500ms from restart).
+          await new Promise(resolve => setTimeout(resolve, 1500));
+
+          const {stdout: historyStdout} = await runSwitch(`tasks`, `history`, `--json`);
+          const historyEvents = historyStdout.trim().split(`\n`).filter(Boolean).map((line: string) => JSON.parse(line));
+
+          const longLivedContextId = `4d84fea4-e0d4-4df6-8190-f312b86968b3`;
+          const expectedTaskId = `test-package:server@${longLivedContextId}`;
+
+          // First run: scheduled → warm-up → failed (stopped before warm-up completes)
+          // Second run: scheduled → warm-up → live (only ONE live event, stale timer was cancelled)
+          expect(historyEvents).toEqual([
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: {type: `scheduled`}},
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: {type: `warm-up`, pid: expect.any(Number)}},
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: expect.objectContaining({type: `failed`})},
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: {type: `scheduled`}},
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: {type: `warm-up`, pid: expect.any(Number)}},
+            {date: expect.any(Number), contextualTaskId: expectedTaskId, state: {type: `live`, pid: expect.any(Number)}},
+          ]);
+
+          // Clean up
+          await runSwitch(`tasks`, `stop`, `server`).catch(() => {});
+        })),
+        15000,
+      );
     });
 
     describe(`subtask state management`, () => {
@@ -2355,6 +2425,64 @@ describe(`Commands`, () => {
           expect(processStillRunning).toBe(false);
         }),
         15000, // Increase timeout for this test (5s wait + overhead)
+      );
+
+      test(
+        `it should kill long-lived child processes when standalone daemon exits`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run}) => {
+          // Regression test: when a standalone daemon finishes (all requested
+          // tasks complete), StandaloneDaemonHandle is dropped. Previously,
+          // abort() only cancelled the top-level Tokio task. Tasks spawned
+          // via ExecutorPool::spawn are independent tokio::spawn tasks and
+          // their OS child processes survived the abort. Now the Shutdown
+          // command is sent, which kills all child processes.
+          //
+          // Scenario: a short-lived "client" task depends on a @long-lived
+          // "server" task. When "client" completes, the standalone binary
+          // exits and drops the handle. The "server" child process must be
+          // killed.
+          const pidFile = ppath.join(path, `server.pid`);
+
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `@long-lived`,
+            `server:`,
+            `  echo $$ > server.pid`,
+            `  sleep 30`,
+            ``,
+            `client: server`,
+            `  echo "client-done"`,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          // Run "client" in standalone mode. Once "client" completes, the
+          // standalone binary exits and drops the daemon handle. The server
+          // should be killed during handle cleanup.
+          const {closed} = spawnYarnBin(path, [`tasks`, `run`, `--standalone`, `client`]);
+          const {code} = await closed;
+
+          expect(code).toBe(0);
+
+          // Read the server PID that was written before client started
+          const serverPid = parseInt(await xfs.readFilePromise(pidFile, `utf8`), 10);
+
+          // Wait a moment for cleanup
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          // The server process should have been killed when the handle was dropped
+          let processStillRunning = false;
+          try {
+            process.kill(serverPid, 0);
+            processStillRunning = true;
+          } catch {
+            processStillRunning = false;
+          }
+
+          expect(processStillRunning).toBe(false);
+        }),
+        15000,
       );
     });
 

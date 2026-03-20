@@ -122,7 +122,7 @@ pub async fn run_task(
     let project_cwd
         = project.project_cwd.clone();
 
-    let _daemon_handle: Option<StandaloneDaemonHandle>;
+    let mut daemon_handle: Option<StandaloneDaemonHandle> = None;
 
     let mut client = if standalone {
         let project
@@ -131,10 +131,10 @@ pub async fn run_task(
         let (c, handle)
             = DaemonClient::connect_standalone(project).await?;
 
-        _daemon_handle = Some(handle);
+        daemon_handle = Some(handle);
         c
     } else {
-        _daemon_handle = None;
+        daemon_handle = None;
         DaemonClient::connect(&project_cwd).await?
     };
 
@@ -203,8 +203,8 @@ pub async fn run_task(
 
                         ctx.client.close();
 
-                        if standalone {
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        if let Some(mut handle) = daemon_handle {
+                            handle.shutdown().await;
                         }
 
                         return Ok(exit_status_from_code(0));
@@ -216,8 +216,8 @@ pub async fn run_task(
 
                         ctx.client.close();
 
-                        if standalone {
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        if let Some(mut handle) = daemon_handle {
+                            handle.shutdown().await;
                         }
 
                         // Exit with SIGINT code (130 = 128 + 2)
@@ -275,8 +275,8 @@ pub async fn run_task(
 
     ctx.client.close();
 
-    if standalone {
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    if let Some(mut handle) = daemon_handle {
+        handle.shutdown().await;
     }
 
     Ok(exit_status_from_code(ctx.exit_code))
