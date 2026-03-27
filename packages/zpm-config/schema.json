@@ -398,6 +398,27 @@
         }
       }
     },
+    "unstableIslands": {
+      "type": "object",
+      "description": "Configuration of resolution islands. Each island resolves its transitive dependencies in isolation using a constraint solver (pubgrub), producing at most one version of each package per island.",
+      "additionalProperties": {
+        "type": "object",
+        "title": "IslandDefinition",
+        "properties": {
+          "workspaces": {
+            "type": "array",
+            "description": "List of workspace ident glob patterns that belong to this island.",
+            "items": {
+              "type": "zpm_primitives::IdentGlob"
+            }
+          },
+          "linker": {
+            "type": "crate::IslandLinker",
+            "description": "The linker to use for workspaces in this island. Currently only 'node-modules' is supported."
+          }
+        }
+      }
+    },
     "unsafeHttpWhitelist": {
       "type": "array",
       "description": "The patterns to whitelist when using unsafe HTTP",

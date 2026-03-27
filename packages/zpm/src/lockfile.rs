@@ -32,6 +32,7 @@ pub struct Lockfile {
     pub resolutions: BTreeMap<Descriptor, Locator>,
     pub entries: BTreeMap<Locator, LockfileEntry>,
     pub workspaces: BTreeMap<Ident, Hash64>,
+    pub islands: BTreeMap<String, BTreeMap<Descriptor, Locator>>,
 }
 
 impl Lockfile {
@@ -41,6 +42,7 @@ impl Lockfile {
             resolutions: BTreeMap::new(),
             entries: BTreeMap::new(),
             workspaces: BTreeMap::new(),
+            islands: BTreeMap::new(),
         }
     }
 }
@@ -60,6 +62,18 @@ impl<'de> Deserialize<'de> for Lockfile {
             }
 
             lockfile.entries.insert(entry.resolution.locator.clone(), entry);
+        }
+
+        // Deserialize island entries
+        for (island_id, island_entries) in payload.islands {
+            let mut island_resolutions = BTreeMap::new();
+            for (key, entry) in island_entries {
+                for descriptor in key.0 {
+                    island_resolutions.insert(descriptor, entry.resolution.locator.clone());
+                }
+                lockfile.entries.insert(entry.resolution.locator.clone(), entry);
+            }
+            lockfile.islands.insert(island_id, island_resolutions);
         }
 
         Ok(lockfile)
@@ -94,10 +108,36 @@ impl Serialize for Lockfile {
             entries.insert(entry.key, entry.inner);
         }
 
+        // Serialize island entries
+        let mut islands_payload: BTreeMap<String, BTreeMap<MultiKey<Descriptor>, LockfileEntry>> = BTreeMap::new();
+        for (island_id, island_resolutions) in &self.islands {
+            let mut island_entries_map: BTreeMap<Locator, MultiKeyLockfileEntry> = BTreeMap::new();
+            for (descriptor, locator) in island_resolutions.iter().sorted_by_key(|(descriptor, _)| (*descriptor).clone()) {
+                if descriptor.range.details().transient_resolution {
+                    continue;
+                }
+
+                let entry = self.entries.get(locator)
+                    .expect("Expected a matching resolution to be found in the lockfile for any resolved island locator.");
+
+                island_entries_map.entry(entry.resolution.locator.clone())
+                    .or_insert_with(|| MultiKeyLockfileEntry {inner: entry.clone(), key: MultiKey::new()})
+                    .key.0
+                    .push(descriptor.clone());
+            }
+
+            let mut island_entries = BTreeMap::new();
+            for entry in island_entries_map.into_values() {
+                island_entries.insert(entry.key, entry.inner);
+            }
+            islands_payload.insert(island_id.clone(), island_entries);
+        }
+
         let payload = LockfilePayload {
             metadata: self.metadata.clone(),
             entries,
             workspaces: self.workspaces.clone(),
+            islands: islands_payload,
         };
 
         payload.serialize(serializer)
@@ -240,6 +280,10 @@ struct LockfilePayload {
 
     #[serde(default)]
     entries: BTreeMap<MultiKey<Descriptor>, LockfileEntry>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    islands: BTreeMap<String, BTreeMap<MultiKey<Descriptor>, LockfileEntry>>,
 }
 
 #[derive(Debug, Deserialize)]

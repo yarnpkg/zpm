@@ -2,11 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
-use zpm_primitives::{Descriptor, Ident, Locator, PeerRange, Range, Reference, RegistryReference, SemverPeerRange, WorkspaceIdentRange, descriptor_map_serializer, descriptor_map_deserializer};
+use serde::de::IgnoredAny;
+use zpm_primitives::{Descriptor, Ident, Locator, PeerRange, Range, Reference, Registry, RegistryReference, SemverPeerRange, WorkspaceIdentRange, WorkspaceIdentReference, descriptor_map_serializer, descriptor_map_deserializer};
 use zpm_utils::Requirements;
 
+use zpm_parsers::JsonDocument;
+
 use crate::{
-    error::Error, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest
+    error::Error, http_npm, install::{normalize_resolutions, InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult}, manifest::RemoteManifest,
 };
 
 pub mod builtin;
@@ -289,4 +292,66 @@ pub async fn validate_resolution(context: InstallContext<'_>, descriptor: Descri
     }
 
     Ok(())
+}
+
+pub async fn resolve_versions(context: &InstallContext<'_>, registry: &Registry) -> Result<Vec<Locator>, Error> {
+    match registry {
+        Registry::Npm(ident) => {
+            let project = context.project
+                .expect("The project is required for resolving versions");
+
+            let registry_base
+                = http_npm::get_registry(&project.config, ident.scope(), false)?;
+            let registry_path
+                = crate::npm::registry_url_for_all_versions(ident);
+
+            let authorization
+                = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+                    configuration: &project.config,
+                    http_client: &project.http_client,
+                    registry: &registry_base,
+                    ident: Some(ident),
+                    auth_mode: http_npm::AuthorizationMode::RespectConfiguration,
+                    allow_oidc: false,
+                }).await?;
+
+            let bytes
+                = http_npm::get(&http_npm::NpmHttpParams {
+                    http_client: &project.http_client,
+                    registry: &registry_base,
+                    path: &registry_path,
+                    authorization: authorization.as_deref(),
+                    otp: None,
+                }).await?;
+
+            #[derive(Deserialize)]
+            struct RegistryMetadata {
+                versions: BTreeMap<zpm_semver::Version, IgnoredAny>,
+            }
+
+            let registry_data: RegistryMetadata
+                = JsonDocument::hydrate_from_slice(&bytes[..])?;
+
+            Ok(registry_data.versions.into_keys().map(|version| {
+                Locator::new(ident.clone(), RegistryReference {
+                    ident: ident.clone(),
+                    version,
+                    url: None,
+                }.into())
+            }).collect())
+        }
+
+        Registry::Workspace(ident) => {
+            let project = context.project
+                .expect("The project is required for resolving workspace versions");
+
+            let workspace = project.workspace_by_ident(ident)?;
+            let locator = Locator::new(ident.clone(), WorkspaceIdentReference {
+                ident: workspace.name.clone(),
+            }.into());
+            Ok(vec![locator])
+        }
+
+        Registry::None => Ok(vec![]),
+    }
 }

@@ -8,7 +8,7 @@ use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
 
 use crate::{PeerRange, SemverPeerRange};
 
-use super::{Descriptor, Ident};
+use super::{Descriptor, Ident, Registry};
 
 pub static EXPLICIT_PATH_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^.{0,2}/").unwrap()
@@ -265,6 +265,28 @@ impl Range {
             },
 
             _ => None,
+        }
+    }
+
+    pub fn registry(&self, default_ident: &Ident) -> Registry {
+        match self {
+            Range::AnonymousSemver(_) => {
+                Registry::Npm(default_ident.clone())
+            },
+
+            Range::RegistrySemver(params) => {
+                Registry::Npm(params.ident.clone().unwrap_or_else(|| default_ident.clone()))
+            },
+
+            Range::WorkspaceMagic(_) | Range::WorkspaceSemver(_) => {
+                Registry::Workspace(default_ident.clone())
+            },
+
+            Range::WorkspaceIdent(params) => {
+                Registry::Workspace(params.ident.clone())
+            },
+
+            _ => Registry::None,
         }
     }
 

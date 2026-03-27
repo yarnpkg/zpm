@@ -1,6 +1,9 @@
-use std::{collections::{BTreeMap, BTreeSet}, hash::Hash, marker::PhantomData, sync::LazyLock};
+use std::{collections::{BTreeMap, BTreeSet}, sync::{Arc, LazyLock}};
 
 use chrono::{DateTime, Utc};
+use futures::future::{BoxFuture, FutureExt};
+use futures::stream::{FuturesUnordered, StreamExt};
+use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
@@ -16,13 +19,13 @@ use crate::{
     content_flags::ContentFlags,
     error::Error,
     fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync},
-    graph::{GraphCache, GraphIn, GraphOut, GraphTasks},
+    graph::WaitMap,
     linker,
     lockfile::{Lockfile, LockfileEntry, LockfileMetadata},
     primitives_exts::{InnerDependencyKind, RangeExt},
     project::{InstallMode, Project},
     report::{ReportContext, async_section, current_report, with_context_result},
-    resolvers::{Resolution, SyncResolutionAttempt, catalog::lookup_catalog_entry, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, validate_resolution}, tree_resolver::{ResolutionTree, TreeResolver},
+    resolvers::{Resolution, SyncResolutionAttempt, catalog::lookup_catalog_entry, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync}, tree_resolver::{ResolutionTree, TreeResolver},
 };
 
 #[derive(Clone)]
@@ -104,16 +107,6 @@ impl<'a> InstallContext<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub struct PinnedResult {
-    pub locator: Locator,
-}
-
-#[derive(Clone, Debug)]
-pub struct ValidatedResult {
-    pub success: bool,
-}
-
-#[derive(Clone, Debug)]
 pub struct ResolutionResult {
     pub resolution: Resolution,
     pub original_resolution: Resolution,
@@ -168,364 +161,426 @@ impl IntoResolutionResult for FetchResult {
     }
 }
 
+/// Shared context for the WaitMap-based resolution/fetch pipeline.
+struct InstallMaps {
+    resolution_map: Arc<WaitMap<Descriptor, ResolutionResult>>,
+    fetch_map: Arc<WaitMap<Locator, FetchResult>>,
+}
+
+/// Resolve a single descriptor: runs `get_or_init` for the resolution + starts
+/// the fetch, then returns child descriptors to be resolved next.
+///
+/// The resolution logic is split: `get_or_init` runs only the core resolution +
+/// starts the fetch. Children are returned (not recursed into) so the caller
+/// can drive them iteratively, avoiding stack overflow on deep dependency trees.
+async fn resolve_one<'a>(
+    descriptor: Descriptor,
+    ctx: &'a InstallContext<'a>,
+    lockfile: &'a Lockfile,
+    maps: &'a InstallMaps,
+) -> Vec<Descriptor> {
+    let cell
+        = maps.resolution_map.entry(descriptor.clone());
+
+    let result = cell.get_or_init(|| {
+        resolve_descriptor_impl(descriptor.clone(), ctx, lockfile, maps)
+    }).await;
+
+    let Ok(result) = result else {
+        return vec![];
+    };
+
+    let children
+        = result.resolution.dependencies
+            .values()
+            .chain(result.resolution.variants.iter())
+            .cloned()
+            .collect();
+
+    children
+}
+
+/// Iteratively resolve all descriptors starting from the given roots.
+/// Uses `FuturesUnordered` to process descriptors concurrently without
+/// recursive async calls (which would overflow the stack on deep trees).
+async fn resolve_all<'a>(
+    roots: impl IntoIterator<Item = Descriptor>,
+    ctx: &'a InstallContext<'a>,
+    lockfile: &'a Lockfile,
+    maps: &'a InstallMaps,
+) {
+    let mut in_flight
+        = FuturesUnordered::new();
+
+    for descriptor in roots {
+        in_flight.push(resolve_one(descriptor, ctx, lockfile, maps));
+    }
+
+    while let Some(children) = in_flight.next().await {
+        for child in children {
+            // Only schedule children whose resolution hasn't been started yet.
+            // This prevents infinite loops on cyclic dependency graphs.
+            let cell
+                = maps.resolution_map.entry(child.clone());
+
+            if !cell.initialized() {
+                in_flight.push(resolve_one(child, ctx, lockfile, maps));
+            }
+        }
+    }
+}
+
+/// The actual resolution logic for a single descriptor.
+/// Returns the resolution result; does NOT recurse into children (that happens
+/// in `resolve_one` after the OnceCell init completes, via the `resolve_all` worklist).
+///
+/// Returns a `BoxFuture` to support recursive calls for inner descriptors
+/// (e.g. alias->inner, patch->inner) without causing infinite future sizes.
+fn resolve_descriptor_impl<'a>(
+    descriptor: Descriptor,
+    ctx: &'a InstallContext<'a>,
+    lockfile: &'a Lockfile,
+    maps: &'a InstallMaps,
+) -> BoxFuture<'a, Result<ResolutionResult, Arc<Error>>> {
+    async move {
+        let timeout
+            = std::time::Duration::from_secs(600);
+
+        // Phase 1: Check lockfile cache
+        let cached
+            = check_resolution_cache(ctx, lockfile, &descriptor)
+                .map_err(Arc::new)?;
+
+        if let Some(cached) = cached {
+            match cached {
+                CacheHit::Full(result) => {
+                    start_fetch(&result, ctx, maps).await;
+                    return Ok(result);
+                },
+
+                CacheHit::Pinned(locator) => {
+                    // Inline Refresh: wait for locator prerequisites, then resolve_locator
+                    let refresh_deps
+                        = build_locator_fetch_deps(&locator, maps, ctx).await?;
+
+                    current_report().await.as_ref().map(|report| {
+                        report.counters.resolution_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    });
+
+                    let result = with_context_result(ReportContext::Locator(locator.clone()), async {
+                        tokio::time::timeout(
+                            timeout,
+                            resolve_locator(ctx.clone(), locator.clone(), refresh_deps)
+                        ).await.map_err(|_| Error::TaskTimeout)?
+                    }).await.map_err(Arc::new)?;
+
+                    start_fetch(&result, ctx, maps).await;
+                    return Ok(result);
+                },
+            }
+        }
+
+        // Phase 2: Await prerequisites and build the dependencies vector
+        let mut dependencies
+            = vec![];
+
+        // Parent fetch
+        if let Some(parent) = &descriptor.parent {
+            let parent_fetch
+                = await_fetch(parent, maps, ctx).await?;
+
+            dependencies.push(InstallOpResult::Fetched(parent_fetch));
+        }
+
+        // Inner descriptor resolution + maybe inner fetch
+        if let Some(mut inner_descriptor) = descriptor.range.inner_descriptor() {
+            if inner_descriptor.range.details().require_binding {
+                inner_descriptor.parent = descriptor.parent.clone();
+            }
+
+            // Resolve the inner descriptor (this is NOT a regular child dep, it's
+            // a structural prerequisite like alias->inner or patch->inner).
+            // Uses get_or_init directly; inner descriptor's children will be
+            // discovered by the resolve_all worklist via resolve_one.
+            let inner_cell
+                = maps.resolution_map.entry(inner_descriptor.clone());
+
+            inner_cell.get_or_init(|| {
+                resolve_descriptor_impl(inner_descriptor.clone(), ctx, lockfile, maps)
+            }).await;
+
+            let inner_result
+                = get_resolution_result(&inner_descriptor, maps).await?;
+            let inner_locator
+                = inner_result.resolution.locator.clone();
+
+            let inner_dep_kind
+                = descriptor.range.inner_dependency();
+
+            match inner_dep_kind {
+                Some(InnerDependencyKind::Resolution) => {
+                    dependencies.push(InstallOpResult::Resolved(inner_result));
+                },
+
+                Some(InnerDependencyKind::Fetch) => {
+                    let fetch_result
+                        = await_fetch(&inner_locator, maps, ctx).await?;
+
+                    dependencies.push(InstallOpResult::Resolved(inner_result));
+                    dependencies.push(InstallOpResult::Fetched(fetch_result));
+                },
+
+                None => {},
+            }
+        }
+
+        // Phase 3: Resolve
+        if !descriptor.range.details().transient_resolution {
+            current_report().await.as_ref().map(|report| {
+                report.counters.resolution_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            });
+        }
+
+        let result = with_context_result(ReportContext::Descriptor(descriptor.clone()), async {
+            let dependencies = match try_resolve_descriptor_sync(ctx.clone(), descriptor.clone(), dependencies) {
+                Ok(SyncResolutionAttempt::Success(result)) => return Ok(result),
+                Ok(SyncResolutionAttempt::Failure(dependencies)) => dependencies,
+                Err(e) => return Err(e),
+            };
+
+            tokio::time::timeout(
+                timeout,
+                resolve_descriptor(ctx.clone(), descriptor.clone(), dependencies)
+            ).await.map_err(|_| Error::TaskTimeout)?
+        }).await.map_err(Arc::new)?;
+
+        // Phase 4: Start fetch (children are handled by resolve_all worklist after init completes)
+        start_fetch(&result, ctx, maps).await;
+
+        Ok(result)
+    }.boxed()
+}
+
+/// Start a fetch for the resolved locator.
+async fn start_fetch<'a>(
+    result: &ResolutionResult,
+    ctx: &'a InstallContext<'a>,
+    maps: &'a InstallMaps,
+) {
+    let systems
+        = ctx.systems.unwrap();
+    let is_mock_request
+        = !result.resolution.requirements.validate_any(systems);
+    let locator
+        = result.resolution.locator.clone();
+
+    ensure_fetched(locator, is_mock_request, ctx, maps).await;
+}
+
+/// Ensure a locator is fetched. Uses the fetch WaitMap for deduplication.
+fn ensure_fetched<'a>(
+    locator: Locator,
+    is_mock_request: bool,
+    ctx: &'a InstallContext<'a>,
+    maps: &'a InstallMaps,
+) -> BoxFuture<'a, ()> {
+    async move {
+        let cell
+            = maps.fetch_map.entry(locator.clone());
+
+        cell.get_or_init(|| async {
+            fetch_locator_impl(locator, is_mock_request, ctx, maps).await
+        }).await;
+    }.boxed()
+}
+
+/// The actual fetch logic for a single locator.
+async fn fetch_locator_impl<'a>(
+    locator: Locator,
+    is_mock_request: bool,
+    ctx: &'a InstallContext<'a>,
+    maps: &'a InstallMaps,
+) -> Result<FetchResult, Arc<Error>> {
+    let timeout
+        = std::time::Duration::from_secs(600);
+
+    // Build fetch dependencies (same order as old graph_dependencies for InstallOp::Fetch)
+    let mut dependencies: Vec<InstallOpResult>
+        = vec![];
+
+    if let Some(parent) = &locator.parent {
+        let parent_fetch
+            = await_fetch(parent.as_ref(), maps, ctx).await?;
+
+        dependencies.push(InstallOpResult::Fetched(parent_fetch));
+    }
+
+    if let Some(inner_locator) = locator.reference.inner_locator().cloned() {
+        let inner_fetch
+            = await_fetch(&inner_locator, maps, ctx).await?;
+
+        dependencies.push(InstallOpResult::Fetched(inner_fetch));
+    }
+
+    with_context_result(ReportContext::Locator(locator.clone()), async {
+        let dependencies = match try_fetch_locator_sync(ctx.clone(), &locator, is_mock_request, dependencies) {
+            Ok(SyncFetchAttempt::Success(result)) => return Ok(result),
+            Ok(SyncFetchAttempt::Failure(dependencies)) => dependencies,
+            Err(e) => return Err(e),
+        };
+
+        let future = tokio::time::timeout(
+            timeout,
+            fetch_locator(ctx.clone(), &locator, is_mock_request, dependencies)
+        ).await.map_err(|_| Error::TaskTimeout)?;
+
+        if is_mock_request {
+            if let Ok(result) = future.as_ref() {
+                if let FetchResult {package_data: PackageData::Zip {..}, ..} = result {
+                    current_report().await.as_ref().map(|report| {
+                        report.warn(format!("Mock request for {} returned a zip package; this should not happen.", locator.to_print_string()));
+                    });
+                }
+            }
+        }
+
+        future
+    }).await.map_err(Arc::new)
+}
+
+/// Ensure a locator is fetched and return its result by awaiting the fetch map.
+/// If the fetch hasn't been initiated yet, this will initiate it (non-mock).
+/// Uses BoxFuture because fetch_locator_impl can recursively call await_fetch.
+fn await_fetch<'a>(locator: &Locator, maps: &'a InstallMaps, ctx: &'a InstallContext<'a>) -> BoxFuture<'a, Result<FetchResult, Arc<Error>>> {
+    let cell
+        = maps.fetch_map
+            .entry(locator.clone());
+
+    let locator_clone
+        = locator.clone();
+
+    async move {
+        let result = cell.get_or_init(|| async {
+            fetch_locator_impl(locator_clone, false, ctx, maps).await
+        }).await;
+
+        match result {
+            Ok(v) => Ok(v.clone()),
+            Err(e) => Err(e.clone()),
+        }
+    }.boxed()
+}
+
+/// Get a resolution result from the resolution map. The entry must already be initialized.
+async fn get_resolution_result(descriptor: &Descriptor, maps: &InstallMaps) -> Result<ResolutionResult, Arc<Error>> {
+    let cell
+        = maps.resolution_map
+            .entry(descriptor.clone());
+
+    let result = cell.get_or_init(|| async {
+        Err(Arc::new(Error::MissingResolution(descriptor.clone())))
+    }).await;
+
+    match result {
+        Ok(v) => Ok(v.clone()),
+        Err(e) => Err(e.clone()),
+    }
+}
+
+/// Build the fetch dependencies vector for a locator (for resolve_locator / Refresh).
+async fn build_locator_fetch_deps<'a>(locator: &Locator, maps: &'a InstallMaps, ctx: &'a InstallContext<'a>) -> Result<Vec<InstallOpResult>, Arc<Error>> {
+    let mut dependencies
+        = vec![];
+
+    if let Some(parent) = &locator.parent {
+        let parent_fetch
+            = await_fetch(parent.as_ref(), maps, ctx).await?;
+
+        dependencies.push(InstallOpResult::Fetched(parent_fetch));
+    }
+
+    if let Some(inner_locator) = locator.reference.inner_locator().cloned() {
+        let inner_fetch
+            = await_fetch(&inner_locator, maps, ctx).await?;
+
+        dependencies.push(InstallOpResult::Fetched(inner_fetch));
+    }
+
+    Ok(dependencies)
+}
+
+enum CacheHit {
+    Full(ResolutionResult),
+    Pinned(Locator),
+}
+
+/// Check if a descriptor can be resolved from the lockfile cache.
+fn check_resolution_cache(ctx: &InstallContext<'_>, lockfile: &Lockfile, descriptor: &Descriptor) -> Result<Option<CacheHit>, Error> {
+    let range_details
+        = descriptor.range.details();
+
+    if range_details.transient_resolution {
+        return Ok(None);
+    }
+
+    // enforced_resolutions semantics:
+    // - None (not in map): use lockfile resolution if available
+    // - Some(None): skip lockfile, force re-resolution
+    // - Some(Some(locator)): force resolution to specific locator
+    let enforced_resolution
+        = ctx.enforced_resolutions.get(descriptor);
+
+    // If Some(None), skip lockfile lookup entirely and force re-resolution
+    if enforced_resolution == Some(&None) {
+        return Ok(None);
+    }
+
+    // Get the enforced locator if any
+    let enforced_locator
+        = enforced_resolution.and_then(|opt| opt.as_ref());
+
+    if let Some(locator) = lockfile.resolutions.get(descriptor) {
+        if enforced_locator.map_or(true, |enforced| locator == enforced) {
+            if lockfile.metadata.version != LockfileMetadata::new().version || ctx.refresh_lockfile {
+                return Ok(Some(CacheHit::Pinned(locator.clone())));
+            }
+
+            let entry
+                = lockfile.entries.get(locator)
+                    .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator.to_print_string()));
+
+            return Ok(Some(CacheHit::Full(entry.resolution.clone().into_resolution_result(ctx)?)));
+        }
+    }
+
+    if let Some(locator) = enforced_locator {
+        return Ok(Some(CacheHit::Pinned(locator.clone())));
+    }
+
+    Ok(None)
+}
+
+// Legacy types kept for compatibility with resolver/fetcher function signatures.
+// These will be removed once the resolver/fetcher modules are refactored.
 #[derive(Clone, Debug)]
 pub enum InstallOpResult {
-    Validated,
-    Pinned(PinnedResult),
     Resolved(ResolutionResult),
     Fetched(FetchResult),
 }
 
 impl InstallOpResult {
-    pub fn into_resolved(self) -> ResolutionResult {
-        match self {
-            InstallOpResult::Resolved(resolution) => {
-                resolution
-            },
-
-            _ => {
-                panic!("Expected a resolved result; got {:?}", self)
-            },
-        }
-    }
-
-    pub fn into_fetched(self) -> FetchResult {
-        match self {
-            InstallOpResult::Fetched(fetch) => {
-                fetch
-            },
-
-            _ => {
-                panic!("Expected a fetched result; got {:?}", self)
-            },
-        }
-    }
-
-    pub fn as_resolved(&self) -> &ResolutionResult {
-        match self {
-            InstallOpResult::Resolved(resolution) => resolution,
-            _ => panic!("Expected a resolved result; got {:?}", self),
-        }
-    }
-
     pub fn as_fetched(&self) -> &FetchResult {
         match self {
-            InstallOpResult::Fetched(fetch) => {
-                fetch
-            },
-
-            _ => {
-                panic!("Expected a fetched result; got {:?}", self)
-            },
+            InstallOpResult::Fetched(fetch) => fetch,
+            _ => panic!("Expected a fetched result; got {:?}", self),
         }
     }
 
     pub fn as_resolved_locator(&self) -> &Locator {
         match self {
-            InstallOpResult::Resolved(params) => {
-                &params.resolution.locator
-            },
-
-            InstallOpResult::Pinned(params) => {
-                &params.locator
-            },
-
-            _ => {
-                panic!("Expected a resolved locator; got {:?}", self)
-            },
+            InstallOpResult::Resolved(params) => &params.resolution.locator,
+            _ => panic!("Expected a resolved locator; got {:?}", self),
         }
-    }
-}
-
-impl<'a> GraphOut<InstallContext<'a>, InstallOp<'a>> for InstallOpResult {
-    fn graph_follow_ups(&self, _op: &InstallOp<'a>, ctx: &InstallContext<'a>) -> Vec<InstallOp<'a>> {
-        match self {
-            InstallOpResult::Validated => {
-                vec![]
-            },
-
-            InstallOpResult::Pinned(PinnedResult {locator, ..}) => {
-                vec![InstallOp::Refresh {
-                    locator: locator.clone(),
-                }]
-            },
-
-            InstallOpResult::Resolved(ResolutionResult {resolution, ..}) => {
-                let systems
-                    = ctx.systems.unwrap();
-
-                let mut follow_ups = vec![InstallOp::Fetch {
-                    locator: resolution.locator.clone(),
-                    is_mock_request: !resolution.requirements.validate_any(systems),
-                }];
-
-                let transitive_dependencies = resolution.dependencies
-                    .values()
-                    .cloned()
-                    .map(|dependency| InstallOp::Resolve {descriptor: dependency})
-                    .chain(resolution.variants.iter().map(|variant| InstallOp::Resolve {descriptor: variant.clone()}));
-
-                follow_ups.extend(transitive_dependencies);
-                follow_ups
-            },
-
-            InstallOpResult::Fetched(FetchResult {..}) => {
-                vec![]
-            },
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum InstallOp<'a> {
-    #[allow(dead_code)]
-    Phantom(PhantomData<&'a ()>),
-
-    Refresh {
-        locator: Locator,
-    },
-
-    Validate {
-        descriptor: Descriptor,
-        locator: Locator,
-    },
-
-    Resolve {
-        descriptor: Descriptor,
-    },
-
-    Fetch {
-        locator: Locator,
-        is_mock_request: bool,
-    },
-}
-
-impl<'a> GraphIn<'a, InstallContext<'a>, InstallOpResult, Error> for InstallOp<'a> {
-    fn graph_dependencies(&self, ctx: &InstallContext<'a>, resolved_dependencies: &[&InstallOpResult]) -> Vec<Self> {
-        let mut dependencies = vec![];
-        let mut resolved_it = resolved_dependencies.iter();
-
-        match self {
-            InstallOp::Phantom(_) =>
-                unreachable!("PhantomData should never be instantiated"),
-
-            InstallOp::Validate {descriptor, ..} => {
-                InstallOp::Resolve {
-                    descriptor: descriptor.clone(),
-                }.graph_dependencies(ctx, resolved_dependencies);
-            },
-
-            InstallOp::Refresh {locator} => {
-                if let Some(parent) = &locator.parent {
-                    dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone(), is_mock_request: false});
-                    resolved_it.next();
-                }
-
-                if let Some(inner_locator) = locator.reference.inner_locator().cloned() {
-                    dependencies.push(InstallOp::Fetch {locator: inner_locator, is_mock_request: false});
-                }
-            },
-
-            InstallOp::Resolve {descriptor} => {
-                if let Some(parent) = &descriptor.parent {
-                    dependencies.push(InstallOp::Fetch {locator: parent.clone(), is_mock_request: false});
-                    resolved_it.next();
-                }
-
-                if let Some(mut inner_descriptor) = descriptor.range.inner_descriptor() {
-                    if inner_descriptor.range.details().require_binding {
-                        inner_descriptor.parent = descriptor.parent.clone();
-                    }
-
-                    dependencies.push(InstallOp::Resolve {descriptor: inner_descriptor});
-                    let inner_resolution = resolved_it.next();
-
-                    if let Some(result) = inner_resolution {
-                        let inner_locator = result.as_resolved_locator();
-                        let inner_dep_kind = descriptor.range.inner_dependency();
-
-                        match inner_dep_kind {
-                            // Aliased packages only need the resolution. When the inner result is Pinned,
-                            // add a Refresh dependency to get the full ResolutionResult.
-                            Some(InnerDependencyKind::Resolution) => {
-                                if matches!(result, InstallOpResult::Pinned(_)) {
-                                    dependencies.push(InstallOp::Refresh {locator: inner_locator.clone()});
-                                }
-                            },
-
-                            // Patches need the fetched package contents.
-                            Some(InnerDependencyKind::Fetch) => {
-                                dependencies.push(InstallOp::Fetch {locator: inner_locator.clone(), is_mock_request: false});
-                            },
-
-                            None => {},
-                        }
-                    }
-                }
-            },
-
-            InstallOp::Fetch {locator, ..} => {
-                if let Some(parent) = &locator.parent {
-                    dependencies.push(InstallOp::Fetch {locator: parent.as_ref().clone(), is_mock_request: false});
-                }
-
-                if let Some(inner_locator) = locator.reference.inner_locator().cloned() {
-                    dependencies.push(InstallOp::Fetch {locator: inner_locator, is_mock_request: false});
-                }
-            },
-        }
-
-        dependencies
-    }
-
-    async fn graph_run(self, context: InstallContext<'a>, dependencies: Vec<InstallOpResult>) -> Result<InstallOpResult, Error> {
-        let timeout = std::time::Duration::from_secs(600);
-        match self {
-            InstallOp::Phantom(_) =>
-                unreachable!("PhantomData should never be instantiated"),
-
-            InstallOp::Validate {descriptor, locator} => {
-                current_report().await.as_ref().map(|report| {
-                    report.counters.resolution_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                });
-
-                with_context_result(ReportContext::Descriptor(descriptor.clone()), async {
-                    tokio::time::timeout(
-                        timeout,
-                        validate_resolution(context.clone(), descriptor.clone(), locator.clone(), dependencies)
-                    ).await.map_err(|_| Error::TaskTimeout)??;
-
-                    Ok(InstallOpResult::Validated)
-                }).await
-            },
-
-            InstallOp::Refresh {locator} => {
-                current_report().await.as_ref().map(|report| {
-                    report.counters.resolution_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                });
-
-                with_context_result(ReportContext::Locator(locator.clone()), async {
-                    let future = tokio::time::timeout(
-                        timeout,
-                        resolve_locator(context.clone(), locator.clone(), dependencies)
-                    ).await.map_err(|_| Error::TaskTimeout)?;
-
-                    Ok(InstallOpResult::Resolved(future?))
-                }).await
-            },
-
-            InstallOp::Resolve {descriptor} => {
-                if !descriptor.range.details().transient_resolution {
-                    current_report().await.as_ref().map(|report| {
-                        report.counters.resolution_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    });
-                }
-
-                with_context_result(ReportContext::Descriptor(descriptor.clone()), async {
-                    let dependencies = match try_resolve_descriptor_sync(context.clone(), descriptor.clone(), dependencies)? {
-                        SyncResolutionAttempt::Success(result) => return Ok(InstallOpResult::Resolved(result)),
-                        SyncResolutionAttempt::Failure(dependencies) => dependencies,
-                    };
-
-                    let future = tokio::time::timeout(
-                        timeout,
-                        resolve_descriptor(context.clone(), descriptor.clone(), dependencies)
-                    ).await.map_err(|_| Error::TaskTimeout)?;
-
-                    Ok(InstallOpResult::Resolved(future?))
-                }).await
-            },
-
-            InstallOp::Fetch {locator, is_mock_request} => {
-                with_context_result(ReportContext::Locator(locator.clone()), async {
-                    let dependencies = match try_fetch_locator_sync(context.clone(), &locator, is_mock_request, dependencies)? {
-                        SyncFetchAttempt::Success(result) => return Ok(InstallOpResult::Fetched(result)),
-                        SyncFetchAttempt::Failure(dependencies) => dependencies,
-                    };
-
-                    let future = tokio::time::timeout(
-                        timeout,
-                        fetch_locator(context.clone(), &locator.clone(), is_mock_request, dependencies)
-                    ).await.map_err(|_| Error::TaskTimeout)?;
-
-                    if is_mock_request {
-                        if let Ok(result) = future.as_ref() {
-                            if let FetchResult {package_data: PackageData::Zip {..}, ..} = result {
-                                current_report().await.as_ref().map(|report| {
-                                    report.warn(format!("Mock request for {} returned a zip package; this should not happen.", locator.to_print_string()));
-                                });
-                            }
-                        }
-                    }
-
-                    Ok(InstallOpResult::Fetched(future?))
-                }).await
-            },
-
-        }
-    }
-}
-
-struct InstallCache {
-    pub lockfile: Lockfile,
-}
-
-impl InstallCache {
-    pub fn new(lockfile: Lockfile) -> Self {
-        Self {
-            lockfile,
-        }
-    }
-}
-
-impl<'a> GraphCache<InstallContext<'a>, InstallOp<'a>, InstallOpResult, Error> for InstallCache {
-    fn graph_cache(&self, ctx: &InstallContext<'a>, op: &InstallOp) -> Result<Option<InstallOpResult>, Error> {
-        if let InstallOp::Resolve {descriptor} = op {
-            let range_details
-                = descriptor.range.details();
-
-            if range_details.transient_resolution {
-                return Ok(None);
-            }
-
-            // enforced_resolutions semantics:
-            // - None (not in map): use lockfile resolution if available
-            // - Some(None): skip lockfile, force re-resolution
-            // - Some(Some(locator)): force resolution to specific locator
-            let enforced_resolution
-                = ctx.enforced_resolutions.get(descriptor);
-
-            // If Some(None), skip lockfile lookup entirely and force re-resolution
-            if enforced_resolution == Some(&None) {
-                return Ok(None);
-            }
-
-            // Get the enforced locator if any (flatten Option<Option<Locator>> to Option<Locator>)
-            let enforced_locator = enforced_resolution.and_then(|opt| opt.as_ref());
-
-            if let Some(locator) = self.lockfile.resolutions.get(descriptor) {
-                if enforced_locator.map_or(true, |enforced| locator == enforced) {
-                    if self.lockfile.metadata.version != LockfileMetadata::new().version || ctx.refresh_lockfile {
-                        return Ok(Some(InstallOpResult::Pinned(PinnedResult {
-                            locator: locator.clone(),
-                        })));
-                    }
-
-                    let entry = self.lockfile.entries.get(locator)
-                        .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator.to_print_string()));
-
-                    return Ok(Some(InstallOpResult::Resolved(entry.resolution.clone().into_resolution_result(ctx)?)));
-                }
-            }
-
-            if let Some(locator) = enforced_locator {
-                return Ok(Some(InstallOpResult::Pinned(PinnedResult {
-                    locator: locator.clone(),
-                })));
-            }
-        }
-
-        Ok(None)
     }
 }
 
@@ -544,6 +599,8 @@ pub struct InstallState {
     pub optional_packages: BTreeSet<Locator>,
     pub disabled_locators: BTreeSet<Locator>,
     pub conditional_locators: BTreeSet<Locator>,
+    pub island_descriptor_to_locator: BTreeMap<String, BTreeMap<Descriptor, Locator>>,
+    pub island_normalized_resolutions: BTreeMap<String, BTreeMap<Locator, Resolution>>,
 }
 
 #[derive(Clone, Default)]
@@ -553,6 +610,7 @@ pub struct Install {
     pub package_data: BTreeMap<Locator, PackageData>,
     pub install_state: InstallState,
     pub roots: BTreeSet<Descriptor>,
+    pub resolved_islands: Vec<crate::island::ResolvedIsland>,
     pub skip_build: bool,
     pub skip_link_step: bool,
     pub skip_lockfile_update: bool,
@@ -690,48 +748,130 @@ impl<'a> InstallManager<'a> {
     }
 
     pub async fn resolve_and_fetch(mut self) -> Result<Install, Error> {
-        let cache
-            = InstallCache::new(self.initial_lockfile.clone());
+        let maps = InstallMaps {
+            resolution_map: Arc::new(WaitMap::new()),
+            fetch_map: Arc::new(WaitMap::new()),
+        };
 
-        let mut graph
-            = GraphTasks::new(self.context.clone(), cache);
+        let lockfile
+            = self.initial_lockfile.clone();
 
-        for descriptor in self.result.roots.clone() {
-            graph.register(InstallOp::Resolve {
-                descriptor,
-            });
+        // --- Island resolution ---
+        // Resolve islands from project config and partition roots between
+        // island resolution (pubgrub) and greedy resolution.
+        let project = self.context.project;
+
+        let resolved_islands = if let Some(project) = project {
+            let island_config = &project.config.settings.unstable_islands;
+            if !island_config.is_empty() {
+                Some(crate::island::resolve_islands(island_config, &project.workspaces)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Island workspaces are fully handled by pubgrub — they don't go
+        // through greedy resolution or the PnP linker. Remove them from roots.
+        let island_workspace_idents: BTreeSet<Ident> = resolved_islands.as_ref()
+            .map(|islands| islands.iter().flat_map(|i| i.workspace_idents.iter().cloned()).collect())
+            .unwrap_or_default();
+
+        self.result.roots.retain(|d| !island_workspace_idents.contains(&d.ident));
+        let roots = self.result.roots.clone();
+
+        async_section("Installing packages", async {
+            let greedy_future = resolve_all(roots, &self.context, &lockfile, &maps);
+
+            if let Some(ref islands) = resolved_islands {
+                // Store resolved islands for use during linking
+                self.result.resolved_islands = islands.clone();
+
+                let island_futures = islands.iter().map(|island| {
+                    crate::island::resolve_island(island, &self.context, &lockfile)
+                });
+
+                let (_, island_results) = futures::future::try_join(
+                    async { greedy_future.await; Ok::<(), Error>(()) },
+                    futures::future::try_join_all(island_futures),
+                ).await?;
+
+                // Merge island results into install state and fetch packages
+                let mut island_locators = Vec::new();
+
+                for island_result in island_results {
+                    let island_id = island_result.island_id.clone();
+
+                    // Store per-island mappings (kept separate from global maps
+                    // to preserve island isolation)
+                    self.result.install_state.island_descriptor_to_locator
+                        .insert(island_id.clone(), island_result.descriptor_to_locator.clone());
+                    self.result.install_state.island_normalized_resolutions
+                        .insert(island_id.clone(), island_result.normalized_resolutions.clone());
+
+                    // Lockfile entries are shared (for checksum tracking etc.)
+                    for (locator, resolution) in &island_result.normalized_resolutions {
+                        island_locators.push(locator.clone());
+                        self.result.lockfile.entries
+                            .entry(locator.clone())
+                            .or_insert_with(|| LockfileEntry {
+                                checksum: None,
+                                resolution: resolution.clone(),
+                            });
+                    }
+
+                    // Store island descriptor→locator in lockfile
+                    self.result.lockfile.islands
+                        .insert(island_id, island_result.descriptor_to_locator);
+                }
+
+                // Fetch all island-resolved packages so package_data is
+                // available for checksum computation and linking.
+                let fetch_futures = island_locators.into_iter().map(|locator| {
+                    ensure_fetched(locator, false, &self.context, &maps)
+                });
+                futures::future::join_all(fetch_futures).await;
+            } else {
+                greedy_future.await;
+            }
+
+            Ok::<(), Error>(())
+        }).await?;
+
+        // Collect errors from both maps
+        let mut errors
+            = maps.resolution_map.collect_errors();
+
+        errors.extend(maps.fetch_map.collect_errors());
+
+        if !errors.is_empty() {
+            return Err(Error::SilentError);
         }
 
-        let graph_run
-            = async_section("Installing packages", graph.run()).await;
+        let resolution_map
+            = Arc::try_unwrap(maps.resolution_map)
+                .unwrap_or_else(|_| panic!("resolution_map should have no other references"));
 
-        let installed_entries = graph_run
-            .ok_or(Error::SilentError)?;
+        let fetch_map
+            = Arc::try_unwrap(maps.fetch_map)
+                .unwrap_or_else(|_| panic!("fetch_map should have no other references"));
 
-        for entry in installed_entries {
-            match entry {
-                (InstallOp::Resolve {..}, InstallOpResult::Validated) => {
-                },
+        for (descriptor, result) in resolution_map.into_results() {
+            let Ok(ResolutionResult { resolution, original_resolution, package_data }) = result else {
+                unreachable!("Already handled above")
+            };
 
-                (InstallOp::Resolve {descriptor, ..}, InstallOpResult::Pinned(PinnedResult {locator})) => {
-                    self.record_descriptor(descriptor, locator);
-                },
+            self.record_descriptor(descriptor, resolution.locator.clone());
+            self.record_resolution(resolution, original_resolution, package_data)?;
+        }
 
-                (InstallOp::Refresh {..}, InstallOpResult::Resolved(ResolutionResult {resolution, original_resolution, package_data})) => {
-                    self.record_resolution(resolution, original_resolution, package_data)?;
-                },
+        for (locator, result) in fetch_map.into_results() {
+            let Ok(FetchResult {package_data, ..}) = result else {
+                unreachable!("Already handled above");
+            };
 
-                (InstallOp::Resolve {descriptor, ..}, InstallOpResult::Resolved(ResolutionResult {resolution, original_resolution, package_data})) => {
-                    self.record_descriptor(descriptor, resolution.locator.clone());
-                    self.record_resolution(resolution, original_resolution, package_data)?;
-                },
-
-                (InstallOp::Fetch {locator, ..}, InstallOpResult::Fetched(FetchResult {package_data, ..})) => {
-                    self.record_fetch(locator, package_data)?;
-                },
-
-                _ => panic!("Unsupported install result ({:?})", entry),
-            }
+            self.record_fetch(locator, package_data)?;
         }
 
         let missing_checksums = self.result.lockfile.entries.values()
@@ -818,10 +958,51 @@ impl<'a> InstallManager<'a> {
             entry.checksum = checksum;
         }
 
-        self.result.install_state.resolution_tree = TreeResolver::default()
-            .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)?
-            .with_roots(self.result.roots.clone())
-            .run();
+        // Build resolution tree. If islands are configured, run a separate
+        // TreeResolver per island (isolated peer dep context) and one for
+        // greedy-resolved workspaces, then merge the results.
+        if resolved_islands.is_some() && !self.result.install_state.island_descriptor_to_locator.is_empty() {
+            // Greedy tree: only non-island workspace roots.
+            let mut merged_tree = TreeResolver::default()
+                .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)?
+                .with_roots(self.result.roots.clone())
+                .run();
+
+            // Per-island trees (isolated peer dep context per island)
+            for (island_id, island_d2l) in &self.result.install_state.island_descriptor_to_locator {
+                if island_d2l.is_empty() {
+                    continue;
+                }
+
+                let island_resolutions = self.result.install_state.island_normalized_resolutions
+                    .get(island_id)
+                    .cloned()
+                    .unwrap_or_default();
+
+                // Island roots: only descriptors that are actually in the island d2l
+                let island_roots: BTreeSet<Descriptor> = island_d2l.keys()
+                    .cloned()
+                    .collect();
+
+                let island_tree = TreeResolver::default()
+                    .with_resolutions(island_d2l, &island_resolutions)?
+                    .with_roots(island_roots)
+                    .run();
+
+                // Merge island tree into the combined tree
+                merged_tree.descriptor_to_locator.extend(island_tree.descriptor_to_locator);
+                merged_tree.locator_resolutions.extend(island_tree.locator_resolutions);
+                merged_tree.optional_builds.extend(island_tree.optional_builds);
+                merged_tree.roots.extend(island_tree.roots);
+            }
+
+            self.result.install_state.resolution_tree = merged_tree;
+        } else {
+            self.result.install_state.resolution_tree = TreeResolver::default()
+                .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)?
+                .with_roots(self.result.roots.clone())
+                .run();
+        }
 
         let project
             = self.context.project

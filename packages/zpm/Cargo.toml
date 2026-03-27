@@ -23,6 +23,8 @@ hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 itertools = { workspace = true }
 open = { workspace = true }
+pubgrub = { workspace = true }
+version-ranges = { workspace = true }
 rayon = { workspace = true }
 rkyv = { workspace = true, features = ["bytecheck"] }
 reqwest = { workspace = true, default-features = false, features = ["gzip", "http2", "hickory-dns", "rustls-tls"] }

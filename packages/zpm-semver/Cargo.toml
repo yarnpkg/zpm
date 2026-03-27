@@ -7,4 +7,5 @@ rkyv = { workspace = true, features = ["bytecheck"] }
 rstest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
+version-ranges = { workspace = true }
 zpm-utils = { workspace = true }

@@ -534,6 +534,27 @@ pub enum Error {
     #[error("Samply doesn't seem to be installed; first install it by running {}", DataType::Code.colorize("curl https://github.com/mstange/samply/releases/download/samply-v0.13.1/samply-installer.sh | sh"))]
     MissingSamply,
 
+    #[error("Missing fetch for locator: {0:?}")]
+    MissingFetch(Locator),
+
+    #[error("Missing resolution for descriptor: {0:?}")]
+    MissingResolution(Descriptor),
+
+    #[error("Island resolution failed for island '{}': {}", .island_id, .message)]
+    IslandResolutionFailed {
+        island_id: String,
+        message: String,
+    },
+
+    #[error("Workspace '{}' belongs to multiple islands: {}", .ident.to_print_string(), .islands.join(", "))]
+    WorkspaceInMultipleIslands {
+        ident: Ident,
+        islands: Vec<String>,
+    },
+
+    #[error("Island '{}' has no matching workspaces", .0)]
+    EmptyIsland(String),
+
     // Silent error; no particular message, just exit with an exit code 1
     #[error("")]
     SilentError,

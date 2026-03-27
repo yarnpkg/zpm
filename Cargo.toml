@@ -68,6 +68,8 @@ mimalloc = "0.1.43"
 num = "0.4.3"
 pretty_assertions = "1.4.1"
 pnp = { git = "https://github.com/yarnpkg/pnp-rs.git", branch = "mael/pub-vpath" }
+pubgrub = "0.3"
+version-ranges = "0.1"
 proc-macro2 = "1.0.79"
 p256 = "0.13.2"
 quote = "1.0.36"
