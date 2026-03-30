@@ -1,9 +1,29 @@
 use std::fmt;
 
 use pubgrub::{Ranges, VersionSet};
-use zpm_primitives::{Locator, Reference};
+use smallvec::SmallVec;
+use zpm_primitives::{Ident, Locator, Reference};
 use zpm_semver::pubgrub::PubgrubVersion;
 use zpm_utils::ToFileString;
+
+// ---------------------------------------------------------------------------
+// IslandPackage — the pubgrub P type
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub enum IslandPackage {
+    Root,
+    Named(Ident),
+}
+
+impl fmt::Display for IslandPackage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IslandPackage::Root => write!(f, "<root>"),
+            IslandPackage::Named(ident) => write!(f, "{}", ident),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // IslandVersion — the pubgrub V type, wrapping a Locator
@@ -37,79 +57,96 @@ impl fmt::Display for IslandVersion {
 
 // ---------------------------------------------------------------------------
 // ExactSet — set algebra for non-semver version sets
+//
+// Two variants cover all cases:
+//   OneOf([])        = ∅        (empty)
+//   OneOf([v])       = {v}      (singleton)
+//   OneOf([a, b])    = {a, b}   (finite set)
+//   NoneOf([])       = *        (full / universe)
+//   NoneOf([v])      = ¬{v}     (complement of singleton)
+//   NoneOf([a, b])   = ¬{a, b}  (everything except a and b)
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExactSet {
-    Empty,
-    Singleton(IslandVersion),
-    Full,
-    Complement(IslandVersion),
+    OneOf(SmallVec<[IslandVersion; 1]>),
+    NoneOf(SmallVec<[IslandVersion; 1]>),
 }
 
 impl ExactSet {
     pub fn complement(&self) -> ExactSet {
         match self {
-            ExactSet::Empty => ExactSet::Full,
-            ExactSet::Full => ExactSet::Empty,
-            ExactSet::Singleton(v) => ExactSet::Complement(v.clone()),
-            ExactSet::Complement(v) => ExactSet::Singleton(v.clone()),
+            ExactSet::OneOf(vs) => ExactSet::NoneOf(vs.clone()),
+            ExactSet::NoneOf(vs) => ExactSet::OneOf(vs.clone()),
         }
     }
 
     pub fn intersection(&self, other: &ExactSet) -> ExactSet {
         match (self, other) {
-            (ExactSet::Empty, _) | (_, ExactSet::Empty) => ExactSet::Empty,
-            (ExactSet::Full, other) => other.clone(),
-            (other, ExactSet::Full) => other.clone(),
-
-            (ExactSet::Singleton(a), ExactSet::Singleton(b)) => {
-                if a == b { ExactSet::Singleton(a.clone()) } else { ExactSet::Empty }
+            // {a, b, ...} ∩ {c, d, ...} = elements in both
+            (ExactSet::OneOf(a), ExactSet::OneOf(b)) => {
+                let vs: SmallVec<_> = a.iter()
+                    .filter(|v| b.contains(v))
+                    .cloned()
+                    .collect();
+                ExactSet::OneOf(vs)
             }
 
-            (ExactSet::Singleton(a), ExactSet::Complement(b))
-            | (ExactSet::Complement(b), ExactSet::Singleton(a)) => {
-                if a == b { ExactSet::Empty } else { ExactSet::Singleton(a.clone()) }
+            // {a, b, ...} ∩ ¬{c, d, ...} = elements in a not excluded by b
+            (ExactSet::OneOf(vs), ExactSet::NoneOf(excluded))
+            | (ExactSet::NoneOf(excluded), ExactSet::OneOf(vs)) => {
+                let kept: SmallVec<_> = vs.iter()
+                    .filter(|v| !excluded.contains(v))
+                    .cloned()
+                    .collect();
+                ExactSet::OneOf(kept)
             }
 
-            (ExactSet::Complement(a), ExactSet::Complement(b)) => {
-                if a == b {
-                    ExactSet::Complement(a.clone())
-                } else {
-                    panic!(
-                        "ExactSet::intersection of two different complements is not representable: {:?} vs {:?}",
-                        a, b
-                    )
+            // ¬{a, b, ...} ∩ ¬{c, d, ...} = ¬(a ∪ b ∪ c ∪ d ∪ ...)
+            (ExactSet::NoneOf(a), ExactSet::NoneOf(b)) => {
+                let mut merged = a.clone();
+                for v in b {
+                    if !merged.contains(v) {
+                        merged.push(v.clone());
+                    }
                 }
+                ExactSet::NoneOf(merged)
             }
         }
     }
 
     pub fn contains(&self, v: &IslandVersion) -> bool {
         match self {
-            ExactSet::Empty => false,
-            ExactSet::Full => true,
-            ExactSet::Singleton(inner) => inner == v,
-            ExactSet::Complement(inner) => inner != v,
+            ExactSet::OneOf(vs) => vs.contains(v),
+            ExactSet::NoneOf(vs) => !vs.contains(v),
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        matches!(self, ExactSet::Empty)
+        matches!(self, ExactSet::OneOf(vs) if vs.is_empty())
     }
 
     pub fn is_full(&self) -> bool {
-        matches!(self, ExactSet::Full)
+        matches!(self, ExactSet::NoneOf(vs) if vs.is_empty())
     }
 }
 
 impl fmt::Display for ExactSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ExactSet::Empty => write!(f, "∅"),
-            ExactSet::Full => write!(f, "*"),
-            ExactSet::Singleton(v) => write!(f, "{{ {} }}", v),
-            ExactSet::Complement(v) => write!(f, "¬{{ {} }}", v),
+            ExactSet::OneOf(vs) if vs.is_empty() => write!(f, "∅"),
+            ExactSet::NoneOf(vs) if vs.is_empty() => write!(f, "*"),
+            ExactSet::OneOf(vs) | ExactSet::NoneOf(vs) => {
+                if matches!(self, ExactSet::NoneOf(_)) {
+                    write!(f, "¬")?;
+                }
+                write!(f, "{{ ")?;
+                for (i, v) in vs.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", v)?;
+                }
+                write!(f, " }}")
+            }
         }
     }
 }
@@ -131,7 +168,7 @@ impl IslandVersionSet {
     }
 
     pub fn exact_singleton(v: IslandVersion) -> IslandVersionSet {
-        IslandVersionSet::Exact(ExactSet::Singleton(v))
+        IslandVersionSet::Exact(ExactSet::OneOf(SmallVec::from_elem(v, 1)))
     }
 
     fn is_semver_empty(&self) -> bool {
@@ -143,11 +180,11 @@ impl IslandVersionSet {
     }
 
     fn is_exact_empty(&self) -> bool {
-        matches!(self, IslandVersionSet::Exact(ExactSet::Empty))
+        matches!(self, IslandVersionSet::Exact(e) if e.is_empty())
     }
 
     fn is_exact_full(&self) -> bool {
-        matches!(self, IslandVersionSet::Exact(ExactSet::Full))
+        matches!(self, IslandVersionSet::Exact(e) if e.is_full())
     }
 
     fn is_logically_empty(&self) -> bool {
@@ -197,7 +234,7 @@ impl VersionSet for IslandVersionSet {
                 IslandVersionSet::Semver(Ranges::singleton(PubgrubVersion::new(version)))
             }
             None => {
-                IslandVersionSet::Exact(ExactSet::Singleton(v))
+                IslandVersionSet::Exact(ExactSet::OneOf(SmallVec::from_elem(v, 1)))
             }
         }
     }
@@ -217,7 +254,9 @@ impl VersionSet for IslandVersionSet {
             (IslandVersionSet::Exact(a), IslandVersionSet::Exact(b)) => {
                 IslandVersionSet::Exact(a.intersection(b))
             }
-            // Cross-variant: handle trivial cases (empty/full), panic otherwise
+            // Cross-variant: semver and exact sets never share values (see
+            // is_disjoint), so the intersection is empty unless one side is
+            // the full set (in which case we return the other side).
             _ => {
                 if self.is_logically_empty() || other.is_logically_empty() {
                     IslandVersionSet::empty()
@@ -226,10 +265,7 @@ impl VersionSet for IslandVersionSet {
                 } else if other.is_logically_full() {
                     self.clone()
                 } else {
-                    panic!(
-                        "IslandVersionSet: cross-variant intersection not supported: {:?} ∩ {:?}",
-                        self, other
-                    )
+                    IslandVersionSet::empty()
                 }
             }
         }

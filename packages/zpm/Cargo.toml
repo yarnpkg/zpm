@@ -55,6 +55,7 @@ hickory-resolver = { workspace = true }
 indexmap = { workspace = true, features = ["serde"]}
 interprocess = { workspace = true, features = ["tokio"] }
 sha2 = { workspace = true }
+smallvec = { workspace = true }
 hex = { workspace = true }
 p256 = { workspace = true }
 spki = { workspace = true }

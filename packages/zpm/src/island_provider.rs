@@ -1,4 +1,5 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -7,7 +8,7 @@ use zpm_primitives::{Descriptor, Ident, Locator, Reference, Registry, RegistryRe
 
 use crate::error::Error;
 use crate::install::InstallContext;
-use crate::island_types::{IslandVersion, IslandVersionSet};
+use crate::island_types::{ExactSet, IslandPackage, IslandVersion, IslandVersionSet};
 use crate::resolvers;
 use crate::resolvers::Resolution;
 
@@ -33,27 +34,25 @@ impl From<Error> for IslandResolutionError {
     }
 }
 
-/// Priority for pubgrub package selection.
-/// Lower version count = higher priority (finds conflicts faster).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IslandPriority {
-    /// Whether this is a locked package (highest priority)
-    pub is_locked: bool,
-    /// Inverse of matching version count (fewer = higher priority)
-    pub inverse_count: u64,
-}
-
-impl Ord for IslandPriority {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.is_locked.cmp(&other.is_locked)
-            .then(self.inverse_count.cmp(&other.inverse_count))
-    }
-}
-
-impl PartialOrd for IslandPriority {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
+/// Priority tiers for pubgrub package selection.
+///
+/// Derived `Ord` gives higher priority to later variants. Within each
+/// tier, `Reverse<usize>` orders by discovery time (earlier = higher).
+///
+/// Modelled after uv's `PubGrubPriority`:
+///   <https://github.com/astral-sh/uv/blob/main/crates/uv-resolver/src/pubgrub/priority.rs>
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IslandPriority {
+    /// Default for range constraints (e.g. `^1.0.0`).
+    Unspecified(Reverse<usize>),
+    /// Packages involved in many conflicts — resolve earlier to prune
+    /// the search space.
+    Conflict(Reverse<usize>),
+    /// Packages pinned to a single version (exact semver or non-semver
+    /// singleton). Only one possible choice, so free to resolve first.
+    Singleton(Reverse<usize>),
+    /// Packages whose version is locked in the previous lockfile.
+    Locked(Reverse<usize>),
 }
 
 /// The pubgrub DependencyProvider for island resolution.
@@ -63,7 +62,7 @@ pub struct IslandDependencyProvider<'a> {
     pub enforced_resolutions: BTreeMap<Descriptor, Option<Locator>>,
     pub handle: tokio::runtime::Handle,
     /// The root dependencies: one entry per workspace as an exact singleton.
-    pub root_deps: BTreeMap<Ident, IslandVersionSet>,
+    pub root_deps: BTreeMap<IslandPackage, IslandVersionSet>,
     /// Install context for resolving versions and dependencies from the registry.
     pub ctx: &'a InstallContext<'a>,
     /// Each workspace's manifest dependencies (regular + optionally dev).
@@ -71,6 +70,10 @@ pub struct IslandDependencyProvider<'a> {
     /// Cache of full resolutions fetched during dependency resolution.
     /// Keyed by locator so convert_solution can retrieve them.
     pub resolution_cache: RefCell<BTreeMap<Locator, Resolution>>,
+    /// Monotonic counter for discovery order (breadth-first priority).
+    discovery_counter: Cell<usize>,
+    /// Maps package ident → discovery index (first time seen in prioritize).
+    discovery_order: RefCell<BTreeMap<Ident, usize>>,
 }
 
 impl<'a> IslandDependencyProvider<'a> {
@@ -79,7 +82,7 @@ impl<'a> IslandDependencyProvider<'a> {
         locked_versions: BTreeMap<Ident, Locator>,
         enforced_resolutions: BTreeMap<Descriptor, Option<Locator>>,
         handle: tokio::runtime::Handle,
-        root_deps: BTreeMap<Ident, IslandVersionSet>,
+        root_deps: BTreeMap<IslandPackage, IslandVersionSet>,
         ctx: &'a InstallContext<'a>,
         workspace_deps: BTreeMap<Ident, BTreeMap<Ident, Descriptor>>,
     ) -> Self {
@@ -92,6 +95,8 @@ impl<'a> IslandDependencyProvider<'a> {
             ctx,
             workspace_deps,
             resolution_cache: RefCell::new(BTreeMap::new()),
+            discovery_counter: Cell::new(0),
+            discovery_order: RefCell::new(BTreeMap::new()),
         }
     }
 
@@ -111,14 +116,14 @@ impl<'a> IslandDependencyProvider<'a> {
     ///
     /// Semver ranges are converted directly. Non-semver ranges are resolved
     /// on the spot via `resolve_descriptor` and injected as exact singletons.
-    fn descriptors_to_deps(&self, descriptors: &BTreeMap<Ident, Descriptor>) -> Result<BTreeMap<Ident, IslandVersionSet>, IslandResolutionError> {
+    fn descriptors_to_deps(&self, descriptors: &BTreeMap<Ident, Descriptor>) -> Result<BTreeMap<IslandPackage, IslandVersionSet>, IslandResolutionError> {
         let mut deps = BTreeMap::new();
         let mut non_semver: Vec<(Ident, Descriptor)> = Vec::new();
 
         for (ident, descriptor) in descriptors {
             match crate::island::range_to_version_set(&descriptor.range) {
                 Some(vs) => {
-                    deps.insert(ident.clone(), vs);
+                    deps.insert(IslandPackage::Named(ident.clone()), vs);
                 }
                 None => {
                     non_semver.push((ident.clone(), descriptor.clone()));
@@ -140,7 +145,7 @@ impl<'a> IslandDependencyProvider<'a> {
             for ((ident, _), result) in non_semver.into_iter().zip(results) {
                 let locator = result.resolution.locator.clone();
                 cache.insert(locator.clone(), result.resolution);
-                deps.insert(ident, IslandVersionSet::exact_singleton(IslandVersion(locator)));
+                deps.insert(IslandPackage::Named(ident), IslandVersionSet::exact_singleton(IslandVersion(locator)));
             }
         }
 
@@ -148,13 +153,13 @@ impl<'a> IslandDependencyProvider<'a> {
     }
 
     /// Convert a Resolution's dependencies into IslandVersionSets for pubgrub.
-    fn resolution_to_deps(&self, resolution: &Resolution) -> Result<BTreeMap<Ident, IslandVersionSet>, IslandResolutionError> {
+    fn resolution_to_deps(&self, resolution: &Resolution) -> Result<BTreeMap<IslandPackage, IslandVersionSet>, IslandResolutionError> {
         self.descriptors_to_deps(&resolution.dependencies)
     }
 
     /// Fetch the dependencies of a specific package version from the registry.
     /// Also caches the full Resolution for later use in convert_solution.
-    fn fetch_dependencies(&self, version: &IslandVersion) -> Result<BTreeMap<Ident, IslandVersionSet>, IslandResolutionError> {
+    fn fetch_dependencies(&self, version: &IslandVersion) -> Result<BTreeMap<IslandPackage, IslandVersionSet>, IslandResolutionError> {
         let locator = &version.0;
 
         // Check resolution cache first — covers non-semver packages resolved
@@ -186,7 +191,7 @@ impl<'a> IslandDependencyProvider<'a> {
 }
 
 impl DependencyProvider for IslandDependencyProvider<'_> {
-    type P = Ident;
+    type P = IslandPackage;
     type V = IslandVersion;
     type VS = IslandVersionSet;
     type Priority = IslandPriority;
@@ -195,48 +200,84 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
 
     fn prioritize(
         &self,
-        package: &Ident,
-        _range: &IslandVersionSet,
-        _stats: &PackageResolutionStatistics,
+        package: &IslandPackage,
+        range: &IslandVersionSet,
+        stats: &PackageResolutionStatistics,
     ) -> IslandPriority {
-        let is_locked = self.locked_versions.contains_key(package);
+        let ident = match package {
+            IslandPackage::Root => return IslandPriority::Locked(Reverse(0)),
+            IslandPackage::Named(ident) => ident,
+        };
 
-        let inverse_count = if is_locked { u64::MAX } else { 0 };
+        // Assign a stable discovery index (first time we see this package).
+        let discovery_idx = {
+            let mut order = self.discovery_order.borrow_mut();
+            let len = order.len();
+            *order.entry(ident.clone()).or_insert_with(|| {
+                let idx = self.discovery_counter.get();
+                self.discovery_counter.set(idx + 1);
+                let _ = len; // suppress unused
+                idx
+            })
+        };
 
-        IslandPriority {
-            is_locked,
-            inverse_count,
+        if self.locked_versions.contains_key(ident) {
+            return IslandPriority::Locked(Reverse(discovery_idx));
         }
+
+        // Detect singleton constraints: exact non-semver (OneOf with one
+        // element) or a semver range that matches exactly one version.
+        let is_singleton = match range {
+            IslandVersionSet::Exact(ExactSet::OneOf(vs)) => vs.len() == 1,
+            IslandVersionSet::Semver(r) => r.as_singleton().is_some(),
+            _ => false,
+        };
+
+        if is_singleton {
+            return IslandPriority::Singleton(Reverse(discovery_idx));
+        }
+
+        // Promote packages involved in conflicts so they are resolved
+        // earlier on subsequent passes, pruning the search space faster.
+        if stats.conflict_count() > 0 {
+            return IslandPriority::Conflict(Reverse(discovery_idx));
+        }
+
+        IslandPriority::Unspecified(Reverse(discovery_idx))
     }
 
     fn choose_version(
         &self,
-        package: &Ident,
+        package: &IslandPackage,
         range: &IslandVersionSet,
     ) -> Result<Option<IslandVersion>, IslandResolutionError> {
-        // Virtual root
-        if package.as_str() == "__island_root__" {
-            let root_locator = Locator::new(
-                package.clone(),
-                zpm_primitives::ShorthandReference {
-                    version: zpm_semver::Version::default(),
-                }.into(),
-            );
-            let root_version = IslandVersion(root_locator);
-            if range.contains(&root_version) {
-                return Ok(Some(root_version));
+        let ident = match package {
+            IslandPackage::Root => {
+                let root_locator = Locator::new(
+                    Ident::default(),
+                    zpm_primitives::ShorthandReference {
+                        version: zpm_semver::Version::default(),
+                    }.into(),
+                );
+                let root_version = IslandVersion(root_locator);
+                if range.contains(&root_version) {
+                    return Ok(Some(root_version));
+                }
+                return Ok(None);
             }
-            return Ok(None);
-        }
+            IslandPackage::Named(ident) => ident,
+        };
 
         // Exact singletons (workspace packages, non-semver deps from
         // descriptors_to_deps) have exactly one possible version — return it directly.
-        if let IslandVersionSet::Exact(crate::island_types::ExactSet::Singleton(v)) = range {
-            return Ok(Some(v.clone()));
+        if let IslandVersionSet::Exact(crate::island_types::ExactSet::OneOf(vs)) = range {
+            if vs.len() == 1 {
+                return Ok(Some(vs[0].clone()));
+            }
         }
 
         // Check locked version first
-        if let Some(locked_locator) = self.locked_versions.get(package) {
+        if let Some(locked_locator) = self.locked_versions.get(ident) {
             let iv = IslandVersion(locked_locator.clone());
             if range.contains(&iv) {
                 return Ok(Some(iv));
@@ -245,7 +286,7 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
 
         // Fetch all available versions from the registry and pick the first
         // (newest) that satisfies the range.
-        let versions = self.fetch_versions(package)?;
+        let versions = self.fetch_versions(ident)?;
         for iv in versions {
             if range.contains(&iv) {
                 return Ok(Some(iv));
@@ -257,19 +298,21 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
 
     fn get_dependencies(
         &self,
-        package: &Ident,
+        package: &IslandPackage,
         version: &IslandVersion,
-    ) -> Result<Dependencies<Ident, IslandVersionSet, String>, IslandResolutionError> {
-        // Virtual root returns the island's workspace dependencies
-        if package.as_str() == "__island_root__" {
-            let deps: pubgrub::DependencyConstraints<Ident, IslandVersionSet> = self.root_deps.clone()
-                .into_iter()
-                .collect();
-            return Ok(Dependencies::Available(deps));
-        }
+    ) -> Result<Dependencies<IslandPackage, IslandVersionSet, String>, IslandResolutionError> {
+        let ident = match package {
+            IslandPackage::Root => {
+                let deps: pubgrub::DependencyConstraints<IslandPackage, IslandVersionSet> = self.root_deps.clone()
+                    .into_iter()
+                    .collect();
+                return Ok(Dependencies::Available(deps));
+            }
+            IslandPackage::Named(ident) => ident,
+        };
 
         // Workspace packages: return their manifest dependencies
-        if let Some(ws_deps) = self.workspace_deps.get(package) {
+        if let Some(ws_deps) = self.workspace_deps.get(ident) {
             let deps = self.descriptors_to_deps(ws_deps)?;
             return Ok(Dependencies::Available(deps.into_iter().collect()));
         }

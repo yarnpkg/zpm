@@ -1489,6 +1489,56 @@ describe(`Features`, () => {
       ),
     );
 
+    test(
+      `it should error when an island has both semver and non-semver references for the same package`,
+      makeTemporaryMonorepoEnv(
+        {
+          workspaces: [`packages/*`],
+        },
+        {
+          [`packages/workspace-a`]: {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            dependencies: {
+              // Semver reference
+              [`no-deps`]: `1.0.0`,
+            },
+          },
+          [`packages/workspace-b`]: {
+            name: `workspace-b`,
+            version: `1.0.0`,
+            dependencies: {
+              // Non-semver reference to the same package
+              [`no-deps`]: `link:../local-no-deps`,
+            },
+          },
+        },
+        async ({path, run}) => {
+          // Create a local package for the link reference
+          const localPkgPath = `${path}/packages/local-no-deps` as PortablePath;
+          await xfs.mkdirPromise(localPkgPath, {recursive: true});
+          await xfs.writeJsonPromise(`${localPkgPath}/package.json` as PortablePath, {
+            name: `no-deps`,
+            version: `1.0.0`,
+          });
+
+          await yarn.writeConfiguration(path, {
+            unstableIslands: {
+              main: {
+                workspaces: [`workspace-a`, `workspace-b`],
+                linker: `node-modules`,
+              },
+            },
+          });
+
+          // One workspace wants no-deps from the registry (semver) and
+          // the other wants it via link: (non-semver). The island resolver
+          // uses single-version resolution, so it cannot satisfy both.
+          await expect(run(`install`)).rejects.toThrow(/No solution found/i);
+        },
+      ),
+    );
+
     // ---------------------------------------------------------------
     // Linking tests
     //

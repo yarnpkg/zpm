@@ -4543,6 +4543,7 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "sha2",
+ "smallvec",
  "spki",
  "thiserror 2.0.18",
  "tokio",

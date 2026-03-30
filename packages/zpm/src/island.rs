@@ -7,7 +7,7 @@ use zpm_utils::FromFileString;
 use crate::error::Error;
 use crate::install::InstallContext;
 use crate::island_provider::IslandDependencyProvider;
-use crate::island_types::{IslandVersion, IslandVersionSet};
+use crate::island_types::{IslandPackage, IslandVersion, IslandVersionSet};
 use crate::lockfile::Lockfile;
 use crate::project::Workspace;
 use crate::resolvers::Resolution;
@@ -96,7 +96,7 @@ pub async fn resolve_island(
     let project = ctx.project
         .expect("Project is required for island resolution");
 
-    let mut root_deps: BTreeMap<Ident, IslandVersionSet> = BTreeMap::new();
+    let mut root_deps: BTreeMap<IslandPackage, IslandVersionSet> = BTreeMap::new();
     let mut workspace_deps: BTreeMap<Ident, BTreeMap<Ident, Descriptor>> = BTreeMap::new();
 
     for workspace in &project.workspaces {
@@ -115,7 +115,7 @@ pub async fn resolve_island(
 
         // Root depends on each workspace as an exact singleton
         root_deps.insert(
-            workspace.name.clone(),
+            IslandPackage::Named(workspace.name.clone()),
             IslandVersionSet::exact_singleton(ws_version),
         );
 
@@ -173,16 +173,22 @@ pub async fn resolve_island(
             workspace_deps_for_provider,
         );
 
-        let root_package = Ident::new("__island_root__");
         let root_locator = Locator::new(
-            root_package.clone(),
+            Ident::default(),
             zpm_primitives::ShorthandReference {
                 version: zpm_semver::Version::default(),
             }.into(),
         );
         let root_version = IslandVersion(root_locator);
 
-        let result = pubgrub::resolve(&provider, root_package, root_version)
+        // TODO: Drive pubgrub step-by-step (unit_propagation / pick_highest_priority_pkg /
+        // add_decision) instead of using the one-shot resolve() API. This would allow:
+        //   1. Concurrent metadata prefetching (fetch next packages while solving the current one)
+        //   2. ConflictEarly/ConflictLate split (track affected vs culprit separately)
+        //   3. Remove the unsafe transmute to 'static (the async fetch loop would own the data)
+        // See uv's resolver for reference:
+        //   https://github.com/astral-sh/uv/blob/main/crates/uv-resolver/src/resolver/mod.rs
+        let result = pubgrub::resolve(&provider, IslandPackage::Root, root_version)
             .map_err(|e| handle_pubgrub_error(&island_id, e));
 
         // Extract cached resolutions before provider is dropped
@@ -318,11 +324,12 @@ fn convert_solution(
     let mut normalized_resolutions = BTreeMap::new();
     let mut ident_to_locator = BTreeMap::new();
 
-    for (ident, island_version) in &solution {
+    for (package, island_version) in &solution {
         // Skip the virtual root
-        if ident.as_str() == "__island_root__" {
-            continue;
-        }
+        let ident = match package {
+            IslandPackage::Root => continue,
+            IslandPackage::Named(ident) => ident,
+        };
 
         // Workspace packages: include them with their dependencies so the
         // tree resolver (and later the WorkTree) can look them up.
