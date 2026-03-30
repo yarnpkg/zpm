@@ -323,8 +323,18 @@ fn resolve_descriptor_impl<'a>(
                 },
 
                 Some(InnerDependencyKind::Fetch) => {
-                    let fetch_result
+                    let mut fetch_result
                         = await_fetch(&inner_locator, maps, ctx).await?;
+
+                    // The shared fetch_map may contain a mock fetch (MissingZip)
+                    // if the package doesn't match the current system requirements.
+                    // The outer package (e.g. a patch) needs the real contents to
+                    // apply the patch, so we re-fetch directly with is_mock_request
+                    // =false, bypassing the shared map. The disk-level package cache
+                    // still deduplicates the actual download.
+                    if matches!(fetch_result.package_data, PackageData::MissingZip {..}) {
+                        fetch_result = fetch_locator_impl(inner_locator, false, ctx, maps).await?;
+                    }
 
                     dependencies.push(InstallOpResult::Resolved(inner_result));
                     dependencies.push(InstallOpResult::Fetched(fetch_result));
