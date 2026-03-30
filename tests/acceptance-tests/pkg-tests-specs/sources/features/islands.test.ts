@@ -1,5 +1,5 @@
 import {PortablePath, xfs, npath} from '@yarnpkg/fslib';
-import {yarn}             from 'pkg-tests-core';
+import {yarn}                     from 'pkg-tests-core';
 
 async function readLockfile(path: PortablePath) {
   const raw = await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`);
