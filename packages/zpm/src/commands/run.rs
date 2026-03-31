@@ -3,8 +3,8 @@ use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
 use zpm_utils::Path;
 use clipanion::cli;
 
-use crate::{error::Error, project, script::ScriptEnvironment};
-use super::tasks::run as task_run;
+use crate::{commands::tasks::run_silent_dependencies::TaskRunSilentDependencies, error::Error, project, script::ScriptEnvironment};
+use super::tasks as task_run;
 
 /// Run a dependency binary or local script
 ///
@@ -161,20 +161,13 @@ impl Run {
             },
 
             Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_)) => {
-                // Try task files as a fallback before looking for binaries
                 if task_run::task_exists(&project, &self.name) {
-                    return task_run::run_task(
-                        &project,
-                        &self.name,
-                        &self.args,
-                        0,     // verbose_level
-                        true,  // silent_dependencies
-                        true,  // interlaced
-                        project.config.settings.enable_timers.value,
-                    ).await;
+                    let task_run_silent_dependencies
+                        = TaskRunSilentDependencies::new(&self.cli_environment, self.name.clone(), self.args.clone());
+
+                    return task_run_silent_dependencies.execute().await;
                 }
 
-                // Fall back to binary lookup
                 execute_binary(true).await
             }
 

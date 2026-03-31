@@ -75,6 +75,26 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should print deferredVersionFolder default value`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        const {stdout} = await run(`config`, `get`, `--json`, `deferredVersionFolder`);
+
+        expect(JSON.parse(stdout)).toEqual(`${path}/.yarn/versions`);
+      }),
+    );
+
+    test(
+      `it should print deferredVersionFolder configured value`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await xfs.writeFilePromise(`${path}/.yarnrc.yml`, `deferredVersionFolder: ./.custom-versions\n`);
+
+        const {stdout} = await run(`config`, `get`, `--json`, `deferredVersionFolder`);
+
+        expect(JSON.parse(stdout)).toEqual(`${path}/.custom-versions`);
+      }),
+    );
+
+    test(
       `it should support printing sub-keys`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         await xfs.writeFilePromise(`${path}/.yarnrc.yml`, `packageExtensions:\n  "foo@*":\n    dependencies:\n      "bar": "1.0.0"\n`);

@@ -5,7 +5,7 @@ use zpm_formats::{entries_to_disk, iter_ext::IterExt};
 use zpm_parsers::JsonDocument;
 use zpm_utils::{get_system_string, FromFileString, Path};
 
-use crate::{cache, errors::Error, http::{fetch, fetch_from_npm}, manifest::VersionPackageManagerReference};
+use crate::{cache, errors::Error, http::fetch, manifest::VersionPackageManagerReference};
 
 async fn install_native_from_zpm(source: &cache::CacheKey, binary_name: &Path) -> Result<Command, Error> {
     let binary_name_for_cache
@@ -14,7 +14,7 @@ async fn install_native_from_zpm(source: &cache::CacheKey, binary_name: &Path) -
     let cache_path = cache::ensure(source, |p| async move {
         if let Some(npm_url) = source.to_npm_url() {
             let tgz_data
-                = fetch_from_npm(&npm_url).await?;
+                = fetch(&npm_url).await?;
 
             let binary_name
                 = binary_name_for_cache;

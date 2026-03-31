@@ -1,3 +1,5 @@
+use zpm_utils::Path;
+
 use crate::ConfigurationContext;
 
 pub fn check_tsconfig(context: &ConfigurationContext) -> bool {
@@ -22,4 +24,13 @@ pub fn check_tsconfig(context: &ConfigurationContext) -> bool {
     }
 
     false
+}
+
+pub fn default_deferred_version_folder(context: &ConfigurationContext) -> Path {
+    context
+        .project_cwd
+        .as_ref()
+        .or(context.package_cwd.as_ref())
+        .expect("A project or package directory should be set when resolving the default deferred version folder")
+        .with_join_str(".yarn/versions")
 }

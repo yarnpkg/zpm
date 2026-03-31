@@ -13,11 +13,14 @@ clipanion = { workspace = true, features = ["serde"] }
 regex = { workspace = true }
 reqwest = { workspace = true, default-features = false, features = ["hickory-dns", "rustls-tls"] }
 rkyv = { workspace = true, features = ["bytecheck"] }
+serde_json = { workspace = true }
 serde_plain = { workspace = true }
 serde_with = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+tokio-tungstenite = { workspace = true }
+futures = { workspace = true }
 zpm-allocator = { workspace = true }
 zpm-formats = { workspace = true }
 zpm-macro-enum = { workspace = true }
@@ -25,6 +28,9 @@ zpm-parsers = { workspace = true }
 zpm-semver = { workspace = true }
 zpm-utils = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

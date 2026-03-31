@@ -229,7 +229,14 @@ impl Project {
     }
 
     pub fn versioning_path(&self) -> Path {
-        self.project_cwd.with_join_str(".yarn/versions")
+        let path
+            = &self.config.settings.deferred_version_folder.value;
+
+        if path.is_relative() {
+            self.project_cwd.with_join(path)
+        } else {
+            path.clone()
+        }
     }
 
     pub fn migration_path(&self) -> Path {

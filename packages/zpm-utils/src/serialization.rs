@@ -213,7 +213,14 @@ impl FromFileString for std::time::Duration {
 
 impl ToFileString for std::time::Duration {
     fn to_file_string(&self) -> String {
-        self.as_secs().to_string()
+        let ms = self.as_millis();
+        if ms == 0 {
+            "0s".to_string()
+        } else if ms % 1000 == 0 {
+            format!("{}s", ms / 1000)
+        } else {
+            format!("{}ms", ms)
+        }
     }
 }
 

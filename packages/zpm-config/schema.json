@@ -23,10 +23,30 @@
       "type": ["zpm_formats::CompressionAlgorithm", "null"],
       "description": "The compression level to use for the packed file"
     },
+    "daemonOutputBufferMaxLines": {
+      "type": "usize",
+      "description": "Maximum number of output lines to keep in memory per task in the daemon",
+      "default": 1000
+    },
+    "daemonMaxClosedTasks": {
+      "type": "usize",
+      "description": "Maximum number of completed/failed tasks whose output buffers are kept in memory by the daemon",
+      "default": 100
+    },
+    "daemonDefaultWarmupPeriod": {
+      "type": "std::time::Duration",
+      "description": "Default warm-up period for long-lived tasks in the daemon. After a long-lived task starts, dependents are unblocked once this period elapses.",
+      "default": "1s"
+    },
     "defaultSemverRangePrefix": {
       "type": "zpm_semver::RangeKind",
       "description": "The default semver range prefix to use for dependencies",
       "default": "caret"
+    },
+    "deferredVersionFolder": {
+      "type": "zpm_utils::Path",
+      "description": "Folder where the versioning files are stored.",
+      "default": "crate::fns::default_deferred_version_folder(context)"
     },
     "enableAutoTypes": {
       "type": "boolean",

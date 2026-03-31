@@ -469,9 +469,9 @@ impl MergeSettings for Setting<Path> {
     fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
         if let Partial::Value(project_rel_path) = project {
             let path = context
-                .package_cwd
+                .project_cwd
                 .as_ref()
-                .expect("A package directory should be set since we're using the value provided through the project config")
+                .expect("A project directory should be set since we're using the value provided through the project config")
                 .with_join(&project_rel_path);
 
             return Self {

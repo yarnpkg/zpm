@@ -14,6 +14,14 @@ pub enum TaskNameError {
     SyntaxError(String),
 }
 
+#[derive(thiserror::Error, Clone, Debug)]
+pub enum TaskIdError {
+    #[error("Invalid task id format (expected 'workspace:task'): {0}")]
+    SyntaxError(String),
+    #[error("Invalid task name in task id: {0}")]
+    InvalidTaskName(#[from] TaskNameError),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TaskName(String);
 
@@ -68,7 +76,7 @@ impl ToFileString for TaskName {
 
 impl ToHumanString for TaskName {
     fn to_print_string(&self) -> String {
-        DataType::Ident.colorize(&self.0)
+        DataType::Task.colorize(&self.0)
     }
 }
 
@@ -81,20 +89,38 @@ pub struct TaskId {
     pub task_name: TaskName,
 }
 
-impl std::fmt::Display for TaskId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.workspace.as_str(), self.task_name.as_str())
+impl FromFileString for TaskId {
+    type Error = TaskIdError;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        let (workspace_str, task_name_str)
+            = s.rsplit_once(':')
+                .ok_or_else(|| TaskIdError::SyntaxError(s.to_string()))?;
+
+        let workspace
+            = Ident::new(workspace_str);
+
+        let task_name
+            = TaskName::new(task_name_str)?;
+
+        Ok(TaskId { workspace, task_name })
     }
 }
 
-impl Serialize for TaskId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
+impl ToFileString for TaskId {
+    fn to_file_string(&self) -> String {
+        format!("{}:{}", self.workspace.to_file_string(), self.task_name.to_file_string())
     }
 }
+
+impl ToHumanString for TaskId {
+    fn to_print_string(&self) -> String {
+        format!("{}{}{}", self.workspace.to_print_string(), DataType::Task.colorize(":"), self.task_name.to_print_string())
+    }
+}
+
+impl_file_string_from_str!(TaskId);
+impl_file_string_serialization!(TaskId);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TaskFile {

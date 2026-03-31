@@ -57,8 +57,14 @@ hex = { workspace = true }
 p256 = { workspace = true }
 spki = { workspace = true }
 ring = { workspace = true }
+tokio-tungstenite = { workspace = true }
 url = { workspace = true }
 rand = { workspace = true }
+uuid = { version = "1.21.0", features = ["v4"] }
+async-trait = "0.1.89"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 divan = { workspace = true, package = "codspeed-divan-compat" }

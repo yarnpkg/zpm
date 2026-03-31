@@ -1,0 +1,1 @@
+pub const YARN_SWITCH_PATH_ENV: &str = "YARN_SWITCH_PATH";
