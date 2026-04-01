@@ -1,8 +1,10 @@
-use std::{collections::BTreeMap, io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}};
+use std::{collections::BTreeMap, io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}, sync::atomic::{AtomicU64, Ordering}, time::SystemTime};
 
 use rkyv::Archive;
 
 use crate::{diff_data, impl_file_string_from_str, impl_file_string_serialization, path_resolve::resolve_path, DataType, FromFileString, IoResultExt, PathError, PathIterator, ToFileString, ToHumanString};
+
+static ATOMIC_WRITE_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 pub struct SyncEntry {
@@ -535,6 +537,59 @@ impl Path {
     pub fn fs_write<T: AsRef<[u8]>>(&self, data: T) -> Result<&Self, PathError> {
         std::fs::write(self.to_path_buf(), data)?;
         Ok(self)
+    }
+
+    pub fn fs_write_atomic<E, F>(&self, f: F) -> Result<&Self, PathError> where
+        E: Into<PathError>,
+        F: FnOnce(Path) -> Result<(), E>,
+    {
+        let parent
+            = self.dirname().unwrap_or_default();
+
+        let basename
+            = self.basename().unwrap_or("tmp");
+
+        let timestamp
+            = SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+
+        let nonce
+            = ATOMIC_WRITE_NONCE.fetch_add(1, Ordering::Relaxed);
+
+        let tmp_name
+            = format!(".{}-{}-{}-{}.tmp", basename, std::process::id(), timestamp, nonce);
+
+        let tmp_path
+            = parent.with_join_str(tmp_name);
+
+        if let Err(error) = f(tmp_path.clone()).map_err(Into::into) {
+            let _ = tmp_path.fs_rm_file().ok_missing();
+            return Err(error);
+        }
+
+        match tmp_path.fs_rename(self) {
+            Ok(_) => {
+                Ok(self)
+            },
+
+            Err(error) => {
+                let _ = tmp_path
+                    .fs_rm_file()
+                    .ok_missing();
+
+                if error.io_kind() == Some(std::io::ErrorKind::AlreadyExists) {
+                    return Err(PathError::AtomicRenameConflict {
+                        from: tmp_path,
+                        to: self.clone(),
+                        inner: std::sync::Arc::new(error),
+                    });
+                }
+
+                Err(error)
+            },
+        }
     }
 
     pub fn fs_write_text<T: AsRef<str>>(&self, text: T) -> Result<&Self, PathError> {

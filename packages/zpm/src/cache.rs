@@ -8,7 +8,7 @@ use itertools::Itertools;
 use zpm_formats::{zip::ToZip, Entry};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::Locator;
-use zpm_utils::{Hash64, Path};
+use zpm_utils::{Hash64, IoResultExt, Path, PathError};
 use futures::Future;
 
 use crate::report::current_report;
@@ -347,12 +347,26 @@ impl DiskCache {
         let data
             = func().await?;
 
-        let mut file
-            = File::create(key_path.clone())?;
+        let atomic_path
+            = Path::try_from(key_path.clone())?;
 
-        file.write_all(&data)?;
+        let write_result
+            = atomic_path
+                .fs_write_atomic(|tmp_path| -> Result<(), PathError> {
+                    tmp_path.fs_write(&data)?;
+                    Ok(())
+                })
+                .ok_exists();
 
-        Ok(data)
+        match write_result? {
+            Some(_) => {
+                Ok(data)
+            },
+
+            None => {
+                Ok(tokio::fs::read(key_path).await?)
+            },
+        }
     }
 
     pub async fn clean(&self) -> Result<usize, Error> {
