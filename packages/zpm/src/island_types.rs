@@ -284,7 +284,7 @@ impl VersionSet for IslandVersionSet {
     }
 
     fn full() -> Self {
-        IslandVersionSet::Semver(Ranges::full())
+        IslandVersionSet::Exact(ExactSet::NoneOf(SmallVec::new()))
     }
 
     fn is_disjoint(&self, other: &Self) -> bool {
@@ -293,8 +293,17 @@ impl VersionSet for IslandVersionSet {
             (IslandVersionSet::Exact(a), IslandVersionSet::Exact(b)) => {
                 a.intersection(b).is_empty()
             }
-            // Cross-variant: semver and exact never share values
-            _ => true,
+            // Cross-variant: normally disjoint, except when one side is a
+            // logical full set.
+            _ => {
+                if self.is_logically_full() {
+                    other.is_logically_empty()
+                } else if other.is_logically_full() {
+                    self.is_logically_empty()
+                } else {
+                    true
+                }
+            },
         }
     }
 
@@ -304,8 +313,15 @@ impl VersionSet for IslandVersionSet {
             (IslandVersionSet::Exact(a), IslandVersionSet::Exact(b)) => {
                 *a == a.intersection(b)
             }
-            // Cross-variant: only if self is empty
-            _ => self.is_logically_empty(),
+            // Cross-variant: any set is a subset of full; otherwise only empty
+            // sets can be subsets across domains.
+            _ => {
+                if other.is_logically_full() {
+                    true
+                } else {
+                    self.is_logically_empty()
+                }
+            },
         }
     }
 }

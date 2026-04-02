@@ -14,6 +14,10 @@ function getIslandDescriptorKeys(lockfile: any, islandName: string): Array<strin
   return Object.keys(lockfile.islands?.[islandName] ?? {});
 }
 
+function getWorkspaceHash(lockfile: any, workspaceName: string): string | undefined {
+  return lockfile.workspaces?.[workspaceName];
+}
+
 describe(`Features`, () => {
   describe(`Islands`, () => {
     test(
@@ -1962,6 +1966,109 @@ describe(`Features`, () => {
           // Verify it's not nested under one-fixed-dep/node_modules
           const nestedPath = `${path}/packages/workspace-a/node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath;
           expect(await xfs.existsPromise(nestedPath)).toBe(false);
+        },
+      ),
+    );
+
+    test(
+      `it should resolve workspace and semver dependencies together inside an island`,
+      makeTemporaryMonorepoEnv(
+        {
+          workspaces: [`packages/*`],
+        },
+        {
+          [`packages/workspace-a`]: {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            dependencies: {
+              [`no-deps`]: `1.0.0`,
+              [`workspace-b`]: `workspace:*`,
+            },
+          },
+          [`packages/workspace-b`]: {
+            name: `workspace-b`,
+            version: `1.0.0`,
+            main: `./index.js`,
+          },
+        },
+        async ({path, run, source}) => {
+          await xfs.writeFilePromise(
+            `${path}/packages/workspace-b/index.js` as PortablePath,
+            `module.exports = require('./package.json');\n`,
+          );
+
+          await yarn.writeConfiguration(path, {
+            unstableIslands: {
+              main: {
+                workspaces: [`workspace-a`],
+                linker: `node-modules`,
+              },
+            },
+          });
+
+          await run(`install`);
+
+          await expect(
+            source(`require('no-deps')`, {cwd: `${path}/packages/workspace-a` as PortablePath}),
+          ).resolves.toMatchObject({
+            name: `no-deps`,
+            version: `1.0.0`,
+          });
+
+          await expect(
+            source(`require('workspace-b')`, {cwd: `${path}/packages/workspace-a` as PortablePath}),
+          ).resolves.toMatchObject({
+            name: `workspace-b`,
+            version: `1.0.0`,
+          });
+        },
+      ),
+    );
+
+    test(
+      `it should update island workspace tree hashes when island dependencies change`,
+      makeTemporaryMonorepoEnv(
+        {
+          workspaces: [`packages/*`],
+        },
+        {
+          [`packages/workspace-a`]: {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            dependencies: {
+              [`no-deps`]: `1.0.0`,
+            },
+          },
+        },
+        async ({path, run}) => {
+          await yarn.writeConfiguration(path, {
+            unstableIslands: {
+              main: {
+                workspaces: [`workspace-a`],
+                linker: `node-modules`,
+              },
+            },
+          });
+
+          await run(`install`);
+          const lockfileBefore = await readLockfile(path);
+          const hashBefore = getWorkspaceHash(lockfileBefore, `workspace-a`);
+          expect(hashBefore).toBeDefined();
+
+          await xfs.writeJsonPromise(`${path}/packages/workspace-a/package.json` as PortablePath, {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            dependencies: {
+              [`no-deps`]: `2.0.0`,
+            },
+          });
+
+          await run(`install`);
+
+          const lockfileAfter = await readLockfile(path);
+          const hashAfter = getWorkspaceHash(lockfileAfter, `workspace-a`);
+          expect(hashAfter).toBeDefined();
+          expect(hashAfter).not.toEqual(hashBefore);
         },
       ),
     );

@@ -3,7 +3,6 @@ use std::{collections::{BTreeMap, BTreeSet}, sync::{Arc, LazyLock}};
 use chrono::{DateTime, Utc};
 use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
@@ -1080,6 +1079,27 @@ impl<'a> InstallManager<'a> {
     }
 
     fn compute_workspace_hash(&self, root_locator: &Locator) -> Hash64 {
+        let island_id = self.result.resolved_islands.iter()
+            .find(|island| island.workspace_idents.contains(&root_locator.ident))
+            .map(|island| &island.id);
+
+        let (descriptor_to_locator, normalized_resolutions) = if let Some(island_id) = island_id {
+            let island_descriptor_to_locator = self.result.install_state.island_descriptor_to_locator
+                .get(island_id)
+                .unwrap_or(&self.result.install_state.descriptor_to_locator);
+
+            let island_normalized_resolutions = self.result.install_state.island_normalized_resolutions
+                .get(island_id)
+                .unwrap_or(&self.result.install_state.normalized_resolutions);
+
+            (island_descriptor_to_locator, island_normalized_resolutions)
+        } else {
+            (
+                &self.result.install_state.descriptor_to_locator,
+                &self.result.install_state.normalized_resolutions,
+            )
+        };
+
         let mut hash_writer
             = Hash64Writer::new();
 
@@ -1096,9 +1116,9 @@ impl<'a> InstallManager<'a> {
 
             hash_writer.update(locator.to_file_string());
 
-            if let Some(resolution) = self.result.install_state.normalized_resolutions.get(&locator) {
+            if let Some(resolution) = normalized_resolutions.get(&locator) {
                 for dependency_descriptor in resolution.dependencies.values() {
-                    if let Some(dep_locator) = self.result.install_state.descriptor_to_locator.get(dependency_descriptor) {
+                    if let Some(dep_locator) = descriptor_to_locator.get(dependency_descriptor) {
                         if !visited.contains(dep_locator) {
                             queue.push(dep_locator.clone());
                         }
@@ -1106,7 +1126,7 @@ impl<'a> InstallManager<'a> {
                 }
 
                 for variant_descriptor in &resolution.variants {
-                    if let Some(variant_locator) = self.result.install_state.descriptor_to_locator.get(variant_descriptor) {
+                    if let Some(variant_locator) = descriptor_to_locator.get(variant_descriptor) {
                         if !visited.contains(variant_locator) {
                             queue.push(variant_locator.clone());
                         }

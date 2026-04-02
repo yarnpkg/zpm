@@ -140,36 +140,28 @@ pub async fn resolve_island(
     // Future optimisation: compare root_deps against locked island
     // descriptors and reuse the lockfile when they match exactly.
 
-    // Phase 4: Run pubgrub on a blocking thread.
+    // Phase 4: Run pubgrub in a blocking section.
     //
-    // We use spawn_blocking because pubgrub::resolve is synchronous and may
-    // call handle.block_on() internally (via the provider) to fetch registry
-    // data.  The provider holds references to `ctx` which has a non-'static
-    // lifetime, so we transmute it to 'static for the spawn_blocking closure.
+    // pubgrub::resolve is synchronous and may call handle.block_on() internally
+    // (via the provider) to fetch registry data. We run it in block_in_place so
+    // it does not block the async scheduler.
     //
-    // SAFETY: the JoinHandle is `.await`ed immediately below, so the closure
-    // always completes before this function returns — the references in `ctx`
-    // remain valid for the entire duration of the blocking task.
+    // Unlike spawn_blocking, block_in_place does not require a 'static closure,
+    // which lets us borrow `ctx` safely without unsafe lifetime tricks.
     let handle = tokio::runtime::Handle::current();
     let island_id = island.id.clone();
     let enforced_resolutions = ctx.enforced_resolutions.clone();
 
-    // SAFETY: see comment above — the references are valid for the lifetime
-    // of the spawn_blocking task because we .await the result immediately.
-    let ctx_static: &'static InstallContext<'static> = unsafe {
-        std::mem::transmute::<&InstallContext<'_>, &'static InstallContext<'static>>(ctx)
-    };
-
     let workspace_deps_for_provider = workspace_deps.clone();
 
-    let (solution, resolution_cache) = tokio::task::spawn_blocking(move || {
+    let (solution, resolution_cache) = tokio::task::block_in_place(|| {
         let provider = IslandDependencyProvider::new(
             island_id.clone(),
             locked_versions,
             enforced_resolutions,
             handle,
             root_deps,
-            ctx_static,
+            ctx,
             workspace_deps_for_provider,
         );
 
@@ -185,7 +177,6 @@ pub async fn resolve_island(
         // add_decision) instead of using the one-shot resolve() API. This would allow:
         //   1. Concurrent metadata prefetching (fetch next packages while solving the current one)
         //   2. ConflictEarly/ConflictLate split (track affected vs culprit separately)
-        //   3. Remove the unsafe transmute to 'static (the async fetch loop would own the data)
         // See uv's resolver for reference:
         //   https://github.com/astral-sh/uv/blob/main/crates/uv-resolver/src/resolver/mod.rs
         let result = pubgrub::resolve(&provider, IslandPackage::Root, root_version)
@@ -195,10 +186,7 @@ pub async fn resolve_island(
         let cache = provider.resolution_cache.into_inner();
 
         result.map(|solution| (solution, cache))
-    }).await.map_err(|e| Error::IslandResolutionFailed {
-        island_id: island.id.clone(),
-        message: format!("Join error: {}", e),
-    })??;
+    })?;
 
     // Phase 5: Convert pubgrub solution to descriptor_to_locator + resolutions
     convert_solution(&island.id, solution, &resolution_cache, &workspace_deps)
