@@ -40,19 +40,27 @@ impl PypiVersion {
     }
 
     pub fn to_lossy_semver(&self) -> Result<zpm_semver::Version, PypiError> {
-        let parsed = self.parse()?;
-        let release = parsed.release();
+        let parsed
+            = self.parse()?;
+        let release
+            = parsed.release();
 
-        let to_u32 = |n: Option<u64>| -> Result<u32, PypiError> {
-            let n = n.unwrap_or(0);
+        let to_u32
+            = |n: Option<u64>| -> Result<u32, PypiError> {
+                let n
+                    = n.unwrap_or(0);
             n.try_into().map_err(|_| PypiError::InvalidSemverProjection(self.raw.clone()))
-        };
+            };
 
-        let major = to_u32(release.first().copied())?;
-        let minor = to_u32(release.get(1).copied())?;
-        let patch = to_u32(release.get(2).copied())?;
+        let major
+            = to_u32(release.first().copied())?;
+        let minor
+            = to_u32(release.get(1).copied())?;
+        let patch
+            = to_u32(release.get(2).copied())?;
 
-        let mut prerelease_segments = Vec::new();
+        let mut prerelease_segments
+            = Vec::new();
 
         if let Some(pre) = parsed.pre() {
             prerelease_segments.push(pre.kind.to_string());
@@ -77,18 +85,20 @@ impl PypiVersion {
             }
         }
 
-        let rc = if prerelease_segments.is_empty() {
-            None
-        } else {
-            let rc_segments = prerelease_segments.into_iter().map(|segment| {
-                match segment.parse::<u32>() {
-                    Ok(number) => VersionRc::Number(number),
-                    Err(_) => VersionRc::String(segment.into()),
-                }
-            }).collect::<Vec<_>>();
+        let rc
+            = if prerelease_segments.is_empty() {
+                None
+            } else {
+                let rc_segments
+                    = prerelease_segments.into_iter().map(|segment| {
+                        match segment.parse::<u32>() {
+                            Ok(number) => VersionRc::Number(number),
+                            Err(_) => VersionRc::String(segment.into()),
+                        }
+                    }).collect::<Vec<_>>();
 
-            Some(EcoVec::from(rc_segments))
-        };
+                Some(EcoVec::from(rc_segments))
+            };
 
         Ok(zpm_semver::Version::new_from_components(major, minor, patch, rc))
     }
@@ -103,10 +113,12 @@ impl FromFileString for PypiVersion {
     type Error = PypiError;
 
     fn from_file_string(src: &str) -> Result<Self, Self::Error> {
-        let src = src.trim();
+        let src
+            = src.trim();
 
-        let parsed = pep440_rs::Version::from_str(src)
-            .map_err(|_| PypiError::InvalidVersion(src.to_string()))?;
+        let parsed
+            = pep440_rs::Version::from_str(src)
+                .map_err(|_| PypiError::InvalidVersion(src.to_string()))?;
 
         Ok(Self {
             raw: parsed.to_string(),
@@ -155,15 +167,17 @@ impl PypiSpecifierSet {
             return Ok(true);
         }
 
-        let parsed_version = pep440_rs::Version::from_str(version.as_str())
-            .map_err(|_| PypiError::InvalidVersion(version.as_str().to_string()))?;
+        let parsed_version
+            = pep440_rs::Version::from_str(version.as_str())
+                .map_err(|_| PypiError::InvalidVersion(version.as_str().to_string()))?;
 
         if let Ok(specifiers) = pep440_rs::VersionSpecifiers::from_str(&self.raw) {
             return Ok(specifiers.contains(&parsed_version));
         }
 
-        let pinned = pep440_rs::Version::from_str(&self.raw)
-            .map_err(|_| PypiError::InvalidSpecifier(self.raw.clone()))?;
+        let pinned
+            = pep440_rs::Version::from_str(&self.raw)
+                .map_err(|_| PypiError::InvalidSpecifier(self.raw.clone()))?;
 
         Ok(parsed_version == pinned)
     }
@@ -179,7 +193,8 @@ impl FromFileString for PypiSpecifierSet {
     type Error = PypiError;
 
     fn from_file_string(src: &str) -> Result<Self, Self::Error> {
-        let src = src.trim();
+        let src
+            = src.trim();
 
         if src.is_empty() || src == "*" {
             return Ok(Self::any());
@@ -191,8 +206,9 @@ impl FromFileString for PypiSpecifierSet {
             });
         }
 
-        let version = pep440_rs::Version::from_str(src)
-            .map_err(|_| PypiError::InvalidSpecifier(src.to_string()))?;
+        let version
+            = pep440_rs::Version::from_str(src)
+                .map_err(|_| PypiError::InvalidSpecifier(src.to_string()))?;
 
         Ok(Self {
             raw: version.to_string(),

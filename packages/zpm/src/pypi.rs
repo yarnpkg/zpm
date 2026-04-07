@@ -37,7 +37,10 @@ pub fn parse_upload_time(distribution: &PypiDistribution) -> Option<DateTime<Utc
         .and_then(|value| {
             DateTime::parse_from_rfc3339(value).ok()
                 .map(|time| time.with_timezone(&Utc))
-                .or_else(|| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S").ok().map(|time| time.and_utc()))
+                .or_else(|| {
+                    NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S").ok()
+                        .map(|time| time.and_utc())
+                })
         })
 }
 

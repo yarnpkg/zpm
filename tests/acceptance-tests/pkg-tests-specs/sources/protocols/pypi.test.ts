@@ -1,5 +1,5 @@
 import {ppath, xfs} from '@yarnpkg/fslib';
-import {tests}             from 'pkg-tests-core';
+import {tests}      from 'pkg-tests-core';
 
 describe(`Protocols`, () => {
   describe(`pypi:`, () => {
