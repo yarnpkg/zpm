@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Locator, PypiRegistryReference};
@@ -7,6 +6,7 @@ use zpm_utils::ToFileString;
 use crate::{
     error::Error,
     install::{FetchResult, InstallContext},
+    pypi::{PypiDistribution, pypi_registry_base, encode_path_segment, select_best_wheel},
 };
 
 use super::PackageData;
@@ -15,55 +15,6 @@ use super::PackageData;
 struct PypiVersionMetadata {
     #[serde(default)]
     urls: Vec<PypiDistribution>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct PypiDistribution {
-    #[serde(default)]
-    filename: String,
-
-    #[serde(default)]
-    packagetype: String,
-
-    url: String,
-
-    #[serde(default)]
-    upload_time: Option<String>,
-
-    #[serde(default)]
-    upload_time_iso_8601: Option<String>,
-}
-
-fn pypi_registry_base() -> String {
-    std::env::var("ZPM_PYPI_REGISTRY")
-        .ok()
-        .unwrap_or_else(|| "https://pypi.org".to_string())
-        .trim_end_matches('/')
-        .to_string()
-}
-
-fn encode_path_segment(segment: &str) -> String {
-    url::form_urlencoded::byte_serialize(segment.as_bytes())
-        .collect::<String>()
-}
-
-fn parse_upload_time(distribution: &PypiDistribution) -> Option<DateTime<Utc>> {
-    distribution.upload_time_iso_8601.as_ref()
-        .or(distribution.upload_time.as_ref())
-        .and_then(|value| {
-            DateTime::parse_from_rfc3339(value).ok()
-                .map(|time| time.with_timezone(&Utc))
-                .or_else(|| DateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S").ok().map(|time| time.with_timezone(&Utc)))
-        })
-}
-
-fn select_best_wheel(distributions: &[PypiDistribution]) -> Option<&PypiDistribution> {
-    distributions.iter()
-        .filter(|distribution| distribution.packagetype == "bdist_wheel")
-        .max_by(|a, b| {
-            parse_upload_time(a).cmp(&parse_upload_time(b))
-                .then_with(|| b.filename.cmp(&a.filename))
-        })
 }
 
 async fn resolve_artifact_url(context: &InstallContext<'_>, params: &PypiRegistryReference) -> Result<String, Error> {

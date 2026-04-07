@@ -32,6 +32,7 @@ pub mod patch;
 pub mod prepare;
 pub mod primitives_exts;
 pub mod project;
+pub mod pypi;
 pub mod provenance;
 pub mod resolvers;
 pub mod report;
