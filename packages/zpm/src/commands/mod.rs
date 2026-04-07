@@ -25,6 +25,7 @@ mod node;
 mod pack;
 mod patch_commit;
 mod patch;
+mod python;
 mod rebuild;
 mod remove;
 mod run;
@@ -101,6 +102,7 @@ pub enum YarnCli {
     SetVersion(set_version::SetVersion),
     SetVersionFromSources(set_version_from_sources::SetVersionFromSources),
     Node(node::Node),
+    Python(python::Python),
     Pack(pack::Pack),
     PatchCommit(patch_commit::PatchCommit),
     Patch(patch::Patch),

@@ -15,6 +15,7 @@ pub mod helpers;
 pub mod nm;
 pub mod pnpm;
 pub mod pnp;
+pub mod venv;
 
 #[derive(Debug)]
 pub struct LinkResult {
@@ -41,7 +42,13 @@ pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Res
                 let island_result = nm::link_island_nm(project, install, island).await?;
                 result.packages_by_location.extend(island_result.packages_by_location);
                 result.build_requests.entries.extend(island_result.build_requests.entries);
-            }
+            },
+
+            IslandLinker::Venv => {
+                let island_result = venv::link_island_venv(project, install, island).await?;
+                result.packages_by_location.extend(island_result.packages_by_location);
+                result.build_requests.entries.extend(island_result.build_requests.entries);
+            },
         }
     }
 

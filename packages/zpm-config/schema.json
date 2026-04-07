@@ -414,7 +414,7 @@
           },
           "linker": {
             "type": "crate::IslandLinker",
-            "description": "The linker to use for workspaces in this island. Currently only 'node-modules' is supported."
+            "description": "The linker to use for workspaces in this island. Supported values are 'node-modules' and 'venv'."
           }
         }
       }

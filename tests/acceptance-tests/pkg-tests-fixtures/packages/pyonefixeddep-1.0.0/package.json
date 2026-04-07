@@ -1,0 +1,7 @@
+{
+    "name": "pyonefixeddep",
+    "version": "1.0.0",
+    "dependencies": {
+        "pynodeps": "1.0.0"
+    }
+}

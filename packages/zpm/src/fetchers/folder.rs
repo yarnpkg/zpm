@@ -1,5 +1,6 @@
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{FolderReference, Locator};
+use zpm_utils::{FromFileString, Path};
 
 use crate::{
     error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::RemoteManifest, npm::NpmEntryExt, resolvers::Resolution
@@ -25,12 +26,21 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         return Ok(FetchResult::new_mock(archive_path, package_directory));
     }
 
-    let parent_data
-        = dependencies[0].as_fetched();
+    let folder_relative_path
+        = Path::from_file_string(&params.path)?;
 
-    let context_directory = parent_data.package_data
-        .context_directory()
-        .with_join_str(&params.path);
+    let context_directory = if folder_relative_path.is_absolute() {
+        folder_relative_path
+    } else {
+        let parent_data
+            = dependencies.first()
+                .ok_or(Error::Unsupported)?
+                .as_fetched();
+
+        parent_data.package_data
+            .context_directory()
+            .with_join_str(&params.path)
+    };
 
     let package_subdir
         = locator.ident.nm_subdir();
