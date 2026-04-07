@@ -149,6 +149,10 @@ impl ContentFlags {
     }
 
     fn extract_zip(locator: &Locator, archive_path: &Path) -> Result<Self, Error> {
+        if matches!(locator.reference, Reference::PypiShorthand(_) | Reference::PypiRegistry(_)) {
+            return Ok(Self::default());
+        }
+
         let package_bytes
             = archive_path.fs_read()?;
 

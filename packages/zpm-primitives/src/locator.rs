@@ -158,7 +158,8 @@ impl_file_string_serialization!(Locator);
 
 #[rstest]
 #[case("foo@npm:1.0.0")]
-#[case("foo@npm:1.0.0::parent=root@workspace:")]
+#[case("foo@pypi:1.0.0")]
+#[case("foo@npm:1.0.0::parent=root@workspace:.")]
 fn test_locator_serialization(#[case] str: &str) {
     assert_eq!(str, Locator::from_file_string(str).unwrap().to_file_string());
 }

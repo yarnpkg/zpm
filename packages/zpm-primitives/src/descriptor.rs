@@ -91,6 +91,11 @@ impl Descriptor {
                 version: params.version,
             }.into(),
 
+            Reference::PypiRegistry(params) if params.ident == self.ident && params.url.is_none() => reference::PypiShorthandReference {
+                version: params.version,
+                url: None,
+            }.into(),
+
             _ => reference,
         };
 
@@ -259,7 +264,8 @@ impl_file_string_serialization!(Descriptor);
 
 #[rstest]
 #[case("foo@npm:1.0.0")]
-#[case("foo@npm:1.0.0::parent=root@workspace:")]
+#[case("foo@pypi:1.0.0")]
+#[case("foo@npm:1.0.0::parent=root@workspace:.")]
 fn test_descriptor_serialization(#[case] str: &str) {
     assert_eq!(str, Descriptor::from_file_string(str).unwrap().to_file_string());
 }

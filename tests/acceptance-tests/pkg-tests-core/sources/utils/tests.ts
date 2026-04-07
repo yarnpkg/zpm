@@ -71,6 +71,8 @@ export enum RequestType {
   PackageInfo = `packageInfo`,
   PackageTarball = `packageTarball`,
   PackageVersion = `packageVersion`,
+  PypiProjectInfo = `pypiProjectInfo`,
+  PypiVersionInfo = `pypiVersionInfo`,
   Whoami = `whoami`,
   Repository = `repository`,
   Publish = `publish`,
@@ -102,6 +104,13 @@ export type Request = {
   scope?: string;
   localName: string;
   version?: string;
+} | {
+  type: RequestType.PypiProjectInfo;
+  packageName: string;
+} | {
+  type: RequestType.PypiVersionInfo;
+  packageName: string;
+  version: string;
 } | {
   registry?: string;
   type: RequestType.Whoami;
@@ -213,6 +222,59 @@ const RELEASE_DATE_PACKAGES: Record<string, Record<string, number | string>> = {
     "1.1.0": new Date(new Date().getTime() - /* 5 days */ 1000 * 60 * 60 * 24 * 5).toISOString(),
     "1.1.1": new Date().toISOString(),
     "1.1.2": new Date(new Date().getTime() - /* 5 days */ 1000 * 60 * 60 * 24 * 5).toISOString(),
+  },
+};
+
+type PypiFixtureDistribution = {
+  filename: string;
+  packagetype: `bdist_wheel` | `sdist`;
+  path: string;
+  uploadTime: string;
+};
+
+type PypiFixtureRelease = {
+  requiresDist?: Array<string>;
+  files: Array<PypiFixtureDistribution>;
+};
+
+const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
+  [`pypi-no-deps`]: {
+    [`1.0.0`]: {
+      files: [{
+        filename: `pypi_no_deps-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_no_deps-1.0.0-py3-none-any.whl`,
+        uploadTime: `2023-01-01T00:00:00Z`,
+      }, {
+        // Deliberately newer than the wheel to ensure wheel selection takes precedence over sdist recency.
+        filename: `pypi_no_deps-1.0.0.tar.gz`,
+        packagetype: `sdist`,
+        path: `/repositories/pypi/pypi_no_deps-1.0.0.tar.gz`,
+        uploadTime: `2025-01-01T00:00:00Z`,
+      }],
+    },
+    [`1.1.0`]: {
+      files: [{
+        filename: `pypi_no_deps-1.1.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_no_deps-1.1.0-py3-none-any.whl`,
+        uploadTime: `2024-01-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-one-dep`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-no-deps (>=1.0.0)`,
+        `marker-only-dep (>=1.0.0); python_version < "3.12"`,
+      ],
+      files: [{
+        filename: `pypi_one_dep-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_one_dep-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-06-01T00:00:00Z`,
+      }],
+    },
   },
 };
 
@@ -525,6 +587,66 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       response.end(data);
     },
 
+    async [RequestType.PypiProjectInfo](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.PypiProjectInfo)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const project = PYPI_FIXTURES[parsedRequest.packageName];
+      if (!project) {
+        processError(response, 404, `PyPI package not found: ${parsedRequest.packageName}`);
+        return;
+      }
+
+      const serverUrl = await startPackageServer();
+
+      const releases = Object.fromEntries(Object.entries(project).map(([version, release]) => {
+        return [version, release.files.map(file => ({
+          filename: file.filename,
+          packagetype: file.packagetype,
+          url: `${serverUrl}${file.path}`,
+          upload_time_iso_8601: file.uploadTime,
+        }))];
+      }));
+
+      response.writeHead(200, {[`Content-Type`]: `application/json`});
+      response.end(JSON.stringify({
+        info: {
+          name: parsedRequest.packageName,
+        },
+        releases,
+      }));
+    },
+
+    async [RequestType.PypiVersionInfo](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.PypiVersionInfo)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const project = PYPI_FIXTURES[parsedRequest.packageName];
+      const release = project?.[parsedRequest.version];
+
+      if (!project || !release) {
+        processError(response, 404, `PyPI package not found: ${parsedRequest.packageName}@${parsedRequest.version}`);
+        return;
+      }
+
+      const serverUrl = await startPackageServer();
+
+      response.writeHead(200, {[`Content-Type`]: `application/json`});
+      response.end(JSON.stringify({
+        info: {
+          name: parsedRequest.packageName,
+          version: parsedRequest.version,
+          requires_dist: release.requiresDist,
+        },
+        urls: release.files.map(file => ({
+          filename: file.filename,
+          packagetype: file.packagetype,
+          url: `${serverUrl}${file.path}`,
+          upload_time_iso_8601: file.uploadTime,
+        })),
+      }));
+    },
+
     async [RequestType.PackageTarball](parsedRequest, request, response) {
       if (parsedRequest.type !== RequestType.PackageTarball)
         throw new Error(`Assertion failed: Invalid request type`);
@@ -826,6 +948,17 @@ exit 0
       return {
         type: RequestType.YarnSwitchInfo,
         platform: match[1]!,
+      };
+    } else if ((match = url.match(/^\/pypi\/([^/]+)\/([^/]+)\/json$/))) {
+      return {
+        type: RequestType.PypiVersionInfo,
+        packageName: decodeURIComponent(match[1]!),
+        version: decodeURIComponent(match[2]!),
+      };
+    } else if ((match = url.match(/^\/pypi\/([^/]+)\/json$/))) {
+      return {
+        type: RequestType.PypiProjectInfo,
+        packageName: decodeURIComponent(match[1]!),
       };
     } else {
       let registry: {registry: string} | undefined;
