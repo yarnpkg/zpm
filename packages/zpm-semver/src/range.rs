@@ -96,6 +96,10 @@ impl Range {
         extract::extract_tokens(&mut str.as_ref().chars().peekable())
     }
 
+    pub(crate) fn tokens(&self) -> &[Token] {
+        self.tokens.as_ref()
+    }
+
     pub fn any() -> Range {
         Range {
             // TODO: Replace >=0.0.0-0 with "*" once "*" is implemented

@@ -100,6 +100,182 @@ fn register_workspace_bin_symlinks(workspace_nm_tree: &mut SyncTree, workspace_p
     Ok(())
 }
 
+fn generate_workspace_node_modules(
+    project: &Project,
+    install: &Install,
+    work_tree: &WorkTree,
+    workspace_node_idx: usize,
+    packages_by_location: &mut BTreeMap<Path, zpm_primitives::Locator>,
+) -> Result<(), Error> {
+    let workspace_node
+        = &work_tree.nodes[workspace_node_idx];
+
+    let workspace
+        = project.workspace_by_locator(&workspace_node.locator)?;
+
+    packages_by_location.insert(workspace.rel_path.clone(), workspace_node.locator.clone());
+
+    let workspace_dir
+        = project.project_cwd
+            .with_join(&workspace.rel_path);
+
+    let workspace_abs_path
+        = workspace_dir
+            .with_join_str("node_modules");
+
+    let mut workspace_nm_tree
+        = SyncTree::new();
+
+    workspace_nm_tree.dry_run = false;
+
+    let workspace_binaries
+        = collect_workspace_binaries(install, &work_tree.nodes[workspace_node_idx]);
+
+    register_workspace_bin_symlinks(&mut workspace_nm_tree, &workspace_dir, &workspace_binaries)?;
+
+    let mut workspace_queue
+        = vec![(Path::new(), workspace_node_idx)];
+
+    while let Some((node_rel_path, node_idx)) = workspace_queue.pop() {
+        let node
+            = &work_tree.nodes[node_idx];
+
+        let children
+            = node.children.as_ref()
+                .expect(EXPECT_CHILDREN);
+
+        for (ident, child_idx) in children {
+            let child_node
+                = &work_tree.nodes[*child_idx];
+
+            let child_rel_path
+                = node_rel_path.with_join_str(&ident.as_str());
+
+            workspace_queue.push((child_rel_path.with_join_str("node_modules"), *child_idx));
+
+            let abs_path
+                = workspace_abs_path
+                    .with_join(&node_rel_path)
+                    .with_join(&child_rel_path);
+
+            let rel_path
+                = abs_path
+                    .relative_to(&project.project_cwd);
+
+            packages_by_location.insert(rel_path, child_node.locator.clone());
+
+            let package_data
+                = install.package_data.get(&child_node.locator.physical_locator());
+
+            match package_data {
+                Some(PackageData::Abstract) => {
+                    return Err(Error::Unsupported);
+                },
+
+                Some(PackageData::Local {package_directory, ..}) => {
+                    let child_abs_path
+                        = workspace_abs_path.with_join(&child_rel_path);
+
+                    let target_path
+                        = package_directory.relative_to(&child_abs_path.dirname().unwrap());
+
+                    workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
+                        target_path: target_path.clone(),
+                    })?;
+                },
+
+                Some(PackageData::Zip {archive_path, package_directory, ..}) => {
+                    workspace_nm_tree.register_entry(child_rel_path, SyncItem::Folder {
+                        template: Some(SyncTemplate::Zip {
+                            archive_path: archive_path.clone(),
+                            inner_path: package_directory.relative_to(&archive_path),
+                        }),
+                    })?;
+                },
+
+                Some(PackageData::MissingZip {..}) => {
+                    // Nothing to do here
+                },
+
+                None => match &child_node.locator.reference {
+                    Reference::Link(params) if params.path.starts_with('/') => {
+                        let target_path
+                            = Path::from_file_string(&params.path)?;
+
+                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
+                            target_path,
+                        })?;
+                    },
+
+                    _ => {
+                        unreachable!("Expected package data for {}", ToHumanString::to_print_string(&child_node.locator.physical_locator()));
+                    },
+                },
+            }
+        }
+
+        // Register bin symlinks for all direct dependencies of this node
+        // Skip any bins that conflict with workspace binaries (workspace takes precedence)
+        let mut binaries
+            = collect_binaries_from_dependencies(install, children, &work_tree);
+
+        // For root level, filter out bins that conflict with workspace binaries
+        if node_rel_path.is_empty() {
+            for bin_name in workspace_binaries.keys() {
+                binaries.remove(bin_name);
+            }
+        }
+
+        register_bin_symlinks_at_path(&mut workspace_nm_tree, &node_rel_path, &binaries)?;
+    }
+
+    workspace_nm_tree
+        .run(workspace_abs_path)?;
+
+    Ok(())
+}
+
+pub async fn link_island_nm(
+    project: &Project,
+    install: &Install,
+    island: &crate::island::ResolvedIsland,
+) -> Result<LinkResult, Error> {
+    let mut packages_by_location
+        = BTreeMap::new();
+
+    for workspace_ident in &island.workspace_idents {
+        let workspace = project.workspace_by_ident(workspace_ident)?;
+        let workspace_locator = workspace.locator();
+
+        let mut work_tree = WorkTree::new_for_island_workspace(
+            project,
+            &install.install_state,
+            workspace_locator,
+        );
+
+        let mut hoister
+            = Hoister::new(&mut work_tree);
+
+        hoister.hoist();
+
+        generate_workspace_node_modules(
+            project,
+            install,
+            &work_tree,
+            0,
+            &mut packages_by_location,
+        )?;
+    }
+
+    Ok(LinkResult {
+        packages_by_location,
+        build_requests: BuildRequests {
+            entries: vec![],
+            dependencies: BTreeMap::new(),
+        },
+    })
+}
+
 pub async fn link_project_nm(project: &Project, install: &Install) -> Result<LinkResult, Error> {
     let mut work_tree
         = WorkTree::new(project, &install.install_state);
@@ -116,132 +292,15 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
         = vec![0usize];
 
     while let Some(workspace_node_idx) = project_queue.pop() {
-        let workspace_node
-            = &work_tree.nodes[workspace_node_idx];
+        generate_workspace_node_modules(
+            project,
+            install,
+            &work_tree,
+            workspace_node_idx,
+            &mut packages_by_location,
+        )?;
 
-        let workspace
-            = project.workspace_by_locator(&workspace_node.locator)?;
-
-        packages_by_location.insert(workspace.rel_path.clone(), workspace_node.locator.clone());
-
-        let workspace_dir
-            = project.project_cwd
-                .with_join(&workspace.rel_path);
-
-        let workspace_abs_path
-            = workspace_dir
-                .with_join_str("node_modules");
-
-        let mut workspace_nm_tree
-            = SyncTree::new();
-
-        workspace_nm_tree.dry_run = false;
-
-        let workspace_binaries
-            = collect_workspace_binaries(install, &work_tree.nodes[workspace_node_idx]);
-
-        register_workspace_bin_symlinks(&mut workspace_nm_tree, &workspace_dir, &workspace_binaries)?;
-
-        let mut workspace_queue
-            = vec![(Path::new(), workspace_node_idx)];
-
-        while let Some((node_rel_path, node_idx)) = workspace_queue.pop() {
-            let node
-                = &work_tree.nodes[node_idx];
-
-            let children
-                = node.children.as_ref()
-                    .expect(EXPECT_CHILDREN);
-
-            for (ident, child_idx) in children {
-                let child_node
-                    = &work_tree.nodes[*child_idx];
-
-                let child_rel_path
-                    = node_rel_path.with_join_str(&ident.as_str());
-
-                workspace_queue.push((child_rel_path.with_join_str("node_modules"), *child_idx));
-
-                let abs_path
-                    = workspace_abs_path
-                        .with_join(&node_rel_path)
-                        .with_join(&child_rel_path);
-
-                let rel_path
-                    = abs_path
-                        .relative_to(&project.project_cwd);
-
-                packages_by_location.insert(rel_path, child_node.locator.clone());
-
-                let package_data
-                    = install.package_data.get(&child_node.locator.physical_locator());
-
-                match package_data {
-                    Some(PackageData::Abstract) => {
-                        return Err(Error::Unsupported);
-                    },
-
-                    Some(PackageData::Local {package_directory, ..}) => {
-                        let child_abs_path
-                            = workspace_abs_path.with_join(&child_rel_path);
-
-                        let target_path
-                            = package_directory.relative_to(&child_abs_path.dirname().unwrap());
-
-                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
-                            target_path: target_path.clone(),
-                        })?;
-                    },
-
-                    Some(PackageData::Zip {archive_path, package_directory, ..}) => {
-                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Folder {
-                            template: Some(SyncTemplate::Zip {
-                                archive_path: archive_path.clone(),
-                                inner_path: package_directory.relative_to(&archive_path),
-                            }),
-                        })?;
-                    },
-
-                    Some(PackageData::MissingZip {..}) => {
-                        // Nothing to do here
-                    },
-
-                    None => match &child_node.locator.reference {
-                        Reference::Link(params) if params.path.starts_with('/') => {
-                            let target_path
-                                = Path::from_file_string(&params.path)?;
-
-                            workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
-                                target_path,
-                            })?;
-                        },
-
-                        _ => {
-                            unreachable!("Expected package data for {}", ToHumanString::to_print_string(&child_node.locator.physical_locator()));
-                        },
-                    },
-                }
-            }
-
-            // Register bin symlinks for all direct dependencies of this node
-            // Skip any bins that conflict with workspace binaries (workspace takes precedence)
-            let mut binaries
-                = collect_binaries_from_dependencies(install, children, &work_tree);
-
-            // For root level, filter out bins that conflict with workspace binaries
-            if node_rel_path.is_empty() {
-                for bin_name in workspace_binaries.keys() {
-                    binaries.remove(bin_name);
-                }
-            }
-
-            register_bin_symlinks_at_path(&mut workspace_nm_tree, &node_rel_path, &binaries)?;
-        }
-
-        workspace_nm_tree
-            .run(workspace_abs_path)?;
-
-        project_queue.extend_from_slice(&workspace_node.workspaces_idx);
+        project_queue.extend_from_slice(&work_tree.nodes[workspace_node_idx].workspaces_idx);
     }
 
     Ok(LinkResult {

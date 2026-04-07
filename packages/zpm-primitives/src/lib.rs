@@ -12,6 +12,7 @@ mod ident_resolution;
 mod ident_glob;
 mod ident;
 mod locator;
+mod registry;
 
 pub use descriptor_filter::*;
 pub use descriptor_resolution::*;
@@ -25,3 +26,4 @@ pub use ident_resolution::*;
 pub use ident_glob::*;
 pub use ident::*;
 pub use locator::*;
+pub use registry::*;

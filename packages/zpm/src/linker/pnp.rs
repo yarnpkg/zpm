@@ -520,10 +520,21 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
         }
     }
 
-    let ignore_pattern_data = project.config.settings.pnp_ignore_patterns
+    let mut ignore_pattern_data: Vec<String> = project.config.settings.pnp_ignore_patterns
         .iter()
         .map(|pattern| pattern.value.to_regex_string())
-        .collect::<Vec<String>>();
+        .collect();
+
+    // Add ignore patterns for island workspaces using node-modules linker
+    for island in &install.resolved_islands {
+        if island.linker == zpm_config::IslandLinker::NodeModules {
+            for ws_ident in &island.workspace_idents {
+                let workspace = project.workspace_by_ident(ws_ident)?;
+                let escaped = regex::escape(&workspace.rel_path.to_file_string());
+                ignore_pattern_data.push(format!("^{}(/.*)?$", escaped));
+            }
+        }
+    }
 
     let state = PnpState {
         enable_top_level_fallback,

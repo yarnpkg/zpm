@@ -2,6 +2,7 @@ mod error;
 mod extract;
 mod range;
 mod version;
+pub mod pubgrub;
 
 pub use error::Error;
 pub use range::Range;
