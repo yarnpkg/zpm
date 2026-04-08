@@ -1,5 +1,6 @@
 import {miscUtils, semverUtils}                    from '@yarnpkg/core';
 import {PortablePath, npath, xfs, ppath, Filename} from '@yarnpkg/fslib';
+import {LibZipImpl, ZIP_UNIX, makeEmptyArchive}    from '@yarnpkg/libzip';
 import {npmAuditTypes}                             from '@yarnpkg/plugin-npm-cli';
 import assert                                      from 'assert';
 import crypto                                      from 'crypto';
@@ -27,6 +28,101 @@ import * as fsUtils                                from './fs';
 
 const deepResolve = require(`super-resolve`);
 const staticServer = serveStatic(npath.fromPortablePath(require(`pkg-tests-fixtures`)));
+const pypiRepositoryDir = npath.toPortablePath(`${require(`pkg-tests-fixtures`)}/repositories/pypi`);
+
+const ZIP_FIXED_DATE = new Date(`2000-01-01T00:00:00.000Z`);
+
+type ZipEntry = {
+  data: Buffer;
+  mode: number;
+  name: PortablePath;
+};
+
+async function collectWheelEntries(directory: PortablePath): Promise<Array<ZipEntry>> {
+  const entries: Array<ZipEntry> = [];
+
+  const visit = async (current: PortablePath) => {
+    const listing = await xfs.readdirPromise(current);
+
+    for (const name of listing) {
+      const path = ppath.join(current, name);
+      const stat = await xfs.lstatPromise(path);
+
+      if (stat.isDirectory()) {
+        await visit(path);
+        continue;
+      }
+
+      if (!stat.isFile())
+        continue;
+
+      const relativePath = ppath.relative(directory, path);
+
+      entries.push({
+        name: relativePath,
+        data: await xfs.readFilePromise(path),
+        mode: stat.mode & 0xffff,
+      });
+    }
+  };
+
+  await visit(directory);
+
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+
+  return entries;
+}
+
+function buildZipFromEntries(entries: Array<ZipEntry>) {
+  const zipImpl = new LibZipImpl({
+    buffer: makeEmptyArchive(),
+    readOnly: false,
+  });
+  const mtime = Math.floor(ZIP_FIXED_DATE.getTime() / 1000);
+
+  try {
+    for (const entry of entries) {
+      const file = zipImpl.setFileSource(entry.name, null, entry.data);
+      zipImpl.setExternalAttributes(file, ZIP_UNIX, (entry.mode & 0xffff) << 16);
+      zipImpl.setMtime(file, mtime);
+    }
+
+    return zipImpl.getBufferAndClose();
+  } catch (error) {
+    zipImpl.discard();
+    throw error;
+  }
+}
+
+async function serveDynamicPypiWheel(request: IncomingMessage, response: ServerResponse) {
+  const pathname = new URL(request.url ?? `/`, `http://localhost`).pathname;
+  const match = pathname.match(/^\/repositories\/pypi\/([^/]+\.whl)$/);
+
+  if (match === null)
+    return false;
+
+  const wheelFileName = decodeURIComponent(match[1]!);
+  const wheelDir = ppath.join(pypiRepositoryDir, wheelFileName);
+
+  if (!await xfs.existsPromise(wheelDir))
+    return false;
+
+  const stat = await xfs.lstatPromise(wheelDir);
+  if (!stat.isDirectory())
+    return false;
+
+  const entries = await collectWheelEntries(wheelDir);
+  const wheel = buildZipFromEntries(entries);
+
+  response.writeHead(200, {
+    [`Content-Type`]: `application/octet-stream`,
+    [`Content-Length`]: wheel.length.toString(),
+  });
+
+  response.end(wheel);
+
+  return true;
+}
 
 const TEST_MAJOR = process.env.TEST_MAJOR
   ? parseInt(process.env.TEST_MAJOR, 10)
@@ -273,6 +369,16 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
         packagetype: `bdist_wheel`,
         path: `/repositories/pypi/pypi_one_dep-1.0.0-py3-none-any.whl`,
         uploadTime: `2024-06-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-entry-points`]: {
+    [`1.0.0`]: {
+      files: [{
+        filename: `pypi_entry_points-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_entry_points-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-07-01T00:00:00Z`,
       }],
     },
   },
@@ -728,6 +834,9 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
     },
 
     async [RequestType.Repository](parsedRequest, request, response) {
+      if (await serveDynamicPypiWheel(request, response))
+        return;
+
       staticServer(request as any, response as any, finalhandler(request, response));
     },
 

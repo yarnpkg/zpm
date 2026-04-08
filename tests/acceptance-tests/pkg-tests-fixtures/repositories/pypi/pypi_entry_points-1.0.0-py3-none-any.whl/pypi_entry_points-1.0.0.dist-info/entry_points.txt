@@ -1,0 +1,2 @@
+[console_scripts]
+pypi-entry-points = pypi_entry_points.cli:main

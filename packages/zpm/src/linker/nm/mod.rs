@@ -5,7 +5,7 @@ use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
 use zpm_utils::{FromFileString, Path, ToHumanString};
 
 use crate::{
-    build::BuildRequests, error::Error, fetchers::PackageData, install::Install, linker::{LinkResult, nm::hoist::{Hoister, WorkTree}}, project::Project
+    build::BuildRequests, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{LinkResult, nm::hoist::{Hoister, WorkTree}}, project::Project
 };
 
 pub mod hoist;
@@ -24,8 +24,10 @@ fn collect_binaries_from_dependencies(install: &Install, children: &BTreeMap<Ide
             = child_node.locator.physical_locator();
 
         if let Some(content_flags) = install.install_state.content_flags.get(&physical_locator) {
-            for (bin_name, bin_path) in &content_flags.binaries {
-                binaries.insert(bin_name.clone(), (ident.clone(), bin_path.clone()));
+            for (bin_name, binary) in &content_flags.binaries {
+                if let content_flags::Binary::Node(bin_path) = binary {
+                    binaries.insert(bin_name.clone(), (ident.clone(), bin_path.clone()));
+                }
             }
         }
     }
@@ -41,8 +43,10 @@ fn collect_workspace_binaries(install: &Install, workspace_node: &hoist::WorkNod
         = workspace_node.locator.physical_locator();
 
     if let Some(content_flags) = install.install_state.content_flags.get(&physical_locator) {
-        for (bin_name, bin_path) in &content_flags.binaries {
-            binaries.insert(bin_name.clone(), (workspace_node.locator.ident.clone(), bin_path.clone()));
+        for (bin_name, binary) in &content_flags.binaries {
+            if let content_flags::Binary::Node(bin_path) = binary {
+                binaries.insert(bin_name.clone(), (workspace_node.locator.ident.clone(), bin_path.clone()));
+            }
         }
     }
 

@@ -12,6 +12,7 @@ use zpm_formats::zip::ZipSupport;
 
 use crate::{
     cache::{CompositeCache, DiskCache},
+    content_flags,
     diff_finder::CacheEntry,
     error::Error,
     git::{GitOperation, detect_git_operation},
@@ -644,7 +645,24 @@ impl Project {
             .unwrap_or_else(|| panic!("Expected {} to have content flags", locator.to_print_string()));
 
         let binaries = content_flags.binaries.iter()
-            .map(|(name, path)| (name.clone(), Binary::new(self, package_location.with_join(&path))))
+            .map(|(name, binary)| {
+                let binary = match binary {
+                    content_flags::Binary::Node(path) => {
+                        Binary::new_path(self, package_location.with_join(path))
+                    },
+
+                    content_flags::Binary::Python {module, object} => {
+                        Binary::new_python(
+                            name.clone(),
+                            self.project_cwd.with_join(package_location),
+                            module.clone(),
+                            object.clone(),
+                        )
+                    },
+                };
+
+                (name.clone(), binary)
+            })
             .collect();
 
         Ok(binaries)

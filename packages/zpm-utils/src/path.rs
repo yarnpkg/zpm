@@ -269,6 +269,10 @@ impl Path {
     }
 
     pub fn strip_prefix(&self, prefix: &Path) -> Option<Path> {
+        if prefix.is_empty() {
+            return Some(self.clone());
+        }
+
         if !self.path.starts_with(prefix.as_str()) {
             return None;
         }

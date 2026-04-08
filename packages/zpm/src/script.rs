@@ -17,6 +17,21 @@ static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(
 static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
 static JS_EXTENSION: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
 
+fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, module: &str, object: &str) -> String {
+    let binary_name
+        = serde_json::to_string(binary_name).expect("expected valid binary name");
+    let package_path
+        = serde_json::to_string(&package_path.to_file_string()).expect("expected valid package path");
+    let module
+        = serde_json::to_string(module).expect("expected valid python module");
+    let object
+        = serde_json::to_string(object).expect("expected valid python object");
+
+    format!(
+        "import importlib, sys\nsys.path.insert(0, {package_path})\nmodule = importlib.import_module({module})\nentry = module\nfor part in {object}.split('.'):\n    entry = getattr(entry, part)\nsys.argv[0] = {binary_name}\nsys.exit(entry())"
+    )
+}
+
 fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &Vec<String>) -> Result<(), Error> {
     if cfg!(windows) {
         let cmd_script = format!(
@@ -114,13 +129,21 @@ pub enum BinaryKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Binary {
-    pub path: Path,
-    pub kind: BinaryKind,
+pub enum Binary {
+    Path {
+        path: Path,
+        kind: BinaryKind,
+    },
+    PythonEntryPoint {
+        name: String,
+        package_path: Path,
+        module: String,
+        object: String,
+    },
 }
 
 impl Binary {
-    pub fn new(project: &Project, path_rel: Path) -> Self {
+    pub fn new_path(project: &Project, path_rel: Path) -> Self {
         let path_abs = project.project_cwd
             .with_join(&path_rel);
 
@@ -129,9 +152,18 @@ impl Binary {
             false => BinaryKind::Default,
         };
 
-        Self {
+        Self::Path {
             path: path_abs,
             kind,
+        }
+    }
+
+    pub fn new_python(name: String, package_path: Path, module: String, object: String) -> Self {
+        Self::PythonEntryPoint {
+            name,
+            package_path,
+            module,
+            object,
         }
     }
 }
@@ -188,21 +220,36 @@ impl ScriptBinaries {
 
     pub fn with_package(mut self, binaries: &BTreeMap<String, Binary>, relative_to: &Path) -> Result<Self, Error> {
         for (name, binary) in binaries {
-            let binary_path_abs = relative_to
-                .with_join(&binary.path);
+            match binary {
+                Binary::Path {path, kind} => {
+                    let binary_path_abs = relative_to
+                        .with_join(path);
 
-            if binary.kind == BinaryKind::Node {
-                self.binaries.push(ScriptBinary {
-                    name: name.clone(),
-                    argv0: "node".to_string(),
-                    args: vec![binary_path_abs.to_file_string()],
-                });
-            } else {
-                self.binaries.push(ScriptBinary {
-                    name: name.clone(),
-                    argv0: binary_path_abs.to_file_string(),
-                    args: vec![],
-                });
+                    if *kind == BinaryKind::Node {
+                        self.binaries.push(ScriptBinary {
+                            name: name.clone(),
+                            argv0: "node".to_string(),
+                            args: vec![binary_path_abs.to_file_string()],
+                        });
+                    } else {
+                        self.binaries.push(ScriptBinary {
+                            name: name.clone(),
+                            argv0: binary_path_abs.to_file_string(),
+                            args: vec![],
+                        });
+                    }
+                },
+
+                Binary::PythonEntryPoint {name, package_path, module, object} => {
+                    self.binaries.push(ScriptBinary {
+                        name: name.clone(),
+                        argv0: "python".to_string(),
+                        args: vec![
+                            "-c".to_string(),
+                            make_python_entry_point_snippet(name, package_path, module, object),
+                        ],
+                    });
+                },
             }
         }
 
@@ -696,18 +743,33 @@ impl ScriptEnvironment {
     }
 
     pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
-        match binary.kind {
-            BinaryKind::Node => {
+        match binary {
+            Binary::Path {path, kind: BinaryKind::Node} => {
                 let mut node_args = self.node_args.clone();
 
-                node_args.push(binary.path.to_file_string());
+                node_args.push(path.to_file_string());
                 node_args.extend(args.into_iter().map(|arg| arg.as_ref().to_string()));
 
                 self.run_exec("node", node_args).await
             },
 
-            BinaryKind::Default => {
-                self.run_exec(&binary.path.to_file_string(), args).await
+            Binary::Path {path, kind: BinaryKind::Default} => {
+                self.run_exec(&path.to_file_string(), args).await
+            },
+
+            Binary::PythonEntryPoint {name, package_path, module, object} => {
+                let mut python_args = vec![
+                    "-c".to_string(),
+                    make_python_entry_point_snippet(name, package_path, module, object),
+                ];
+
+                python_args.extend(args.into_iter().map(|arg| arg.as_ref().to_string()));
+
+                match self.run_exec("python", &python_args).await {
+                    Ok(result) => Ok(result),
+                    Err(Error::SpawnFailed {name, ..}) if name == "python" => self.run_exec("python3", &python_args).await,
+                    Err(err) => Err(err),
+                }
             },
         }
     }

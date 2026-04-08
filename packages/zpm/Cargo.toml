@@ -27,8 +27,10 @@ pubgrub = { workspace = true }
 version-ranges = { workspace = true }
 rayon = { workspace = true }
 rkyv = { workspace = true, features = ["bytecheck"] }
+pep-508 = { workspace = true }
 reqwest = { workspace = true, default-features = false, features = ["gzip", "http2", "hickory-dns", "rustls-tls"] }
 regex = { workspace = true }
+rust-ini = { workspace = true }
 serde_with = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
