@@ -75,10 +75,13 @@ where
     let mut frame_idx: usize
         = 0;
 
-    let mut stdout
-        = std::io::stdout().lock();
+    {
+        let mut stdout
+            = std::io::stdout().lock();
 
-    stdout.write_all(b"\x1b[?25l").ok();
+        stdout.write_all(b"\x1b[?25l").ok();
+        stdout.flush().ok();
+    }
 
     loop {
         match stop_rx.recv_timeout(Duration::from_millis(50)) {

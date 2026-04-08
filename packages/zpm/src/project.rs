@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::Arc, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::Arc, time::{Duration, UNIX_EPOCH}};
 
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext};
@@ -6,7 +6,7 @@ use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
 use zpm_tasks::{parse as parse_taskfile, ResolvedTasks, TaskId};
-use zpm_utils::{Glob, LastModifiedAt, Path, ToFileString, ToHumanString};
+use zpm_utils::{Glob, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -764,7 +764,7 @@ impl Project {
             }
         }
 
-        self.run_install(RunInstallOptions {
+        let install = self.run_install(RunInstallOptions {
             check_checksums: false,
             check_resolutions: false,
             enforced_resolutions: BTreeMap::new(),
@@ -774,7 +774,34 @@ impl Project {
             mode: None,
             roots: None,
             ..Default::default()
-        }).await?;
+        });
+
+        tokio::pin!(install);
+
+        if !is_terminal() {
+            install.await?;
+            return Ok(());
+        }
+
+        tokio::select! {
+            result = &mut install => {
+                result?;
+                return Ok(());
+            },
+
+            _ = tokio::time::sleep(Duration::from_millis(200)) => {
+            }
+        }
+
+        let mut progress_handle
+            = start_progress(|_| "Installing dependencies...".to_string());
+
+        let install_result
+            = install.await;
+
+        progress_handle.stop();
+
+        install_result?;
 
         Ok(())
     }
