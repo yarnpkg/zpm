@@ -4,7 +4,7 @@ use zpm_primitives::{Ident, Locator, PatchReference};
 use zpm_utils::Hash64;
 
 use crate::{
-    error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::RemoteManifest, misc::unpack_brotli_data, npm::NpmEntryExt, patch::apply::apply_patch, resolvers::Resolution
+    error::{Error, remote_manifest_parse_error}, install::{FetchResult, InstallContext, InstallOpResult}, manifest::RemoteManifest, misc::unpack_brotli_data, npm::NpmEntryExt, patch::apply::apply_patch, resolvers::Resolution
 };
 
 use super::PackageData;
@@ -97,6 +97,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let package_subdir
         = locator.ident.nm_subdir();
+    let locator_for_patch_source
+        = locator.clone();
 
     let package_subdir_for_entries
         = package_subdir.clone();
@@ -142,7 +144,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
                     .ok_or(Error::MissingPackageManifest)?;
 
             let manifest: RemoteManifest
-                = JsonDocument::hydrate_from_slice(&package_json_entry.data)?;
+                = JsonDocument::hydrate_from_slice(&package_json_entry.data)
+                    .map_err(|error| remote_manifest_parse_error(&locator_for_patch_source, "patch source archive", "package.json", error))?;
 
             let package_version
                 = manifest.version
@@ -174,7 +177,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         = zpm_formats::zip::first_entry_from_zip(&cached_blob.data)?;
 
     let manifest: RemoteManifest
-        = JsonDocument::hydrate_from_slice(&package_json_entry.data)?;
+        = JsonDocument::hydrate_from_slice(&package_json_entry.data)
+            .map_err(|error| remote_manifest_parse_error(&locator, "patched package archive", "package.json", error))?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest);

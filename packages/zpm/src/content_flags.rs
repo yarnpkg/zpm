@@ -9,7 +9,7 @@ use zpm_primitives::{Ident, Locator, Reference};
 use zpm_utils::{Path, Requirements};
 
 use crate::{
-    build, error::Error, fetchers::PackageData, manifest::bin::BinField
+    build, error::{Error, remote_manifest_parse_error}, fetchers::PackageData, manifest::bin::BinField
 };
 
 static UNPLUG_SCRIPTS: &[&str] = &["preinstall", "install", "postinstall"];
@@ -160,7 +160,8 @@ impl ContentFlags {
             = zpm_formats::zip::first_entry_from_zip(&package_bytes)?;
 
         let meta_manifest: Manifest
-            = JsonDocument::hydrate_from_slice(&first_entry.data)?;
+            = JsonDocument::hydrate_from_slice(&first_entry.data)
+                .map_err(|error| remote_manifest_parse_error(locator, "cached package archive", "package.json", error))?;
 
         let mut build_commands = UNPLUG_SCRIPTS.iter()
             .filter_map(|k| meta_manifest.scripts.get(*k).map(|s| (k, s)))

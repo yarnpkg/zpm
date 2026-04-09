@@ -3,7 +3,7 @@ use zpm_parsers::JsonDocument;
 use zpm_primitives::{GitReference, Locator};
 
 use crate::{
-    error::Error, git, install::{FetchResult, InstallContext}, manifest::RemoteManifest, npm::NpmEntryExt, prepare, resolvers::Resolution
+    error::{Error, remote_manifest_parse_error}, git, install::{FetchResult, InstallContext}, manifest::RemoteManifest, npm::NpmEntryExt, prepare, resolvers::Resolution
 };
 
 use super::PackageData;
@@ -62,7 +62,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         = zpm_formats::zip::first_entry_from_zip(&pkg_blob.data)?;
 
     let remote_manifest: RemoteManifest
-        = JsonDocument::hydrate_from_slice(&first_entry.data)?;
+        = JsonDocument::hydrate_from_slice(&first_entry.data)
+            .map_err(|error| remote_manifest_parse_error(locator, "package archive", "package.json", error))?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), remote_manifest);

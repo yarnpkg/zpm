@@ -5,7 +5,7 @@ use zpm_parsers::JsonDocument;
 use zpm_primitives::{Locator, UrlReference};
 
 use crate::{
-    error::Error,
+    error::{Error, remote_manifest_parse_error},
     http_npm::{self, AuthorizationMode, GetAuthorizationOptions},
     install::{FetchResult, InstallContext},
     manifest::RemoteManifest,
@@ -91,7 +91,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         = zpm_formats::zip::first_entry_from_zip(&cached_blob.data)?;
 
     let manifest: RemoteManifest
-        = JsonDocument::hydrate_from_slice(&first_entry.data)?;
+        = JsonDocument::hydrate_from_slice(&first_entry.data)
+            .map_err(|error| remote_manifest_parse_error(locator, "package archive", "package.json", error))?;
 
     let resolution
         = Resolution::from_remote_manifest(locator.clone(), manifest);

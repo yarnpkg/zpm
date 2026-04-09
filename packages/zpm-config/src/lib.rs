@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc, time::UNIX_EPOCH};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, IoResultExt, LastModifiedAt, Libc, Os, Path, RawString, Serialized, System, ToFileString, ToHumanString, tree};
+use zpm_utils::{AbstractValue, Container, Cpu, DataType, EcoString, FromFileString, IoResultExt, LastModifiedAt, Libc, Os, Path, RawString, Serialized, System, ToFileString, ToHumanString, tree};
 
 #[derive(Debug, Clone)]
 pub struct ConfigurationContext {
@@ -816,6 +816,18 @@ pub enum ConfigurationError {
 
     #[error(transparent)]
     SerdeError(#[from] Arc<serde_yaml::Error>),
+
+    #[error("Invalid user configuration file ({}): {message}", path.to_print_string())]
+    UserConfigParseError {
+        path: Path,
+        message: EcoString,
+    },
+
+    #[error("Invalid project configuration file ({}): {message}", path.to_print_string())]
+    ProjectConfigParseError {
+        path: Path,
+        message: EcoString,
+    },
 }
 
 impl From<std::io::Error> for ConfigurationError {
@@ -905,7 +917,11 @@ impl Configuration {
                         .fs_read_text_with_size(metadata.len())?;
 
                 let user_config: intermediate::Settings
-                    = serde_yaml::from_str(&user_config_text)?;
+                    = serde_yaml::from_str(&user_config_text)
+                        .map_err(|error| ConfigurationError::UserConfigParseError {
+                            path: user_config_path.clone(),
+                            message: error.to_string().into(),
+                        })?;
 
                 intermediate_user_config = Partial::Value(user_config);
             }
@@ -929,7 +945,11 @@ impl Configuration {
                         .fs_read_text_with_size(metadata.len())?;
 
                 let project_config: intermediate::Settings
-                    = serde_yaml::from_str(&project_config_text)?;
+                    = serde_yaml::from_str(&project_config_text)
+                        .map_err(|error| ConfigurationError::ProjectConfigParseError {
+                            path: project_config_path.clone(),
+                            message: error.to_string().into(),
+                        })?;
 
                 intermediate_project_config = Partial::Value(project_config);
             }

@@ -1,7 +1,7 @@
 use std::{future::Future, sync::Arc};
 
 use zpm_primitives::{Descriptor, Ident, Locator, Range};
-use zpm_utils::{DataType, Path, ToHumanString};
+use zpm_utils::{DataType, EcoString, Path, ToHumanString};
 use tokio::task::JoinError;
 
 fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
@@ -9,6 +9,50 @@ fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
         backtrace.to_string().trim_end().to_string()
     } else {
         "Run with RUST_BACKTRACE=1 to get a backtrace".to_string()
+    }
+}
+
+fn render_remote_manifest_reason(raw_reason: &str) -> String {
+    let first_line = raw_reason.lines().next().unwrap_or(raw_reason).trim();
+
+    if let Some(rest) = first_line.strip_prefix("invalid type: ")
+        && let Some((actual, expected_tail)) = rest.split_once(", expected ")
+    {
+        if let Some((expected, line_col)) = expected_tail.split_once(" at line ") {
+            return format!(
+                "type mismatch: expected {}, got {} (line {})",
+                expected.trim(),
+                actual.trim(),
+                line_col.trim(),
+            );
+        }
+
+        return format!(
+            "type mismatch: expected {}, got {}",
+            expected_tail.trim(),
+            actual.trim(),
+        );
+    }
+
+    first_line.to_string()
+}
+
+pub fn remote_manifest_parse_error(
+    locator: &Locator,
+    origin: impl Into<EcoString>,
+    path: impl Into<EcoString>,
+    parser_error: zpm_parsers::Error,
+) -> Error {
+    let raw_reason = match &parser_error {
+        zpm_parsers::Error::InvalidSyntax(message) => message.clone(),
+        _ => parser_error.to_string(),
+    };
+
+    Error::RemoteManifestParseError {
+        locator: locator.clone(),
+        origin: origin.into(),
+        path: path.into(),
+        reason: render_remote_manifest_reason(&raw_reason).into(),
     }
 }
 
@@ -144,6 +188,14 @@ pub enum Error {
     #[error("File parsing error ({0})")]
     FileParsingError(#[from] zpm_parsers::Error),
 
+    #[error("Invalid package metadata in {path} ({origin}): {reason}")]
+    RemoteManifestParseError {
+        locator: Locator,
+        origin: EcoString,
+        path: EcoString,
+        reason: EcoString,
+    },
+
     #[error("Semver error ({0})")]
     SemverError(#[from] zpm_semver::Error),
 
@@ -165,8 +217,11 @@ pub enum Error {
     #[error("Package manifest not found ({})", .0.to_print_string())]
     ManifestNotFound(Path),
 
-    #[error("Package manifest failed to parse ({}): {}", .0.to_print_string(), .1)]
-    ManifestParseError(Path, Arc<dyn std::error::Error + Send + Sync>),
+    #[error("Package manifest failed to parse ({}): {reason}", path.to_print_string())]
+    ManifestParseError {
+        path: Path,
+        reason: EcoString,
+    },
 
     #[error("Invalid descriptor ({0})")]
     InvalidDescriptor(String),
@@ -249,8 +304,11 @@ pub enum Error {
     #[error("An error occured while reading the lockfile from disk")]
     LockfileReadError(Arc<std::io::Error>),
 
-    #[error("An error occured while parsing the lockfile: {0}")]
-    LockfileParseError(zpm_parsers::Error),
+    #[error("An error occured while parsing the lockfile ({}): {reason}", path.to_print_string())]
+    LockfileParseError {
+        path: Path,
+        reason: EcoString,
+    },
 
     #[error("Can't perform this operation without a git root")]
     NoGitRoot,
@@ -261,8 +319,11 @@ pub enum Error {
     #[error("No merge base could be found between any of HEAD and {args}", args = .0.join(", "))]
     NoMergeBaseFound(Vec<String>),
 
-    #[error("An error occured while parsing the Yarn Berry lockfile: {0}")]
-    LegacyLockfileParseError(Arc<serde_yaml::Error>),
+    #[error("An error occured while parsing the Yarn Berry lockfile ({}): {reason}", path.to_print_string())]
+    LegacyLockfileParseError {
+        path: Path,
+        reason: EcoString,
+    },
 
     #[error("Failed to read pnpm node_modules directory")]
     PnpmNodeModulesReadError,
@@ -558,6 +619,30 @@ pub enum Error {
     // Silent error; no particular message, just exit with an exit code 1
     #[error("")]
     SilentError,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_remote_manifest_reason;
+
+    #[test]
+    fn renders_manifest_type_mismatch_compactly() {
+        let reason = render_remote_manifest_reason(
+            "invalid type: string \"glibc\", expected a sequence at line 1 column 1687",
+        );
+
+        assert_eq!(
+            reason,
+            "type mismatch: expected a sequence, got string \"glibc\" (line 1 column 1687)"
+        );
+    }
+
+    #[test]
+    fn keeps_first_line_for_multiline_reasons() {
+        let reason = render_remote_manifest_reason("foo\nbar\nbaz");
+
+        assert_eq!(reason, "foo");
+    }
 }
 
 impl Error {

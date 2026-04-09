@@ -9,7 +9,7 @@ use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, Reference
 use zpm_utils::UrlEncoded;
 
 use crate::{
-    error::Error,
+    error::{Error, remote_manifest_parse_error},
     http_npm,
     install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
     manifest::RemoteManifest,
@@ -213,8 +213,18 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
             continue;
         }
 
+        let locator = Locator::new(
+            package_ident.clone(),
+            RegistryReference {
+                ident: package_ident.clone(),
+                version: version.clone(),
+                url: None,
+            }.into(),
+        );
+
         let manifest
-            = JsonDocument::hydrate_from_value(manifest)?;
+            = JsonDocument::hydrate_from_value(manifest)
+                .map_err(|error| remote_manifest_parse_error(&locator, "npm registry metadata", "package.json", error))?;
 
         return build_resolution_result(context, descriptor, package_ident, version.clone(), manifest);
     }
@@ -285,7 +295,20 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
             .ok_or_else(|| Error::NoCandidatesFound(AnonymousSemverRange {range: zpm_semver::Range::lte(latest_version.clone())}.into()))?;
 
     let manifest
-        = JsonDocument::hydrate_from_value(&manifest)?;
+        = JsonDocument::hydrate_from_value(&manifest)
+            .map_err(|error| remote_manifest_parse_error(
+                &Locator::new(
+                    package_ident.clone(),
+                    RegistryReference {
+                        ident: package_ident.clone(),
+                        version: version.clone(),
+                        url: None,
+                    }.into(),
+                ),
+                "npm registry metadata",
+                "package.json",
+                error,
+            ))?;
 
     build_resolution_result(context, descriptor, package_ident, version, manifest)
 }
@@ -319,7 +342,8 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
         }).await?;
 
     let mut manifest: RemoteManifestWithScripts
-        = JsonDocument::hydrate_from_slice(&bytes[..])?;
+        = JsonDocument::hydrate_from_slice(&bytes[..])
+            .map_err(|error| remote_manifest_parse_error(locator, "npm registry metadata", "package.json", error))?;
 
     fix_manifest(&mut manifest);
 
