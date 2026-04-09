@@ -32,22 +32,34 @@ fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, modul
     )
 }
 
-fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &Vec<String>) -> Result<(), Error> {
+fn make_executable_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &[String]) -> Result<(), Error> {
     if cfg!(windows) {
+        let escaped_args = args
+            .iter()
+            .map(|arg| format!(r#""{}""#, arg.replace(r#"""#, r#""""#)))
+            .collect::<Vec<String>>()
+            .join(" ");
+
         let cmd_script = format!(
             r#"@goto #_undefined_# 2>NUL || @title %COMSPEC% & @setlocal & @"{}" {} %*"#,
             argv0,
-            args.iter().map(|arg| format!(r#""{}""#, arg.replace(r#"""#, r#""""#))).collect::<Vec<String>>().join(" "),
+            escaped_args,
         );
 
         bin_dir
             .with_join_str(format!("{}.cmd", name))
             .fs_write_text(&cmd_script)?;
     } else {
+        let escaped_args = args
+            .iter()
+            .map(|arg| format!("'{}'", arg.replace("'", "'\"'\"'")))
+            .collect_vec()
+            .join(" ");
+
         let sh_script = format!(
             "#!/bin/sh\nexec \"{}\" {} \"$@\"\n",
             argv0,
-            args.iter().map(|arg| format!("'{}'", arg.replace("'", "'\"'\"'"))).collect_vec().join(" "),
+            escaped_args,
         );
 
         bin_dir
@@ -240,7 +252,14 @@ impl ScriptBinaries {
                     }
                 },
 
-                Binary::PythonEntryPoint {name, package_path, module, object} => {
+                Binary::PythonEntryPoint {
+                    name: entry_name,
+                    package_path,
+                    module,
+                    object,
+                } => {
+                    debug_assert_eq!(entry_name, name);
+
                     self.binaries.push(ScriptBinary {
                         name: name.clone(),
                         argv0: "python".to_string(),
@@ -604,7 +623,7 @@ impl ScriptEnvironment {
                 .fs_create_dir_all()?;
 
             for binary in &self.binaries.binaries {
-                make_path_wrapper(&temp_dir, &binary.name, &binary.argv0, &binary.args)?;
+                make_executable_wrapper(&temp_dir, &binary.name, &binary.argv0, &binary.args)?;
             }
 
             dir
@@ -765,11 +784,7 @@ impl ScriptEnvironment {
 
                 python_args.extend(args.into_iter().map(|arg| arg.as_ref().to_string()));
 
-                match self.run_exec("python", &python_args).await {
-                    Ok(result) => Ok(result),
-                    Err(Error::SpawnFailed {name, ..}) if name == "python" => self.run_exec("python3", &python_args).await,
-                    Err(err) => Err(err),
-                }
+                self.run_exec("python", &python_args).await
             },
         }
     }

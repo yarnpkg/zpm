@@ -97,11 +97,8 @@ impl Python {
                 .with_env_variable("PATH", &path);
         }
 
-        let result = match env.run_exec("python", &self.args).await {
-            Ok(result) => result,
-            Err(Error::SpawnFailed {name, ..}) if name == "python" => env.run_exec("python3", &self.args).await?,
-            Err(err) => return Err(err),
-        };
+        let result
+            = env.run_exec("python", &self.args).await?;
 
         Ok(result.into())
     }
