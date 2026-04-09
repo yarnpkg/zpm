@@ -102,7 +102,10 @@ async function serveDynamicPypiWheel(request: IncomingMessage, response: ServerR
     return false;
 
   const wheelFileName = decodeURIComponent(match[1]!);
-  const wheelDir = ppath.join(pypiRepositoryDir, wheelFileName);
+  if (wheelFileName.includes(`/`) || wheelFileName.includes(`\\`))
+    return false;
+
+  const wheelDir = ppath.join(pypiRepositoryDir, wheelFileName as Filename);
 
   if (!await xfs.existsPromise(wheelDir))
     return false;
