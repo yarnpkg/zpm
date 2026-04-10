@@ -1,0 +1,189 @@
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  discover-e2e:
+    name: Discover E2E tests
+    runs-on: ubuntu-latest
+    outputs:
+      tests: ${{ steps.discover.outputs.tests }}
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build matrix data
+        id: discover
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t tests < <(find tests/e2e -maxdepth 1 -type f -name '[0-9][0-9]-*.sh' | sort)
+          if [[ "${#tests[@]}" -eq 0 ]]; then
+            echo "No e2e tests found" >&2
+            exit 1
+          fi
+
+          matrix_json="$(printf '%s\n' "${tests[@]}" | jq -R -s -c 'split("\n")[:-1]')"
+          echo "tests=${matrix_json}" >> "$GITHUB_OUTPUT"
+          echo "Discovered e2e tests: ${matrix_json}"
+
+  build-e2e-binary:
+    name: Build e2e binary
+    runs-on: ubuntu-latest
+    needs: [discover-e2e]
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+        with:
+          shared-key: e2e-linux-release
+
+      - name: Build yarn-bin
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -r -p zpm-switch
+
+      - name: Upload e2e binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-binary-yarn-bin
+          path: target/release/yarn-bin
+
+  run-e2e:
+    name: Run ${{ matrix.test }}
+    runs-on: ubuntu-latest
+    needs: [discover-e2e, build-e2e-binary]
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJson(needs.discover-e2e.outputs.tests) }}
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download e2e binary
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-binary-yarn-bin
+          path: target/release
+
+      - name: Resolve test metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_name="$(basename "${{ matrix.test }}" .sh)"
+          echo "test_name=${test_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare e2e artifact paths
+        id: artifact-paths
+        shell: bash
+        env:
+          TEST_SCRIPT: ${{ matrix.test }}
+          TEST_NAME: ${{ steps.meta.outputs.test_name }}
+        run: |
+          set -euo pipefail
+          artifact_dir="e2e-artifacts/${TEST_NAME}"
+          log_file="${artifact_dir}/run.log"
+          status_file="${artifact_dir}/status.json"
+          mkdir -p "${artifact_dir}"
+
+          echo "artifact_dir=${artifact_dir}" >> "$GITHUB_OUTPUT"
+          echo "log_file=${log_file}" >> "$GITHUB_OUTPUT"
+          echo "status_file=${status_file}" >> "$GITHUB_OUTPUT"
+
+      - name: Run test in Docker sandbox action
+        id: run-in-sandbox
+        uses: ./.github/actions/run-e2e-sandbox
+        with:
+          test-script: ${{ matrix.test }}
+          log-file: ${{ steps.artifact-paths.outputs.log_file }}
+
+      - name: Write test status
+        id: write-status
+        shell: bash
+        env:
+          TEST_SCRIPT: ${{ matrix.test }}
+          STATUS_FILE: ${{ steps.artifact-paths.outputs.status_file }}
+          EXIT_CODE: ${{ steps.run-in-sandbox.outputs.exit-code || '1' }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg test "${TEST_SCRIPT}" \
+            --argjson exitCode "${EXIT_CODE}" \
+            '{test:$test, exitCode:$exitCode}' > "${STATUS_FILE}"
+
+      - name: Fail job if test failed
+        if: ${{ steps.run-in-sandbox.outputs.exit-code != '0' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          exit 1
+
+      - name: Upload e2e logs and status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-result-${{ steps.meta.outputs.test_name }}
+          path: e2e-artifacts/${{ steps.meta.outputs.test_name }}
+          if-no-files-found: warn
+
+  report-e2e-failures:
+    name: Report e2e failures
+    runs-on: ubuntu-latest
+    needs: [run-e2e]
+    if: always()
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download e2e result artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          path: e2e-artifacts
+          pattern: e2e-result-*
+          merge-multiple: false
+
+      - name: Create or update GitHub issues for failing tests
+        env:
+          E2E_ARTIFACTS_DIR: e2e-artifacts
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # node --experimental-strip-types scripts/e2e/report-failures.ts

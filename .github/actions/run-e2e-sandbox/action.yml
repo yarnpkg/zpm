@@ -1,0 +1,21 @@
+name: Run E2E Sandbox
+description: Run an e2e shell test inside a Docker action sandbox and stream logs
+
+inputs:
+  test-script:
+    description: Relative path to the test script from repository root
+    required: true
+  log-file:
+    description: Relative path to the log file to write in repository root
+    required: true
+
+outputs:
+  exit-code:
+    description: Exit code returned by the test script
+
+runs:
+  using: docker
+  image: Dockerfile
+  args:
+    - ${{ inputs.test-script }}
+    - ${{ inputs.log-file }}
