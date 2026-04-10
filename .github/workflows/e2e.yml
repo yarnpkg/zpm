@@ -164,7 +164,7 @@ jobs:
     name: Report e2e failures
     runs-on: ubuntu-latest
     needs: [run-e2e]
-    if: github.ref == 'refs/heads/main'
+    if: always() && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       issues: write
@@ -192,5 +192,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          set -euo pipefail
-          node --experimental-strip-types scripts/e2e/report-failures.ts
+          yarn node --experimental-strip-types scripts/e2e/report-failures.ts
