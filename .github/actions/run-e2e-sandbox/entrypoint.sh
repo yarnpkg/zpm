@@ -27,11 +27,11 @@ mkdir -p "${HOME}"
 
 cd "${WORKSPACE}"
 
-if [[ -x "${WORKSPACE}/target/release/yarn" ]]; then
+if [[ -f "${WORKSPACE}/target/release/yarn" ]]; then
   chmod +x "${WORKSPACE}/target/release/yarn"
 fi
 
-if [[ -x "${WORKSPACE}/target/release/yarn-bin" ]]; then
+if [[ -f "${WORKSPACE}/target/release/yarn-bin" ]]; then
   chmod +x "${WORKSPACE}/target/release/yarn-bin"
 fi
 
