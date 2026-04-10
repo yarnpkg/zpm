@@ -3,13 +3,13 @@
     "version": 9
   },
   "workspaces": {
-    "@yarnpkg/documentation": "6774a1e95bf35686d609df068e6915a715ed2ddb250161d8cccc144f2c624ead4f5e16ffc99f5cd52499e22ca7b048ce447e103fe1447c6f56a596dd9d6ec6d0",
-    "@yarnpkg/monorepo": "4981b3b9d5d923e6614ed3bcc4b54555d73484003d06b8f36a6554a14f8d00888ad5e149f9ad59dc47d7ceb8be75b7af9ddb40139ee59549f29491a470b21daa",
+    "@yarnpkg/documentation": "105cf01165fcffc02e5a354f6734895d01fbb152899e635b1d1b152a04e48c904810d457a85b09d642ca9061bf01e02dc203eabdf0c3a29ddf20036b31e43cde",
+    "@yarnpkg/monorepo": "69da8dfb279601957675174872ca291310b88ff5e33fcc0060b11a3503fdef48f629515bcf7d74fbe12b83b2a84b7f0249cf8154978d15bc6a3fa3c634624f94",
     "@yarnpkg/zpm-constraints": "5c6a5440669d0a0244f06ebc980b86b246235da3b4da7fc5c2bbdc0bf61ef23e95d8bb9f2fdb7402d20cf0ac8461b086799a0e0e606054b85e9ac472be1dd9d2",
-    "acceptance-tests": "7bbbb284f8efd2543311498c2c8044ca3b54d526cef1c265c7c0e9fed7e1aa1cf6fcd1391b1241cafbcffaee6da62001337db4f8d9f9a5540453b56d3916d108",
+    "acceptance-tests": "9e727eab8feee6a4383eb4abec8384decbaf30d2ee37dca7d2c8fc1e6afff399509282042cc605746ffaca0ed8f7e5b964b88327ecd50c5077d7a44b7ea4a5ae",
     "pkg-tests-core": "e68bd05709df7e934e9746828824feeea05a4de108f2b55ee6a387664e1b30d412f19108824e87263a3227358fe1fa7277207b8b041372caf95bae441452d0bf",
     "pkg-tests-fixtures": "92f85e94a04dac9a6700073012b6c7d15c0ce80b32ef51f4463566cae3b95f69f6416e3bc1c62bd4bc400d07a559c93bcfe1c6fc5e0e0320f1c338b127f2388d",
-    "pkg-tests-specs": "9d79c0001a057abe6f6d5c233b39666bc5a6f7e86d0e5d014f0ece363451ace931e6969780e8fa55e05bdb8942b59d013a5cfdb0a8871bdb62076fbfb707e809",
+    "pkg-tests-specs": "99b05aaf26d1c6bf9f0da94ebe57194feb5b24c5e35a9ac127558c9c005dba0d2acf8db3a96c54c8525c608b1daa0a844414ec9a9aa7b868c50c5d39ab5eeb67",
     "zpm": "95257b9606ea262055a12ded1215d68ea1e15447d9f99ffef0c2e86e13cb71ec9fe728ce19f98c6e421b28f71f0d210e9d260fe41cfcd8f3c1c8e16ef2ddd8f9"
   },
   "entries": {
@@ -5504,6 +5504,307 @@
         }
       }
     },
+    "@octokit/app@npm:^16.1.2": {
+      "checksum": "6c1bca74a51acf2817ba4d462c4277e7fc03ef4136d9acb5feeddc24349bb34948496df5da7b1f5f87c92cf22f0fad8dc5b6153bf4c44d895f9467c17814d49f",
+      "resolution": {
+        "resolution": "@octokit/app@npm:16.1.2",
+        "version": "16.1.2",
+        "dependencies": {
+          "@octokit/auth-app": "^8.1.2",
+          "@octokit/auth-unauthenticated": "^7.0.3",
+          "@octokit/core": "^7.0.6",
+          "@octokit/oauth-app": "^8.0.3",
+          "@octokit/plugin-paginate-rest": "^14.0.0",
+          "@octokit/types": "^16.0.0",
+          "@octokit/webhooks": "^14.0.0"
+        }
+      }
+    },
+    "@octokit/auth-app@npm:^8.1.2": {
+      "checksum": "f5bb097a6845460ce1a53bbd5ce7dd176668544e2d4967cc37234025ef8600d329ee48b5f070f4d81f235413640a20c72e769479448776311fa5217afdd60a48",
+      "resolution": {
+        "resolution": "@octokit/auth-app@npm:8.2.0",
+        "version": "8.2.0",
+        "dependencies": {
+          "@octokit/auth-oauth-app": "^9.0.3",
+          "@octokit/auth-oauth-user": "^6.0.2",
+          "@octokit/request": "^10.0.6",
+          "@octokit/request-error": "^7.0.2",
+          "@octokit/types": "^16.0.0",
+          "toad-cache": "^3.7.0",
+          "universal-github-app-jwt": "^2.2.0",
+          "universal-user-agent": "^7.0.0"
+        }
+      }
+    },
+    "@octokit/auth-oauth-app@npm:^9.0.2, @octokit/auth-oauth-app@npm:^9.0.3": {
+      "checksum": "58f87c84a38d9bf385814eb4c428000a0ca8201c160283d6b982a35b0a268a0d71a6b8ac6a4aef7b60d455cbb26892d768b0b571866ad30e031bef55c8cc4aee",
+      "resolution": {
+        "resolution": "@octokit/auth-oauth-app@npm:9.0.3",
+        "version": "9.0.3",
+        "dependencies": {
+          "@octokit/auth-oauth-device": "^8.0.3",
+          "@octokit/auth-oauth-user": "^6.0.2",
+          "@octokit/request": "^10.0.6",
+          "@octokit/types": "^16.0.0",
+          "universal-user-agent": "^7.0.0"
+        }
+      }
+    },
+    "@octokit/auth-oauth-device@npm:^8.0.3": {
+      "checksum": "2e4bbdaf276e26e054b1342952274ad3581f71a43cd772925c96a1310de0bfb8871e0dab4d7f907e4af0dad060e9106a6d62142ad9d6cd64d7904234bb8bcd1f",
+      "resolution": {
+        "resolution": "@octokit/auth-oauth-device@npm:8.0.3",
+        "version": "8.0.3",
+        "dependencies": {
+          "@octokit/oauth-methods": "^6.0.2",
+          "@octokit/request": "^10.0.6",
+          "@octokit/types": "^16.0.0",
+          "universal-user-agent": "^7.0.0"
+        }
+      }
+    },
+    "@octokit/auth-oauth-user@npm:^6.0.1, @octokit/auth-oauth-user@npm:^6.0.2": {
+      "checksum": "6e114a94720ee2f81dd539b040f596885b204473af6e53bae1cd6f0baf7f1765d76d16534425740ddccffbb03b420c7369db3f17ec29fe30febdfcf172fd0619",
+      "resolution": {
+        "resolution": "@octokit/auth-oauth-user@npm:6.0.2",
+        "version": "6.0.2",
+        "dependencies": {
+          "@octokit/auth-oauth-device": "^8.0.3",
+          "@octokit/oauth-methods": "^6.0.2",
+          "@octokit/request": "^10.0.6",
+          "@octokit/types": "^16.0.0",
+          "universal-user-agent": "^7.0.0"
+        }
+      }
+    },
+    "@octokit/auth-token@npm:^6.0.0": {
+      "checksum": "2d4177b4e7e249c4444c7391c0ffbdf44b781b1bcf5aad361d7bd325821b37763032c9e2fa89abd2f91e18fc29aad79b79205aa42208fa6cea128faecd442686",
+      "resolution": {
+        "resolution": "@octokit/auth-token@npm:6.0.0",
+        "version": "6.0.0"
+      }
+    },
+    "@octokit/auth-unauthenticated@npm:^7.0.2, @octokit/auth-unauthenticated@npm:^7.0.3": {
+      "checksum": "4901d9c88244eb6675de3dc1bae597c8534db1ceedfff41c1caa0cf158c0776969ea368f0ffbc8192eb7131590ed3a6deb6a184c5f7d14958c0a3661105a5a65",
+      "resolution": {
+        "resolution": "@octokit/auth-unauthenticated@npm:7.0.3",
+        "version": "7.0.3",
+        "dependencies": {
+          "@octokit/request-error": "^7.0.2",
+          "@octokit/types": "^16.0.0"
+        }
+      }
+    },
+    "@octokit/core@npm:^7.0.5, @octokit/core@npm:^7.0.6": {
+      "checksum": "5a25f0321dc6ea0fb0a2b4da287d96b4ebdf0cce9e9e271d3f10735c95c1d548d3026b35a1eb7e8dca85d335e0e0335fc44526988b42db923b85543d8d65393c",
+      "resolution": {
+        "resolution": "@octokit/core@npm:7.0.6",
+        "version": "7.0.6",
+        "dependencies": {
+          "@octokit/auth-token": "^6.0.0",
+          "@octokit/graphql": "^9.0.3",
+          "@octokit/request": "^10.0.6",
+          "@octokit/request-error": "^7.0.2",
+          "@octokit/types": "^16.0.0",
+          "before-after-hook": "^4.0.0",
+          "universal-user-agent": "^7.0.0"
+        }
+      }
+    },
+    "@octokit/endpoint@npm:^11.0.3": {
+      "checksum": "023d3428d71a55ec9976369523c6d591f08fe0c1cb0397dbd3376511a844311d296c7b60ee460b59b69f7e1f4af845539e0212d3add5300d0814ae4848c52ad5",
+      "resolution": {
+        "resolution": "@octokit/endpoint@npm:11.0.3",
+        "version": "11.0.3",
+        "dependencies": {
+          "@octokit/types": "^16.0.0",
+          "universal-user-agent": "^7.0.2"
+        }
+      }
+    },
+    "@octokit/graphql@npm:^9.0.3": {
+      "checksum": "cd4ca3373c27561cd2e80896bfba18323968c476c83c8086df4a3712643fbbc630a7336c52dc5e212f3d640477e3ecab824606a090bade1f14d8bf0056057be8",
+      "resolution": {
+        "resolution": "@octokit/graphql@npm:9.0.3",
+        "version": "9.0.3",
+        "dependencies": {
+          "@octokit/request": "^10.0.6",
+          "@octokit/types": "^16.0.0",
+          "universal-user-agent": "^7.0.0"
+        }
+      }
+    },
+    "@octokit/oauth-app@npm:^8.0.3": {
+      "checksum": "7c5f1e8ffc8e833619ea1c263597b3d689d8b1696566e98a4e97ec23af889e9b64203184d30e0784a38567da65e4dc222a0508806c227f97d211666948a9a12c",
+      "resolution": {
+        "resolution": "@octokit/oauth-app@npm:8.0.3",
+        "version": "8.0.3",
+        "dependencies": {
+          "@octokit/auth-oauth-app": "^9.0.2",
+          "@octokit/auth-oauth-user": "^6.0.1",
+          "@octokit/auth-unauthenticated": "^7.0.2",
+          "@octokit/core": "^7.0.5",
+          "@octokit/oauth-authorization-url": "^8.0.0",
+          "@octokit/oauth-methods": "^6.0.1",
+          "@types/aws-lambda": "^8.10.83",
+          "universal-user-agent": "^7.0.0"
+        }
+      }
+    },
+    "@octokit/oauth-authorization-url@npm:^8.0.0": {
+      "checksum": "0b2cf4450f71169ff282c60406fb9dcff4a372a76b750ed1c516a457ecbfbb1d56ea5e4beeb98c72a0ec9a4f43ed91e4ca27e8605aca4306ac1f13f09265374e",
+      "resolution": {
+        "resolution": "@octokit/oauth-authorization-url@npm:8.0.0",
+        "version": "8.0.0"
+      }
+    },
+    "@octokit/oauth-methods@npm:^6.0.1, @octokit/oauth-methods@npm:^6.0.2": {
+      "checksum": "b35d54c736edd6acc607a3f5fa0fa675b317244ddf37c4bcf93a4907b53b0b08bd67fb084b09a9c780737b5d8c8f92fd12bf868cfaec898f0576a7488a8cb9eb",
+      "resolution": {
+        "resolution": "@octokit/oauth-methods@npm:6.0.2",
+        "version": "6.0.2",
+        "dependencies": {
+          "@octokit/oauth-authorization-url": "^8.0.0",
+          "@octokit/request": "^10.0.6",
+          "@octokit/request-error": "^7.0.2",
+          "@octokit/types": "^16.0.0"
+        }
+      }
+    },
+    "@octokit/openapi-types@npm:^27.0.0": {
+      "checksum": "518c76bcd407420063db395ca6b0f9aabb448dd11d3d11844f30cf4a0f905eb8f12d53c1a55a651c26ed9a137b6eb92ef833ff22631efd66a665c96b302647ae",
+      "resolution": {
+        "resolution": "@octokit/openapi-types@npm:27.0.0",
+        "version": "27.0.0"
+      }
+    },
+    "@octokit/openapi-webhooks-types@npm:12.1.0": {
+      "checksum": "3e36157b5f7f66a802a33c128d0d2fb106478e7888fd8e31ff3a98b094a9485ca1d9e27b7c9172125b592e075a14068e2206394c169468a646f7139ee884ec9c",
+      "resolution": {
+        "resolution": "@octokit/openapi-webhooks-types@npm:12.1.0",
+        "version": "12.1.0"
+      }
+    },
+    "@octokit/plugin-paginate-graphql@npm:^6.0.0": {
+      "checksum": "cdd533ac28513712b7dbe85ed6aae1972d048d53571c9f7e862e7c632a585a6686d68f002da375d600a8deaa23edcfd576670a4f084404c33d94ec9a5c301014",
+      "resolution": {
+        "resolution": "@octokit/plugin-paginate-graphql@npm:6.0.0",
+        "version": "6.0.0",
+        "peerDependencies": {
+          "@octokit/core": ">=6"
+        }
+      }
+    },
+    "@octokit/plugin-paginate-rest@npm:^14.0.0": {
+      "checksum": "4ea2eff7ebaed47aa4c3f100922d87bb92460133065c77530f97b3091213e02182307edcebd62f9066a0e2e99b3d60af24b7f0b07c50c7317077aa9ea0319c03",
+      "resolution": {
+        "resolution": "@octokit/plugin-paginate-rest@npm:14.0.0",
+        "version": "14.0.0",
+        "dependencies": {
+          "@octokit/types": "^16.0.0"
+        },
+        "peerDependencies": {
+          "@octokit/core": ">=6"
+        }
+      }
+    },
+    "@octokit/plugin-rest-endpoint-methods@npm:^17.0.0": {
+      "checksum": "b272a955ffd599c5447a5f51a807f949c211f03fe0746657f01fb60fa89b4e9cd11b8153e0eef02170ab100dba0eb46d8ee324821b5bfb055a5858711d412c25",
+      "resolution": {
+        "resolution": "@octokit/plugin-rest-endpoint-methods@npm:17.0.0",
+        "version": "17.0.0",
+        "dependencies": {
+          "@octokit/types": "^16.0.0"
+        },
+        "peerDependencies": {
+          "@octokit/core": ">=6"
+        }
+      }
+    },
+    "@octokit/plugin-retry@npm:^8.0.3": {
+      "checksum": "3925c512b4e18c1f91cc48bb9b6ffebde92dad04fa03d22e2807d128c65f3ed9e53219ede84519ad6644cafe91fcf4b36843f3f11d9936f67bce75a60bf6f1ac",
+      "resolution": {
+        "resolution": "@octokit/plugin-retry@npm:8.1.0",
+        "version": "8.1.0",
+        "dependencies": {
+          "@octokit/request-error": "^7.0.2",
+          "@octokit/types": "^16.0.0",
+          "bottleneck": "^2.15.3"
+        },
+        "peerDependencies": {
+          "@octokit/core": ">=7"
+        }
+      }
+    },
+    "@octokit/plugin-throttling@npm:^11.0.3": {
+      "checksum": "cee97b486529bd5bfcedd676263ef2ae40bd2ca75434717245c93d3967a537cfca04b3d5e3a701f276b2d567e3e932e11339c0ffe4b75ac34219d3720b026b2f",
+      "resolution": {
+        "resolution": "@octokit/plugin-throttling@npm:11.0.3",
+        "version": "11.0.3",
+        "dependencies": {
+          "@octokit/types": "^16.0.0",
+          "bottleneck": "^2.15.3"
+        },
+        "peerDependencies": {
+          "@octokit/core": "^7.0.0"
+        }
+      }
+    },
+    "@octokit/request@npm:^10.0.6": {
+      "checksum": "f80c539f7bb1be6ac686b5218e094b8aa022ebd5a383d07ff6806bff8f210a9e9f5c41b53d2a1d8e52624bb59527ff23b61bd9dc290ec4d7757e72f5dc0541c0",
+      "resolution": {
+        "resolution": "@octokit/request@npm:10.0.8",
+        "version": "10.0.8",
+        "dependencies": {
+          "@octokit/endpoint": "^11.0.3",
+          "@octokit/request-error": "^7.0.2",
+          "@octokit/types": "^16.0.0",
+          "fast-content-type-parse": "^3.0.0",
+          "json-with-bigint": "^3.5.3",
+          "universal-user-agent": "^7.0.2"
+        }
+      }
+    },
+    "@octokit/request-error@npm:^7.0.0, @octokit/request-error@npm:^7.0.2": {
+      "checksum": "85e041206bb0a13f73ab75ae6a40540041b33434270e220782615340fd49252f6f7f67e02018e6527a3f216de6eaaacd9928a9a2eb648997b41eb0c3d49f558b",
+      "resolution": {
+        "resolution": "@octokit/request-error@npm:7.1.0",
+        "version": "7.1.0",
+        "dependencies": {
+          "@octokit/types": "^16.0.0"
+        }
+      }
+    },
+    "@octokit/types@npm:^16.0.0": {
+      "checksum": "000d6a7ca8b9f232969d569a6d4711f7b82cde97b4d2ec94afe83a5334fd833ac6c0558e267b38fb880b877f58f91459c91ff21d1c2706ecc686254d7cc2dc09",
+      "resolution": {
+        "resolution": "@octokit/types@npm:16.0.0",
+        "version": "16.0.0",
+        "dependencies": {
+          "@octokit/openapi-types": "^27.0.0"
+        }
+      }
+    },
+    "@octokit/webhooks@npm:^14.0.0": {
+      "checksum": "d4c1fc70ccd4ba5f57c3d1f512a596e3f31b58be11a65544ddf7ffc5fce30d1e4314a2e2292c461e030218758b1595fdbaacefe500afc4a3e5949489d2981652",
+      "resolution": {
+        "resolution": "@octokit/webhooks@npm:14.2.0",
+        "version": "14.2.0",
+        "dependencies": {
+          "@octokit/openapi-webhooks-types": "12.1.0",
+          "@octokit/request-error": "^7.0.0",
+          "@octokit/webhooks-methods": "^6.0.0"
+        }
+      }
+    },
+    "@octokit/webhooks-methods@npm:^6.0.0": {
+      "checksum": "03f93cd34150a6f37c392835fe37360a2fda27f5cafe980de163e7c3b3c428d351c0142d3b1e2d2f0a2c6d6e58840767c702f19d2a89d959433d5e9797b6c2bf",
+      "resolution": {
+        "resolution": "@octokit/webhooks-methods@npm:6.0.0",
+        "version": "6.0.0"
+      }
+    },
     "@opentelemetry/api@npm:1.9.0": {
       "checksum": "3089e249bad966b8dbc22db3e538d699083fb2e1e704cabad32bd385095ca09a8c853be90e56a355fa0d6ba6083dbd291c190d1fc3d1305eee8b28dd1aec6986",
       "resolution": {
@@ -7755,6 +8056,13 @@
         "dependencies": {
           "tslib": "^2.4.0"
         }
+      }
+    },
+    "@types/aws-lambda@npm:^8.10.83": {
+      "checksum": "afe6d253974534fe48fedcb4bc9cc2412bbae0bec1c6f31f646ef78fcc44477f0c703d7c5928e5247fe53b2eef092526c2f38670606be97649b3fa77c8a73fe5",
+      "resolution": {
+        "resolution": "@types/aws-lambda@npm:8.10.161",
+        "version": "8.10.161"
       }
     },
     "@types/babel__core@npm:^7, @types/babel__core@npm:^7.1.14": {
@@ -11122,6 +11430,13 @@
         "version": "2.0.3"
       }
     },
+    "before-after-hook@npm:^4.0.0": {
+      "checksum": "699a6dba652a2cfa9f0c425b315665cb3b0c24fd164161a2935d308de1d7699ff43ecbc2858247530e607b74d2e73893b4260b38b987084d51b7f14dc7cd60aa",
+      "resolution": {
+        "resolution": "before-after-hook@npm:4.0.0",
+        "version": "4.0.0"
+      }
+    },
     "better-opn@npm:^2.1.1": {
       "checksum": "8a0ef6de4da25dcb809e6277b7ad0373ddb12d840e9d84441580db3762910958478b99bb6e6063fb980a5b8dd5a693f59caea109fa7f426f040c33286fa65c15",
       "resolution": {
@@ -11230,6 +11545,13 @@
       "resolution": {
         "resolution": "boolbase@npm:1.0.0",
         "version": "1.0.0"
+      }
+    },
+    "bottleneck@npm:^2.15.3": {
+      "checksum": "33c76b7b5e8701cd8e68d8f9175386df7b2f09bd25219497d8998ddadfc94855a578d00ba497cb7b7d99d9159067b152c5a65c79082ae789643cefb703f876af",
+      "resolution": {
+        "resolution": "bottleneck@npm:2.19.5",
+        "version": "2.19.5"
       }
     },
     "boxen@npm:8.0.1": {
@@ -14848,6 +15170,13 @@
           "iconv-lite": "^0.4.24",
           "tmp": "^0.0.33"
         }
+      }
+    },
+    "fast-content-type-parse@npm:^3.0.0": {
+      "checksum": "64aaf7553b6aac65fbaeea8221081d7903c0c8ed2771ebe8f2a3ad76ec5c047aa46225345fc096e0770ee8896c395a4a042bcf52c9e2cfb848141d1d541d7bfa",
+      "resolution": {
+        "resolution": "fast-content-type-parse@npm:3.0.0",
+        "version": "3.0.0"
       }
     },
     "fast-deep-equal@npm:^3.1.1, fast-deep-equal@npm:^3.1.3": {
@@ -18633,6 +18962,13 @@
         "version": "1.0.1"
       }
     },
+    "json-with-bigint@npm:^3.5.3": {
+      "checksum": "172feba2196a006b4a397cea2e660f109148c4767fa298a7751c970527b2d7a8640c511da7d014e646ecd00aaa9fd6311d4e2681dfd9f22991921e5e443bbbe5",
+      "resolution": {
+        "resolution": "json-with-bigint@npm:3.5.8",
+        "version": "3.5.8"
+      }
+    },
     "json5@npm:^1.0.2": {
       "checksum": "4913a68e352db1d537327da67d531fa6f786daade0a1d582bdd701cea824ea0ae218dc39a7f0c3b21566adf1489ca2a57a9a094582d094ac32172be1a3d73e38",
       "resolution": {
@@ -21127,6 +21463,26 @@
           "call-bound": "^1.0.3",
           "define-properties": "^1.2.1",
           "es-object-atoms": "^1.0.0"
+        }
+      }
+    },
+    "octokit@npm:^5.0.5": {
+      "checksum": "cfac10938dc95e4eca822452306ef953b127b20ece7db02abcf7914337ee0b33fde9ea9af6ec1bb6cf51b4776f362294e150a11678eaa5054f2e42593a46a8ac",
+      "resolution": {
+        "resolution": "octokit@npm:5.0.5",
+        "version": "5.0.5",
+        "dependencies": {
+          "@octokit/app": "^16.1.2",
+          "@octokit/core": "^7.0.6",
+          "@octokit/oauth-app": "^8.0.3",
+          "@octokit/plugin-paginate-graphql": "^6.0.0",
+          "@octokit/plugin-paginate-rest": "^14.0.0",
+          "@octokit/plugin-rest-endpoint-methods": "^17.0.0",
+          "@octokit/plugin-retry": "^8.0.3",
+          "@octokit/plugin-throttling": "^11.0.3",
+          "@octokit/request-error": "^7.0.2",
+          "@octokit/types": "^16.0.0",
+          "@octokit/webhooks": "^14.0.0"
         }
       }
     },
@@ -25566,6 +25922,13 @@
         }
       }
     },
+    "toad-cache@npm:^3.7.0": {
+      "checksum": "8beeb324bfb83fc33286061feab2d5252031b373011700911496897891e93025c5243ddf18c5bb5aa351970b7bb7fb8543112ab13b016d5ccfa48a8f639b2da4",
+      "resolution": {
+        "resolution": "toad-cache@npm:3.7.0",
+        "version": "3.7.0"
+      }
+    },
     "toidentifier@npm:1.0.1, toidentifier@npm:~1.0.1": {
       "checksum": "10d49b9f3c69b31c641c5fff7ffe61e421f27aaea2033202ac353c5b0acd1e175cf4827d866f028f50ba6a4d27fa449320b1d1e517140af9365224ee48576854",
       "resolution": {
@@ -26193,6 +26556,20 @@
           "@types/unist": "^3.0.0",
           "unist-util-is": "^6.0.0"
         }
+      }
+    },
+    "universal-github-app-jwt@npm:^2.2.0": {
+      "checksum": "5dbdff8286ad940d749a3eb36d34aa82c2ad8868462e1996be5a2996cbb94a5ce4d50878e5ba22adfff9e41cbca7cceae9ade9d6f3856740ef0076ac929648a6",
+      "resolution": {
+        "resolution": "universal-github-app-jwt@npm:2.2.2",
+        "version": "2.2.2"
+      }
+    },
+    "universal-user-agent@npm:^7.0.0, universal-user-agent@npm:^7.0.2": {
+      "checksum": "9ea48ddb28cd5e303b8d1bef261800c1cc75ccf0f51ed408c5eb5c0b4b99a32494ecd501211a98aa32a148bd62850a271b6117a66f19a10f0d78448fa580d54a",
+      "resolution": {
+        "resolution": "universal-user-agent@npm:7.0.3",
+        "version": "7.0.3"
       }
     },
     "universalify@npm:^2.0.0": {

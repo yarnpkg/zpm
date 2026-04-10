@@ -13,6 +13,48 @@ type GithubIssue = {
   title: string;
 };
 
+type RepoIssue = GithubIssue & {
+  pull_request?: unknown;
+};
+
+type OctokitClient = {
+  paginate: (
+    route: unknown,
+    parameters: {
+      owner: string;
+      repo: string;
+      state: `open`;
+      labels: string;
+      per_page: number;
+    },
+  ) => Promise<Array<RepoIssue>>;
+  rest: {
+    issues: {
+      createLabel: (parameters: {
+        owner: string;
+        repo: string;
+        name: string;
+        color: string;
+        description: string;
+      }) => Promise<unknown>;
+      listForRepo: unknown;
+      update: (parameters: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        body: string;
+      }) => Promise<unknown>;
+      create: (parameters: {
+        owner: string;
+        repo: string;
+        title: string;
+        body: string;
+        labels: Array<string>;
+      }) => Promise<{data: GithubIssue}>;
+    };
+  };
+};
+
 const ISSUE_LABEL = `e2e-failure`;
 
 function requiredEnv(name: string): string {
@@ -61,59 +103,38 @@ function sanitizeLogTail(logFilePath: string): string {
   return tail.slice(-30000);
 }
 
-async function githubRequest<T = any>(
-  token: string,
-  repository: string,
-  method: string,
-  urlPath: string,
-  body: unknown = undefined,
-): Promise<T> {
-  const response = await fetch(`https://api.github.com${urlPath}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: `application/vnd.github+json`,
-      'x-github-api-version': `2022-11-28`,
-      'user-agent': `${repository}-e2e-reporter`,
-      ...(body === undefined ? {} : {'content-type': `application/json`}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`GitHub API ${method} ${urlPath} failed (${response.status}): ${text}`);
-  }
-
-  if (response.status === 204)
-    return undefined as T;
-
-  return await response.json() as T;
-}
-
-async function ensureLabel(token: string, owner: string, repo: string) {
+async function ensureLabel(octokit: OctokitClient, owner: string, repo: string) {
   try {
-    await githubRequest(token, `${owner}/${repo}`, `POST`, `/repos/${owner}/${repo}/labels`, {
+    await octokit.rest.issues.createLabel({
+      owner,
+      repo,
       name: ISSUE_LABEL,
       color: `b60205`,
       description: `Automated end-to-end test failures`,
     });
-  } catch (error: any) {
-    if (!String(error.message).includes(`422`)) {
+  } catch (error) {
+    if (!(error instanceof Error) || !(error as Error & {status?: number}).status || (error as Error & {status?: number}).status !== 422) {
       throw error;
     }
   }
 }
 
-async function getOpenE2EIssues(token: string, owner: string, repo: string): Promise<Array<GithubIssue>> {
-  const issues = await githubRequest<Array<GithubIssue>>(
-    token,
-    `${owner}/${repo}`,
-    `GET`,
-    `/repos/${owner}/${repo}/issues?state=open&labels=${encodeURIComponent(ISSUE_LABEL)}&per_page=100`,
-  );
+async function getOpenE2EIssues(octokit: OctokitClient, owner: string, repo: string): Promise<Array<GithubIssue>> {
+  const issues = await octokit.paginate(octokit.rest.issues.listForRepo, {
+    owner,
+    repo,
+    state: `open`,
+    labels: ISSUE_LABEL,
+    per_page: 100,
+  });
 
-  return issues.filter(issue => issue.title.startsWith(`E2E failure:`));
+  return issues
+    .filter(issue => issue.pull_request === undefined)
+    .filter(issue => issue.title.startsWith(`E2E failure:`))
+    .map(issue => ({
+      number: issue.number,
+      title: issue.title,
+    }));
 }
 
 function buildIssueBody(testStatus: TestStatus, logTail: string): string {
@@ -168,8 +189,14 @@ async function main() {
   if (!owner || !repo)
     throw new Error(`Invalid GITHUB_REPOSITORY value: ${repository}`);
 
-  await ensureLabel(token, owner, repo);
-  const openIssues = await getOpenE2EIssues(token, owner, repo);
+  const {Octokit} = await import(`octokit`);
+  const octokit: OctokitClient = new Octokit({
+    auth: token,
+    userAgent: `${repository}-e2e-reporter`,
+  });
+
+  await ensureLabel(octokit, owner, repo);
+  const openIssues = await getOpenE2EIssues(octokit, owner, repo);
 
   for (const {status, logFile} of failingStatuses) {
     const title = `E2E failure: ${status.test}`;
@@ -177,26 +204,21 @@ async function main() {
     const existing = openIssues.find(issue => issue.title === title);
 
     if (existing) {
-      await githubRequest(
-        token,
-        `${owner}/${repo}`,
-        `PATCH`,
-        `/repos/${owner}/${repo}/issues/${existing.number}`,
-        {body},
-      );
+      await octokit.rest.issues.update({
+        owner,
+        repo,
+        issue_number: existing.number,
+        body,
+      });
       console.log(`Updated issue #${existing.number}: ${title}`);
     } else {
-      const created = await githubRequest<GithubIssue>(
-        token,
-        `${owner}/${repo}`,
-        `POST`,
-        `/repos/${owner}/${repo}/issues`,
-        {
-          title,
-          body,
-          labels: [ISSUE_LABEL],
-        },
-      );
+      const {data: created} = await octokit.rest.issues.create({
+        owner,
+        repo,
+        title,
+        body,
+        labels: [ISSUE_LABEL],
+      });
       console.log(`Created issue #${created.number}: ${title}`);
     }
   }

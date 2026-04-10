@@ -63,12 +63,13 @@ jobs:
         run: |
           set -euo pipefail
           cargo build -r -p zpm
+          tar -czf e2e-binary-yarn-bin.tgz -C target/release yarn-bin
 
       - name: Upload e2e binary
         uses: actions/upload-artifact@v4
         with:
           name: e2e-binary-yarn-bin
-          path: target/release/yarn-bin
+          path: e2e-binary-yarn-bin.tgz
 
   run-e2e:
     name: Run ${{ matrix.test }}
@@ -89,7 +90,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: e2e-binary-yarn-bin
-          path: target/release
+          path: .
+
+      - name: Extract e2e binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf e2e-binary-yarn-bin.tgz -C target/release
 
       - name: Resolve test metadata
         id: meta
@@ -164,8 +172,6 @@ jobs:
     steps:
       - name: Checkout the repo
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

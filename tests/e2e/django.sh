@@ -1,39 +1,11 @@
 #!/usr/bin/env bash
-set -exou pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
-YARN_BIN="${REPO_ROOT}/target/release/yarn-bin"
-
-if [[ ! -x "${YARN_BIN}" ]]; then
-  echo "Missing compiled Yarn binary at ${YARN_BIN}" >&2
-  exit 1
-fi
-
-WORKDIR="$(mktemp -d)"
-SERVER_PID=""
-cleanup() {
-  if [[ -n "${SERVER_PID}" ]]; then
-    kill "${SERVER_PID}" 2>/dev/null || true
-    wait "${SERVER_PID}" 2>/dev/null || true
-  fi
-  rm -rf "${WORKDIR}"
-}
-trap cleanup EXIT
-
-mkdir -p "${WORKDIR}/bin"
-ln -sf "${YARN_BIN}" "${WORKDIR}/bin/yarn"
-export PATH="${WORKDIR}/bin:${PATH}"
-
-PROJECT_DIR="${WORKDIR}/project"
-mkdir -p "${PROJECT_DIR}/packages/django-workspace"
-cd "${PROJECT_DIR}"
+mkdir -p packages/django-workspace
 
 cat > package.json <<'JSON'
 {
   "name": "e2e-django-root",
   "private": true,
-  "packageManager": "yarn@6.0.0-rc.10",
   "workspaces": [
     "packages/*"
   ]
@@ -100,15 +72,11 @@ PY
 yarn install
 yarn workspace django-workspace python -c 'import django; import django.conf; print(django.get_version())'
 
-LOG_FILE="${WORKDIR}/django-server.log"
+LOG_FILE="${TEMP_DIR}/django-server.log"
 yarn workspace django-workspace start > "${LOG_FILE}" 2>&1 &
 SERVER_PID="$!"
 
-for _ in {1..30}; do
-  if curl -fsS http://127.0.0.1:8000/ > "${WORKDIR}/response.txt"; then
-    break
-  fi
-  sleep 1
-done
+wait_for http://127.0.0.1:8000/
 
-grep -F "Hello world from Django via pypi protocol!" "${WORKDIR}/response.txt"
+curl -fsS http://127.0.0.1:8000/ > "${TEMP_DIR}/response.txt"
+grep -F "Hello world from Django via pypi protocol!" "${TEMP_DIR}/response.txt"
