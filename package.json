@@ -2,7 +2,7 @@
   "name": "@yarnpkg/monorepo",
   "packageManager": "yarn@6.0.0-rc.10",
   "scripts": {
-    "test:e2e": "bash ./scripts/e2e/run.sh"
+    "e2e": "bash ./scripts/e2e/run.sh"
   },
   "workspaces": [
     "documentation",

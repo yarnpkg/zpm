@@ -73,8 +73,9 @@ yarn install
 yarn workspace django-workspace python -c 'import django; import django.conf; print(django.get_version())'
 
 LOG_FILE="${TEMP_DIR}/django-server.log"
-yarn workspace django-workspace start > "${LOG_FILE}" 2>&1 &
-SERVER_PID="$!"
+spawn_bg --log "${LOG_FILE}" yarn workspace django-workspace start
+SERVER_PID="${SPAWN_BG_PID}"
+[[ -n "${SERVER_PID}" ]]
 
 wait_for http://127.0.0.1:8000/
 

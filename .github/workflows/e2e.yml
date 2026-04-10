@@ -128,7 +128,7 @@ jobs:
         id: run-in-sandbox
         uses: ./.github/actions/run-e2e-sandbox
         with:
-          test-script: ${{ matrix.test }}
+          test-name: ${{ steps.meta.outputs.test_name }}
           log-file: ${{ steps.artifact-paths.outputs.log_file }}
 
       - name: Write test status
@@ -164,7 +164,7 @@ jobs:
     name: Report e2e failures
     runs-on: ubuntu-latest
     needs: [run-e2e]
-    if: always()
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       issues: write
@@ -193,4 +193,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # node --experimental-strip-types scripts/e2e/report-failures.ts
+          node --experimental-strip-types scripts/e2e/report-failures.ts
