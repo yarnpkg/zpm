@@ -99,8 +99,9 @@ async function ensureLabel(token: string, owner: string, repo: string) {
       description: `Automated end-to-end test failures`,
     });
   } catch (error: any) {
-    if (!String(error.message).includes(`422`))
+    if (!String(error.message).includes(`422`)) {
       throw error;
+    }
   }
 }
 
@@ -162,7 +163,10 @@ async function main() {
   }
 
   const token = requiredEnv(`GITHUB_TOKEN`);
-  const [owner, repo] = requiredEnv(`GITHUB_REPOSITORY`).split(`/`);
+  const repository = requiredEnv(`GITHUB_REPOSITORY`);
+  const [owner, repo] = repository.split(`/`);
+  if (!owner || !repo)
+    throw new Error(`Invalid GITHUB_REPOSITORY value: ${repository}`);
 
   await ensureLabel(token, owner, repo);
   const openIssues = await getOpenE2EIssues(token, owner, repo);

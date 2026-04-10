@@ -27,7 +27,14 @@ mkdir -p "${HOME}"
 
 cd "${WORKSPACE}"
 
-chmod +x "${WORKSPACE}/target/release/yarn-bin"
+if [[ -x "${WORKSPACE}/target/release/yarn" ]]; then
+  chmod +x "${WORKSPACE}/target/release/yarn"
+fi
+
+if [[ -x "${WORKSPACE}/target/release/yarn-bin" ]]; then
+  chmod +x "${WORKSPACE}/target/release/yarn-bin"
+fi
+
 chmod +x "${WORKSPACE}/${TEST_SCRIPT}"
 
 set +e
