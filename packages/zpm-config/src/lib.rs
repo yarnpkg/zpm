@@ -865,7 +865,7 @@ pub enum HydrateError {
 
 struct RcFile {
     path: Path,
-    text: String,
+    text: Option<String>,
 }
 
 impl RcFile {
@@ -882,7 +882,7 @@ impl RcFile {
                 .ok_missing()?;
 
         let Some(metadata) = metadata else {
-            return Ok(None);
+            return Ok(Some(RcFile {path, text: None}));
         };
 
         let changed_at
@@ -895,17 +895,23 @@ impl RcFile {
         let text
             = path.fs_read_text_with_size(metadata.len())?;
 
-        Ok(Some(RcFile {path, text}))
+        Ok(Some(RcFile {path, text: Some(text)}))
     }
 
-    fn deserialize(&self) -> Result<intermediate::Settings, ConfigurationError> {
-        Ok(serde_yaml::from_str(&self.text)?)
+    fn deserialize(&self) -> Option<Result<intermediate::Settings, ConfigurationError>> {
+        self.text.as_ref().map(|text| {
+            Ok(serde_yaml::from_str(text)?)
+        })
     }
 
     /// Extract the `injectEnvironmentFiles` value from the raw YAML text.
     /// Uses a minimal struct to avoid full deserialization, which would fail
     /// if config values reference env vars not yet loaded from .env files.
     fn extract_inject_environment_files(&self) -> Result<Option<Vec<String>>, ConfigurationError> {
+        let Some(text) = &self.text else {
+            return Ok(None);
+        };
+
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct PartialSettings {
@@ -914,7 +920,7 @@ impl RcFile {
         }
 
         let partial: PartialSettings
-            = serde_yaml::from_str(&self.text)?;
+            = serde_yaml::from_str(text)?;
 
         Ok(partial.inject_environment_files)
     }
@@ -1035,13 +1041,13 @@ impl Configuration {
             = project_rc.as_ref()
                 .map(|rc| rc.path.clone());
 
-        let intermediate_user_config = match user_rc {
-            Some(rc) => Partial::Value(rc.deserialize()?),
+        let intermediate_user_config = match user_rc.and_then(|rc| rc.deserialize()) {
+            Some(result) => Partial::Value(result?),
             None => Partial::Missing,
         };
 
-        let intermediate_project_config = match project_rc {
-            Some(rc) => Partial::Value(rc.deserialize()?),
+        let intermediate_project_config = match project_rc.and_then(|rc| rc.deserialize()) {
+            Some(result) => Partial::Value(result?),
             None => Partial::Missing,
         };
 
