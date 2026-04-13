@@ -30,7 +30,7 @@ describe(`DotEnv files`, () => {
 
     await xfs.writeFilePromise(ppath.join(path, `.env.yarn`), [
       `INJECTED_FROM_ENV_FILE_1=hello\n`,
-      `INJECTED_FROM_ENV_FILE_2=\${INJECTED_FROM_ENV_FILE_1} world\n`,
+      `INJECTED_FROM_ENV_FILE_2="\${INJECTED_FROM_ENV_FILE_1} world"\n`,
     ].join(``));
 
     await expect(run(`exec`, `env`, {env: {FOO: `foo`}})).resolves.toMatchObject({

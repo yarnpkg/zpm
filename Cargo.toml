@@ -45,6 +45,7 @@ dashmap = "6"
 clipanion = { git = "https://github.com/arcanis/clipanion-rs.git", features = ["serde", "tokens"] }
 colored = "3.0.0"
 dialoguer = "0.11.0"
+dotenvy = "0.15.7"
 divan = { version = "4.2.0", package = "codspeed-divan-compat" }
 ecow = "0.2.6"
 erased-serde = "0.4.6"
