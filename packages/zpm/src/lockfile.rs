@@ -205,7 +205,14 @@ impl<T> Serialize for MultiKey<T> where T: ToFileString {
                 string.push_str(", ");
             }
 
-            string.push_str(&item.to_file_string());
+            let serialized = item.to_file_string();
+            for ch in serialized.chars() {
+                if ch == ',' || ch == '\\' {
+                    string.push('\\');
+                }
+
+                string.push(ch);
+            }
         }
 
         serializer.serialize_str(&string)
@@ -226,10 +233,37 @@ impl<'de, T: FromFileString> Deserialize<'de> for MultiKey<T> where <T as FromFi
             }
 
             fn visit_str<E>(self, value: &str) -> Result<Vec<T>, E> where E: de::Error {
-                let result = value
-                    .split(',')
-                    .map(str::trim)
-                    .map(|s| T::from_file_string(s))
+                let mut chunks = Vec::new();
+                let mut current = String::new();
+                let mut chars = value.chars().peekable();
+
+                while let Some(ch) = chars.next() {
+                    if ch == ',' {
+                        chunks.push(current);
+                        current = String::new();
+                        continue;
+                    }
+
+                    if ch != '\\' {
+                        current.push(ch);
+                        continue;
+                    }
+
+                    match chars.peek() {
+                        Some(',') | Some('\\') => {
+                            current.push(chars.next().expect("peeked character should be present"));
+                        }
+                        _ => {
+                            // Keep unknown escapes as-is to stay backward-compatible with legacy lockfiles.
+                            current.push('\\');
+                        }
+                    }
+                }
+
+                chunks.push(current);
+
+                let result = chunks.into_iter()
+                    .map(|s| T::from_file_string(s.trim()))
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(de::Error::custom)?;
 
