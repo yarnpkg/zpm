@@ -801,6 +801,7 @@ pub struct Configuration {
     pub settings: Settings,
     pub user_config_path: Option<Path>,
     pub project_config_path: Option<Path>,
+    pub env_files: BTreeMap<String, String>,
 }
 
 #[derive(thiserror::Error, Debug, Clone)]
@@ -816,6 +817,15 @@ pub enum ConfigurationError {
 
     #[error(transparent)]
     SerdeError(#[from] Arc<serde_yaml::Error>),
+
+    #[error("Environment file not found: {0}")]
+    EnvironmentFileNotFound(String),
+
+    #[error("Invalid environment file line: {0}")]
+    InvalidEnvironmentFileLine(String),
+
+    #[error("Environment variable expansion error: {0}")]
+    EnvironmentVariableExpansionError(String),
 }
 
 impl From<std::io::Error> for ConfigurationError {
@@ -869,7 +879,10 @@ impl Configuration {
         self.settings.get(path)
     }
 
-    pub fn load(context: &ConfigurationContext, last_modified_at: &mut LastModifiedAt) -> Result<Configuration, ConfigurationError> {
+    fn load_rc_files(
+        context: &ConfigurationContext,
+        last_modified_at: &mut LastModifiedAt,
+    ) -> Result<(Option<Path>, Partial<intermediate::Settings>, Option<Path>, Partial<intermediate::Settings>), ConfigurationError> {
         let rc_filename
             = std::env::var("YARN_RC_FILENAME")
                 .unwrap_or_else(|_| ".yarnrc.yml".to_string());
@@ -935,8 +948,163 @@ impl Configuration {
             }
         }
 
+        Ok((user_config_path, intermediate_user_config, project_config_path, intermediate_project_config))
+    }
+
+    fn parse_env_file(
+        content: &str,
+        env: &BTreeMap<String, String>,
+    ) -> Result<BTreeMap<String, String>, ConfigurationError> {
+        let mut result: BTreeMap<String, String>
+            = BTreeMap::new();
+
+        for line in content.lines() {
+            let line = line.trim();
+
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            let Some(eq_pos) = line.find('=') else {
+                continue;
+            };
+
+            let key = line[..eq_pos].trim().to_string();
+            let value = line[eq_pos + 1..].trim().to_string();
+
+            // Build a combined env for variable expansion: system env + previously parsed vars
+            let mut lookup_env = env.clone();
+            for (k, v) in &result {
+                lookup_env.insert(k.clone(), v.clone());
+            }
+
+            let expanded = shellexpand::env_with_context_no_errors(&value, |var| -> Option<String> {
+                lookup_env.get(var).cloned()
+            });
+
+            result.insert(key, expanded.into_owned());
+        }
+
+        Ok(result)
+    }
+
+    fn load_env_files(
+        project_cwd: &Path,
+        env_file_paths: &[Setting<String>],
+        system_env: &BTreeMap<String, String>,
+    ) -> Result<BTreeMap<String, String>, ConfigurationError> {
+        let mut env_vars: BTreeMap<String, String>
+            = BTreeMap::new();
+
+        for entry in env_file_paths {
+            let path_str = &entry.value;
+
+            let (actual_path, optional) = if let Some(stripped) = path_str.strip_suffix('?') {
+                (stripped, true)
+            } else {
+                (path_str.as_str(), false)
+            };
+
+            let full_path = project_cwd.with_join_str(actual_path);
+
+            let metadata = full_path.fs_metadata()
+                .ok_missing()?;
+
+            match metadata {
+                Some(metadata) => {
+                    let content = full_path
+                        .fs_read_text_with_size(metadata.len())?;
+
+                    // Build combined env for expansion: system env + previously loaded env file vars
+                    let mut combined_env = system_env.clone();
+                    for (k, v) in &env_vars {
+                        combined_env.insert(k.clone(), v.clone());
+                    }
+
+                    let file_vars = Self::parse_env_file(&content, &combined_env)?;
+                    env_vars.extend(file_vars);
+                },
+
+                None => {
+                    if !optional {
+                        return Err(ConfigurationError::EnvironmentFileNotFound(path_str.clone()));
+                    }
+                },
+            }
+        }
+
+        Ok(env_vars)
+    }
+
+    /// Extract the `injectEnvironmentFiles` value from a raw YAML config string.
+    /// This avoids full deserialization which would fail if config values
+    /// reference env vars that haven't been loaded from .env files yet.
+    fn extract_inject_environment_files(yaml_text: &str) -> Option<Vec<String>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PartialSettings {
+            #[serde(default)]
+            inject_environment_files: Option<Vec<String>>,
+        }
+
+        let partial: PartialSettings = serde_yaml::from_str(yaml_text).ok()?;
+        partial.inject_environment_files
+    }
+
+    pub fn load(context: &ConfigurationContext, last_modified_at: &mut LastModifiedAt) -> Result<Configuration, ConfigurationError> {
+        let project_cwd = context.project_cwd
+            .as_ref()
+            .expect("A project directory should be set");
+
+        let rc_filename
+            = std::env::var("YARN_RC_FILENAME")
+                .unwrap_or_else(|_| ".yarnrc.yml".to_string());
+
+        let project_config_path_for_env = project_cwd.with_join_str(&rc_filename);
+
+        // Phase 1: Extract injectEnvironmentFiles from raw YAML (minimal parse)
+        // This avoids full deserialization which would fail if config values
+        // reference env vars that haven't been loaded from .env files yet.
+        let env_file_paths: Vec<String> = project_config_path_for_env.fs_metadata()
+            .ok_missing()?
+            .and_then(|metadata| {
+                let text = project_config_path_for_env
+                    .fs_read_text_with_size(metadata.len())
+                    .ok()?;
+
+                Self::extract_inject_environment_files(&text)
+            })
+            .unwrap_or_else(|| vec![".env.yarn?".to_string()]);
+
+        // Convert to Setting<String> for load_env_files
+        let env_file_settings: Vec<Setting<String>> = env_file_paths.iter()
+            .map(|p| Setting::new(p.clone(), Source::Default))
+            .collect();
+
+        // Phase 2: Load .env files and collect variables
+        let env_files = Self::load_env_files(
+            project_cwd,
+            &env_file_settings,
+            &context.env,
+        )?;
+
+        // Phase 3: Set env file variables in the process environment so that
+        // shellexpand::env() (used by the Interpolated deserializer) can
+        // resolve them when deserializing config values like ${VAR}.
+        let mut enriched_context = context.clone();
+        for (key, value) in &env_files {
+            // SAFETY: Configuration loading happens during startup before any
+            // threads are spawned, so concurrent access to the environment is
+            // not a concern.
+            unsafe { std::env::set_var(key, value); }
+            enriched_context.env.insert(key.clone(), value.clone());
+        }
+
+        let (user_config_path, intermediate_user_config, project_config_path, intermediate_project_config)
+            = Self::load_rc_files(&enriched_context, last_modified_at)?;
+
         let mut settings = Settings::merge(
-            &context,
+            &enriched_context,
             intermediate_user_config,
             intermediate_project_config,
             || panic!("No configuration found")
@@ -950,6 +1118,7 @@ impl Configuration {
             settings,
             user_config_path,
             project_config_path,
+            env_files,
         })
     }
 }

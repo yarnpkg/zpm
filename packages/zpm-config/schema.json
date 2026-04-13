@@ -123,6 +123,19 @@
       "description": "The folder where the global cache will be stored",
       "default": "Path::home_dir().unwrap().unwrap().with_join_str(\".yarn/zpm\")"
     },
+    "initScope": {
+      "type": "string",
+      "description": "Scope used when creating packages via the init command",
+      "default": "yarnpkg"
+    },
+    "injectEnvironmentFiles": {
+      "type": "array",
+      "description": "Array of .env files which will get injected into any subprocess spawned by Yarn",
+      "items": {
+        "type": "string"
+      },
+      "default": [".env.yarn?"]
+    },
     "httpRetry": {
       "type": "usize",
       "description": "The number of times to retry a network request",

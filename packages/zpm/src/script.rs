@@ -509,6 +509,11 @@ impl ScriptEnvironment {
     pub fn with_project(mut self, project: &Project) -> Self {
         self.remove_pnp_loader();
 
+        // Inject environment variables from .env files
+        for (key, value) in &project.config.env_files {
+            self.env.insert(key.clone(), Some(value.clone()));
+        }
+
         if let Some(pnp_path) = project.pnp_path().if_exists() {
             self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_file_string()));
         }
