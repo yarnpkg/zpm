@@ -17,6 +17,41 @@ fn prepend_env_path(key: &str, value: &str, separator: char) -> String {
     }
 }
 
+fn build_site_packages_pythonpath(site_packages_path: &zpm_utils::Path, separator: char) -> String {
+    let mut entries
+        = vec![site_packages_path.to_file_string()];
+
+    if let Ok(read_dir) = site_packages_path.fs_read_dir() {
+        for entry in read_dir.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+
+            if !file_type.is_dir() {
+                continue;
+            }
+
+            let dirname
+                = entry.file_name();
+
+            let dirname
+                = dirname.to_string_lossy();
+
+            if dirname.starts_with('.') {
+                continue;
+            }
+
+            entries.push(
+                site_packages_path
+                    .with_join_str(dirname.as_ref())
+                    .to_file_string(),
+            );
+        }
+    }
+
+    entries.join(&separator.to_string())
+}
+
 fn active_workspace_venv(project: &project::Project) -> Option<zpm_utils::Path> {
     let workspace
         = project.active_workspace().ok()?;
@@ -89,7 +124,11 @@ impl Python {
                 = prepend_env_path("PATH", &bin_path.to_file_string(), path_separator);
 
             let pythonpath
-                = prepend_env_path("PYTHONPATH", &site_packages_path.to_file_string(), path_separator);
+                = prepend_env_path(
+                    "PYTHONPATH",
+                    &build_site_packages_pythonpath(&site_packages_path, path_separator),
+                    path_separator,
+                );
 
             env = env
                 .with_env_variable("VIRTUAL_ENV", &venv_path.to_file_string())

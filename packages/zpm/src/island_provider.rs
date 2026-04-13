@@ -164,7 +164,12 @@ impl<'a> IslandDependencyProvider<'a> {
 
         // Check resolution cache first — covers non-semver packages resolved
         // lazily in choose_version or resolution_to_deps.
-        if let Some(resolution) = self.resolution_cache.borrow().get(locator).cloned() {
+        let cached_resolution = {
+            let cache = self.resolution_cache.borrow();
+            cache.get(locator).cloned()
+        };
+
+        if let Some(resolution) = cached_resolution {
             return self.resolution_to_deps(&resolution);
         }
 
