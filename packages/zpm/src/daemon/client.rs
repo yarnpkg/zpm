@@ -11,7 +11,7 @@ use super::{
     coordinator_commands::CoordinatorCommand,
     ipc::{
         AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest,
-        DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskEvent,
+        DaemonMeta, DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskEvent,
         TaskSubscription, DAEMON_SERVER_ENV_NAME, daemon_url,
     },
     scheduler::ContextualTaskId,
@@ -429,6 +429,18 @@ impl DaemonClient {
         ).await
     }
 
+    /// Get daemon metadata including the CLI version used by the daemon.
+    pub async fn get_meta(&mut self) -> Result<DaemonMeta, Error> {
+        self.request(
+            DaemonRequest::GetMeta,
+            |r| match r {
+                DaemonResponse::Meta { version, cwd } => Some(DaemonMeta { version, cwd }),
+                _ => None,
+            },
+        )
+        .await
+    }
+
     pub async fn cancel_context(&mut self, context_id: &str) -> Result<usize, Error> {
         self.request(
             DaemonRequest::CancelContext { context_id: context_id.to_string() },
@@ -474,11 +486,7 @@ pub struct DaemonStatsResult {
 async fn start_daemon(project_root: &Path) -> Result<String, Error> {
     let switch_path
         = std::env::var(YARN_SWITCH_PATH_ENV).map_err(|_| {
-            Error::IpcError(
-                "This command can only be called within a Yarn Switch context. \
-                 Please run this command through `yarn` instead of calling the binary directly."
-                    .to_string(),
-            )
+            Error::MissingYarnSwitchContext
         })?;
 
     let mut cmd

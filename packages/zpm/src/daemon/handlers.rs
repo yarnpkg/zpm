@@ -1,10 +1,13 @@
 use tokio::sync::oneshot;
+use zpm_tasks::parse as parse_taskfile;
 use zpm_utils::ToFileString;
+
+use crate::project::Project;
 
 use super::{
     coordinator_commands::{CommandSender, CoordinatorCommand},
     coordinator_state::SubscriptionId,
-    ipc::{DaemonRequest, DaemonResponse, LongLivedTaskStatus, SubscriptionScope},
+    ipc::{DaemonRequest, DaemonResponse, DeclaredTaskInfo, LongLivedTaskStatus, SubscriptionScope},
 };
 
 async fn send_command<T>(
@@ -30,9 +33,16 @@ pub async fn dispatch_request(
     request: DaemonRequest,
     subscription_id: Option<SubscriptionId>,
     command_tx: &CommandSender,
+    project: &Project,
+    port: u16,
+    auth_token: Option<&str>,
 ) -> DaemonResponse {
     match request {
         DaemonRequest::Ping => DaemonResponse::Pong,
+        DaemonRequest::GetMeta => DaemonResponse::Meta {
+            version: zpm_switch::get_bin_version(),
+            cwd: project.project_cwd.to_file_string(),
+        },
 
         DaemonRequest::PushTasks {
             tasks,
@@ -61,12 +71,24 @@ pub async fn dispatch_request(
             handle_cancel_context(context_id, command_tx).await
         }
 
+        DaemonRequest::ListDeclaredTasks => {
+            handle_list_declared_tasks(project)
+        }
+
         DaemonRequest::GetStats => {
             handle_get_stats(command_tx).await
         }
 
         DaemonRequest::GetTaskHistory => {
             handle_get_task_history(command_tx).await
+        }
+
+        DaemonRequest::GetAuthUrl => {
+            handle_get_auth_url(port, auth_token)
+        }
+
+        DaemonRequest::Shutdown => {
+            handle_shutdown(command_tx).await
         }
     }
 }
@@ -212,6 +234,57 @@ async fn handle_get_task_history(command_tx: &CommandSender) -> DaemonResponse {
         Ok(events) => DaemonResponse::TaskHistory { events },
         Err(e) => e,
     }
+}
+
+async fn handle_shutdown(command_tx: &CommandSender) -> DaemonResponse {
+    let (response_tx, _response_rx) = oneshot::channel();
+
+    if command_tx
+        .send(CoordinatorCommand::Shutdown { response_tx })
+        .is_err()
+    {
+        return DaemonResponse::Error {
+            message: "Coordinator channel closed".to_string(),
+        };
+    }
+
+    DaemonResponse::ShuttingDown
+}
+
+fn handle_get_auth_url(port: u16, auth_token: Option<&str>) -> DaemonResponse {
+    let url = match auth_token {
+        Some(token) => {
+            let encoded: String = url::form_urlencoded::Serializer::new(String::new())
+                .append_pair("token", token)
+                .finish();
+            format!("http://127.0.0.1:{}/?{}", port, encoded)
+        }
+        None => format!("http://127.0.0.1:{}/", port),
+    };
+    DaemonResponse::AuthUrl { url }
+}
+
+fn handle_list_declared_tasks(project: &Project) -> DaemonResponse {
+    let mut tasks = Vec::new();
+
+    for workspace in &project.workspaces {
+        let task_file_path = workspace.taskfile_path();
+        let Ok(content) = task_file_path.fs_read_text() else { continue };
+        let Ok(task_file) = parse_taskfile(&content) else { continue };
+
+        for (task_name, task) in &task_file.tasks {
+            let is_long_lived = task.attributes.iter().any(|attr| attr.name == "long-lived");
+            tasks.push(DeclaredTaskInfo {
+                workspace: workspace.name.to_file_string(),
+                task_name: task_name.to_file_string(),
+                is_long_lived,
+            });
+        }
+    }
+
+    tasks.sort_by(|a, b| a.workspace.cmp(&b.workspace).then(a.task_name.cmp(&b.task_name)));
+
+    DaemonResponse::DeclaredTaskList { tasks }
 }
 
 pub async fn create_subscription_if_needed(

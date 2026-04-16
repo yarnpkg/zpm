@@ -17,7 +17,7 @@ use super::{
     ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskEvent, TaskEventState, TaskSubscription, LONG_LIVED_CONTEXT_ID},
     platform,
     scheduler::dependencies,
-    server::{bind_to_available_port, connection::{run_accept_loop, ConnectionContext}},
+    server::{bind_to_available_port, bind_to_port, connection::{run_accept_loop, ConnectionContext}},
 };
 use crate::{
     error::Error,
@@ -35,20 +35,24 @@ pub async fn start_daemon_inline_with_handle(
     port_tx: oneshot::Sender<u16>,
     handle_tx: oneshot::Sender<DaemonShutdownHandle>,
 ) -> Result<(), Error> {
-    run_daemon_internal(project, Some(port_tx), Some(handle_tx)).await
+    run_daemon_internal(project, None, None, Some(port_tx), Some(handle_tx)).await
 }
 
-pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
-    run_daemon_internal(project, None, None).await
+pub async fn run_daemon(project: Arc<Project>, port: Option<u16>, auth_token: Option<String>) -> Result<(), Error> {
+    run_daemon_internal(project, port, auth_token, None, None).await
 }
 
 async fn run_daemon_internal(
     project: Arc<Project>,
+    fixed_port: Option<u16>,
+    auth_token: Option<String>,
     port_tx: Option<oneshot::Sender<u16>>,
     handle_tx: Option<oneshot::Sender<DaemonShutdownHandle>>,
 ) -> Result<(), Error> {
-    let (listener, port)
-        = bind_to_available_port().await?;
+    let (listener, port) = match fixed_port {
+        Some(p) => bind_to_port(p).await?,
+        None => bind_to_available_port().await?,
+    };
     let daemon_url_str
         = daemon_url(port);
 
@@ -123,6 +127,9 @@ async fn run_daemon_internal(
 
     let ctx = Arc::new(ConnectionContext {
         command_tx,
+        auth_token,
+        project: project.clone(),
+        port,
     });
 
     // Run accept loop until shutdown is signaled

@@ -13,6 +13,7 @@ mod cache_clear;
 mod config;
 mod config_get;
 mod config_set;
+mod daemon;
 mod constraints;
 mod dedupe;
 mod dlx;
@@ -87,6 +88,7 @@ pub enum YarnCli {
     Config(config::Config),
     ConfigGet(config_get::ConfigGet),
     Daemon(debug::daemon::Daemon),
+    DaemonStub(daemon::DaemonStub),
     ConfigSet(config_set::ConfigSet),
     Constraints(constraints::Constraints),
     Dedupe(dedupe::Dedupe),

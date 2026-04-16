@@ -1,0 +1,6 @@
+codegen:
+  cargo run -p zpm --bin generate_daemon_types -- --output packages/zpm-daemon-ui/src/generated/daemon-protocol.ts
+
+build:
+  yarn workspace @yarnpkg/zpm-daemon-ui build
+  zip -r ../zpm/src/daemon/server/ui.zip dist/

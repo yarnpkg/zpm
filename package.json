@@ -2,6 +2,8 @@
   "name": "@yarnpkg/monorepo",
   "packageManager": "yarn@6.0.0-rc.10",
   "scripts": {
+    "codegen:daemon-types": "cargo run -p zpm --bin generate_daemon_types",
+    "codegen:daemon-types:check": "cargo run -p zpm --bin generate_daemon_types -- --check",
     "e2e": "bash ./scripts/e2e/run.sh"
   },
   "workspaces": [
