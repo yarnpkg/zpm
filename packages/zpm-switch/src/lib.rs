@@ -10,7 +10,7 @@ pub use errors::{
   Error,
 };
 
-pub use ipc::YARN_SWITCH_PATH_ENV;
+pub use ipc::YARNSW_PATH_ENV;
 
 pub use manifest::{
     PackageManagerField,
