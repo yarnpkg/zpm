@@ -34,7 +34,7 @@ fn is_npm_registry_request(url: &str) -> bool {
 }
 
 fn attach_auth_headers(request: &mut reqwest::RequestBuilder) {
-    if let Ok(token) = std::env::var("YARN_SWITCH_NPM_AUTH_TOKEN") {
+    if let Ok(token) = std::env::var("YARNSW_NPM_AUTH_TOKEN") {
         if let Some(cloned_request) = request.try_clone() {
             *request = cloned_request.bearer_auth(token);
         }
@@ -42,7 +42,7 @@ fn attach_auth_headers(request: &mut reqwest::RequestBuilder) {
         return;
     }
 
-    if let Ok(mut auth_ident) = std::env::var("YARN_SWITCH_NPM_AUTH_IDENT") {
+    if let Ok(mut auth_ident) = std::env::var("YARNSW_NPM_AUTH_IDENT") {
         if auth_ident.contains(':') {
             auth_ident = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, auth_ident);
         }

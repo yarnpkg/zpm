@@ -3,7 +3,7 @@ use std::{process::{Command, ExitStatus, Stdio}, sync::Arc};
 use clipanion::cli;
 use zpm_utils::ToFileString;
 
-use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, ipc::YARN_SWITCH_PATH_ENV, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}, yarn::resolve_selector, yarn_enums::Selector};
+use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, ipc::YARNSW_PATH_ENV, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}, yarn::resolve_selector, yarn_enums::Selector};
 
 /// Call a custom Yarn binary for the current project
 #[cli::command(proxy)]
@@ -29,7 +29,7 @@ impl ExplicitCommand {
         binary.args(args);
 
         if let Ok(switch_path) = std::env::current_exe() {
-            binary.env(YARN_SWITCH_PATH_ENV, switch_path);
+            binary.env(YARNSW_PATH_ENV, switch_path);
         }
 
         let mut child

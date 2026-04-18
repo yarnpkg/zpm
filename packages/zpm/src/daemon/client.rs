@@ -3,7 +3,7 @@ use std::{collections::HashMap, process::Stdio, sync::{atomic::{AtomicBool, Atom
 use futures::{SinkExt, stream::StreamExt};
 use tokio::{io::AsyncBufReadExt, sync::{mpsc, oneshot, Mutex}, task::AbortHandle};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
-use zpm_switch::YARN_SWITCH_PATH_ENV;
+use zpm_switch::YARNSW_PATH_ENV;
 use zpm_utils::Path;
 
 use super::{
@@ -486,7 +486,7 @@ pub struct DaemonStatsResult {
 
 async fn start_daemon(project_root: &Path) -> Result<String, Error> {
     let switch_path
-        = std::env::var(YARN_SWITCH_PATH_ENV).map_err(|_| {
+        = std::env::var(YARNSW_PATH_ENV).map_err(|_| {
             Error::MissingYarnSwitchContext
         })?;
 

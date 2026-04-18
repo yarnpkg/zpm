@@ -1,1 +1,1 @@
-pub const YARN_SWITCH_PATH_ENV: &str = "YARN_SWITCH_PATH";
+pub const YARNSW_PATH_ENV: &str = "YARNSW_PATH";
