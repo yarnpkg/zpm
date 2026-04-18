@@ -2,8 +2,8 @@ use std::{collections::HashSet, io::Write, sync::Arc, time::{Duration, SystemTim
 
 use tokio::sync::{mpsc, oneshot};
 use zpm_primitives::Ident;
-use zpm_tasks::{TaskId, TaskName};
-use zpm_utils::Path;
+use zpm_tasks::{parse as parse_taskfile, TaskId, TaskName};
+use zpm_utils::{Path, ToFileString};
 
 use super::{
     coordinator_commands::{
@@ -11,10 +11,10 @@ use super::{
         PushTasksResult, StatsResult, StopTaskResult, TaskCompletionResult,
     },
     coordinator_state::{
-        now_ms, ContextualTaskId, CoordinatorState, TaskGraph, TransitionEffects, LONG_LIVED_ATTRIBUTE,
+        now_ms, ContextualTaskId, CoordinatorState, TaskGraph, TaskfileWatcher, TransitionEffects, LONG_LIVED_ATTRIBUTE,
     },
     executor::ExecutorPool,
-    ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskEvent, TaskEventState, TaskSubscription, LONG_LIVED_CONTEXT_ID},
+    ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, DeclaredTaskInfo, TaskEvent, TaskEventState, TaskSubscription, LONG_LIVED_CONTEXT_ID},
     platform,
     scheduler::dependencies,
     server::{bind_to_available_port, bind_to_port, connection::{run_accept_loop, ConnectionContext}},
@@ -116,6 +116,13 @@ async fn run_daemon_internal(
         watch_project_root(project_root, command_tx_for_watcher, shutdown_for_watcher).await;
     });
 
+    // Taskfile watcher
+    let command_tx_for_taskfile_watcher
+        = command_tx.clone();
+    tokio::spawn(async move {
+        watch_taskfiles(command_tx_for_taskfile_watcher).await;
+    });
+
     // Signal handler
     let command_tx_for_signal
         = command_tx.clone();
@@ -152,6 +159,8 @@ async fn run_coordinator_loop(
 ) {
     let mut state
         = CoordinatorState::new(output_buffer_max_lines, max_closed_tasks);
+
+    initialize_taskfile_watcher(&mut state.taskfile_watcher, &project);
 
     let mut executor_pool
         = ExecutorPool::new(daemon_url, command_tx.clone());
@@ -451,6 +460,7 @@ async fn handle_command(
                 subtasks_count: state.graph.subtasks_count(),
                 output_buffer_count: state.output.buffer_count(),
                 closed_tasks_count: state.output.closed_tasks_count(),
+                watched_files_count: state.taskfile_watcher.watched_file_count(),
             });
         }
 
@@ -479,6 +489,34 @@ async fn handle_command(
 
         CoordinatorCommand::RemoveSubscription { subscription_id } => {
             state.subscriptions.remove(subscription_id);
+        }
+
+        CoordinatorCommand::PollTaskfiles => {
+            let changed_workspaces
+                = state.taskfile_watcher.poll_changes();
+
+            if !changed_workspaces.is_empty() {
+                for workspace_ident in changed_workspaces {
+                    reload_taskfile(&workspace_ident, state, project);
+                }
+
+                let (tasks, errors)
+                    = build_declared_tasks_list(project);
+                state.subscriptions.broadcast(DaemonNotification::DeclaredTasksChanged {
+                    tasks,
+                    errors,
+                });
+            }
+        }
+
+        CoordinatorCommand::ListDeclaredTasks { response_tx } => {
+            let (tasks, errors)
+                = build_declared_tasks_list(project);
+            let _ = response_tx.send((tasks, errors));
+        }
+
+        CoordinatorCommand::SubscribeGlobal { response_tx } => {
+            let _ = response_tx.send(state.subscriptions.subscribe_global());
         }
 
         CoordinatorCommand::Shutdown { response_tx } => {
@@ -601,7 +639,17 @@ fn execute_push_tasks(
             effective_context_id,
             &mut state.contexts,
         ) {
-            Ok((ctx_task_id, resolved_ctx_task_ids)) => {
+            Ok((ctx_task_id, resolved_ctx_task_ids, source_files)) => {
+                // Register source files with the watcher for hot-reload
+                if !source_files.is_empty() {
+                    if let Some(ref tid) = task_id {
+                        state.taskfile_watcher.register_sources(
+                            tid.workspace.clone(),
+                            source_files,
+                        );
+                    }
+                }
+
                 record_scheduled_events(&resolved_ctx_task_ids, &mut state.event_history);
 
                 // After add_task, check is_long_lived from the prepared task
@@ -753,8 +801,8 @@ fn resolve_is_long_lived(graph: &TaskGraph, project: &Project, task_id: &TaskId)
     // Slow path: resolve from disk (only needed on first push per task)
     project.resolve_task(task_id)
         .ok()
-        .and_then(|resolved| {
-            resolved.task_files.get(&task_id.workspace)
+        .and_then(|result| {
+            result.resolved.task_files.get(&task_id.workspace)
                 .and_then(|tf| tf.tasks.get(task_id.task_name.as_str()))
                 .map(|task| task.attributes.iter().any(|a| a.name == LONG_LIVED_ATTRIBUTE))
         })
@@ -769,6 +817,182 @@ fn check_if_long_lived_from_graph(graph: &TaskGraph, task_id: &TaskId) -> bool {
         }
     }
     false
+}
+
+/// Initialize the taskfile watcher with all workspace taskfiles at daemon startup.
+fn initialize_taskfile_watcher(watcher: &mut TaskfileWatcher, project: &Project) {
+    for workspace in &project.workspaces {
+        let task_file_path = workspace.taskfile_path();
+
+        // Always watch the default taskfile path, even if it doesn't exist yet
+        let mut sources = vec![task_file_path];
+
+        if let Some((task_file, extra_sources)) = project.get_workspace_taskfile(workspace) {
+            // Replace sources with the full list (main + includes)
+            sources = extra_sources;
+            watcher.update_cached_taskfile(workspace.name.clone(), task_file);
+        }
+
+        watcher.register_sources(workspace.name.clone(), sources);
+    }
+}
+
+/// Periodically send PollTaskfiles commands to the coordinator.
+async fn watch_taskfiles(command_tx: CommandSender) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        if command_tx.send(CoordinatorCommand::PollTaskfiles).is_err() {
+            break;
+        }
+    }
+}
+
+/// Reload a workspace's taskfile after a change is detected.
+fn reload_taskfile(
+    workspace_ident: &Ident,
+    state: &mut CoordinatorState,
+    project: &Project,
+) {
+    let workspace = match project.workspace_by_ident(workspace_ident) {
+        Ok(ws) => ws,
+        Err(_) => return,
+    };
+
+    let task_file_path = workspace.taskfile_path();
+    let content = match task_file_path.fs_read_text() {
+        Ok(c) => c,
+        Err(_) => {
+            // File deleted: treat as empty taskfile — purge all tasks
+            if let Some(old_taskfile) = state.taskfile_watcher.cached_taskfiles().get(workspace_ident).cloned() {
+                for task_name in old_taskfile.tasks.keys() {
+                    purge_task_from_graph(workspace_ident, task_name.as_str(), state);
+                }
+                state.taskfile_watcher.remove_cached_taskfile(workspace_ident);
+                state.graph.resolved.task_files.remove(workspace_ident);
+            }
+            return;
+        }
+    };
+
+    let new_taskfile = match parse_taskfile(&content) {
+        Ok(tf) => tf,
+        Err(_) => return, // Parse error: keep old version
+    };
+
+    // Determine removed tasks by comparing with old cached taskfile
+    if let Some(old_taskfile) = state.taskfile_watcher.cached_taskfiles().get(workspace_ident).cloned() {
+        let old_task_names: HashSet<&str> = old_taskfile.tasks.keys()
+            .map(|n| n.as_str()).collect();
+        let new_task_names: HashSet<&str> = new_taskfile.tasks.keys()
+            .map(|n| n.as_str()).collect();
+
+        for removed_name in old_task_names.difference(&new_task_names) {
+            purge_task_from_graph(workspace_ident, removed_name, state);
+        }
+    }
+
+    // Update caches
+    state.taskfile_watcher.update_cached_taskfile(
+        workspace_ident.clone(),
+        new_taskfile.clone(),
+    );
+    state.graph.resolved.task_files.insert(
+        workspace_ident.clone(),
+        new_taskfile.clone(),
+    );
+
+    // Re-register source files (includes may have changed)
+    let mut sources = vec![task_file_path];
+    for include in &new_taskfile.includes {
+        if let Ok(inc_ws) = project.workspace_by_ident(&include.ident) {
+            let inc_path = match &include.path {
+                Some(p) => inc_ws.path.with_join_str(p),
+                None => inc_ws.taskfile_path(),
+            };
+            sources.push(inc_path);
+        }
+    }
+    state.taskfile_watcher.register_sources(workspace_ident.clone(), sources);
+}
+
+/// Purge a task that has been removed from a taskfile.
+/// Running tasks are sent SIGTERM; non-running tasks are evicted directly.
+fn purge_task_from_graph(
+    workspace_ident: &Ident,
+    task_name_str: &str,
+    state: &mut CoordinatorState,
+) {
+    let task_name = match TaskName::new(task_name_str) {
+        Ok(tn) => tn,
+        Err(_) => return,
+    };
+
+    let task_id = TaskId {
+        workspace: workspace_ident.clone(),
+        task_name,
+    };
+
+    // Remove from resolved.tasks (the dependency graph)
+    state.graph.resolved.tasks.remove(&task_id);
+
+    // Find all contextual instances of this task (across all contexts)
+    let ctx_task_ids_to_remove: Vec<ContextualTaskId> = state.graph.tasks.keys()
+        .filter(|ctx_id| ctx_id.task_id == task_id)
+        .cloned()
+        .collect();
+
+    for ctx_task_id in &ctx_task_ids_to_remove {
+        // If the task is actively running, send SIGTERM for graceful shutdown.
+        // The normal TaskCompleted path will handle cleanup when it exits.
+        if let Some(pid) = state.processes.get_pid_for_task(ctx_task_id) {
+            platform::kill_process_group(pid);
+            continue;
+        }
+
+        // Non-running: evict directly
+        state.graph.evict_closed_task(ctx_task_id);
+    }
+
+    // Also remove from long-lived registry if present
+    state.long_lived.remove(&task_id);
+}
+
+/// Build the declared tasks list by reading taskfiles from disk.
+///
+/// We read from disk on every request rather than using the watcher cache,
+/// because the cache is populated asynchronously and may not yet contain
+/// all workspaces at the time of the first request.
+fn build_declared_tasks_list(project: &Project) -> (Vec<DeclaredTaskInfo>, Vec<super::ipc::TaskfileError>) {
+    let mut tasks = Vec::new();
+    let mut errors = Vec::new();
+
+    for workspace in &project.workspaces {
+        let task_file_path = workspace.taskfile_path();
+        let Ok(content) = task_file_path.fs_read_text() else { continue };
+
+        match parse_taskfile(&content) {
+            Ok(task_file) => {
+                for (task_name, task) in &task_file.tasks {
+                    let is_long_lived = task.attributes.iter()
+                        .any(|attr| attr.name == LONG_LIVED_ATTRIBUTE);
+                    tasks.push(DeclaredTaskInfo {
+                        workspace: workspace.name.to_file_string(),
+                        task_name: task_name.to_file_string(),
+                        is_long_lived,
+                    });
+                }
+            }
+            Err(e) => {
+                errors.push(super::ipc::TaskfileError {
+                    workspace: workspace.name.to_file_string(),
+                    message: e.to_string(),
+                });
+            }
+        }
+    }
+
+    tasks.sort_by(|a, b| a.workspace.cmp(&b.workspace).then(a.task_name.cmp(&b.task_name)));
+    (tasks, errors)
 }
 
 async fn watch_project_root(project_root: Path, command_tx: CommandSender, shutdown_notify: Arc<tokio::sync::Notify>) {

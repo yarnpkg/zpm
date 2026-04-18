@@ -5,7 +5,7 @@ use zpm_config::{Configuration, ConfigurationContext};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
-use zpm_tasks::{parse as parse_taskfile, ResolvedTasks, TaskId};
+use zpm_tasks::{parse as parse_taskfile, ResolvedTasks, TaskFile, TaskId};
 use zpm_utils::{Glob, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
@@ -910,7 +910,10 @@ impl Project {
     }
 
     /// Resolve a task and all its dependencies.
-    pub fn resolve_task(&self, root_task: &TaskId) -> Result<ResolvedTasks, Error> {
+    pub fn resolve_task(&self, root_task: &TaskId) -> Result<ResolveTaskResult, Error> {
+        let source_files
+            = std::cell::RefCell::new(Vec::<Path>::new());
+
         let get_task_file = |ident: &Ident, path: Option<&str>| {
             let workspace = self.workspace_by_ident(ident).ok()?;
             let task_file_path = match path {
@@ -918,7 +921,9 @@ impl Project {
                 None => workspace.taskfile_path(),
             };
             let content = task_file_path.fs_read_text().ok()?;
-            parse_taskfile(&content).ok()
+            let task_file = parse_taskfile(&content).ok()?;
+            source_files.borrow_mut().push(task_file_path);
+            Some(task_file)
         };
 
         let resolve_ident_glob = |glob: &zpm_primitives::IdentGlob, context: &Ident| {
@@ -949,9 +954,42 @@ impl Project {
                 || ws.manifest.dev_dependencies.contains_key(include_ident)
         };
 
-        zpm_tasks::resolve(root_task, get_task_file, resolve_ident_glob, is_dependency)
-            .map_err(Error::TaskResolveError)
+        let resolved = zpm_tasks::resolve(root_task, get_task_file, resolve_ident_glob, is_dependency)
+            .map_err(Error::TaskResolveError)?;
+
+        Ok(ResolveTaskResult {
+            resolved,
+            source_files: source_files.into_inner(),
+        })
     }
+
+    /// Get the parsed taskfile and its source file paths for a workspace.
+    /// Returns `None` if the taskfile doesn't exist or fails to parse.
+    pub fn get_workspace_taskfile(&self, workspace: &Workspace) -> Option<(TaskFile, Vec<Path>)> {
+        let task_file_path = workspace.taskfile_path();
+        let content = task_file_path.fs_read_text().ok()?;
+        let task_file = parse_taskfile(&content).ok()?;
+
+        let mut sources = vec![task_file_path];
+
+        for include in &task_file.includes {
+            if let Ok(inc_ws) = self.workspace_by_ident(&include.ident) {
+                let inc_path = match &include.path {
+                    Some(p) => inc_ws.path.with_join_str(p),
+                    None => inc_ws.taskfile_path(),
+                };
+                sources.push(inc_path);
+            }
+        }
+
+        Some((task_file, sources))
+    }
+}
+
+/// Result of resolving a task, including the source files that were read.
+pub struct ResolveTaskResult {
+    pub resolved: ResolvedTasks,
+    pub source_files: Vec<Path>,
 }
 
 #[derive(Debug, Clone)]

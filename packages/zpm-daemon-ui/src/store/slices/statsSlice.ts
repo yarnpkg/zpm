@@ -1,6 +1,6 @@
 import {createSlice, type PayloadAction} from '@reduxjs/toolkit';
 
-import type {RootState}                                from '../index';
+import type {RootState}                  from '../index';
 
 export interface DaemonStats {
   tasksCount: number;
@@ -8,6 +8,7 @@ export interface DaemonStats {
   subtasksCount: number;
   outputBufferCount: number;
   closedTasksCount: number;
+  watchedFilesCount: number;
 }
 
 export interface StatsSliceState {

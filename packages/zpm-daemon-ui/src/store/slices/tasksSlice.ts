@@ -1,16 +1,17 @@
-import {createSlice, type PayloadAction} from '@reduxjs/toolkit';
+import {createSlice, type PayloadAction}      from '@reduxjs/toolkit';
 
-import type {DeclaredTaskInfo}                         from '../../generated/daemon-protocol';
-
-import type {RootState}                                from '../index';
+import type {DeclaredTaskInfo, TaskfileError} from '../../generated/daemon-protocol';
+import type {RootState}                       from '../index';
 
 export interface TasksSliceState {
   declaredTasks: Array<DeclaredTaskInfo>;
+  taskfileErrors: Array<TaskfileError>;
   loading: boolean;
 }
 
 const initialState: TasksSliceState = {
   declaredTasks: [],
+  taskfileErrors: [],
   loading: false,
 };
 
@@ -21,8 +22,9 @@ export const tasksSlice = createSlice({
     fetchTasksStarted(state) {
       state.loading = true;
     },
-    fetchTasksSucceeded(state, action: PayloadAction<Array<DeclaredTaskInfo>>) {
-      state.declaredTasks = action.payload;
+    fetchTasksSucceeded(state, action: PayloadAction<{tasks: Array<DeclaredTaskInfo>, errors: Array<TaskfileError>}>) {
+      state.declaredTasks = action.payload.tasks;
+      state.taskfileErrors = action.payload.errors;
       state.loading = false;
     },
     fetchTasksFailed(state) {
@@ -37,4 +39,5 @@ export const tasksSlice = createSlice({
 export const {fetchTasksStarted, fetchTasksSucceeded, fetchTasksFailed, clearTasks} = tasksSlice.actions;
 
 export const selectDeclaredTasks = (state: RootState) => state.tasks.declaredTasks;
+export const selectTaskfileErrors = (state: RootState) => state.tasks.taskfileErrors;
 export const selectTasksLoading = (state: RootState) => state.tasks.loading;

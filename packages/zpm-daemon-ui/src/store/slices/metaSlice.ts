@@ -1,8 +1,7 @@
 import {createSlice, type PayloadAction} from '@reduxjs/toolkit';
 
-import type {DaemonMeta}                               from '../../generated/daemon-protocol';
-
-import type {RootState}                                from '../index';
+import type {DaemonMeta}                 from '../../generated/daemon-protocol';
+import type {RootState}                  from '../index';
 
 export interface MetaSliceState {
   data: DaemonMeta | null;

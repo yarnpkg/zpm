@@ -1,11 +1,11 @@
-import {useState}                                      from 'react';
+import {useState}                                            from 'react';
 
-import type {TaskEventState}                           from '../generated/daemon-protocol';
-import {useAppSelector}                                from '../store/hooks';
-import {selectIsConnected}                             from '../store/slices/connectionSlice';
+import type {TaskEventState}                                 from '../generated/daemon-protocol';
+import {useAppSelector}                                      from '../store/hooks';
+import {selectIsConnected}                                   from '../store/slices/connectionSlice';
 import {selectHistoryEventsSortedDesc, selectHistoryLoading} from '../store/slices/historySlice';
 
-function stateBadge(state: TaskEventState): {label: string; className: string} {
+function stateBadge(state: TaskEventState): {label: string, className: string} {
   switch (state.type) {
     case `scheduled`:
       return {label: `Scheduled`, className: `bg-slate-100 text-slate-700`};
@@ -23,6 +23,8 @@ function stateBadge(state: TaskEventState): {label: string; className: string} {
     }
     case `cancelled`:
       return {label: `Cancelled`, className: `bg-slate-100 text-slate-600`};
+    default:
+      throw new Error(`Unknown state: ${(state as any).type}`);
   }
 }
 
@@ -34,26 +36,26 @@ export function HistoryRoute() {
   const [hoveredInstance, setHoveredInstance] = useState<string | null>(null);
 
   return (
-    <div className="p-8">
-      <h2 className="text-2xl font-semibold text-slate-900">Task History</h2>
+    <div className={`p-8`}>
+      <h2 className={`text-2xl font-semibold text-slate-900`}>Task History</h2>
 
       {!isConnected ? (
-        <p className="mt-6 rounded border border-yellow-300 bg-yellow-50 p-3 text-yellow-800">
+        <p className={`mt-6 rounded border border-yellow-300 bg-yellow-50 p-3 text-yellow-800`}>
           Waiting for daemon connection…
         </p>
       ) : null}
 
       {loading && isConnected ? (
-        <p className="mt-6 text-slate-700">Loading history…</p>
+        <p className={`mt-6 text-slate-700`}>Loading history…</p>
       ) : null}
 
       {!loading && events.length === 0 && isConnected ? (
-        <p className="mt-6 text-slate-600">No task events recorded.</p>
+        <p className={`mt-6 text-slate-600`}>No task events recorded.</p>
       ) : null}
 
       {events.length > 0 ? (
         <ul
-          className="mt-6 divide-y divide-slate-200 rounded border border-slate-200 bg-white"
+          className={`mt-6 divide-y divide-slate-200 rounded border border-slate-200 bg-white`}
           onMouseLeave={() => setHoveredInstance(null)}
         >
           {events.map((event, i) => {
@@ -69,10 +71,10 @@ export function HistoryRoute() {
                 <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${badge.className}`}>
                   {badge.label}
                 </span>
-                <span className="flex-1 truncate text-sm font-medium text-slate-900">
+                <span className={`flex-1 truncate text-sm font-medium text-slate-900`}>
                   {event.contextualTaskId}
                 </span>
-                <span className="tabular-nums text-xs text-slate-400">{time}</span>
+                <span className={`tabular-nums text-xs text-slate-400`}>{time}</span>
               </li>
             );
           })}

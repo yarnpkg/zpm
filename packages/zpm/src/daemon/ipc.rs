@@ -192,6 +192,14 @@ pub struct DeclaredTaskInfo {
     pub is_long_lived: bool,
 }
 
+/// An error encountered while parsing a workspace taskfile.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskfileError {
+    pub workspace: String,
+    pub message: String,
+}
+
 /// Information about a long-lived task
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -235,6 +243,7 @@ pub enum DaemonResponse {
     },
     DeclaredTaskList {
         tasks: Vec<DeclaredTaskInfo>,
+        errors: Vec<TaskfileError>,
     },
     ContextCancelled {
         cancelled_count: usize,
@@ -253,6 +262,8 @@ pub enum DaemonResponse {
         output_buffer_count: usize,
         /// Number of entries in the closed_tasks queue
         closed_tasks_count: usize,
+        /// Number of files being watched for taskfile changes
+        watched_files_count: usize,
     },
     AuthUrl {
         url: String,
@@ -290,6 +301,10 @@ pub enum DaemonNotification {
     TaskWarmUpComplete {
         #[ts(type = "string")]
         task_id: ContextualTaskId,
+    },
+    DeclaredTasksChanged {
+        tasks: Vec<DeclaredTaskInfo>,
+        errors: Vec<TaskfileError>,
     },
 }
 

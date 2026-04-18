@@ -11,6 +11,8 @@ use tokio_tungstenite::tungstenite::{
 
 use crate::project::Project;
 
+use tokio::sync::oneshot;
+
 use super::super::{
     coordinator_commands::{CommandSender, CoordinatorCommand},
     coordinator_state::SubscriptionId,
@@ -207,9 +209,34 @@ pub async fn handle_connection(
     // Notification receivers from subscriptions
     let mut notification_receivers: Vec<mpsc::UnboundedReceiver<DaemonNotification>> = Vec::new();
 
+    // Subscribe to global notifications (e.g. taskfile changes)
+    let mut global_rx = {
+        let (tx, rx) = oneshot::channel();
+        let _ = ctx.command_tx.send(CoordinatorCommand::SubscribeGlobal { response_tx: tx });
+        rx.await.ok()
+    };
+
     loop {
         let notification_future
             = poll_notifications(&mut notification_receivers);
+
+        let global_future = async {
+            match &mut global_rx {
+                Some(rx) => loop {
+                    match rx.recv().await {
+                        Ok(n) => break Some(n),
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            // Missed messages; keep receiving to get the latest
+                            continue;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break std::future::pending::<Option<DaemonNotification>>().await;
+                        }
+                    }
+                },
+                None => std::future::pending::<Option<DaemonNotification>>().await,
+            }
+        };
 
         tokio::select! {
             biased;
@@ -292,6 +319,19 @@ pub async fn handle_connection(
 
             // Handle notifications from subscriptions
             Some(notification) = notification_future => {
+                let message
+                    = DaemonMessage::notification(notification);
+
+                let notification_json = serde_json::to_string(&message)
+                    .map_err(|e| zpm_switch::Error::InvalidDaemonMessage(e.to_string()))?;
+
+                if write.send(Message::Text(notification_json.into())).await.is_err() {
+                    break;
+                }
+            }
+
+            // Handle global notifications (e.g. taskfile changes)
+            Some(notification) = global_future => {
                 let message
                     = DaemonMessage::notification(notification);
 

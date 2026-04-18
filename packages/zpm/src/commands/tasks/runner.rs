@@ -270,6 +270,7 @@ pub async fn run_task(
             }
 
             DaemonNotification::TaskWarmUpComplete { .. } => {}
+            DaemonNotification::DeclaredTasksChanged { .. } => {}
         }
     }
 

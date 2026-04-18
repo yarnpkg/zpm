@@ -5,6 +5,7 @@ use zpm::daemon::{
     AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonMeta, DaemonNotification,
     DaemonRequest, DaemonRequestEnvelope, DaemonResponse, DeclaredTaskInfo, LongLivedTaskInfo,
     LongLivedTaskStatus, SubscriptionScope, TaskEvent, TaskEventState, TaskSubscription,
+    TaskfileError,
 };
 
 const DEFAULT_OUTPUT_PATH: &str = "packages/zpm/src/daemon/protocol.generated.ts";
@@ -84,6 +85,7 @@ fn render() -> String {
         to_exported_declaration::<TaskEventState>(&config),
         to_exported_declaration::<TaskEvent>(&config),
         to_exported_declaration::<DeclaredTaskInfo>(&config),
+        to_exported_declaration::<TaskfileError>(&config),
         to_exported_declaration::<LongLivedTaskInfo>(&config),
         to_exported_declaration::<DaemonResponse>(&config),
         to_exported_declaration::<DaemonNotification>(&config),

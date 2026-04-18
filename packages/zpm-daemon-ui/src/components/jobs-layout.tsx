@@ -1,15 +1,15 @@
-import {useCallback, useMemo}                                                  from 'react';
+import {useCallback, useMemo}                                                                 from 'react';
 
-import type {DeclaredTaskInfo, TaskEventState}                                 from '../generated/daemon-protocol';
-import {useDaemon}                                                             from '../lib/daemon-context';
-import {type FuzzyMatch, fuzzyMatch}                                           from '../lib/fuzzy-match';
-import {useAppDispatch, useAppSelector}                                        from '../store/hooks';
-import {selectIsConnected}                                                     from '../store/slices/connectionSlice';
-import {type TaskInstance, selectInstanceMap, selectRunningSet}                 from '../store/slices/historySlice';
+import type {DeclaredTaskInfo, TaskEventState}                                                from '../generated/daemon-protocol';
+import {useDaemon}                                                                            from '../lib/daemon-context';
+import {type FuzzyMatch, fuzzyMatch}                                                          from '../lib/fuzzy-match';
+import {useAppDispatch, useAppSelector}                                                       from '../store/hooks';
+import {selectIsConnected}                                                                    from '../store/slices/connectionSlice';
+import {type TaskInstance, selectInstanceMap, selectRunningSet}                               from '../store/slices/historySlice';
 import {setFilter, selectTask, selectJobsFilter, selectActiveTaskKey, selectActiveInstanceId} from '../store/slices/jobsUiSlice';
-import {selectDeclaredTasks, selectTasksLoading}                               from '../store/slices/tasksSlice';
+import {selectDeclaredTasks, selectTaskfileErrors, selectTasksLoading}                        from '../store/slices/tasksSlice';
 
-import {TaskTerminal}                                                          from './task-terminal';
+import {TaskTerminal}                                                                         from './task-terminal';
 
 interface MatchedTask {
   task: DeclaredTaskInfo;
@@ -48,6 +48,7 @@ function statusDotColor(status: TaskStatus): string {
   switch (status) {
     case `running`: return `bg-green-500`;
     case `stopped`: return `bg-slate-300`;
+    default: throw new Error(`Unknown status: ${status satisfies never}`);
   }
 }
 
@@ -60,6 +61,7 @@ function instanceBadge(state: TaskEventState): {label: string, className: string
     case `completed`: return {label: `OK`, className: `bg-green-100 text-green-700`};
     case `failed`: return {label: `Fail`, className: `bg-red-100 text-red-700`};
     case `cancelled`: return {label: `Cancel`, className: `bg-slate-100 text-slate-500`};
+    default: throw new Error(`Unknown state: ${(state as any).type}`);
   }
 }
 
@@ -98,7 +100,9 @@ function TaskRow({task, match, label, status, isActive, onRun, onStop, onSelect,
         {isRunning ? (
           <button
             type={`button`}
-            onClick={e => { e.stopPropagation(); onStop(); }}
+            onClick={e => {
+              e.stopPropagation(); onStop();
+            }}
             className={`invisible ml-1 flex-none rounded p-0.5 text-red-400 hover:text-red-600 group-hover:visible`}
             title={`Stop ${task.workspace}:${task.taskName}`}
           >
@@ -109,7 +113,9 @@ function TaskRow({task, match, label, status, isActive, onRun, onStop, onSelect,
         ) : (
           <button
             type={`button`}
-            onClick={e => { e.stopPropagation(); onRun(); }}
+            onClick={e => {
+              e.stopPropagation(); onRun();
+            }}
             className={`invisible ml-1 flex-none rounded p-0.5 text-slate-400 hover:text-blue-600 group-hover:visible`}
             title={`Run ${task.workspace}:${task.taskName}`}
           >
@@ -155,6 +161,7 @@ export function JobsLayout() {
 
   const isConnected = useAppSelector(selectIsConnected);
   const declaredTasks = useAppSelector(selectDeclaredTasks);
+  const taskfileErrors = useAppSelector(selectTaskfileErrors);
   const tasksLoading = useAppSelector(selectTasksLoading);
   const runningSet = useAppSelector(selectRunningSet);
   const instanceMap = useAppSelector(selectInstanceMap);
@@ -164,7 +171,7 @@ export function JobsLayout() {
   const activeInstanceId = useAppSelector(selectActiveInstanceId);
 
   const grouped = useMemo(() => {
-    if (declaredTasks.length === 0 && !tasksLoading) return null;
+    if (declaredTasks.length === 0 && !tasksLoading) return new Map<string, Array<MatchedTask>>();
     if (declaredTasks.length === 0) return null;
 
     const matched: Array<MatchedTask> = [];
@@ -176,7 +183,9 @@ export function JobsLayout() {
         matched.push({task, match: null, label});
       } else {
         const m = fuzzyMatch(needle, label);
-        if (m) matched.push({task, match: m, label});
+        if (m) {
+          matched.push({task, match: m, label});
+        }
       }
     }
 
@@ -254,41 +263,55 @@ export function JobsLayout() {
             <p className={`p-3 text-xs text-slate-400`}>Waiting for connection…</p>
           ) : tasksLoading ? (
             <p className={`p-3 text-xs text-slate-400`}>Loading tasks…</p>
-          ) : grouped && grouped.size === 0 ? (
+          ) : grouped && grouped.size === 0 && taskfileErrors.length === 0 ? (
             <p className={`p-3 text-xs text-slate-400`}>No matching tasks.</p>
           ) : grouped ? (
-            <ul className={`space-y-4`}>
-              {[...grouped.entries()].map(([workspace, entries]) => (
-                <li key={workspace}>
-                  <p className={`sticky top-0 bg-slate-50 p-2 text-xs font-semibold text-slate-500`}>
-                    {workspace}
-                  </p>
-                  <ul>
-                    {entries.map(entry => {
-                      const key = taskKey(entry.task.workspace, entry.task.taskName);
-                      const status: TaskStatus = runningSet.has(key) ? `running` : `stopped`;
-                      const instances = entry.task.isLongLived ? [] : (instanceMap.get(key) ?? []);
-                      return (
-                        <TaskRow
-                          key={entry.label}
-                          task={entry.task}
-                          match={entry.match}
-                          label={entry.task.taskName}
-                          status={status}
-                          isActive={activeTaskKey === key && activeInstanceId === null}
-                          onRun={() => handleRun(entry.task)}
-                          onStop={() => handleStop(entry.task)}
-                          onSelect={() => handleSelect(key)}
-                          instances={instances}
-                          activeTaskId={activeInstanceId}
-                          onSelectInstance={(id) => handleSelectInstance(key, id)}
-                        />
-                      );
-                    })}
-                  </ul>
-                </li>
-              ))}
-            </ul>
+            <>
+              {taskfileErrors.length > 0 && (
+                <div className={`space-y-2 p-2`}>
+                  {taskfileErrors.map(error => (
+                    <div key={error.workspace} className={`rounded border border-red-200 bg-red-50 p-2`}>
+                      <p className={`text-xs font-semibold text-red-700`}>{error.workspace}</p>
+                      <p className={`mt-0.5 text-xs text-red-600 whitespace-pre-wrap`}>{error.message}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {grouped.size > 0 && (
+                <ul className={`space-y-4`}>
+                  {[...grouped.entries()].map(([workspace, entries]) => (
+                    <li key={workspace}>
+                      <p className={`sticky top-0 bg-slate-50 p-2 text-xs font-semibold text-slate-500`}>
+                        {workspace}
+                      </p>
+                      <ul>
+                        {entries.map(entry => {
+                          const key = taskKey(entry.task.workspace, entry.task.taskName);
+                          const status: TaskStatus = runningSet.has(key) ? `running` : `stopped`;
+                          const instances = entry.task.isLongLived ? [] : (instanceMap.get(key) ?? []);
+                          return (
+                            <TaskRow
+                              key={entry.label}
+                              task={entry.task}
+                              match={entry.match}
+                              label={entry.task.taskName}
+                              status={status}
+                              isActive={activeTaskKey === key && activeInstanceId === null}
+                              onRun={() => handleRun(entry.task)}
+                              onStop={() => handleStop(entry.task)}
+                              onSelect={() => handleSelect(key)}
+                              instances={instances}
+                              activeTaskId={activeInstanceId}
+                              onSelectInstance={id => handleSelectInstance(key, id)}
+                            />
+                          );
+                        })}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
           ) : null}
         </div>
       </aside>

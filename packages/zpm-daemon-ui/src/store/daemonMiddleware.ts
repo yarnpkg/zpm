@@ -1,12 +1,12 @@
-import type {DaemonNotification}                      from '../generated/daemon-protocol';
-import type {DaemonConnection}                         from '../lib/daemon';
+import type {DaemonNotification}                                                                                                                     from '../generated/daemon-protocol';
+import type {DaemonConnection}                                                                                                                       from '../lib/daemon';
 
-import type {AppDispatch, RootState}                   from './index';
-import {setConnectionError, setConnectionStatus}       from './slices/connectionSlice';
+import type {AppDispatch, RootState}                                                                                                                 from './index';
+import {setConnectionError, setConnectionStatus}                                                                                                     from './slices/connectionSlice';
 import {clearHistory, fetchHistoryFailed, fetchHistoryStarted, fetchHistorySucceeded, taskCancelled, taskCompleted, taskStarted, taskWarmUpComplete} from './slices/historySlice';
-import {clearMeta, fetchMetaFailed, fetchMetaStarted, fetchMetaSucceeded} from './slices/metaSlice';
-import {clearStats, fetchStatsFailed, fetchStatsStarted, fetchStatsSucceeded} from './slices/statsSlice';
-import {clearTasks, fetchTasksFailed, fetchTasksStarted, fetchTasksSucceeded} from './slices/tasksSlice';
+import {clearMeta, fetchMetaFailed, fetchMetaStarted, fetchMetaSucceeded}                                                                            from './slices/metaSlice';
+import {clearStats, fetchStatsFailed, fetchStatsStarted, fetchStatsSucceeded}                                                                        from './slices/statsSlice';
+import {clearTasks, fetchTasksFailed, fetchTasksStarted, fetchTasksSucceeded}                                                                        from './slices/tasksSlice';
 
 let statsIntervalId: number | null = null;
 
@@ -42,17 +42,17 @@ async function initialDataLoad(daemon: DaemonConnection, dispatch: AppDispatch, 
     daemon.getStats(),
   ]);
 
-  if (results[0].status === `fulfilled`) {
+  if (results[0].status === `fulfilled`)
     dispatch(fetchMetaSucceeded(results[0].value));
-  } else {
+  else
     dispatch(fetchMetaFailed());
-  }
 
-  if (results[1].status === `fulfilled`) {
+
+  if (results[1].status === `fulfilled`)
     dispatch(fetchTasksSucceeded(results[1].value));
-  } else {
+  else
     dispatch(fetchTasksFailed());
-  }
+
 
   if (results[2].status === `fulfilled`) {
     const [events, longLivedTasks] = results[2].value;
@@ -61,11 +61,11 @@ async function initialDataLoad(daemon: DaemonConnection, dispatch: AppDispatch, 
     dispatch(fetchHistoryFailed());
   }
 
-  if (results[3].status === `fulfilled`) {
+  if (results[3].status === `fulfilled`)
     dispatch(fetchStatsSucceeded(results[3].value));
-  } else {
+  else
     dispatch(fetchStatsFailed());
-  }
+
 
   startStatsPolling(daemon, dispatch);
 }
@@ -101,16 +101,16 @@ export function bindDaemonToStore(
 ): () => void {
   // Sync initial connection state.
   dispatch(setConnectionStatus(daemon.getState()));
-  if (daemon.getConnectionError()) {
+  if (daemon.getConnectionError())
     dispatch(setConnectionError(daemon.getConnectionError()));
-  }
+
 
   const unsubState = daemon.onStateChange(state => {
     dispatch(setConnectionStatus(state));
 
-    if (state === `connected`) {
+    if (state === `connected`)
       initialDataLoad(daemon, dispatch, getState);
-    }
+
 
     if (state === `disconnected` || state === `rejected`) {
       stopStatsPolling();
@@ -146,14 +146,17 @@ export function bindDaemonToStore(
       case `taskWarmUpComplete`:
         dispatch(taskWarmUpComplete({taskId: notification.taskId}));
         break;
+      case `declaredTasksChanged`:
+        dispatch(fetchTasksSucceeded({tasks: notification.tasks, errors: notification.errors}));
+        break;
       // taskOutputLine is handled directly by TaskTerminal, not stored in Redux.
     }
   });
 
   // If already connected, load immediately.
-  if (daemon.getState() === `connected`) {
+  if (daemon.getState() === `connected`)
     initialDataLoad(daemon, dispatch, getState);
-  }
+
 
   return () => {
     stopStatsPolling();

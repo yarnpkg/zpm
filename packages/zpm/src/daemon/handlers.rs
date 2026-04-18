@@ -1,5 +1,4 @@
 use tokio::sync::oneshot;
-use zpm_tasks::parse as parse_taskfile;
 use zpm_utils::ToFileString;
 
 use crate::project::Project;
@@ -7,7 +6,7 @@ use crate::project::Project;
 use super::{
     coordinator_commands::{CommandSender, CoordinatorCommand},
     coordinator_state::SubscriptionId,
-    ipc::{DaemonRequest, DaemonResponse, DeclaredTaskInfo, LongLivedTaskStatus, SubscriptionScope},
+    ipc::{DaemonRequest, DaemonResponse, LongLivedTaskStatus, SubscriptionScope},
 };
 
 async fn send_command<T>(
@@ -72,7 +71,7 @@ pub async fn dispatch_request(
         }
 
         DaemonRequest::ListDeclaredTasks => {
-            handle_list_declared_tasks(project)
+            handle_list_declared_tasks(command_tx).await
         }
 
         DaemonRequest::GetStats => {
@@ -222,6 +221,7 @@ async fn handle_get_stats(command_tx: &CommandSender) -> DaemonResponse {
             subtasks_count: result.subtasks_count,
             output_buffer_count: result.output_buffer_count,
             closed_tasks_count: result.closed_tasks_count,
+            watched_files_count: result.watched_files_count,
         },
         Err(e) => e,
     }
@@ -264,27 +264,13 @@ fn handle_get_auth_url(port: u16, auth_token: Option<&str>) -> DaemonResponse {
     DaemonResponse::AuthUrl { url }
 }
 
-fn handle_list_declared_tasks(project: &Project) -> DaemonResponse {
-    let mut tasks = Vec::new();
-
-    for workspace in &project.workspaces {
-        let task_file_path = workspace.taskfile_path();
-        let Ok(content) = task_file_path.fs_read_text() else { continue };
-        let Ok(task_file) = parse_taskfile(&content) else { continue };
-
-        for (task_name, task) in &task_file.tasks {
-            let is_long_lived = task.attributes.iter().any(|attr| attr.name == "long-lived");
-            tasks.push(DeclaredTaskInfo {
-                workspace: workspace.name.to_file_string(),
-                task_name: task_name.to_file_string(),
-                is_long_lived,
-            });
-        }
+async fn handle_list_declared_tasks(command_tx: &CommandSender) -> DaemonResponse {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::ListDeclaredTasks { response_tx }
+    }).await {
+        Ok((tasks, errors)) => DaemonResponse::DeclaredTaskList { tasks, errors },
+        Err(e) => e,
     }
-
-    tasks.sort_by(|a, b| a.workspace.cmp(&b.workspace).then(a.task_name.cmp(&b.task_name)));
-
-    DaemonResponse::DeclaredTaskList { tasks }
 }
 
 pub async fn create_subscription_if_needed(

@@ -1,6 +1,6 @@
 import {createSlice, type PayloadAction} from '@reduxjs/toolkit';
 
-import type {RootState}                                from '../index';
+import type {RootState}                  from '../index';
 
 export interface JobsUiSliceState {
   filter: string;
@@ -21,7 +21,7 @@ export const jobsUiSlice = createSlice({
     setFilter(state, action: PayloadAction<string>) {
       state.filter = action.payload;
     },
-    selectTask(state, action: PayloadAction<{key: string; instanceId?: string | null}>) {
+    selectTask(state, action: PayloadAction<{key: string, instanceId?: string | null}>) {
       state.activeTaskKey = action.payload.key;
       state.activeInstanceId = action.payload.instanceId ?? null;
     },

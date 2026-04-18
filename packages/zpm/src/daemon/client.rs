@@ -451,8 +451,8 @@ impl DaemonClient {
     /// Get internal state statistics from the daemon (for debugging/testing)
     pub async fn get_stats(&mut self) -> Result<DaemonStatsResult, Error> {
         self.request(DaemonRequest::GetStats, |r| match r {
-            DaemonResponse::Stats { tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count } => {
-                Some(DaemonStatsResult { tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count })
+            DaemonResponse::Stats { tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count, watched_files_count } => {
+                Some(DaemonStatsResult { tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count, watched_files_count })
             }
             _ => None,
         }).await
@@ -481,6 +481,7 @@ pub struct DaemonStatsResult {
     pub subtasks_count: usize,
     pub output_buffer_count: usize,
     pub closed_tasks_count: usize,
+    pub watched_files_count: usize,
 }
 
 async fn start_daemon(project_root: &Path) -> Result<String, Error> {

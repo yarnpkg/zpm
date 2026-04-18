@@ -10,6 +10,7 @@ import type {
   BufferedOutputLine,
   SubscriptionScope,
   TaskEvent,
+  TaskfileError,
 } from '../generated/daemon-protocol';
 
 declare const __DAEMON_PORT__: string;
@@ -42,9 +43,9 @@ export function getDaemonUrl(): string {
     return fromQs;
 
   // When served by the daemon itself (detected by ?token= param), use the same host:port
-  if (getTokenFromQueryString()) {
+  if (getTokenFromQueryString())
     return `ws://${window.location.host}`;
-  }
+
 
   const port = __DAEMON_PORT__ !== `` ? __DAEMON_PORT__ : String(DEFAULT_PORT);
   return `ws://127.0.0.1:${port}`;
@@ -176,8 +177,9 @@ export class DaemonConnection {
 
   async ping(): Promise<void> {
     const response = await this.request({type: `ping`});
-    if (response.type === `error`)
+    if (response.type === `error`) {
       throw new Error(response.message);
+    }
   }
 
   async getMeta(): Promise<DaemonMeta> {
@@ -225,22 +227,23 @@ export class DaemonConnection {
     return response;
   }
 
-  async listDeclaredTasks(): Promise<Array<DeclaredTaskInfo>> {
+  async listDeclaredTasks(): Promise<{tasks: Array<DeclaredTaskInfo>, errors: Array<TaskfileError>}> {
     const response = await this.request({type: `listDeclaredTasks`});
     if (response.type === `error`)
       throw new Error(response.message);
     if (response.type !== `declaredTaskList`)
       throw new Error(`Unexpected response: ${response.type}`);
-    return response.tasks;
+    return {tasks: response.tasks, errors: response.errors};
   }
 
   async shutdown(): Promise<void> {
     const response = await this.request({type: `shutdown`});
-    if (response.type === `error`)
+    if (response.type === `error`) {
       throw new Error(response.message);
+    }
   }
 
-  async stopTask(taskName: string, workspace: string | null): Promise<{success: boolean; error: string | null}> {
+  async stopTask(taskName: string, workspace: string | null): Promise<{success: boolean, error: string | null}> {
     const response = await this.request({type: `stopTask`, taskName, workspace});
     if (response.type === `error`)
       throw new Error(response.message);
@@ -250,11 +253,11 @@ export class DaemonConnection {
   }
 
   async pushTasks(
-    tasks: Array<{name: string; args: string[]}>,
+    tasks: Array<{name: string, args: Array<string>}>,
     workspace: string,
     contextId: string,
-    opts?: {outputSubscription?: SubscriptionScope; statusSubscription?: SubscriptionScope},
-  ): Promise<{taskIds: string[]; dependencyCount: number}> {
+    opts?: {outputSubscription?: SubscriptionScope, statusSubscription?: SubscriptionScope},
+  ): Promise<{taskIds: Array<string>, dependencyCount: number}> {
     const response = await this.request({
       type: `pushTasks`,
       tasks,
@@ -356,7 +359,9 @@ export class DaemonConnection {
     });
 
     socket.addEventListener(`error`, () => {
-      if (this.socket !== socket) return;
+      if (this.socket !== socket) {
+        return;
+      }
       // The close event will follow; let it handle cleanup.
     });
   }

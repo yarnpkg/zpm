@@ -1,9 +1,9 @@
-import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import {createRootRoute, createRoute, createRouter} from '@tanstack/react-router';
 
-import { Layout } from "./components/layout";
-import { JobsLayout } from "./components/jobs-layout";
-import { DashboardRoute } from "./routes/dashboard-route";
-import { HistoryRoute } from "./routes/history-route";
+import {JobsLayout}                                 from './components/jobs-layout';
+import {Layout}                                     from './components/layout';
+import {DashboardRoute}                             from './routes/dashboard-route';
+import {HistoryRoute}                               from './routes/history-route';
 
 const rootRoute = createRootRoute({
   component: Layout,

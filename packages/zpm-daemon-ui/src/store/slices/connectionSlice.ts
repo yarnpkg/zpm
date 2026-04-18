@@ -1,8 +1,7 @@
 import {createSlice, type PayloadAction} from '@reduxjs/toolkit';
 
-import type {ConnectionState}                          from '../../lib/daemon';
-
-import type {RootState}                                from '../index';
+import type {ConnectionState}            from '../../lib/daemon';
+import type {RootState}                  from '../index';
 
 export interface ConnectionSliceState {
   status: ConnectionState;

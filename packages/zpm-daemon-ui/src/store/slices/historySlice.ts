@@ -1,7 +1,6 @@
-import {createSelector, createSlice, type PayloadAction} from '@reduxjs/toolkit';
+import {createSelector, createSlice, type PayloadAction}   from '@reduxjs/toolkit';
 
 import type {LongLivedTaskInfo, TaskEvent, TaskEventState} from '../../generated/daemon-protocol';
-
 import type {RootState}                                    from '../index';
 
 const MAX_INSTANCES = 3;
@@ -34,16 +33,18 @@ function isRunningState(type: TaskEventState[`type`]): boolean {
 function computeRunningCounts(events: Array<TaskEvent>): Record<string, number> {
   // Find the latest event per contextual task ID
   const latest = new Map<string, TaskEventState>();
-  for (const event of events) {
+  for (const event of events)
     latest.set(event.contextualTaskId, event.state);
-  }
+
 
   // Count running instances per task key
   const counts: Record<string, number> = {};
   for (const [contextualTaskId, state] of latest) {
     if (!isRunningState(state.type)) continue;
     const key = taskKeyFromContextualId(contextualTaskId);
-    if (key) counts[key] = (counts[key] ?? 0) + 1;
+    if (key) {
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
   }
   return counts;
 }
@@ -54,7 +55,7 @@ function taskKeyFromContextualId(contextualTaskId: string): string | null {
   return contextualTaskId.slice(0, atIdx);
 }
 
-function longLivedKeyFromTaskKey(taskKey: string): {workspace: string; taskName: string} | null {
+function longLivedKeyFromTaskKey(taskKey: string): {workspace: string, taskName: string} | null {
   const colonIdx = taskKey.indexOf(`:`);
   if (colonIdx === -1) return null;
   return {workspace: taskKey.slice(0, colonIdx), taskName: taskKey.slice(colonIdx + 1)};
@@ -86,7 +87,7 @@ export const historySlice = createSlice({
       state.loading = false;
     },
 
-    taskStarted(state, action: PayloadAction<{taskId: string; isLongLived: boolean}>) {
+    taskStarted(state, action: PayloadAction<{taskId: string, isLongLived: boolean}>) {
       state.events.push({
         date: Date.now(),
         contextualTaskId: action.payload.taskId,
@@ -107,7 +108,7 @@ export const historySlice = createSlice({
         }
       }
     },
-    taskCompleted(state, action: PayloadAction<{taskId: string; exitCode: number; signal: number | null}>) {
+    taskCompleted(state, action: PayloadAction<{taskId: string, exitCode: number, signal: number | null}>) {
       const {taskId, exitCode, signal} = action.payload;
       const eventState: TaskEventState = exitCode === 0
         ? {type: `completed`}
@@ -175,7 +176,7 @@ export const selectInstanceMap = createSelector(
   selectHistoryEvents,
   events => {
     // Collect the latest state per contextual task ID
-    const latest = new Map<string, {state: TaskEventState; date: number}>();
+    const latest = new Map<string, {state: TaskEventState, date: number}>();
     for (const event of events) {
       const existing = latest.get(event.contextualTaskId);
       if (!existing || event.date >= existing.date) {

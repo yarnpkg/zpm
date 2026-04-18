@@ -114,6 +114,19 @@ pub enum CoordinatorCommand {
         subscription_id: SubscriptionId,
     },
 
+    /// Timer tick: poll taskfiles for changes and reload if needed.
+    PollTaskfiles,
+
+    /// List all declared tasks from cached taskfiles.
+    ListDeclaredTasks {
+        response_tx: oneshot::Sender<(Vec<super::ipc::DeclaredTaskInfo>, Vec<super::ipc::TaskfileError>)>,
+    },
+
+    /// Subscribe to global notifications (e.g. taskfile changes).
+    SubscribeGlobal {
+        response_tx: oneshot::Sender<tokio::sync::broadcast::Receiver<super::ipc::DaemonNotification>>,
+    },
+
     /// Request graceful shutdown, returns all PIDs.
     Shutdown {
         response_tx: oneshot::Sender<Vec<u32>>,
@@ -174,6 +187,7 @@ pub struct StatsResult {
     pub subtasks_count: usize,
     pub output_buffer_count: usize,
     pub closed_tasks_count: usize,
+    pub watched_files_count: usize,
 }
 
 pub type CommandSender = mpsc::UnboundedSender<CoordinatorCommand>;

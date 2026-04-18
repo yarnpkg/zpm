@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use super::super::ipc::{DaemonNotification, SubscriptionScope};
 use super::super::scheduler::ContextualTaskId;
@@ -35,6 +35,8 @@ impl SubscriptionFilter {
             DaemonNotification::TaskCompleted { task_id, .. } => (task_id, self.status_scope),
             DaemonNotification::TaskCancelled { task_id } => (task_id, self.status_scope),
             DaemonNotification::TaskWarmUpComplete { task_id } => (task_id, self.status_scope),
+            // Global notifications are always delivered.
+            DaemonNotification::DeclaredTasksChanged { .. } => return true,
         };
 
         let is_explicit_target = self.target_task_ids.contains(task_id);
@@ -80,14 +82,24 @@ struct Subscription {
 pub struct SubscriptionManager {
     subscriptions: HashMap<SubscriptionId, Subscription>,
     next_subscription_id: u64,
+    /// Broadcast channel for global notifications (e.g. taskfile changes).
+    /// All WebSocket connections subscribe to this on connect.
+    global_tx: broadcast::Sender<DaemonNotification>,
 }
 
 impl SubscriptionManager {
     pub fn new() -> Self {
+        let (global_tx, _) = broadcast::channel(64);
         Self {
             subscriptions: HashMap::new(),
             next_subscription_id: 1,
+            global_tx,
         }
+    }
+
+    /// Subscribe to global notifications (taskfile changes, etc.).
+    pub fn subscribe_global(&self) -> broadcast::Receiver<DaemonNotification> {
+        self.global_tx.subscribe()
     }
 
     pub fn create(
@@ -128,6 +140,12 @@ impl SubscriptionManager {
     }
 
     pub fn broadcast(&self, notification: DaemonNotification) {
+        // Global notifications go through the broadcast channel.
+        if matches!(notification, DaemonNotification::DeclaredTasksChanged { .. }) {
+            let _ = self.global_tx.send(notification);
+            return;
+        }
+
         for sub in self.subscriptions.values() {
             if sub.filter.matches(&notification) {
                 let _ = sub.sender.send(notification.clone());

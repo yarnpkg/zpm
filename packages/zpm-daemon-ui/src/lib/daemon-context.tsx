@@ -1,9 +1,9 @@
 import {createContext, useContext, useEffect, useState} from 'react';
 
-import {store}                                         from '../store';
-import {bindDaemonToStore}                             from '../store/daemonMiddleware';
+import {bindDaemonToStore}                              from '../store/daemonMiddleware';
+import {store}                                          from '../store';
 
-import {DaemonConnection, getAuthToken, getDaemonUrl}  from './daemon';
+import {DaemonConnection, getAuthToken, getDaemonUrl}   from './daemon';
 
 const DaemonContext = createContext<DaemonConnection | null>(null);
 

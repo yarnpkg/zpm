@@ -1,19 +1,19 @@
-import {useEffect, useRef} from 'react';
-import {Terminal} from '@xterm/xterm';
-import {FitAddon} from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import {FitAddon}                from '@xterm/addon-fit';
+import {Terminal}                from '@xterm/xterm';
+import {useEffect, useRef}       from 'react';
 
 import type {DaemonNotification} from '../generated/daemon-protocol';
-import {useDaemon} from '../lib/daemon-context';
+import {useDaemon}               from '../lib/daemon-context';
 
-export function TaskTerminal({taskIds}: {taskIds: string[]}) {
+export function TaskTerminal({taskIds}: {taskIds: Array<string>}) {
   const daemon = useDaemon();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container) return undefined;
 
     const term = new Terminal({
       convertEol: true,
@@ -49,7 +49,7 @@ export function TaskTerminal({taskIds}: {taskIds: string[]}) {
   // Clear the terminal and load buffered output when task IDs change.
   useEffect(() => {
     const term = termRef.current;
-    if (!term || !daemon || taskIds.length === 0) return;
+    if (!term || !daemon || taskIds.length === 0) return undefined;
 
     term.clear();
     term.reset();
@@ -67,12 +67,14 @@ export function TaskTerminal({taskIds}: {taskIds: string[]}) {
       });
     }
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [daemon, taskIds]);
 
   // Subscribe to live output notifications for the given task IDs.
   useEffect(() => {
-    if (!daemon || taskIds.length === 0) return;
+    if (!daemon || taskIds.length === 0) return undefined;
 
     const taskIdSet = new Set(taskIds);
 
@@ -86,6 +88,6 @@ export function TaskTerminal({taskIds}: {taskIds: string[]}) {
   }, [daemon, taskIds]);
 
   return (
-    <div ref={containerRef} className="h-full w-full" />
+    <div ref={containerRef} className={`h-full w-full`} />
   );
 }

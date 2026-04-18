@@ -27,11 +27,11 @@ impl ResolveTask {
                 task_name,
             };
 
-        let resolved
+        let resolve_result
             = project.resolve_task(&root_task)?;
 
         let json
-            = serde_json::to_string_pretty(&resolved.tasks)
+            = serde_json::to_string_pretty(&resolve_result.resolved.tasks)
                 .map_err(|e| Error::JsonSerializeError(e.to_string()))?;
 
         println!("{}", json);

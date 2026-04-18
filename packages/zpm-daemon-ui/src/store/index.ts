@@ -1,4 +1,4 @@
-import {configureStore} from '@reduxjs/toolkit';
+import {configureStore}  from '@reduxjs/toolkit';
 
 import {connectionSlice} from './slices/connectionSlice';
 import {historySlice}    from './slices/historySlice';

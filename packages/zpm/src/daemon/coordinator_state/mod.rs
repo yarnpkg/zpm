@@ -5,6 +5,7 @@ mod output_buffer;
 mod process_registry;
 mod subscription_manager;
 mod task_graph;
+mod taskfile_watcher;
 
 pub use context_registry::ContextRegistry;
 pub use event_history::{EventHistory, now_ms};
@@ -13,6 +14,7 @@ pub use output_buffer::OutputBuffer;
 pub use process_registry::ProcessRegistry;
 pub use subscription_manager::{SubscriptionId, SubscriptionManager};
 pub use task_graph::{TaskGraph, LONG_LIVED_ATTRIBUTE};
+pub use taskfile_watcher::TaskfileWatcher;
 
 // Re-export scheduler types that are used across the coordinator
 pub use super::scheduler::{ContextualTaskId, PreparedTask};
@@ -46,6 +48,7 @@ pub struct CoordinatorState {
     pub subscriptions: SubscriptionManager,
     pub output: OutputBuffer,
     pub event_history: EventHistory,
+    pub taskfile_watcher: TaskfileWatcher,
 }
 
 impl CoordinatorState {
@@ -58,6 +61,7 @@ impl CoordinatorState {
             subscriptions: SubscriptionManager::new(),
             output: OutputBuffer::new(output_buffer_max_lines, max_closed_tasks),
             event_history: EventHistory::new(),
+            taskfile_watcher: TaskfileWatcher::new(),
         }
     }
 

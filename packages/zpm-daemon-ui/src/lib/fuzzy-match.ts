@@ -46,7 +46,7 @@ export function fuzzyMatch(pattern: string, target: string): FuzzyMatch | null {
   const tLen = tLower.length;
 
   const memo = new Map<number, number>();
-  const pathMemo = new Map<number, number[]>();
+  const pathMemo = new Map<number, Array<number>>();
 
   function key(pi: number, ti: number, consec: boolean): number {
     return (pi * tLen + ti) * 2 + (consec ? 1 : 0);
@@ -62,7 +62,7 @@ export function fuzzyMatch(pattern: string, target: string): FuzzyMatch | null {
     if (cached !== undefined) return cached;
 
     let best = -Infinity;
-    let bestPath: number[] = [];
+    let bestPath: Array<number> = [];
 
     const ch = pLower.charAt(pi);
 
@@ -91,7 +91,7 @@ export function fuzzyMatch(pattern: string, target: string): FuzzyMatch | null {
       const skipRest = solve(pi + 1, t + 1, false);
 
       let total: number;
-      let sub: number[];
+      let sub: Array<number>;
       if (rest >= skipRest) {
         total = bonus + rest;
         sub = pathMemo.get(key(pi + 1, t + 1, true)) ?? [];

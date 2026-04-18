@@ -1,7 +1,8 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
+import tailwindcss    from '@tailwindcss/vite';
+import react          from '@vitejs/plugin-react';
+import {defineConfig} from 'vite';
 
+// eslint-disable-next-line arca/no-default-export
 export default defineConfig(({mode}) => {
   const daemonPort = process.env.DAEMON_PORT ?? ``;
   const daemonToken = process.env.DAEMON_TOKEN ?? ``;
