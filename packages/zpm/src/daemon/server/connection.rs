@@ -97,7 +97,10 @@ async fn serve_http_request(
         p => p.strip_prefix('/').unwrap_or(p),
     };
 
-    if let Some((content_type, data)) = super::get_ui_asset(asset_path) {
+    let asset = super::get_ui_asset(asset_path)
+        .or_else(|| super::get_ui_asset("index.html"));
+
+    if let Some((content_type, data)) = asset {
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
             data.len(),
