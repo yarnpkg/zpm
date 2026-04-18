@@ -70,17 +70,6 @@ export function getAuthToken(): string | null {
   }
 }
 
-/**
- * Persists a token in sessionStorage for the current tab.
- */
-export function setAuthToken(token: string): void {
-  try {
-    sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, token);
-  } catch {
-    // Ignore storage errors.
-  }
-}
-
 function buildConnectionUrl(base: string, token: string | null): string {
   if (!token)
     return base;
@@ -111,7 +100,6 @@ export class DaemonConnection {
   constructor(url: string, token: string | null) {
     this.url = url;
     this.token = token;
-    console.log(`DaemonConnection constructor`, url, token);
     this.connect();
   }
 
@@ -147,7 +135,6 @@ export class DaemonConnection {
     }
 
     this.pendingRequests.clear();
-    console.trace(`Closing socket`);
     this.socket?.close();
     this.socket = null;
     this.setState(`disconnected`);

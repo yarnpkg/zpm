@@ -86,6 +86,16 @@ function TaskRow({task, match, label, status, isActive, onRun, onStop, onSelect,
   const isRunning = status === `running`;
   const canRun = !(task.isLongLived && isRunning);
 
+  const prefixLen = task.workspace.length + 1;
+  const adjustedRanges: Array<[number, number]> = [];
+  for (const [start, end] of match?.ranges ?? []) {
+    const s = Math.max(0, start - prefixLen);
+    const e = Math.min(label.length, end - prefixLen);
+    if (s < e) {
+      adjustedRanges.push([s, e]);
+    }
+  }
+
   return (
     <li>
       <div
@@ -95,7 +105,7 @@ function TaskRow({task, match, label, status, isActive, onRun, onStop, onSelect,
       >
         <span className={`inline-block h-1.5 w-1.5 flex-none rounded-full ${statusDotColor(status)}`} />
         <span className={`flex-1 truncate`}>
-          <HighlightedText text={label} ranges={match?.ranges ?? []} />
+          <HighlightedText text={label} ranges={adjustedRanges} />
         </span>
         {isRunning ? (
           <button
