@@ -46,7 +46,6 @@ export function TaskTerminal({taskIds}: {taskIds: Array<string>}) {
     };
   }, []);
 
-  // Clear the terminal and load buffered output when task IDs change.
   useEffect(() => {
     const term = termRef.current;
     if (!term || !daemon || taskIds.length === 0) return undefined;
@@ -55,6 +54,20 @@ export function TaskTerminal({taskIds}: {taskIds: Array<string>}) {
     term.reset();
 
     let cancelled = false;
+    let buffered = false;
+    const pending: Array<string> = [];
+    const taskIdSet = new Set(taskIds);
+
+    const unsubscribe = daemon.onNotification((notification: DaemonNotification) => {
+      if (cancelled) return;
+      if (notification.type === `taskOutputLine` && taskIdSet.has(notification.taskId)) {
+        if (buffered) {
+          term.writeln(notification.line);
+        } else {
+          pending.push(notification.line);
+        }
+      }
+    });
 
     for (const taskId of taskIds) {
       daemon.getTaskOutput(taskId).then(lines => {
@@ -64,27 +77,19 @@ export function TaskTerminal({taskIds}: {taskIds: Array<string>}) {
         }
       }).catch(() => {
         // Task output may not be available yet.
+      }).finally(() => {
+        if (cancelled) return;
+        buffered = true;
+        for (const line of pending)
+          term.writeln(line);
+        pending.length = 0;
       });
     }
 
     return () => {
       cancelled = true;
+      unsubscribe();
     };
-  }, [daemon, taskIds]);
-
-  // Subscribe to live output notifications for the given task IDs.
-  useEffect(() => {
-    if (!daemon || taskIds.length === 0) return undefined;
-
-    const taskIdSet = new Set(taskIds);
-
-    const unsubscribe = daemon.onNotification((notification: DaemonNotification) => {
-      if (notification.type === `taskOutputLine` && taskIdSet.has(notification.taskId)) {
-        termRef.current?.writeln(notification.line);
-      }
-    });
-
-    return unsubscribe;
   }, [daemon, taskIds]);
 
   return (

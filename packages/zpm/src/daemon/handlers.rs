@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tokio::sync::oneshot;
 use zpm_utils::ToFileString;
 
@@ -35,6 +37,7 @@ pub async fn dispatch_request(
     project: &Project,
     port: u16,
     auth_token: Option<&str>,
+    shutdown_notify: &Arc<tokio::sync::Notify>,
 ) -> DaemonResponse {
     match request {
         DaemonRequest::Ping => DaemonResponse::Pong,
@@ -87,7 +90,7 @@ pub async fn dispatch_request(
         }
 
         DaemonRequest::Shutdown => {
-            handle_shutdown(command_tx).await
+            handle_shutdown(command_tx, shutdown_notify).await
         }
     }
 }
@@ -236,17 +239,21 @@ async fn handle_get_task_history(command_tx: &CommandSender) -> DaemonResponse {
     }
 }
 
-async fn handle_shutdown(command_tx: &CommandSender) -> DaemonResponse {
-    let (response_tx, _response_rx) = oneshot::channel();
+async fn handle_shutdown(command_tx: &CommandSender, shutdown_notify: &Arc<tokio::sync::Notify>) -> DaemonResponse {
+    let (response_tx, response_rx) = oneshot::channel();
 
     if command_tx
         .send(CoordinatorCommand::Shutdown { response_tx })
         .is_err()
     {
+        shutdown_notify.notify_one();
         return DaemonResponse::Error {
             message: "Coordinator channel closed".to_string(),
         };
     }
+
+    let _ = response_rx.await;
+    shutdown_notify.notify_one();
 
     DaemonResponse::ShuttingDown
 }

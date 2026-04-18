@@ -30,6 +30,7 @@ pub struct ConnectionContext {
     pub auth_token: Option<String>,
     pub project: Arc<Project>,
     pub port: u16,
+    pub shutdown_notify: Arc<tokio::sync::Notify>,
 }
 
 /// Guard that removes subscription when dropped (via command)
@@ -291,6 +292,7 @@ pub async fn handle_connection(
                             &ctx.project,
                             ctx.port,
                             ctx.auth_token.as_deref(),
+                            &ctx.shutdown_notify,
                         )
                         .await;
 

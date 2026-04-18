@@ -137,6 +137,7 @@ async fn run_daemon_internal(
         auth_token,
         project: project.clone(),
         port,
+        shutdown_notify: shutdown_notify.clone(),
     });
 
     // Run accept loop until shutdown is signaled
