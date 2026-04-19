@@ -16,7 +16,8 @@
       "Bash(yarn test:integration:*)",
       "Bash(cargo check:*)",
       "Bash(git stash:*)",
-      "Bash(RUST_BACKTRACE=1 ~/Repositories/zpm/target/release/yarn-bin:*)"
+      "Bash(RUST_BACKTRACE=1 ~/Repositories/zpm/target/release/yarn-bin:*)",
+      "Bash(/Users/mael.nison/Repositories/zpm/target/release/yarn-bin install *)"
     ],
     "deny": [],
     "ask": []
