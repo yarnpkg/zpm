@@ -62,8 +62,9 @@ function ProjectImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
 
     return () => {
       cancelled = true;
-      if (blobUrl)
+      if (blobUrl) {
         URL.revokeObjectURL(blobUrl);
+      }
     };
   }, [daemon, src, isRelative]);
 
