@@ -553,15 +553,21 @@ async fn handle_command(
         CoordinatorCommand::ReadFile { path, project_cwd, response_tx } => {
             let full_path = project_cwd.with_join_str(&path);
 
+            let (Ok(canonical_root), Ok(canonical_file)) = (project_cwd.fs_canonicalize(), full_path.fs_canonicalize()) else {
+                let _ = response_tx.send(None);
+                return false;
+            };
+
             // Security: validate the resolved path stays under the project root
-            let canonical_root = project_cwd.fs_canonicalize().unwrap_or(project_cwd.clone());
-            let canonical_file = full_path.fs_canonicalize().unwrap_or(full_path.clone());
             if !canonical_root.contains(&canonical_file) {
                 let _ = response_tx.send(None);
-            } else {
-                let result = read_file_content(&full_path);
-                let _ = response_tx.send(result);
+                return false;
             }
+
+            let result
+                = read_file_content(&full_path);
+
+            let _ = response_tx.send(result);
         }
 
         CoordinatorCommand::WatchFile { path, response_tx } => {
