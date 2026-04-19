@@ -43,6 +43,7 @@ function ProjectImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
       return undefined;
 
     let cancelled = false;
+    let blobUrl: string | null = null;
 
     daemon.readFile(src).then(result => {
       if (cancelled || !result)
@@ -52,7 +53,8 @@ function ProjectImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
         setDataUri(`data:${getMimeType(src)};base64,${result.content}`);
       } else {
         const blob = new Blob([result.content], {type: getMimeType(src)});
-        setDataUri(URL.createObjectURL(blob));
+        blobUrl = URL.createObjectURL(blob);
+        setDataUri(blobUrl);
       }
     }).catch(() => {
       // Image not available
@@ -60,6 +62,8 @@ function ProjectImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
 
     return () => {
       cancelled = true;
+      if (blobUrl)
+        URL.revokeObjectURL(blobUrl);
     };
   }, [daemon, src, isRelative]);
 

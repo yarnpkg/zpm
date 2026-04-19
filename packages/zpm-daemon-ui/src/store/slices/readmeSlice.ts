@@ -26,9 +26,6 @@ export const readmeSlice = createSlice({
     fetchReadmeFailed(state) {
       state.loading = false;
     },
-    readmeChanged(state, action: PayloadAction<{content: string | null}>) {
-      state.content = action.payload.content;
-    },
     clearReadme() {
       return initialState;
     },
@@ -37,7 +34,7 @@ export const readmeSlice = createSlice({
 
 export const {
   fetchReadmeStarted, fetchReadmeSucceeded, fetchReadmeFailed,
-  readmeChanged, clearReadme,
+  clearReadme,
 } = readmeSlice.actions;
 
 export const selectReadmeContent = (state: RootState) => state.readme.content;
