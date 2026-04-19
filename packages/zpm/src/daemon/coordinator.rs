@@ -556,7 +556,7 @@ async fn handle_command(
             // Security: validate the resolved path stays under the project root
             let canonical_root = project_cwd.fs_canonicalize().unwrap_or(project_cwd.clone());
             let canonical_file = full_path.fs_canonicalize().unwrap_or(full_path.clone());
-            if !canonical_file.to_file_string().starts_with(&canonical_root.to_file_string()) {
+            if !canonical_root.contains(&canonical_file) {
                 let _ = response_tx.send(None);
             } else {
                 let result = read_file_content(&full_path);
