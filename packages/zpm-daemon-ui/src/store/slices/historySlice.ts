@@ -1,7 +1,7 @@
-import {createSelector, createSlice, type PayloadAction}   from '@reduxjs/toolkit';
+import {createSelector, createSlice, type PayloadAction} from '@reduxjs/toolkit';
 
-import type {LongLivedTaskInfo, TaskEvent, TaskEventState} from '../../generated/daemon-protocol';
-import type {RootState}                                    from '../index';
+import type {TaskEvent, TaskEventState}                  from '../../generated/daemon-protocol';
+import type {RootState}                                  from '../index';
 
 const MAX_INSTANCES = 3;
 
@@ -13,7 +13,6 @@ export interface TaskInstance {
 
 export interface HistorySliceState {
   events: Array<TaskEvent>;
-  runningLongLived: Record<string, LongLivedTaskInfo>;
   /** Number of currently-running instances per task key (workspace:taskName). */
   runningCounts: Record<string, number>;
   loading: boolean;
@@ -21,7 +20,6 @@ export interface HistorySliceState {
 
 const initialState: HistorySliceState = {
   events: [],
-  runningLongLived: {},
   runningCounts: {},
   loading: false,
 };
@@ -36,11 +34,12 @@ function computeRunningCounts(events: Array<TaskEvent>): Record<string, number> 
   for (const event of events)
     latest.set(event.contextualTaskId, event.state);
 
-
   // Count running instances per task key
   const counts: Record<string, number> = {};
   for (const [contextualTaskId, state] of latest) {
-    if (!isRunningState(state.type)) continue;
+    if (!isRunningState(state.type))
+      continue;
+
     const key = taskKeyFromContextualId(contextualTaskId);
     if (key) {
       counts[key] = (counts[key] ?? 0) + 1;
@@ -51,14 +50,9 @@ function computeRunningCounts(events: Array<TaskEvent>): Record<string, number> 
 
 function taskKeyFromContextualId(contextualTaskId: string): string | null {
   const atIdx = contextualTaskId.lastIndexOf(`@`);
-  if (atIdx === -1) return null;
+  if (atIdx === -1)
+    return null;
   return contextualTaskId.slice(0, atIdx);
-}
-
-function longLivedKeyFromTaskKey(taskKey: string): {workspace: string, taskName: string} | null {
-  const colonIdx = taskKey.indexOf(`:`);
-  if (colonIdx === -1) return null;
-  return {workspace: taskKey.slice(0, colonIdx), taskName: taskKey.slice(colonIdx + 1)};
 }
 
 export const historySlice = createSlice({
@@ -70,16 +64,8 @@ export const historySlice = createSlice({
     },
     fetchHistorySucceeded(state, action: PayloadAction<{
       events: Array<TaskEvent>;
-      longLivedTasks: Array<LongLivedTaskInfo>;
     }>) {
       state.events = action.payload.events;
-      state.runningLongLived = {};
-      for (const task of action.payload.longLivedTasks) {
-        if (task.status !== `stopped`) {
-          const key = `${task.workspace}:${task.taskName}`;
-          state.runningLongLived[key] = task;
-        }
-      }
       state.runningCounts = computeRunningCounts(action.payload.events);
       state.loading = false;
     },
@@ -87,7 +73,7 @@ export const historySlice = createSlice({
       state.loading = false;
     },
 
-    taskStarted(state, action: PayloadAction<{taskId: string, isLongLived: boolean}>) {
+    taskStarted(state, action: PayloadAction<{taskId: string}>) {
       state.events.push({
         date: Date.now(),
         contextualTaskId: action.payload.taskId,
@@ -96,31 +82,25 @@ export const historySlice = createSlice({
       const key = taskKeyFromContextualId(action.payload.taskId);
       if (key) {
         state.runningCounts[key] = (state.runningCounts[key] ?? 0) + 1;
-        if (action.payload.isLongLived) {
-          const parsed = longLivedKeyFromTaskKey(key);
-          if (parsed) {
-            state.runningLongLived[key] = {
-              workspace: parsed.workspace,
-              taskName: parsed.taskName,
-              status: {running: {started_at_ms: Date.now(), process_id: null}},
-            };
-          }
-        }
       }
     },
     taskCompleted(state, action: PayloadAction<{taskId: string, exitCode: number, signal: number | null}>) {
       const {taskId, exitCode, signal} = action.payload;
+
       const eventState: TaskEventState = exitCode === 0
         ? {type: `completed`}
         : {type: `failed`, exit_code: exitCode, signal};
+
       state.events.push({date: Date.now(), contextualTaskId: taskId, state: eventState});
 
       const key = taskKeyFromContextualId(taskId);
       if (key) {
         const count = (state.runningCounts[key] ?? 1) - 1;
-        if (count > 0) state.runningCounts[key] = count;
-        else delete state.runningCounts[key];
-        delete state.runningLongLived[key];
+        if (count > 0) {
+          state.runningCounts[key] = count;
+        } else {
+          delete state.runningCounts[key];
+        }
       }
     },
     taskCancelled(state, action: PayloadAction<{taskId: string}>) {
@@ -129,12 +109,15 @@ export const historySlice = createSlice({
         contextualTaskId: action.payload.taskId,
         state: {type: `cancelled`},
       });
+
       const key = taskKeyFromContextualId(action.payload.taskId);
       if (key) {
         const count = (state.runningCounts[key] ?? 1) - 1;
-        if (count > 0) state.runningCounts[key] = count;
-        else delete state.runningCounts[key];
-        delete state.runningLongLived[key];
+        if (count > 0) {
+          state.runningCounts[key] = count;
+        } else {
+          delete state.runningCounts[key];
+        }
       }
     },
     taskWarmUpComplete(state, action: PayloadAction<{taskId: string}>) {
@@ -188,7 +171,8 @@ export const selectInstanceMap = createSelector(
     const map = new Map<string, Array<TaskInstance>>();
     for (const [contextualTaskId, info] of latest) {
       const key = taskKeyFromContextualId(contextualTaskId);
-      if (!key) continue;
+      if (!key)
+        continue;
 
       let list = map.get(key);
       if (!list) {

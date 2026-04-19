@@ -181,8 +181,10 @@ export function JobsLayout() {
   const activeInstanceId = useAppSelector(selectActiveInstanceId);
 
   const grouped = useMemo(() => {
-    if (declaredTasks.length === 0 && !tasksLoading) return new Map<string, Array<MatchedTask>>();
-    if (declaredTasks.length === 0) return null;
+    if (declaredTasks.length === 0 && !tasksLoading)
+      return new Map<string, Array<MatchedTask>>();
+    if (declaredTasks.length === 0)
+      return null;
 
     const matched: Array<MatchedTask> = [];
     const needle = filter.trim();
@@ -216,9 +218,12 @@ export function JobsLayout() {
   }, [declaredTasks, tasksLoading, filter]);
 
   const handleRun = useCallback((task: DeclaredTaskInfo) => {
-    if (!daemon) return;
+    if (!daemon)
+      return;
+
     const key = taskKey(task.workspace, task.taskName);
     const contextId = crypto.randomUUID();
+
     daemon.pushTasks(
       [{name: task.taskName, args: []}],
       task.workspace,
@@ -232,7 +237,9 @@ export function JobsLayout() {
   }, [daemon, dispatch]);
 
   const handleStop = useCallback((task: DeclaredTaskInfo) => {
-    if (!daemon) return;
+    if (!daemon)
+      return;
+
     daemon.stopTask(task.taskName, task.workspace);
   }, [daemon]);
 
@@ -245,12 +252,14 @@ export function JobsLayout() {
   }, [dispatch]);
 
   const activeTaskIds = useMemo(() => {
-    if (!activeTaskKey) return [];
-
-    if (activeInstanceId) return [activeInstanceId];
+    if (!activeTaskKey)
+      return [];
+    if (activeInstanceId)
+      return [activeInstanceId];
 
     const instances = instanceMap.get(activeTaskKey);
-    if (!instances || instances.length === 0) return [];
+    if (!instances || instances.length === 0)
+      return [];
 
     return instances.map(inst => inst.contextualTaskId).reverse();
   }, [activeTaskKey, activeInstanceId, instanceMap]);

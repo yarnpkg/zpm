@@ -16,7 +16,7 @@ export function DaemonProvider({children}: {children: React.ReactNode}) {
     const conn = new DaemonConnection(url, token);
     setConnection(conn);
 
-    const unbind = bindDaemonToStore(conn, store.dispatch, store.getState);
+    const unbind = bindDaemonToStore(conn, store.dispatch);
 
     return () => {
       unbind();

@@ -8,11 +8,17 @@ function isSeparator(ch: string): boolean {
 }
 
 function isWordBoundary(target: string, i: number): boolean {
-  if (i === 0) return true;
+  if (i === 0)
+    return true;
+
   const prev = target.charAt(i - 1);
   const curr = target.charAt(i);
-  if (isSeparator(prev)) return true;
-  if (prev >= `a` && prev <= `z` && curr >= `A` && curr <= `Z`) return true;
+
+  if (isSeparator(prev))
+    return true;
+  if (prev >= `a` && prev <= `z` && curr >= `A` && curr <= `Z`)
+    return true;
+
   return false;
 }
 
@@ -35,7 +41,8 @@ export function fuzzyMatch(pattern: string, target: string): FuzzyMatch | null {
     let j = 0;
     for (let i = 0; i < pLower.length; i++) {
       j = tLower.indexOf(pLower.charAt(i), j);
-      if (j === -1) return null;
+      if (j === -1)
+        return null;
       j++;
     }
   }
@@ -53,13 +60,17 @@ export function fuzzyMatch(pattern: string, target: string): FuzzyMatch | null {
   }
 
   function solve(pi: number, ti: number, consec: boolean): number {
-    if (pi === pLen) return 0;
-    if (ti === tLen) return -Infinity;
-    if (tLen - ti < pLen - pi) return -Infinity; // Not enough chars left.
+    if (pi === pLen)
+      return 0;
+    if (ti === tLen)
+      return -Infinity;
+    if (tLen - ti < pLen - pi)
+      return -Infinity;
 
     const k = key(pi, ti, consec);
     const cached = memo.get(k);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined)
+      return cached;
 
     let best = -Infinity;
     let bestPath: Array<number> = [];
@@ -67,25 +78,26 @@ export function fuzzyMatch(pattern: string, target: string): FuzzyMatch | null {
     const ch = pLower.charAt(pi);
 
     for (let t = ti; t <= tLen - (pLen - pi); t++) {
-      if (tLower.charAt(t) !== ch) continue;
+      if (tLower.charAt(t) !== ch)
+        continue;
 
       let bonus = 0;
 
-      // Word boundary bonus.
-      if (isWordBoundary(target, t)) bonus += 6;
+      if (isWordBoundary(target, t))
+        bonus += 6;
+      if (pattern.charAt(pi) === target.charAt(t))
+        bonus += 1;
 
-      // Exact case bonus.
-      if (pattern.charAt(pi) === target.charAt(t)) bonus += 1;
-
-      // Consecutive bonus: if previous char was matched at t-1.
       const isConsec = t === ti && consec;
-      if (isConsec) bonus += 8;
+      if (isConsec)
+        bonus += 8;
 
       // Penalty for distance from start.
       bonus -= t * 0.1;
 
       const rest = solve(pi + 1, t + 1, true);
-      if (rest === -Infinity) continue;
+      if (rest === -Infinity)
+        continue;
 
       // Also try skipping (not being consecutive for the next char).
       const skipRest = solve(pi + 1, t + 1, false);
@@ -112,10 +124,12 @@ export function fuzzyMatch(pattern: string, target: string): FuzzyMatch | null {
   }
 
   const score = solve(0, 0, false);
-  if (score === -Infinity) return null;
+  if (score === -Infinity)
+    return null;
 
   const indices = pathMemo.get(key(0, 0, false)) ?? [];
-  if (indices.length === 0) return null;
+  if (indices.length === 0)
+    return null;
 
   // Merge consecutive indices into ranges.
   const ranges: Array<[number, number]> = [];

@@ -1,5 +1,6 @@
 import '@xterm/xterm/css/xterm.css';
 import {FitAddon}                from '@xterm/addon-fit';
+import {WebLinksAddon}           from '@xterm/addon-web-links';
 import {Terminal}                from '@xterm/xterm';
 import {useEffect, useRef}       from 'react';
 
@@ -13,7 +14,8 @@ export function TaskTerminal({taskIds}: {taskIds: Array<string>}) {
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return undefined;
+    if (!container)
+      return undefined;
 
     const term = new Terminal({
       convertEol: true,
@@ -29,6 +31,7 @@ export function TaskTerminal({taskIds}: {taskIds: Array<string>}) {
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon());
     term.open(container);
     fitAddon.fit();
 
@@ -48,7 +51,8 @@ export function TaskTerminal({taskIds}: {taskIds: Array<string>}) {
 
   useEffect(() => {
     const term = termRef.current;
-    if (!term || !daemon || taskIds.length === 0) return undefined;
+    if (!term || !daemon || taskIds.length === 0)
+      return undefined;
 
     term.clear();
     term.reset();
@@ -59,7 +63,9 @@ export function TaskTerminal({taskIds}: {taskIds: Array<string>}) {
     const taskIdSet = new Set(taskIds);
 
     const unsubscribe = daemon.onNotification((notification: DaemonNotification) => {
-      if (cancelled) return;
+      if (cancelled)
+        return;
+
       if (notification.type === `taskOutputLine` && taskIdSet.has(notification.taskId)) {
         if (buffered) {
           term.writeln(notification.line);
@@ -71,14 +77,18 @@ export function TaskTerminal({taskIds}: {taskIds: Array<string>}) {
 
     for (const taskId of taskIds) {
       daemon.getTaskOutput(taskId).then(lines => {
-        if (cancelled) return;
+        if (cancelled)
+          return;
+
         for (const line of lines) {
           term.writeln(line.line);
         }
       }).catch(() => {
         // Task output may not be available yet.
       }).finally(() => {
-        if (cancelled) return;
+        if (cancelled)
+          return;
+
         buffered = true;
         for (const line of pending)
           term.writeln(line);

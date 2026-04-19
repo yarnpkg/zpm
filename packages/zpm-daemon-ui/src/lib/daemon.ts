@@ -46,7 +46,6 @@ export function getDaemonUrl(): string {
   if (getTokenFromQueryString())
     return `ws://${window.location.host}`;
 
-
   const port = __DAEMON_PORT__ !== `` ? __DAEMON_PORT__ : String(DEFAULT_PORT);
   return `ws://127.0.0.1:${port}`;
 }
@@ -143,7 +142,6 @@ export class DaemonConnection {
   async request(request: DaemonRequest): Promise<DaemonResponse> {
     if (this.state !== `connected` || !this.socket)
       throw new Error(`Not connected to daemon`);
-
 
     const requestId = this.nextRequestId++;
 
@@ -284,7 +282,9 @@ export class DaemonConnection {
     this.socket = socket;
 
     socket.addEventListener(`open`, () => {
-      if (this.socket !== socket) return;
+      if (this.socket !== socket)
+        return;
+
       this.setState(`connected`);
     });
 
@@ -335,10 +335,13 @@ export class DaemonConnection {
     });
 
     socket.addEventListener(`close`, () => {
-      if (this.socket !== socket) return;
+      if (this.socket !== socket)
+        return;
+
       this.socket = null;
 
-      if (rejected) return;
+      if (rejected)
+        return;
 
       this.setState(`disconnected`);
       this.rejectAllPending(`Connection closed`);

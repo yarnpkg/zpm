@@ -6,7 +6,7 @@
     "@yarnpkg/documentation": "105cf01165fcffc02e5a354f6734895d01fbb152899e635b1d1b152a04e48c904810d457a85b09d642ca9061bf01e02dc203eabdf0c3a29ddf20036b31e43cde",
     "@yarnpkg/monorepo": "69da8dfb279601957675174872ca291310b88ff5e33fcc0060b11a3503fdef48f629515bcf7d74fbe12b83b2a84b7f0249cf8154978d15bc6a3fa3c634624f94",
     "@yarnpkg/zpm-constraints": "5c6a5440669d0a0244f06ebc980b86b246235da3b4da7fc5c2bbdc0bf61ef23e95d8bb9f2fdb7402d20cf0ac8461b086799a0e0e606054b85e9ac472be1dd9d2",
-    "@yarnpkg/zpm-daemon-ui": "7bd736750404ae582ced539e457bb72945200d21df65fee71e258ae1e79d3a3410c22c5b899b32214b0a7187444de636a28096f600b9d33f2fa201cea9655fb6",
+    "@yarnpkg/zpm-daemon-ui": "133f804d1b3623d08ac5ed2d55525bb7a39b9e1fde762240adf6b446f3678fdfbfa8d8a5c88a1bbaab0d7cb25a2312030915f9e2f896757b420909c66a0d19af",
     "acceptance-tests": "9e727eab8feee6a4383eb4abec8384decbaf30d2ee37dca7d2c8fc1e6afff399509282042cc605746ffaca0ed8f7e5b964b88327ecd50c5077d7a44b7ea4a5ae",
     "pkg-tests-core": "e68bd05709df7e934e9746828824feeea05a4de108f2b55ee6a387664e1b30d412f19108824e87263a3227358fe1fa7277207b8b041372caf95bae441452d0bf",
     "pkg-tests-fixtures": "92f85e94a04dac9a6700073012b6c7d15c0ce80b32ef51f4463566cae3b95f69f6416e3bc1c62bd4bc400d07a559c93bcfe1c6fc5e0e0320f1c338b127f2388d",
@@ -9590,6 +9590,13 @@
       "resolution": {
         "resolution": "@xterm/addon-fit@npm:0.11.0",
         "version": "0.11.0"
+      }
+    },
+    "@xterm/addon-web-links@npm:^0.12.0": {
+      "checksum": "4daa53ad5f255afa68b3c05793b9536b90788a6c88190de3de73c40eec5e08633a6cadff2a8dbb5f76b55895f9a26c49d15babc05f870b8a8a2991f8ba0a6e0f",
+      "resolution": {
+        "resolution": "@xterm/addon-web-links@npm:0.12.0",
+        "version": "0.12.0"
       }
     },
     "@xterm/xterm@npm:^6.0.0": {
