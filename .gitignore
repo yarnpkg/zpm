@@ -21,4 +21,7 @@ profile.json.gz
 /.yarn/cache
 /.yarn/unplugged
 
+/.claude
+/.superset
+
 /bench-*.json
