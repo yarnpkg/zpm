@@ -8,5 +8,8 @@
   "include": [
     "src",
     "vite.config.ts"
+  ],
+  "exclude": [
+    "src/tailwind-scoped-preflight.js"
   ]
 }

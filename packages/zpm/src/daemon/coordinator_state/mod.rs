@@ -1,5 +1,6 @@
 mod context_registry;
 mod event_history;
+mod file_watcher;
 mod long_lived_registry;
 mod output_buffer;
 mod process_registry;
@@ -9,6 +10,7 @@ mod taskfile_watcher;
 
 pub use context_registry::ContextRegistry;
 pub use event_history::{EventHistory, now_ms};
+pub use file_watcher::FileWatcher;
 pub use long_lived_registry::LongLivedRegistry;
 pub use output_buffer::OutputBuffer;
 pub use process_registry::ProcessRegistry;
@@ -22,6 +24,10 @@ pub use super::scheduler::{ContextualTaskId, PreparedTask};
 use std::collections::BTreeSet;
 
 use zpm_tasks::TaskId;
+
+use std::path::PathBuf;
+
+use tokio::sync::mpsc;
 
 use super::ipc::DaemonNotification;
 
@@ -49,10 +55,17 @@ pub struct CoordinatorState {
     pub output: OutputBuffer,
     pub event_history: EventHistory,
     pub taskfile_watcher: TaskfileWatcher,
+    pub file_watcher: FileWatcher,
 }
 
 impl CoordinatorState {
-    pub fn new(output_buffer_max_lines: usize, max_closed_tasks: usize) -> Self {
+    pub fn new(
+        output_buffer_max_lines: usize,
+        max_closed_tasks: usize,
+        file_notify_tx: mpsc::UnboundedSender<notify::Event>,
+        taskfile_notify_tx: mpsc::UnboundedSender<notify::Event>,
+        project_cwd: PathBuf,
+    ) -> Self {
         Self {
             graph: TaskGraph::new(),
             contexts: ContextRegistry::new(),
@@ -61,7 +74,8 @@ impl CoordinatorState {
             subscriptions: SubscriptionManager::new(),
             output: OutputBuffer::new(output_buffer_max_lines, max_closed_tasks),
             event_history: EventHistory::new(),
-            taskfile_watcher: TaskfileWatcher::new(),
+            taskfile_watcher: TaskfileWatcher::new(taskfile_notify_tx),
+            file_watcher: FileWatcher::new(file_notify_tx, project_cwd),
         }
     }
 

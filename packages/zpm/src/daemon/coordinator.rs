@@ -1,5 +1,6 @@
 use std::{collections::HashSet, io::Write, sync::Arc, time::{Duration, SystemTime}};
 
+use base64::Engine;
 use tokio::sync::{mpsc, oneshot};
 use zpm_primitives::Ident;
 use zpm_tasks::{parse as parse_taskfile, TaskId, TaskName};
@@ -92,6 +93,16 @@ async fn run_daemon_internal(
     let command_tx_for_executor
         = command_tx.clone();
 
+    // Notify channels: senders go to FileWatcher/TaskfileWatcher (via coordinator loop),
+    // receivers go to bridge tasks that forward events as commands
+    let (file_notify_tx, file_notify_rx)
+        = mpsc::unbounded_channel::<notify::Event>();
+    let (taskfile_notify_tx, taskfile_notify_rx)
+        = mpsc::unbounded_channel::<notify::Event>();
+
+    let project_cwd_for_loop
+        = project.project_cwd.to_file_string();
+
     tokio::spawn(async move {
         run_coordinator_loop(
             project_for_loop,
@@ -101,6 +112,9 @@ async fn run_daemon_internal(
             output_buffer_max_lines,
             max_closed_tasks,
             default_warmup_period,
+            file_notify_tx,
+            taskfile_notify_tx,
+            project_cwd_for_loop,
         ).await;
     });
 
@@ -116,11 +130,18 @@ async fn run_daemon_internal(
         watch_project_root(project_root, command_tx_for_watcher, shutdown_for_watcher).await;
     });
 
-    // Taskfile watcher
+    // Taskfile watcher — bridge native OS events to coordinator commands
     let command_tx_for_taskfile_watcher
         = command_tx.clone();
     tokio::spawn(async move {
-        watch_taskfiles(command_tx_for_taskfile_watcher).await;
+        bridge_notify_events(taskfile_notify_rx, command_tx_for_taskfile_watcher, |event| CoordinatorCommand::NotifyTaskfileEvent { event }).await;
+    });
+
+    // File watcher — bridge native OS events to coordinator commands
+    let command_tx_for_file_watcher
+        = command_tx.clone();
+    tokio::spawn(async move {
+        bridge_notify_events(file_notify_rx, command_tx_for_file_watcher, |event| CoordinatorCommand::NotifyFileEvent { event }).await;
     });
 
     // Signal handler
@@ -157,9 +178,18 @@ async fn run_coordinator_loop(
     output_buffer_max_lines: usize,
     max_closed_tasks: usize,
     default_warmup_period: Duration,
+    file_notify_tx: mpsc::UnboundedSender<notify::Event>,
+    taskfile_notify_tx: mpsc::UnboundedSender<notify::Event>,
+    project_cwd: String,
 ) {
     let mut state
-        = CoordinatorState::new(output_buffer_max_lines, max_closed_tasks);
+        = CoordinatorState::new(
+            output_buffer_max_lines,
+            max_closed_tasks,
+            file_notify_tx,
+            taskfile_notify_tx,
+            std::path::PathBuf::from(project_cwd),
+        );
 
     initialize_taskfile_watcher(&mut state.taskfile_watcher, &project);
 
@@ -492,13 +522,13 @@ async fn handle_command(
             state.subscriptions.remove(subscription_id);
         }
 
-        CoordinatorCommand::PollTaskfiles => {
+        CoordinatorCommand::NotifyTaskfileEvent { event } => {
             let changed_workspaces
-                = state.taskfile_watcher.poll_changes();
+                = state.taskfile_watcher.resolve_changed_workspaces(&event);
 
             if !changed_workspaces.is_empty() {
-                for workspace_ident in changed_workspaces {
-                    reload_taskfile(&workspace_ident, state, project);
+                for workspace_ident in &changed_workspaces {
+                    reload_taskfile(workspace_ident, state, project);
                 }
 
                 let (tasks, errors)
@@ -518,6 +548,33 @@ async fn handle_command(
 
         CoordinatorCommand::SubscribeGlobal { response_tx } => {
             let _ = response_tx.send(state.subscriptions.subscribe_global());
+        }
+
+        CoordinatorCommand::ReadFile { path, project_cwd, response_tx } => {
+            let full_path = project_cwd.with_join_str(&path);
+
+            // Security: validate the resolved path stays under the project root
+            let canonical_root = project_cwd.fs_canonicalize().unwrap_or(project_cwd.clone());
+            let canonical_file = full_path.fs_canonicalize().unwrap_or(full_path.clone());
+            if !canonical_file.to_file_string().starts_with(&canonical_root.to_file_string()) {
+                let _ = response_tx.send(None);
+            } else {
+                let result = read_file_content(&full_path);
+                let _ = response_tx.send(result);
+            }
+        }
+
+        CoordinatorCommand::WatchFile { path, response_tx } => {
+            state.file_watcher.register(&path);
+            let _ = response_tx.send(());
+        }
+
+        CoordinatorCommand::NotifyFileEvent { event } => {
+            for path in state.file_watcher.resolve_event_paths(&event) {
+                state.subscriptions.broadcast(DaemonNotification::FileChanged {
+                    path,
+                });
+            }
         }
 
         CoordinatorCommand::Shutdown { response_tx } => {
@@ -838,13 +895,39 @@ fn initialize_taskfile_watcher(watcher: &mut TaskfileWatcher, project: &Project)
     }
 }
 
-/// Periodically send PollTaskfiles commands to the coordinator.
-async fn watch_taskfiles(command_tx: CommandSender) {
-    loop {
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        if command_tx.send(CoordinatorCommand::PollTaskfiles).is_err() {
-            break;
+/// Bridge native file-system events from a notify watcher into coordinator commands.
+async fn bridge_notify_events(
+    mut notify_rx: mpsc::UnboundedReceiver<notify::Event>,
+    command_tx: CommandSender,
+    make_command: impl Fn(notify::Event) -> CoordinatorCommand,
+) {
+    use notify::EventKind;
+    while let Some(event) = notify_rx.recv().await {
+        match event.kind {
+            EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) => {
+                if command_tx.send(make_command(event)).is_err() {
+                    break;
+                }
+            }
+            _ => {}
         }
+    }
+}
+
+fn is_binary_extension(path: &Path) -> bool {
+    let ext = path.to_file_string();
+    let ext = ext.rsplit('.').next().unwrap_or("");
+    matches!(ext, "png" | "jpg" | "jpeg" | "gif" | "bmp" | "ico" | "webp" | "svg" | "pdf" | "woff" | "woff2" | "ttf" | "eot" | "otf" | "zip" | "tar" | "gz")
+}
+
+fn read_file_content(path: &Path) -> Option<(String, String)> {
+    if is_binary_extension(path) {
+        let bytes = std::fs::read(path.to_file_string()).ok()?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Some((encoded, "base64".to_string()))
+    } else {
+        let text = path.fs_read_text().ok()?;
+        Some((text, "utf-8".to_string()))
     }
 }
 

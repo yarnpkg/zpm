@@ -92,6 +92,14 @@ pub async fn dispatch_request(
         DaemonRequest::Shutdown => {
             handle_shutdown(command_tx, shutdown_notify).await
         }
+
+        DaemonRequest::ReadFile { path } => {
+            handle_read_file(path, command_tx, project).await
+        }
+
+        DaemonRequest::WatchFile { path } => {
+            handle_watch_file(path, command_tx).await
+        }
     }
 }
 
@@ -276,6 +284,47 @@ async fn handle_list_declared_tasks(command_tx: &CommandSender) -> DaemonRespons
         CoordinatorCommand::ListDeclaredTasks { response_tx }
     }).await {
         Ok((tasks, errors)) => DaemonResponse::DeclaredTaskList { tasks, errors },
+        Err(e) => e,
+    }
+}
+
+async fn handle_read_file(
+    path: String,
+    command_tx: &CommandSender,
+    project: &Project,
+) -> DaemonResponse {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::ReadFile {
+            path: path.clone(),
+            project_cwd: project.project_cwd.clone(),
+            response_tx,
+        }
+    }).await {
+        Ok(Some((content, encoding))) => DaemonResponse::FileContent {
+            path,
+            content: Some(content),
+            encoding,
+        },
+        Ok(None) => DaemonResponse::FileContent {
+            path,
+            content: None,
+            encoding: "utf-8".to_string(),
+        },
+        Err(e) => e,
+    }
+}
+
+async fn handle_watch_file(
+    path: String,
+    command_tx: &CommandSender,
+) -> DaemonResponse {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::WatchFile {
+            path,
+            response_tx,
+        }
+    }).await {
+        Ok(()) => DaemonResponse::FileWatched,
         Err(e) => e,
     }
 }

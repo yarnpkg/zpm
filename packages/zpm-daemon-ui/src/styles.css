@@ -1,1 +1,9 @@
-@import "tailwindcss";
+@import "tailwindcss/theme";
+@import "tailwindcss/utilities";
+
+@import "github-markdown-css/github-markdown-light.css";
+
+@plugin "tailwindcss-scoped-preflight" {
+  isolationStrategy: outside;
+  selector: .markdown-body;
+}

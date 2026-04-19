@@ -221,6 +221,24 @@ export class DaemonConnection {
     return {tasks: response.tasks, errors: response.errors};
   }
 
+  async readFile(path: string): Promise<{content: string, encoding: string} | null> {
+    const response = await this.request({type: `readFile`, path});
+    if (response.type === `error`)
+      throw new Error(response.message);
+    if (response.type !== `fileContent`)
+      throw new Error(`Unexpected response: ${response.type}`);
+    if (response.content === null)
+      return null;
+    return {content: response.content, encoding: response.encoding};
+  }
+
+  async watchFile(path: string): Promise<void> {
+    const response = await this.request({type: `watchFile`, path});
+    if (response.type === `error`) {
+      throw new Error(response.message);
+    }
+  }
+
   async shutdown(): Promise<void> {
     const response = await this.request({type: `shutdown`});
     if (response.type === `error`) {

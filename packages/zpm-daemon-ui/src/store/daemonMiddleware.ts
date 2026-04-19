@@ -5,6 +5,7 @@ import type {AppDispatch}                                                       
 import {setConnectionError, setConnectionStatus}                                                                                                     from './slices/connectionSlice';
 import {clearHistory, fetchHistoryFailed, fetchHistoryStarted, fetchHistorySucceeded, taskCancelled, taskCompleted, taskStarted, taskWarmUpComplete} from './slices/historySlice';
 import {clearMeta, fetchMetaFailed, fetchMetaStarted, fetchMetaSucceeded}                                                                            from './slices/metaSlice';
+import {clearReadme, fetchReadmeStarted, fetchReadmeSucceeded, fetchReadmeFailed}                                                                    from './slices/readmeSlice';
 import {clearStats, fetchStatsFailed, fetchStatsStarted, fetchStatsSucceeded}                                                                        from './slices/statsSlice';
 import {clearTasks, fetchTasksFailed, fetchTasksStarted, fetchTasksSucceeded}                                                                        from './slices/tasksSlice';
 
@@ -63,6 +64,25 @@ async function initialDataLoad(daemon: DaemonConnection, dispatch: AppDispatch) 
     dispatch(fetchStatsFailed());
 
   startStatsPolling(daemon, dispatch);
+
+  loadReadme(daemon, dispatch);
+}
+
+async function loadReadme(daemon: DaemonConnection, dispatch: AppDispatch) {
+  dispatch(fetchReadmeStarted());
+
+  try {
+    await daemon.watchFile(`README.md`);
+  } catch {
+    // Ignore watch errors
+  }
+
+  try {
+    const result = await daemon.readFile(`README.md`);
+    dispatch(fetchReadmeSucceeded({content: result?.content ?? null}));
+  } catch {
+    dispatch(fetchReadmeFailed());
+  }
 }
 
 /**
@@ -90,6 +110,7 @@ export function bindDaemonToStore(
       dispatch(clearTasks());
       dispatch(clearStats());
       dispatch(clearHistory());
+      dispatch(clearReadme());
 
       if (state === `rejected`) {
         dispatch(setConnectionError(daemon.getConnectionError()));
@@ -119,6 +140,10 @@ export function bindDaemonToStore(
         break;
       case `declaredTasksChanged`:
         dispatch(fetchTasksSucceeded({tasks: notification.tasks, errors: notification.errors}));
+        break;
+      case `fileChanged`:
+        if (notification.path === `README.md`)
+          loadReadme(daemon, dispatch);
         break;
       // taskOutputLine is handled directly by TaskTerminal, not stored in Redux.
     }

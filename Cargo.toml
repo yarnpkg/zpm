@@ -66,6 +66,7 @@ itertools = "0.14.0"
 indexmap = {version = "2.11.0", features = ["serde"]}
 interprocess = { version = "2.2.2", features = ["tokio"] }
 mimalloc = "0.1.43"
+notify = "7"
 num = "0.4.3"
 pretty_assertions = "1.4.1"
 pnp = { git = "https://github.com/yarnpkg/pnp-rs.git", branch = "mael/pub-vpath" }

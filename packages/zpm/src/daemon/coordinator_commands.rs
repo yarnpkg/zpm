@@ -1,4 +1,5 @@
 use tokio::sync::{mpsc, oneshot};
+use zpm_utils::Path;
 
 use super::{
     coordinator_state::SubscriptionId,
@@ -114,8 +115,28 @@ pub enum CoordinatorCommand {
         subscription_id: SubscriptionId,
     },
 
-    /// Timer tick: poll taskfiles for changes and reload if needed.
-    PollTaskfiles,
+    /// Read a file relative to the project root.
+    ReadFile {
+        path: String,
+        project_cwd: Path,
+        response_tx: oneshot::Sender<Option<(String, String)>>,
+    },
+
+    /// Watch a file relative to the project root for changes.
+    WatchFile {
+        path: String,
+        response_tx: oneshot::Sender<()>,
+    },
+
+    /// A native file-system event arrived from the notify watcher.
+    NotifyFileEvent {
+        event: notify::Event,
+    },
+
+    /// A native file-system event arrived from the taskfile watcher.
+    NotifyTaskfileEvent {
+        event: notify::Event,
+    },
 
     /// List all declared tasks from cached taskfiles.
     ListDeclaredTasks {

@@ -6,7 +6,7 @@
     "@yarnpkg/documentation": "105cf01165fcffc02e5a354f6734895d01fbb152899e635b1d1b152a04e48c904810d457a85b09d642ca9061bf01e02dc203eabdf0c3a29ddf20036b31e43cde",
     "@yarnpkg/monorepo": "69da8dfb279601957675174872ca291310b88ff5e33fcc0060b11a3503fdef48f629515bcf7d74fbe12b83b2a84b7f0249cf8154978d15bc6a3fa3c634624f94",
     "@yarnpkg/zpm-constraints": "5c6a5440669d0a0244f06ebc980b86b246235da3b4da7fc5c2bbdc0bf61ef23e95d8bb9f2fdb7402d20cf0ac8461b086799a0e0e606054b85e9ac472be1dd9d2",
-    "@yarnpkg/zpm-daemon-ui": "133f804d1b3623d08ac5ed2d55525bb7a39b9e1fde762240adf6b446f3678fdfbfa8d8a5c88a1bbaab0d7cb25a2312030915f9e2f896757b420909c66a0d19af",
+    "@yarnpkg/zpm-daemon-ui": "64b5d42d2f7f1113e164b3c3137385b0d72824abc41ca9e4d852261f61018f037cbe0b0d5c97d7b3529075ff8b6ceead5803590a5ff9ee3564a785732262564a",
     "acceptance-tests": "9e727eab8feee6a4383eb4abec8384decbaf30d2ee37dca7d2c8fc1e6afff399509282042cc605746ffaca0ed8f7e5b964b88327ecd50c5077d7a44b7ea4a5ae",
     "pkg-tests-core": "e68bd05709df7e934e9746828824feeea05a4de108f2b55ee6a387664e1b30d412f19108824e87263a3227358fe1fa7277207b8b041372caf95bae441452d0bf",
     "pkg-tests-fixtures": "92f85e94a04dac9a6700073012b6c7d15c0ce80b32ef51f4463566cae3b95f69f6416e3bc1c62bd4bc400d07a559c93bcfe1c6fc5e0e0320f1c338b127f2388d",
@@ -16547,6 +16547,13 @@
         }
       }
     },
+    "gemoji@npm:^8.0.0": {
+      "checksum": "06f8c55d7f821535e5bd74fa1b3312bf30d436fd27069b07aa10f538fec0089bdaecbe4c5f219a6465b0397d38118e6e8266aec3a2d32ca8d6061601b66dba22",
+      "resolution": {
+        "resolution": "gemoji@npm:8.1.0",
+        "version": "8.1.0"
+      }
+    },
     "gensync@npm:^1.0.0-beta.2": {
       "checksum": "09497cb9f94ceb0dc371ca5f392427ed5d79b498624a9be85ec4ede03790f8ee5d40f524ee13cd8dedba5cf47a2685b3fc6325e7bae18735f66ee7903f4d3e4d",
       "resolution": {
@@ -16688,6 +16695,13 @@
       "resolution": {
         "resolution": "github-from-package@npm:0.0.0",
         "version": "0.0.0"
+      }
+    },
+    "github-markdown-css@npm:^5.9.0": {
+      "checksum": "73185264ece58cb52a0f4fc4dd2613865090d7439d5cb7eee6545b3cac2919aa9139969ce7a8a8820e4acc70373a89b24562a014d22c6295d054191a4c39de85",
+      "resolution": {
+        "resolution": "github-markdown-css@npm:5.9.0",
+        "version": "5.9.0"
       }
     },
     "github-slugger@npm:^2.0.0": {
@@ -17127,6 +17141,19 @@
         }
       }
     },
+    "hast-util-find-and-replace@npm:^5.0.0": {
+      "checksum": "e1e6a0277e49cc3dc9e6972dd75b1502abe875609e42574355ae6d0cf288301a7c56b617d6d6424b6ecb4e93c64f85abfcd0c2145843c0c238f5a7867a821067",
+      "resolution": {
+        "resolution": "hast-util-find-and-replace@npm:5.0.1",
+        "version": "5.0.1",
+        "dependencies": {
+          "@types/hast": "^3.0.0",
+          "escape-string-regexp": "^5.0.0",
+          "hast-util-is-element": "^3.0.0",
+          "unist-util-visit-parents": "^6.0.0"
+        }
+      }
+    },
     "hast-util-format@npm:^1.0.0": {
       "checksum": "91316b601badaa73b5ab39347ea8f59caebf1fcc20ea39c7513ada6b067790d3c0a03899cd6c8d4f2ef7171ff7b5eba7a6d219d79ea1071e1691982b620f4d25",
       "resolution": {
@@ -17493,6 +17520,13 @@
       "resolution": {
         "resolution": "html-escaper@npm:2.0.2",
         "version": "2.0.2"
+      }
+    },
+    "html-url-attributes@npm:^3.0.0": {
+      "checksum": "b5a430fbca41628d0a01e043ecaedfda4031293f83f8c8a54f76a623a6a513b3f9d584bed06876bee283e21e5e86d2b65ed2d94efb747328aee0081af20e691c",
+      "resolution": {
+        "resolution": "html-url-attributes@npm:3.0.1",
+        "version": "3.0.1"
       }
     },
     "html-void-elements@npm:^3.0.0": {
@@ -23567,6 +23601,30 @@
         }
       }
     },
+    "react-markdown@npm:^10.1.0": {
+      "checksum": "143a5fa936940df04778e96419e63721ed0ea66a677c5651247ba2153e3a9eeb5777f57941f58b7cfae60db2b11ddae60f6d542adf7d92fa68acedfb3a228a6b",
+      "resolution": {
+        "resolution": "react-markdown@npm:10.1.0",
+        "version": "10.1.0",
+        "dependencies": {
+          "@types/hast": "^3.0.0",
+          "@types/mdast": "^4.0.0",
+          "devlop": "^1.0.0",
+          "hast-util-to-jsx-runtime": "^2.0.0",
+          "html-url-attributes": "^3.0.0",
+          "mdast-util-to-hast": "^13.0.0",
+          "remark-parse": "^11.0.0",
+          "remark-rehype": "^11.0.0",
+          "unified": "^11.0.0",
+          "unist-util-visit": "^5.0.0",
+          "vfile": "^6.0.0"
+        },
+        "peerDependencies": {
+          "@types/react": ">=18",
+          "react": ">=18"
+        }
+      }
+    },
     "react-reconciler@npm:^0.26.2": {
       "checksum": "488300272b2a756a9c0ee5962c03f51ff9961908b97b6ef36b670d90a729d12d45b810baf133e36d16b9c5060a0b4f00eb44cc565357ac16aea6e2c6970c7599",
       "resolution": {
@@ -24025,6 +24083,80 @@
         "dependencies": {
           "@types/hast": "^3.0.0",
           "hast-util-format": "^1.0.0"
+        }
+      }
+    },
+    "rehype-github-alert@npm:^1.0.0": {
+      "checksum": "6c44d457fd60e0d7ac3a85669d9c50125297d3b4707c169f1c5652253f42c1a27a7393d47538419f26124cff8ed2219d96d4380b74dbd2b1a1f83b571f3635c2",
+      "resolution": {
+        "resolution": "rehype-github-alert@npm:1.0.0",
+        "version": "1.0.0",
+        "dependencies": {
+          "@types/hast": "^3.0.0",
+          "hast-util-whitespace": "^3.0.0",
+          "unist-util-visit": "^5.0.0"
+        }
+      }
+    },
+    "rehype-github-color@npm:^1.0.0": {
+      "checksum": "7a0d6478fbf5708f4f9475d794c26af4681204deb80c0f64b00a3d2c3c3e2814e00ed69aa211a25c1f385773f5dd0a74652c7450b6cf4b36b559170e23847453",
+      "resolution": {
+        "resolution": "rehype-github-color@npm:1.0.0",
+        "version": "1.0.0",
+        "dependencies": {
+          "@types/hast": "^3.0.0",
+          "hast-util-to-string": "^3.0.0",
+          "unist-util-visit": "^5.0.0"
+        }
+      }
+    },
+    "rehype-github-dir@npm:^1.0.0": {
+      "checksum": "cac96df84b249fd68430066b6b279b11313bd28d93ec73ae9743f7d47b314ea51c3737d3a4b047807e8a6c4fa40ebc72a2cab0749a53c6be210e23d9f6b08f9a",
+      "resolution": {
+        "resolution": "rehype-github-dir@npm:1.0.0",
+        "version": "1.0.0",
+        "dependencies": {
+          "@types/hast": "^3.0.0",
+          "hast-util-to-string": "^3.0.0",
+          "unist-util-visit": "^5.0.0"
+        }
+      }
+    },
+    "rehype-github-emoji@npm:^1.0.0": {
+      "checksum": "5123d375df5966018778fa80e284335a7a30cf82073a88c90d7dcca97ff66f7049f6db717b320ccab8b271f46f0e632ef755992ad4b2b862f8834d748eab20e8",
+      "resolution": {
+        "resolution": "rehype-github-emoji@npm:1.0.0",
+        "version": "1.0.0",
+        "dependencies": {
+          "@types/hast": "^3.0.0",
+          "escape-string-regexp": "^5.0.0",
+          "gemoji": "^8.0.0",
+          "hast-util-find-and-replace": "^5.0.0",
+          "hast-util-is-element": "^3.0.0"
+        }
+      }
+    },
+    "rehype-github-heading@npm:^1.0.0": {
+      "checksum": "4020e0abd2e3f3ac9d70ca6fd432d7864d9710e9615909a02c9abfaa426e6216979c0df4faf174e3249170b461a0f53bb818d821da7460225ee338adaa409435",
+      "resolution": {
+        "resolution": "rehype-github-heading@npm:1.0.0",
+        "version": "1.0.0",
+        "dependencies": {
+          "@types/hast": "^3.0.0",
+          "github-slugger": "^2.0.0",
+          "hast-util-to-string": "^3.0.0",
+          "unist-util-visit": "^5.0.0"
+        }
+      }
+    },
+    "rehype-github-image@npm:^1.0.0": {
+      "checksum": "cde0e60c3841b583e7d0e9ea5456d80f25b0ebc87667b820632c431cad45d21f061c5b3bf7dd502476c2791b2aac724ad1b6d72dfe510e5580d1d3bba3de8f99",
+      "resolution": {
+        "resolution": "rehype-github-image@npm:1.0.0",
+        "version": "1.0.0",
+        "dependencies": {
+          "@types/hast": "^3.0.0",
+          "unist-util-visit-parents": "^6.0.0"
         }
       }
     },
@@ -25960,6 +26092,17 @@
       "resolution": {
         "resolution": "tailwindcss@npm:4.1.14",
         "version": "4.1.14"
+      }
+    },
+    "tailwindcss-scoped-preflight@npm:^4.0.1": {
+      "checksum": "261d7f678f2b1ea70ed7606f3ed7f53da3e29d9e0b52df32df2e8e6d1541a8d19fed8af5c8827e3f8411015c7224e4298e5501900115dc6a47f36531799d7c22",
+      "resolution": {
+        "resolution": "tailwindcss-scoped-preflight@npm:4.0.1",
+        "version": "4.0.1",
+        "peerDependencies": {
+          "postcss": "^8",
+          "tailwindcss": "^4"
+        }
       }
     },
     "tapable@npm:^1.0.0": {

@@ -36,7 +36,8 @@ impl SubscriptionFilter {
             DaemonNotification::TaskCancelled { task_id } => (task_id, self.status_scope),
             DaemonNotification::TaskWarmUpComplete { task_id } => (task_id, self.status_scope),
             // Global notifications are always delivered.
-            DaemonNotification::DeclaredTasksChanged { .. } => return true,
+            DaemonNotification::DeclaredTasksChanged { .. }
+            | DaemonNotification::FileChanged { .. } => return true,
         };
 
         let is_explicit_target = self.target_task_ids.contains(task_id);
@@ -141,7 +142,7 @@ impl SubscriptionManager {
 
     pub fn broadcast(&self, notification: DaemonNotification) {
         // Global notifications go through the broadcast channel.
-        if matches!(notification, DaemonNotification::DeclaredTasksChanged { .. }) {
+        if matches!(notification, DaemonNotification::DeclaredTasksChanged { .. } | DaemonNotification::FileChanged { .. }) {
             let _ = self.global_tx.send(notification);
             return;
         }

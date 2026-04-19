@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::time::SystemTime;
 
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use tokio::sync::mpsc;
 use zpm_primitives::Ident;
 use zpm_tasks::TaskFile;
-use zpm_utils::Path;
+use zpm_utils::{Path, ToFileString};
 
-/// Tracks which files contribute to each workspace's taskfile
-/// and caches their modification times for change detection.
 pub struct TaskfileWatcher {
+    watcher: RecommendedWatcher,
+
     /// For each workspace, the set of file paths that were read
     /// when resolving its taskfile (includes the main taskfile + includes).
     workspace_sources: BTreeMap<Ident, Vec<Path>>,
@@ -15,20 +16,23 @@ pub struct TaskfileWatcher {
     /// Reverse index: file path -> set of workspaces that depend on it.
     file_to_workspaces: HashMap<Path, HashSet<Ident>>,
 
-    /// Last known modification time for each watched file.
-    /// `None` means the file did not exist at last check.
-    file_mtimes: HashMap<Path, Option<SystemTime>>,
-
     /// Cached parsed taskfiles per workspace (the raw parse, not resolved).
     cached_taskfiles: BTreeMap<Ident, TaskFile>,
 }
 
 impl TaskfileWatcher {
-    pub fn new() -> Self {
+    pub fn new(event_tx: mpsc::UnboundedSender<notify::Event>) -> Self {
+        let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                let _ = event_tx.send(event);
+            }
+        })
+        .expect("failed to create taskfile watcher");
+
         Self {
+            watcher,
             workspace_sources: BTreeMap::new(),
             file_to_workspaces: HashMap::new(),
-            file_mtimes: HashMap::new(),
             cached_taskfiles: BTreeMap::new(),
         }
     }
@@ -43,7 +47,7 @@ impl TaskfileWatcher {
                     ws_set.remove(&workspace);
                     if ws_set.is_empty() {
                         self.file_to_workspaces.remove(path);
-                        self.file_mtimes.remove(path);
+                        let _ = self.watcher.unwatch(std::path::Path::new(&path.to_file_string()));
                     }
                 }
             }
@@ -51,18 +55,37 @@ impl TaskfileWatcher {
 
         // Add new entries
         for path in &sources {
+            let is_new = !self.file_to_workspaces.contains_key(path);
+
             self.file_to_workspaces
                 .entry(path.clone())
                 .or_default()
                 .insert(workspace.clone());
 
-            // Snapshot mtime if not already tracked
-            self.file_mtimes
-                .entry(path.clone())
-                .or_insert_with(|| get_mtime(path));
+            if is_new {
+                let _ = self
+                    .watcher
+                    .watch(std::path::Path::new(&path.to_file_string()), RecursiveMode::NonRecursive);
+            }
         }
 
         self.workspace_sources.insert(workspace, sources);
+    }
+
+    /// Resolve a notify event into the set of workspace idents whose
+    /// taskfiles may have changed.
+    pub fn resolve_changed_workspaces(&self, event: &notify::Event) -> Vec<Ident> {
+        let mut changed: HashSet<Ident> = HashSet::new();
+
+        for abs_path in &event.paths {
+            if let Ok(path) = Path::try_from(abs_path.as_path()) {
+                if let Some(workspaces) = self.file_to_workspaces.get(&path) {
+                    changed.extend(workspaces.iter().cloned());
+                }
+            }
+        }
+
+        changed.into_iter().collect()
     }
 
     /// Update the cached taskfile for a workspace.
@@ -75,28 +98,6 @@ impl TaskfileWatcher {
         self.cached_taskfiles.remove(workspace);
     }
 
-    /// Check all watched files for modification time changes.
-    /// Returns the set of workspace idents whose taskfiles need reloading.
-    pub fn poll_changes(&mut self) -> Vec<Ident> {
-        let mut changed_workspaces: HashSet<Ident>
-            = HashSet::new();
-
-        for (path, old_mtime) in &mut self.file_mtimes {
-            let current_mtime
-                = get_mtime(path);
-
-            if current_mtime != *old_mtime {
-                *old_mtime = current_mtime;
-
-                if let Some(workspaces) = self.file_to_workspaces.get(path) {
-                    changed_workspaces.extend(workspaces.iter().cloned());
-                }
-            }
-        }
-
-        changed_workspaces.into_iter().collect()
-    }
-
     /// Read access to cached taskfiles.
     pub fn cached_taskfiles(&self) -> &BTreeMap<Ident, TaskFile> {
         &self.cached_taskfiles
@@ -104,11 +105,6 @@ impl TaskfileWatcher {
 
     /// Number of files being watched.
     pub fn watched_file_count(&self) -> usize {
-        self.file_mtimes.len()
+        self.file_to_workspaces.len()
     }
-}
-
-/// Get the modification time of a file, or `None` if it doesn't exist.
-fn get_mtime(path: &Path) -> Option<SystemTime> {
-    path.fs_metadata().ok().and_then(|m| m.modified().ok())
 }

@@ -73,6 +73,14 @@ pub enum DaemonRequest {
     GetAuthUrl,
     /// Request graceful daemon shutdown
     Shutdown,
+    /// Read a file's content, relative to the project root.
+    ReadFile {
+        path: String,
+    },
+    /// Watch a file for changes, relative to the project root.
+    WatchFile {
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -269,6 +277,12 @@ pub enum DaemonResponse {
         url: String,
     },
     ShuttingDown,
+    FileContent {
+        path: String,
+        content: Option<String>,
+        encoding: String,
+    },
+    FileWatched,
     Error {
         message: String,
     },
@@ -305,6 +319,9 @@ pub enum DaemonNotification {
     DeclaredTasksChanged {
         tasks: Vec<DeclaredTaskInfo>,
         errors: Vec<TaskfileError>,
+    },
+    FileChanged {
+        path: String,
     },
 }
 

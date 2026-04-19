@@ -22,6 +22,7 @@ http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 itertools = { workspace = true }
+notify = { workspace = true }
 open = { workspace = true }
 pubgrub = { workspace = true }
 version-ranges = { workspace = true }

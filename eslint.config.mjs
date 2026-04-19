@@ -12,6 +12,8 @@ export default [
       `tests/acceptance-tests/pkg-tests-fixtures`,
       `documentation/.astro`,
       `packages/zpm/src/constraints/constraints.tpl.js`,
+      `**/generated/**`,
+      `**/*.generated.ts`,
     ],
   },
   ...eslintConfig,
