@@ -8,51 +8,63 @@ use zpm_utils::{get_system_string, FromFileString, Path};
 use crate::{cache, errors::Error, http::fetch, manifest::VersionPackageManagerReference};
 
 async fn install_native_from_zpm(source: &cache::CacheKey, binary_name: &Path) -> Result<Command, Error> {
+    let binary_name_for_cache
+        = binary_name.clone();
+
     let cache_path = cache::ensure(source, |p| async move {
         if let Some(npm_url) = source.to_npm_url() {
             let tgz_data
                 = fetch(&npm_url).await?;
 
-            let tar_data
-                = zpm_formats::tar::unpack_tgz(&tgz_data)?;
+            let binary_name
+                = binary_name_for_cache;
+            let p
+                = p.clone();
 
-            let entries
-                = zpm_formats::tar::entries_from_tar(&tar_data)?
-                    .into_iter()
-                    .strip_first_segment()
-                    .collect::<Vec<_>>();
+            tokio::task::spawn_blocking(move || -> Result<(), Error> {
+                let tar_data
+                    = zpm_formats::tar::unpack_tgz(&tgz_data)?;
 
-            let package_json
-                = entries.iter()
-                    .find(|entry| entry.name.basename() == Some("package.json"))
-                    .expect("Expected a package manifest entry to exist");
+                let entries
+                    = zpm_formats::tar::entries_from_tar(&tar_data)?
+                        .into_iter()
+                        .strip_first_segment()
+                        .collect::<Vec<_>>();
 
-            #[derive(Deserialize)]
-            #[serde(rename_all = "camelCase")]
-            struct Bin {
-                yarn: Path,
-            }
+                let package_json
+                    = entries.iter()
+                        .find(|entry| entry.name.basename() == Some("package.json"))
+                        .expect("Expected a package manifest entry to exist");
 
-            #[derive(Deserialize)]
-            struct PackageJson {
-                bin: Bin,
-            }
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Bin {
+                    yarn: Path,
+                }
 
-            let package_json_data: PackageJson
-                = JsonDocument::hydrate_from_slice(&package_json.data.as_ref())?;
+                #[derive(Deserialize)]
+                struct PackageJson {
+                    bin: Bin,
+                }
 
-            let mut bin_entry
-                = entries.into_iter()
-                    .find(|entry| entry.name == package_json_data.bin.yarn)
-                    .expect("Expected the main bin entry to be found");
+                let package_json_data: PackageJson
+                    = JsonDocument::hydrate_from_slice(&package_json.data.as_ref())?;
 
-            bin_entry.name
-                = binary_name.clone();
+                let mut bin_entry
+                    = entries.into_iter()
+                        .find(|entry| entry.name == package_json_data.bin.yarn)
+                        .expect("Expected the main bin entry to be found");
 
-            let target_dir = p
-                .with_join_str("bin");
+                bin_entry.name
+                    = binary_name;
 
-            entries_to_disk(&[bin_entry], &target_dir)?;
+                let target_dir = p
+                    .with_join_str("bin");
+
+                entries_to_disk(&[bin_entry], &target_dir)?;
+
+                Ok(())
+            }).await??;
         } else {
             let repo_url
                 = source.to_url();
@@ -63,9 +75,12 @@ async fn install_native_from_zpm(source: &cache::CacheKey, binary_name: &Path) -
             let entries
                 = zpm_formats::zip::entries_from_zip(&zip_data)?;
 
+            let binary_name
+                = binary_name_for_cache;
+
             let bin_entry
                 = entries.into_iter()
-                    .find(|entry| entry.name == binary_name.clone())
+                    .find(|entry| entry.name == binary_name)
                     .expect("Expected the main bin entry to be found");
 
             let target_dir = p
@@ -109,16 +124,20 @@ async fn install_node_js_from_package(source: &cache::CacheKey, main_file: &Path
         let compressed_data
             = fetch(&source.to_url()).await?;
 
-        let data
-            = zpm_formats::tar::unpack_tgz(&compressed_data)?;
+        tokio::task::spawn_blocking(move || -> Result<(), Error> {
+            let data
+                = zpm_formats::tar::unpack_tgz(&compressed_data)?;
 
-        let entries
-            = zpm_formats::tar::entries_from_tar(&data)?
-                .into_iter()
-                .strip_first_segment()
-                .collect::<Vec<_>>();
+            let entries
+                = zpm_formats::tar::entries_from_tar(&data)?
+                    .into_iter()
+                    .strip_first_segment()
+                    .collect::<Vec<_>>();
 
-        zpm_formats::entries_to_disk(&entries, &p)?;
+            zpm_formats::entries_to_disk(&entries, &p)?;
+
+            Ok(())
+        }).await??;
 
         Ok(())
     }).await?;
@@ -141,15 +160,15 @@ pub async fn install_package_manager(package_manager: &VersionPackageManagerRefe
         platform: get_system_string().to_string(),
     };
 
-    if zpm_semver::Range::from_file_string(">=6.0.0-0").unwrap().check(&package_manager.version) {
+    if zpm_semver::Range::from_file_string(">=6.0.0-0").unwrap().check_ignore_rc(&package_manager.version) {
         return install_native_from_zpm(&version_platform, &Path::from_str("yarn-bin").unwrap()).await;
     }
 
-    if zpm_semver::Range::from_file_string(">=2.0.0-0").unwrap().check(&package_manager.version) {
+    if zpm_semver::Range::from_file_string(">=2.0.0-0").unwrap().check_ignore_rc(&package_manager.version) {
         return install_node_js_from_url(&version_platform).await;
     }
 
-    if zpm_semver::Range::from_file_string(">=0.0.0-0").unwrap().check(&package_manager.version) {
+    if zpm_semver::Range::from_file_string(">=0.0.0-0").unwrap().check_ignore_rc(&package_manager.version) {
         return install_node_js_from_package(&version_platform, &Path::from_str("bin/yarn.js").unwrap()).await;
     }
 

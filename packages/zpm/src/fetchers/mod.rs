@@ -1,4 +1,4 @@
-use zpm_primitives::{Locator, Reference, RegistryReference};
+use zpm_primitives::{Locator, PypiRegistryReference, Reference, RegistryReference};
 use zpm_utils::{Hash64, Path, ToHumanString};
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +13,7 @@ pub mod git;
 pub mod link;
 pub mod npm;
 pub mod patch;
+pub mod pypi;
 pub mod portal;
 pub mod tarball;
 pub mod url;
@@ -147,6 +148,22 @@ pub fn try_fetch_locator_sync(context: InstallContext, locator: &Locator, is_moc
                 None => Ok(SyncFetchAttempt::Failure(dependencies)),
             },
 
+        Reference::PypiShorthand(params)
+            => match pypi::try_fetch_locator_sync(&context, locator, &PypiRegistryReference {
+                ident: locator.ident.clone(),
+                version: params.version.clone(),
+                url: params.url.clone(),
+            }, is_mock_request)? {
+                Some(fetch_result) => Ok(SyncFetchAttempt::Success(fetch_result)),
+                None => Ok(SyncFetchAttempt::Failure(dependencies)),
+            },
+
+        Reference::PypiRegistry(params)
+            => match pypi::try_fetch_locator_sync(&context, locator, params, is_mock_request)? {
+                Some(fetch_result) => Ok(SyncFetchAttempt::Success(fetch_result)),
+                None => Ok(SyncFetchAttempt::Failure(dependencies)),
+            },
+
         Reference::Link(params)
             => Ok(SyncFetchAttempt::Success(link::fetch_locator(&context, locator, params, dependencies)?)),
 
@@ -175,25 +192,35 @@ pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, i
             => portal::fetch_locator(&context, locator, params, dependencies),
 
         Reference::Url(params)
-            => url::fetch_locator(&context, locator, params).await,
+            => url::fetch_locator(&context, locator, params, is_mock_request).await,
 
         Reference::Tarball(params)
-            => tarball::fetch_locator(&context, locator, params, dependencies).await,
+            => tarball::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
 
         Reference::Folder(params)
-            => folder::fetch_locator(&context, locator, params, dependencies).await,
+            => folder::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
 
         Reference::Git(params)
-            => git::fetch_locator(&context, locator, params).await,
+            => git::fetch_locator(&context, locator, params, is_mock_request).await,
 
         Reference::Patch(params)
-            => patch::fetch_locator(&context, locator, params, dependencies).await,
+            => patch::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
 
         Reference::Shorthand(params)
             => npm::fetch_locator(&context, locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone(), url: None}, is_mock_request).await,
 
         Reference::Registry(params)
             => npm::fetch_locator(&context, locator, params, is_mock_request).await,
+
+        Reference::PypiShorthand(params)
+            => pypi::fetch_locator(&context, locator, &PypiRegistryReference {
+                ident: locator.ident.clone(),
+                version: params.version.clone(),
+                url: params.url.clone(),
+            }, is_mock_request).await,
+
+        Reference::PypiRegistry(params)
+            => pypi::fetch_locator(&context, locator, params, is_mock_request).await,
 
         Reference::WorkspaceIdent(params)
             => workspace::fetch_locator_ident(&context, locator, params),

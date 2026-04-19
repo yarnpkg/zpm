@@ -1,0 +1,62 @@
+name: Post Benchmark Comment
+
+on:
+  workflow_run:
+    workflows: ["Benchmarks"]
+    types:
+      - completed
+
+jobs:
+  comment:
+    name: Post benchmark comment
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Download comment artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: perfcheck-comment
+          path: perfcheck-comment
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post or update comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const commentBody = fs.readFileSync('perfcheck-comment/comment-body.md', 'utf8');
+            const prNumber = parseInt(fs.readFileSync('perfcheck-comment/pr-number.txt', 'utf8').trim(), 10);
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('## ⏱️ Benchmark Results')
+            );
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody,
+              });
+              console.log(`Updated comment ${botComment.id} on PR #${prNumber}`);
+            } else {
+              // Create new comment
+              const { data: newComment } = await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: commentBody,
+              });
+              console.log(`Created comment ${newComment.id} on PR #${prNumber}`);
+            }

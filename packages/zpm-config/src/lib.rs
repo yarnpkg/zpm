@@ -154,12 +154,12 @@ trait MergeSettings: Sized {
         &self,
         path: &[&str],
         value_str: &str,
-    ) -> Result<AbstractValue, HydrateError>;
+    ) -> Result<AbstractValue<'_>, HydrateError>;
 
     fn get(
         &self,
         path: &[&str],
-    ) -> Result<ConfigurationEntry, GetError>;
+    ) -> Result<ConfigurationEntry<'_>, GetError>;
 
     fn merge<F: Fn() -> Self>(
         context: &ConfigurationContext,
@@ -172,7 +172,7 @@ trait MergeSettings: Sized {
         &self,
         label: Option<String>,
         description: Option<String>,
-    ) -> tree::Node;
+    ) -> tree::Node<'_>;
 }
 
 impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::fmt::Debug, T: MergeSettings + Serialize + std::fmt::Debug> MergeSettings for BTreeMap<K, T> {
@@ -182,7 +182,7 @@ impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::f
         unimplemented!("Configuration maps cannot be returned directly just yet");
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
         let Some(key_str) = path.first() else {
             unimplemented!("Configuration maps cannot be returned directly just yet");
         };
@@ -198,7 +198,7 @@ impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::f
         entry.hydrate(&path[1..], value_str)
     }
 
-    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         let Some(key_str) = path.first() else {
             return Ok(ConfigurationEntry {
                 value: AbstractValue::new(Container::new(self)),
@@ -253,7 +253,7 @@ impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::f
         result
     }
 
-    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node<'_> {
         let mut children
             = tree::Map::new();
 
@@ -322,7 +322,7 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
         Ok(result)
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
         let Some(key_str) = path.first() else {
             unimplemented!("Configuration lists cannot be returned directly just yet");
         };
@@ -338,7 +338,7 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
         self[key].hydrate(&path[1..], value_str)
     }
 
-    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         let Some(key_str) = path.first() else {
             return Ok(ConfigurationEntry {
                 value: AbstractValue::new(Container::new(self)),
@@ -390,7 +390,7 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
         result
     }
 
-    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node<'_> {
         let mut children
             = Vec::new();
 
@@ -443,7 +443,7 @@ impl MergeSettings for Setting<Path> {
         })
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
         if let Some(key) = path.first() {
             return Err(HydrateError::KeyNotFound(key.to_string()));
         }
@@ -455,7 +455,7 @@ impl MergeSettings for Setting<Path> {
         Ok(AbstractValue::new(value))
     }
 
-    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         if let Some(key) = path.first() {
             return Err(GetError::KeyNotFound(key.to_string()));
         }
@@ -469,9 +469,9 @@ impl MergeSettings for Setting<Path> {
     fn merge<F: FnOnce() -> Self>(context: &ConfigurationContext, user: Partial<Self::Intermediate>, project: Partial<Self::Intermediate>, default: F) -> Self {
         if let Partial::Value(project_rel_path) = project {
             let path = context
-                .package_cwd
+                .project_cwd
                 .as_ref()
-                .expect("A package directory should be set since we're using the value provided through the project config")
+                .expect("A project directory should be set since we're using the value provided through the project config")
                 .with_join(&project_rel_path);
 
             return Self {
@@ -496,7 +496,7 @@ impl MergeSettings for Setting<Path> {
         default()
     }
 
-    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node<'_> {
         let mut fields
             = tree::Map::new();
 
@@ -538,7 +538,7 @@ macro_rules! merge_settings_impl {
                 })
             }
 
-            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
                 if let Some(key) = path.first() {
                     return Err(HydrateError::KeyNotFound(key.to_string()));
                 }
@@ -550,7 +550,7 @@ macro_rules! merge_settings_impl {
                 Ok(AbstractValue::new(value))
             }
 
-            fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+            fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
                 if let Some(key) = path.first() {
                     return Err(GetError::KeyNotFound(key.to_string()));
                 }
@@ -579,7 +579,7 @@ macro_rules! merge_settings_impl {
                 default()
             }
 
-            fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+            fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node<'_> {
                 let mut fields
                     = tree::Map::new();
 
@@ -605,6 +605,11 @@ macro_rules! merge_settings_impl {
             }
         }
 
+    };
+}
+
+macro_rules! merge_optional_settings_impl {
+    ($type:ty) => {
         impl MergeSettings for Setting<Option<$type>> {
             type Intermediate = Option<Interpolated<$type>>;
 
@@ -619,7 +624,7 @@ macro_rules! merge_settings_impl {
                 })
             }
 
-            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
                 if let Some(key) = path.first() {
                     return Err(HydrateError::KeyNotFound(key.to_string()));
                 }
@@ -631,7 +636,7 @@ macro_rules! merge_settings_impl {
                 Ok(AbstractValue::new(value))
             }
 
-            fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+            fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
                 if !path.is_empty() {
                     return Err(GetError::KeyNotFound(path.join(".").to_string()));
                 }
@@ -653,10 +658,16 @@ macro_rules! merge_settings_impl {
                         )
                     });
 
-                    return inner.map_or_else(default, |inner| Self {
-                        value: Some(inner.value),
-                        source: inner.source,
-                    });
+                    return inner.map_or_else(
+                        || Self {
+                            value: None,
+                            source: Source::User,
+                        },
+                        |inner| Self {
+                            value: Some(inner.value),
+                            source: inner.source,
+                        }
+                    );
                 }
 
                 if let Partial::Value(project) = project {
@@ -669,16 +680,22 @@ macro_rules! merge_settings_impl {
                         )
                     });
 
-                    return inner.map_or_else(default, |inner| Self {
-                        value: Some(inner.value),
-                        source: inner.source,
-                    });
+                    return inner.map_or_else(
+                        || Self {
+                            value: None,
+                            source: Source::Project,
+                        },
+                        |inner| Self {
+                            value: Some(inner.value),
+                            source: inner.source,
+                        }
+                    );
                 }
 
                 default()
             }
 
-            fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {
+            fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node<'_> {
                 let mut fields
                     = tree::Map::new();
 
@@ -698,8 +715,8 @@ macro_rules! merge_settings_impl {
 
                 tree::Node {
                     label,
-                    value: Some(AbstractValue::new(self.value.clone())),
-                    children: None,
+                    value: None,
+                    children: Some(tree::TreeNodeChildren::Map(fields)),
                 }
             }
         }
@@ -709,6 +726,12 @@ macro_rules! merge_settings_impl {
 macro_rules! merge_settings {
     ($type:ty, $from_str:expr) => {
         merge_settings_impl!($type, $from_str);
+    };
+}
+
+macro_rules! merge_optional_settings {
+    ($type:ty) => {
+        merge_optional_settings_impl!($type);
     };
 }
 
@@ -778,6 +801,7 @@ pub struct Configuration {
     pub settings: Settings,
     pub user_config_path: Option<Path>,
     pub project_config_path: Option<Path>,
+    pub env_files: BTreeMap<String, String>,
 }
 
 #[derive(thiserror::Error, Debug, Clone)]
@@ -793,6 +817,12 @@ pub enum ConfigurationError {
 
     #[error(transparent)]
     SerdeError(#[from] Arc<serde_yaml::Error>),
+
+    #[error("Environment file not found: {0}")]
+    EnvironmentFileNotFound(String),
+
+    #[error("Invalid environment file line: {0}")]
+    InvalidEnvironmentFileLine(String),
 }
 
 impl From<std::io::Error> for ConfigurationError {
@@ -833,87 +863,196 @@ pub enum HydrateError {
     InvalidValue(String),
 }
 
+struct RcFile {
+    path: Path,
+    text: Option<String>,
+}
+
+impl RcFile {
+    fn try_read(dir: Option<&Path>, rc_filename: &str, last_modified_at: &mut LastModifiedAt) -> Result<Option<Self>, ConfigurationError> {
+        let Some(dir) = dir else {
+            return Ok(None);
+        };
+
+        let path
+            = dir.with_join_str(rc_filename);
+
+        let metadata
+            = path.fs_metadata()
+                .ok_missing()?;
+
+        let Some(metadata) = metadata else {
+            return Ok(Some(RcFile {path, text: None}));
+        };
+
+        let changed_at
+            = metadata.modified()?
+                .duration_since(UNIX_EPOCH).unwrap()
+                .as_nanos();
+
+        last_modified_at.update(changed_at);
+
+        let text
+            = path.fs_read_text_with_size(metadata.len())?;
+
+        Ok(Some(RcFile {path, text: Some(text)}))
+    }
+
+    fn deserialize(&self) -> Option<Result<intermediate::Settings, ConfigurationError>> {
+        self.text.as_ref().map(|text| {
+            Ok(serde_yaml::from_str(text)?)
+        })
+    }
+
+    /// Extract the `injectEnvironmentFiles` value from the raw YAML text.
+    /// Uses a minimal struct to avoid full deserialization, which would fail
+    /// if config values reference env vars not yet loaded from .env files.
+    fn extract_inject_environment_files(&self) -> Result<Option<Vec<String>>, ConfigurationError> {
+        let Some(text) = &self.text else {
+            return Ok(None);
+        };
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PartialSettings {
+            #[serde(default)]
+            inject_environment_files: Option<Vec<String>>,
+        }
+
+        let partial: PartialSettings
+            = serde_yaml::from_str(text)?;
+
+        Ok(partial.inject_environment_files)
+    }
+}
+
 impl Configuration {
-    pub fn tree_node(&self) -> tree::Node {
+    pub fn tree_node(&self) -> tree::Node<'_> {
         self.settings.tree_node(None, None)
     }
 
-    pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {
+    pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
         self.settings.hydrate(path, value_str)
     }
 
-    pub fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {
+    pub fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         self.settings.get(path)
     }
 
+    fn load_env_files(
+        project_cwd: &Path,
+        env_file_paths: &[String],
+    ) -> Result<BTreeMap<String, String>, ConfigurationError> {
+        let mut env_vars: BTreeMap<String, String>
+            = BTreeMap::new();
+
+        for path_str in env_file_paths {
+            let (actual_path, optional) = if let Some(stripped) = path_str.strip_suffix('?') {
+                (stripped, true)
+            } else {
+                (path_str.as_str(), false)
+            };
+
+            let full_path
+                = project_cwd.with_join_str(actual_path);
+
+            let metadata
+                = full_path.fs_metadata()
+                    .ok_missing()?;
+
+            match metadata {
+                Some(metadata) => {
+                    let content
+                        = full_path
+                            .fs_read_text_with_size(metadata.len())?;
+
+                    for item in dotenvy::from_read_iter(content.as_bytes()) {
+                        let (key, value)
+                            = item
+                                .map_err(|e| ConfigurationError::InvalidEnvironmentFileLine(e.to_string()))?;
+
+                        env_vars.insert(key, value);
+                    }
+                },
+
+                None => {
+                    if !optional {
+                        return Err(ConfigurationError::EnvironmentFileNotFound(path_str.clone()));
+                    }
+                },
+            }
+        }
+
+        Ok(env_vars)
+    }
+
     pub fn load(context: &ConfigurationContext, last_modified_at: &mut LastModifiedAt) -> Result<Configuration, ConfigurationError> {
+        let project_cwd
+            = context.project_cwd
+                .as_ref()
+                .expect("A project directory should be set");
+
         let rc_filename
             = std::env::var("YARN_RC_FILENAME")
                 .unwrap_or_else(|_| ".yarnrc.yml".to_string());
 
-        let user_config_path = context.user_cwd
-            .as_ref()
-            .map(|path| path.with_join_str(&rc_filename));
+        // Read both rc files upfront (once each)
+        let user_rc
+            = RcFile::try_read(context.user_cwd.as_ref(), &rc_filename, last_modified_at)?;
+        let project_rc
+            = RcFile::try_read(Some(project_cwd), &rc_filename, last_modified_at)?;
 
-        let project_config_path = context.project_cwd
-            .as_ref()
-            .map(|path| path.with_join_str(&rc_filename));
+        // Phase 1: Extract injectEnvironmentFiles from the raw YAML text.
+        // We check the project rc first, falling back to the user rc, then
+        // to the default. This uses a minimal parse that tolerates config
+        // values referencing env vars that don't exist yet.
+        let inject_environment_files = project_rc.as_ref()
+            .and_then(|rc| rc.extract_inject_environment_files().ok().flatten())
+            .or_else(|| user_rc.as_ref()
+                .and_then(|rc| rc.extract_inject_environment_files().ok().flatten()))
+            .unwrap_or_else(|| vec![".env.yarn?".to_string()]);
 
-        let mut intermediate_user_config
-            = Partial::Missing;
-        let mut intermediate_project_config
-            = Partial::Missing;
+        // Phase 2: Load .env files and collect variables
+        let env_files = Self::load_env_files(
+            project_cwd,
+            &inject_environment_files,
+        )?;
 
-        if let Some(user_config_path) = user_config_path.as_ref() {
-            let metadata
-                = user_config_path.fs_metadata()
-                    .ok_missing()?;
+        // Phase 3: Set env file variables in the process environment so that
+        // shellexpand::env() (used by the Interpolated deserializer) can
+        // resolve them when deserializing config values like ${VAR}.
+        let mut enriched_context
+            = context.clone();
 
-            if let Some(metadata) = metadata {
-                let user_last_changed_at
-                    = metadata.modified()?
-                        .duration_since(UNIX_EPOCH).unwrap()
-                        .as_nanos();
-
-                last_modified_at.update(user_last_changed_at);
-
-                let user_config_text
-                    = user_config_path
-                        .fs_read_text_with_size(metadata.len())?;
-
-                let user_config: intermediate::Settings
-                    = serde_yaml::from_str(&user_config_text)?;
-
-                intermediate_user_config = Partial::Value(user_config);
-            }
+        for (key, value) in &env_files {
+            // SAFETY: Configuration loading happens during startup before any
+            // threads are spawned, so concurrent access to the environment is
+            // not a concern.
+            unsafe { std::env::set_var(key, value); }
+            enriched_context.env.insert(key.clone(), value.clone());
         }
 
-        if let Some(project_config_path) = project_config_path.as_ref() {
-            let metadata
-                = project_config_path.fs_metadata()
-                    .ok_missing()?;
+        // Phase 4: Deserialize the already-read rc files (no re-read)
+        let user_config_path
+            = user_rc.as_ref()
+                .map(|rc| rc.path.clone());
 
-            if let Some(metadata) = metadata {
-                let project_last_changed_at
-                    = metadata.modified()?
-                        .duration_since(UNIX_EPOCH).unwrap()
-                        .as_nanos();
+        let project_config_path
+            = project_rc.as_ref()
+                .map(|rc| rc.path.clone());
 
-                last_modified_at.update(project_last_changed_at);
+        let intermediate_user_config = match user_rc.and_then(|rc| rc.deserialize()) {
+            Some(result) => Partial::Value(result?),
+            None => Partial::Missing,
+        };
 
-                let project_config_text
-                    = project_config_path
-                        .fs_read_text_with_size(metadata.len())?;
-
-                let project_config: intermediate::Settings
-                    = serde_yaml::from_str(&project_config_text)?;
-
-                intermediate_project_config = Partial::Value(project_config);
-            }
-        }
+        let intermediate_project_config = match project_rc.and_then(|rc| rc.deserialize()) {
+            Some(result) => Partial::Value(result?),
+            None => Partial::Missing,
+        };
 
         let mut settings = Settings::merge(
-            &context,
+            &enriched_context,
             intermediate_user_config,
             intermediate_project_config,
             || panic!("No configuration found")
@@ -927,6 +1066,7 @@ impl Configuration {
             settings,
             user_config_path,
             project_config_path,
+            env_files,
         })
     }
 }
@@ -940,13 +1080,19 @@ pub use types::*;
 // Rust doesn't support specialization, so we can't have a blanket implementation for FromStr
 // and a different one for Option<T: FromStr>; instead we manually generate whatever we need.
 merge_settings!(std::time::Duration, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_optional_settings!(std::time::Duration);
 
 merge_settings!(String, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(bool, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(usize, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(u64, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_optional_settings!(String);
+merge_optional_settings!(bool);
+merge_optional_settings!(usize);
+merge_optional_settings!(u64);
 
 merge_settings!(zpm_formats::CompressionAlgorithm, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_optional_settings!(zpm_formats::CompressionAlgorithm);
 
 merge_settings!(zpm_primitives::Descriptor, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_primitives::FilterDescriptor, |s: &str| FromFileString::from_file_string(s).unwrap());
@@ -956,14 +1102,33 @@ merge_settings!(zpm_primitives::Locator, |s: &str| FromFileString::from_file_str
 merge_settings!(zpm_primitives::PeerRange, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_primitives::Range, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_primitives::Reference, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_optional_settings!(zpm_primitives::Descriptor);
+merge_optional_settings!(zpm_primitives::FilterDescriptor);
+merge_optional_settings!(zpm_primitives::Ident);
+merge_optional_settings!(zpm_primitives::IdentGlob);
+merge_optional_settings!(zpm_primitives::Locator);
+merge_optional_settings!(zpm_primitives::PeerRange);
+merge_optional_settings!(zpm_primitives::Range);
+merge_optional_settings!(zpm_primitives::Reference);
 
 merge_settings!(zpm_semver::RangeKind, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_optional_settings!(zpm_semver::RangeKind);
 
 merge_settings!(zpm_utils::Cpu, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_utils::Glob, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_utils::Libc, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_utils::Os, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(zpm_utils::Secret<String>, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_optional_settings!(zpm_utils::Cpu);
+merge_optional_settings!(zpm_utils::Glob);
+merge_optional_settings!(zpm_utils::Libc);
+merge_optional_settings!(zpm_utils::Os);
+merge_optional_settings!(zpm_utils::Secret<String>);
 
 merge_settings!(crate::types::NodeLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::IslandLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_optional_settings!(crate::types::NodeLinker);
+merge_optional_settings!(crate::types::IslandLinker);
+merge_optional_settings!(crate::types::PnpFallbackMode);
+merge_optional_settings!(Path);

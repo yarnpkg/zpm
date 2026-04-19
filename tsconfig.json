@@ -3,10 +3,12 @@
   "exclude": [
     "dist",
     "documentation",
+    "packages/zpm-daemon-ui",
     "tests",
   ],
   "references": [
     {"path": "documentation/tsconfig.json"},
+    {"path": "packages/zpm-daemon-ui/tsconfig.json"},
     {"path": "tests/acceptance-tests/tsconfig.json"},
   ],
 }

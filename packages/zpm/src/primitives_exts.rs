@@ -61,11 +61,29 @@ impl RangeExt for Range {
                 }
             },
 
+            Range::PypiSpecifier(params) if params.ident.is_some() => {
+                RangeDetails {
+                    require_binding: false,
+                    fetch_before_resolve: false,
+                    transient_resolution: true,
+                }
+            },
+
+            Range::PypiTag(params) if params.ident.is_some() => {
+                RangeDetails {
+                    require_binding: false,
+                    fetch_before_resolve: false,
+                    transient_resolution: true,
+                }
+            },
+
             Range::Builtin(_) |
             Range::AnonymousSemver(_) |
             Range::AnonymousTag(_) |
             Range::RegistrySemver(_) |
-            Range::RegistryTag(_) => {
+            Range::RegistryTag(_) |
+            Range::PypiSpecifier(_) |
+            Range::PypiTag(_) => {
                 RangeDetails {
                     require_binding: false,
                     fetch_before_resolve: false,
@@ -158,6 +176,8 @@ impl RangeExt for Range {
             // Aliased packages only need the resolution (to remap the ident)
             Range::RegistrySemver(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
             Range::RegistryTag(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
+            Range::PypiSpecifier(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
+            Range::PypiTag(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
 
             // Patches need the fetched package contents to apply the patch
             Range::Patch(_) => Some(InnerDependencyKind::Fetch),

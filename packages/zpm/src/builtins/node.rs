@@ -143,62 +143,72 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
 
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching npm packages");
+    let cache_packer
+        = package_cache.packer();
 
     let package_subdir
         = locator.ident.nm_subdir();
+    let package_subdir_for_entries
+        = package_subdir.clone();
+    let locator_ident
+        = locator.ident.clone();
+    let bin_file
+        = bin_file.to_string();
+    let system_os
+        = system.os.clone();
+    let system_arch
+        = system.arch.clone();
 
-    let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async {
-        let version_str
-            = version.to_file_string();
-
-        let project = context.project
-            .expect("The project is required for fetching a nodejs package");
-
+    let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async move {
         let bytes
             = project.http_client.get(&url)?
                 .send().await?
                 .error_for_status()?
                 .bytes().await?;
 
-        let tar_data
-            = zpm_formats::tar::unpack_tgz(&bytes)?;
+        let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
+            let tar_data
+                = zpm_formats::tar::unpack_tgz(&bytes)?;
 
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct GeneratedManifest<'a> {
-            name: &'a str,
-            version: &'a str,
-            os: &'a Os,
-            cpu: &'a Cpu,
-            prefer_unplugged: bool,
-            bin: BinField,
-        }
+            #[derive(Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct GeneratedManifest<'a> {
+                name: &'a str,
+                version: &'a str,
+                os: &'a Os,
+                cpu: &'a Cpu,
+                prefer_unplugged: bool,
+                bin: BinField,
+            }
 
-        let manifest = GeneratedManifest {
-            name: locator.ident.as_str(),
-            version: version_str.as_str(),
-            os: system.os.as_ref().unwrap(),
-            cpu: system.arch.as_ref().unwrap(),
-            prefer_unplugged: true,
-            bin: BinField::Map(BTreeMap::from([(Ident::from_str("node").unwrap(), RawPath {
-                raw: bin_file.to_string(),
-                path: Path::from_str(bin_file).unwrap(),
-            })])),
-        };
+            let manifest = GeneratedManifest {
+                name: locator_ident.as_str(),
+                version: version_str.as_str(),
+                os: system_os.as_ref().unwrap(),
+                cpu: system_arch.as_ref().unwrap(),
+                prefer_unplugged: true,
+                bin: BinField::Map(BTreeMap::from([(Ident::from_str("node").unwrap(), RawPath {
+                    raw: bin_file.clone(),
+                    path: Path::from_str(&bin_file).unwrap(),
+                })])),
+            };
 
-        let serialized_manifest
-            = JsonDocument::to_string(&manifest)?;
+            let serialized_manifest
+                = JsonDocument::to_string(&manifest)?;
 
-        let entries
-            = zpm_formats::tar::entries_from_tar(&tar_data)?
-                .into_iter()
-                .strip_first_segment()
-                .filter(|entry| entry.name.as_str() == *bin_file)
-                .chain(once(Entry::new_file(Path::from_str("package.json").unwrap(), Cow::Owned(serialized_manifest.into_bytes()))))
-                .prepare_npm_entries(&locator.ident.nm_subdir())
-                .collect_vec();
+            let entries
+                = zpm_formats::tar::entries_from_tar(&tar_data)?
+                    .into_iter()
+                    .strip_first_segment()
+                    .filter(|entry| entry.name.as_str() == bin_file.as_str())
+                    .chain(once(Entry::new_file(Path::from_str("package.json").unwrap(), Cow::Owned(serialized_manifest.into_bytes()))))
+                    .prepare_npm_entries(&package_subdir_for_entries)
+                    .collect_vec();
 
-        Ok(package_cache.bundle_entries(entries)?)
+            Ok(cache_packer.pack(entries)?)
+        }).await??;
+
+        Ok(archive)
     }).await?.into_info();
 
     let package_directory = cached_blob.path

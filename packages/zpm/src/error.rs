@@ -42,8 +42,8 @@ pub enum Error {
     #[error(transparent)]
     SwitchError(#[from] zpm_switch::Error),
 
-    #[error("Network error: {0}{}", .1.as_deref().map(|s| format!(" ({})", s)).unwrap_or_default())]
-    HttpError(Arc<reqwest::Error>, Option<String>),
+    #[error("Network error: {inner}{}", extra.as_deref().map(|s| format!(" ({})", s)).unwrap_or_default())]
+    HttpError { inner: Arc<reqwest::Error>, extra: Option<String> },
 
     #[error(transparent)]
     PathError(#[from] zpm_utils::PathError),
@@ -159,8 +159,8 @@ pub enum Error {
     #[error("Catalog not found ({0})")]
     CatalogNotFound(String),
 
-    #[error("Catalog entry not found ({0}:{})", .1.to_print_string())]
-    CatalogEntryNotFound(String, Ident),
+    #[error("Catalog entry not found ({catalog}:{})", ident.to_print_string())]
+    CatalogEntryNotFound { catalog: String, ident: Ident },
 
     #[error("Package manifest not found ({})", .0.to_print_string())]
     ManifestNotFound(Path),
@@ -336,6 +336,9 @@ pub enum Error {
     #[error("Invalid install state; please run an install operation to fix it")]
     InvalidInstallState,
 
+    #[error("Commands can only be run from focused workspaces and their dependencies")]
+    WorkspaceNotInstalled,
+
     #[error("Couldn't find a package matching the current working directory")]
     ActivePackageNotFound,
 
@@ -354,8 +357,47 @@ pub enum Error {
     #[error("Binary not found ({0})")]
     BinaryNotFound(String),
 
-    #[error("Binary failed to spawn: {2} ({}, in {})", DataType::Code.colorize(.0), .1.to_print_string())]
-    SpawnFailed(String, Path, Arc<Box<dyn std::error::Error + Send + Sync>>),
+    #[error("Task file parse error: {0}")]
+    TaskParseError(#[source] zpm_tasks::Error),
+
+    #[error("Task resolution error: {0}")]
+    TaskResolveError(#[source] zpm_tasks::Error),
+
+    #[error("Task workspace not found: {}", .0.as_str())]
+    TaskWorkspaceNotFound(Ident),
+
+    #[error("Task '{}' not found in workspace '{}'", task_name, workspace.as_str())]
+    TaskNotFound { workspace: Ident, task_name: String },
+
+    #[error("No taskfile found in {}", .0.to_print_string())]
+    TaskFileNotFound(Path),
+
+    #[error("Task execution failed: {0}")]
+    TaskJoinError(String),
+
+    #[error("Invalid task name: {0}")]
+    TaskNameParseError(String),
+
+    #[error("IPC connection failed: {0}")]
+    IpcConnectionFailed(String),
+
+    #[error("IPC error: {0}")]
+    IpcError(String),
+
+    #[error("Task push failed: {0}")]
+    TaskPushFailed(String),
+
+    #[error("Task execution failed: {0}")]
+    TaskExecutionFailed(String),
+
+    #[error("Missing context_id: task operations require a context_id (either provided directly or inherited from parent task)")]
+    MissingContextId,
+
+    #[error("JSON serialization error: {0}")]
+    JsonSerializeError(String),
+
+    #[error("Binary failed to spawn: {error} ({}, in {})", DataType::Code.colorize(name), path.to_print_string())]
+    SpawnFailed { name: String, path: Path, error: Arc<Box<dyn std::error::Error + Send + Sync>> },
 
     #[error("No binaries available in the dlx context")]
     MissingBinariesDlxContent,
@@ -492,6 +534,30 @@ pub enum Error {
     #[error("Samply doesn't seem to be installed; first install it by running {}", DataType::Code.colorize("curl https://github.com/mstange/samply/releases/download/samply-v0.13.1/samply-installer.sh | sh"))]
     MissingSamply,
 
+    #[error("Missing fetch for locator: {0:?}")]
+    MissingFetch(Locator),
+
+    #[error("Missing resolution for descriptor: {0:?}")]
+    MissingResolution(Descriptor),
+
+    #[error("Island resolution failed for island '{}': {}", .island_id, .message)]
+    IslandResolutionFailed {
+        island_id: String,
+        message: String,
+    },
+
+    #[error("Workspace '{}' belongs to multiple islands: {}", .ident.to_print_string(), .islands.join(", "))]
+    WorkspaceInMultipleIslands {
+        ident: Ident,
+        islands: Vec<String>,
+    },
+
+    #[error("Island '{}' has no matching workspaces", .0)]
+    EmptyIsland(String),
+
+    #[error("This command can only be called within a Yarn Switch context. Please run this command through `yarn` instead of calling the binary directly.")]
+    MissingYarnSwitchContext,
+
     // Silent error; no particular message, just exit with an exit code 1
     #[error("")]
     SilentError,
@@ -536,6 +602,6 @@ impl From<std::convert::Infallible> for Error {
 
 impl From<reqwest::Error> for Error {
     fn from(error: reqwest::Error) -> Self {
-        Error::HttpError(Arc::new(error), None)
+        Error::HttpError { inner: Arc::new(error), extra: None }
     }
 }

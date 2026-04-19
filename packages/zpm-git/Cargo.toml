@@ -3,10 +3,10 @@ name = "zpm-git"
 edition = "2024"
 
 [dependencies]
-fancy-regex = "0.13.0"
-rkyv = { version = "0.8", features = ["bytecheck"] }
-serde = { version = "1.0.207", features = ["derive"] }
-thiserror = "1.0.63"
-urlencoding = "2.1.3"
-zpm-semver = { path = "../zpm-semver" }
-zpm-utils = { path = "../zpm-utils" }
+fancy-regex = { workspace = true }
+rkyv = { workspace = true, features = ["bytecheck"] }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+urlencoding = { workspace = true }
+zpm-semver = { workspace = true }
+zpm-utils = { workspace = true }

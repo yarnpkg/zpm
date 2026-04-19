@@ -239,7 +239,7 @@ pub struct HardDependency<'a> {
 }
 
 impl Manifest {
-    pub fn iter_hard_dependencies(&self) -> impl Iterator<Item = HardDependency> {
+    pub fn iter_hard_dependencies(&self) -> impl Iterator<Item = HardDependency<'_>> {
         let dependencies_iter = self.remote.dependencies.values()
             .map(|descriptor| HardDependency {
                 kind: HardDependencyKind::Dependency,

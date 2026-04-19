@@ -60,6 +60,25 @@ impl<'a> WorkTree<'a> {
         tree
     }
 
+    pub fn new_for_island_workspace(
+        project: &'a Project,
+        install_state: &'a InstallState,
+        workspace_locator: Locator,
+    ) -> Self {
+        let mut tree = Self {
+            project,
+            install_state,
+            nodes: vec![],
+        };
+
+        let root_idx
+            = tree.create_node(workspace_locator, None, false);
+
+        tree.expand_node(root_idx);
+
+        tree
+    }
+
     fn import_workspaces(&mut self, root_idx: usize) {
         let mut workspace_path_set
             = BTreeSet::new();

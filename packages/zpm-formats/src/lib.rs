@@ -1,5 +1,6 @@
-use std::{borrow::Cow, os::unix::fs::PermissionsExt};
+use std::{borrow::Cow, io::Write, os::unix::fs::PermissionsExt};
 
+use flate2::write::DeflateEncoder;
 use zpm_utils::{FromFileString, impl_file_string_from_str, Path, ToFileString, ToHumanString};
 
 pub(crate) mod zip_structs;
@@ -108,6 +109,23 @@ impl<'a> Entry<'a> {
             data,
             compression: None,
         }
+    }
+
+    pub fn compress_in_place(&mut self, algorithm: CompressionAlgorithm) {
+        let compressed_data = match algorithm {
+            CompressionAlgorithm::Deflate(level) => {
+                let mut encoder
+                    = DeflateEncoder::new(Vec::with_capacity(self.data.len()), flate2::Compression::new(level as u32));
+
+                encoder.write_all(&self.data).unwrap();
+                encoder.finish().unwrap()
+            },
+        };
+
+        self.compression = Some(Compression {
+            data: Cow::Owned(compressed_data),
+            algorithm,
+        });
     }
 }
 

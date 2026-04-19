@@ -17,22 +17,49 @@ static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(
 static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
 static JS_EXTENSION: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
 
-fn make_path_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &Vec<String>) -> Result<(), Error> {
+fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, module: &str, object: &str) -> String {
+    let binary_name
+        = serde_json::to_string(binary_name).expect("expected valid binary name");
+    let package_path
+        = serde_json::to_string(&package_path.to_file_string()).expect("expected valid package path");
+    let module
+        = serde_json::to_string(module).expect("expected valid python module");
+    let object
+        = serde_json::to_string(object).expect("expected valid python object");
+
+    format!(
+        "import importlib, sys\nsys.path.insert(0, {package_path})\nmodule = importlib.import_module({module})\nentry = module\nfor part in {object}.split('.'):\n    entry = getattr(entry, part)\nsys.argv[0] = {binary_name}\nsys.exit(entry())"
+    )
+}
+
+fn make_executable_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &[String]) -> Result<(), Error> {
     if cfg!(windows) {
+        let escaped_args = args
+            .iter()
+            .map(|arg| format!(r#""{}""#, arg.replace(r#"""#, r#""""#)))
+            .collect::<Vec<String>>()
+            .join(" ");
+
         let cmd_script = format!(
             r#"@goto #_undefined_# 2>NUL || @title %COMSPEC% & @setlocal & @"{}" {} %*"#,
             argv0,
-            args.iter().map(|arg| format!(r#""{}""#, arg.replace(r#"""#, r#""""#))).collect::<Vec<String>>().join(" "),
+            escaped_args,
         );
 
         bin_dir
             .with_join_str(format!("{}.cmd", name))
             .fs_write_text(&cmd_script)?;
     } else {
+        let escaped_args = args
+            .iter()
+            .map(|arg| format!("'{}'", arg.replace("'", "'\"'\"'")))
+            .collect_vec()
+            .join(" ");
+
         let sh_script = format!(
             "#!/bin/sh\nexec \"{}\" {} \"$@\"\n",
             argv0,
-            args.iter().map(|arg| format!("'{}'", arg.replace("'", "'\"'\"'"))).collect_vec().join(" "),
+            escaped_args,
         );
 
         bin_dir
@@ -114,13 +141,21 @@ pub enum BinaryKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Binary {
-    pub path: Path,
-    pub kind: BinaryKind,
+pub enum Binary {
+    Path {
+        path: Path,
+        kind: BinaryKind,
+    },
+    PythonEntryPoint {
+        name: String,
+        package_path: Path,
+        module: String,
+        object: String,
+    },
 }
 
 impl Binary {
-    pub fn new(project: &Project, path_rel: Path) -> Self {
+    pub fn new_path(project: &Project, path_rel: Path) -> Self {
         let path_abs = project.project_cwd
             .with_join(&path_rel);
 
@@ -129,9 +164,18 @@ impl Binary {
             false => BinaryKind::Default,
         };
 
-        Self {
+        Self::Path {
             path: path_abs,
             kind,
+        }
+    }
+
+    pub fn new_python(name: String, package_path: Path, module: String, object: String) -> Self {
+        Self::PythonEntryPoint {
+            name,
+            package_path,
+            module,
+            object,
         }
     }
 }
@@ -188,21 +232,43 @@ impl ScriptBinaries {
 
     pub fn with_package(mut self, binaries: &BTreeMap<String, Binary>, relative_to: &Path) -> Result<Self, Error> {
         for (name, binary) in binaries {
-            let binary_path_abs = relative_to
-                .with_join(&binary.path);
+            match binary {
+                Binary::Path {path, kind} => {
+                    let binary_path_abs = relative_to
+                        .with_join(path);
 
-            if binary.kind == BinaryKind::Node {
-                self.binaries.push(ScriptBinary {
-                    name: name.clone(),
-                    argv0: "node".to_string(),
-                    args: vec![binary_path_abs.to_file_string()],
-                });
-            } else {
-                self.binaries.push(ScriptBinary {
-                    name: name.clone(),
-                    argv0: binary_path_abs.to_file_string(),
-                    args: vec![],
-                });
+                    if *kind == BinaryKind::Node {
+                        self.binaries.push(ScriptBinary {
+                            name: name.clone(),
+                            argv0: "node".to_string(),
+                            args: vec![binary_path_abs.to_file_string()],
+                        });
+                    } else {
+                        self.binaries.push(ScriptBinary {
+                            name: name.clone(),
+                            argv0: binary_path_abs.to_file_string(),
+                            args: vec![],
+                        });
+                    }
+                },
+
+                Binary::PythonEntryPoint {
+                    name: entry_name,
+                    package_path,
+                    module,
+                    object,
+                } => {
+                    debug_assert_eq!(entry_name, name);
+
+                    self.binaries.push(ScriptBinary {
+                        name: name.clone(),
+                        argv0: "python".to_string(),
+                        args: vec![
+                            "-c".to_string(),
+                            make_python_entry_point_snippet(name, package_path, module, object),
+                        ],
+                    });
+                },
             }
         }
 
@@ -298,13 +364,47 @@ impl From<ScriptResult> for ExitStatus {
     }
 }
 
+/// Target output mode for script execution.
+#[derive(Clone, Debug, Default)]
+pub enum TargetOutput {
+    /// Inherit stdout/stderr from parent process (direct to terminal).
+    Inherit,
+    /// Buffer all stdout/stderr and return in ScriptResult (default).
+    #[default]
+    Buffers,
+}
+
+/// A running script process with piped output.
+pub struct RunningScript {
+    pub child: tokio::process::Child,
+    program: String,
+}
+
+impl RunningScript {
+    /// Wait for the script to complete and return the result.
+    pub async fn wait(mut self) -> Result<ScriptResult, Error> {
+        let status = self.child.wait().await?;
+        let output = Output {
+            status,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        Ok(if status.success() {
+            ScriptResult::Success(output)
+        } else {
+            ScriptResult::Failure(output, self.program.clone(), self.program)
+        })
+    }
+}
+
 pub struct ScriptEnvironment {
     cwd: Path,
     binaries: ScriptBinaries,
     env: BTreeMap<String, Option<String>>,
     node_args: Vec<String>,
-    shell_forwarding: bool,
+    target_output: TargetOutput,
     stdin: Option<String>,
+    signal_delegation: bool,
 }
 
 impl ScriptEnvironment {
@@ -314,8 +414,9 @@ impl ScriptEnvironment {
             binaries: ScriptBinaries::new().with_standard()?,
             env: BTreeMap::new(),
             node_args: Vec::new(),
-            shell_forwarding: false,
+            target_output: TargetOutput::default(),
             stdin: None,
+            signal_delegation: false,
         };
 
         if let Ok(val) = std::env::var("YARNSW_DETECTED_ROOT") {
@@ -383,7 +484,7 @@ impl ScriptEnvironment {
     }
 
     pub fn enable_shell_forwarding(mut self) -> Self {
-        self.shell_forwarding = true;
+        self.target_output = TargetOutput::Inherit;
         self
     }
 
@@ -392,8 +493,26 @@ impl ScriptEnvironment {
         self
     }
 
+    /// Enables signal delegation mode.
+    ///
+    /// When enabled, SIGINT is ignored in the parent process while waiting
+    /// for child processes to complete. This allows the child to handle
+    /// the signal and exit gracefully, with its exit code properly propagated.
+    ///
+    /// This is useful when the parent is a wrapper (like yarn-switch) that
+    /// should delegate signal handling to the actual command being run.
+    pub fn enable_signal_delegation(mut self) -> Self {
+        self.signal_delegation = true;
+        self
+    }
+
     pub fn with_project(mut self, project: &Project) -> Self {
         self.remove_pnp_loader();
+
+        // Inject environment variables from .env files
+        for (key, value) in &project.config.env_files {
+            self.env.insert(key.clone(), Some(value.clone()));
+        }
 
         if let Some(pnp_path) = project.pnp_path().if_exists() {
             self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_file_string()));
@@ -509,7 +628,7 @@ impl ScriptEnvironment {
                 .fs_create_dir_all()?;
 
             for binary in &self.binaries.binaries {
-                make_path_wrapper(&temp_dir, &binary.name, &binary.argv0, &binary.args)?;
+                make_executable_wrapper(&temp_dir, &binary.name, &binary.argv0, &binary.args)?;
             }
 
             dir
@@ -522,13 +641,9 @@ impl ScriptEnvironment {
         Ok(dir)
     }
 
-    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
-        let mut cmd
-            = Command::new(program);
-
-        let args = args.into_iter()
-            .map(|arg| arg.as_ref().to_string())
-            .collect::<Vec<_>>();
+    /// Prepares a command with the current environment settings.
+    fn prepare_command(&mut self, program: &str, args: &[String]) -> Result<(Command, Path), Error> {
+        let mut cmd = Command::new(program);
 
         cmd.current_dir(self.cwd.to_path_buf());
 
@@ -537,15 +652,13 @@ impl ScriptEnvironment {
                 Some(val) => {
                     cmd.env(key, val);
                 },
-
                 None => {
                     cmd.env_remove(key);
                 },
             };
         }
 
-        let bin_dir
-            = self.install_binaries()?;
+        let bin_dir = self.install_binaries()?;
 
         let env_path = self.env.get("PATH")
             .cloned()
@@ -553,32 +666,41 @@ impl ScriptEnvironment {
             .unwrap_or_default();
 
         let next_env_path = match env_path.is_empty() {
-            true => {
-                bin_dir.to_file_string()
-            },
-
-            false => {
-                format!("{}:{}", bin_dir.to_file_string(), env_path)
-            },
+            true => bin_dir.to_file_string(),
+            false => format!("{}:{}", bin_dir.to_file_string(), env_path),
         };
 
         cmd.env("PATH", next_env_path);
         cmd.env("BERRY_BIN_FOLDER", bin_dir.to_file_string());
-
-        cmd.args(&args);
+        cmd.args(args);
 
         if self.stdin.is_some() {
             cmd.stdin(std::process::Stdio::piped());
         }
 
-        if !self.shell_forwarding {
-            cmd.stdout(std::process::Stdio::piped());
-            cmd.stderr(std::process::Stdio::piped());
+        Ok((cmd, bin_dir))
+    }
+
+    pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
+        let args = args.into_iter()
+            .map(|arg| arg.as_ref().to_string())
+            .collect::<Vec<_>>();
+
+        let (mut cmd, _) = self.prepare_command(program, &args)?;
+
+        // Configure stdout/stderr based on target_output
+        match &self.target_output {
+            TargetOutput::Inherit => {
+                // Output goes directly to terminal
+            },
+            TargetOutput::Buffers => {
+                cmd.stdout(std::process::Stdio::piped());
+                cmd.stderr(std::process::Stdio::piped());
+            },
         }
 
-        let mut child
-            = cmd.spawn()
-                .map_err(|e| Error::SpawnFailed(program.to_string(), self.cwd.clone(), Arc::new(Box::new(e))))?;
+        let mut child = cmd.spawn()
+            .map_err(|e| Error::SpawnFailed { name: program.to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 
         if let Some(stdin) = &self.stdin {
             if let Some(mut child_stdin) = child.stdin.take() {
@@ -587,55 +709,144 @@ impl ScriptEnvironment {
             }
         }
 
-        let output = match self.shell_forwarding {
-            false => {
-                child.wait_with_output().await.unwrap()
-            },
+        // If signal delegation is enabled, ignore SIGINT while waiting for the child.
+        // This allows the child to handle the signal and exit gracefully.
+        #[cfg(unix)]
+        let _guard = if self.signal_delegation {
+            Some(zpm_utils::IgnoreSigint::new())
+        } else {
+            None
+        };
 
-            true => {
+        let output = match &self.target_output {
+            TargetOutput::Inherit => {
                 Output {
                     status: child.wait().await.unwrap(),
                     stdout: Vec::new(),
                     stderr: Vec::new(),
                 }
             },
+            TargetOutput::Buffers => {
+                child.wait_with_output().await.unwrap()
+            },
         };
 
         Ok(ScriptResult::new(output, cmd.as_std()))
     }
 
+    /// Spawns a command and returns the running process with piped stdout/stderr.
+    /// Use this when you need to read output incrementally (e.g., for interlaced task output).
+    pub async fn spawn_exec<I, S>(&mut self, program: &str, args: I) -> Result<RunningScript, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
+        let args = args.into_iter()
+            .map(|arg| arg.as_ref().to_string())
+            .collect::<Vec<_>>();
+
+        let (mut cmd, _) = self.prepare_command(program, &args)?;
+
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        // Put the child in its own process group so we can kill the entire group if needed
+        #[cfg(unix)]
+        cmd.process_group(0);
+
+        let mut child = cmd.spawn()
+            .map_err(|e| Error::SpawnFailed { name: program.to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
+
+        if let Some(stdin) = &self.stdin {
+            if let Some(mut child_stdin) = child.stdin.take() {
+                use tokio::io::AsyncWriteExt;
+                child_stdin.write_all(stdin.as_bytes()).await.unwrap();
+            }
+        }
+
+        Ok(RunningScript {
+            child,
+            program: program.to_string(),
+        })
+    }
+
     pub async fn run_binary<I, S>(&mut self, binary: &Binary, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
-        match binary.kind {
-            BinaryKind::Node => {
+        match binary {
+            Binary::Path {path, kind: BinaryKind::Node} => {
                 let mut node_args = self.node_args.clone();
 
-                node_args.push(binary.path.to_file_string());
+                node_args.push(path.to_file_string());
                 node_args.extend(args.into_iter().map(|arg| arg.as_ref().to_string()));
 
                 self.run_exec("node", node_args).await
             },
 
-            BinaryKind::Default => {
-                self.run_exec(&binary.path.to_file_string(), args).await
+            Binary::Path {path, kind: BinaryKind::Default} => {
+                self.run_exec(&path.to_file_string(), args).await
+            },
+
+            Binary::PythonEntryPoint {name, package_path, module, object} => {
+                let mut python_args = vec![
+                    "-c".to_string(),
+                    make_python_entry_point_snippet(name, package_path, module, object),
+                ];
+
+                python_args.extend(args.into_iter().map(|arg| arg.as_ref().to_string()));
+
+                self.run_exec("python", &python_args).await
             },
         }
     }
 
     pub async fn run_script<I, S>(&mut self, script: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
-        let mut final_script
-            = script.to_string();
+        let mut final_script = script.to_string();
 
         for arg in args {
             final_script.push(' ');
             final_script.push_str(&shell_escape(arg.to_string().as_str()));
         }
 
-        let mut bash_args = vec![];
+        self.run_exec("bash", ["-c", &final_script, "yarn-script"]).await
+    }
 
-        bash_args.push("-c".to_string());
-        bash_args.push(final_script);
-        bash_args.push("yarn-script".to_string());
+    /// Spawns a script and returns the running process with piped stdout/stderr.
+    /// Use this when you need to read output incrementally (e.g., for interlaced task output).
+    pub async fn spawn_script<I, S>(&mut self, script: &str, args: I) -> Result<RunningScript, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+        // Pass args as bash positional parameters ($1, $2, etc.)
+        // Format: bash -c "script" yarn-script arg1 arg2 ...
+        let mut bash_args = vec!["-c".to_string(), script.to_string(), "yarn-script".to_string()];
+        for arg in args {
+            bash_args.push(arg.to_string());
+        }
 
-        self.run_exec("bash", bash_args).await
+        self.spawn_exec("bash", bash_args.iter().map(|s| s.as_str())).await
+    }
+
+    /// Runs a script with inherited stdio (output goes directly to terminal).
+    /// Use this when you want the script's output to go directly to the terminal without capturing.
+    pub async fn run_script_inherited<I, S>(&mut self, script: &str, args: I) -> Result<ExitStatus, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+        let mut final_script = script.to_string();
+
+        for arg in args {
+            final_script.push(' ');
+            final_script.push_str(&shell_escape(arg.to_string().as_str()));
+        }
+
+        let args = ["-c", &final_script, "yarn-script"];
+        let (mut cmd, _) = self.prepare_command("bash", &args.iter().map(|s| s.to_string()).collect::<Vec<_>>())?;
+
+        cmd.stdout(std::process::Stdio::inherit());
+        cmd.stderr(std::process::Stdio::inherit());
+        cmd.stdin(std::process::Stdio::inherit());
+
+        // If signal delegation is enabled, ignore SIGINT while waiting for the child.
+        // This allows the child to handle the signal and exit gracefully.
+        #[cfg(unix)]
+        let _guard = if self.signal_delegation {
+            Some(zpm_utils::IgnoreSigint::new())
+        } else {
+            None
+        };
+
+        let status = cmd.status().await
+            .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
+
+        Ok(status)
     }
 }

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
 use zpm_semver::{Version, VersionRc};
 use zpm_utils::{DataType, Hash64, Path, ToFileString, ToHumanString, Unit, is_terminal};
+use zpm_utils::eco_vec;
 
 use crate::errors::Error;
 
@@ -17,15 +18,25 @@ pub struct CacheKey {
     pub platform: String,
 }
 
+fn get_npm_registry_server() -> String {
+    std::env::var("YARNSW_NPM_REGISTRY_SERVER")
+        .unwrap_or_else(|_| "https://registry.npmjs.org".to_string())
+}
+
 impl CacheKey {
     pub fn to_npm_url(&self) -> Option<String> {
-        if self.version.rc.as_ref().map_or(true, |rc| !rc.starts_with(&[VersionRc::String("git".to_string())])) {
+        if self.version.rc.as_ref().map_or(true, |rc| !rc.starts_with(&[VersionRc::String("git".into())])) {
             // Older RC versions (<6.0.0-rc.9) are not available in npm
-            let first_npm_release =
-                Version::new_from_components(6, 0, 0, Some(vec![VersionRc::String("rc".to_string()), VersionRc::Number(9)]));
+            let first_npm_release = Version::new_from_components(
+                6,
+                0,
+                0,
+                Some(eco_vec![VersionRc::String("rc".into()), VersionRc::Number(9)]),
+            );
 
             if self.version >= first_npm_release {
-                return Some(format!("https://registry.npmjs.org/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", self.platform, self.platform, self.version.to_file_string()));
+                let registry = get_npm_registry_server();
+                return Some(format!("{}/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", registry, self.platform, self.platform, self.version.to_file_string()));
             }
         }
 

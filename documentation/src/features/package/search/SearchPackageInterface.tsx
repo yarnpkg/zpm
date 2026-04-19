@@ -1,4 +1,3 @@
-import {liteClient as algoliasearch}     from 'algoliasearch/lite';
 import {history}                         from 'instantsearch.js/es/lib/routers';
 import {useEffect}                       from 'preact/hooks';
 import {InstantSearch, useInstantSearch} from 'react-instantsearch';
@@ -7,106 +6,6 @@ import NoPackagesFound                   from './NoPackagesFound';
 import PackageGridSkeleton               from './PackageGridSkeleton';
 import PackageSearchInput                from './PackageSearchInput';
 import PackageSearchResults              from './PackageSearchResults';
-
-const algoliaClient = algoliasearch(
-  `OFCNCOG2CU`,
-  `f54e21fa3a2a0160595bb058179bfb1e`,
-);
-
-const DEFAULT_PACKAGES = [
-  `clipanion`,
-  `typescript`,
-  `next`,
-  `jest`,
-  `eslint`,
-  `esbuild`,
-  `webpack`,
-  `ts-node`,
-  `typanion`,
-];
-
-const searchClient = {
-  ...algoliaClient,
-  async search(requests: Array<any>) {
-    if (
-      requests.every(
-        ({params}: {params: {query: string}}) => !params.query,
-      )
-    ) {
-      try {
-        const defaultPackageResults = await Promise.all(
-          DEFAULT_PACKAGES.map(packageName =>
-            algoliaClient.search([
-              {
-                indexName: `npm-search`,
-                params: {
-                  query: packageName,
-                  hitsPerPage: 1,
-                  attributesToRetrieve: [
-                    `name`,
-                    `version`,
-                    `description`,
-                    `owner`,
-                    `humanDownloadsLast30Days`,
-                    `downloadsLast30Days`,
-                    `objectID`,
-                    `rev`,
-                    `styleTypes`,
-                    `types`,
-                  ],
-                  attributesToHighlight: [],
-                },
-              },
-            ]),
-          ),
-        );
-
-        const hits = defaultPackageResults.map(({results}) => {
-          const result = results[0];
-          if (!result)
-            return null;
-
-          if (!(`hits` in result))
-            return null;
-
-          return result.hits[0];
-        }).filter(Boolean);
-
-        return {
-          results: requests.map(() => ({
-            hits,
-            nbHits: hits.length,
-            nbPages: 1,
-            page: 0,
-            processingTimeMS: 1,
-            hitsPerPage: hits.length,
-            exhaustiveNbHits: false,
-            query: ``,
-            params: ``,
-            __isArtificial: true,
-          })),
-        };
-      } catch (error) {
-        console.error(`Error fetching default packages:`, error);
-        return {
-          results: requests.map(() => ({
-            hits: [],
-            nbHits: 0,
-            nbPages: 0,
-            page: 0,
-            processingTimeMS: 0,
-            hitsPerPage: 0,
-            exhaustiveNbHits: false,
-            query: ``,
-            params: ``,
-          })),
-        };
-      }
-    }
-
-    return algoliaClient.search(requests);
-  },
-};
 
 const connection = (navigator as any).connection;
 
@@ -118,7 +17,7 @@ updateTimeout();
 export default function SearchPackageInterface() {
   return (
     <InstantSearch
-      searchClient={searchClient as any}
+      searchClient={null as any}
       indexName={`npm-search`}
       routing={{
         router: history({
@@ -128,7 +27,6 @@ export default function SearchPackageInterface() {
 
             if (pathname.startsWith(`/search`))
               return query ? `/search?q=${query}` : `/search?q=`;
-
 
             return ``;
           },

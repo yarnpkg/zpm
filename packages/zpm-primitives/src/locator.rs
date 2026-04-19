@@ -64,11 +64,13 @@ impl Locator {
     }
 
     pub fn virtualized_for(&self, parent: &Locator) -> Locator {
-        let serialized = parent.to_file_string();
+        self.virtualized_with_hash(Hash64::from_string(parent))
+    }
 
+    pub fn virtualized_with_hash(&self, hash: Hash64) -> Locator {
         let reference = Reference::Virtual(VirtualReference {
             inner: Box::new(self.reference.clone()),
-            hash: Hash64::from_string(&serialized),
+            hash,
         });
 
         Locator {
@@ -156,7 +158,8 @@ impl_file_string_serialization!(Locator);
 
 #[rstest]
 #[case("foo@npm:1.0.0")]
-#[case("foo@npm:1.0.0::parent=root@workspace:")]
+#[case("foo@pypi:1.0.0")]
+#[case("foo@npm:1.0.0::parent=root@workspace:.")]
 fn test_locator_serialization(#[case] str: &str) {
     assert_eq!(str, Locator::from_file_string(str).unwrap().to_file_string());
 }

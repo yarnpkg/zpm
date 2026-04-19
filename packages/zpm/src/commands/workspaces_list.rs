@@ -49,6 +49,10 @@ pub struct WorkspacesList {
     /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
     json: bool,
+
+    /// Include a hash of the workspace's dependency tree (requires --json)
+    #[cli::option("--tree-hash", default = false)]
+    tree_hash: bool,
 }
 
 impl WorkspacesList {
@@ -73,7 +77,7 @@ impl WorkspacesList {
             Path::from_str(".pnp.loader.mjs").unwrap(),
         ]);
 
-        let ignored_paths = vec![
+        let ignored_paths = [
             Path::from_str(".yarn").unwrap(),
         ];
 
@@ -193,6 +197,9 @@ impl WorkspacesList {
 
                     #[serde(skip_serializing_if = "Option::is_none")]
                     mismatched_workspace_dependencies: Option<Vec<&'a str>>,
+
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    tree_hash: Option<String>,
                 }
 
                 let mut workspace_dependencies = None;
@@ -226,11 +233,20 @@ impl WorkspacesList {
                         }).collect::<Vec<_>>());
                 }
 
+                let tree_hash = if self.tree_hash {
+                    project.lockfile().ok()
+                        .and_then(|lockfile| lockfile.workspaces.get(&workspace.name).cloned())
+                        .map(|hash| hash.to_file_string())
+                } else {
+                    None
+                };
+
                 let payload = Payload {
                     location: workspace_printed_path,
                     name: workspace.manifest.name.as_ref(),
                     workspace_dependencies,
                     mismatched_workspace_dependencies,
+                    tree_hash,
                 };
 
                 println!("{}", JsonDocument::to_string(&payload)?);

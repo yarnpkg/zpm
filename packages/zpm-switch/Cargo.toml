@@ -1,6 +1,6 @@
 [package]
 name = "zpm-switch"
-version = "6.0.0-rc.12"
+version = "6.0.0-rc.16"
 edition = "2021"
 
 [[bin]]
@@ -8,22 +8,31 @@ name = "yarn"
 path = "src/main.rs"
 
 [dependencies]
-blake2 = { version = "0.10.6" }
-clipanion = { git = "https://github.com/arcanis/clipanion-rs.git", features = ["serde"] }
-hex = "0.4.3"
-regex = "1.11.1"
-reqwest = { version = "0.12.26", default-features = false, features = ["hickory-dns", "rustls-tls"] }
-rkyv = { version = "0.8", features = ["bytecheck"] }
-serde_plain = "1.0.2"
-serde_with = "3.9.0"
-serde = "1.0.219"
-thiserror = "2.0.12"
-tokio = { version = "1.39.2", features = ["full"] }
-zpm-formats = { path = "../zpm-formats" }
-zpm-macro-enum = { path = "../zpm-macro-enum" }
-zpm-parsers = { path = "../zpm-parsers" }
-zpm-semver = { path = "../zpm-semver" }
-zpm-utils = { path = "../zpm-utils" }
-assert_cmd = "2.0.17"
-predicates = "3.1.3"
-chrono = "0.4.41"
+base64 = { workspace = true }
+clipanion = { workspace = true, features = ["serde"] }
+regex = { workspace = true }
+reqwest = { workspace = true, default-features = false, features = ["hickory-dns", "rustls-tls"] }
+rkyv = { workspace = true, features = ["bytecheck"] }
+serde_json = { workspace = true }
+serde_plain = { workspace = true }
+serde_with = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-tungstenite = { workspace = true }
+futures = { workspace = true }
+open = { workspace = true }
+uuid = { version = "1.21.0", features = ["v4"] }
+zpm-allocator = { workspace = true }
+zpm-formats = { workspace = true }
+zpm-macro-enum = { workspace = true }
+zpm-parsers = { workspace = true }
+zpm-semver = { workspace = true }
+zpm-utils = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+assert_cmd = { workspace = true }

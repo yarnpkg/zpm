@@ -3,7 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "jsxImportSource": "preact",
-    "lib": ["ES2023", "dom.iterable"],
+    "lib": ["ES2023", "dom", "dom.iterable"],
     "skipLibCheck": true,
     "paths": {
       "@/styles/*": [

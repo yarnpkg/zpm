@@ -3,8 +3,14 @@ name: Build
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'documentation/**'
+      - 'README.md'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'documentation/**'
+      - 'README.md'
 
 env:
   CARGO_TERM_COLOR: always
@@ -98,7 +104,11 @@ jobs:
 
       - name: Generate the test report
         run: |
+          chmod +x artifacts/{yarn,yarn-bin}
+
           export TEST_BINARY=$(pwd)/artifacts/yarn-bin
+          export TEST_SWITCH_BINARY=$(pwd)/artifacts/yarn
+
           yarn ./tests/acceptance-tests jest --json --outputFile=$(pwd)/report.json || true
 
       - name: Upload test report

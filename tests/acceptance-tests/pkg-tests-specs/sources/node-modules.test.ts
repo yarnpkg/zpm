@@ -1,13 +1,12 @@
 import {WindowsLinkType}                           from '@yarnpkg/core';
 import {xfs, npath, PortablePath, ppath, Filename} from '@yarnpkg/fslib';
 
-
 const {
   fs: {writeFile, writeJson, FsLinkType, determineLinkType},
   tests: {testIf},
 } = require(`pkg-tests-core`);
 
-describe(`Node_Modules`, () => {
+describe(`Node Modules`, () => {
   it(`should install one dependency`,
     makeTemporaryEnv(
       {
@@ -24,6 +23,25 @@ describe(`Node_Modules`, () => {
         await expect(source(`require('resolve').sync('resolve')`)).resolves.toEqual(
           await source(`require.resolve('resolve')`),
         );
+      },
+    ),
+  );
+
+  it(`should install one dependency with executable files`,
+    makeTemporaryEnv(
+      {
+        dependencies: {
+          [`has-bin-entries`]: `1.0.0`,
+        },
+      },
+      {
+        nodeLinker: `node-modules`,
+      },
+      async ({path, run, source}) => {
+        await run(`install`);
+
+        const stat = await xfs.statPromise(ppath.join(path, `node_modules/has-bin-entries/bin-with-exit-code.js`));
+        expect(stat.mode & 0o111).toEqual(0o111);
       },
     ),
   );

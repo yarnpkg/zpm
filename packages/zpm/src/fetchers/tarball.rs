@@ -1,6 +1,7 @@
 use zpm_formats::iter_ext::IterExt;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Locator, TarballReference};
+use zpm_utils::{FromFileString, Path};
 
 use crate::{
     error::Error, install::{FetchResult, InstallContext, InstallOpResult}, manifest::RemoteManifest, npm::NpmEntryExt, resolvers::Resolution
@@ -8,34 +9,64 @@ use crate::{
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &TarballReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
-    let parent_data
-        = dependencies[0].as_fetched();
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &TarballReference, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+    let package_cache
+        = context.package_cache
+            .expect("The package cache is required for fetching tarball packages");
 
-    let tarball_path = parent_data.package_data
-        .context_directory()
-        .with_join_str(&params.path);
+    let cache_packer
+        = package_cache.packer();
 
-    let package_cache = context.package_cache
-        .expect("The package cache is required for fetching tarball packages");
+    if is_mock_request {
+        let archive_path = package_cache
+            .key_path(locator, ".zip");
+
+        let package_directory = archive_path
+            .with_join(&locator.ident.nm_subdir());
+
+        return Ok(FetchResult::new_mock(archive_path, package_directory));
+    }
+
+    let tarball_relative_path
+        = Path::from_file_string(&params.path)?;
+
+    let tarball_path = if tarball_relative_path.is_absolute() {
+        tarball_relative_path
+    } else {
+        let parent_data
+            = dependencies.first()
+                .ok_or(Error::Unsupported)?
+                .as_fetched();
+
+        parent_data.package_data
+            .context_directory()
+            .with_join_str(&params.path)
+    };
 
     let package_subdir
         = locator.ident.nm_subdir();
+    let package_subdir_for_entries
+        = package_subdir.clone();
 
     let cached_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
         let tgz_data
             = tarball_path.fs_read()?;
-        let tar_data
-            = zpm_formats::tar::unpack_tgz(&tgz_data)?;
 
-        let entries
-            = zpm_formats::tar::entries_from_tar(&tar_data)?
-                .into_iter()
-                .strip_first_segment()
-                .prepare_npm_entries(&package_subdir)
-                .collect();
+        let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
+            let tar_data
+                = zpm_formats::tar::unpack_tgz(&tgz_data)?;
 
-        Ok(package_cache.bundle_entries(entries)?)
+            let entries
+                = zpm_formats::tar::entries_from_tar(&tar_data)?
+                    .into_iter()
+                    .strip_first_segment()
+                    .prepare_npm_entries(&package_subdir_for_entries)
+                    .collect::<Vec<_>>();
+
+            Ok(cache_packer.pack(entries)?)
+        }).await??;
+
+        Ok(archive)
     }).await?;
 
     let first_entry

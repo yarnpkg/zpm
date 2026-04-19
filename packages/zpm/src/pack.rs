@@ -202,9 +202,7 @@ impl PackList {
         Ok(())
     }
 
-    pub fn load_ignore(&self) -> Result<Vec<String>, Error> {
-        let mut patterns = vec![];
-
+    pub fn load_ignore(&self, ignore: &mut PackIgnore) -> Result<(), Error> {
         for (path, ignore_files) in &self.ignore_files {
             let ignore_name = if ignore_files.npmignore {
                 Some(".npmignore")
@@ -222,18 +220,19 @@ impl PackList {
                     .with_join_str(&ignore_name)
                     .fs_read_text_prealloc()?;
 
-                let ignore_list = ignore_file
-                    .split('\n')
-                    .map(|line| line.trim())
-                    .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                    .map(|line| line.to_string())
-                    .collect::<Vec<_>>();
-
-                patterns.extend(ignore_list);
+                let patterns
+                    = ignore_file
+                        .split('\n')
+                        .map(|line| line.trim())
+                        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                        .map(|line| line.to_string());
+                for pattern in patterns {
+                    ignore.add(path, &pattern)?;
+                }
             }
         }
 
-        Ok(patterns)
+        Ok(())
     }
 }
 
@@ -583,12 +582,7 @@ pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) 
         }
     }
 
-    let user_patterns = pack_list
-        .load_ignore()?;
-
-    for pattern in &user_patterns {
-        glob_ignore.add(&Path::new(), pattern)?;
-    }
+    pack_list.load_ignore(&mut glob_ignore)?;
 
     let always_ignored = GlobBuilder::new("{.#*,.DS_Store,.gitignore,.npmignore,.pnp.*,.yarnrc,yarn.lock,*.tsbuildinfo}")
         .build()

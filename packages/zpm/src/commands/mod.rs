@@ -5,6 +5,7 @@ use zpm_switch::{extract_bin_meta, BinMeta};
 
 mod debug;
 mod npm;
+mod tasks;
 
 mod add;
 mod bin;
@@ -12,6 +13,7 @@ mod cache_clear;
 mod config;
 mod config_get;
 mod config_set;
+mod daemon;
 mod constraints;
 mod dedupe;
 mod dlx;
@@ -24,6 +26,7 @@ mod node;
 mod pack;
 mod patch_commit;
 mod patch;
+mod python;
 mod rebuild;
 mod remove;
 mod run;
@@ -33,6 +36,7 @@ mod set_version_from_sources;
 mod unlink;
 mod unplug;
 mod up;
+mod up_recursive;
 mod version;
 mod workspaces_focus;
 mod workspaces_foreach;
@@ -63,6 +67,7 @@ pub enum YarnCli {
     PrintChangedWorkspaces(debug::print_changed_workspaces::PrintChangedWorkspaces),
     PrintHoisting(debug::print_hoisting::PrintHoisting),
     PrintPlatform(debug::print_platform::PrintPlatform),
+    ResolveTask(debug::resolve_task::ResolveTask),
     SyncFs(debug::sync_fs::SyncFs),
 
     Login(npm::login::Login),
@@ -82,6 +87,8 @@ pub enum YarnCli {
     CacheClear2(cache_clear::CacheClear2),
     Config(config::Config),
     ConfigGet(config_get::ConfigGet),
+    Daemon(debug::daemon::Daemon),
+    DaemonStub(daemon::DaemonStub),
     ConfigSet(config_set::ConfigSet),
     Constraints(constraints::Constraints),
     Dedupe(dedupe::Dedupe),
@@ -97,15 +104,25 @@ pub enum YarnCli {
     SetVersion(set_version::SetVersion),
     SetVersionFromSources(set_version_from_sources::SetVersionFromSources),
     Node(node::Node),
+    Python(python::Python),
     Pack(pack::Pack),
     PatchCommit(patch_commit::PatchCommit),
     Patch(patch::Patch),
     Rebuild(rebuild::Rebuild),
     Remove(remove::Remove),
     Run(run::Run),
+    TaskHistory(tasks::history::TaskHistory),
+    TaskList(tasks::list::TaskList),
+    TaskPush(tasks::push::TaskPush),
+    TaskRunInterlaced(tasks::run_interlaced::TaskRunInterlaced),
+    TaskRunBuffered(tasks::run_buffered::TaskRunBuffered),
+    TaskRunSilentDependencies(tasks::run_silent_dependencies::TaskRunSilentDependencies),
+    TaskStats(tasks::stats::TaskStats),
+    TaskStop(tasks::stop::TaskStop),
     Unlink(unlink::Unlink),
     Unplug(unplug::Unplug),
     Up(up::Up),
+    UpRecursive(up_recursive::UpRecursive),
     WorkspacesFocus(workspaces_focus::WorkspacesFocus),
     WorkspacesForeach(workspaces_foreach::WorkspacesForeach),
     WorkspacesList(workspaces_list::WorkspacesList),

@@ -1,6 +1,7 @@
 use std::{fmt, string::FromUtf8Error};
 
 use colored::Colorize;
+use crate::EcoString;
 use erased_serde::serialize_trait_object;
 use fundu::parse_duration;
 use serde::{Serialize, Serializer};
@@ -136,6 +137,20 @@ impl FromFileString for bool {
     }
 }
 
+impl FromFileString for EcoString {
+    type Error = SerializationError;
+
+    fn from_file_string(s: &str) -> Result<Self, Self::Error> {
+        Ok(EcoString::from(s))
+    }
+}
+
+impl ToFileString for EcoString {
+    fn to_file_string(&self) -> String {
+        self.as_str().to_string()
+    }
+}
+
 impl ToFileString for bool {
     fn to_file_string(&self) -> String {
         self.to_string()
@@ -198,7 +213,14 @@ impl FromFileString for std::time::Duration {
 
 impl ToFileString for std::time::Duration {
     fn to_file_string(&self) -> String {
-        self.as_secs().to_string()
+        let ms = self.as_millis();
+        if ms == 0 {
+            "0s".to_string()
+        } else if ms % 1000 == 0 {
+            format!("{}s", ms / 1000)
+        } else {
+            format!("{}ms", ms)
+        }
     }
 }
 

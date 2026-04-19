@@ -189,7 +189,7 @@ impl<'a, T> Iterator for Compress<T> where T: Iterator<Item = Entry<'a>> {
         let compressed_data = match algorithm {
             CompressionAlgorithm::Deflate(level) => {
                 let mut encoder
-                    = DeflateEncoder::new(Vec::new(), flate2::Compression::new(level as u32));
+                    = DeflateEncoder::new(Vec::with_capacity(next.data.len()), flate2::Compression::new(level as u32));
 
                 encoder.write_all(&next.data).unwrap();
                 encoder.finish().unwrap()

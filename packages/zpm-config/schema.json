@@ -14,14 +14,39 @@
       },
       "default": ["main", "master"]
     },
+    "cloneConcurrency": {
+      "type": "usize",
+      "description": "The number of concurrent git clone operations Yarn can perform",
+      "default": 2
+    },
     "compressionLevel": {
       "type": ["zpm_formats::CompressionAlgorithm", "null"],
       "description": "The compression level to use for the packed file"
+    },
+    "daemonOutputBufferMaxLines": {
+      "type": "usize",
+      "description": "Maximum number of output lines to keep in memory per task in the daemon",
+      "default": 1000
+    },
+    "daemonMaxClosedTasks": {
+      "type": "usize",
+      "description": "Maximum number of completed/failed tasks whose output buffers are kept in memory by the daemon",
+      "default": 100
+    },
+    "daemonDefaultWarmupPeriod": {
+      "type": "std::time::Duration",
+      "description": "Default warm-up period for long-lived tasks in the daemon. After a long-lived task starts, dependents are unblocked once this period elapses.",
+      "default": "1s"
     },
     "defaultSemverRangePrefix": {
       "type": "zpm_semver::RangeKind",
       "description": "The default semver range prefix to use for dependencies",
       "default": "caret"
+    },
+    "deferredVersionFolder": {
+      "type": "zpm_utils::Path",
+      "description": "Folder where the versioning files are stored.",
+      "default": "crate::fns::default_deferred_version_folder(context)"
     },
     "enableAutoTypes": {
       "type": "boolean",
@@ -73,6 +98,11 @@
       "description": "Whether to run postinstall scripts",
       "default": true
     },
+    "enableStrictSsl": {
+      "type": "boolean",
+      "description": "Whether SSL errors should be treated as errors",
+      "default": true
+    },
     "enableTimers": {
       "type": "boolean",
       "description": "Whether to show timers in the output",
@@ -93,10 +123,48 @@
       "description": "The folder where the global cache will be stored",
       "default": "Path::home_dir().unwrap().unwrap().with_join_str(\".yarn/zpm\")"
     },
+    "initScope": {
+      "type": "string",
+      "description": "Scope used when creating packages via the init command",
+      "default": "yarnpkg"
+    },
+    "injectEnvironmentFiles": {
+      "type": "array",
+      "description": "Array of .env files which will get injected into any subprocess spawned by Yarn",
+      "items": {
+        "type": "string"
+      },
+      "default": [".env.yarn?"]
+    },
     "httpRetry": {
       "type": "usize",
       "description": "The number of times to retry a network request",
       "default": 3
+    },
+    "httpProxy": {
+      "type": ["string", "null"],
+      "description": "Proxy to use when making an HTTP request"
+    },
+    "httpTimeout": {
+      "type": "u64",
+      "description": "Amount of time to wait in milliseconds before cancelling pending HTTP requests",
+      "default": 60000
+    },
+    "httpsCaFilePath": {
+      "type": ["zpm_utils::Path", "null"],
+      "description": "Path to a file containing one or multiple Certificate Authority signing certificates"
+    },
+    "httpsCertFilePath": {
+      "type": ["zpm_utils::Path", "null"],
+      "description": "Path to a file containing a certificate chain in PEM format"
+    },
+    "httpsKeyFilePath": {
+      "type": ["zpm_utils::Path", "null"],
+      "description": "Path to a file containing a private key in PEM format"
+    },
+    "httpsProxy": {
+      "type": ["string", "null"],
+      "description": "Define a proxy to use when making an HTTPS request"
     },
     "localCacheFolderName": {
       "type": "string",
@@ -339,6 +407,27 @@
           "description": "The list of operating systems to cover.",
           "items": {
             "type": "zpm_utils::Os"
+          }
+        }
+      }
+    },
+    "unstableIslands": {
+      "type": "object",
+      "description": "Configuration of resolution islands. Each island resolves its transitive dependencies in isolation using a constraint solver (pubgrub), producing at most one version of each package per island.",
+      "additionalProperties": {
+        "type": "object",
+        "title": "IslandDefinition",
+        "properties": {
+          "workspaces": {
+            "type": "array",
+            "description": "List of workspace ident glob patterns that belong to this island.",
+            "items": {
+              "type": "zpm_primitives::IdentGlob"
+            }
+          },
+          "linker": {
+            "type": "crate::IslandLinker",
+            "description": "The linker to use for workspaces in this island. Supported values are 'node-modules' and 'venv'."
           }
         }
       }

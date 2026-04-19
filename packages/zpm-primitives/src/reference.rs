@@ -20,6 +20,19 @@ fn format_registry(ident: &Ident, version: &zpm_semver::Version, url: Option<&St
     }
 }
 
+fn format_pypi(version: &crate::PypiVersion, url: Option<&String>) -> String {
+    match url {
+        Some(url) => format!("pypi:{}#{}", version.to_file_string(), url.to_file_string()),
+        None => format!("pypi:{}", version.to_file_string()),
+    }
+}
+
+fn format_pypi_registry(ident: &Ident, version: &crate::PypiVersion, url: Option<&String>) -> String {
+    match url {
+        Some(url) => format!("pypi:{}@{}#{}", ident.to_file_string(), version.to_file_string(), url.to_file_string()),
+        None => format!("pypi:{}@{}", ident.to_file_string(), version.to_file_string()),
+    }
+}
 fn format_workspace_path(path: &Path) -> String {
     if path.is_empty() {
         "workspace:.".to_string()
@@ -60,6 +73,23 @@ pub enum Reference {
     Registry {
         ident: Ident,
         version: zpm_semver::Version,
+        url: Option<UrlEncoded<String>>,
+    },
+
+    #[pattern(r"pypi:(?<version>[^#]*)(?:#(?<url>.*))?")]
+    #[to_file_string(|params| format_pypi(&params.version, params.url.as_deref()))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format_pypi(&params.version, params.url.as_deref())))]
+    PypiShorthand {
+        version: crate::PypiVersion,
+        url: Option<UrlEncoded<String>>,
+    },
+
+    #[pattern(r"pypi:(?<ident>(?:@[^#@]+/)?[^#@]+)@(?<version>[^#]*)(?:#(?<url>.*))?")]
+    #[to_file_string(|params| format_pypi_registry(&params.ident, &params.version, params.url.as_deref()))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format_pypi_registry(&params.ident, &params.version, params.url.as_deref())))]
+    PypiRegistry {
+        ident: Ident,
+        version: crate::PypiVersion,
         url: Option<UrlEncoded<String>>,
     },
 
@@ -207,6 +237,14 @@ impl Reference {
 
             Reference::Registry(params) => {
                 format!("npm-{}", params.version.to_file_string())
+            },
+
+            Reference::PypiShorthand(params) => {
+                format!("pypi-{}", params.version.to_file_string())
+            },
+
+            Reference::PypiRegistry(params) => {
+                format!("pypi-{}", params.version.to_file_string())
             },
 
             Reference::Tarball(_) => {

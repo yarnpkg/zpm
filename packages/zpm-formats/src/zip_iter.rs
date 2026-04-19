@@ -5,12 +5,12 @@ use zpm_utils::Path;
 
 use crate::{zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, GeneralRecord}, Compression, CompressionAlgorithm, Entry, Error};
 
-fn unpack_deflate(data: &[u8]) -> Result<Vec<u8>, Error> {
+fn unpack_deflate(data: &[u8], expected_size: Option<usize>) -> Result<Vec<u8>, Error> {
     let mut decoder
         = flate2::bufread::DeflateDecoder::new(data);
 
     let mut buffer
-        = Vec::new();
+        = Vec::with_capacity(expected_size.unwrap_or(0));
 
     decoder.read_to_end(&mut buffer)?;
 
@@ -81,7 +81,9 @@ impl<'a> ZipIterator<'a> {
                     algorithm: CompressionAlgorithm::Deflate(0),
                 });
 
-                entry.data = Cow::Owned(unpack_deflate(data)?);
+                let expected_size
+                    = Some(central_directory_record.header.uncompressed_size.get() as usize);
+                entry.data = Cow::Owned(unpack_deflate(data, expected_size)?);
             },
 
             _ => {

@@ -8,12 +8,28 @@ use crate::{
 
 use super::PackageData;
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &GitReference) -> Result<FetchResult, Error> {
-    let package_cache = context.package_cache
-        .expect("The package cache is required for fetching git packages");
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &GitReference, is_mock_request: bool) -> Result<FetchResult, Error> {
+    let package_cache
+        = context.package_cache
+            .expect("The package cache is required for fetching git packages");
+
+    let cache_packer
+        = package_cache.packer();
+
+    if is_mock_request {
+        let archive_path = package_cache
+            .key_path(locator, ".zip");
+
+        let package_directory = archive_path
+            .with_join(&locator.ident.nm_subdir());
+
+        return Ok(FetchResult::new_mock(archive_path, package_directory));
+    }
 
     let package_subdir
         = locator.ident.nm_subdir();
+    let package_subdir_for_entries
+        = package_subdir.clone();
 
     let pkg_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
         let repository_path
@@ -25,17 +41,21 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             &params.git.prepare_params,
         ).await?;
 
-        let pack_tar
-            = zpm_formats::tar::unpack_tgz(&pack_tgz)?;
+        let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
+            let pack_tar
+                = zpm_formats::tar::unpack_tgz(&pack_tgz)?;
 
-        let entries
-            = zpm_formats::tar::entries_from_tar(&pack_tar)?
-                .into_iter()
-                .strip_first_segment()
-                .prepare_npm_entries(&package_subdir)
-                .collect::<Vec<_>>();
+            let entries
+                = zpm_formats::tar::entries_from_tar(&pack_tar)?
+                    .into_iter()
+                    .strip_first_segment()
+                    .prepare_npm_entries(&package_subdir_for_entries)
+                    .collect::<Vec<_>>();
 
-        Ok(package_cache.bundle_entries(entries)?)
+            Ok(cache_packer.pack(entries)?)
+        }).await??;
+
+        Ok(archive)
     }).await?;
 
     let first_entry

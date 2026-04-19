@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, os::unix::fs::PermissionsExt, sync::Arc};
 
 use itertools::Itertools;
 use serde::Deserialize;
@@ -275,10 +275,19 @@ impl<'a> SyncTree<'a> {
                 })
             },
 
-            SyncNode::File {..} => {
+            SyncNode::File {data, is_exec} => {
+                let expected_x
+                    = if *is_exec {0o111} else {0o000};
+
+                let is_file_up_to_date
+                    = metadata.is_file()
+                        && (metadata.permissions().mode() & 0o111) == expected_x
+                        && metadata.len() == data.len() as u64
+                        && data == &path.fs_read_with_size(metadata.len())?;
+
                 Ok(SyncCheck {
-                    must_remove: !metadata.is_file(),
-                    must_create: !metadata.is_file(),
+                    must_remove: !is_file_up_to_date,
+                    must_create: !is_file_up_to_date,
                 })
             },
 
@@ -395,12 +404,16 @@ impl<'a> SyncTree<'a> {
                 Ok(next_tasks)
             },
 
-            SyncNode::File {data, ..} => {
+            SyncNode::File {data, is_exec} => {
                 if check.must_create {
                     if self.dry_run {
                         file_ops.push(FileOp::CreateFile(path.clone(), data[..data.len().min(20)].to_vec()));
                     } else {
                         path.fs_write(data)?;
+
+                        if *is_exec {
+                            path.fs_set_permissions(std::fs::Permissions::from_mode(0o755))?;
+                        }
                     }
                 }
 

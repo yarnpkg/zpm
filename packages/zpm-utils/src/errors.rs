@@ -39,6 +39,13 @@ pub enum PathError {
         backtrace: Arc<std::backtrace::Backtrace>,
     },
 
+    #[error("Atomic rename conflict while moving {from} to {to} ({inner})", from = from.to_print_string(), to = to.to_print_string())]
+    AtomicRenameConflict {
+        from: Path,
+        to: Path,
+        inner: Arc<PathError>,
+    },
+
     #[error("Invalid UTF8 path")]
     InvalidUtf8Path,
 
@@ -48,10 +55,18 @@ pub enum PathError {
 
 impl PathError {
     pub fn io_kind(&self) -> Option<std::io::ErrorKind> {
-        if let PathError::IoError {inner, ..} = self {
-            Some(inner.kind())
-        } else {
-            None
+        match self {
+            PathError::IoError {inner, ..} => {
+                Some(inner.kind())
+            },
+
+            PathError::AtomicRenameConflict {inner, ..} => {
+                inner.io_kind()
+            },
+
+            _ => {
+                None
+            },
         }
     }
 }

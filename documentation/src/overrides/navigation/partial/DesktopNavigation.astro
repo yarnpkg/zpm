@@ -2,7 +2,6 @@
 import CustomSearch from "@/overrides/CustomSearch.astro";
 import CustomSocialIcons from "@/overrides/CustomSocialIcons.astro";
 import { NAVIGATION } from "@/content/consts.ts";
-import DropdownMenu from "./client/DropdownMenu";
 import cn from "@/utils/cn";
 
 import { isActivePath } from "@/utils/helpers";
@@ -35,7 +34,6 @@ const { pathname } = Astro.props;
       </div>
 
       <div class="flex items-center gap-x-6">
-        <DropdownMenu client:only="preact" />
         <CustomSocialIcons />
         <CustomSearch />
       </div>

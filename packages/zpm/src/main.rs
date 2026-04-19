@@ -1,3 +1,5 @@
+extern crate zpm_allocator;
+
 use std::process::ExitCode;
 
 #[tokio::main]

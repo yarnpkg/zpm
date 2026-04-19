@@ -194,11 +194,14 @@ impl TreeResolver {
                 continue;
             }
 
+            let parent_hash
+                = zpm_utils::Hash64::from_string(parent_locator);
+
             let virtualized_descriptor = dependency_descriptor
-                .virtualized_for(parent_locator);
+                .virtualized_with_hash(parent_hash.clone());
 
             let virtualized_locator = dependency_locator
-                .virtualized_for(parent_locator);
+                .virtualized_with_hash(parent_hash);
 
             let mut virtualized_resolution = pkg
                 .clone();

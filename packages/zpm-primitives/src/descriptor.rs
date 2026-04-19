@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::Hash;
@@ -90,6 +91,11 @@ impl Descriptor {
                 version: params.version,
             }.into(),
 
+            Reference::PypiRegistry(params) if params.ident == self.ident && params.url.is_none() => reference::PypiShorthandReference {
+                version: params.version,
+                url: None,
+            }.into(),
+
             _ => reference,
         };
 
@@ -97,11 +103,13 @@ impl Descriptor {
     }
 
     pub fn virtualized_for(&self, parent: &Locator) -> Descriptor {
-        let serialized = parent.to_file_string();
+        self.virtualized_with_hash(Hash64::from_string(parent))
+    }
 
+    pub fn virtualized_with_hash(&self, hash: Hash64) -> Descriptor {
         let range = Range::Virtual(VirtualRange {
             inner: Box::new(self.range.clone()),
-            hash: Hash64::from_string(&serialized),
+            hash,
         });
 
         Descriptor {
@@ -183,9 +191,9 @@ pub fn descriptor_map_deserializer<'de, D>(deserializer: D) -> Result<BTreeMap<I
             let mut map
                 = BTreeMap::new();
 
-            while let Some((key, value)) = access.next_entry::<&str, &str>()? {
+            while let Some((key, value)) = access.next_entry::<Cow<'de, str>, Cow<'de, str>>()? {
                 let descriptor
-                    = extract_descriptor(key, value)
+                    = extract_descriptor(&key, &value)
                         .map_err(|e| serde::de::Error::custom(e.to_string()))?;
 
                 map.insert(descriptor.ident.clone(), descriptor);
@@ -256,7 +264,8 @@ impl_file_string_serialization!(Descriptor);
 
 #[rstest]
 #[case("foo@npm:1.0.0")]
-#[case("foo@npm:1.0.0::parent=root@workspace:")]
+#[case("foo@pypi:1.0.0")]
+#[case("foo@npm:1.0.0::parent=root@workspace:.")]
 fn test_descriptor_serialization(#[case] str: &str) {
     assert_eq!(str, Descriptor::from_file_string(str).unwrap().to_file_string());
 }

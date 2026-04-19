@@ -1,0 +1,43 @@
+---
+import { Image } from "astro:assets";
+import BlueSkyIcon from "@/assets/svg/bluesky.svg";
+import europeanFlagUrl from "@/assets/svg/europe.svg?url";
+
+const { author } = Astro.props;
+---
+
+<div>
+{
+  author !== undefined && (
+    <div class="flex items-center gap-x-4">
+      <Image
+        src={author.image_url ?? "/default-author.png"}
+        alt={author.name}
+        width={56}
+        height={56}
+        class="rounded-full object-cover"
+      />
+      <div class="text-white">
+        <a
+          href={author.url}
+          class="flex items-center gap-x-2 font-montserrat font-medium leading-[22px] no-underline"
+          target="_blank"
+          referrerpolicy="no-referrer"
+        >
+          <div>
+            {author.name}
+          </div>
+          <div class="flex items-center gap-x-2 opacity-80">
+            <BlueSkyIcon class="size-4" />
+          </div>
+        </a>
+        <div class="opacity-80">
+          <div class="font-montserrat">
+            {author.title}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+</div>

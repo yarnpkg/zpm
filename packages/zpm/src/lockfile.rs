@@ -31,6 +31,8 @@ pub struct Lockfile {
     pub metadata: LockfileMetadata,
     pub resolutions: BTreeMap<Descriptor, Locator>,
     pub entries: BTreeMap<Locator, LockfileEntry>,
+    pub workspaces: BTreeMap<Ident, Hash64>,
+    pub islands: BTreeMap<String, BTreeMap<Descriptor, Locator>>,
 }
 
 impl Lockfile {
@@ -39,6 +41,8 @@ impl Lockfile {
             metadata: LockfileMetadata::new(),
             resolutions: BTreeMap::new(),
             entries: BTreeMap::new(),
+            workspaces: BTreeMap::new(),
+            islands: BTreeMap::new(),
         }
     }
 }
@@ -50,6 +54,7 @@ impl<'de> Deserialize<'de> for Lockfile {
         let mut lockfile = Lockfile::new();
 
         lockfile.metadata = payload.metadata;
+        lockfile.workspaces = payload.workspaces;
 
         for (key, entry) in payload.entries {
             for descriptor in key.0 {
@@ -57,6 +62,18 @@ impl<'de> Deserialize<'de> for Lockfile {
             }
 
             lockfile.entries.insert(entry.resolution.locator.clone(), entry);
+        }
+
+        // Deserialize island entries
+        for (island_id, island_entries) in payload.islands {
+            let mut island_resolutions = BTreeMap::new();
+            for (key, entry) in island_entries {
+                for descriptor in key.0 {
+                    island_resolutions.insert(descriptor, entry.resolution.locator.clone());
+                }
+                lockfile.entries.insert(entry.resolution.locator.clone(), entry);
+            }
+            lockfile.islands.insert(island_id, island_resolutions);
         }
 
         Ok(lockfile)
@@ -91,9 +108,36 @@ impl Serialize for Lockfile {
             entries.insert(entry.key, entry.inner);
         }
 
+        // Serialize island entries
+        let mut islands_payload: BTreeMap<String, BTreeMap<MultiKey<Descriptor>, LockfileEntry>> = BTreeMap::new();
+        for (island_id, island_resolutions) in &self.islands {
+            let mut island_entries_map: BTreeMap<Locator, MultiKeyLockfileEntry> = BTreeMap::new();
+            for (descriptor, locator) in island_resolutions.iter().sorted_by_key(|(descriptor, _)| (*descriptor).clone()) {
+                if descriptor.range.details().transient_resolution {
+                    continue;
+                }
+
+                let entry = self.entries.get(locator)
+                    .expect("Expected a matching resolution to be found in the lockfile for any resolved island locator.");
+
+                island_entries_map.entry(entry.resolution.locator.clone())
+                    .or_insert_with(|| MultiKeyLockfileEntry {inner: entry.clone(), key: MultiKey::new()})
+                    .key.0
+                    .push(descriptor.clone());
+            }
+
+            let mut island_entries = BTreeMap::new();
+            for entry in island_entries_map.into_values() {
+                island_entries.insert(entry.key, entry.inner);
+            }
+            islands_payload.insert(island_id.clone(), island_entries);
+        }
+
         let payload = LockfilePayload {
             metadata: self.metadata.clone(),
             entries,
+            workspaces: self.workspaces.clone(),
+            islands: islands_payload,
         };
 
         payload.serialize(serializer)
@@ -161,7 +205,14 @@ impl<T> Serialize for MultiKey<T> where T: ToFileString {
                 string.push_str(", ");
             }
 
-            string.push_str(&item.to_file_string());
+            let serialized = item.to_file_string();
+            for ch in serialized.chars() {
+                if ch == ',' || ch == '\\' {
+                    string.push('\\');
+                }
+
+                string.push(ch);
+            }
         }
 
         serializer.serialize_str(&string)
@@ -182,10 +233,37 @@ impl<'de, T: FromFileString> Deserialize<'de> for MultiKey<T> where <T as FromFi
             }
 
             fn visit_str<E>(self, value: &str) -> Result<Vec<T>, E> where E: de::Error {
-                let result = value
-                    .split(',')
-                    .map(str::trim)
-                    .map(|s| T::from_file_string(s))
+                let mut chunks = Vec::new();
+                let mut current = String::new();
+                let mut chars = value.chars().peekable();
+
+                while let Some(ch) = chars.next() {
+                    if ch == ',' {
+                        chunks.push(current);
+                        current = String::new();
+                        continue;
+                    }
+
+                    if ch != '\\' {
+                        current.push(ch);
+                        continue;
+                    }
+
+                    match chars.peek() {
+                        Some(',') | Some('\\') => {
+                            current.push(chars.next().expect("peeked character should be present"));
+                        }
+                        _ => {
+                            // Keep unknown escapes as-is to stay backward-compatible with legacy lockfiles.
+                            current.push('\\');
+                        }
+                    }
+                }
+
+                chunks.push(current);
+
+                let result = chunks.into_iter()
+                    .map(|s| T::from_file_string(s.trim()))
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(de::Error::custom)?;
 
@@ -232,7 +310,14 @@ struct LockfilePayload {
     metadata: LockfileMetadata,
 
     #[serde(default)]
+    workspaces: BTreeMap<Ident, Hash64>,
+
+    #[serde(default)]
     entries: BTreeMap<MultiKey<Descriptor>, LockfileEntry>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    islands: BTreeMap<String, BTreeMap<MultiKey<Descriptor>, LockfileEntry>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -323,7 +408,8 @@ struct PnpmListDependency {
 /// Builds a lockfile from pnpm's installed packages using `pnpm list --json`.
 ///
 /// The approach:
-/// 1. Run `pnpm list --json --depth=3` to get most of the full dependency tree
+/// 1. Run `pnpm list --json` to get the full dependency tree
+///    (uses `--depth=Infinity` on pnpm >= 10.29.3, `--depth=3` on older versions)
 /// 2. Recursively walk the tree to collect all packages with their resolved URLs
 /// 3. For each package, read its package.json to get the original dependency ranges
 /// 4. Build descriptor -> locator mappings
@@ -353,9 +439,17 @@ pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
         return Ok(Lockfile::new());
     }
 
-    // Run pnpm list --json --depth=Infinity
+    let depth_flag = std::process::Command::new("pnpm")
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|v| zpm_semver::Version::from_file_string(v.trim()).ok())
+        .filter(|v| *v >= zpm_semver::Version::from_file_string("10.29.3").unwrap())
+        .map_or("--depth=3", |_| "--depth=Infinity");
+
     let output = std::process::Command::new("pnpm")
-        .args(["list", "-r", "--json", "--depth=3"])
+        .args(["list", "-r", "--json", depth_flag])
         .current_dir(project_cwd.as_str())
         .output()
         .map_err(|_| Error::PnpmNodeModulesReadError)?;

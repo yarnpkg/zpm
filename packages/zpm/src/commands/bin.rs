@@ -41,10 +41,14 @@ impl Bin {
         let binary
             = project.find_binary(&self.name)?;
 
-        let binary_path = project.project_cwd
-            .with_join(&binary.path);
+        let path = match binary {
+            crate::script::Binary::Path {path, ..} => path,
+            crate::script::Binary::PythonEntryPoint {..} => {
+                return Err(Error::Unsupported);
+            },
+        };
 
-        println!("{}", binary_path.to_file_string());
+        println!("{}", path.to_file_string());
 
         Ok(())
     }

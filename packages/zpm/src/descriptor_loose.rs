@@ -15,6 +15,7 @@ pub struct ResolveOptions {
     pub active_workspace_ident: Ident,
     pub range_kind: RangeKind,
     pub resolve_tags: bool,
+    pub allow_reuse: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -122,30 +123,37 @@ impl LooseDescriptor {
     pub async fn resolve(&self, context: &InstallContext<'_>, options: &ResolveOptions) -> Result<LooseResolution, Error> {
         match self {
             LooseDescriptor::Range(RangeLooseDescriptor {range: Range::Tarball(params)}) => {
-                let path
-                    = Path::try_from(&params.path)?;
+                let params_path
+                    = params.path.clone();
 
-                let tgz_content = path
-                    .fs_read_prealloc()?;
+                let ident = tokio::task::spawn_blocking(move || -> Result<Ident, Error> {
+                    let path
+                        = Path::try_from(&params_path)?;
 
-                let tar_content
-                    = tar::unpack_tgz(&tgz_content)?;
+                    let tgz_content = path
+                        .fs_read_prealloc()?;
 
-                let package_json_entry
-                    = tar_iter::TarIterator::new(&tar_content)
-                        .filter_map(|entry| entry.ok())
-                        .strip_first_segment()
-                        .find(|entry| entry.name.basename() == Some("package.json"));
+                    let tar_content
+                        = tar::unpack_tgz(&tgz_content)?;
 
-                let Some(package_json_entry) = package_json_entry else {
-                    return Err(Error::ManifestNotFound(path.with_join_str("package.json")));
-                };
+                    let package_json_entry
+                        = tar_iter::TarIterator::new(&tar_content)
+                            .filter_map(|entry| entry.ok())
+                            .strip_first_segment()
+                            .find(|entry| entry.name.basename() == Some("package.json"));
 
-                let manifest
-                    = parse_manifest_from_bytes(&package_json_entry.data)?;
+                    let Some(package_json_entry) = package_json_entry else {
+                        return Err(Error::ManifestNotFound(path.with_join_str("package.json")));
+                    };
 
-                let ident = manifest.name
-                    .ok_or_else(|| Error::MissingPackageName)?;
+                    let manifest
+                        = parse_manifest_from_bytes(&package_json_entry.data)?;
+
+                    let ident = manifest.name
+                        .ok_or_else(|| Error::MissingPackageName)?;
+
+                    Ok(ident)
+                }).await??;
 
                 let descriptor
                     = Descriptor::new(ident, TarballRange {path: params.path.clone()}.into());
@@ -190,11 +198,11 @@ impl LooseDescriptor {
             }
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::AnonymousTag(AnonymousTagRange {tag}), ..}}) => {
-                LooseDescriptor::resolve_registry_tag(context, options, ident, None, tag).await
+                LooseDescriptor::resolve_registry_tag(context, options, ident, None, tag.as_str()).await
             },
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::RegistryTag(RegistryTagRange {ident: ident_range, tag}), ..}}) => {
-                LooseDescriptor::resolve_registry_tag(context, options, ident, ident_range.as_ref(), tag).await
+                LooseDescriptor::resolve_registry_tag(context, options, ident, ident_range.as_ref(), tag.as_str()).await
             },
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor}) => {
@@ -218,7 +226,7 @@ impl LooseDescriptor {
                     });
                 }
 
-                if project.config.settings.prefer_reuse.value {
+                if options.allow_reuse && project.config.settings.prefer_reuse.value {
                     if let Some(descriptor) = find_project_descriptor(project, ident.clone())? {
                         return Ok(LooseResolution {
                             descriptor: descriptor.clone(),
@@ -270,7 +278,7 @@ impl LooseDescriptor {
     async fn resolve_registry_tag(context: &InstallContext<'_>, options: &ResolveOptions, ident: &Ident, range_ident: Option<&Ident>, tag: &str) -> Result<LooseResolution, Error> {
         if !options.resolve_tags {
             let descriptor
-                = Descriptor::new(ident.clone(), RegistryTagRange {ident: range_ident.cloned(), tag: tag.to_string()}.into());
+                = Descriptor::new(ident.clone(), RegistryTagRange {ident: range_ident.cloned(), tag: tag.into()}.into());
 
             return Ok(LooseResolution {
                 descriptor,
@@ -279,7 +287,7 @@ impl LooseDescriptor {
         }
 
         let descriptor
-            = Descriptor::new(ident.clone(), RegistryTagRange {ident: range_ident.cloned(), tag: tag.to_string()}.into());
+            = Descriptor::new(ident.clone(), RegistryTagRange {ident: range_ident.cloned(), tag: tag.into()}.into());
 
         let Range::RegistryTag(range_params) = &descriptor.range else {
             panic!("Invalid range");

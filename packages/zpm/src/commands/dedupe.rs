@@ -101,7 +101,9 @@ impl Dedupe {
             }
         } else {
             project.run_install(RunInstallOptions {
-                enforced_resolutions,
+                enforced_resolutions: enforced_resolutions.into_iter()
+                    .map(|(d, l)| (d, Some(l)))
+                    .collect(),
                 mode: self.mode,
                 ..Default::default()
             }).await?;

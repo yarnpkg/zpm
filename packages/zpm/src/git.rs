@@ -265,6 +265,12 @@ pub async fn clone_repository(context: &InstallContext<'_>, source: &GitSource, 
         return Ok(clone_dir);
     }
 
+    let _clone_permit
+        = project.clone_limiter
+            .acquire()
+            .await
+            .expect("The clone limiter semaphore should not be closed");
+
     git_clone_into(source, commit, &clone_dir, &project.http_client.config).await?;
     Ok(clone_dir)
 }

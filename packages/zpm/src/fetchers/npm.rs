@@ -62,9 +62,13 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching npm packages");
+    let cache_packer
+        = package_cache.packer();
 
     let package_subdir
         = params.ident.nm_subdir();
+    let package_subdir_for_entries
+        = package_subdir.clone();
 
     let authorization
         = http_npm::get_authorization(&GetAuthorizationOptions {
@@ -86,17 +90,21 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
                 otp: None,
             }).await?;
 
-        let tar_data
-            = zpm_formats::tar::unpack_tgz(&bytes)?;
+        let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
+            let tar_data
+                = zpm_formats::tar::unpack_tgz(&bytes)?;
 
-        let entries
-            = zpm_formats::tar::entries_from_tar(&tar_data)?
-                .into_iter()
-                .strip_first_segment()
-                .prepare_npm_entries(&package_subdir)
-                .collect::<Vec<_>>();
+            let entries
+                = zpm_formats::tar::entries_from_tar(&tar_data)?
+                    .into_iter()
+                    .strip_first_segment()
+                    .prepare_npm_entries(&package_subdir_for_entries)
+                    .collect::<Vec<_>>();
 
-        Ok(package_cache.bundle_entries(entries)?)
+            Ok(cache_packer.pack(entries)?)
+        }).await??;
+
+        Ok(archive)
     }).await?.into_info();
 
     let package_directory = cached_blob.path

@@ -1,6 +1,11 @@
 {
   "name": "@yarnpkg/monorepo",
   "packageManager": "yarn@6.0.0-rc.10",
+  "scripts": {
+    "codegen:daemon-types": "cargo run -p zpm --bin generate_daemon_types",
+    "codegen:daemon-types:check": "cargo run -p zpm --bin generate_daemon_types -- --check",
+    "e2e": "bash ./scripts/e2e/run.sh"
+  },
   "workspaces": [
     "documentation",
     "packages/*",
@@ -10,21 +15,19 @@
     "tests/acceptance-tests/pkg-tests-specs"
   ],
   "devDependencies": {
+    "@types/dom-navigation": "^1.0.6",
     "@types/lodash": "^4.17.17",
     "@types/node": "^22.15.20",
     "@yarnpkg/types": "^4.0.1",
     "esbuild": "^0.25.5",
     "lodash": "^4.17.21",
-    "typescript": "^5.8.3"
+    "octokit": "^5.0.5",
+    "typescript": "^5.9.3"
   },
   "repository": {
     "directory": "",
     "type": "git",
     "url": "git+https://github.com/yarnpkg/zpm.git"
-  },
-  "scripts": {
-    "foo": "echo root",
-    "berry": "export TEST_BINARY=$PROJECT_CWD/local/yarn && export YARNSW_DEFAULT=local:$PROJECT_CWD/local/yarn-bin && export TEST_MAJOR=5 && cd ${BERRY_DIR:-../berry} && yarn"
   },
   "dependencies": {
     "@yarnpkg/eslint-config": "^3.1.0",

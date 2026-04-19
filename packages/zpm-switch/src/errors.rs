@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use reqwest::StatusCode;
+use tokio::task::JoinError;
 use zpm_utils::{DataType, Path, PathError, ToHumanString};
 
 #[derive(thiserror::Error, Clone, Debug)]
@@ -25,6 +26,9 @@ pub enum Error {
 
     #[error(transparent)]
     JsonError(#[from] zpm_parsers::Error),
+
+    #[error("Internal error: Join failed ({0})")]
+    JoinFailed(#[from] Arc<JoinError>),
 
     #[error("Failed to execute the {program} binary: {error}", program = DataType::Code.colorize(&.0), error = .1.to_string())]
     FailedToExecuteBinary(String, Arc<std::io::Error>),
@@ -79,6 +83,36 @@ pub enum Error {
 
     #[error("Yarn cannot be used on project configured for use with {0}")]
     UnsupportedProject(&'static str),
+
+    #[error("No project found in current directory or any parent")]
+    NoProjectFound,
+
+    #[error("Daemons are not supported for local Yarn versions")]
+    DaemonNotSupportedForLocalVersions,
+
+    #[error("Failed to start daemon: {0}")]
+    FailedToStartDaemon(Arc<std::io::Error>),
+
+    #[error("No daemon is running for this project")]
+    DaemonNotRunning,
+
+    #[error("Daemon failed to start within timeout")]
+    DaemonStartTimeout,
+
+    #[error("Failed to connect to daemon: {0}")]
+    DaemonConnectionFailed(Arc<std::io::Error>),
+
+    #[error("Invalid daemon message: {0}")]
+    InvalidDaemonMessage(String),
+
+    #[error("Failed to bind socket: {0}")]
+    FailedToBindSocket(Arc<std::io::Error>),
+
+    #[error("Failed to read from socket: {0}")]
+    SocketReadError(Arc<std::io::Error>),
+
+    #[error("Failed to write to socket: {0}")]
+    SocketWriteError(Arc<std::io::Error>),
 }
 
 impl From<std::str::Utf8Error> for Error {
@@ -89,6 +123,12 @@ impl From<std::str::Utf8Error> for Error {
 
 impl From<reqwest::Error> for Error {
     fn from(value: reqwest::Error) -> Self {
+        Error::from(Arc::new(value))
+    }
+}
+
+impl From<JoinError> for Error {
+    fn from(value: JoinError) -> Self {
         Error::from(Arc::new(value))
     }
 }

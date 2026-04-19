@@ -50,7 +50,7 @@ renderedEntries.sort((a, b) => b.rawDate.valueOf() - a.rawDate.valueOf());
     <div class="flex flex-col gap-12">
       {
         renderedEntries.map(({ entry, date, minutesRead, author, Content }) => (
-          <div class="mx-auto max-w-[700px] bg-gradient-to-b from-white/15 to-white/5 p-px rounded-[20px]">
+          <div class="mx-auto w-full max-w-[700px] bg-gradient-to-b from-white/15 to-white/5 p-px rounded-[20px]">
             <div class="rounded-[20px] p-4 md:p-6 bg-gradient-to-b from-gray-950 to-gray-800 h-full flex flex-col justify-between">
               <a href={`/blog/${entry.data.slug}`}>
                 <Heading className="pb-2 md:pb-3">{entry.data.title}</Heading>
@@ -81,7 +81,7 @@ renderedEntries.sort((a, b) => b.rawDate.valueOf() - a.rawDate.valueOf());
                       <img src={europeanFlagUrl} class="inline rounded h-4 ml-1 -mt-[3px]"/>
                     </a>
                     <div class="flex items-baseline justify-between text-sm leading-[22px]">
-                      <p class="text-white/60">
+                      <p class="hidden lg:block text-white/60">
                         {author?.title}
                       </p>
                       <div class="flex items-baseline gap-x-2">
@@ -91,7 +91,7 @@ renderedEntries.sort((a, b) => b.rawDate.valueOf() - a.rawDate.valueOf());
                             {date}
                           </span>
                         </p>
-                        <p class="text-white/60 inline-flex items-baseline gap-x-2">
+                        <p class="text-white/60 hidden lg:inline-flex items-baseline gap-x-2">
                           <Clock class="relative top-[5px] size-6" />
                           <span class="font-medium text-white">
                             {minutesRead}

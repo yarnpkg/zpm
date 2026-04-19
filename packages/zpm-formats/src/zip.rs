@@ -12,11 +12,11 @@ pub struct CraftZipOptions {
     pub compression: Option<CompressionAlgorithm>,
 }
 
-pub fn entries_from_zip(buffer: &[u8]) -> Result<Vec<Entry>, Error> {
+pub fn entries_from_zip(buffer: &[u8]) -> Result<Vec<Entry<'_>>, Error> {
     ZipIterator::new(buffer)?.collect()
 }
 
-pub fn first_entry_from_zip(buffer: &[u8]) -> Result<Entry, Error> {
+pub fn first_entry_from_zip(buffer: &[u8]) -> Result<Entry<'_>, Error> {
     ZipIterator::new(buffer)?.next()
         .unwrap_or_else(|| Err(Error::InvalidZipFile("Empty".to_string())))
 }
@@ -27,7 +27,7 @@ pub trait ToZip {
 
 impl<'a> ToZip for Vec<Entry<'a>> {
     fn to_zip(&self) -> Vec<u8> {
-        let mut general_capacity = 0;
+        let mut local_headers_capacity = 0;
         let mut central_directory_capacity = std::mem::size_of::<EndOfCentralDirectoryRecord>();
 
         for entry in self {
@@ -38,17 +38,22 @@ impl<'a> ToZip for Vec<Entry<'a>> {
             let name_bytes
                 = entry.name.as_str().as_bytes();
 
-            general_capacity
+            local_headers_capacity
                 += std::mem::size_of::<GeneralRecord>() + name_bytes.len() + compressed_data.len();
 
             central_directory_capacity
                 += std::mem::size_of::<CentralDirectoryRecord>() + name_bytes.len();
         }
 
-        let mut general_segment
-            = Vec::with_capacity(general_capacity);
-        let mut central_directory_segment
-            = Vec::with_capacity(central_directory_capacity);
+        let total_capacity
+            = local_headers_capacity + central_directory_capacity;
+
+        let mut buffer
+            = Vec::with_capacity(total_capacity);
+
+        // First pass: write local file headers + data, computing CRC32 inline
+        let mut entry_metadata: Vec<(usize, u32)>
+            = Vec::with_capacity(self.len());
 
         for entry in self {
             let compressed_data = entry.compression
@@ -59,33 +64,58 @@ impl<'a> ToZip for Vec<Entry<'a>> {
                 .as_ref()
                 .map(|compressed_data| compressed_data.algorithm);
 
-            let offset = general_segment.len();
+            let crc
+                = crc32fast::hash(&entry.data);
 
-            inject_general_record(&mut general_segment, entry, compressed_data, compression);
-            inject_central_directory_record(&mut central_directory_segment, entry, compressed_data, offset, compression);
+            let offset = buffer.len();
+            entry_metadata.push((offset, crc));
+
+            inject_general_record(&mut buffer, entry, compressed_data, compression, crc);
         }
 
-        central_directory_segment.extend_from_slice(
+        assert_eq!(buffer.len(), local_headers_capacity);
+
+        let central_directory_offset
+            = buffer.len();
+
+        // Second pass: write central directory records
+        for (i, entry) in self.iter().enumerate() {
+            let compressed_data = entry.compression
+                .as_ref()
+                .map_or(&entry.data, |compressed_data| &compressed_data.data);
+
+            let compression = entry.compression
+                .as_ref()
+                .map(|compressed_data| compressed_data.algorithm);
+
+            let (offset, crc) = entry_metadata[i];
+
+            inject_central_directory_record(&mut buffer, entry, compressed_data, offset, compression, crc);
+        }
+
+        let central_directory_size
+            = buffer.len() - central_directory_offset;
+
+        buffer.extend_from_slice(
             EndOfCentralDirectoryRecord {
                 signature: [0x50, 0x4b, 0x05, 0x06],
                 disk_number: U16::new(0x00),
                 disk_with_central_directory: U16::new(0x00),
                 number_of_files_on_this_disk: U16::new(self.len() as u16),
                 number_of_files: U16::new(self.len() as u16),
-                size_of_central_directory: U32::new(central_directory_segment.len() as u32),
-                offset_of_central_directory: U32::new(general_segment.len() as u32),
+                size_of_central_directory: U32::new(central_directory_size as u32),
+                offset_of_central_directory: U32::new(central_directory_offset as u32),
                 comment_length: U16::new(0x00),
             }.as_bytes(),
         );
 
-        assert_eq!(general_segment.len(), general_capacity);
-        assert_eq!(central_directory_segment.len(), central_directory_capacity);
+        assert_eq!(buffer.len(), total_capacity);
 
-        [general_segment, central_directory_segment].concat()
+        buffer
     }
 }
 
-fn inject_general_record(target: &mut Vec<u8>, entry: &Entry, compressed_data: &[u8], compression: Option<CompressionAlgorithm>) {
+fn inject_general_record(target: &mut Vec<u8>, entry: &Entry, compressed_data: &[u8], compression: Option<CompressionAlgorithm>, crc: u32) {
     let compression_method: u16 = match compression {
         Some(CompressionAlgorithm::Deflate(_)) => 0x08, // Deflate compression
         None => 0x00, // No compression
@@ -103,7 +133,7 @@ fn inject_general_record(target: &mut Vec<u8>, entry: &Entry, compressed_data: &
                 compression_method: U16::new(compression_method),
                 last_mod_file_time: U16::new(0xae40),
                 last_mod_file_date: U16::new(0x08d6),
-                crc_32: U32::new(entry.crc),
+                crc_32: U32::new(crc),
                 compressed_size: U32::new(compressed_data.len() as u32),
                 uncompressed_size: U32::new(entry.data.len() as u32),
                 file_name_length: U16::new(name_bytes.len() as u16),
@@ -119,7 +149,7 @@ fn inject_general_record(target: &mut Vec<u8>, entry: &Entry, compressed_data: &
     target.extend_from_slice(compressed_data);
 }
 
-fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, compressed_data: &[u8], offset: usize, compression: Option<CompressionAlgorithm>) {
+fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, compressed_data: &[u8], offset: usize, compression: Option<CompressionAlgorithm>, crc: u32) {
     let compression_method: u16 = match compression {
         Some(CompressionAlgorithm::Deflate(_)) => 0x08, // Deflate compression
         None => 0x00, // No compression
@@ -138,7 +168,7 @@ fn inject_central_directory_record(target: &mut Vec<u8>, entry: &Entry, compress
                 compression_method: U16::new(compression_method),
                 last_mod_file_time: U16::new(0xae40),
                 last_mod_file_date: U16::new(0x08d6),
-                crc_32: U32::new(entry.crc),
+                crc_32: U32::new(crc),
                 compressed_size: U32::new(compressed_data.len() as u32),
                 uncompressed_size: U32::new(entry.data.len() as u32),
                 file_name_length: U16::new(name_bytes.len() as u16),

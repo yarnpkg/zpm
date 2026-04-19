@@ -1,5 +1,7 @@
+pub mod daemons;
 mod errors;
 mod http;
+mod ipc;
 mod manifest;
 mod yarn_enums;
 mod yarn;
@@ -7,6 +9,8 @@ mod yarn;
 pub use errors::{
   Error,
 };
+
+pub use ipc::YARNSW_PATH_ENV;
 
 pub use manifest::{
     PackageManagerField,

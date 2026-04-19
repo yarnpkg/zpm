@@ -1,5 +1,5 @@
 import {execUtils, semverUtils} from '@yarnpkg/core';
-import {npath}                  from '@yarnpkg/fslib';
+import {npath, ppath, xfs}      from '@yarnpkg/fslib';
 import {tests}                  from 'pkg-tests-core';
 
 const TESTED_URLS = {
@@ -20,6 +20,110 @@ const TESTED_URLS = {
   [`https://github.com/yarnpkg/util-deprecate.git#master`]: {version: `1.0.2`, runOnCI: true},
   [`https://github.com/yarnpkg/util-deprecate.git#b3562c2798507869edb767da869cd7b85487726d`]: {version: `1.0.0`, runOnCI: true},
 };
+
+const makeCloneMetricsWrapper = ({realGitPath, metricsDir}: {realGitPath: string, metricsDir: string}) => `
+#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+const {spawn} = require('child_process');
+
+const realGitPath = ${JSON.stringify(realGitPath)};
+const metricsDir = ${JSON.stringify(metricsDir)};
+const stateFile = path.join(metricsDir, 'state');
+const lockDir = path.join(metricsDir, 'lock');
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function withLock(fn) {
+  while (true) {
+    try {
+      await fs.promises.mkdir(lockDir);
+      break;
+    } catch (error) {
+      if (error && error.code === 'EEXIST') {
+        await sleep(10);
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    await fs.promises.rmdir(lockDir);
+  }
+}
+
+async function readState() {
+  const content = await fs.promises.readFile(stateFile, 'utf8');
+  const [currentLine = '0', maxLine = '0'] = content.trim().split(/\\r\\n|\\r|\\n/);
+
+  return {
+    current: Number(currentLine),
+    max: Number(maxLine),
+  };
+}
+
+async function writeState(current, max) {
+  await fs.promises.writeFile(stateFile, \`\${current}\\n\${max}\\n\`);
+}
+
+async function incrementCounter() {
+  await withLock(async () => {
+    const {current, max} = await readState();
+    const nextCurrent = current + 1;
+    const nextMax = Math.max(max, nextCurrent);
+
+    await writeState(nextCurrent, nextMax);
+  });
+}
+
+async function decrementCounter() {
+  await withLock(async () => {
+    const {current, max} = await readState();
+    await writeState(current - 1, max);
+  });
+}
+
+function runGit(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(realGitPath, args, {stdio: 'inherit'});
+
+    child.on('error', reject);
+    child.on('exit', code => {
+      resolve(typeof code === 'number' ? code : 1);
+    });
+  });
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+
+  if (args[0] === 'clone') {
+    await incrementCounter();
+    await sleep(200);
+
+    const exitCode = await (async () => {
+      try {
+        return await runGit(args);
+      } finally {
+        await decrementCounter();
+      }
+    })();
+
+    process.exit(exitCode);
+  }
+
+  process.exit(await runGit(args));
+}
+
+main().catch(error => {
+  console.error(error);
+  process.exit(1);
+});
+`.trimStart();
 
 describe(`Protocols`, () => {
   describe(`git:`, () => {
@@ -152,6 +256,51 @@ describe(`Protocols`, () => {
             name: `pkg-b`,
             version: `1.0.0`,
           });
+        },
+      ),
+    );
+
+    tests.testIf(
+      () => process.platform !== `win32`,
+      `it should respect cloneConcurrency when cloning git repositories`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`pkg-a`]: tests.startPackageServer().then(url => `${url}/repositories/deep-projects.git#cwd=projects/pkg-a`),
+            [`pkg-b`]: tests.startPackageServer().then(url => `${url}/repositories/deep-projects.git#cwd=projects/pkg-b`),
+            [`lib-a`]: tests.startPackageServer().then(url => `${url}/repositories/deep-projects.git#cwd=projects/pkg-a&workspace=lib`),
+            [`lib-b`]: tests.startPackageServer().then(url => `${url}/repositories/deep-projects.git#cwd=projects/pkg-b&workspace=lib`),
+          },
+        },
+        {
+          cloneConcurrency: 1,
+        },
+        async ({path, run, source}) => {
+          const {stdout: gitPathStdout} = await execUtils.execvp(`which`, [`git`], {cwd: path});
+          const realGitPath = gitPathStdout.trim();
+
+          const binDir = ppath.join(path, `bin`);
+          const metricsDir = ppath.join(path, `.clone-metrics`);
+          const stateFile = ppath.join(metricsDir, `state`);
+          const wrapperPath = ppath.join(binDir, `git`);
+
+          await xfs.mkdirPromise(binDir, {recursive: true});
+          await xfs.mkdirPromise(metricsDir, {recursive: true});
+          await xfs.writeFilePromise(stateFile, `0\n0\n`);
+          await xfs.writeFilePromise(wrapperPath, makeCloneMetricsWrapper({
+            realGitPath,
+            metricsDir: npath.fromPortablePath(metricsDir),
+          }));
+
+          await xfs.chmodPromise(wrapperPath, 0o755);
+
+          await run(`install`);
+
+          const [currentLine, maxLine] = (await xfs.readFilePromise(stateFile, `utf8`)).trim().split(/\r\n|\r|\n/);
+
+          expect(Number(currentLine)).toBe(0);
+          expect(Number(maxLine)).toBeGreaterThan(0);
+          expect(Number(maxLine)).toBeLessThanOrEqual(1);
         },
       ),
     );

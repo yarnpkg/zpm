@@ -18,5 +18,5 @@ pub fn lookup_catalog_entry(project: &Project, params: &CatalogRange, ident: &Id
     catalog
         .get(ident)
         .map(|setting| setting.value.clone())
-        .ok_or_else(|| Error::CatalogEntryNotFound(catalog_name.to_string(), ident.clone()))
+        .ok_or_else(|| Error::CatalogEntryNotFound { catalog: catalog_name.to_string(), ident: ident.clone() })
 }

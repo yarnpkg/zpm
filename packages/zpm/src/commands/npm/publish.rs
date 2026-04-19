@@ -145,7 +145,7 @@ impl Publish {
                     return Ok(());
                 },
 
-                Err(Error::HttpError(e, _)) if e.status() == Some(StatusCode::NOT_FOUND) => {
+                Err(Error::HttpError { inner: e, .. }) if e.status() == Some(StatusCode::NOT_FOUND) => {
                     // Nothing to do, the package doesn't exist yet so we're good to go
                 },
 

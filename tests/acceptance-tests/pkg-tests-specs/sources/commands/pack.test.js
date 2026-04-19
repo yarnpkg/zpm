@@ -282,6 +282,21 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should ignore the files covered by a gitignore file in a folder`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await fsUtils.writeFile(`${path}/index.js`, `module.exports = 42;\n`);
+        await fsUtils.writeFile(`${path}/subdir/index.js`, `module.exports = 42;\n`);
+        await fsUtils.writeFile(`${path}/subdir/.gitignore`, `/index.js\n`);
+
+        await run(`install`);
+
+        const {stdout} = await run(`pack`, `--dry-run`);
+        expect(stdout).toMatch(/index\.js/);
+        expect(stdout).not.toMatch(/subdir\/index\.js/);
+      }),
+    );
+
+    test(
       `it should ignore the files covered by the local npmignore file`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         await fsUtils.writeFile(`${path}/index.js`, `module.exports = 42;\n`);

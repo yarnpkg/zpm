@@ -95,6 +95,10 @@
   }
 }
 
+footer {
+  display: none;
+}
+
 /* Testimonials 3D Card Effects */
 .slide {
   @apply will-change-transform opacity-0;

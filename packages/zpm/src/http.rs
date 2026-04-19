@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use hickory_resolver::{config::LookupIpStrategy, TokioResolver};
 use http::HeaderMap;
 use itertools::Itertools;
-use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Client, Method, RequestBuilder, Response, Url};
+use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Certificate, Client, Identity, Method, Proxy, RequestBuilder, Response, Url};
 use tokio::sync::OnceCell;
 use wax::Program;
 use zpm_config::{Configuration, NetworkSettings, Setting};
@@ -279,7 +279,7 @@ impl<'a> HttpRequest<'a> {
 
 impl HttpClient {
     pub fn new(config: &Configuration) -> Result<Arc<Self>, Error> {
-        let client = reqwest::Client::builder()
+        let mut client_builder = reqwest::Client::builder()
             // Connection pooling settings
             .pool_max_idle_per_host(config.settings.network_concurrency.value)
             .pool_idle_timeout(Duration::from_secs(30))
@@ -287,7 +287,7 @@ impl HttpClient {
             // Timeout settings
             .connect_timeout(Duration::from_secs(30))
             .read_timeout(Duration::from_secs(30))
-            .timeout(Duration::from_secs(300))
+            .timeout(Duration::from_millis(config.settings.http_timeout.value))
 
             // HTTP/2 settings (helps with connection reuse)
             .http2_keep_alive_interval(Duration::from_secs(30))
@@ -300,9 +300,68 @@ impl HttpClient {
             .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(config.settings.network_concurrency.value))
 
             .use_rustls_tls()
-            .dns_resolver(Arc::new(HickoryDnsResolver::default()))
+            .dns_resolver(Arc::new(HickoryDnsResolver::default()));
+
+        if !config.settings.enable_strict_ssl.value {
+            client_builder = client_builder
+                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_hostnames(true);
+        }
+
+        if let Some(http_proxy) = config.settings.http_proxy.value.as_ref() {
+            client_builder = client_builder.proxy(Proxy::http(http_proxy)?);
+        }
+
+        if let Some(https_proxy) = config.settings.https_proxy.value.as_ref() {
+            client_builder = client_builder.proxy(Proxy::https(https_proxy)?);
+        }
+
+        if let Some(ca_path) = config.settings.https_ca_file_path.value.as_ref() {
+            let ca_content
+                = ca_path.fs_read_prealloc()?;
+
+            let certificate
+                = Certificate::from_pem(&ca_content)?;
+
+            client_builder = client_builder.add_root_certificate(certificate);
+        }
+
+        match (
+            config.settings.https_cert_file_path.value.as_ref(),
+            config.settings.https_key_file_path.value.as_ref(),
+        ) {
+            (Some(cert_path), Some(key_path)) => {
+                let cert_content
+                    = cert_path.fs_read_prealloc()?;
+
+                let key_content
+                    = key_path.fs_read_prealloc()?;
+
+                let mut identity_content
+                    = cert_content;
+
+                identity_content.push(b'\n');
+                identity_content.extend_from_slice(&key_content);
+
+                let identity
+                    = Identity::from_pem(&identity_content)?;
+
+                client_builder = client_builder.identity(identity);
+            },
+
+            (Some(_), None) | (None, Some(_)) => {
+                return Err(Error::ConflictingOptions("httpsCertFilePath and httpsKeyFilePath must be set together".to_string()));
+            },
+
+            (None, None) => {}
+        }
+
+        let client = client_builder
             .build()
-            .map_err(|err| Error::DnsResolutionError(Arc::new(err)))?;
+            .map_err(|err| Error::HttpError {
+                inner: Arc::new(err),
+                extra: Some("Failed to build HTTP client from current network/proxy/TLS settings".to_string()),
+            })?;
 
         let config = HttpConfig {
             enforce_unsafe_http: config.settings.enforce_unsafe_http.value,
@@ -326,7 +385,7 @@ impl HttpClient {
         }))
     }
 
-    pub fn request(&self, url: impl AsRef<str>, method: Method) -> Result<HttpRequest, Error> {
+    pub fn request(&self, url: impl AsRef<str>, method: Method) -> Result<HttpRequest<'_>, Error> {
         let url
             = url.as_ref();
 
@@ -356,7 +415,7 @@ impl HttpClient {
         Ok(HttpRequest::new(self, url, method))
     }
 
-    pub fn get(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
+    pub fn get(&self, url: impl AsRef<str>) -> Result<HttpRequest<'_>, Error> {
         self.request(url, Method::GET)
     }
 
@@ -388,11 +447,11 @@ impl HttpClient {
         result.clone()
     }
 
-    pub fn post(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
+    pub fn post(&self, url: impl AsRef<str>) -> Result<HttpRequest<'_>, Error> {
         self.request(url, Method::POST)
     }
 
-    pub fn put(&self, url: impl AsRef<str>) -> Result<HttpRequest, Error> {
+    pub fn put(&self, url: impl AsRef<str>) -> Result<HttpRequest<'_>, Error> {
         self.request(url, Method::PUT)
     }
 }

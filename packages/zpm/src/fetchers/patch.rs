@@ -20,7 +20,20 @@ pub fn has_builtin_patch(ident: &Ident) -> bool {
         .any(|(name, _)| *name == ident.as_str())
 }
 
-pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &PatchReference, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &PatchReference, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
+    let package_cache = context.package_cache
+        .expect("The package cache is required to fetch a patch package");
+
+    if is_mock_request {
+        let archive_path = package_cache
+            .key_path(locator, ".zip");
+
+        let package_directory = archive_path
+            .with_join(&locator.ident.nm_subdir());
+
+        return Ok(FetchResult::new_mock(archive_path, package_directory));
+    }
+
     let project = context.project
         .expect("The project is required to fetch a patch package");
 
@@ -75,67 +88,86 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let original_data
         = dependencies_it.next().unwrap().as_fetched();
 
-    let package_cache = context.package_cache
-        .expect("The package cache is required to fetch a patch package");
+    let package_cache
+        = context.package_cache
+            .expect("The package cache is required to fetch a patch package");
+
+    let cache_packer
+        = package_cache.packer();
 
     let package_subdir
         = locator.ident.nm_subdir();
 
+    let package_subdir_for_entries
+        = package_subdir.clone();
+
     let cached_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
+        // Extract owned data from references before spawn_blocking
         let original_bytes = match &original_data.package_data {
             PackageData::Zip {archive_path, ..} => Some(archive_path.fs_read()?),
             _ => None,
         };
 
-        let original_entries = match &original_data.package_data {
-            PackageData::Local {package_directory, ..} => {
-                zpm_formats::entries_from_folder(package_directory)?
-            },
+        let original_package_directory = match &original_data.package_data {
+            PackageData::Local {package_directory, ..} => Some(package_directory.clone()),
+            _ => None,
+        };
 
-            PackageData::Zip {..} => {
-                let package_subpath
-                    = original_data.package_data.package_subpath();
+        let original_package_subpath = match &original_data.package_data {
+            PackageData::Zip {..} => Some(original_data.package_data.package_subpath()),
+            _ => None,
+        };
 
-                zpm_formats::zip::entries_from_zip(original_bytes.as_ref().unwrap())?
-                    .into_iter()
-                    .strip_path_prefix(&package_subpath)
-                    .collect::<Vec<_>>()
-            },
+        let is_unsupported = matches!(&original_data.package_data, PackageData::Abstract | PackageData::MissingZip {..});
 
-            PackageData::Abstract | PackageData::MissingZip {..} => {
+        let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
+            if is_unsupported {
                 return Err(Error::Unsupported);
-            },
-        };
+            }
 
-        let package_json_entry
-            = original_entries
-                .first()
-                .ok_or(Error::MissingPackageManifest)?;
+            let original_entries = if let Some(ref bytes) = original_bytes {
+                zpm_formats::zip::entries_from_zip(bytes)?
+                    .into_iter()
+                    .strip_path_prefix(&original_package_subpath.unwrap())
+                    .collect::<Vec<_>>()
+            } else if let Some(ref dir) = original_package_directory {
+                zpm_formats::entries_from_folder(dir)?
+            } else {
+                return Err(Error::Unsupported);
+            };
 
-        let manifest: RemoteManifest
-            = JsonDocument::hydrate_from_slice(&package_json_entry.data)?;
+            let package_json_entry
+                = original_entries
+                    .first()
+                    .ok_or(Error::MissingPackageManifest)?;
 
-        let package_version
-            = manifest.version
-                .unwrap_or_default();
+            let manifest: RemoteManifest
+                = JsonDocument::hydrate_from_slice(&package_json_entry.data)?;
 
-        let patched_entries = match is_builtin {
-            true => {
-                apply_patch(original_entries.clone(), &patch_content, &package_version)
-                    .unwrap_or(original_entries)
-            },
+            let package_version
+                = manifest.version
+                    .unwrap_or_default();
 
-            false => {
-                apply_patch(original_entries, &patch_content, &package_version)?
-            },
-        };
+            let patched_entries = match is_builtin {
+                true => {
+                    apply_patch(original_entries.clone(), &patch_content, &package_version)
+                        .unwrap_or(original_entries)
+                },
 
-        let patched_entries = patched_entries
-            .into_iter()
-            .prepare_npm_entries(&package_subdir)
-            .collect::<Vec<_>>();
+                false => {
+                    apply_patch(original_entries, &patch_content, &package_version)?
+                },
+            };
 
-        Ok(package_cache.bundle_entries(patched_entries)?)
+            let patched_entries = patched_entries
+                .into_iter()
+                .prepare_npm_entries(&package_subdir_for_entries)
+                .collect::<Vec<_>>();
+
+            cache_packer.pack(patched_entries)
+        }).await??;
+
+        Ok(archive)
     }).await?;
 
     let package_json_entry

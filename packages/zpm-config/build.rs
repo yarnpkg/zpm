@@ -337,7 +337,7 @@ impl Generator {
             writeln!(writer, "        unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue, HydrateError> {{").unwrap();
+            writeln!(writer, "    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {{").unwrap();
             writeln!(writer, "        let Some(key_str) = path.first() else {{").unwrap();
             writeln!(writer, "            unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
             writeln!(writer, "        }};").unwrap();
@@ -363,7 +363,7 @@ impl Generator {
             writeln!(writer, "        }}").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry, GetError> {{").unwrap();
+            writeln!(writer, "    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {{").unwrap();
             writeln!(writer, "        let Some(key_str) = path.first() else {{").unwrap();
             writeln!(writer, "            unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
             writeln!(writer, "        }};").unwrap();
@@ -433,7 +433,7 @@ impl Generator {
             writeln!(writer, "        }}").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node {{").unwrap();
+            writeln!(writer, "    fn tree_node(&self, label: Option<String>, description: Option<String>) -> tree::Node<'_> {{").unwrap();
             writeln!(writer, "        let mut children = tree::Map::new();").unwrap();
 
             for field in fields {

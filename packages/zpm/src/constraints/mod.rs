@@ -72,7 +72,7 @@ pub async fn check_constraints(project: &Project, fix: bool) -> Result<Constrain
 }
 
 fn generate_constraints_adapter(config_path: &Path, context: &ConstraintsContext, fix: bool) -> String {
-    vec![
+    [
         "\"use strict\";\n",
         "\n",
         "const CONFIG_PATH =\n",

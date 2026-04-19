@@ -27,50 +27,14 @@ interface RegistryMetadata {
   repo: RepoResponse;
 }
 
-function useRegistryMetadata() {
+export function useVersion(releaseLine: string, channel: string) {
   return useSuspenseQuery({
-    queryKey: [`registryMetadata`],
-    queryFn: async (): Promise<RegistryMetadata> => {
-      const repoRequest = fetch(`https://repo.yarnpkg.com/tags`);
-      const npmRequest = fetch(`https://registry.npmjs.org/yarn`, {
-        headers: {accept: `application/vnd.npm.install-v1+json`},
-      });
+    queryKey: [`versions`, releaseLine, channel],
+    queryFn: async (): Promise<string> => {
+      const res = await fetch(`https://repo.yarnpkg.com/channels/${releaseLine}/${channel}`);
+      const data = await res.text();
 
-      const [npmResponse, repoResponse] = await Promise.all([
-        npmRequest.then(res => res.json()),
-        repoRequest.then(res => res.json()),
-      ]);
-
-      return {
-        npm: npmResponse,
-        repo: repoResponse,
-      };
+      return data.trim();
     },
   }).data!;
-}
-
-export function useYarnVersions(): [YarnVersion, YarnVersion, YarnVersion] {
-  const {npm, repo} = useRegistryMetadata();
-
-  const foundV3 = repo.tags.find((v: string) => v.startsWith(`v3`));
-
-  return [
-    {
-      label: `Master (4.9.1-dev)`,
-      href: `https://yarnpkg.com/getting-started`,
-    },
-    {
-      label: foundV3 || `3.8.7`,
-      href: `https://v3.yarnpkg.com`,
-    },
-    {
-      label: npm[`dist-tags`].latest || `1.22.22`,
-      href: `https://classic.yarnpkg.com/en/docs`,
-    },
-  ];
-}
-
-export function useYarnReleaseVersions(): Record<string, string> {
-  const {repo} = useRegistryMetadata();
-  return repo.latest;
 }

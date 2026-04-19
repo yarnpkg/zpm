@@ -1,0 +1,15 @@
+@long-lived
+doc:
+  cd documentation && yarn astro dev
+
+typecheck:
+  yarn tsc --build
+
+lint:
+  yarn eslint
+
+lint:fix:
+  yarn eslint --fix
+
+import-berry-artifacts:
+  node scripts/import-artifacts.mjs --berry-folder "${BERRY_FOLDER:?Set BERRY_FOLDER to the path of your local Berry repository}"

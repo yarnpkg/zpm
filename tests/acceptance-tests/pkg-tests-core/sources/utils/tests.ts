@@ -1,5 +1,6 @@
 import {miscUtils, semverUtils}                    from '@yarnpkg/core';
 import {PortablePath, npath, xfs, ppath, Filename} from '@yarnpkg/fslib';
+import {LibZipImpl, ZIP_UNIX, makeEmptyArchive}    from '@yarnpkg/libzip';
 import {npmAuditTypes}                             from '@yarnpkg/plugin-npm-cli';
 import assert                                      from 'assert';
 import crypto                                      from 'crypto';
@@ -27,6 +28,104 @@ import * as fsUtils                                from './fs';
 
 const deepResolve = require(`super-resolve`);
 const staticServer = serveStatic(npath.fromPortablePath(require(`pkg-tests-fixtures`)));
+const pypiRepositoryDir = npath.toPortablePath(`${require(`pkg-tests-fixtures`)}/repositories/pypi`);
+
+const ZIP_FIXED_DATE = new Date(`2000-01-01T00:00:00.000Z`);
+
+type ZipEntry = {
+  data: Buffer;
+  mode: number;
+  name: PortablePath;
+};
+
+async function collectWheelEntries(directory: PortablePath): Promise<Array<ZipEntry>> {
+  const entries: Array<ZipEntry> = [];
+
+  const visit = async (current: PortablePath) => {
+    const listing = await xfs.readdirPromise(current);
+
+    for (const name of listing) {
+      const path = ppath.join(current, name);
+      const stat = await xfs.lstatPromise(path);
+
+      if (stat.isDirectory()) {
+        await visit(path);
+        continue;
+      }
+
+      if (!stat.isFile())
+        continue;
+
+      const relativePath = ppath.relative(directory, path);
+
+      entries.push({
+        name: relativePath,
+        data: await xfs.readFilePromise(path),
+        mode: stat.mode & 0xffff,
+      });
+    }
+  };
+
+  await visit(directory);
+
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+
+  return entries;
+}
+
+function buildZipFromEntries(entries: Array<ZipEntry>) {
+  const zipImpl = new LibZipImpl({
+    buffer: makeEmptyArchive(),
+    readOnly: false,
+  });
+  const mtime = Math.floor(ZIP_FIXED_DATE.getTime() / 1000);
+
+  try {
+    for (const entry of entries) {
+      const file = zipImpl.setFileSource(entry.name, null, entry.data);
+      zipImpl.setExternalAttributes(file, ZIP_UNIX, (entry.mode & 0xffff) << 16);
+      zipImpl.setMtime(file, mtime);
+    }
+
+    return zipImpl.getBufferAndClose();
+  } catch (error) {
+    zipImpl.discard();
+    throw error;
+  }
+}
+
+async function serveDynamicPypiWheel(request: IncomingMessage, response: ServerResponse) {
+  const pathname = new URL(request.url ?? `/`, `http://localhost`).pathname;
+  const match = pathname.match(/^\/repositories\/pypi\/([^/]+\.whl)$/);
+
+  if (match === null)
+    return false;
+
+  const wheelFileName = decodeURIComponent(match[1]!);
+  if (wheelFileName.includes(`/`) || wheelFileName.includes(`\\`))
+    return false;
+
+  const wheelDir = ppath.join(pypiRepositoryDir, wheelFileName as Filename);
+
+  if (!await xfs.existsPromise(wheelDir))
+    return false;
+
+  const stat = await xfs.lstatPromise(wheelDir);
+  if (!stat.isDirectory())
+    return false;
+
+  const entries = await collectWheelEntries(wheelDir);
+  const wheel = buildZipFromEntries(entries);
+
+  response.writeHead(200, {
+    [`Content-Type`]: `application/octet-stream`,
+    [`Content-Length`]: wheel.length.toString(),
+  });
+
+  response.end(wheel);
+
+  return true;
+}
 
 const TEST_MAJOR = process.env.TEST_MAJOR
   ? parseInt(process.env.TEST_MAJOR, 10)
@@ -71,12 +170,16 @@ export enum RequestType {
   PackageInfo = `packageInfo`,
   PackageTarball = `packageTarball`,
   PackageVersion = `packageVersion`,
+  PypiProjectInfo = `pypiProjectInfo`,
+  PypiVersionInfo = `pypiVersionInfo`,
   Whoami = `whoami`,
   Repository = `repository`,
   Publish = `publish`,
   BulkAdvisories = `bulkAdvisories`,
   NodeDistIndex = `nodeDistIndex`,
   NodeDistTarball = `nodeDistTarball`,
+  YarnSwitchInfo = `yarnSwitchInfo`,
+  YarnSwitchTarball = `yarnSwitchTarball`,
 }
 
 export type Request = {
@@ -101,6 +204,13 @@ export type Request = {
   localName: string;
   version?: string;
 } | {
+  type: RequestType.PypiProjectInfo;
+  packageName: string;
+} | {
+  type: RequestType.PypiVersionInfo;
+  packageName: string;
+  version: string;
+} | {
   registry?: string;
   type: RequestType.Whoami;
   login: Login;
@@ -119,6 +229,13 @@ export type Request = {
 } | {
   type: RequestType.NodeDistTarball;
   name: string;
+} | {
+  type: RequestType.YarnSwitchInfo;
+  platform: string;
+} | {
+  type: RequestType.YarnSwitchTarball;
+  platform: string;
+  version: string;
 };
 
 export class Login {
@@ -207,6 +324,69 @@ const RELEASE_DATE_PACKAGES: Record<string, Record<string, number | string>> = {
   },
 };
 
+type PypiFixtureDistribution = {
+  filename: string;
+  packagetype: `bdist_wheel` | `sdist`;
+  path: string;
+  uploadTime: string;
+};
+
+type PypiFixtureRelease = {
+  requiresDist?: Array<string>;
+  files: Array<PypiFixtureDistribution>;
+};
+
+const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
+  [`pypi-no-deps`]: {
+    [`1.0.0`]: {
+      files: [{
+        filename: `pypi_no_deps-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_no_deps-1.0.0-py3-none-any.whl`,
+        uploadTime: `2023-01-01T00:00:00Z`,
+      }, {
+        // Deliberately newer than the wheel to ensure wheel selection takes precedence over sdist recency.
+        filename: `pypi_no_deps-1.0.0.tar.gz`,
+        packagetype: `sdist`,
+        path: `/repositories/pypi/pypi_no_deps-1.0.0.tar.gz`,
+        uploadTime: `2025-01-01T00:00:00Z`,
+      }],
+    },
+    [`1.1.0`]: {
+      files: [{
+        filename: `pypi_no_deps-1.1.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_no_deps-1.1.0-py3-none-any.whl`,
+        uploadTime: `2024-01-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-one-dep`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-no-deps (>=1.0.0)`,
+        `marker-only-dep (>=1.0.0); python_version < "3.12"`,
+      ],
+      files: [{
+        filename: `pypi_one_dep-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_one_dep-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-06-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-entry-points`]: {
+    [`1.0.0`]: {
+      files: [{
+        filename: `pypi_entry_points-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_entry_points-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-07-01T00:00:00Z`,
+      }],
+    },
+  },
+};
+
 export const validLogins = {
   fooUser: new Login(`foo-user`),
   barUser: new Login(`bar-user`),
@@ -221,6 +401,12 @@ export function sortJson<T>(data: Iterable<T>): Array<T> {
   return miscUtils.sortMap(data, request => {
     return JSON.stringify(request);
   });
+}
+
+function serializeJsonWithEscapedAngles(data: unknown): string {
+  return JSON.stringify(data)
+    .replace(/</g, `\\u003c`)
+    .replace(/>/g, `\\u003e`);
 }
 
 export const startRegistryRecording = async (
@@ -430,7 +616,11 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       if (typeof distTags === `object` && distTags !== null && !Object.hasOwn(distTags, `latest`))
         throw new Error(`Assertion failed: The package "${name}" must define a "latest" dist-tag too if it defines any dist-tags`);
 
-      const data = JSON.stringify({
+      const serialize = localName.endsWith(`-escaped`)
+        ? serializeJsonWithEscapedAngles
+        : JSON.stringify;
+
+      const data = serialize({
         name,
         versions: Object.assign(
           {},
@@ -489,7 +679,11 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       const packageVersionEntry = packageEntry.get(version);
       invariant(packageVersionEntry, `This can only exist`);
 
-      const data = JSON.stringify(Object.assign({}, packageVersionEntry!.packageJson, {
+      const serialize = localName.endsWith(`-escaped`)
+        ? serializeJsonWithEscapedAngles
+        : JSON.stringify;
+
+      const data = serialize(Object.assign({}, packageVersionEntry!.packageJson, {
         dist: {
           shasum: await getPackageArchiveHash(name, version),
           tarball: (localName === `unconventional-tarball` || localName === `private-unconventional-tarball`)
@@ -500,6 +694,66 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
 
       response.writeHead(200, {[`Content-Type`]: `application/json`});
       response.end(data);
+    },
+
+    async [RequestType.PypiProjectInfo](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.PypiProjectInfo)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const project = PYPI_FIXTURES[parsedRequest.packageName];
+      if (!project) {
+        processError(response, 404, `PyPI package not found: ${parsedRequest.packageName}`);
+        return;
+      }
+
+      const serverUrl = await startPackageServer();
+
+      const releases = Object.fromEntries(Object.entries(project).map(([version, release]) => {
+        return [version, release.files.map(file => ({
+          filename: file.filename,
+          packagetype: file.packagetype,
+          url: `${serverUrl}${file.path}`,
+          upload_time_iso_8601: file.uploadTime,
+        }))];
+      }));
+
+      response.writeHead(200, {[`Content-Type`]: `application/json`});
+      response.end(JSON.stringify({
+        info: {
+          name: parsedRequest.packageName,
+        },
+        releases,
+      }));
+    },
+
+    async [RequestType.PypiVersionInfo](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.PypiVersionInfo)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const project = PYPI_FIXTURES[parsedRequest.packageName];
+      const release = project?.[parsedRequest.version];
+
+      if (!project || !release) {
+        processError(response, 404, `PyPI package not found: ${parsedRequest.packageName}@${parsedRequest.version}`);
+        return;
+      }
+
+      const serverUrl = await startPackageServer();
+
+      response.writeHead(200, {[`Content-Type`]: `application/json`});
+      response.end(JSON.stringify({
+        info: {
+          name: parsedRequest.packageName,
+          version: parsedRequest.version,
+          requires_dist: release.requiresDist,
+        },
+        urls: release.files.map(file => ({
+          filename: file.filename,
+          packagetype: file.packagetype,
+          url: `${serverUrl}${file.path}`,
+          upload_time_iso_8601: file.uploadTime,
+        })),
+      }));
     },
 
     async [RequestType.PackageTarball](parsedRequest, request, response) {
@@ -583,6 +837,9 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
     },
 
     async [RequestType.Repository](parsedRequest, request, response) {
+      if (await serveDynamicPypiWheel(request, response))
+        return;
+
       staticServer(request as any, response as any, finalhandler(request, response));
     },
 
@@ -691,6 +948,74 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
 
       stream.pipeline(tar, gzip, response, () => {});
     },
+
+    async [RequestType.YarnSwitchInfo](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.YarnSwitchInfo)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const {platform} = parsedRequest;
+      const name = `@yarnpkg/yarn-${platform}`;
+      const serverUrl = await startPackageServer();
+
+      // Return package info with available versions
+      const data = JSON.stringify({
+        name,
+        versions: {
+          [`6.0.0`]: {
+            name,
+            version: `6.0.0`,
+            bin: {yarn: `yarn-bin`},
+            dist: {
+              shasum: `fake-shasum-6.0.0`,
+              tarball: `${serverUrl}/@yarnpkg/yarn-${platform}/-/yarn-${platform}-6.0.0.tgz`,
+            },
+          },
+        },
+        [`dist-tags`]: {
+          latest: `6.0.0`,
+        },
+      });
+
+      response.writeHead(200, {[`Content-Type`]: `application/json`});
+      response.end(data);
+    },
+
+    async [RequestType.YarnSwitchTarball](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.YarnSwitchTarball)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const {platform, version} = parsedRequest;
+
+      response.writeHead(200, {
+        [`Content-Type`]: `application/octet-stream`,
+        [`Transfer-Encoding`]: `chunked`,
+      });
+
+      // Create a fake yarn binary tarball that contains:
+      // - package/package.json with bin entry
+      // - package/yarn-bin (executable that outputs version info)
+      const tar = tarStream.pack();
+
+      // Add package.json
+      const packageJson = JSON.stringify({
+        name: `@yarnpkg/yarn-${platform}`,
+        version,
+        bin: {yarn: `yarn-bin`},
+      });
+      tar.entry({name: `package/package.json`}, packageJson);
+
+      // Add fake yarn-bin executable
+      const fakeYarnBin = `#!/usr/bin/env bash
+echo "Fake Yarn ${version}"
+exit 0
+`;
+      tar.entry({name: `package/yarn-bin`, mode: 0o755}, fakeYarnBin);
+
+      tar.finalize();
+
+      const gzip = zlib.createGzip();
+      stream.pipeline(tar, gzip, response, () => {});
+    },
   };
 
   const sendError = (res: ServerResponse, statusCode: number, errorMessage: string): void => {
@@ -722,6 +1047,30 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       return {
         type: RequestType.NodeDistTarball,
         name: match[2]!,
+      };
+    } else if ((match = url.match(/^\/@yarnpkg\/yarn-([a-z0-9-]+)\/-\/yarn-\1-(.+)\.tgz$/))) {
+      // Yarn Switch tarball: /@yarnpkg/yarn-{platform}/-/yarn-{platform}-{version}.tgz
+      return {
+        type: RequestType.YarnSwitchTarball,
+        platform: match[1]!,
+        version: match[2]!,
+      };
+    } else if ((match = url.match(/^\/@yarnpkg\/yarn-([a-z0-9-]+)$/))) {
+      // Yarn Switch package info: /@yarnpkg/yarn-{platform}
+      return {
+        type: RequestType.YarnSwitchInfo,
+        platform: match[1]!,
+      };
+    } else if ((match = url.match(/^\/pypi\/([^/]+)\/([^/]+)\/json$/))) {
+      return {
+        type: RequestType.PypiVersionInfo,
+        packageName: decodeURIComponent(match[1]!),
+        version: decodeURIComponent(match[2]!),
+      };
+    } else if ((match = url.match(/^\/pypi\/([^/]+)\/json$/))) {
+      return {
+        type: RequestType.PypiProjectInfo,
+        packageName: decodeURIComponent(match[1]!),
       };
     } else {
       let registry: {registry: string} | undefined;
@@ -1004,20 +1353,26 @@ export type Run = (...args: Array<string> | [...Array<string>, Partial<RunDriver
 export type Source = (script: string, callDefinition?: Record<string, any>) => Promise<Record<string, any>>;
 
 export type RunFunction = (
-  {path, run, source}:
+  {path, run, runSwitch, source, yarnBinary}:
   {
     path: PortablePath;
     run: Run;
+    runSwitch: Run;
     source: Source;
+    yarnBinary: string;
   }
 ) => Promise<void>;
 
 export const generatePkgDriver = ({
   getName,
   runDriver,
+  runSwitchDriver,
+  getYarnBinary,
 }: {
   getName: () => string;
   runDriver: PackageRunDriver;
+  runSwitchDriver?: PackageRunDriver;
+  getYarnBinary?: () => string;
 }): PackageDriver => {
   const withConfig = (definition: Record<string, any>): PackageDriver => {
     const makeTemporaryEnv: PackageDriver = (packageJson, subDefinition, fn) => {
@@ -1078,6 +1433,29 @@ export const generatePkgDriver = ({
           };
         };
 
+        const runSwitch = async (...args: Array<any>) => {
+          if (!runSwitchDriver)
+            throw new Error(`runSwitch is not available - no runSwitchDriver was provided`);
+
+          let callDefinition = {};
+
+          if (args.length > 0 && typeof args[args.length - 1] === `object`)
+            callDefinition = args.pop();
+
+          const {stdout, stderr, ...rest} = await runSwitchDriver(path, args, {
+            registryUrl,
+            ...definition,
+            ...subDefinition,
+            ...callDefinition,
+          });
+
+          return {
+            stdout: cleanup(stdout),
+            stderr: cleanup(stderr),
+            ...rest,
+          };
+        };
+
         const source = async (script: string, callDefinition: Record<string, any> = {}): Promise<Record<string, any>> => {
           const scriptWrapper = `
             Promise.resolve().then(async () => ${script}).then(result => {
@@ -1115,26 +1493,10 @@ export const generatePkgDriver = ({
           }
         };
 
+        const yarnBinary = getYarnBinary?.() ?? ``;
+
         try {
-          // To pass [citgm](https://github.com/nodejs/citgm), we need to suppress timeout failures
-          // So add env variable TEST_IGNORE_TIMEOUT_FAILURES to turn on this suppression
-          // TODO: investigate whether this is still needed.
-          if (process.env.TEST_IGNORE_TIMEOUT_FAILURES) {
-            let timer: NodeJS.Timeout | undefined;
-            await Promise.race([
-              new Promise(resolve => {
-                // Resolve 1s ahead of the jest timeout
-                timer = setTimeout(resolve, TEST_TIMEOUT - 1000);
-              }),
-              fn!({path, run, source}),
-            ]).finally(() => {
-              if (timer) {
-                clearTimeout(timer);
-              }
-            });
-            return;
-          }
-          await fn!({path, run, source});
+          await fn!({path, run, runSwitch, source, yarnBinary});
         } catch (error: any) {
           error.message = `Temporary fixture folder: ${npath.fromPortablePath(path)}\n\n${error.message}`;
           throw error;
@@ -1190,7 +1552,10 @@ export const getHttpsCertificates = async () => {
     config: [`[v3_req]`, `basicConstraints = critical,CA:TRUE\``].join(`\n`),
   });
 
-  const serverCSRResult = await createCSR({commonName: `localhost`});
+  const serverCSRResult = await createCSR({
+    commonName: `localhost`,
+    altNames: [`localhost`],
+  });
 
   const serverCertificate = await createCertificate({
     csr: serverCSRResult.csr,

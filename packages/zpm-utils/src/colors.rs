@@ -51,6 +51,12 @@ const RANGE_COLOR: Color
 const REFERENCE_COLOR: Color
     = Color::TrueColor { r: 135, g: 175, b: 255 };
 
+const TASK_COLOR: Color
+    = Color::TrueColor { r: 135, g: 175, b: 255 };
+
+const TIMESTAMP_COLOR: Color
+    = Color::TrueColor { r: 144, g: 144, b: 144 };
+
 #[derive(Debug, Clone, Copy)]
 pub enum DataType {
     Info,
@@ -70,6 +76,8 @@ pub enum DataType {
     Ident,
     Range,
     Reference,
+    Timestamp,
+    Task,
     Custom(u8, u8, u8),
 }
 
@@ -93,6 +101,8 @@ impl DataType {
             DataType::Ident => IDENT_COLOR,
             DataType::Range => RANGE_COLOR,
             DataType::Reference => REFERENCE_COLOR,
+            DataType::Timestamp => TIMESTAMP_COLOR,
+            DataType::Task => TASK_COLOR,
             DataType::Custom(r, g, b) => Color::TrueColor {r: *r, g: *g, b: *b},
         }
     }

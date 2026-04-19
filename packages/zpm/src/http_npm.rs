@@ -420,7 +420,7 @@ pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<Response, E
                 .ok()
                 .map(|data| data.error);
 
-        return Err(Error::HttpError(Arc::new(error), message));
+        return Err(Error::HttpError { inner: Arc::new(error), extra: message });
     }
 
     Ok(response)

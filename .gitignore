@@ -12,6 +12,7 @@
 dist
 node_modules
 .pnp.*
+*.pyc
 
 flamegraph.svg
 profile.json.gz

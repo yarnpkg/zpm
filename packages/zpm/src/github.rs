@@ -36,16 +36,23 @@ pub async fn download_into(source: &GitSource, commit: &str, download_dir: &Path
         },
     };
 
-    let tar_data
-        = zpm_formats::tar::unpack_tgz(&tgz_data)?;
+    let download_dir: Path
+        = download_dir.clone();
 
-    let entries
-        = zpm_formats::tar_iter::TarIterator::new(&tar_data)
-            .filter_map(|entry| entry.ok())
-            .strip_first_segment()
-            .collect::<Vec<_>>();
+    tokio::task::spawn_blocking(move || -> Result<(), Error> {
+        let tar_data
+            = zpm_formats::tar::unpack_tgz(&tgz_data)?;
 
-    zpm_formats::entries_to_disk(&entries, download_dir)?;
+        let entries
+            = zpm_formats::tar_iter::TarIterator::new(&tar_data)
+                .filter_map(|entry| entry.ok())
+                .strip_first_segment()
+                .collect::<Vec<_>>();
+
+        zpm_formats::entries_to_disk(&entries, &download_dir)?;
+
+        Ok(())
+    }).await??;
 
     Ok(Some(()))
 }

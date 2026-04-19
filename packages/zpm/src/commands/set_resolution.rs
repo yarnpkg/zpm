@@ -38,7 +38,7 @@ impl SetResolution {
             = self.descriptor.resolve_with(self.reference.clone());
 
         let enforced_resolutions
-            = BTreeMap::from([(self.descriptor.clone(), locator)]);
+            = BTreeMap::from([(self.descriptor.clone(), Some(locator))]);
 
         project.run_install(RunInstallOptions{
             enforced_resolutions,

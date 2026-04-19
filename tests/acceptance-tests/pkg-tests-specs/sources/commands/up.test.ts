@@ -130,6 +130,23 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should upgrade the dependency even when preferReuse is enabled`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {preferReuse: true}, async ({path, run, source}) => {
+        await run(`up`, `no-deps`);
+
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toStrictEqual({
+          dependencies: {
+            [`no-deps`]: `^2.0.0`,
+          },
+        });
+      }),
+    );
+
+    test(
       `it should skip build scripts when using --mode=skip-build`,
       makeTemporaryEnv({
         dependencies: {

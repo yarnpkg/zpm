@@ -12,7 +12,7 @@ pub struct TarIterator<'a> {
 }
 
 impl<'a> TarIterator<'a> {
-    pub fn new(buffer: &[u8]) -> TarIterator {
+    pub fn new(buffer: &[u8]) -> TarIterator<'_> {
         TarIterator {
             buffer,
             offset: 0,

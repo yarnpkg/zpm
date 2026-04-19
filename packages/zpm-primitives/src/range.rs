@@ -1,13 +1,14 @@
 use std::{hash::Hash, str::FromStr, sync::LazyLock};
 
+use zpm_utils::EcoString;
 use regex::Regex;
 use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
 use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
 
-use crate::{PeerRange, SemverPeerRange};
+use crate::{PeerRange, PypiSpecifierSet, SemverPeerRange};
 
-use super::{Descriptor, Ident};
+use super::{Descriptor, Ident, Registry};
 
 pub static EXPLICIT_PATH_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^.{0,2}/").unwrap()
@@ -24,6 +25,20 @@ fn format_registry_tag(ident: &Option<Ident>, tag: &str) -> String {
     match ident {
         Some(ident) => format!("npm:{}@{}", ident.to_file_string(), tag),
         None => format!("npm:{}", tag),
+    }
+}
+
+fn format_pypi_specifier(ident: &Option<Ident>, specifier: &PypiSpecifierSet) -> String {
+    match ident {
+        Some(ident) => format!("pypi:{}@{}", ident.to_file_string(), specifier.to_file_string()),
+        None => format!("pypi:{}", specifier.to_file_string()),
+    }
+}
+
+fn format_pypi_tag(ident: &Option<Ident>, tag: &str) -> String {
+    match ident {
+        Some(ident) => format!("pypi:{}@{}", ident.to_file_string(), tag),
+        None => format!("pypi:{}", tag),
     }
 }
 
@@ -85,11 +100,27 @@ pub enum Range {
     },
 
     #[pattern(r"npm:(?:(?<ident>.*)@)?(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
-    #[to_file_string(|params| format_registry_tag(&params.ident, &params.tag))]
-    #[to_print_string(|params| DataType::Range.colorize(&format_registry_tag(&params.ident, &params.tag)))]
+    #[to_file_string(|params| format_registry_tag(&params.ident, params.tag.as_str()))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_registry_tag(&params.ident, params.tag.as_str())))]
     RegistryTag {
         ident: Option<Ident>,
-        tag: String,
+        tag: EcoString,
+    },
+
+    #[pattern(r"pypi:(?:(?<ident>.*)@)?(?<specifier>.*)")]
+    #[to_file_string(|params| format_pypi_specifier(&params.ident, &params.specifier))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_pypi_specifier(&params.ident, &params.specifier)))]
+    PypiSpecifier {
+        ident: Option<Ident>,
+        specifier: PypiSpecifierSet,
+    },
+
+    #[pattern(r"pypi:(?:(?<ident>.*)@)?(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
+    #[to_file_string(|params| format_pypi_tag(&params.ident, params.tag.as_str()))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_pypi_tag(&params.ident, params.tag.as_str())))]
+    PypiTag {
+        ident: Option<Ident>,
+        tag: EcoString,
     },
 
     #[pattern(r"link:(?<path>.*)")]
@@ -184,10 +215,10 @@ pub enum Range {
     },
 
     #[pattern(r"(?<tag>.*)")]
-    #[to_file_string(|params| params.tag.clone())]
-    #[to_print_string(|params| DataType::Range.colorize(&params.tag))]
+    #[to_file_string(|params| params.tag.as_str().to_string())]
+    #[to_print_string(|params| DataType::Range.colorize(params.tag.as_str()))]
     AnonymousTag {
-        tag: String,
+        tag: EcoString,
     },
 
     // We keep this at the end so virtual ranges are listed last when sorted
@@ -220,6 +251,12 @@ impl Range {
             Range::RegistryTag(params) if params.ident.is_some()
                 => Some(Descriptor::new(params.ident.clone().unwrap(), RegistryTagRange {ident: None, tag: params.tag.clone()}.into())),
 
+            Range::PypiSpecifier(params) if params.ident.is_some()
+                => Some(Descriptor::new(params.ident.clone().unwrap(), PypiSpecifierRange {ident: None, specifier: params.specifier.clone()}.into())),
+
+            Range::PypiTag(params) if params.ident.is_some()
+                => Some(Descriptor::new(params.ident.clone().unwrap(), PypiTagRange {ident: None, tag: params.tag.clone()}.into())),
+
             Range::Patch(params)
                 => Some(params.inner.0.clone()),
 
@@ -249,6 +286,14 @@ impl Range {
                 Range::AnonymousTag(AnonymousTagRange {tag: params.tag.clone()})
             },
 
+            Range::PypiSpecifier(params) => {
+                Range::PypiSpecifier(PypiSpecifierRange {ident: None, specifier: params.specifier.clone()})
+            },
+
+            Range::PypiTag(params) => {
+                Range::PypiTag(PypiTagRange {ident: None, tag: params.tag.clone()})
+            },
+
             _ => self.clone(),
         }
     }
@@ -264,6 +309,28 @@ impl Range {
             },
 
             _ => None,
+        }
+    }
+
+    pub fn registry(&self, default_ident: &Ident) -> Registry {
+        match self {
+            Range::AnonymousSemver(_) => {
+                Registry::Npm(default_ident.clone())
+            },
+
+            Range::RegistrySemver(params) => {
+                Registry::Npm(params.ident.clone().unwrap_or_else(|| default_ident.clone()))
+            },
+
+            Range::WorkspaceMagic(_) | Range::WorkspaceSemver(_) => {
+                Registry::Workspace(default_ident.clone())
+            },
+
+            Range::WorkspaceIdent(params) => {
+                Registry::Workspace(params.ident.clone())
+            },
+
+            _ => Registry::None,
         }
     }
 

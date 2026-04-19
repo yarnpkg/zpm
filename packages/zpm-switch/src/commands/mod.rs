@@ -5,6 +5,7 @@ use zpm_utils::{Path, ToFileString};
 
 use crate::{cwd::set_fake_cwd, yarn::{extract_bin_meta, BinMeta}};
 
+pub mod daemon;
 pub mod init;
 pub mod proxy;
 pub mod switch;
@@ -16,6 +17,11 @@ enum SwitchExecCli {
     CacheInstallCommand(switch::cache_install::CacheInstallCommand),
     CacheListCommand(switch::cache_list::CacheListCommand),
     ClipanionCommandsCommand(switch::clipanion_commands::ClipanionCommandsCommand),
+    DaemonKillAllCommand(switch::daemon_kill_all::DaemonKillAllCommand),
+    DaemonKillCommand(switch::daemon_kill::DaemonKillCommand),
+    DaemonCommand(daemon::DaemonCommand),
+    DaemonListCommand(switch::daemon_list::DaemonListCommand),
+    DaemonOpenCommand(switch::daemon_open::DaemonOpenCommand),
     ExplicitCommand(switch::explicit::ExplicitCommand),
     LinksListCommand(switch::links_list::LinksListCommand),
     LinksClearCommand(switch::links_clear::LinksClearCommand),

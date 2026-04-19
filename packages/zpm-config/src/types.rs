@@ -17,6 +17,16 @@ pub enum NodeLinker {
 
 #[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IslandLinker {
+    #[literal("node-modules")]
+    NodeModules,
+
+    #[literal("venv")]
+    Venv,
+}
+
+#[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PnpFallbackMode {
     #[literal("none")]
     None,

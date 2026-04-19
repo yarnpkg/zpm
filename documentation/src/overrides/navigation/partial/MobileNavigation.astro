@@ -1,0 +1,10 @@
+---
+import MobileNavigation from "./client/MobileNavigation";
+
+const { pathname } = Astro.props;
+---
+
+<div class="relative">
+  <div class="h-12"/>
+  <MobileNavigation client:only="preact" pathname={pathname}/>
+</div>

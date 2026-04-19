@@ -144,7 +144,7 @@ export default function CheckList({
   return (
     <div class={`[:has(.package-check[data-show=true])]:pb-4`}>
       <div
-        class={`w-full bg-white/3 [:has(>.package-check[data-show=true])]:border border-white/5 rounded-xl [:has(>.package-check[data-show=true])]:p-4 flex flex-col gap-y-4`}
+        class={`w-full bg-white/3 [:has(>.package-check[data-show=true])]:border text-white border-white/5 rounded-xl [:has(>.package-check[data-show=true])]:p-4 flex flex-col gap-y-4`}
         id={`checklist`}
       >
         {checks.map(check => (
