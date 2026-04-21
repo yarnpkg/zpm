@@ -63,6 +63,7 @@ impl InitWithTemplate {
             private: self.private,
             workspace: self.workspace,
             name: self.name.clone(),
+            version: self.cli_environment.info.version.clone(),
         };
 
         let mut project
@@ -78,9 +79,10 @@ impl InitWithTemplate {
         let package_cache
             = project.package_cache()?;
 
-        let install_context = InstallContext::default()
-            .with_package_cache(Some(&package_cache))
-            .with_project(Some(&project));
+        let install_context
+            = InstallContext::default()
+                .with_package_cache(Some(&package_cache))
+                .with_project(Some(&project));
 
         let template
             = self.template.resolve(&install_context, &resolve_options).await?;
@@ -144,6 +146,7 @@ impl Init {
             private: self.private,
             workspace: self.workspace,
             name: self.name.clone(),
+            version: self.cli_environment.info.version.clone(),
         };
 
         let mut project
@@ -161,6 +164,7 @@ pub struct InitParams {
     private: Option<bool>,
     workspace: bool,
     name: Option<String>,
+    version: String,
 }
 
 pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project, Error> {
@@ -172,21 +176,32 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     let manifest_content
         = manifest_path.fs_read_prealloc()
             .ok_missing()?
-            .unwrap_or_else(|| b"{}".to_vec());
+            .unwrap_or_else(|| b"{}\n".to_vec());
 
     let mut document
         = JsonDocument::new(manifest_content)?;
 
     if !manifest_path.fs_exists() {
-        let init_name = params.name.as_ref()
-            .map(|n| Ident::new(n))
-            .unwrap_or_else(|| Ident::new(init_cwd.basename().unwrap_or("package")));
+        let init_name
+            = params.name.as_ref()
+                .map(|n| Ident::new(n))
+                .unwrap_or_else(|| Ident::new(init_cwd.basename().unwrap_or("package")));
 
         document.set_path(
             &zpm_parsers::Path::from_segments(vec!["name".to_string()]),
             Value::String(init_name.to_file_string()),
         )?;
+
+        document.set_path(
+            &zpm_parsers::Path::from_segments(vec!["type".to_string()]),
+            Value::String("module".to_file_string()),
+        )?;
     }
+
+    document.set_path(
+        &zpm_parsers::Path::from_segments(vec!["packageManager".to_string()]),
+        Value::String(format!("yarn@{}", params.version)),
+    )?;
 
     if let Some(version) = option_env!("INFRA_VERSION") {
         document.set_path(
@@ -211,8 +226,9 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     // define a workspace root (we should have a different flag
     // for that).
     if params.workspace {
-        let packages_dir = init_cwd
-            .with_join_str("packages");
+        let packages_dir
+            = init_cwd
+                .with_join_str("packages");
 
         packages_dir
             .fs_create_dir_all()?;
@@ -238,7 +254,8 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     ];
 
     let readme_path
-        = init_cwd.with_join_str("README.md");
+        = init_cwd
+            .with_join_str("README.md");
 
     if !readme_path.fs_exists() {
         if let Some(name) = manifest.name.as_ref() {
@@ -253,14 +270,16 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     }
 
     // Only create lockfile and other files if we're in the project root
-    let is_project_root = existing_project
-        .as_ref()
-        .map(|(project_cwd, _)| project_cwd == init_cwd)
-        .unwrap_or(true);
+    let is_project_root
+        = existing_project
+            .as_ref()
+            .map(|(project_cwd, _)| project_cwd == init_cwd)
+            .unwrap_or(true);
 
     if is_project_root {
-        let lockfile_path = init_cwd
-            .with_join_str("yarn.lock");
+        let lockfile_path
+            = init_cwd
+                .with_join_str("yarn.lock");
 
         if !lockfile_path.fs_exists() {
             lockfile_path
@@ -271,8 +290,9 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             );
         }
 
-        let gitignore_path = init_cwd
-            .with_join_str(".gitignore");
+        let gitignore_path
+            = init_cwd
+                .with_join_str(".gitignore");
 
         if !gitignore_path.fs_exists() {
             let gitignore_content = [
@@ -287,8 +307,9 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             );
         }
 
-        let gitattributes_path = init_cwd
-            .with_join_str(".gitattributes");
+        let gitattributes_path
+            = init_cwd
+                .with_join_str(".gitattributes");
 
         if !gitattributes_path.fs_exists() {
             let gitattributes_content = [
@@ -304,8 +325,9 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
             );
         }
 
-        let editorconfig_path = init_cwd
-            .with_join_str(".editorconfig");
+        let editorconfig_path
+            = init_cwd
+                .with_join_str(".editorconfig");
 
         if !editorconfig_path.fs_exists() {
             let editorconfig_content = [
