@@ -203,13 +203,6 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
         Value::String(format!("yarn@{}", params.version)),
     )?;
 
-    if let Some(version) = option_env!("INFRA_VERSION") {
-        document.set_path(
-            &zpm_parsers::Path::from_segments(vec!["packageManager".to_string()]),
-            Value::String(format!("yarn@{version}")),
-        )?;
-    }
-
     if let Some(private) = params.private {
         let private_field = match private {
             true => Value::Bool(true),
