@@ -35,12 +35,12 @@ fn empty_profile_file() -> Result<(), Box<dyn std::error::Error>> {
     cmd.assert()
         .success();
 
-    let profile_content = tmp_dir
-        .with_join_str(".profile")
+    let bashrc_content = tmp_dir
+        .with_join_str(".bashrc")
         .fs_read_text_prealloc()
-        .expect("Failed to read .profile");
+        .expect("Failed to read .bashrc");
 
-    assert_eq!(profile_content, format!(". \"{}/.yarn/switch/env\"\n", tmp_dir.to_file_string()));
+    assert_eq!(bashrc_content, format!("# Added by Yarn Switch\nsource \"{}/.yarn/switch/env\"\n", tmp_dir.to_file_string()));
 
     Ok(())
 }
@@ -53,9 +53,9 @@ fn profile_file_with_existing_path() -> Result<(), Box<dyn std::error::Error>> {
     } = init_test_env();
 
     tmp_dir
-        .with_join_str(".profile")
+        .with_join_str(".bashrc")
         .fs_write_text("# Hello world!\n")
-        .expect("Failed to write .profile");
+        .expect("Failed to write .bashrc");
 
     cmd.args(vec!["switch", "postinstall", "--home-dir", tmp_dir.as_str()]);
     cmd.env("SHELL", "/bin/bash");
@@ -63,12 +63,12 @@ fn profile_file_with_existing_path() -> Result<(), Box<dyn std::error::Error>> {
     cmd.assert()
         .success();
 
-    let profile_content = tmp_dir
-        .with_join_str(".profile")
+    let bashrc_content = tmp_dir
+        .with_join_str(".bashrc")
         .fs_read_text_prealloc()
-        .expect("Failed to read .profile");
+        .expect("Failed to read .bashrc");
 
-    assert_eq!(profile_content, format!("# Hello world!\n. \"{}/.yarn/switch/env\"\n", tmp_dir.to_file_string()));
+    assert_eq!(bashrc_content, format!("# Hello world!\n\n# Added by Yarn Switch\nsource \"{}/.yarn/switch/env\"\n", tmp_dir.to_file_string()));
 
     Ok(())
 }
