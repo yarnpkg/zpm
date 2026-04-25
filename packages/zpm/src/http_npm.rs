@@ -1,17 +1,22 @@
+use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
+use dashmap::DashMap;
 use regex::{Captures, Regex};
 use reqwest::Response;
 use serde::Deserialize;
+use sha2::{Sha256, Digest};
+use tokio::sync::OnceCell;
 use zpm_config::Configuration;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
-use zpm_utils::DataType;
+use zpm_utils::{DataType, Path};
 
 use crate::{
     error::Error,
     http::{HttpClient, HttpRequest},
+    npm,
     report::{current_report, PromptType},
 };
 
@@ -345,6 +350,193 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
     };
 
     Ok(bytes)
+}
+
+const CACHED_VERSION_FIELDS: &[&str] = &[
+    "name", "version", "dist", "bin", "scripts",
+    "os", "cpu", "libc",
+    "dependencies", "dependenciesMeta", "optionalDependencies",
+    "peerDependencies", "peerDependenciesMeta",
+];
+
+const CACHED_TOP_LEVEL_FIELDS: &[&str] = &["dist-tags", "time", "versions"];
+
+static METADATA_CACHE_KEY: LazyLock<String> = LazyLock::new(|| {
+    let mut hasher = Sha256::new();
+    for field in CACHED_VERSION_FIELDS {
+        hasher.update(field.as_bytes());
+    }
+    hex::encode(&hasher.finalize()[..3])
+});
+
+static METADATA_CACHE: LazyLock<DashMap<String, Arc<OnceCell<Result<Bytes, Error>>>>> = LazyLock::new(DashMap::new);
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CachedMetadata {
+    metadata: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    etag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_modified: Option<String>,
+}
+
+pub struct GetPackageMetadataParams<'a> {
+    pub http_client: &'a HttpClient,
+    pub registry: &'a str,
+    pub ident: &'a Ident,
+    pub authorization: Option<&'a str>,
+    pub global_folder: &'a Path,
+    pub refresh_lockfile: bool,
+}
+
+pub async fn get_package_metadata(params: &GetPackageMetadataParams<'_>) -> Result<Bytes, Error> {
+    let cache_key
+        = params.ident.to_string();
+
+    let cell = METADATA_CACHE
+        .entry(cache_key)
+        .or_insert_with(|| Arc::new(OnceCell::new()))
+        .clone();
+
+    let result = cell.get_or_init(|| async {
+        fetch_metadata_with_disk_cache(params).await
+    }).await;
+
+    result.clone()
+}
+
+fn get_cache_file_path(global_folder: &Path, registry: &str, ident: &Ident) -> Path {
+    let registry_hostname
+        = url::Url::parse(registry)
+            .ok()
+            .and_then(|u| u.host_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| "unknown".to_string());
+
+    global_folder
+        .with_join_str("metadata/npm")
+        .with_join_str(&*METADATA_CACHE_KEY)
+        .with_join_str(&registry_hostname)
+        .with_join_str(&format!("{}.json", ident.slug()))
+}
+
+fn trim_metadata(raw: &[u8]) -> Result<serde_json::Value, Error> {
+    let mut metadata: serde_json::Value
+        = serde_json::from_slice(raw)
+            .map_err(|e| Error::SerializationError(e.to_string()))?;
+
+    let top_level_fields: HashSet<&str>
+        = CACHED_TOP_LEVEL_FIELDS.iter().copied().collect();
+    let version_fields: HashSet<&str>
+        = CACHED_VERSION_FIELDS.iter().copied().collect();
+
+    if let Some(obj) = metadata.as_object_mut() {
+        obj.retain(|k, _| top_level_fields.contains(k.as_str()));
+    }
+
+    if let Some(versions) = metadata.get_mut("versions").and_then(|v| v.as_object_mut()) {
+        for version_data in versions.values_mut() {
+            if let Some(obj) = version_data.as_object_mut() {
+                obj.retain(|k, _| version_fields.contains(k.as_str()));
+            }
+        }
+    }
+
+    Ok(metadata)
+}
+
+async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -> Result<Bytes, Error> {
+    let registry_path
+        = npm::registry_url_for_all_versions(params.ident);
+    let url
+        = format!("{}{}", params.registry, registry_path);
+
+    let cache_file
+        = get_cache_file_path(params.global_folder, params.registry, params.ident);
+
+    let cached = if !params.refresh_lockfile {
+        cache_file.fs_read_prealloc().ok()
+            .and_then(|data| serde_json::from_slice::<CachedMetadata>(&data).ok())
+    } else {
+        None
+    };
+
+    let mut request
+        = params.http_client.get(&url)?
+            .enable_status_check(false);
+
+    if let Some(auth) = params.authorization {
+        request = request.header("authorization", Some(auth));
+    }
+
+    if let Some(ref cached) = cached {
+        if let Some(ref etag) = cached.etag {
+            request = request.header("if-none-match", Some(etag.as_str()));
+        }
+        if let Some(ref last_modified) = cached.last_modified {
+            request = request.header("if-modified-since", Some(last_modified.as_str()));
+        }
+    }
+
+    let response
+        = request.send().await?;
+
+    if params.authorization.is_some() {
+        let npm_params = NpmHttpParams {
+            http_client: params.http_client,
+            registry: params.registry,
+            path: &registry_path,
+            authorization: params.authorization,
+            otp: None,
+        };
+        handle_invalid_authentication_error(&npm_params, &response).await?;
+    }
+
+    if response.status().as_u16() == 304 {
+        if let Some(cached) = cached {
+            let bytes = serde_json::to_vec(&cached.metadata)
+                .map_err(|e| Error::SerializationError(e.to_string()))?;
+            return Ok(Bytes::from(bytes));
+        }
+    }
+
+    let etag
+        = response.headers().get("etag")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+    let last_modified
+        = response.headers().get("last-modified")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+    let body
+        = response.error_for_status()?.bytes().await?;
+
+    let trimmed
+        = trim_metadata(&body)?;
+
+    let serialized
+        = serde_json::to_vec(&trimmed)
+            .map_err(|e| Error::SerializationError(e.to_string()))?;
+
+    let disk_entry = CachedMetadata {
+        metadata: trimmed,
+        etag,
+        last_modified,
+    };
+
+    let cache_dir
+        = cache_file.dirname().unwrap();
+
+    let _ = cache_dir.fs_create_dir_all();
+    let _ = cache_file.fs_write_atomic(|tmp| {
+        let data = serde_json::to_vec(&disk_entry)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        tmp.fs_write(&data)?;
+        Ok::<_, zpm_utils::PathError>(())
+    });
+
+    Ok(Bytes::from(serialized))
 }
 
 pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {
