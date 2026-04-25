@@ -76,6 +76,14 @@ jobs:
         working-directory: ../head
         run: ./target/release-lto/yarn-bin debug bench gatsby install-full-cold
 
+      - name: Run benchmark cache only (base)
+        working-directory: ../base
+        run: ./target/release-lto/yarn-bin debug bench gatsby install-cache-only
+
+      - name: Run benchmark cache only (head)
+        working-directory: ../head
+        run: ./target/release-lto/yarn-bin debug bench gatsby install-cache-only
+
       - name: Run benchmark warm with lockfile (base)
         working-directory: ../base
         run: ./target/release-lto/yarn-bin debug bench gatsby install-cache-and-lock
@@ -106,6 +114,7 @@ jobs:
 
             const benches = [
               {mode: 'install-full-cold', label: 'gatsby install-full-cold'},
+              {mode: 'install-cache-only', label: 'gatsby install-cache-only'},
               {mode: 'install-cache-and-lock', label: 'gatsby install-cache-and-lock (warm, with lockfile)'},
             ];
 
