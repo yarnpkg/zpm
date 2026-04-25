@@ -371,13 +371,11 @@ static METADATA_CACHE_KEY: LazyLock<String> = LazyLock::new(|| {
 
 static METADATA_CACHE: LazyLock<DashMap<String, Arc<OnceCell<Result<Bytes, Error>>>>> = LazyLock::new(DashMap::new);
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CachedMetadata {
-    metadata: serde_json::Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
+struct CachedMetadataRead {
+    metadata: Box<serde_json::value::RawValue>,
     etag: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     last_modified: Option<String>,
 }
 
@@ -420,10 +418,10 @@ fn get_cache_file_path(global_folder: &Path, registry: &str, ident: &Ident) -> P
         .with_join_str(&format!("{}.json", ident.slug()))
 }
 
-fn trim_metadata(raw: &[u8]) -> Result<serde_json::Value, Error> {
-    let mut metadata: serde_json::Value
-        = serde_json::from_slice(raw)
-            .map_err(|e| Error::SerializationError(e.to_string()))?;
+fn trim_metadata(raw: &[u8]) -> Vec<u8> {
+    let Ok(mut metadata) = serde_json::from_slice::<serde_json::Value>(raw) else {
+        return raw.to_vec();
+    };
 
     let top_level_fields: HashSet<&str>
         = CACHED_TOP_LEVEL_FIELDS.iter().copied().collect();
@@ -442,7 +440,36 @@ fn trim_metadata(raw: &[u8]) -> Result<serde_json::Value, Error> {
         }
     }
 
-    Ok(metadata)
+    serde_json::to_vec(&metadata).unwrap_or_else(|_| raw.to_vec())
+}
+
+fn write_cache_to_disk(cache_file: &Path, metadata: &[u8], etag: Option<String>, last_modified: Option<String>) {
+    let cache_dir
+        = cache_file.dirname().unwrap();
+
+    let _ = cache_dir.fs_create_dir_all();
+
+    let trimmed
+        = trim_metadata(metadata);
+
+    let mut out = Vec::with_capacity(trimmed.len() + 128);
+    out.extend_from_slice(b"{\"metadata\":");
+    out.extend_from_slice(&trimmed);
+
+    if let Some(ref etag) = etag {
+        out.extend_from_slice(b",\"etag\":");
+        let _ = serde_json::to_writer(&mut out, etag);
+    }
+    if let Some(ref last_modified) = last_modified {
+        out.extend_from_slice(b",\"lastModified\":");
+        let _ = serde_json::to_writer(&mut out, last_modified);
+    }
+    out.push(b'}');
+
+    let _ = cache_file.fs_write_atomic(|tmp| {
+        tmp.fs_write(&out)?;
+        Ok::<_, zpm_utils::PathError>(())
+    });
 }
 
 async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -> Result<Bytes, Error> {
@@ -456,7 +483,7 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
 
     let cached = if !params.refresh_lockfile {
         cache_file.fs_read_prealloc().ok()
-            .and_then(|data| serde_json::from_slice::<CachedMetadata>(&data).ok())
+            .and_then(|data| serde_json::from_slice::<CachedMetadataRead>(&data).ok())
     } else {
         None
     };
@@ -494,9 +521,7 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
 
     if response.status().as_u16() == 304 {
         if let Some(cached) = cached {
-            let bytes = serde_json::to_vec(&cached.metadata)
-                .map_err(|e| Error::SerializationError(e.to_string()))?;
-            return Ok(Bytes::from(bytes));
+            return Ok(Bytes::from(cached.metadata.get().as_bytes().to_vec()));
         }
     }
 
@@ -512,31 +537,13 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
     let body
         = response.error_for_status()?.bytes().await?;
 
-    let trimmed
-        = trim_metadata(&body)?;
-
-    let serialized
-        = serde_json::to_vec(&trimmed)
-            .map_err(|e| Error::SerializationError(e.to_string()))?;
-
-    let disk_entry = CachedMetadata {
-        metadata: trimmed,
-        etag,
-        last_modified,
-    };
-
-    let cache_dir
-        = cache_file.dirname().unwrap();
-
-    let _ = cache_dir.fs_create_dir_all();
-    let _ = cache_file.fs_write_atomic(|tmp| {
-        let data = serde_json::to_vec(&disk_entry)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        tmp.fs_write(&data)?;
-        Ok::<_, zpm_utils::PathError>(())
+    let body_for_disk = body.clone();
+    let cache_file_for_disk = cache_file.clone();
+    tokio::task::spawn_blocking(move || {
+        write_cache_to_disk(&cache_file_for_disk, &body_for_disk, etag, last_modified);
     });
 
-    Ok(Bytes::from(serialized))
+    Ok(body)
 }
 
 pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {
