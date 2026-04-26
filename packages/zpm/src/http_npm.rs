@@ -556,8 +556,11 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
     let body
         = response.error_for_status()?.bytes().await?;
 
-    let body_for_disk = body.clone();
-    let cache_file_for_disk = cache_file.clone();
+    let body_for_disk
+        = body.clone();
+    let cache_file_for_disk
+        = cache_file.clone();
+
     tokio::task::spawn_blocking(move || {
         write_cache_to_disk(&cache_file_for_disk, &body_for_disk, etag, last_modified);
     });
