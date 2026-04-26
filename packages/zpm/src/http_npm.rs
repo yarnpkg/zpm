@@ -353,23 +353,44 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
 }
 
 const CACHED_VERSION_FIELDS: &[&str] = &[
-    "name", "version", "dist", "bin", "scripts",
-    "os", "cpu", "libc",
-    "dependencies", "dependenciesMeta", "optionalDependencies",
-    "peerDependencies", "peerDependenciesMeta",
+    "bin",
+    "cpu",
+    "dependenciesMeta",
+    "dependencies",
+    "dist",
+    "libc",
+    "name",
+    "optionalDependencies",
+    "os",
+    "peerDependenciesMeta",
+    "peerDependencies",
+    "scripts",
+    "version",
 ];
 
-const CACHED_TOP_LEVEL_FIELDS: &[&str] = &["dist-tags", "time", "versions"];
+const CACHED_TOP_LEVEL_FIELDS: &[&str] = &[
+    "dist-tags",
+    "time",
+    "versions",
+];
 
 static METADATA_CACHE_KEY: LazyLock<String> = LazyLock::new(|| {
-    let mut hasher = Sha256::new();
+    let mut hasher
+        = Sha256::new();
+
+    for field in CACHED_TOP_LEVEL_FIELDS {
+        hasher.update(field.as_bytes());
+    }
+
     for field in CACHED_VERSION_FIELDS {
         hasher.update(field.as_bytes());
     }
+
     hex::encode(&hasher.finalize()[..3])
 });
 
-static METADATA_CACHE: LazyLock<DashMap<String, Arc<OnceCell<Result<Bytes, Error>>>>> = LazyLock::new(DashMap::new);
+static METADATA_CACHE: LazyLock<DashMap<String, Arc<OnceCell<Bytes>>>>
+    = LazyLock::new(DashMap::new);
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 struct CachedMetadataDisk {
@@ -391,30 +412,36 @@ pub async fn get_package_metadata(params: &GetPackageMetadataParams<'_>) -> Resu
     let cache_key
         = params.ident.to_string();
 
-    let cell = METADATA_CACHE
-        .entry(cache_key)
-        .or_insert_with(|| Arc::new(OnceCell::new()))
-        .clone();
+    let cell
+        = METADATA_CACHE
+            .entry(cache_key)
+            .or_default()
+            .clone();
 
-    let result = cell.get_or_init(|| async {
+    let result = cell.get_or_try_init(|| async {
         fetch_metadata_with_disk_cache(params).await
-    }).await;
+    }).await?;
 
-    result.clone()
+    Ok(result.clone())
 }
 
-fn get_cache_file_path(global_folder: &Path, registry: &str, ident: &Ident) -> Path {
-    let registry_hostname
-        = url::Url::parse(registry)
-            .ok()
-            .and_then(|u| u.host_str().map(|s| s.to_string()))
-            .unwrap_or_else(|| "unknown".to_string());
+pub fn ensure_metadata_cache_dir(global_folder: &Path) {
+    let cache_dir = global_folder
+        .with_join_str("metadata/npm")
+        .with_join_str(&*METADATA_CACHE_KEY);
+
+    let _ = cache_dir.fs_create_dir_all();
+}
+
+fn get_cache_file_path(global_folder: &Path, url: &str) -> Path {
+    let mut hasher = Sha256::new();
+    hasher.update(url.as_bytes());
+    let url_hash = hex::encode(hasher.finalize());
 
     global_folder
         .with_join_str("metadata/npm")
         .with_join_str(&*METADATA_CACHE_KEY)
-        .with_join_str(&registry_hostname)
-        .with_join_str(&format!("{}.bin", ident.slug()))
+        .with_join_str(&format!("{}.bin", url_hash))
 }
 
 fn trim_metadata(raw: &[u8]) -> Vec<u8> {
@@ -422,10 +449,15 @@ fn trim_metadata(raw: &[u8]) -> Vec<u8> {
         return raw.to_vec();
     };
 
-    let top_level_fields: HashSet<&str>
-        = CACHED_TOP_LEVEL_FIELDS.iter().copied().collect();
-    let version_fields: HashSet<&str>
-        = CACHED_VERSION_FIELDS.iter().copied().collect();
+    let top_level_fields: HashSet<_>
+        = CACHED_TOP_LEVEL_FIELDS.iter()
+            .copied()
+            .collect();
+
+    let version_fields: HashSet<_>
+        = CACHED_VERSION_FIELDS.iter()
+            .copied()
+            .collect();
 
     if let Some(obj) = metadata.as_object_mut() {
         obj.retain(|k, _| top_level_fields.contains(k.as_str()));
@@ -443,11 +475,6 @@ fn trim_metadata(raw: &[u8]) -> Vec<u8> {
 }
 
 fn write_cache_to_disk(cache_file: &Path, metadata: &[u8], etag: Option<String>, last_modified: Option<String>) {
-    let cache_dir
-        = cache_file.dirname().unwrap();
-
-    let _ = cache_dir.fs_create_dir_all();
-
     let entry = CachedMetadataDisk {
         metadata: trim_metadata(metadata),
         etag,
@@ -471,7 +498,7 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
         = format!("{}{}", params.registry, registry_path);
 
     let cache_file
-        = get_cache_file_path(params.global_folder, params.registry, params.ident);
+        = get_cache_file_path(params.global_folder, &url);
 
     let cached = if !params.refresh_lockfile {
         cache_file.fs_read_prealloc().ok()
