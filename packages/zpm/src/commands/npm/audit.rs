@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use clipanion::cli;
 use globset::GlobBuilder;
 use indexmap::IndexMap;
+use itertools::Itertools;
 use serde::Deserialize;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Ident, Locator, Reference};
@@ -12,7 +13,7 @@ use zpm_utils::{AbstractValue, FromFileString, RawString, ToFileString, tree};
 use crate::{
     error::Error,
     http_npm::{self, AuthorizationMode, GetAuthorizationOptions, NpmHttpParams, get_authorization, get_registry},
-    project::{Project, Workspace},
+    project::Project,
 };
 
 /// Perform a vulnerability audit against the installed packages.
@@ -79,18 +80,28 @@ pub struct Audit {
 const ALL_SEVERITIES: &[&str] = &["info", "low", "moderate", "high", "critical"];
 
 fn get_severity_inclusions(severity: &str) -> BTreeSet<String> {
-    let index = ALL_SEVERITIES.iter().position(|&s| s == severity).unwrap_or(0);
-    ALL_SEVERITIES[index..].iter().map(|s| s.to_string()).collect()
+    let index
+        = ALL_SEVERITIES.iter()
+            .position(|&s| s == severity)
+            .unwrap_or(0);
+
+    ALL_SEVERITIES[index..].iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 fn is_npm_package(locator: &Locator) -> bool {
-    matches!(&locator.reference, Reference::Shorthand { .. } | Reference::Registry { .. })
+    matches!(&locator.reference, Reference::Shorthand {..} | Reference::Registry {..})
 }
 
 fn get_npm_version(locator: &Locator) -> Option<zpm_semver::Version> {
     match &locator.reference {
-        Reference::Shorthand(params) => Some(params.version.clone()),
-        Reference::Registry(params) => Some(params.version.clone()),
+        Reference::Shorthand(params)
+            => Some(params.version.clone()),
+
+        Reference::Registry(params)
+            => Some(params.version.clone()),
+
         _ => None,
     }
 }
@@ -149,15 +160,16 @@ impl Audit {
             = self.collect_packages(&project)?;
 
         let excluded_packages = {
-            let mut excluded: Vec<String>
+            let mut excluded
                 = project.config.settings.npm_audit_exclude_packages.iter()
                     .map(|s| s.value.clone())
-                    .collect();
+                    .collect_vec();
+
             excluded.extend(self.excludes.clone());
             excluded
         };
 
-        let mut payload: BTreeMap<String, Vec<String>>
+        let mut payload
             = BTreeMap::new();
 
         for (package_name, versions) in &packages {
@@ -175,12 +187,14 @@ impl Audit {
             if !self.json {
                 println!("No audit suggestions");
             }
+
             return Ok(());
         }
 
-        let registry = project.config.settings.npm_audit_registry.value.as_deref()
-            .map(|s| s.strip_suffix('/').unwrap_or(s))
-            .unwrap_or_else(|| get_registry(&project.config, None, false).unwrap());
+        let registry
+            = project.config.settings.npm_audit_registry.value.as_deref()
+                .map(|s| s.strip_suffix('/').unwrap_or(s))
+                .unwrap_or_else(|| get_registry(&project.config, None, false).unwrap());
 
         let authorization
             = get_authorization(&GetAuthorizationOptions {
@@ -209,7 +223,7 @@ impl Audit {
             = audit_response.text().await
                 .map_err(|e| Error::HttpError { inner: std::sync::Arc::new(e), extra: None })?;
 
-        let mut result: HashMap<String, Vec<AuditAdvisory>>
+        let mut result
             = JsonDocument::hydrate_from_str(&audit_body)?;
 
         if !self.no_deprecations {
@@ -220,32 +234,34 @@ impl Audit {
             = get_severity_inclusions(&self.severity);
 
         let ignored_advisories = {
-            let mut ignored: Vec<String>
+            let mut ignored
                 = project.config.settings.npm_audit_ignore_advisories.iter()
                     .map(|s| s.value.clone())
-                    .collect();
+                    .collect_vec();
+
             ignored.extend(self.ignores.clone());
             ignored
         };
 
-        let mut expanded_result: BTreeMap<String, Vec<AuditExtendedAdvisory>>
+        let mut expanded_result
             = BTreeMap::new();
 
         for (package_name, advisories) in &result {
-            let filtered: Vec<&AuditAdvisory> = advisories.iter()
-                .filter(|advisory| {
-                    let id_str = match &advisory.id {
-                        serde_json::Value::Number(n) => n.to_string(),
-                        serde_json::Value::String(s) => s.clone(),
-                        _ => format!("{}", advisory.id),
-                    };
+            let filtered
+                = advisories.iter()
+                    .filter(|advisory| {
+                        let id_str = match &advisory.id {
+                            serde_json::Value::Number(n) => n.to_string(),
+                            serde_json::Value::String(s) => s.clone(),
+                            _ => format!("{}", advisory.id),
+                        };
 
-                    let is_ignored = ignored_advisories.iter()
-                        .any(|pattern| glob_matches(pattern, &id_str));
+                        let is_ignored = ignored_advisories.iter()
+                            .any(|pattern| glob_matches(pattern, &id_str));
 
-                    !is_ignored && severities.contains(&advisory.severity)
-                })
-                .collect();
+                        !is_ignored && severities.contains(&advisory.severity)
+                    })
+                    .collect_vec();
 
             if filtered.is_empty() {
                 continue;
@@ -260,16 +276,17 @@ impl Audit {
                 let vulnerable_range
                     = Range::from_file_string(&advisory.vulnerable_versions).ok();
 
-                let affected_versions: Vec<zpm_semver::Version> = package_versions.keys()
-                    .filter(|version| {
-                        vulnerable_range.as_ref()
-                            .map(|range| range.check(version))
-                            .unwrap_or(false)
-                    })
-                    .cloned()
-                    .collect();
+                let affected_versions
+                    = package_versions.keys()
+                        .filter(|version| {
+                            vulnerable_range.as_ref()
+                                .map(|range| range.check(version))
+                                .unwrap_or(false)
+                        })
+                        .cloned()
+                        .collect();
 
-                let mut dependents_map: BTreeMap<String, Locator>
+                let mut dependents_map
                     = BTreeMap::new();
 
                 for version in &affected_versions {
@@ -326,14 +343,14 @@ impl Audit {
     }
 
     fn collect_packages(&self, project: &Project) -> Result<BTreeMap<String, BTreeMap<zpm_semver::Version, Vec<Locator>>>, Error> {
-        let install_state = project.install_state.as_ref()
-            .ok_or(Error::InstallStateNotFound)?;
+        let install_state
+            = project.install_state.as_ref()
+                .ok_or(Error::InstallStateNotFound)?;
 
-        let workspaces: Vec<&Workspace> = if self.all {
+        let workspaces = if self.all {
             project.workspaces.iter().collect()
         } else {
-            let active = project.active_workspace()?;
-            vec![active]
+            vec![project.active_workspace()?]
         };
 
         let include_dependencies
@@ -348,8 +365,9 @@ impl Audit {
             let workspace_locator
                 = workspace.locator();
 
-            let resolution = install_state.resolution_tree.locator_resolutions
-                .get(&workspace_locator);
+            let resolution
+                = install_state.resolution_tree.locator_resolutions
+                    .get(&workspace_locator);
 
             let Some(resolution) = resolution else {
                 continue;
@@ -373,11 +391,11 @@ impl Audit {
             }
         }
 
-        let mut packages: BTreeMap<String, BTreeMap<zpm_semver::Version, Vec<Locator>>>
+        let mut packages: BTreeMap<_, BTreeMap<_, Vec<_>>>
             = BTreeMap::new();
         let mut visited
             = BTreeSet::new();
-        let mut queue: Vec<(Locator, Locator)>
+        let mut queue
             = top_level_descriptors;
 
         while let Some((parent, locator)) = queue.pop() {
@@ -440,7 +458,9 @@ impl Audit {
                 Err(_) => continue,
             };
 
-            let (scope, name) = ident.split();
+            let (scope, name)
+                = ident.split();
+
             let encoded_name = if let Some(scope) = scope {
                 format!("{}%2f{}", scope, name)
             } else {
@@ -488,18 +508,19 @@ impl Audit {
                     _ => continue,
                 };
 
-                let already_vulnerable = result.get(package_name)
-                    .map(|advisories| {
-                        advisories.iter().any(|advisory| {
-                            Range::from_file_string(&advisory.vulnerable_versions).ok()
-                                .and_then(|range| {
-                                    zpm_semver::Version::from_file_string(version_str).ok()
-                                        .map(|v| range.check(&v))
-                                })
-                                .unwrap_or(false)
+                let already_vulnerable
+                    = result.get(package_name)
+                        .map(|advisories| {
+                            advisories.iter().any(|advisory| {
+                                Range::from_file_string(&advisory.vulnerable_versions).ok()
+                                    .and_then(|range| {
+                                        zpm_semver::Version::from_file_string(version_str).ok()
+                                            .map(|v| range.check(&v))
+                                    })
+                                    .unwrap_or(false)
+                            })
                         })
-                    })
-                    .unwrap_or(false);
+                        .unwrap_or(false);
 
                 if already_vulnerable {
                     continue;
@@ -562,9 +583,10 @@ impl Audit {
                 });
 
                 if !advisory.versions.is_empty() {
-                    let version_nodes: Vec<tree::Node<'_>> = advisory.versions.iter()
-                        .map(|v| tree::Node::new_value(v.clone()))
-                        .collect();
+                    let version_nodes
+                        = advisory.versions.iter()
+                            .map(|v| tree::Node::new_value(v.clone()))
+                            .collect();
 
                     children.insert("Tree Versions".to_string(), tree::Node {
                         label: Some("Tree Versions".to_string()),
@@ -574,9 +596,10 @@ impl Audit {
                 }
 
                 if !advisory.dependents.is_empty() {
-                    let dependent_nodes: Vec<tree::Node<'_>> = advisory.dependents.iter()
-                        .map(|l| tree::Node::new_value(l.clone()))
-                        .collect();
+                    let dependent_nodes
+                        = advisory.dependents.iter()
+                            .map(|l| tree::Node::new_value(l.clone()))
+                            .collect();
 
                     children.insert("Dependents".to_string(), tree::Node {
                         label: Some("Dependents".to_string()),
@@ -585,7 +608,8 @@ impl Audit {
                     });
                 }
 
-                let ident = Ident::from_file_string(package_name).ok();
+                let ident
+                    = Ident::from_file_string(package_name).ok();
 
                 root_children.push(tree::Node {
                     label: None,
