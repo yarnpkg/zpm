@@ -46,7 +46,7 @@
     "deferredVersionFolder": {
       "type": "zpm_utils::Path",
       "description": "Folder where the versioning files are stored.",
-      "default": "crate::fns::default_deferred_version_folder(context)"
+      "default": ".yarn/versions"
     },
     "enableAutoTypes": {
       "type": "boolean",

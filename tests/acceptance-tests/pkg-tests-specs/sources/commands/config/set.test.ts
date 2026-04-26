@@ -36,7 +36,7 @@ describe(`Commands`, () => {
         const {stdout} = await run(`config`, `set`, `npmAuthToken`, `foobar`);
 
         expect(stdout).not.toContain(`foobar`);
-        expect(stdout).toContain(`********`);
+        expect(stdout).toContain(`<redacted>`);
 
         await expect(xfs.readFilePromise(ppath.join(path, Filename.rc), `utf8`)).resolves.toContain(`npmAuthToken: foobar`);
       }),

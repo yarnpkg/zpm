@@ -201,7 +201,7 @@ impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::f
     fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         let Some(key_str) = path.first() else {
             return Ok(ConfigurationEntry {
-                value: AbstractValue::new(Container::new(self)),
+                value: AbstractValue::new_container(Container::new(self)),
                 source: Source::Mixed,
             });
         };
@@ -341,7 +341,7 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
     fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         let Some(key_str) = path.first() else {
             return Ok(ConfigurationEntry {
-                value: AbstractValue::new(Container::new(self)),
+                value: AbstractValue::new_container(Container::new(self)),
                 source: Source::Mixed,
             });
         };
@@ -988,9 +988,7 @@ impl Configuration {
 
     pub fn load(context: &ConfigurationContext, last_modified_at: &mut LastModifiedAt) -> Result<Configuration, ConfigurationError> {
         let project_cwd
-            = context.project_cwd
-                .as_ref()
-                .expect("A project directory should be set");
+            = context.project_cwd.as_ref();
 
         let rc_filename
             = std::env::var("YARN_RC_FILENAME")
@@ -1000,7 +998,7 @@ impl Configuration {
         let user_rc
             = RcFile::try_read(context.user_cwd.as_ref(), &rc_filename, last_modified_at)?;
         let project_rc
-            = RcFile::try_read(Some(project_cwd), &rc_filename, last_modified_at)?;
+            = RcFile::try_read(project_cwd, &rc_filename, last_modified_at)?;
 
         // Phase 1: Extract injectEnvironmentFiles from the raw YAML text.
         // We check the project rc first, falling back to the user rc, then
@@ -1013,10 +1011,13 @@ impl Configuration {
             .unwrap_or_else(|| vec![".env.yarn?".to_string()]);
 
         // Phase 2: Load .env files and collect variables
-        let env_files = Self::load_env_files(
-            project_cwd,
-            &inject_environment_files,
-        )?;
+        let env_files = match project_cwd {
+            Some(project_cwd) => Self::load_env_files(
+                project_cwd,
+                &inject_environment_files,
+            )?,
+            None => BTreeMap::new(),
+        };
 
         // Phase 3: Set env file variables in the process environment so that
         // shellexpand::env() (used by the Interpolated deserializer) can

@@ -40,11 +40,20 @@ serialize_trait_object!(Extracted);
 
 pub struct AbstractValue<'a> {
     value: Box<dyn Extracted + 'a>,
+    is_container: bool,
 }
 
 impl<'a> AbstractValue<'a> {
     pub fn new<T: Extracted + 'a>(value: T) -> Self {
-        Self {value: Box::new(value)}
+        Self {value: Box::new(value), is_container: false}
+    }
+
+    pub fn new_container<T: Extracted + 'a>(value: T) -> Self {
+        Self {value: Box::new(value), is_container: true}
+    }
+
+    pub fn is_container(&self) -> bool {
+        self.is_container
     }
 
     pub fn export(self, json: bool) -> String {
