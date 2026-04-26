@@ -1,10 +1,13 @@
+use std::collections::HashSet;
+
 use clipanion::cli;
 use zpm_parsers::{Document, JsonDocument, Value};
-use zpm_primitives::Ident;
+use zpm_primitives::{FilterDescriptor, Locator, Reference};
 use zpm_utils::ToFileString;
 
 use crate::{
     error::Error,
+    install::InstallState,
     project,
 };
 
@@ -34,29 +37,86 @@ pub struct Unplug {
     #[cli::option("--revert", default = false)]
     revert: bool,
 
-    /// The identifiers to unplug
-    identifiers: Vec<Ident>,
+    /// Unplug direct dependencies from the entire project
+    #[cli::option("-A,--all", default = false)]
+    all: bool,
+
+    /// Unplug both direct and transitive dependencies
+    #[cli::option("-R,--recursive", default = false)]
+    recursive: bool,
+
+    /// Format the output as an NDJSON stream
+    #[cli::option("--json", default = false)]
+    json: bool,
+
+    /// The patterns to unplug
+    patterns: Vec<FilterDescriptor>,
+}
+
+fn package_ident(locator: &Locator) -> &zpm_primitives::Ident {
+    match &locator.reference {
+        Reference::Registry(params) => &params.ident,
+        _ => &locator.ident,
+    }
 }
 
 impl Unplug {
     pub async fn execute(&self) -> Result<(), Error> {
-        let project
+        let mut project
             = project::Project::new(None).await?;
 
-        let manifest_path = project.project_cwd
-            .with_join_str(project::MANIFEST_NAME);
+        project.lazy_install().await?;
 
-        let manifest_content = manifest_path
-            .fs_read_prealloc()?;
+        let install_state
+            = project.install_state
+                .as_ref()
+                .ok_or(Error::InstallStateNotFound)?;
+
+        let matches_any = |ident: &zpm_primitives::Ident, version: &zpm_semver::Version| -> bool {
+            self.patterns.iter().any(|p| p.check(ident, version))
+        };
+
+        let selected = if self.all && self.recursive {
+            self.get_all_matching_packages(install_state, &matches_any)
+        } else {
+            let roots: Vec<Locator> = if self.all {
+                project.workspaces.iter().map(|w| w.locator()).collect()
+            } else {
+                vec![project.active_workspace()?.locator()]
+            };
+
+            self.get_selected_packages(&roots, install_state, &matches_any)
+        };
+
+        let manifest_path
+            = project.project_cwd
+                .with_join_str(project::MANIFEST_NAME);
+
+        let manifest_content
+            = manifest_path
+                .fs_read_prealloc()?;
 
         let mut document
             = JsonDocument::new(manifest_content)?;
 
-        for identifier in &self.identifiers {
+        let mut output
+            = Vec::new();
+
+        for (ident, version) in &selected {
+            let key
+                = format!("{}@{}", ident, version);
+
             document.set_path(
-                &zpm_parsers::Path::from_segments(vec!["dependenciesMeta".to_string(), identifier.to_file_string(), "unplugged".to_string()]),
+                &zpm_parsers::Path::from_segments(vec!["dependenciesMeta".to_string(), key, "unplugged".to_string()]),
                 if self.revert {Value::Undefined} else {Value::Bool(true)},
             )?;
+
+            if self.json {
+                output.push(serde_json::json!({
+                    "locator": format!("{}@npm:{}", ident, version),
+                    "version": version,
+                }));
+            }
         }
 
         manifest_path
@@ -66,9 +126,113 @@ impl Unplug {
             = project::Project::new(None).await?;
 
         project.run_install(project::RunInstallOptions {
+            silent_or_error: self.json,
             ..Default::default()
         }).await?;
 
+        for item in output {
+            println!("{}", serde_json::to_string(&item).unwrap());
+        }
+
         Ok(())
+    }
+
+    fn get_all_matching_packages(
+        &self,
+        install_state: &InstallState,
+        matches_any: &dyn Fn(&zpm_primitives::Ident, &zpm_semver::Version) -> bool,
+    ) -> Vec<(String, String)> {
+        let mut selected
+            = Vec::new();
+
+        for (locator, resolution) in &install_state.resolution_tree.locator_resolutions {
+            if locator.reference.is_workspace_reference() {
+                continue;
+            }
+
+            if locator.reference.is_virtual_reference() {
+                continue;
+            }
+
+            let ident
+                = package_ident(locator);
+
+            if matches_any(ident, &resolution.version) {
+                selected.push((ident.to_file_string(), resolution.version.to_file_string()));
+            }
+        }
+
+        selected.sort();
+        selected.dedup();
+        selected
+    }
+
+    fn get_selected_packages(
+        &self,
+        roots: &[Locator],
+        install_state: &InstallState,
+        matches_any: &dyn Fn(&zpm_primitives::Ident, &zpm_semver::Version) -> bool,
+    ) -> Vec<(String, String)> {
+        let mut seen
+            = HashSet::new();
+
+        let mut selected
+            = Vec::new();
+
+        for root in roots {
+            self.traverse(root, 0, &mut seen, install_state, matches_any, &mut selected);
+        }
+
+        selected.sort();
+        selected.dedup();
+        selected
+    }
+
+    fn traverse(
+        &self,
+        locator: &Locator,
+        depth: usize,
+        seen: &mut HashSet<Locator>,
+        install_state: &InstallState,
+        matches_any: &dyn Fn(&zpm_primitives::Ident, &zpm_semver::Version) -> bool,
+        selected: &mut Vec<(String, String)>,
+    ) {
+        if seen.contains(locator) {
+            return;
+        }
+
+        let is_workspace
+            = locator.reference.is_workspace_reference();
+
+        // Don't mark workspace deps as "seen" when not recursive,
+        // so they can still be visited as traversal roots in --all mode.
+        if depth > 0 && !self.recursive && is_workspace {
+            return;
+        }
+
+        seen.insert(locator.clone());
+
+        if !is_workspace {
+            if let Some(resolution) = install_state.resolution_tree.locator_resolutions.get(locator) {
+                let ident
+                    = package_ident(locator);
+
+                if matches_any(ident, &resolution.version) {
+                    selected.push((ident.to_file_string(), resolution.version.to_file_string()));
+                }
+            }
+        }
+
+        if depth > 0 && !self.recursive {
+            return;
+        }
+
+        if let Some(resolution) = install_state.resolution_tree.locator_resolutions.get(locator) {
+            for descriptor in resolution.dependencies.values() {
+                if let Some(dep_locator) = install_state.resolution_tree.descriptor_to_locator.get(descriptor) {
+                    self.traverse(dep_locator, depth + 1, seen, install_state, matches_any, selected);
+                }
+            }
+        }
     }
 }
