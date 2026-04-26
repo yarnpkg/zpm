@@ -931,6 +931,11 @@ impl Configuration {
         self.settings.tree_node(None, None)
     }
 
+    pub fn validate(text: &str) -> Result<(), ConfigurationError> {
+        serde_yaml::from_str::<intermediate::Settings>(text)?;
+        Ok(())
+    }
+
     pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
         self.settings.hydrate(path, value_str)
     }

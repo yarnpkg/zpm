@@ -90,6 +90,9 @@ impl ConfigSet {
             value,
         )?;
 
+        Configuration::validate(&updated_document)
+            .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
+
         document_path
             .fs_change(&updated_document, false)?;
 
