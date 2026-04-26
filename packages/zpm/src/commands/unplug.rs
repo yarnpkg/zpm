@@ -102,9 +102,12 @@ impl Unplug {
         let mut output
             = Vec::new();
 
-        for (ident, version) in &selected {
+        for (locator, version) in &selected {
+            let ident
+                = package_ident(locator);
+
             let key
-                = format!("{}@{}", ident, version);
+                = format!("{}@{}", ident.to_file_string(), version.to_file_string());
 
             document.set_path(
                 &zpm_parsers::Path::from_segments(vec!["dependenciesMeta".to_string(), key, "unplugged".to_string()]),
@@ -113,8 +116,8 @@ impl Unplug {
 
             if self.json {
                 output.push(serde_json::json!({
-                    "locator": format!("{}@npm:{}", ident, version),
-                    "version": version,
+                    "locator": locator.to_file_string(),
+                    "version": version.to_file_string(),
                 }));
             }
         }
@@ -141,7 +144,7 @@ impl Unplug {
         &self,
         install_state: &InstallState,
         matches_any: &dyn Fn(&zpm_primitives::Ident, &zpm_semver::Version) -> bool,
-    ) -> Vec<(String, String)> {
+    ) -> Vec<(Locator, zpm_semver::Version)> {
         let mut selected
             = Vec::new();
 
@@ -158,7 +161,7 @@ impl Unplug {
                 = package_ident(locator);
 
             if matches_any(ident, &resolution.version) {
-                selected.push((ident.to_file_string(), resolution.version.to_file_string()));
+                selected.push((locator.clone(), resolution.version.clone()));
             }
         }
 
@@ -172,7 +175,7 @@ impl Unplug {
         roots: &[Locator],
         install_state: &InstallState,
         matches_any: &dyn Fn(&zpm_primitives::Ident, &zpm_semver::Version) -> bool,
-    ) -> Vec<(String, String)> {
+    ) -> Vec<(Locator, zpm_semver::Version)> {
         let mut seen
             = HashSet::new();
 
@@ -195,7 +198,7 @@ impl Unplug {
         seen: &mut HashSet<Locator>,
         install_state: &InstallState,
         matches_any: &dyn Fn(&zpm_primitives::Ident, &zpm_semver::Version) -> bool,
-        selected: &mut Vec<(String, String)>,
+        selected: &mut Vec<(Locator, zpm_semver::Version)>,
     ) {
         if seen.contains(locator) {
             return;
@@ -218,7 +221,7 @@ impl Unplug {
                     = package_ident(locator);
 
                 if matches_any(ident, &resolution.version) {
-                    selected.push((ident.to_file_string(), resolution.version.to_file_string()));
+                    selected.push((locator.clone(), resolution.version.clone()));
                 }
             }
         }
