@@ -194,7 +194,8 @@ impl Audit {
         let registry
             = project.config.settings.npm_audit_registry.value.as_deref()
                 .map(|s| s.strip_suffix('/').unwrap_or(s))
-                .unwrap_or_else(|| get_registry(&project.config, None, false).unwrap());
+                .map(Ok)
+                .unwrap_or_else(|| get_registry(&project.config, None, false))?;
 
         let authorization
             = get_authorization(&GetAuthorizationOptions {
@@ -402,9 +403,8 @@ impl Audit {
             let physical_locator
                 = locator.physical_locator();
 
-            if !visited.insert(physical_locator.to_file_string()) {
-                continue;
-            }
+            let first_visit
+                = visited.insert(physical_locator.to_file_string());
 
             if is_npm_package(&physical_locator) {
                 if let Some(version) = get_npm_version(&physical_locator) {
@@ -419,7 +419,7 @@ impl Audit {
                 }
             }
 
-            if self.recursive {
+            if self.recursive && first_visit {
                 if let Some(resolution) = install_state.resolution_tree.locator_resolutions.get(&locator) {
                     for descriptor in resolution.dependencies.values() {
                         if let Some(dep_locator) = install_state.resolution_tree.descriptor_to_locator.get(descriptor) {
