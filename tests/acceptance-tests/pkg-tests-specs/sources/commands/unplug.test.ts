@@ -240,6 +240,28 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should not produce duplicate entries for packages with peer dependencies`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`provides-peer-deps-1-0-0`]: `1.0.0`,
+          [`peer-deps`]: `1.0.0`,
+          [`no-deps`]: `2.0.0`,
+        },
+      }, async ({path, run, source}) => {
+        await run(`install`);
+
+        const {stdout} = await run(`unplug`, `peer-deps`, `--recursive`, `--json`);
+        const lines = stdout.trim().split(`\n`).map(l => JSON.parse(l));
+
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toStrictEqual({
+          locator: `peer-deps@npm:1.0.0`,
+          version: `1.0.0`,
+        });
+      }),
+    );
+
+    test(
       `it should not use an outdated install state`,
       makeTemporaryEnv({
         dependencies: {

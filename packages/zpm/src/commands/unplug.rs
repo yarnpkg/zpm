@@ -221,7 +221,7 @@ impl Unplug {
                     = package_ident(locator);
 
                 if matches_any(ident, &resolution.version) {
-                    selected.push((locator.clone(), resolution.version.clone()));
+                    selected.push((locator.physical_locator(), resolution.version.clone()));
                 }
             }
         }
