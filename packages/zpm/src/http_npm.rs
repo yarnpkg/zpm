@@ -371,10 +371,9 @@ static METADATA_CACHE_KEY: LazyLock<String> = LazyLock::new(|| {
 
 static METADATA_CACHE: LazyLock<DashMap<String, Arc<OnceCell<Result<Bytes, Error>>>>> = LazyLock::new(DashMap::new);
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CachedMetadataRead {
-    metadata: Box<serde_json::value::RawValue>,
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+struct CachedMetadataDisk {
+    metadata: Vec<u8>,
     etag: Option<String>,
     last_modified: Option<String>,
 }
@@ -415,7 +414,7 @@ fn get_cache_file_path(global_folder: &Path, registry: &str, ident: &Ident) -> P
         .with_join_str("metadata/npm")
         .with_join_str(&*METADATA_CACHE_KEY)
         .with_join_str(&registry_hostname)
-        .with_join_str(&format!("{}.json", ident.slug()))
+        .with_join_str(&format!("{}.bin", ident.slug()))
 }
 
 fn trim_metadata(raw: &[u8]) -> Vec<u8> {
@@ -449,25 +448,18 @@ fn write_cache_to_disk(cache_file: &Path, metadata: &[u8], etag: Option<String>,
 
     let _ = cache_dir.fs_create_dir_all();
 
-    let trimmed
-        = trim_metadata(metadata);
+    let entry = CachedMetadataDisk {
+        metadata: trim_metadata(metadata),
+        etag,
+        last_modified,
+    };
 
-    let mut out = Vec::with_capacity(trimmed.len() + 128);
-    out.extend_from_slice(b"{\"metadata\":");
-    out.extend_from_slice(&trimmed);
-
-    if let Some(ref etag) = etag {
-        out.extend_from_slice(b",\"etag\":");
-        let _ = serde_json::to_writer(&mut out, etag);
-    }
-    if let Some(ref last_modified) = last_modified {
-        out.extend_from_slice(b",\"lastModified\":");
-        let _ = serde_json::to_writer(&mut out, last_modified);
-    }
-    out.push(b'}');
+    let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::BoxedError>(&entry) else {
+        return;
+    };
 
     let _ = cache_file.fs_write_atomic(|tmp| {
-        tmp.fs_write(&out)?;
+        tmp.fs_write(&encoded)?;
         Ok::<_, zpm_utils::PathError>(())
     });
 }
@@ -483,7 +475,7 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
 
     let cached = if !params.refresh_lockfile {
         cache_file.fs_read_prealloc().ok()
-            .and_then(|data| serde_json::from_slice::<CachedMetadataRead>(&data).ok())
+            .and_then(|data| rkyv::from_bytes::<CachedMetadataDisk, rkyv::rancor::BoxedError>(&data).ok())
     } else {
         None
     };
@@ -521,7 +513,7 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
 
     if response.status().as_u16() == 304 {
         if let Some(cached) = cached {
-            return Ok(Bytes::from(cached.metadata.get().as_bytes().to_vec()));
+            return Ok(Bytes::from(cached.metadata));
         }
     }
 
