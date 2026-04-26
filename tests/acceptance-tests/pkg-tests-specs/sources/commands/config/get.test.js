@@ -17,7 +17,7 @@ describe(`Commands`, () => {
         await xfs.writeFilePromise(`${path}/.yarnrc.yml`, `npmAuthToken: foobar\n`);
 
         await expect(run(`config`, `get`, `npmAuthToken`)).resolves.toMatchObject({
-          stdout: `********\n`,
+          stdout: `<redacted>\n`,
         });
       }),
     );
@@ -79,7 +79,7 @@ describe(`Commands`, () => {
       makeTemporaryEnv({}, async ({path, run, source}) => {
         const {stdout} = await run(`config`, `get`, `--json`, `deferredVersionFolder`);
 
-        expect(JSON.parse(stdout)).toEqual(`${path}/.yarn/versions`);
+        expect(JSON.parse(stdout)).toEqual(`.yarn/versions`);
       }),
     );
 
@@ -90,7 +90,7 @@ describe(`Commands`, () => {
 
         const {stdout} = await run(`config`, `get`, `--json`, `deferredVersionFolder`);
 
-        expect(JSON.parse(stdout)).toEqual(`${path}/.custom-versions`);
+        expect(JSON.parse(stdout)).toEqual(`.custom-versions`);
       }),
     );
 
