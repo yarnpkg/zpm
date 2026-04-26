@@ -2,7 +2,7 @@ use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::Perm
 
 use zpm_formats::iter_ext::IterExt;
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Descriptor, FilterDescriptor, Locator};
+use zpm_primitives::{Descriptor, FilterDescriptor, Locator, Reference};
 use zpm_utils::{Path, PathError, System};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -172,9 +172,14 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     // The package meta is based on the top-level configuration extracted
     // from the `dependenciesMeta` field.
     //
+    let package_ident = match &locator.reference {
+        Reference::Registry(params) => &params.ident,
+        _ => &locator.ident,
+    };
+
     let package_meta
         = dependencies_meta.iter()
-            .find(|(selector, _)| selector.check(&locator.ident, &resolution.version))
+            .find(|(selector, _)| selector.check(package_ident, &resolution.version))
             .map(|(_, meta)| meta)
             .cloned()
             .unwrap_or_default();
