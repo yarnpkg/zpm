@@ -208,6 +208,24 @@
       "description": "Whether to always send authentication headers when querying the npm registry",
       "default": false
     },
+    "npmAuditExcludePackages": {
+      "type": "array",
+      "description": "Array of glob patterns of packages to exclude from the audit check",
+      "items": {
+        "type": "string"
+      }
+    },
+    "npmAuditIgnoreAdvisories": {
+      "type": "array",
+      "description": "Array of glob patterns of advisory IDs to ignore in the audit report",
+      "items": {
+        "type": "string"
+      }
+    },
+    "npmAuditRegistry": {
+      "type": ["string", "null"],
+      "description": "The registry to use when auditing packages via `yarn npm audit`"
+    },
     "npmMinimalAgeGate": {
       "type": ["std::time::Duration", "null"],
       "description": "Minimum age of a package version in minutes to be considered for installation. Can be used to prevent installing very new packages, either because they tend to be more likely to include accidental bugs, or because of supply-chain security concerns."

@@ -70,6 +70,7 @@ pub enum YarnCli {
     ResolveTask(debug::resolve_task::ResolveTask),
     SyncFs(debug::sync_fs::SyncFs),
 
+    Audit(npm::audit::Audit),
     Login(npm::login::Login),
     LogoutAll(npm::logout_all::LogoutAll),
     Logout(npm::logout::Logout),
