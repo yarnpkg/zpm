@@ -2,13 +2,12 @@ use std::{future::Future, io::Write};
 
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
-use zpm_semver::{Version, VersionRc};
-use zpm_utils::{DataType, Hash64, Path, ToFileString, ToHumanString, Unit, is_terminal};
-use zpm_utils::eco_vec;
+use zpm_semver::{Range, VersionRc};
+use zpm_utils::{DataType, FromFileString, Hash64, Path, ToFileString, ToHumanString, Unit, is_terminal};
 
 use crate::errors::Error;
 
-pub const CACHE_VERSION: usize = 1;
+pub const CACHE_VERSION: usize = 2;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,17 +25,16 @@ fn get_npm_registry_server() -> String {
 impl CacheKey {
     pub fn to_npm_url(&self) -> Option<String> {
         if self.version.rc.as_ref().map_or(true, |rc| !rc.starts_with(&[VersionRc::String("git".into())])) {
-            // Older RC versions (<6.0.0-rc.9) are not available in npm
-            let first_npm_release = Version::new_from_components(
-                6,
-                0,
-                0,
-                Some(eco_vec![VersionRc::String("rc".into()), VersionRc::Number(9)]),
-            );
-
-            if self.version >= first_npm_release {
+            // zpm is available on npm since 6.0.0-rc.9
+            if Range::from_file_string(">=6.0.0-rc.9").unwrap().check_ignore_rc(&self.version) {
                 let registry = get_npm_registry_server();
                 return Some(format!("{}/@yarnpkg/yarn-{}/-/yarn-{}-{}.tgz", registry, self.platform, self.platform, self.version.to_file_string()));
+            }
+
+            // berry has been published to npm since 2.4.1
+            if Range::from_file_string(">=2.4.1 <6.0.0-0").unwrap().check_ignore_rc(&self.version) {
+                let registry = get_npm_registry_server();
+                return Some(format!("{}/@yarnpkg/cli-dist/-/cli-dist-{}.tgz", registry, self.version.to_file_string()));
             }
         }
 

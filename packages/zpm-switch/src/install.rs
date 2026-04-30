@@ -119,10 +119,10 @@ async fn install_node_js_from_url(source: &cache::CacheKey) -> Result<Command, E
     Ok(command)
 }
 
-async fn install_node_js_from_package(source: &cache::CacheKey, main_file: &Path) -> Result<Command, Error> {
+async fn install_node_js_from_package(source: &cache::CacheKey, url: &str, main_file: &Path) -> Result<Command, Error> {
     let cache_path = cache::ensure(source, |p| async move {
         let compressed_data
-            = fetch(&source.to_url()).await?;
+            = fetch(url).await?;
 
         tokio::task::spawn_blocking(move || -> Result<(), Error> {
             let data
@@ -153,6 +153,18 @@ async fn install_node_js_from_package(source: &cache::CacheKey, main_file: &Path
     Ok(command)
 }
 
+async fn install_berry(source: &cache:: CacheKey) -> Result<Command, Error> {
+    if let Some(npm_url) = source.to_npm_url() {
+        install_node_js_from_package(source, &npm_url, &Path::from_str("bin/yarn.js").unwrap()).await
+    } else {
+        install_node_js_from_url(source).await
+    }
+}
+
+async fn install_yarnpkg_legacy(source: &cache:: CacheKey) -> Result<Command, Error> {
+    install_node_js_from_package(source, &source.to_url(), &Path::from_str("bin/yarn.js").unwrap()).await
+}
+
 pub async fn install_package_manager(package_manager: &VersionPackageManagerReference) -> Result<Command, Error> {
     let version_platform = cache::CacheKey {
         cache_version: cache::CACHE_VERSION,
@@ -165,11 +177,11 @@ pub async fn install_package_manager(package_manager: &VersionPackageManagerRefe
     }
 
     if zpm_semver::Range::from_file_string(">=2.0.0-0").unwrap().check_ignore_rc(&package_manager.version) {
-        return install_node_js_from_url(&version_platform).await;
+        return install_berry(&version_platform).await;
     }
 
     if zpm_semver::Range::from_file_string(">=0.0.0-0").unwrap().check_ignore_rc(&package_manager.version) {
-        return install_node_js_from_package(&version_platform, &Path::from_str("bin/yarn.js").unwrap()).await;
+        return install_yarnpkg_legacy(&version_platform).await;
     }
 
     unreachable!()
