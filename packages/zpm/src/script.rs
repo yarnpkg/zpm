@@ -495,12 +495,10 @@ impl ScriptEnvironment {
 
     /// Enables signal delegation mode.
     ///
-    /// When enabled, SIGINT is ignored in the parent process while waiting
-    /// for child processes to complete. This allows the child to handle
-    /// the signal and exit gracefully, with its exit code properly propagated.
-    ///
-    /// This is useful when the parent is a wrapper (like yarn-switch) that
-    /// should delegate signal handling to the actual command being run.
+    /// When enabled, SIGINT and SIGTERM are ignored in the parent process
+    /// while waiting for child processes to complete. This allows the child
+    /// to handle the signals and exit gracefully, with its exit code properly
+    /// propagated.
     pub fn enable_signal_delegation(mut self) -> Self {
         self.signal_delegation = true;
         self
@@ -709,11 +707,11 @@ impl ScriptEnvironment {
             }
         }
 
-        // If signal delegation is enabled, ignore SIGINT while waiting for the child.
-        // This allows the child to handle the signal and exit gracefully.
+        // If signal delegation is enabled, ignore SIGINT/SIGTERM while waiting
+        // for the child. This allows the child to handle signals and exit gracefully.
         #[cfg(unix)]
         let _guard = if self.signal_delegation {
-            Some(zpm_utils::IgnoreSigint::new())
+            Some(zpm_utils::IgnoreSignals::new())
         } else {
             None
         };
@@ -835,11 +833,11 @@ impl ScriptEnvironment {
         cmd.stderr(std::process::Stdio::inherit());
         cmd.stdin(std::process::Stdio::inherit());
 
-        // If signal delegation is enabled, ignore SIGINT while waiting for the child.
-        // This allows the child to handle the signal and exit gracefully.
+        // If signal delegation is enabled, ignore SIGINT/SIGTERM while waiting
+        // for the child. This allows the child to handle signals and exit gracefully.
         #[cfg(unix)]
         let _guard = if self.signal_delegation {
-            Some(zpm_utils::IgnoreSigint::new())
+            Some(zpm_utils::IgnoreSignals::new())
         } else {
             None
         };

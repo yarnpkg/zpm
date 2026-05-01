@@ -36,13 +36,13 @@ impl ExplicitCommand {
             = binary.spawn()
                 .map_err(|err| Error::FailedToExecuteBinary(binary.get_program().to_string_lossy().to_string(), Arc::new(err)))?;
 
-        // Ignore SIGINT while waiting for the child process.
+        // Ignore SIGINT/SIGTERM while waiting for the child process.
         // This ensures the child's exit code is properly propagated
-        // instead of the parent being killed by SIGINT.
+        // instead of the parent being killed by a signal.
         // Note: We must spawn BEFORE setting SIG_IGN, otherwise the child
-        // inherits the ignored signal disposition and won't receive Ctrl-C.
+        // inherits the ignored signal disposition and won't receive signals.
         #[cfg(unix)]
-        let _guard = zpm_utils::IgnoreSigint::new();
+        let _guard = zpm_utils::IgnoreSignals::new();
 
         let exit_code
             = child.wait()

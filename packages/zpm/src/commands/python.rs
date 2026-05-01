@@ -100,7 +100,8 @@ impl Python {
         let mut env = ScriptEnvironment::new()?
             .with_project(&project)
             .with_package(&project, &project.active_package()?)?
-            .enable_shell_forwarding();
+            .enable_shell_forwarding()
+            .enable_signal_delegation();
 
         if let Some(venv_path) = active_workspace_venv(&project) {
             let site_packages_path
