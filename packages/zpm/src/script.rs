@@ -819,22 +819,33 @@ impl ScriptEnvironment {
     /// Runs a script with inherited stdio (output goes directly to terminal).
     /// Use this when you want the script's output to go directly to the terminal without capturing.
     pub async fn run_script_inherited<I, S>(&mut self, script: &str, args: I) -> Result<ExitStatus, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
-        let mut final_script = script.to_string();
+        let mut final_script
+            = script.to_string();
 
         for arg in args {
             final_script.push(' ');
             final_script.push_str(&shell_escape(arg.to_string().as_str()));
         }
 
-        let args = ["-c", &final_script, "yarn-script"];
-        let (mut cmd, _) = self.prepare_command("bash", &args.iter().map(|s| s.to_string()).collect::<Vec<_>>())?;
+        let args
+            = ["-c", &final_script, "yarn-script"];
+
+        let bash_args
+            = args.iter()
+                .map(|s| s.to_string())
+                .collect_vec();
+
+        let (mut cmd, _)
+            = self.prepare_command("bash", &bash_args)?;
 
         cmd.stdout(std::process::Stdio::inherit());
         cmd.stderr(std::process::Stdio::inherit());
         cmd.stdin(std::process::Stdio::inherit());
 
-        // If signal delegation is enabled, ignore SIGINT/SIGTERM while waiting
-        // for the child. This allows the child to handle signals and exit gracefully.
+        let mut child
+            = cmd.spawn()
+                .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
+
         #[cfg(unix)]
         let _guard = if self.signal_delegation {
             Some(zpm_utils::IgnoreSignals::new())
@@ -842,8 +853,9 @@ impl ScriptEnvironment {
             None
         };
 
-        let status = cmd.status().await
-            .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
+        let status
+            = child.wait().await
+                .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 
         Ok(status)
     }
