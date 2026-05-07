@@ -7,7 +7,7 @@ describe(`Features`, () => {
       `it should make the managed Node.js available through yarn node`,
       makeTemporaryEnv({
         dependencies: {
-          [`@yarnpkg/node`]: `^22.0.0`,
+          [`@yarnpkg/node`]: `builtin:^22.0.0`,
         },
       }, async ({path, run, source}) => {
         await run(`install`, {
@@ -26,7 +26,7 @@ describe(`Features`, () => {
       `it should make the managed Node.js available through yarn exec`,
       makeTemporaryEnv({
         dependencies: {
-          [`@yarnpkg/node`]: `^22.0.0`,
+          [`@yarnpkg/node`]: `builtin:^22.0.0`,
         },
       }, async ({path, run, source}) => {
         await run(`install`, {
@@ -45,7 +45,7 @@ describe(`Features`, () => {
       `it should run scripts with the managed Node.js version`,
       makeTemporaryEnv({
         dependencies: {
-          [`@yarnpkg/node`]: `^22.0.0`,
+          [`@yarnpkg/node`]: `builtin:^22.0.0`,
         },
         scripts: {
           [`check-version`]: `node --version`,
@@ -107,7 +107,7 @@ describe(`Features`, () => {
         `it should support Node.js 20.x`,
         makeTemporaryEnv({
           dependencies: {
-            [`@yarnpkg/node`]: `^20.0.0`,
+            [`@yarnpkg/node`]: `builtin:^20.0.0`,
           },
         }, async ({path, run, source}) => {
           await run(`install`, {
@@ -126,7 +126,7 @@ describe(`Features`, () => {
         `it should support Node.js 22.x`,
         makeTemporaryEnv({
           dependencies: {
-            [`@yarnpkg/node`]: `^22.0.0`,
+            [`@yarnpkg/node`]: `builtin:^22.0.0`,
           },
         }, async ({path, run, source}) => {
           await run(`install`, {
@@ -147,7 +147,7 @@ describe(`Features`, () => {
         `it should by default only fetch the @yarnpkg/node package for the current platform`,
         makeTemporaryEnv({
           dependencies: {
-            [`@yarnpkg/node`]: `^22.0.0`,
+            [`@yarnpkg/node`]: `builtin:^22.0.0`,
           },
         }, async ({path, run, source}) => {
           await run(`install`, {
@@ -170,7 +170,7 @@ describe(`Features`, () => {
         `it should fetch @yarnpkg/node packages for multiple platforms when supportedArchitectures is configured`,
         makeTemporaryEnv({
           dependencies: {
-            [`@yarnpkg/node`]: `^22.0.0`,
+            [`@yarnpkg/node`]: `builtin:^22.0.0`,
           },
         }, async ({path, run, source}) => {
           await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
@@ -201,7 +201,7 @@ describe(`Features`, () => {
         `it should produce a stable lockfile regardless of the current platform`,
         makeTemporaryEnv({
           dependencies: {
-            [`@yarnpkg/node`]: `^22.0.0`,
+            [`@yarnpkg/node`]: `builtin:^22.0.0`,
           },
         }, async ({path, run, source}) => {
           await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
@@ -237,7 +237,7 @@ describe(`Features`, () => {
         `it should resolve platform-specific packages for arm64 and x64 when both are configured`,
         makeTemporaryEnv({
           dependencies: {
-            [`@yarnpkg/node`]: `^22.0.0`,
+            [`@yarnpkg/node`]: `builtin:^22.0.0`,
           },
         }, async ({path, run, source}) => {
           await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {

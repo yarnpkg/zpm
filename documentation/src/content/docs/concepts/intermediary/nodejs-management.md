@@ -17,12 +17,12 @@ Yarn provides a special `@yarnpkg/node` package that you can add to your depende
 {
   "name": "my-app",
   "dependencies": {
-    "@yarnpkg/node": "^22.0.0"
+    "@yarnpkg/node": "builtin:^22.0.0"
   }
 }
 ```
 
-The range here works similarly to semver ranges - Yarn will resolve it to the highest available Node.js version that satisfies your constraint. Once resolved, this version gets locked in your `yarn.lock` file, guaranteeing that every developer and CI environment uses the exact same Node.js release.
+The `builtin:` protocol prefix tells Yarn to resolve this dependency through its built-in resolver rather than the npm registry. The range after the prefix works similarly to semver ranges - Yarn will resolve it to the highest available Node.js version that satisfies your constraint. Once resolved, this version gets locked in your `yarn.lock` file, guaranteeing that every developer and CI environment uses the exact same Node.js release.
 
 ## Why manage Node.js through Yarn?
 
