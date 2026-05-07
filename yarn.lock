@@ -3,15 +3,15 @@
     "version": 9
   },
   "workspaces": {
-    "@yarnpkg/documentation": "105cf01165fcffc02e5a354f6734895d01fbb152899e635b1d1b152a04e48c904810d457a85b09d642ca9061bf01e02dc203eabdf0c3a29ddf20036b31e43cde",
-    "@yarnpkg/monorepo": "69da8dfb279601957675174872ca291310b88ff5e33fcc0060b11a3503fdef48f629515bcf7d74fbe12b83b2a84b7f0249cf8154978d15bc6a3fa3c634624f94",
-    "@yarnpkg/zpm-constraints": "5c6a5440669d0a0244f06ebc980b86b246235da3b4da7fc5c2bbdc0bf61ef23e95d8bb9f2fdb7402d20cf0ac8461b086799a0e0e606054b85e9ac472be1dd9d2",
-    "@yarnpkg/zpm-daemon-ui": "64b5d42d2f7f1113e164b3c3137385b0d72824abc41ca9e4d852261f61018f037cbe0b0d5c97d7b3529075ff8b6ceead5803590a5ff9ee3564a785732262564a",
-    "acceptance-tests": "9e727eab8feee6a4383eb4abec8384decbaf30d2ee37dca7d2c8fc1e6afff399509282042cc605746ffaca0ed8f7e5b964b88327ecd50c5077d7a44b7ea4a5ae",
-    "pkg-tests-core": "e68bd05709df7e934e9746828824feeea05a4de108f2b55ee6a387664e1b30d412f19108824e87263a3227358fe1fa7277207b8b041372caf95bae441452d0bf",
-    "pkg-tests-fixtures": "92f85e94a04dac9a6700073012b6c7d15c0ce80b32ef51f4463566cae3b95f69f6416e3bc1c62bd4bc400d07a559c93bcfe1c6fc5e0e0320f1c338b127f2388d",
-    "pkg-tests-specs": "99b05aaf26d1c6bf9f0da94ebe57194feb5b24c5e35a9ac127558c9c005dba0d2acf8db3a96c54c8525c608b1daa0a844414ec9a9aa7b868c50c5d39ab5eeb67",
-    "zpm": "95257b9606ea262055a12ded1215d68ea1e15447d9f99ffef0c2e86e13cb71ec9fe728ce19f98c6e421b28f71f0d210e9d260fe41cfcd8f3c1c8e16ef2ddd8f9"
+    "@yarnpkg/documentation": "91807b34e6dea592435ccae123ff1de2e4eb5915b5bf6f69e9b6108bb1fc47e614b3e6c095e90fddbc48070749ad63c372a7990a826f9c9c5da55a01875290a4",
+    "@yarnpkg/monorepo": "bb4a782d3d434fcd650e79b1367560cde2ac80cebaba1f906373cf370aa66aef412bac5d990d807b0e2c87734ac966a221b6442932a96bc0d774438e3fcafbd5",
+    "@yarnpkg/zpm-constraints": "60af699f2119810820520bb8e3eb436c2b62987eae269d932eb44f73f96cb2274059fcbe7ec29bfb8c3c3022719b5b27829653a4c00162d7a4979963f63d6055",
+    "@yarnpkg/zpm-daemon-ui": "fa7a9a93084cb9be77a2ecc957130a65d371e4755518d7ca9ad0882d86965132a9629bb843f688f22c61cccecc5e746e572cbbfaad253e0cfca99f381fc16e00",
+    "acceptance-tests": "9d8edc097d9e560116c52345d9a48c0066f7b6f25e95554a612e01de95b19c720af054e6f98c4d5a3e00696ea566f8910687a0149f591c0911cc757bd5f2bad0",
+    "pkg-tests-core": "5a2339ba2265d216312aa34bbf0b7e0fd3a8724e6fe285562c70f2b27a76c4370832597316e2d20246c8cdc54f96df0eb083aeec824f489a8f68c9bf2efc9a55",
+    "pkg-tests-fixtures": "6f988cb36fe126bc5d41ce56ce3fd0ad485e201dfe8aaa5c70bbf8a3b64a0c0e4ca7f13215026f93dd8cb6c5c43be41574f171e84a345f67a47898fb8e1204cd",
+    "pkg-tests-specs": "12b6677dde1f354be6117229b4fd4c8714ec52269a28175843170cbed4cf0942b2634c01016de5df3f1e942126a0b0141b01180201e26aca444b51637714cfa0",
+    "zpm": "f451ea7a75c0fff2ecb527015471b4aab2b18ddda36078d7949c45d7b3737a2d350781c0b561376fa56ec117ecb89b54974f17eb7c9815d028a75d40e7f7d9b5"
   },
   "entries": {
     "@ai-sdk/gateway@npm:1.0.33": {
@@ -2791,79 +2791,6 @@
       "resolution": {
         "resolution": "@builder.io/partytown@npm:0.7.6",
         "version": "0.7.6"
-      }
-    },
-    "@builtin/node@builtin:^24.12.0": {
-      "checksum": null,
-      "resolution": {
-        "resolution": "@builtin/node@builtin:24.12.0",
-        "version": "24.12.0",
-        "variants": [
-          "@builtin/node-linux-x64@builtin:24.12.0",
-          "@builtin/node-linux-arm64@builtin:24.12.0",
-          "@builtin/node-darwin-x64@builtin:24.12.0",
-          "@builtin/node-darwin-arm64@builtin:24.12.0"
-        ]
-      }
-    },
-    "@builtin/node-darwin-arm64@builtin:24.12.0": {
-      "checksum": null,
-      "resolution": {
-        "resolution": "@builtin/node-darwin-arm64@builtin:24.12.0",
-        "version": "24.12.0",
-        "requirements": {
-          "cpu": [
-            "arm64"
-          ],
-          "os": [
-            "darwin"
-          ]
-        }
-      }
-    },
-    "@builtin/node-darwin-x64@builtin:24.12.0": {
-      "checksum": null,
-      "resolution": {
-        "resolution": "@builtin/node-darwin-x64@builtin:24.12.0",
-        "version": "24.12.0",
-        "requirements": {
-          "cpu": [
-            "x64"
-          ],
-          "os": [
-            "darwin"
-          ]
-        }
-      }
-    },
-    "@builtin/node-linux-arm64@builtin:24.12.0": {
-      "checksum": null,
-      "resolution": {
-        "resolution": "@builtin/node-linux-arm64@builtin:24.12.0",
-        "version": "24.12.0",
-        "requirements": {
-          "cpu": [
-            "arm64"
-          ],
-          "os": [
-            "linux"
-          ]
-        }
-      }
-    },
-    "@builtin/node-linux-x64@builtin:24.12.0": {
-      "checksum": null,
-      "resolution": {
-        "resolution": "@builtin/node-linux-x64@builtin:24.12.0",
-        "version": "24.12.0",
-        "requirements": {
-          "cpu": [
-            "x64"
-          ],
-          "os": [
-            "linux"
-          ]
-        }
       }
     },
     "@capsizecss/unpack@npm:^2.4.0": {
@@ -9893,6 +9820,79 @@
           "@yarnpkg/core": "^4.4.2",
           "@yarnpkg/fslib": "^3.1.2",
           "@yarnpkg/pnp": "^4.1.1"
+        }
+      }
+    },
+    "@yarnpkg/node@builtin:^24.12.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "@yarnpkg/node@builtin:24.12.0",
+        "version": "24.12.0",
+        "variants": [
+          "@yarnpkg/node-linux-x64@builtin:24.12.0",
+          "@yarnpkg/node-linux-arm64@builtin:24.12.0",
+          "@yarnpkg/node-darwin-x64@builtin:24.12.0",
+          "@yarnpkg/node-darwin-arm64@builtin:24.12.0"
+        ]
+      }
+    },
+    "@yarnpkg/node-darwin-arm64@builtin:24.12.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "@yarnpkg/node-darwin-arm64@builtin:24.12.0",
+        "version": "24.12.0",
+        "requirements": {
+          "cpu": [
+            "arm64"
+          ],
+          "os": [
+            "darwin"
+          ]
+        }
+      }
+    },
+    "@yarnpkg/node-darwin-x64@builtin:24.12.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "@yarnpkg/node-darwin-x64@builtin:24.12.0",
+        "version": "24.12.0",
+        "requirements": {
+          "cpu": [
+            "x64"
+          ],
+          "os": [
+            "darwin"
+          ]
+        }
+      }
+    },
+    "@yarnpkg/node-linux-arm64@builtin:24.12.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "@yarnpkg/node-linux-arm64@builtin:24.12.0",
+        "version": "24.12.0",
+        "requirements": {
+          "cpu": [
+            "arm64"
+          ],
+          "os": [
+            "linux"
+          ]
+        }
+      }
+    },
+    "@yarnpkg/node-linux-x64@builtin:24.12.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "@yarnpkg/node-linux-x64@builtin:24.12.0",
+        "version": "24.12.0",
+        "requirements": {
+          "cpu": [
+            "x64"
+          ],
+          "os": [
+            "linux"
+          ]
         }
       }
     },

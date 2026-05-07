@@ -7,7 +7,7 @@ describe(`Features`, () => {
       `it should make the managed Node.js available through yarn node`,
       makeTemporaryEnv({
         dependencies: {
-          [`@builtin/node`]: `^22.0.0`,
+          [`@yarnpkg/node`]: `^22.0.0`,
         },
       }, async ({path, run, source}) => {
         await run(`install`, {
@@ -26,7 +26,7 @@ describe(`Features`, () => {
       `it should make the managed Node.js available through yarn exec`,
       makeTemporaryEnv({
         dependencies: {
-          [`@builtin/node`]: `^22.0.0`,
+          [`@yarnpkg/node`]: `^22.0.0`,
         },
       }, async ({path, run, source}) => {
         await run(`install`, {
@@ -45,7 +45,7 @@ describe(`Features`, () => {
       `it should run scripts with the managed Node.js version`,
       makeTemporaryEnv({
         dependencies: {
-          [`@builtin/node`]: `^22.0.0`,
+          [`@yarnpkg/node`]: `^22.0.0`,
         },
         scripts: {
           [`check-version`]: `node --version`,
@@ -65,7 +65,7 @@ describe(`Features`, () => {
 
     describe(`Monorepo support`, () => {
       test(
-        `it should allow declaring @builtin/node in a workspace profile`,
+        `it should allow declaring @yarnpkg/node in a workspace profile`,
         makeTemporaryMonorepoEnv(
           {
             workspaces: [`packages/*`],
@@ -81,7 +81,7 @@ describe(`Features`, () => {
               workspaceProfiles: {
                 default: {
                   devDependencies: {
-                    [`@builtin/node`]: `builtin:^22.0.0`,
+                    [`@yarnpkg/node`]: `builtin:^22.0.0`,
                   },
                 },
               },
@@ -107,7 +107,7 @@ describe(`Features`, () => {
         `it should support Node.js 20.x`,
         makeTemporaryEnv({
           dependencies: {
-            [`@builtin/node`]: `^20.0.0`,
+            [`@yarnpkg/node`]: `^20.0.0`,
           },
         }, async ({path, run, source}) => {
           await run(`install`, {
@@ -126,7 +126,7 @@ describe(`Features`, () => {
         `it should support Node.js 22.x`,
         makeTemporaryEnv({
           dependencies: {
-            [`@builtin/node`]: `^22.0.0`,
+            [`@yarnpkg/node`]: `^22.0.0`,
           },
         }, async ({path, run, source}) => {
           await run(`install`, {
@@ -144,10 +144,10 @@ describe(`Features`, () => {
 
     describe(`Platform support`, () => {
       test(
-        `it should by default only fetch the @builtin/node package for the current platform`,
+        `it should by default only fetch the @yarnpkg/node package for the current platform`,
         makeTemporaryEnv({
           dependencies: {
-            [`@builtin/node`]: `^22.0.0`,
+            [`@yarnpkg/node`]: `^22.0.0`,
           },
         }, async ({path, run, source}) => {
           await run(`install`, {
@@ -158,19 +158,19 @@ describe(`Features`, () => {
           });
 
           const allCachedFiles = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
-          const nodeFiles = allCachedFiles.sort().filter(file => file.startsWith(`@builtin-node-`));
+          const nodeFiles = allCachedFiles.sort().filter(file => file.startsWith(`@yarnpkg-node-`));
 
           expect(nodeFiles).toEqual([
-            expect.stringMatching(/@builtin-node-linux-x64-builtin-22\.0\.0-/),
+            expect.stringMatching(/@yarnpkg-node-linux-x64-builtin-22\.0\.0-/),
           ]);
         }),
       );
 
       test(
-        `it should fetch @builtin/node packages for multiple platforms when supportedArchitectures is configured`,
+        `it should fetch @yarnpkg/node packages for multiple platforms when supportedArchitectures is configured`,
         makeTemporaryEnv({
           dependencies: {
-            [`@builtin/node`]: `^22.0.0`,
+            [`@yarnpkg/node`]: `^22.0.0`,
           },
         }, async ({path, run, source}) => {
           await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
@@ -188,11 +188,11 @@ describe(`Features`, () => {
           });
 
           const allCachedFiles = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
-          const nodeFiles = allCachedFiles.sort().filter(file => file.startsWith(`@builtin-node-`));
+          const nodeFiles = allCachedFiles.sort().filter(file => file.startsWith(`@yarnpkg-node-`));
 
           expect(nodeFiles).toEqual([
-            expect.stringMatching(/@builtin-node-darwin-x64-builtin-22\.0\.0-/),
-            expect.stringMatching(/@builtin-node-linux-x64-builtin-22\.0\.0-/),
+            expect.stringMatching(/@yarnpkg-node-darwin-x64-builtin-22\.0\.0-/),
+            expect.stringMatching(/@yarnpkg-node-linux-x64-builtin-22\.0\.0-/),
           ]);
         }),
       );
@@ -201,7 +201,7 @@ describe(`Features`, () => {
         `it should produce a stable lockfile regardless of the current platform`,
         makeTemporaryEnv({
           dependencies: {
-            [`@builtin/node`]: `^22.0.0`,
+            [`@yarnpkg/node`]: `^22.0.0`,
           },
         }, async ({path, run, source}) => {
           await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
@@ -237,7 +237,7 @@ describe(`Features`, () => {
         `it should resolve platform-specific packages for arm64 and x64 when both are configured`,
         makeTemporaryEnv({
           dependencies: {
-            [`@builtin/node`]: `^22.0.0`,
+            [`@yarnpkg/node`]: `^22.0.0`,
           },
         }, async ({path, run, source}) => {
           await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
@@ -255,11 +255,11 @@ describe(`Features`, () => {
           });
 
           const allCachedFiles = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
-          const nodeFiles = allCachedFiles.sort().filter(file => file.startsWith(`@builtin-node-`));
+          const nodeFiles = allCachedFiles.sort().filter(file => file.startsWith(`@yarnpkg-node-`));
 
           expect(nodeFiles).toEqual([
-            expect.stringMatching(/@builtin-node-linux-arm64-builtin-22\.0\.0-/),
-            expect.stringMatching(/@builtin-node-linux-x64-builtin-22\.0\.0-/),
+            expect.stringMatching(/@yarnpkg-node-linux-arm64-builtin-22\.0\.0-/),
+            expect.stringMatching(/@yarnpkg-node-linux-x64-builtin-22\.0\.0-/),
           ]);
         }),
       );

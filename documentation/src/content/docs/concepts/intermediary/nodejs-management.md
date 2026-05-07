@@ -9,15 +9,15 @@ sidebar:
 
 One of the subtle causes of "works on my machine" bugs comes from differences in Node.js versions between developers. While tools like nvm, fnm, or Volta help manage local Node.js installations, they require each team member to manually configure their environment. Yarn takes a different approach by letting you declare Node.js as a project dependency, ensuring everyone uses exactly the same version without any extra setup.
 
-## The `@builtin/node` dependency
+## The `@yarnpkg/node` dependency
 
-Yarn provides a special `@builtin/node` package that you can add to your dependencies just like any other package. When installed, Yarn will download the appropriate Node.js binary for your platform directly from [nodejs.org](https://nodejs.org/) and make it available to your project.
+Yarn provides a special `@yarnpkg/node` package that you can add to your dependencies just like any other package. When installed, Yarn will download the appropriate Node.js binary for your platform directly from [nodejs.org](https://nodejs.org/) and make it available to your project.
 
 ```json
 {
   "name": "my-app",
   "dependencies": {
-    "@builtin/node": "^22.0.0"
+    "@yarnpkg/node": "^22.0.0"
   }
 }
 ```
@@ -64,20 +64,20 @@ yarn exec node --version
 
 ## Monorepo support
 
-In a monorepo, you typically want all workspaces to use the same Node.js version. Rather than adding `@builtin/node` to each workspace's `package.json`, you can use [workspace profiles](/concepts/profiles) to declare it once:
+In a monorepo, you typically want all workspaces to use the same Node.js version. Rather than adding `@yarnpkg/node` to each workspace's `package.json`, you can use [workspace profiles](/concepts/profiles) to declare it once:
 
 ```yaml
 workspaceProfiles:
   default:
     devDependencies:
-      "@builtin/node": "builtin:^22.0.0"
+      "@yarnpkg/node": "builtin:^22.0.0"
 ```
 
 Since the `default` profile is automatically applied to all workspaces, every package in your monorepo will use the same Node.js version without any additional configuration. This keeps your Node.js version centralized and easy to update.
 
 ## Platform support
 
-The `@builtin/node` package automatically downloads the correct binary for your operating system and architecture. Currently supported platforms include:
+The `@yarnpkg/node` package automatically downloads the correct binary for your operating system and architecture. Currently supported platforms include:
 
 - Linux (x64, arm64)
 - macOS (x64, arm64)
