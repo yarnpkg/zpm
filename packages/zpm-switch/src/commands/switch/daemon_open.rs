@@ -21,10 +21,18 @@ use crate::{
 #[derive(Debug)]
 pub struct DaemonOpenCommand {
     #[cli::option("--open")]
-    _open: bool,
+    open: bool,
 }
 
 impl DaemonOpenCommand {
+    pub fn new(cli_environment: &clipanion::Environment) -> Self {
+        Self {
+            cli_environment: cli_environment.clone(),
+            cli_path: vec!["switch".to_string(), "daemon".to_string()],
+            open: false,
+        }
+    }
+
     pub async fn execute(&self) -> Result<(), Error> {
         let project_cwd
             = get_final_cwd()?;
@@ -39,10 +47,12 @@ impl DaemonOpenCommand {
 
         if let Some(existing) = daemons::get_daemon(&detected_root)? {
             if daemons::is_process_alive(existing.pid) {
-                if self.check_daemon_ready(existing.port).await.is_ok() {
-                    println!("ws://127.0.0.1:{}", existing.port);
+                let token = existing.auth_token.as_deref();
+                if self.check_daemon_ready(existing.port, token).await.is_ok() {
+                    println!("{}", build_ws_url(existing.port, token));
                     return Ok(());
                 }
+
                 // Process alive but not answering — terminate it and its children before replacing
                 let pid = existing.pid;
                 let _ = tokio::task::spawn_blocking(move || daemons::kill_daemon_gracefully(pid)).await;
@@ -87,9 +97,13 @@ impl DaemonOpenCommand {
     }
 
     async fn start_with_command(&self, detected_root: &Path, binary: &mut Command, version_label: &str) -> Result<(), Error> {
+        let auth_token = uuid::Uuid::new_v4().to_string();
+
         binary
             .arg("debug")
             .arg("daemon")
+            .arg("--auth-token")
+            .arg(&auth_token)
             .current_dir(detected_root.to_file_string())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -102,11 +116,8 @@ impl DaemonOpenCommand {
             binary.env("USERPROFILE", userprofile);
         }
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            binary.process_group(0);
-        }
+        use std::os::unix::process::CommandExt;
+        binary.process_group(0);
 
         let mut child
             = binary
@@ -123,18 +134,19 @@ impl DaemonOpenCommand {
             yarn_version: version_label.parse().unwrap_or_else(|_| Version::new()),
             pid,
             port,
+            auth_token: Some(auth_token.clone()),
         };
 
         daemons::register_daemon(&entry)?;
 
-        if let Err(e) = self.wait_for_ready(port).await {
+        if let Err(e) = self.wait_for_ready(port, Some(&auth_token)).await {
             // Daemon failed to become ready — kill it and clean up registry
             let _ = tokio::task::spawn_blocking(move || daemons::kill_daemon_gracefully(pid)).await;
             daemons::unregister_daemon(&detected_root)?;
             return Err(e);
         }
 
-        println!("ws://127.0.0.1:{}", port);
+        println!("{}", build_ws_url(port, Some(&auth_token)));
 
         Ok(())
     }
@@ -169,13 +181,14 @@ impl DaemonOpenCommand {
         Ok(port)
     }
 
-    async fn wait_for_ready(&self, port: u16) -> Result<(), Error> {
-        let max_attempts = 100;
+    async fn wait_for_ready(&self, port: u16, token: Option<&str>) -> Result<(), Error> {
+        let max_attempts
+            = 100;
         let poll_interval
             = Duration::from_millis(50);
 
         for _ in 0..max_attempts {
-            if self.check_daemon_ready(port).await.is_ok() {
+            if self.check_daemon_ready(port, token).await.is_ok() {
                 return Ok(());
             }
 
@@ -185,9 +198,9 @@ impl DaemonOpenCommand {
         Err(Error::DaemonStartTimeout)
     }
 
-    async fn check_daemon_ready(&self, port: u16) -> Result<(), Error> {
+    async fn check_daemon_ready(&self, port: u16, token: Option<&str>) -> Result<(), Error> {
         let url
-            = format!("ws://127.0.0.1:{}", port);
+            = build_ws_url(port, token);
 
         // Just attempt to establish a WebSocket connection - if it succeeds, daemon is ready
         let (mut ws, _) = tokio_tungstenite::connect_async(&url)
@@ -203,5 +216,12 @@ impl DaemonOpenCommand {
         ws.close(None).await.ok();
 
         Ok(())
+    }
+}
+
+pub fn build_ws_url(port: u16, token: Option<&str>) -> String {
+    match token {
+        Some(t) => format!("ws://127.0.0.1:{}/?token={}", port, t),
+        None => format!("ws://127.0.0.1:{}/", port),
     }
 }

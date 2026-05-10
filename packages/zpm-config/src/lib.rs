@@ -201,7 +201,7 @@ impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::f
     fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         let Some(key_str) = path.first() else {
             return Ok(ConfigurationEntry {
-                value: AbstractValue::new(Container::new(self)),
+                value: AbstractValue::new_container(Container::new(self)),
                 source: Source::Mixed,
             });
         };
@@ -341,7 +341,7 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
     fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
         let Some(key_str) = path.first() else {
             return Ok(ConfigurationEntry {
-                value: AbstractValue::new(Container::new(self)),
+                value: AbstractValue::new_container(Container::new(self)),
                 source: Source::Mixed,
             });
         };
@@ -801,6 +801,7 @@ pub struct Configuration {
     pub settings: Settings,
     pub user_config_path: Option<Path>,
     pub project_config_path: Option<Path>,
+    pub env_files: BTreeMap<String, String>,
 }
 
 #[derive(thiserror::Error, Debug, Clone)]
@@ -816,6 +817,12 @@ pub enum ConfigurationError {
 
     #[error(transparent)]
     SerdeError(#[from] Arc<serde_yaml::Error>),
+
+    #[error("Environment file not found: {0}")]
+    EnvironmentFileNotFound(String),
+
+    #[error("Invalid environment file line: {0}")]
+    InvalidEnvironmentFileLine(String),
 }
 
 impl From<std::io::Error> for ConfigurationError {
@@ -856,9 +863,77 @@ pub enum HydrateError {
     InvalidValue(String),
 }
 
+struct RcFile {
+    path: Path,
+    text: Option<String>,
+}
+
+impl RcFile {
+    fn try_read(dir: Option<&Path>, rc_filename: &str, last_modified_at: &mut LastModifiedAt) -> Result<Option<Self>, ConfigurationError> {
+        let Some(dir) = dir else {
+            return Ok(None);
+        };
+
+        let path
+            = dir.with_join_str(rc_filename);
+
+        let metadata
+            = path.fs_metadata()
+                .ok_missing()?;
+
+        let Some(metadata) = metadata else {
+            return Ok(Some(RcFile {path, text: None}));
+        };
+
+        let changed_at
+            = metadata.modified()?
+                .duration_since(UNIX_EPOCH).unwrap()
+                .as_nanos();
+
+        last_modified_at.update(changed_at);
+
+        let text
+            = path.fs_read_text_with_size(metadata.len())?;
+
+        Ok(Some(RcFile {path, text: Some(text)}))
+    }
+
+    fn deserialize(&self) -> Option<Result<intermediate::Settings, ConfigurationError>> {
+        self.text.as_ref().map(|text| {
+            Ok(serde_yaml::from_str(text)?)
+        })
+    }
+
+    /// Extract the `injectEnvironmentFiles` value from the raw YAML text.
+    /// Uses a minimal struct to avoid full deserialization, which would fail
+    /// if config values reference env vars not yet loaded from .env files.
+    fn extract_inject_environment_files(&self) -> Result<Option<Vec<String>>, ConfigurationError> {
+        let Some(text) = &self.text else {
+            return Ok(None);
+        };
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PartialSettings {
+            #[serde(default)]
+            inject_environment_files: Option<Vec<String>>,
+        }
+
+        let partial: PartialSettings
+            = serde_yaml::from_str(text)?;
+
+        Ok(partial.inject_environment_files)
+    }
+}
+
 impl Configuration {
     pub fn tree_node(&self) -> tree::Node<'_> {
         self.settings.tree_node(None, None)
+    }
+
+    pub fn validate(text: &str) -> Result<(), ConfigurationError> {
+        serde_yaml::from_str::<intermediate::Settings>(text)?;
+        Ok(())
     }
 
     pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
@@ -869,74 +944,121 @@ impl Configuration {
         self.settings.get(path)
     }
 
+    fn load_env_files(
+        project_cwd: &Path,
+        env_file_paths: &[String],
+    ) -> Result<BTreeMap<String, String>, ConfigurationError> {
+        let mut env_vars: BTreeMap<String, String>
+            = BTreeMap::new();
+
+        for path_str in env_file_paths {
+            let (actual_path, optional) = if let Some(stripped) = path_str.strip_suffix('?') {
+                (stripped, true)
+            } else {
+                (path_str.as_str(), false)
+            };
+
+            let full_path
+                = project_cwd.with_join_str(actual_path);
+
+            let metadata
+                = full_path.fs_metadata()
+                    .ok_missing()?;
+
+            match metadata {
+                Some(metadata) => {
+                    let content
+                        = full_path
+                            .fs_read_text_with_size(metadata.len())?;
+
+                    for item in dotenvy::from_read_iter(content.as_bytes()) {
+                        let (key, value)
+                            = item
+                                .map_err(|e| ConfigurationError::InvalidEnvironmentFileLine(e.to_string()))?;
+
+                        env_vars.insert(key, value);
+                    }
+                },
+
+                None => {
+                    if !optional {
+                        return Err(ConfigurationError::EnvironmentFileNotFound(path_str.clone()));
+                    }
+                },
+            }
+        }
+
+        Ok(env_vars)
+    }
+
     pub fn load(context: &ConfigurationContext, last_modified_at: &mut LastModifiedAt) -> Result<Configuration, ConfigurationError> {
+        let project_cwd
+            = context.project_cwd.as_ref();
+
         let rc_filename
             = std::env::var("YARN_RC_FILENAME")
                 .unwrap_or_else(|_| ".yarnrc.yml".to_string());
 
-        let user_config_path = context.user_cwd
-            .as_ref()
-            .map(|path| path.with_join_str(&rc_filename));
+        // Read both rc files upfront (once each)
+        let user_rc
+            = RcFile::try_read(context.user_cwd.as_ref(), &rc_filename, last_modified_at)?;
+        let project_rc
+            = RcFile::try_read(project_cwd, &rc_filename, last_modified_at)?;
 
-        let project_config_path = context.project_cwd
-            .as_ref()
-            .map(|path| path.with_join_str(&rc_filename));
+        // Phase 1: Extract injectEnvironmentFiles from the raw YAML text.
+        // We check the project rc first, falling back to the user rc, then
+        // to the default. This uses a minimal parse that tolerates config
+        // values referencing env vars that don't exist yet.
+        let inject_environment_files = project_rc.as_ref()
+            .and_then(|rc| rc.extract_inject_environment_files().ok().flatten())
+            .or_else(|| user_rc.as_ref()
+                .and_then(|rc| rc.extract_inject_environment_files().ok().flatten()))
+            .unwrap_or_else(|| vec![".env.yarn?".to_string()]);
 
-        let mut intermediate_user_config
-            = Partial::Missing;
-        let mut intermediate_project_config
-            = Partial::Missing;
+        // Phase 2: Load .env files and collect variables
+        let env_files = match project_cwd {
+            Some(project_cwd) => Self::load_env_files(
+                project_cwd,
+                &inject_environment_files,
+            )?,
+            None => BTreeMap::new(),
+        };
 
-        if let Some(user_config_path) = user_config_path.as_ref() {
-            let metadata
-                = user_config_path.fs_metadata()
-                    .ok_missing()?;
+        // Phase 3: Set env file variables in the process environment so that
+        // shellexpand::env() (used by the Interpolated deserializer) can
+        // resolve them when deserializing config values like ${VAR}.
+        let mut enriched_context
+            = context.clone();
 
-            if let Some(metadata) = metadata {
-                let user_last_changed_at
-                    = metadata.modified()?
-                        .duration_since(UNIX_EPOCH).unwrap()
-                        .as_nanos();
-
-                last_modified_at.update(user_last_changed_at);
-
-                let user_config_text
-                    = user_config_path
-                        .fs_read_text_with_size(metadata.len())?;
-
-                let user_config: intermediate::Settings
-                    = serde_yaml::from_str(&user_config_text)?;
-
-                intermediate_user_config = Partial::Value(user_config);
-            }
+        for (key, value) in &env_files {
+            // SAFETY: Configuration loading happens during startup before any
+            // threads are spawned, so concurrent access to the environment is
+            // not a concern.
+            unsafe { std::env::set_var(key, value); }
+            enriched_context.env.insert(key.clone(), value.clone());
         }
 
-        if let Some(project_config_path) = project_config_path.as_ref() {
-            let metadata
-                = project_config_path.fs_metadata()
-                    .ok_missing()?;
+        // Phase 4: Deserialize the already-read rc files (no re-read)
+        let user_config_path
+            = user_rc.as_ref()
+                .map(|rc| rc.path.clone());
 
-            if let Some(metadata) = metadata {
-                let project_last_changed_at
-                    = metadata.modified()?
-                        .duration_since(UNIX_EPOCH).unwrap()
-                        .as_nanos();
+        let project_config_path
+            = project_rc.as_ref()
+                .map(|rc| rc.path.clone());
 
-                last_modified_at.update(project_last_changed_at);
+        let intermediate_user_config = match user_rc.and_then(|rc| rc.deserialize()) {
+            Some(result) => Partial::Value(result?),
+            None => Partial::Missing,
+        };
 
-                let project_config_text
-                    = project_config_path
-                        .fs_read_text_with_size(metadata.len())?;
-
-                let project_config: intermediate::Settings
-                    = serde_yaml::from_str(&project_config_text)?;
-
-                intermediate_project_config = Partial::Value(project_config);
-            }
-        }
+        let intermediate_project_config = match project_rc.and_then(|rc| rc.deserialize()) {
+            Some(result) => Partial::Value(result?),
+            None => Partial::Missing,
+        };
 
         let mut settings = Settings::merge(
-            &context,
+            &enriched_context,
             intermediate_user_config,
             intermediate_project_config,
             || panic!("No configuration found")
@@ -950,6 +1072,7 @@ impl Configuration {
             settings,
             user_config_path,
             project_config_path,
+            env_files,
         })
     }
 }

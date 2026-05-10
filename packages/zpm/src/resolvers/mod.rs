@@ -329,8 +329,6 @@ pub async fn resolve_versions(context: &InstallContext<'_>, registry: &Registry)
 
             let registry_base
                 = http_npm::get_registry(&project.config, ident.scope(), false)?;
-            let registry_path
-                = crate::npm::registry_url_for_all_versions(ident);
 
             let authorization
                 = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
@@ -343,12 +341,13 @@ pub async fn resolve_versions(context: &InstallContext<'_>, registry: &Registry)
                 }).await?;
 
             let bytes
-                = http_npm::get(&http_npm::NpmHttpParams {
+                = http_npm::get_package_metadata(&http_npm::GetPackageMetadataParams {
                     http_client: &project.http_client,
                     registry: &registry_base,
-                    path: &registry_path,
+                    ident,
                     authorization: authorization.as_deref(),
-                    otp: None,
+                    global_folder: &project.config.settings.global_folder.value,
+                    refresh_lockfile: context.refresh_lockfile,
                 }).await?;
 
             #[derive(Deserialize)]

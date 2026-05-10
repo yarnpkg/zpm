@@ -183,10 +183,32 @@ fn parse_attribute(input: &mut &str) -> winnow::ModalResult<Attribute> {
     })
 }
 
+/// Find the header separator colon in a task header line.
+///
+/// The separator is the last colon that is either at the end of the string
+/// (after trimming) or followed by a space. This allows task names to contain
+/// colons (e.g. `lint:fix:` parses as task name `lint:fix`).
+fn find_header_colon(input: &str) -> Option<usize> {
+    let trimmed = input.trim_end();
+    // Walk from the end to find the rightmost colon that is either at the end
+    // or followed by a space.
+    for (i, c) in trimmed.char_indices().rev() {
+        if c == ':' {
+            let after = &trimmed[i + 1..];
+            if after.is_empty() || after.starts_with(' ') || after.starts_with('\t') {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
 fn parse_task_header(input: &str) -> Result<(TaskName, Vec<Dependency>), String> {
-    let Some(colon_pos) = input.find(':') else {
-        return Err(format!("Missing ':' in task header: {}", input));
-    };
+    // Find the header separator colon. The separator is the last colon that
+    // is either at the end of the string or followed by a space. This allows
+    // task names to contain colons (e.g. `lint:fix:`).
+    let colon_pos = find_header_colon(input)
+        .ok_or_else(|| format!("Missing ':' in task header: {}", input))?;
 
     let name_str
         = input[..colon_pos].trim();
@@ -523,6 +545,28 @@ mod tests {
         let input = "include \n\nbuild:\n  npm run build";
         let result = parse(input);
         assert!(matches!(result, Err(Error::ParseError { line: 1, .. })));
+    }
+
+    #[test]
+    fn test_parse_task_name_with_colon() {
+        let input = "lint:fix:\n  yarn eslint --fix";
+        let result = parse(input).unwrap();
+        assert_eq!(result.tasks.len(), 1);
+        assert!(result.tasks.contains_key("lint:fix"));
+        assert_eq!(result.tasks["lint:fix"].script, vec!["yarn eslint --fix"]);
+    }
+
+    #[test]
+    fn test_parse_task_name_with_colon_and_deps() {
+        let input = "lint:fix: typecheck\n  yarn eslint --fix";
+        let result = parse(input).unwrap();
+        assert_eq!(result.tasks.len(), 1);
+        assert!(result.tasks.contains_key("lint:fix"));
+        assert_eq!(result.tasks["lint:fix"].dependencies.len(), 1);
+        match &result.tasks["lint:fix"].dependencies[0] {
+            Dependency::Local { name, .. } => assert_eq!(name, "typecheck"),
+            _ => panic!("Expected local dependency"),
+        }
     }
 
     #[test]

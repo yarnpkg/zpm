@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod login;
 pub mod logout_all;
 pub mod logout;

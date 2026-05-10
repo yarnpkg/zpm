@@ -36,7 +36,7 @@ describe(`Commands`, () => {
         const {stdout} = await run(`config`, `set`, `npmAuthToken`, `foobar`);
 
         expect(stdout).not.toContain(`foobar`);
-        expect(stdout).toContain(`********`);
+        expect(stdout).toContain(`<redacted>`);
 
         await expect(xfs.readFilePromise(ppath.join(path, Filename.rc), `utf8`)).resolves.toContain(`npmAuthToken: foobar`);
       }),
@@ -57,6 +57,21 @@ describe(`Commands`, () => {
           `  yarnpkg:${EOL}` +
           `    npmAlwaysAuth: false`,
         );
+      }),
+    );
+
+    test(
+      `it should reject invalid JSON values and not corrupt the config file`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`config`, `set`, `pnpShebang`, `#!/usr/bin/env iojs\n`);
+
+        await expect(run(`config`, `set`, `enableColors`, `--json`, JSON.stringify(`not-a-bool`))).rejects.toMatchObject({
+          code: 1,
+        });
+
+        expect(parseSyml(await xfs.readFilePromise(ppath.join(path, Filename.rc), `utf8`))).toMatchObject({
+          pnpShebang: `#!/usr/bin/env iojs\n`,
+        });
       }),
     );
 

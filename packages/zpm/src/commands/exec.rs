@@ -34,6 +34,7 @@ impl Exec {
             .with_project(&project)
             .with_package(&project, &project.active_package()?)?
             .enable_shell_forwarding()
+            .enable_signal_delegation()
             .run_script(&self.script, &self.args)
             .await?
             .into())

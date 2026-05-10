@@ -48,6 +48,7 @@ impl TaskRunner {
 
         env = env.with_env_variable(CURRENT_TASK_ENV_NAME, &task_id_str);
         env = env.with_env_variable(DAEMON_SERVER_ENV_NAME, &self.daemon_url);
+        env = env.with_env_variable("FORCE_COLOR", "1");
 
         let mut running = env
             .with_cwd(self.prepared.cwd.clone())

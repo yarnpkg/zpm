@@ -56,7 +56,7 @@ pub async fn resolve_nodejs_descriptor(context: &InstallContext<'_>, descriptor:
 
     let variants = PLATFORM_VARIANTS.iter().map(|(_, file_name, _)| {
         let name
-            = format!("@builtin/node-{}", file_name);
+            = format!("@yarnpkg/node-{}", file_name);
         let range
             = zpm_semver::Range::exact(version.clone());
 
@@ -83,7 +83,7 @@ pub async fn resolve_nodejs_descriptor(context: &InstallContext<'_>, descriptor:
 pub async fn resolve_nodejs_variant_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, range: &zpm_semver::Range) -> Result<ResolutionResult, Error> {
     let (system, _, _)
         = PLATFORM_VARIANTS.iter()
-            .find(|(_, file_name, _)| descriptor.ident.as_str() == &format!("@builtin/node-{}", file_name))
+            .find(|(_, file_name, _)| descriptor.ident.as_str() == &format!("@yarnpkg/node-{}", file_name))
             .ok_or(Error::Unsupported)?;
 
     let version
@@ -105,7 +105,7 @@ pub async fn resolve_nodejs_variant_descriptor(context: &InstallContext<'_>, des
 pub async fn resolve_nodejs_variant_locator(context: &InstallContext<'_>, locator: &Locator, version: &zpm_semver::Version) -> Result<ResolutionResult, Error> {
     let (system, _, _)
         = PLATFORM_VARIANTS.iter()
-            .find(|(_, file_name, _)| locator.ident.as_str() == &format!("@builtin/node-{}", file_name))
+            .find(|(_, file_name, _)| locator.ident.as_str() == &format!("@yarnpkg/node-{}", file_name))
             .ok_or(Error::Unsupported)?;
 
     let mut resolution
@@ -119,7 +119,7 @@ pub async fn resolve_nodejs_variant_locator(context: &InstallContext<'_>, locato
 pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Locator, version: &zpm_semver::Version, is_mock_request: bool) -> Result<FetchResult, Error> {
     let (system, file_name, bin_file)
         = PLATFORM_VARIANTS.iter()
-            .find(|(_, file_name, _)| locator.ident.as_str() == &format!("@builtin/node-{}", file_name))
+            .find(|(_, file_name, _)| locator.ident.as_str() == &format!("@yarnpkg/node-{}", file_name))
             .ok_or(Error::Unsupported)?;
 
     if is_mock_request {

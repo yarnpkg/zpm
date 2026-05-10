@@ -14,6 +14,8 @@ pub struct DaemonEntry {
     pub yarn_version: Version,
     pub pid: u32,
     pub port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
 }
 
 pub fn daemons_dir() -> Result<Path, Error> {
@@ -41,15 +43,27 @@ pub fn register_daemon(entry: &DaemonEntry) -> Result<(), Error> {
         = daemon_file_path(&entry.project_cwd)?;
 
     daemon_path
-        .fs_create_parent()?
-        .fs_write(JsonDocument::to_string(entry)?)?;
+        .fs_create_parent()?;
 
-    // Set restrictive permissions (owner read/write only) to protect sensitive daemon info
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        daemon_path.fs_set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    }
+    let data
+        = JsonDocument::to_string(entry)?;
+
+    daemon_path.fs_write_atomic(move |tmp_path| {
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::io::Write;
+
+        let mut file
+            = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(tmp_path.to_path_buf())?;
+
+        file.write_all(data.as_bytes())?;
+
+        Ok::<(), zpm_utils::PathError>(())
+    })?;
 
     Ok(())
 }

@@ -17,10 +17,10 @@ pub use coordinator_commands::{CommandSender, CoordinatorCommand};
 pub use coordinator_state::SubscriptionId;
 pub use events::Stream;
 pub use ipc::{
-    daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification,
-    DaemonRequest, DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, LongLivedTaskStatus,
-    SubscriptionScope, TaskEvent, TaskEventState, TaskSubscription, DAEMON_BASE_PORT, DAEMON_SERVER_ENV_NAME,
-    LONG_LIVED_CONTEXT_ID, CURRENT_TASK_ENV_NAME,
+    daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonMeta, DaemonNotification,
+    DaemonRequest, DaemonRequestEnvelope, DaemonResponse, DeclaredTaskInfo, LongLivedTaskInfo,
+    LongLivedTaskStatus, SubscriptionScope, TaskEvent, TaskEventState, TaskSubscription, TaskfileError,
+    DAEMON_BASE_PORT, DAEMON_SERVER_ENV_NAME, LONG_LIVED_CONTEXT_ID, CURRENT_TASK_ENV_NAME,
 };
 pub use presentation::{prefix_colors, ProgressState};
 pub use scheduler::{ContextualTaskId, PreparedTask};

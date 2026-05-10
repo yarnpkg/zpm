@@ -1,49 +1,53 @@
 use std::process::Command;
 use shlex::{try_quote, QuoteError};
 
-/// RAII guard to ignore SIGINT while waiting for a child process.
+/// RAII guard to ignore SIGINT and SIGTERM while waiting for a child process.
 ///
 /// When a terminal user presses Ctrl-C, SIGINT is sent to the entire
-/// foreground process group. If a parent process is waiting for a child,
-/// both receive the signal. By ignoring SIGINT in the parent, we ensure
-/// the child can handle the signal and exit gracefully, and the parent
-/// can properly propagate the child's exit code.
+/// foreground process group. Similarly, SIGTERM may be sent by init
+/// systems (e.g. Docker/tini) to request graceful shutdown. If a parent
+/// process is waiting for a child, both receive the signal. By ignoring
+/// these signals in the parent, we ensure the child can handle them and
+/// exit gracefully, and the parent can properly propagate the child's
+/// exit code.
 ///
-/// On drop, restores the previous signal handler.
+/// On drop, restores the previous signal handlers.
 #[cfg(unix)]
-pub struct IgnoreSigint {
-    prev_handler: libc::sighandler_t,
+pub struct IgnoreSignals {
+    prev_sigint: libc::sighandler_t,
+    prev_sigterm: libc::sighandler_t,
 }
 
 #[cfg(unix)]
-impl IgnoreSigint {
-    /// Creates a new guard that ignores SIGINT until dropped.
+impl IgnoreSignals {
+    /// Creates a new guard that ignores SIGINT and SIGTERM until dropped.
     pub fn new() -> Self {
         // SAFETY: We're setting SIG_IGN which is always safe
-        let prev_handler = unsafe { libc::signal(libc::SIGINT, libc::SIG_IGN) };
+        let prev_sigint = unsafe { libc::signal(libc::SIGINT, libc::SIG_IGN) };
+        let prev_sigterm = unsafe { libc::signal(libc::SIGTERM, libc::SIG_IGN) };
         // If signal() returns SIG_ERR, use SIG_DFL as safe fallback so Drop
         // restores a known-valid handler rather than attempting to set SIG_ERR.
-        let prev_handler = if prev_handler == libc::SIG_ERR {
-            libc::SIG_DFL
-        } else {
-            prev_handler
-        };
-        Self { prev_handler }
+        let prev_sigint = if prev_sigint == libc::SIG_ERR { libc::SIG_DFL } else { prev_sigint };
+        let prev_sigterm = if prev_sigterm == libc::SIG_ERR { libc::SIG_DFL } else { prev_sigterm };
+        Self { prev_sigint, prev_sigterm }
     }
 }
 
 #[cfg(unix)]
-impl Default for IgnoreSigint {
+impl Default for IgnoreSignals {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[cfg(unix)]
-impl Drop for IgnoreSigint {
+impl Drop for IgnoreSignals {
     fn drop(&mut self) {
-        // SAFETY: We're restoring the previous handler
-        unsafe { libc::signal(libc::SIGINT, self.prev_handler) };
+        // SAFETY: We're restoring the previous handlers
+        unsafe {
+            libc::signal(libc::SIGINT, self.prev_sigint);
+            libc::signal(libc::SIGTERM, self.prev_sigterm);
+        }
     }
 }
 

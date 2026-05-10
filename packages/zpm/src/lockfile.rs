@@ -205,7 +205,14 @@ impl<T> Serialize for MultiKey<T> where T: ToFileString {
                 string.push_str(", ");
             }
 
-            string.push_str(&item.to_file_string());
+            let serialized = item.to_file_string();
+            for ch in serialized.chars() {
+                if ch == ',' || ch == '\\' {
+                    string.push('\\');
+                }
+
+                string.push(ch);
+            }
         }
 
         serializer.serialize_str(&string)
@@ -226,10 +233,37 @@ impl<'de, T: FromFileString> Deserialize<'de> for MultiKey<T> where <T as FromFi
             }
 
             fn visit_str<E>(self, value: &str) -> Result<Vec<T>, E> where E: de::Error {
-                let result = value
-                    .split(',')
-                    .map(str::trim)
-                    .map(|s| T::from_file_string(s))
+                let mut chunks = Vec::new();
+                let mut current = String::new();
+                let mut chars = value.chars().peekable();
+
+                while let Some(ch) = chars.next() {
+                    if ch == ',' {
+                        chunks.push(current);
+                        current = String::new();
+                        continue;
+                    }
+
+                    if ch != '\\' {
+                        current.push(ch);
+                        continue;
+                    }
+
+                    match chars.peek() {
+                        Some(',') | Some('\\') => {
+                            current.push(chars.next().expect("peeked character should be present"));
+                        }
+                        _ => {
+                            // Keep unknown escapes as-is to stay backward-compatible with legacy lockfiles.
+                            current.push('\\');
+                        }
+                    }
+                }
+
+                chunks.push(current);
+
+                let result = chunks.into_iter()
+                    .map(|s| T::from_file_string(s.trim()))
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(de::Error::custom)?;
 
@@ -374,7 +408,8 @@ struct PnpmListDependency {
 /// Builds a lockfile from pnpm's installed packages using `pnpm list --json`.
 ///
 /// The approach:
-/// 1. Run `pnpm list --json --depth=3` to get most of the full dependency tree
+/// 1. Run `pnpm list --json` to get the full dependency tree
+///    (uses `--depth=Infinity` on pnpm >= 10.29.3, `--depth=3` on older versions)
 /// 2. Recursively walk the tree to collect all packages with their resolved URLs
 /// 3. For each package, read its package.json to get the original dependency ranges
 /// 4. Build descriptor -> locator mappings
@@ -404,9 +439,17 @@ pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
         return Ok(Lockfile::new());
     }
 
-    // Run pnpm list --json --depth=Infinity
+    let depth_flag = std::process::Command::new("pnpm")
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|v| zpm_semver::Version::from_file_string(v.trim()).ok())
+        .filter(|v| *v >= zpm_semver::Version::from_file_string("10.29.3").unwrap())
+        .map_or("--depth=3", |_| "--depth=Infinity");
+
     let output = std::process::Command::new("pnpm")
-        .args(["list", "-r", "--json", "--depth=3"])
+        .args(["list", "-r", "--json", depth_flag])
         .current_dir(project_cwd.as_str())
         .output()
         .map_err(|_| Error::PnpmNodeModulesReadError)?;
@@ -432,14 +475,22 @@ pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
             continue;
         };
 
-        let Ok(package_path) = Path::try_from(package_path_str.as_str()) else {
+        let Ok(raw_path) = Path::try_from(package_path_str.as_str()) else {
             continue;
+        };
+
+        let package_path = if raw_path.is_relative() {
+            project_cwd.with_join_str("node_modules").with_join(&raw_path)
+        } else {
+            raw_path
         };
 
         #[derive(Debug, Deserialize)]
         struct Manifest {
             #[serde(default)]
             dependencies: BTreeMap<String, String>,
+            #[serde(default, rename = "optionalDependencies")]
+            optional_dependencies: BTreeMap<String, String>,
         }
 
         let manifest: Option<Manifest>
@@ -453,7 +504,11 @@ pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
             continue;
         };
 
-        for (name, range) in manifest.dependencies {
+        let all_dependencies
+            = manifest.dependencies.into_iter().map(|(n, r)| (n, r, false))
+                .chain(manifest.optional_dependencies.into_iter().map(|(n, r)| (n, r, true)));
+
+        for (name, range, is_optional) in all_dependencies {
             let Ok(ident) = Ident::from_file_string(&name) else {
                 continue;
             };
@@ -466,6 +521,25 @@ pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
             let Some(resolved_entry) = entry.dependencies.get(&name) else {
                 continue;
             };
+
+            if is_optional {
+                let installed = resolved_entry.path.as_ref().and_then(|p| {
+                    let p
+                        = Path::try_from(p.as_str()).ok()?;
+
+                    let p = if p.is_relative() {
+                        project_cwd.with_join_str("node_modules").with_join(&p)
+                    } else {
+                        p
+                    };
+
+                    Some(p.with_join_str("package.json").fs_exists())
+                });
+
+                if !installed.unwrap_or(false) {
+                    continue;
+                }
+            }
 
             let Some(version) = &resolved_entry.version else {
                 continue;

@@ -17,7 +17,7 @@ describe(`Commands`, () => {
         await xfs.writeFilePromise(`${path}/.yarnrc.yml`, `npmAuthToken: foobar\n`);
 
         await expect(run(`config`, `get`, `npmAuthToken`)).resolves.toMatchObject({
-          stdout: `********\n`,
+          stdout: `<redacted>\n`,
         });
       }),
     );
@@ -75,22 +75,22 @@ describe(`Commands`, () => {
     );
 
     test(
-      `it should print deferredVersionFolder default value`,
+      `it should print localCacheFolderName default value`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
-        const {stdout} = await run(`config`, `get`, `--json`, `deferredVersionFolder`);
+        const {stdout} = await run(`config`, `get`, `--json`, `localCacheFolderName`);
 
-        expect(JSON.parse(stdout)).toEqual(`${path}/.yarn/versions`);
+        expect(JSON.parse(stdout)).toEqual(`cache`);
       }),
     );
 
     test(
-      `it should print deferredVersionFolder configured value`,
+      `it should print localCacheFolderName configured value`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
-        await xfs.writeFilePromise(`${path}/.yarnrc.yml`, `deferredVersionFolder: ./.custom-versions\n`);
+        await xfs.writeFilePromise(`${path}/.yarnrc.yml`, `localCacheFolderName: my-cache\n`);
 
-        const {stdout} = await run(`config`, `get`, `--json`, `deferredVersionFolder`);
+        const {stdout} = await run(`config`, `get`, `--json`, `localCacheFolderName`);
 
-        expect(JSON.parse(stdout)).toEqual(`${path}/.custom-versions`);
+        expect(JSON.parse(stdout)).toEqual(`my-cache`);
       }),
     );
 

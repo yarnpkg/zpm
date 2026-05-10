@@ -1,17 +1,22 @@
+use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
+use dashmap::DashMap;
 use regex::{Captures, Regex};
 use reqwest::Response;
 use serde::Deserialize;
+use sha2::{Sha256, Digest};
+use tokio::sync::OnceCell;
 use zpm_config::Configuration;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
-use zpm_utils::DataType;
+use zpm_utils::{DataType, Path};
 
 use crate::{
     error::Error,
     http::{HttpClient, HttpRequest},
+    npm,
     report::{current_report, PromptType},
 };
 
@@ -345,6 +350,222 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
     };
 
     Ok(bytes)
+}
+
+const CACHED_VERSION_FIELDS: &[&str] = &[
+    "bin",
+    "cpu",
+    "dependenciesMeta",
+    "dependencies",
+    "dist",
+    "libc",
+    "name",
+    "optionalDependencies",
+    "os",
+    "peerDependenciesMeta",
+    "peerDependencies",
+    "scripts",
+    "version",
+];
+
+const CACHED_TOP_LEVEL_FIELDS: &[&str] = &[
+    "dist-tags",
+    "time",
+    "versions",
+];
+
+static METADATA_CACHE_KEY: LazyLock<String> = LazyLock::new(|| {
+    let mut hasher
+        = Sha256::new();
+
+    for field in CACHED_TOP_LEVEL_FIELDS {
+        hasher.update(field.as_bytes());
+    }
+
+    for field in CACHED_VERSION_FIELDS {
+        hasher.update(field.as_bytes());
+    }
+
+    hex::encode(&hasher.finalize()[..3])
+});
+
+static METADATA_CACHE: LazyLock<DashMap<String, Arc<OnceCell<Bytes>>>>
+    = LazyLock::new(DashMap::new);
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+struct CachedMetadataDisk {
+    metadata: Vec<u8>,
+    etag: Option<String>,
+    last_modified: Option<String>,
+}
+
+pub struct GetPackageMetadataParams<'a> {
+    pub http_client: &'a HttpClient,
+    pub registry: &'a str,
+    pub ident: &'a Ident,
+    pub authorization: Option<&'a str>,
+    pub global_folder: &'a Path,
+    pub refresh_lockfile: bool,
+}
+
+pub async fn get_package_metadata(params: &GetPackageMetadataParams<'_>) -> Result<Bytes, Error> {
+    let cache_key
+        = params.ident.to_string();
+
+    let cell
+        = METADATA_CACHE
+            .entry(cache_key)
+            .or_default()
+            .clone();
+
+    let result = cell.get_or_try_init(|| async {
+        fetch_metadata_with_disk_cache(params).await
+    }).await?;
+
+    Ok(result.clone())
+}
+
+pub fn ensure_metadata_cache_dir(global_folder: &Path) {
+    let cache_dir = global_folder
+        .with_join_str("metadata/npm")
+        .with_join_str(&*METADATA_CACHE_KEY);
+
+    let _ = cache_dir.fs_create_dir_all();
+}
+
+fn get_cache_file_path(global_folder: &Path, url: &str) -> Path {
+    let mut hasher = Sha256::new();
+    hasher.update(url.as_bytes());
+    let url_hash = hex::encode(hasher.finalize());
+
+    global_folder
+        .with_join_str("metadata/npm")
+        .with_join_str(&*METADATA_CACHE_KEY)
+        .with_join_str(&format!("{}.bin", url_hash))
+}
+
+fn trim_metadata(raw: &[u8]) -> Vec<u8> {
+    let Ok(mut metadata) = serde_json::from_slice::<serde_json::Value>(raw) else {
+        return raw.to_vec();
+    };
+
+    let top_level_fields: HashSet<_>
+        = CACHED_TOP_LEVEL_FIELDS.iter()
+            .copied()
+            .collect();
+
+    let version_fields: HashSet<_>
+        = CACHED_VERSION_FIELDS.iter()
+            .copied()
+            .collect();
+
+    if let Some(obj) = metadata.as_object_mut() {
+        obj.retain(|k, _| top_level_fields.contains(k.as_str()));
+    }
+
+    if let Some(versions) = metadata.get_mut("versions").and_then(|v| v.as_object_mut()) {
+        for version_data in versions.values_mut() {
+            if let Some(obj) = version_data.as_object_mut() {
+                obj.retain(|k, _| version_fields.contains(k.as_str()));
+            }
+        }
+    }
+
+    serde_json::to_vec(&metadata).unwrap_or_else(|_| raw.to_vec())
+}
+
+fn write_cache_to_disk(cache_file: &Path, metadata: &[u8], etag: Option<String>, last_modified: Option<String>) {
+    let entry = CachedMetadataDisk {
+        metadata: trim_metadata(metadata),
+        etag,
+        last_modified,
+    };
+
+    let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::BoxedError>(&entry) else {
+        return;
+    };
+
+    let _ = cache_file.fs_write_atomic(|tmp| {
+        tmp.fs_write(&encoded)?;
+        Ok::<_, zpm_utils::PathError>(())
+    });
+}
+
+async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -> Result<Bytes, Error> {
+    let registry_path
+        = npm::registry_url_for_all_versions(params.ident);
+    let url
+        = format!("{}{}", params.registry, registry_path);
+
+    let cache_file
+        = get_cache_file_path(params.global_folder, &url);
+
+    let cached = if !params.refresh_lockfile {
+        cache_file.fs_read_prealloc().ok()
+            .and_then(|data| rkyv::from_bytes::<CachedMetadataDisk, rkyv::rancor::BoxedError>(&data).ok())
+    } else {
+        None
+    };
+
+    let mut request
+        = params.http_client.get(&url)?
+            .enable_status_check(false);
+
+    if let Some(auth) = params.authorization {
+        request = request.header("authorization", Some(auth));
+    }
+
+    if let Some(ref cached) = cached {
+        if let Some(ref etag) = cached.etag {
+            request = request.header("if-none-match", Some(etag.as_str()));
+        }
+        if let Some(ref last_modified) = cached.last_modified {
+            request = request.header("if-modified-since", Some(last_modified.as_str()));
+        }
+    }
+
+    let response
+        = request.send().await?;
+
+    if params.authorization.is_some() {
+        let npm_params = NpmHttpParams {
+            http_client: params.http_client,
+            registry: params.registry,
+            path: &registry_path,
+            authorization: params.authorization,
+            otp: None,
+        };
+        handle_invalid_authentication_error(&npm_params, &response).await?;
+    }
+
+    if response.status().as_u16() == 304 {
+        if let Some(cached) = cached {
+            return Ok(Bytes::from(cached.metadata));
+        }
+    }
+
+    let etag
+        = response.headers().get("etag")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+    let last_modified
+        = response.headers().get("last-modified")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+    let body
+        = response.error_for_status()?.bytes().await?;
+
+    let body_for_disk
+        = body.clone();
+    let cache_file_for_disk
+        = cache_file.clone();
+
+    tokio::task::spawn_blocking(move || {
+        write_cache_to_disk(&cache_file_for_disk, &body_for_disk, etag, last_modified);
+    });
+
+    Ok(body)
 }
 
 pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {

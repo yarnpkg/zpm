@@ -33,7 +33,6 @@ fn format_pypi_registry(ident: &Ident, version: &crate::PypiVersion, url: Option
         None => format!("pypi:{}@{}", ident.to_file_string(), version.to_file_string()),
     }
 }
-
 fn format_workspace_path(path: &Path) -> String {
     if path.is_empty() {
         "workspace:.".to_string()

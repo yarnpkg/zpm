@@ -365,7 +365,10 @@ impl Generator {
             writeln!(writer).unwrap();
             writeln!(writer, "    fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {{").unwrap();
             writeln!(writer, "        let Some(key_str) = path.first() else {{").unwrap();
-            writeln!(writer, "            unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
+            writeln!(writer, "            return Ok(ConfigurationEntry {{").unwrap();
+            writeln!(writer, "                value: AbstractValue::new_container(Container::new(self)),").unwrap();
+            writeln!(writer, "                source: Source::Mixed,").unwrap();
+            writeln!(writer, "            }});").unwrap();
             writeln!(writer, "        }};").unwrap();
             writeln!(writer, "").unwrap();
             writeln!(writer, "        match *key_str {{").unwrap();

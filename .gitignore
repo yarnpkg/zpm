@@ -12,6 +12,7 @@
 dist
 node_modules
 .pnp.*
+*.pyc
 
 flamegraph.svg
 profile.json.gz
@@ -19,5 +20,8 @@ profile.json.gz
 /.yarn/ignore
 /.yarn/cache
 /.yarn/unplugged
+
+/.claude
+/.superset
 
 /bench-*.json

@@ -19,6 +19,7 @@ use crate::{
     content_flags::ContentFlags,
     error::Error,
     fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync},
+    http_npm,
     graph::WaitMap,
     linker,
     lockfile::{Lockfile, LockfileEntry, LockfileMetadata},
@@ -765,6 +766,10 @@ impl<'a> InstallManager<'a> {
 
         let lockfile
             = self.initial_lockfile.clone();
+
+        if let Some(project) = self.context.project {
+            http_npm::ensure_metadata_cache_dir(&project.config.settings.global_folder.value);
+        }
 
         // --- Island resolution ---
         // Resolve islands from project config and partition roots between

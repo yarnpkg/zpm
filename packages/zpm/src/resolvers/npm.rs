@@ -162,8 +162,6 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
 
     let registry_base
         = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
-    let registry_path
-        = npm::registry_url_for_all_versions(&package_ident);
 
     let authorization
         = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
@@ -176,12 +174,13 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         }).await?;
 
     let bytes
-        = http_npm::get(&http_npm::NpmHttpParams {
+        = http_npm::get_package_metadata(&http_npm::GetPackageMetadataParams {
             http_client: &project.http_client,
             registry: &registry_base,
-            path: &registry_path,
+            ident: package_ident,
             authorization: authorization.as_deref(),
-            otp: None,
+            global_folder: &project.config.settings.global_folder.value,
+            refresh_lockfile: context.refresh_lockfile,
         }).await?;
 
     #[serde_as]
@@ -231,8 +230,6 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
 
     let registry_base
         = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
-    let registry_path
-        = npm::registry_url_for_all_versions(&package_ident);
 
     let authorization
         = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
@@ -245,12 +242,13 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
         }).await?;
 
     let bytes
-        = http_npm::get(&http_npm::NpmHttpParams {
+        = http_npm::get_package_metadata(&http_npm::GetPackageMetadataParams {
             http_client: &project.http_client,
             registry: &registry_base,
-            path: &registry_path,
+            ident: package_ident,
             authorization: authorization.as_deref(),
-            otp: None,
+            global_folder: &project.config.settings.global_folder.value,
+            refresh_lockfile: context.refresh_lockfile,
         }).await?;
 
     #[serde_as]

@@ -209,6 +209,7 @@ pub async fn run_binary(project: &Project, bin: Binary, args: Vec<String>, curre
         .with_package(&project, &project.root_workspace().locator())?
         .with_cwd(current_cwd)
         .enable_shell_forwarding()
+        .enable_signal_delegation()
         .run_binary(&bin, &args)
         .await?
         .into())

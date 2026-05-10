@@ -1,8 +1,17 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use futures::{SinkExt, stream::StreamExt};
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{
+    Message,
+    handshake::server::{ErrorResponse, Request, Response},
+    protocol::{CloseFrame, frame::coding::CloseCode},
+};
+
+use crate::project::Project;
+
+use tokio::sync::oneshot;
 
 use super::super::{
     coordinator_commands::{CommandSender, CoordinatorCommand},
@@ -18,6 +27,10 @@ use super::super::{
 /// All mutable state access goes through commands.
 pub struct ConnectionContext {
     pub command_tx: CommandSender,
+    pub auth_token: Option<String>,
+    pub project: Arc<Project>,
+    pub port: u16,
+    pub shutdown_notify: Arc<tokio::sync::Notify>,
 }
 
 /// Guard that removes subscription when dropped (via command)
@@ -43,22 +56,156 @@ impl Drop for SubscriptionGuard {
     }
 }
 
+/// Extract the `token` query parameter from a WebSocket upgrade request URI.
+fn extract_token_from_request(request: &Request) -> Option<String> {
+    let uri = request.uri();
+    let query = uri.query()?;
+
+    url::form_urlencoded::parse(query.as_bytes())
+        .find(|(key, _)| key == "token")
+        .map(|(_, value)| value.into_owned())
+}
+
+/// Check if a peeked HTTP request contains a WebSocket upgrade header.
+fn is_websocket_upgrade(buf: &[u8]) -> bool {
+    // Look for "Upgrade:" header with "websocket" value (case-insensitive)
+    let text = String::from_utf8_lossy(buf);
+    let lower = text.to_ascii_lowercase();
+    lower.contains("upgrade:") && lower.contains("websocket")
+}
+
+/// Serve a static UI asset via a raw HTTP response written to the stream.
+async fn serve_http_request(
+    stream: &mut tokio::net::TcpStream,
+    peeked: &[u8],
+    ctx: &ConnectionContext,
+) -> Result<(), std::io::Error> {
+    use tokio::io::AsyncWriteExt;
+
+    let request_text = String::from_utf8_lossy(peeked);
+
+    // Parse the request line (e.g. "GET /path HTTP/1.1")
+    let first_line = request_text.lines().next().unwrap_or("");
+    let parts: Vec<&str> = first_line.split_whitespace().collect();
+    let raw_path = if parts.len() >= 2 { parts[1] } else { "/" };
+
+    // Strip query string from path
+    let path = raw_path.split('?').next().unwrap_or("/");
+
+    // Map "/" to "index.html"
+    let asset_path = match path {
+        "/" | "" => "index.html",
+        p => p.strip_prefix('/').unwrap_or(p),
+    };
+
+    let asset = super::get_ui_asset(asset_path)
+        .or_else(|| super::get_ui_asset("index.html"));
+
+    if let Some((content_type, data)) = asset {
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+            data.len(),
+            content_type
+        );
+        stream.write_all(response.as_bytes()).await?;
+        stream.write_all(data).await?;
+    } else {
+        let body = b"404 Not Found";
+        let response = format!(
+            "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).await?;
+        stream.write_all(body).await?;
+    }
+
+    Ok(())
+}
+
 pub async fn handle_connection(
-    stream: tokio::net::TcpStream,
+    mut stream: tokio::net::TcpStream,
     addr: SocketAddr,
     ctx: Arc<ConnectionContext>,
 ) -> Result<(), zpm_switch::Error> {
-    let ws_stream = tokio_tungstenite::accept_async(stream)
-        .await
-        .map_err(|e| {
-            zpm_switch::Error::SocketReadError(std::sync::Arc::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )))
-        })?;
+    // Peek at the first bytes to determine if this is a WebSocket upgrade
+    let mut peek_buf = vec![0u8; 4096];
+    let n = stream.peek(&mut peek_buf).await.map_err(|e| {
+        zpm_switch::Error::SocketReadError(Arc::new(e))
+    })?;
+
+    if n == 0 {
+        return Ok(());
+    }
+
+    let peeked = &peek_buf[..n];
+
+    if !is_websocket_upgrade(peeked) {
+        // Consume the peeked bytes for HTTP handling
+        let mut buf = vec![0u8; n];
+        let _ = stream.read_exact(&mut buf).await;
+        if let Err(e) = serve_http_request(&mut stream, &buf, &ctx).await {
+            eprintln!("HTTP error from {}: {}", addr, e);
+        }
+        return Ok(());
+    }
+
+    // WebSocket upgrade path — hand the stream to tungstenite
+    let provided_token = Arc::new(std::sync::Mutex::new(None::<String>));
+    let token_slot = provided_token.clone();
+
+    let ws_stream = tokio_tungstenite::accept_hdr_async(stream, move |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
+        *token_slot.lock().unwrap() = extract_token_from_request(request);
+        Ok(response)
+    })
+    .await
+    .map_err(|e| {
+        zpm_switch::Error::SocketReadError(std::sync::Arc::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        )))
+    })?;
 
     let (mut write, mut read)
         = ws_stream.split();
+
+    // Validate the token after the handshake so the client can receive error
+    // messages through the WebSocket protocol rather than an opaque HTTP 403.
+    if let Some(ref expected) = ctx.auth_token {
+        let provided = provided_token.lock().unwrap().take();
+        if provided.as_deref() != Some(expected.as_str()) {
+            let error_msg = DaemonMessage::response(
+                0,
+                DaemonResponse::Error {
+                    message: "Invalid or missing auth token".to_string(),
+                },
+            );
+
+            if let Ok(json) = serde_json::to_string(&error_msg) {
+                let _ = write.send(Message::Text(json.into())).await;
+            }
+
+            let _ = write.send(Message::Close(Some(CloseFrame {
+                code: CloseCode::Policy,
+                reason: "Invalid or missing auth token".into(),
+            }))).await;
+
+            // Wait for the client's close acknowledgment (with timeout) so the
+            // browser has time to process the error message before we drop the
+            // TCP connection.
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                async {
+                    while let Some(Ok(msg)) = read.next().await {
+                        if matches!(msg, Message::Close(_)) {
+                            break;
+                        }
+                    }
+                },
+            ).await;
+
+            return Ok(());
+        }
+    }
 
     // Subscription guards - cleaned up when connection drops
     let mut subscription_guards: Vec<SubscriptionGuard> = Vec::new();
@@ -66,9 +213,34 @@ pub async fn handle_connection(
     // Notification receivers from subscriptions
     let mut notification_receivers: Vec<mpsc::UnboundedReceiver<DaemonNotification>> = Vec::new();
 
+    // Subscribe to global notifications (e.g. taskfile changes)
+    let mut global_rx = {
+        let (tx, rx) = oneshot::channel();
+        let _ = ctx.command_tx.send(CoordinatorCommand::SubscribeGlobal { response_tx: tx });
+        rx.await.ok()
+    };
+
     loop {
         let notification_future
             = poll_notifications(&mut notification_receivers);
+
+        let global_future = async {
+            match &mut global_rx {
+                Some(rx) => loop {
+                    match rx.recv().await {
+                        Ok(n) => break Some(n),
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            // Missed messages; keep receiving to get the latest
+                            continue;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break std::future::pending::<Option<DaemonNotification>>().await;
+                        }
+                    }
+                },
+                None => std::future::pending::<Option<DaemonNotification>>().await,
+            }
+        };
 
         tokio::select! {
             biased;
@@ -117,6 +289,10 @@ pub async fn handle_connection(
                             request,
                             subscription_id,
                             &ctx.command_tx,
+                            &ctx.project,
+                            ctx.port,
+                            ctx.auth_token.as_deref(),
+                            &ctx.shutdown_notify,
                         )
                         .await;
 
@@ -148,6 +324,19 @@ pub async fn handle_connection(
 
             // Handle notifications from subscriptions
             Some(notification) = notification_future => {
+                let message
+                    = DaemonMessage::notification(notification);
+
+                let notification_json = serde_json::to_string(&message)
+                    .map_err(|e| zpm_switch::Error::InvalidDaemonMessage(e.to_string()))?;
+
+                if write.send(Message::Text(notification_json.into())).await.is_err() {
+                    break;
+                }
+            }
+
+            // Handle global notifications (e.g. taskfile changes)
+            Some(notification) = global_future => {
                 let message
                     = DaemonMessage::notification(notification);
 

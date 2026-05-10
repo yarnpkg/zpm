@@ -41,15 +41,17 @@ impl TaskStats {
                     "subtasksCount": stats.subtasks_count,
                     "outputBufferCount": stats.output_buffer_count,
                     "closedTasksCount": stats.closed_tasks_count,
+                    "watchedFilesCount": stats.watched_files_count,
                 })
             );
         } else {
             println!("Daemon State Statistics:");
-            println!("  tasks:         {}", stats.tasks_count);
-            println!("  prepared:      {}", stats.prepared_count);
-            println!("  subtasks:      {}", stats.subtasks_count);
-            println!("  output_buffer: {}", stats.output_buffer_count);
-            println!("  closed_tasks:  {}", stats.closed_tasks_count);
+            println!("  tasks:          {}", stats.tasks_count);
+            println!("  prepared:       {}", stats.prepared_count);
+            println!("  subtasks:       {}", stats.subtasks_count);
+            println!("  output_buffer:  {}", stats.output_buffer_count);
+            println!("  closed_tasks:   {}", stats.closed_tasks_count);
+            println!("  watched_files:  {}", stats.watched_files_count);
         }
 
         Ok(super::runner::exit_status_from_code(0))

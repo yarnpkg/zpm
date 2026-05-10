@@ -1,9 +1,10 @@
 use std::{collections::HashSet, io::Write, sync::Arc, time::{Duration, SystemTime}};
 
+use base64::Engine;
 use tokio::sync::{mpsc, oneshot};
 use zpm_primitives::Ident;
-use zpm_tasks::{TaskId, TaskName};
-use zpm_utils::Path;
+use zpm_tasks::{parse as parse_taskfile, TaskId, TaskName};
+use zpm_utils::{Path, ToFileString};
 
 use super::{
     coordinator_commands::{
@@ -11,13 +12,13 @@ use super::{
         PushTasksResult, StatsResult, StopTaskResult, TaskCompletionResult,
     },
     coordinator_state::{
-        now_ms, ContextualTaskId, CoordinatorState, TaskGraph, TransitionEffects, LONG_LIVED_ATTRIBUTE,
+        now_ms, ContextualTaskId, CoordinatorState, TaskGraph, TaskfileWatcher, TransitionEffects, LONG_LIVED_ATTRIBUTE,
     },
     executor::ExecutorPool,
-    ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, TaskEvent, TaskEventState, TaskSubscription, LONG_LIVED_CONTEXT_ID},
+    ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, DeclaredTaskInfo, TaskEvent, TaskEventState, TaskSubscription, LONG_LIVED_CONTEXT_ID},
     platform,
     scheduler::dependencies,
-    server::{bind_to_available_port, connection::{run_accept_loop, ConnectionContext}},
+    server::{bind_to_available_port, bind_to_port, connection::{run_accept_loop, ConnectionContext}},
 };
 use crate::{
     error::Error,
@@ -35,20 +36,24 @@ pub async fn start_daemon_inline_with_handle(
     port_tx: oneshot::Sender<u16>,
     handle_tx: oneshot::Sender<DaemonShutdownHandle>,
 ) -> Result<(), Error> {
-    run_daemon_internal(project, Some(port_tx), Some(handle_tx)).await
+    run_daemon_internal(project, None, None, Some(port_tx), Some(handle_tx)).await
 }
 
-pub async fn run_daemon(project: Arc<Project>) -> Result<(), Error> {
-    run_daemon_internal(project, None, None).await
+pub async fn run_daemon(project: Arc<Project>, port: Option<u16>, auth_token: Option<String>) -> Result<(), Error> {
+    run_daemon_internal(project, port, auth_token, None, None).await
 }
 
 async fn run_daemon_internal(
     project: Arc<Project>,
+    fixed_port: Option<u16>,
+    auth_token: Option<String>,
     port_tx: Option<oneshot::Sender<u16>>,
     handle_tx: Option<oneshot::Sender<DaemonShutdownHandle>>,
 ) -> Result<(), Error> {
-    let (listener, port)
-        = bind_to_available_port().await?;
+    let (listener, port) = match fixed_port {
+        Some(p) => bind_to_port(p).await?,
+        None => bind_to_available_port().await?,
+    };
     let daemon_url_str
         = daemon_url(port);
 
@@ -88,6 +93,16 @@ async fn run_daemon_internal(
     let command_tx_for_executor
         = command_tx.clone();
 
+    // Notify channels: senders go to FileWatcher/TaskfileWatcher (via coordinator loop),
+    // receivers go to bridge tasks that forward events as commands
+    let (file_notify_tx, file_notify_rx)
+        = mpsc::unbounded_channel::<notify::Event>();
+    let (taskfile_notify_tx, taskfile_notify_rx)
+        = mpsc::unbounded_channel::<notify::Event>();
+
+    let project_cwd_for_loop
+        = project.project_cwd.to_file_string();
+
     tokio::spawn(async move {
         run_coordinator_loop(
             project_for_loop,
@@ -97,6 +112,9 @@ async fn run_daemon_internal(
             output_buffer_max_lines,
             max_closed_tasks,
             default_warmup_period,
+            file_notify_tx,
+            taskfile_notify_tx,
+            project_cwd_for_loop,
         ).await;
     });
 
@@ -112,6 +130,20 @@ async fn run_daemon_internal(
         watch_project_root(project_root, command_tx_for_watcher, shutdown_for_watcher).await;
     });
 
+    // Taskfile watcher — bridge native OS events to coordinator commands
+    let command_tx_for_taskfile_watcher
+        = command_tx.clone();
+    tokio::spawn(async move {
+        bridge_notify_events(taskfile_notify_rx, command_tx_for_taskfile_watcher, |event| CoordinatorCommand::NotifyTaskfileEvent { event }).await;
+    });
+
+    // File watcher — bridge native OS events to coordinator commands
+    let command_tx_for_file_watcher
+        = command_tx.clone();
+    tokio::spawn(async move {
+        bridge_notify_events(file_notify_rx, command_tx_for_file_watcher, |event| CoordinatorCommand::NotifyFileEvent { event }).await;
+    });
+
     // Signal handler
     let command_tx_for_signal
         = command_tx.clone();
@@ -123,6 +155,10 @@ async fn run_daemon_internal(
 
     let ctx = Arc::new(ConnectionContext {
         command_tx,
+        auth_token,
+        project: project.clone(),
+        port,
+        shutdown_notify: shutdown_notify.clone(),
     });
 
     // Run accept loop until shutdown is signaled
@@ -142,9 +178,20 @@ async fn run_coordinator_loop(
     output_buffer_max_lines: usize,
     max_closed_tasks: usize,
     default_warmup_period: Duration,
+    file_notify_tx: mpsc::UnboundedSender<notify::Event>,
+    taskfile_notify_tx: mpsc::UnboundedSender<notify::Event>,
+    project_cwd: String,
 ) {
     let mut state
-        = CoordinatorState::new(output_buffer_max_lines, max_closed_tasks);
+        = CoordinatorState::new(
+            output_buffer_max_lines,
+            max_closed_tasks,
+            file_notify_tx,
+            taskfile_notify_tx,
+            std::path::PathBuf::from(project_cwd),
+        );
+
+    initialize_taskfile_watcher(&mut state.taskfile_watcher, &project);
 
     let mut executor_pool
         = ExecutorPool::new(daemon_url, command_tx.clone());
@@ -444,6 +491,7 @@ async fn handle_command(
                 subtasks_count: state.graph.subtasks_count(),
                 output_buffer_count: state.output.buffer_count(),
                 closed_tasks_count: state.output.closed_tasks_count(),
+                watched_files_count: state.taskfile_watcher.watched_file_count(),
             });
         }
 
@@ -472,6 +520,67 @@ async fn handle_command(
 
         CoordinatorCommand::RemoveSubscription { subscription_id } => {
             state.subscriptions.remove(subscription_id);
+        }
+
+        CoordinatorCommand::NotifyTaskfileEvent { event } => {
+            let changed_workspaces
+                = state.taskfile_watcher.resolve_changed_workspaces(&event);
+
+            if !changed_workspaces.is_empty() {
+                for workspace_ident in &changed_workspaces {
+                    reload_taskfile(workspace_ident, state, project);
+                }
+
+                let (tasks, errors)
+                    = build_declared_tasks_list(project);
+                state.subscriptions.broadcast(DaemonNotification::DeclaredTasksChanged {
+                    tasks,
+                    errors,
+                });
+            }
+        }
+
+        CoordinatorCommand::ListDeclaredTasks { response_tx } => {
+            let (tasks, errors)
+                = build_declared_tasks_list(project);
+            let _ = response_tx.send((tasks, errors));
+        }
+
+        CoordinatorCommand::SubscribeGlobal { response_tx } => {
+            let _ = response_tx.send(state.subscriptions.subscribe_global());
+        }
+
+        CoordinatorCommand::ReadFile { path, project_cwd, response_tx } => {
+            let full_path = project_cwd.with_join_str(&path);
+
+            let (Ok(canonical_root), Ok(canonical_file)) = (project_cwd.fs_canonicalize(), full_path.fs_canonicalize()) else {
+                let _ = response_tx.send(None);
+                return false;
+            };
+
+            // Security: validate the resolved path stays under the project root
+            if !canonical_root.contains(&canonical_file) {
+                let _ = response_tx.send(None);
+                return false;
+            }
+
+            let result
+                = read_file_content(&full_path);
+
+            let _ = response_tx.send(result);
+        }
+
+        CoordinatorCommand::WatchFile { path, response_tx } => {
+            state.file_watcher.register(&path);
+            let _ = response_tx.send(());
+        }
+
+        CoordinatorCommand::NotifyFileEvent { event } => {
+            for path in state.file_watcher.resolve_event_paths(&event) {
+                state.subscriptions.broadcast(DaemonNotification::FileChanged {
+                    path,
+                });
+            }
         }
 
         CoordinatorCommand::Shutdown { response_tx } => {
@@ -594,7 +703,17 @@ fn execute_push_tasks(
             effective_context_id,
             &mut state.contexts,
         ) {
-            Ok((ctx_task_id, resolved_ctx_task_ids)) => {
+            Ok((ctx_task_id, resolved_ctx_task_ids, source_files)) => {
+                // Register source files with the watcher for hot-reload
+                if !source_files.is_empty() {
+                    if let Some(ref tid) = task_id {
+                        state.taskfile_watcher.register_sources(
+                            tid.workspace.clone(),
+                            source_files,
+                        );
+                    }
+                }
+
                 record_scheduled_events(&resolved_ctx_task_ids, &mut state.event_history);
 
                 // After add_task, check is_long_lived from the prepared task
@@ -746,8 +865,8 @@ fn resolve_is_long_lived(graph: &TaskGraph, project: &Project, task_id: &TaskId)
     // Slow path: resolve from disk (only needed on first push per task)
     project.resolve_task(task_id)
         .ok()
-        .and_then(|resolved| {
-            resolved.task_files.get(&task_id.workspace)
+        .and_then(|result| {
+            result.resolved.task_files.get(&task_id.workspace)
                 .and_then(|tf| tf.tasks.get(task_id.task_name.as_str()))
                 .map(|task| task.attributes.iter().any(|a| a.name == LONG_LIVED_ATTRIBUTE))
         })
@@ -762,6 +881,208 @@ fn check_if_long_lived_from_graph(graph: &TaskGraph, task_id: &TaskId) -> bool {
         }
     }
     false
+}
+
+/// Initialize the taskfile watcher with all workspace taskfiles at daemon startup.
+fn initialize_taskfile_watcher(watcher: &mut TaskfileWatcher, project: &Project) {
+    for workspace in &project.workspaces {
+        let task_file_path = workspace.taskfile_path();
+
+        // Always watch the default taskfile path, even if it doesn't exist yet
+        let mut sources = vec![task_file_path];
+
+        if let Some((task_file, extra_sources)) = project.get_workspace_taskfile(workspace) {
+            // Replace sources with the full list (main + includes)
+            sources = extra_sources;
+            watcher.update_cached_taskfile(workspace.name.clone(), task_file);
+        }
+
+        watcher.register_sources(workspace.name.clone(), sources);
+    }
+}
+
+/// Bridge native file-system events from a notify watcher into coordinator commands.
+async fn bridge_notify_events(
+    mut notify_rx: mpsc::UnboundedReceiver<notify::Event>,
+    command_tx: CommandSender,
+    make_command: impl Fn(notify::Event) -> CoordinatorCommand,
+) {
+    use notify::EventKind;
+    while let Some(event) = notify_rx.recv().await {
+        match event.kind {
+            EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) => {
+                if command_tx.send(make_command(event)).is_err() {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn is_binary_extension(path: &Path) -> bool {
+    let ext = path.to_file_string();
+    let ext = ext.rsplit('.').next().unwrap_or("");
+    matches!(ext, "png" | "jpg" | "jpeg" | "gif" | "bmp" | "ico" | "webp" | "svg" | "pdf" | "woff" | "woff2" | "ttf" | "eot" | "otf" | "zip" | "tar" | "gz")
+}
+
+fn read_file_content(path: &Path) -> Option<(String, String)> {
+    if is_binary_extension(path) {
+        let bytes = std::fs::read(path.to_file_string()).ok()?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Some((encoded, "base64".to_string()))
+    } else {
+        let text = path.fs_read_text().ok()?;
+        Some((text, "utf-8".to_string()))
+    }
+}
+
+/// Reload a workspace's taskfile after a change is detected.
+fn reload_taskfile(
+    workspace_ident: &Ident,
+    state: &mut CoordinatorState,
+    project: &Project,
+) {
+    let workspace = match project.workspace_by_ident(workspace_ident) {
+        Ok(ws) => ws,
+        Err(_) => return,
+    };
+
+    let task_file_path = workspace.taskfile_path();
+    let content = match task_file_path.fs_read_text() {
+        Ok(c) => c,
+        Err(_) => {
+            // File deleted: treat as empty taskfile — purge all tasks
+            if let Some(old_taskfile) = state.taskfile_watcher.cached_taskfiles().get(workspace_ident).cloned() {
+                for task_name in old_taskfile.tasks.keys() {
+                    purge_task_from_graph(workspace_ident, task_name.as_str(), state);
+                }
+                state.taskfile_watcher.remove_cached_taskfile(workspace_ident);
+                state.graph.resolved.task_files.remove(workspace_ident);
+            }
+            return;
+        }
+    };
+
+    let new_taskfile = match parse_taskfile(&content) {
+        Ok(tf) => tf,
+        Err(_) => return, // Parse error: keep old version
+    };
+
+    // Determine removed tasks by comparing with old cached taskfile
+    if let Some(old_taskfile) = state.taskfile_watcher.cached_taskfiles().get(workspace_ident).cloned() {
+        let old_task_names: HashSet<&str> = old_taskfile.tasks.keys()
+            .map(|n| n.as_str()).collect();
+        let new_task_names: HashSet<&str> = new_taskfile.tasks.keys()
+            .map(|n| n.as_str()).collect();
+
+        for removed_name in old_task_names.difference(&new_task_names) {
+            purge_task_from_graph(workspace_ident, removed_name, state);
+        }
+    }
+
+    // Update caches
+    state.taskfile_watcher.update_cached_taskfile(
+        workspace_ident.clone(),
+        new_taskfile.clone(),
+    );
+    state.graph.resolved.task_files.insert(
+        workspace_ident.clone(),
+        new_taskfile.clone(),
+    );
+
+    // Re-register source files (includes may have changed)
+    let mut sources = vec![task_file_path];
+    for include in &new_taskfile.includes {
+        if let Ok(inc_ws) = project.workspace_by_ident(&include.ident) {
+            let inc_path = match &include.path {
+                Some(p) => inc_ws.path.with_join_str(p),
+                None => inc_ws.taskfile_path(),
+            };
+            sources.push(inc_path);
+        }
+    }
+    state.taskfile_watcher.register_sources(workspace_ident.clone(), sources);
+}
+
+/// Purge a task that has been removed from a taskfile.
+/// Running tasks are sent SIGTERM; non-running tasks are evicted directly.
+fn purge_task_from_graph(
+    workspace_ident: &Ident,
+    task_name_str: &str,
+    state: &mut CoordinatorState,
+) {
+    let task_name = match TaskName::new(task_name_str) {
+        Ok(tn) => tn,
+        Err(_) => return,
+    };
+
+    let task_id = TaskId {
+        workspace: workspace_ident.clone(),
+        task_name,
+    };
+
+    // Remove from resolved.tasks (the dependency graph)
+    state.graph.resolved.tasks.remove(&task_id);
+
+    // Find all contextual instances of this task (across all contexts)
+    let ctx_task_ids_to_remove: Vec<ContextualTaskId> = state.graph.tasks.keys()
+        .filter(|ctx_id| ctx_id.task_id == task_id)
+        .cloned()
+        .collect();
+
+    for ctx_task_id in &ctx_task_ids_to_remove {
+        // If the task is actively running, send SIGTERM for graceful shutdown.
+        // The normal TaskCompleted path will handle cleanup when it exits.
+        if let Some(pid) = state.processes.get_pid_for_task(ctx_task_id) {
+            platform::kill_process_group(pid);
+            continue;
+        }
+
+        // Non-running: evict directly
+        state.graph.evict_closed_task(ctx_task_id);
+    }
+
+    // Also remove from long-lived registry if present
+    state.long_lived.remove(&task_id);
+}
+
+/// Build the declared tasks list by reading taskfiles from disk.
+///
+/// We read from disk on every request rather than using the watcher cache,
+/// because the cache is populated asynchronously and may not yet contain
+/// all workspaces at the time of the first request.
+fn build_declared_tasks_list(project: &Project) -> (Vec<DeclaredTaskInfo>, Vec<super::ipc::TaskfileError>) {
+    let mut tasks = Vec::new();
+    let mut errors = Vec::new();
+
+    for workspace in &project.workspaces {
+        let task_file_path = workspace.taskfile_path();
+        let Ok(content) = task_file_path.fs_read_text() else { continue };
+
+        match parse_taskfile(&content) {
+            Ok(task_file) => {
+                for (task_name, task) in &task_file.tasks {
+                    let is_long_lived = task.attributes.iter()
+                        .any(|attr| attr.name == LONG_LIVED_ATTRIBUTE);
+                    tasks.push(DeclaredTaskInfo {
+                        workspace: workspace.name.to_file_string(),
+                        task_name: task_name.to_file_string(),
+                        is_long_lived,
+                    });
+                }
+            }
+            Err(e) => {
+                errors.push(super::ipc::TaskfileError {
+                    workspace: workspace.name.to_file_string(),
+                    message: e.to_string(),
+                });
+            }
+        }
+    }
+
+    tasks.sort_by(|a, b| a.workspace.cmp(&b.workspace).then(a.task_name.cmp(&b.task_name)));
+    (tasks, errors)
 }
 
 async fn watch_project_root(project_root: Path, command_tx: CommandSender, shutdown_notify: Arc<tokio::sync::Notify>) {

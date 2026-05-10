@@ -86,5 +86,27 @@ describe(`Protocols`, () => {
         },
       ),
     );
+
+    test(
+      `it should support running install twice with a comma-separated PyPI range`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`pypi-no-deps`]: `pypi:>=1.0.0,<2.0.0`,
+          },
+        },
+        async ({run}) => {
+          const registryUrl = await tests.startPackageServer();
+
+          for (let i = 0; i < 2; i++) {
+            await run(`install`, {
+              env: {
+                ZPM_PYPI_REGISTRY: registryUrl,
+              },
+            });
+          }
+        },
+      ),
+    );
   });
 });

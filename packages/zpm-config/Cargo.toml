@@ -4,6 +4,7 @@ edition = "2024"
 
 [dependencies]
 convert_case = { workspace = true }
+dotenvy = { workspace = true }
 serde_yaml = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 shellexpand = { workspace = true }

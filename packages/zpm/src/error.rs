@@ -555,6 +555,9 @@ pub enum Error {
     #[error("Island '{}' has no matching workspaces", .0)]
     EmptyIsland(String),
 
+    #[error("This command can only be called within a Yarn Switch context. Please run this command through `yarn` instead of calling the binary directly.")]
+    MissingYarnSwitchContext,
+
     // Silent error; no particular message, just exit with an exit code 1
     #[error("")]
     SilentError,

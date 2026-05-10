@@ -495,12 +495,10 @@ impl ScriptEnvironment {
 
     /// Enables signal delegation mode.
     ///
-    /// When enabled, SIGINT is ignored in the parent process while waiting
-    /// for child processes to complete. This allows the child to handle
-    /// the signal and exit gracefully, with its exit code properly propagated.
-    ///
-    /// This is useful when the parent is a wrapper (like yarn-switch) that
-    /// should delegate signal handling to the actual command being run.
+    /// When enabled, SIGINT and SIGTERM are ignored in the parent process
+    /// while waiting for child processes to complete. This allows the child
+    /// to handle the signals and exit gracefully, with its exit code properly
+    /// propagated.
     pub fn enable_signal_delegation(mut self) -> Self {
         self.signal_delegation = true;
         self
@@ -508,6 +506,11 @@ impl ScriptEnvironment {
 
     pub fn with_project(mut self, project: &Project) -> Self {
         self.remove_pnp_loader();
+
+        // Inject environment variables from .env files
+        for (key, value) in &project.config.env_files {
+            self.env.insert(key.clone(), Some(value.clone()));
+        }
 
         if let Some(pnp_path) = project.pnp_path().if_exists() {
             self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_file_string()));
@@ -704,11 +707,11 @@ impl ScriptEnvironment {
             }
         }
 
-        // If signal delegation is enabled, ignore SIGINT while waiting for the child.
-        // This allows the child to handle the signal and exit gracefully.
+        // If signal delegation is enabled, ignore SIGINT/SIGTERM while waiting
+        // for the child. This allows the child to handle signals and exit gracefully.
         #[cfg(unix)]
         let _guard = if self.signal_delegation {
-            Some(zpm_utils::IgnoreSigint::new())
+            Some(zpm_utils::IgnoreSignals::new())
         } else {
             None
         };
@@ -816,31 +819,43 @@ impl ScriptEnvironment {
     /// Runs a script with inherited stdio (output goes directly to terminal).
     /// Use this when you want the script's output to go directly to the terminal without capturing.
     pub async fn run_script_inherited<I, S>(&mut self, script: &str, args: I) -> Result<ExitStatus, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
-        let mut final_script = script.to_string();
+        let mut final_script
+            = script.to_string();
 
         for arg in args {
             final_script.push(' ');
             final_script.push_str(&shell_escape(arg.to_string().as_str()));
         }
 
-        let args = ["-c", &final_script, "yarn-script"];
-        let (mut cmd, _) = self.prepare_command("bash", &args.iter().map(|s| s.to_string()).collect::<Vec<_>>())?;
+        let args
+            = ["-c", &final_script, "yarn-script"];
+
+        let bash_args
+            = args.iter()
+                .map(|s| s.to_string())
+                .collect_vec();
+
+        let (mut cmd, _)
+            = self.prepare_command("bash", &bash_args)?;
 
         cmd.stdout(std::process::Stdio::inherit());
         cmd.stderr(std::process::Stdio::inherit());
         cmd.stdin(std::process::Stdio::inherit());
 
-        // If signal delegation is enabled, ignore SIGINT while waiting for the child.
-        // This allows the child to handle the signal and exit gracefully.
+        let mut child
+            = cmd.spawn()
+                .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
+
         #[cfg(unix)]
         let _guard = if self.signal_delegation {
-            Some(zpm_utils::IgnoreSigint::new())
+            Some(zpm_utils::IgnoreSignals::new())
         } else {
             None
         };
 
-        let status = cmd.status().await
-            .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
+        let status
+            = child.wait().await
+                .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 
         Ok(status)
     }

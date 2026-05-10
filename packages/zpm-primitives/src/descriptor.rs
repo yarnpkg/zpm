@@ -12,7 +12,7 @@ use serde::ser::SerializeMap;
 use serde::Deserializer;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, Hash64, ToFileString, ToHumanString};
 
-use crate::{BuiltinRange, IdentError, LocatorError, RangeError};
+use crate::{IdentError, LocatorError, RangeError};
 
 use super::range::VirtualRange;
 use super::{reference, Ident, Locator, Range, Reference};
@@ -128,20 +128,8 @@ fn extract_descriptor(ident_str: &str, range_str: &str) -> Result<Descriptor, De
 
     let ident
         = Ident::from_file_string(ident_str)?;
-    let mut range
+    let range
         = Range::from_file_string(&range_str[..parent_split.map_or(range_str.len(), |idx| idx)])?;
-
-    if ident.scope() == Some("@builtin") {
-        if !matches!(range, Range::Builtin(_)) {
-            let Range::AnonymousSemver(params) = range else {
-                return Err(DescriptorError::SyntaxError(range_str.to_string()));
-            };
-
-            range = Range::Builtin(BuiltinRange {
-                range: params.range.clone(),
-            });
-        }
-    }
 
     let parent = parent_split
         .map(|idx| Locator::from_file_string(&range_str[idx + parent_marker.len()..]))

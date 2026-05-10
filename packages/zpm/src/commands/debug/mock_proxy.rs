@@ -127,7 +127,20 @@ async fn handle_request(state: Arc<ProxyState>, req: Request<hyper::body::Incomi
             = state.cache.read().await;
 
         if let Some(cached) = cache.get(&path) {
+            let if_none_match = req.headers().get("if-none-match")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
+
+            if let Some(client_etag) = if_none_match {
+                if cached.headers.get("etag").is_some_and(|etag| etag == &client_etag) {
+                    println!("[304]   {path}");
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    return Ok(build_304(cached));
+                }
+            }
+
             println!("[CACHE] {path}");
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             return Ok(build_response(cached, &state));
         }
     }
@@ -139,6 +152,7 @@ async fn handle_request(state: Arc<ProxyState>, req: Request<hyper::body::Incomi
 
     match fetch_and_cache(&state, &path, &remote_url).await {
         Ok(cached) => {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             Ok(build_response(&cached, &state))
         },
 
@@ -217,6 +231,18 @@ async fn fetch_and_cache(state: &ProxyState, path: &str, remote_url: &str) -> Re
     }
 
     Ok(cached)
+}
+
+fn build_304(cached: &CachedResponse) -> Response<Full<Bytes>> {
+    let mut builder
+        = Response::builder()
+            .status(StatusCode::NOT_MODIFIED);
+
+    if let Some(etag) = cached.headers.get("etag") {
+        builder = builder.header("etag", etag);
+    }
+
+    builder.body(Full::new(Bytes::new())).unwrap()
 }
 
 fn build_response(cached: &CachedResponse, state: &ProxyState) -> Response<Full<Bytes>> {

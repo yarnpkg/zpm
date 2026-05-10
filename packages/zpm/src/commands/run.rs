@@ -119,6 +119,7 @@ impl Run {
                     .with_package(&project, &project.active_package()?)?
                     .with_node_args(get_node_args())
                     .enable_shell_forwarding()
+                    .enable_signal_delegation()
                     .run_binary(&binary, &self.args)
                     .await?
                     .into())
@@ -155,6 +156,7 @@ impl Run {
                     .with_package(&project, &locator)?
                     .with_env_variable("npm_lifecycle_event", &self.name)
                     .enable_shell_forwarding()
+                    .enable_signal_delegation()
                     .run_script(&script, &self.args)
                     .await?
                     .into())

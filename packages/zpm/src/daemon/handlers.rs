@@ -1,5 +1,9 @@
+use std::sync::Arc;
+
 use tokio::sync::oneshot;
 use zpm_utils::ToFileString;
+
+use crate::project::Project;
 
 use super::{
     coordinator_commands::{CommandSender, CoordinatorCommand},
@@ -30,9 +34,17 @@ pub async fn dispatch_request(
     request: DaemonRequest,
     subscription_id: Option<SubscriptionId>,
     command_tx: &CommandSender,
+    project: &Project,
+    port: u16,
+    auth_token: Option<&str>,
+    shutdown_notify: &Arc<tokio::sync::Notify>,
 ) -> DaemonResponse {
     match request {
         DaemonRequest::Ping => DaemonResponse::Pong,
+        DaemonRequest::GetMeta => DaemonResponse::Meta {
+            version: zpm_switch::get_bin_version(),
+            cwd: project.project_cwd.to_file_string(),
+        },
 
         DaemonRequest::PushTasks {
             tasks,
@@ -61,12 +73,32 @@ pub async fn dispatch_request(
             handle_cancel_context(context_id, command_tx).await
         }
 
+        DaemonRequest::ListDeclaredTasks => {
+            handle_list_declared_tasks(command_tx).await
+        }
+
         DaemonRequest::GetStats => {
             handle_get_stats(command_tx).await
         }
 
         DaemonRequest::GetTaskHistory => {
             handle_get_task_history(command_tx).await
+        }
+
+        DaemonRequest::GetAuthUrl => {
+            handle_get_auth_url(port, auth_token)
+        }
+
+        DaemonRequest::Shutdown => {
+            handle_shutdown(command_tx, shutdown_notify).await
+        }
+
+        DaemonRequest::ReadFile { path } => {
+            handle_read_file(path, command_tx, project).await
+        }
+
+        DaemonRequest::WatchFile { path } => {
+            handle_watch_file(path, command_tx).await
         }
     }
 }
@@ -200,6 +232,7 @@ async fn handle_get_stats(command_tx: &CommandSender) -> DaemonResponse {
             subtasks_count: result.subtasks_count,
             output_buffer_count: result.output_buffer_count,
             closed_tasks_count: result.closed_tasks_count,
+            watched_files_count: result.watched_files_count,
         },
         Err(e) => e,
     }
@@ -210,6 +243,88 @@ async fn handle_get_task_history(command_tx: &CommandSender) -> DaemonResponse {
         CoordinatorCommand::GetTaskHistory { response_tx }
     }).await {
         Ok(events) => DaemonResponse::TaskHistory { events },
+        Err(e) => e,
+    }
+}
+
+async fn handle_shutdown(command_tx: &CommandSender, shutdown_notify: &Arc<tokio::sync::Notify>) -> DaemonResponse {
+    let (response_tx, response_rx) = oneshot::channel();
+
+    if command_tx
+        .send(CoordinatorCommand::Shutdown { response_tx })
+        .is_err()
+    {
+        shutdown_notify.notify_one();
+        return DaemonResponse::Error {
+            message: "Coordinator channel closed".to_string(),
+        };
+    }
+
+    let _ = response_rx.await;
+    shutdown_notify.notify_one();
+
+    DaemonResponse::ShuttingDown
+}
+
+fn handle_get_auth_url(port: u16, auth_token: Option<&str>) -> DaemonResponse {
+    let url = match auth_token {
+        Some(token) => {
+            let encoded: String = url::form_urlencoded::Serializer::new(String::new())
+                .append_pair("token", token)
+                .finish();
+            format!("http://127.0.0.1:{}/?{}", port, encoded)
+        }
+        None => format!("http://127.0.0.1:{}/", port),
+    };
+    DaemonResponse::AuthUrl { url }
+}
+
+async fn handle_list_declared_tasks(command_tx: &CommandSender) -> DaemonResponse {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::ListDeclaredTasks { response_tx }
+    }).await {
+        Ok((tasks, errors)) => DaemonResponse::DeclaredTaskList { tasks, errors },
+        Err(e) => e,
+    }
+}
+
+async fn handle_read_file(
+    path: String,
+    command_tx: &CommandSender,
+    project: &Project,
+) -> DaemonResponse {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::ReadFile {
+            path: path.clone(),
+            project_cwd: project.project_cwd.clone(),
+            response_tx,
+        }
+    }).await {
+        Ok(Some((content, encoding))) => DaemonResponse::FileContent {
+            path,
+            content: Some(content),
+            encoding,
+        },
+        Ok(None) => DaemonResponse::FileContent {
+            path,
+            content: None,
+            encoding: "utf-8".to_string(),
+        },
+        Err(e) => e,
+    }
+}
+
+async fn handle_watch_file(
+    path: String,
+    command_tx: &CommandSender,
+) -> DaemonResponse {
+    match send_command(command_tx, |response_tx| {
+        CoordinatorCommand::WatchFile {
+            path,
+            response_tx,
+        }
+    }).await {
+        Ok(()) => DaemonResponse::FileWatched,
         Err(e) => e,
     }
 }

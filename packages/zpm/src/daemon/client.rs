@@ -3,7 +3,7 @@ use std::{collections::HashMap, process::Stdio, sync::{atomic::{AtomicBool, Atom
 use futures::{SinkExt, stream::StreamExt};
 use tokio::{io::AsyncBufReadExt, sync::{mpsc, oneshot, Mutex}, task::AbortHandle};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
-use zpm_switch::YARN_SWITCH_PATH_ENV;
+use zpm_switch::YARNSW_PATH_ENV;
 use zpm_utils::Path;
 
 use super::{
@@ -11,7 +11,7 @@ use super::{
     coordinator_commands::CoordinatorCommand,
     ipc::{
         AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonNotification, DaemonRequest,
-        DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskEvent,
+        DaemonMeta, DaemonRequestEnvelope, DaemonResponse, LongLivedTaskInfo, SubscriptionScope, TaskEvent,
         TaskSubscription, DAEMON_SERVER_ENV_NAME, daemon_url,
     },
     scheduler::ContextualTaskId,
@@ -429,6 +429,18 @@ impl DaemonClient {
         ).await
     }
 
+    /// Get daemon metadata including the CLI version used by the daemon.
+    pub async fn get_meta(&mut self) -> Result<DaemonMeta, Error> {
+        self.request(
+            DaemonRequest::GetMeta,
+            |r| match r {
+                DaemonResponse::Meta { version, cwd } => Some(DaemonMeta { version, cwd }),
+                _ => None,
+            },
+        )
+        .await
+    }
+
     pub async fn cancel_context(&mut self, context_id: &str) -> Result<usize, Error> {
         self.request(
             DaemonRequest::CancelContext { context_id: context_id.to_string() },
@@ -439,8 +451,8 @@ impl DaemonClient {
     /// Get internal state statistics from the daemon (for debugging/testing)
     pub async fn get_stats(&mut self) -> Result<DaemonStatsResult, Error> {
         self.request(DaemonRequest::GetStats, |r| match r {
-            DaemonResponse::Stats { tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count } => {
-                Some(DaemonStatsResult { tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count })
+            DaemonResponse::Stats { tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count, watched_files_count } => {
+                Some(DaemonStatsResult { tasks_count, prepared_count, subtasks_count, output_buffer_count, closed_tasks_count, watched_files_count })
             }
             _ => None,
         }).await
@@ -469,16 +481,13 @@ pub struct DaemonStatsResult {
     pub subtasks_count: usize,
     pub output_buffer_count: usize,
     pub closed_tasks_count: usize,
+    pub watched_files_count: usize,
 }
 
 async fn start_daemon(project_root: &Path) -> Result<String, Error> {
     let switch_path
-        = std::env::var(YARN_SWITCH_PATH_ENV).map_err(|_| {
-            Error::IpcError(
-                "This command can only be called within a Yarn Switch context. \
-                 Please run this command through `yarn` instead of calling the binary directly."
-                    .to_string(),
-            )
+        = std::env::var(YARNSW_PATH_ENV).map_err(|_| {
+            Error::MissingYarnSwitchContext
         })?;
 
     let mut cmd

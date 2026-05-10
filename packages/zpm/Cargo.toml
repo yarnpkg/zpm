@@ -22,6 +22,7 @@ http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 itertools = { workspace = true }
+notify = { workspace = true }
 open = { workspace = true }
 pubgrub = { workspace = true }
 version-ranges = { workspace = true }
@@ -36,6 +37,7 @@ serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tower = { workspace = true, features = ["limit"] }
+ts-rs = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 wax = { workspace = true }
@@ -70,6 +72,9 @@ async-trait = "0.1.89"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[build-dependencies]
+flate2 = { workspace = true }
 
 [dev-dependencies]
 divan = { workspace = true, package = "codspeed-divan-compat" }

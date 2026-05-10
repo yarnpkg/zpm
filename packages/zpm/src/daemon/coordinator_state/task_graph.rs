@@ -11,6 +11,8 @@ use super::{
     },
     context_registry::ContextRegistry,
 };
+use zpm_utils::Path;
+
 use crate::{
     error::Error,
     project::Project,
@@ -105,7 +107,7 @@ impl TaskGraph {
         workspace_override: Option<&str>,
         context_id: Option<&str>,
         context_registry: &mut ContextRegistry,
-    ) -> Result<(ContextualTaskId, Vec<ContextualTaskId>), Error> {
+    ) -> Result<(ContextualTaskId, Vec<ContextualTaskId>, Vec<Path>), Error> {
         let task_name = TaskName::new(task_name)
             .map_err(|_| Error::TaskNameParseError(task_name.to_string()))?;
 
@@ -153,10 +155,12 @@ impl TaskGraph {
                         .insert(parent_ctx_id);
                 }
             }
-            return Ok((ctx_task_id, vec![]));
+            return Ok((ctx_task_id, vec![], vec![]));
         }
 
-        let new_resolved = project.resolve_task(&task_id)?;
+        let resolve_result = project.resolve_task(&task_id)?;
+        let new_resolved = resolve_result.resolved;
+        let source_files = resolve_result.source_files;
 
         let mut resolved_ctx_task_ids: Vec<ContextualTaskId> = Vec::new();
 
@@ -195,7 +199,7 @@ impl TaskGraph {
             }
         }
 
-        Ok((ctx_task_id, resolved_ctx_task_ids))
+        Ok((ctx_task_id, resolved_ctx_task_ids, source_files))
     }
 
     /// Prepare only the specific tasks that were resolved for this context.
