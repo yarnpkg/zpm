@@ -15,7 +15,7 @@ jobs:
 
     steps:
     - name: Checkout the repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
     - name: Build the repository
       uses: ./.github/actions/build
@@ -24,7 +24,7 @@ jobs:
         profile: release-lto
 
     - name: Store the build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
       with:
         name: flamegraph-binary
         path: target/aarch64-apple-darwin/release-lto
@@ -43,9 +43,9 @@ jobs:
 
     steps:
     - name: Checkout the repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
       with:
         name: flamegraph-binary
         path: local
@@ -71,7 +71,7 @@ jobs:
         sudo bash scripts/bench-run.sh zpm ${{matrix.benchmark[1]}} flamegraph ${{steps.bench-dir.outputs.BENCH_DIR}}
 
     - name: 'Upload the flamegraph'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
       with:
         name: flamegraphs-${{matrix.benchmark[1]}}
         path: ${{steps.bench-dir.outputs.BENCH_DIR}}/flamegraphs

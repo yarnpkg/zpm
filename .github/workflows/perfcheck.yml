@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -93,7 +93,7 @@ jobs:
         run: ./target/release-lto/yarn-bin debug bench gatsby install-cache-and-lock
 
       - name: Generate benchmark comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const fs = require('fs');
@@ -178,13 +178,13 @@ jobs:
             fs.writeFileSync('perfcheck-comment/pr-number.txt', String(context.issue.number));
 
       - name: Upload comment body artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: perfcheck-comment
           path: perfcheck-comment/
 
       - name: Upload merged benchmark results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: benchmark-results
           path: bench-merged.json
