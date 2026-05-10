@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+npm install -g pnpm
+
 mkdir -p packages/pkg-a
 
 cat > package.json <<'JSON'
