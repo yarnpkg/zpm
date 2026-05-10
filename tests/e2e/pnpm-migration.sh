@@ -30,7 +30,7 @@ cat > packages/pkg-a/package.json <<'JSON'
 }
 JSON
 
-pnpm install
+pnpm install --ignore-scripts
 
 # Capture the versions pnpm resolved (normalized to name@version)
 pnpm ls -r --json --depth=Infinity \
