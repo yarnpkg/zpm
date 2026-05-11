@@ -1,7 +1,7 @@
 use rkyv::Archive;
 use serde::{Deserialize, Deserializer};
 use zpm_macro_enum::zpm_enum;
-use zpm_primitives::{Descriptor, Ident, Locator, Range, RegistrySemverRange};
+use zpm_primitives::{Descriptor, Ident, Locator, Range};
 use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
@@ -103,7 +103,19 @@ impl ResolutionSelector {
     }
 }
 
-
+fn normalize_legacy_resolution_selector(selector: ResolutionSelector) -> ResolutionSelector {
+    match selector {
+        ResolutionSelector::Descriptor(mut params) => {
+            params.descriptor.range = params.descriptor.range.to_anonymous_range();
+            ResolutionSelector::Descriptor(params)
+        },
+        ResolutionSelector::DescriptorIdent(mut params) => {
+            params.parent_descriptor.range = params.parent_descriptor.range.to_anonymous_range();
+            ResolutionSelector::DescriptorIdent(params)
+        },
+        _ => selector,
+    }
+}
 
 use serde::{ser::SerializeMap, Serialize, Serializer};
 use serde::de::{self, Visitor, MapAccess};
@@ -188,16 +200,11 @@ impl<'de> Visitor<'de> for ResolutionsFieldVisitor {
         while let Some(key) = map.next_key::<String>()? {
             let selector = ResolutionSelector::from_file_string(&key)
                 .map_err(|_| de::Error::custom("invalid resolution selector"))?;
+            let selector = normalize_legacy_resolution_selector(selector);
 
             let value_str: String = map.next_value()?;
             let range = Range::from_file_string(&value_str)
                 .map_err(|_| de::Error::custom("invalid range"))?;
-
-            // TODO: Remove this in a future major version; we're keeping it for backwards compatibility with
-            // the Berry codebase in which `yarn patch` was adding the "npm:" prefix to all descriptors.
-            if matches!(selector, ResolutionSelector::Descriptor(DescriptorResolutionSelector {descriptor: Descriptor {range: Range::RegistrySemver(RegistrySemverRange {ident: None, ..}), ..}, ..})) {
-                return Err(de::Error::custom("the 'npm:' prefix is no longer needed"));
-            }
 
             let is_valid_resolution_descriptor = matches!(selector,
                 | ResolutionSelector::Descriptor(DescriptorResolutionSelector {descriptor: Descriptor {range: Range::AnonymousSemver(_), ..}, ..})

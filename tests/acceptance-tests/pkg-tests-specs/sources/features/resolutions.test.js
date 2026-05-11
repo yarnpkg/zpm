@@ -110,6 +110,40 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should support legacy npm-prefixed descriptor selectors`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`one-fixed-dep`]: `1.0.0`,
+            [`no-deps`]: `1.1.0`,
+          },
+          resolutions: {
+            [`no-deps@npm:1.0.0`]: `2.0.0`,
+          },
+        },
+        async ({run, source}) => {
+          await run(`install`);
+
+          await expect(source(`require('no-deps')`)).resolves.toMatchObject({
+            name: `no-deps`,
+            version: `1.1.0`,
+          });
+
+          await expect(source(`require('one-fixed-dep')`)).resolves.toMatchObject({
+            name: `one-fixed-dep`,
+            version: `1.0.0`,
+            dependencies: {
+              [`no-deps`]: {
+                name: `no-deps`,
+                version: `2.0.0`,
+              },
+            },
+          });
+        },
+      ),
+    );
+
+    test(
       `it should support overriding a packages with another, but only if its parent package has a specific version`,
       makeTemporaryEnv(
         {
