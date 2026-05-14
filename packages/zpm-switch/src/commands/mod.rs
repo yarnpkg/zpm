@@ -29,6 +29,7 @@ enum SwitchExecCli {
     LinkCommand(switch::link::LinkCommand),
     PostinstallCommand(switch::postinstall::PostinstallCommand),
     UnlinkCommand(switch::unlink::UnlinkCommand),
+    UpCommand(switch::up::UpCommand),
     UpdateCommand(switch::update::UpdateCommand),
     VersionCommand(switch::version::VersionCommand),
     WhichCommand(switch::which::WhichCommand),

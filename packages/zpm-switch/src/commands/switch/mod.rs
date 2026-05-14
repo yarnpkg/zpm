@@ -14,6 +14,7 @@ pub mod link_migration;
 pub mod link;
 pub mod postinstall;
 pub mod unlink;
+pub mod up;
 pub mod update;
 pub mod version;
 pub mod which;
