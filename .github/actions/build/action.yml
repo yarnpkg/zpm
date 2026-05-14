@@ -22,6 +22,7 @@ runs:
   using: composite
   steps:
     - name: Install cross
+      if: ${{ !endsWith(inputs.target, '-apple-darwin') }}
       uses: taiki-e/install-action@a27ef18d36cfa66b0af3a360104621793b41c036 # v2.54.3
       with:
         tool: cross
@@ -57,5 +58,9 @@ runs:
     - name: Build ${{steps.version.outputs.version}}
       shell: bash
       run: |
-        cross build --verbose --profile=${{inputs.profile}} --target=${{inputs.target}}
+        if [[ "${{inputs.target}}" == *-apple-darwin ]]; then
+          cargo build --verbose --profile=${{inputs.profile}} --target=${{inputs.target}}
+        else
+          cross build --verbose --profile=${{inputs.profile}} --target=${{inputs.target}}
+        fi
         cp LICENSE.md target/${{inputs.target}}/${{inputs.profile}}/
