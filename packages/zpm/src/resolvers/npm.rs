@@ -24,7 +24,7 @@ static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-g
  * We need to read the scripts to figure out whether the package has an implicit node-gyp dependency.
  */
 #[derive(Clone, Deserialize, Debug)]
-struct RemoteManifestWithScripts {
+pub(crate) struct RemoteManifestWithScripts {
     #[serde(flatten)]
     remote: RemoteManifest,
 
@@ -49,7 +49,7 @@ fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
     }
 }
 
-fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: zpm_semver::Version, mut manifest: RemoteManifestWithScripts) -> Result<ResolutionResult, Error> {
+pub(crate) fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: zpm_semver::Version, mut manifest: RemoteManifestWithScripts) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
@@ -97,7 +97,7 @@ pub async fn resolve_semver_or_workspace_descriptor(context: &InstallContext<'_>
     resolve_semver_descriptor(context, descriptor, params).await
 }
 
-fn is_package_approved(context: &InstallContext<'_>, ident: &Ident, version: &zpm_semver::Version, release_time: Option<&DateTime<Utc>>) -> bool {
+pub(crate) fn is_package_approved(context: &InstallContext<'_>, ident: &Ident, version: &zpm_semver::Version, release_time: Option<&DateTime<Utc>>) -> bool {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 

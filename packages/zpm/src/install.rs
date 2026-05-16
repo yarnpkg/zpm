@@ -36,6 +36,7 @@ pub struct InstallContext<'a> {
     pub systems: Option<&'a Vec<System>>,
     pub check_checksums: bool,
     pub check_resolutions: bool,
+    pub enforced_resolution_results: BTreeMap<Descriptor, ResolutionResult>,
     pub prune_dev_dependencies: bool,
     pub enforced_resolutions: BTreeMap<Descriptor, Option<Locator>>,
     pub refresh_lockfile: bool,
@@ -51,6 +52,7 @@ impl<'a> Default for InstallContext<'a> {
             systems: None,
             check_checksums: false,
             check_resolutions: false,
+            enforced_resolution_results: BTreeMap::new(),
             prune_dev_dependencies: false,
             enforced_resolutions: BTreeMap::new(),
             refresh_lockfile: false,
@@ -78,6 +80,11 @@ impl<'a> InstallContext<'a> {
 
     pub fn set_check_resolutions(mut self, check_resolutions: bool) -> Self {
         self.check_resolutions = check_resolutions;
+        self
+    }
+
+    pub fn set_enforced_resolution_results(mut self, enforced_resolution_results: BTreeMap<Descriptor, ResolutionResult>) -> Self {
+        self.enforced_resolution_results = enforced_resolution_results;
         self
     }
 
@@ -256,6 +263,7 @@ fn resolve_descriptor_impl<'a>(
             match cached {
                 CacheHit::Full(result) => {
                     start_fetch(&result, ctx, maps).await;
+
                     return Ok(result);
                 },
 
@@ -276,6 +284,7 @@ fn resolve_descriptor_impl<'a>(
                     }).await.map_err(Arc::new)?;
 
                     start_fetch(&result, ctx, maps).await;
+
                     return Ok(result);
                 },
             }
@@ -527,6 +536,10 @@ enum CacheHit {
 
 /// Check if a descriptor can be resolved from the lockfile cache.
 fn check_resolution_cache(ctx: &InstallContext<'_>, lockfile: &Lockfile, descriptor: &Descriptor) -> Result<Option<CacheHit>, Error> {
+    if let Some(result) = ctx.enforced_resolution_results.get(descriptor) {
+        return Ok(Some(CacheHit::Full(result.clone())));
+    }
+
     let range_details
         = descriptor.range.details();
 

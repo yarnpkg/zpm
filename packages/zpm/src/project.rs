@@ -17,7 +17,7 @@ use crate::{
     error::Error,
     git::{GitOperation, detect_git_operation},
     http::HttpClient,
-    install::{InstallContext, InstallManager, InstallResult, InstallState},
+    install::{InstallContext, InstallManager, InstallResult, InstallState, ResolutionResult},
     lockfile::{Lockfile, from_legacy_berry_lockfile, from_pnpm_node_modules},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
@@ -53,6 +53,7 @@ pub enum InstallMode {
 pub struct RunInstallOptions {
     pub check_checksums: bool,
     pub check_resolutions: bool,
+    pub enforced_resolution_results: BTreeMap<Descriptor, ResolutionResult>,
     pub enforced_resolutions: BTreeMap<Descriptor, Option<Locator>>,
     pub prune_dev_dependencies: bool,
     pub mode: Option<InstallMode>,
@@ -882,6 +883,7 @@ impl Project {
                     .with_project(Some(self))
                     .set_check_checksums(options.check_checksums)
                     .set_enforced_resolutions(options.enforced_resolutions)
+                    .set_enforced_resolution_results(options.enforced_resolution_results)
                     .set_prune_dev_dependencies(options.prune_dev_dependencies)
                     .set_refresh_lockfile(options.refresh_lockfile)
                     .set_mode(options.mode)

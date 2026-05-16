@@ -1,14 +1,18 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{collections::{BTreeMap, BTreeSet}, io::ErrorKind, time::{Duration, SystemTime}};
 
+use chrono::{DateTime, Utc};
 use futures::{future::BoxFuture, FutureExt};
+use serde::Deserialize;
+use serde_with::{MapSkipError, serde_as};
 use wax::{Glob, Program};
 use zpm_formats::{iter_ext::IterExt, tar, tar_iter};
 use zpm_macro_enum::zpm_enum;
+use zpm_parsers::{JsonDocument, RawJsonValue};
 use zpm_primitives::{AnonymousSemverRange, AnonymousTagRange, Descriptor, FolderRange, Ident, Locator, Range, RegistrySemverRange, RegistryTagRange, TarballRange, WorkspaceMagicRange};
 use zpm_semver::RangeKind;
-use zpm_utils::Path;
+use zpm_utils::{Hash64, Path};
 
-use crate::{error::Error, install::InstallContext, manifest::helpers::{parse_manifest_from_bytes, read_manifest}, project::Project, report::{with_report_result, StreamReport, StreamReportConfig}, resolvers};
+use crate::{error::Error, http_npm, install::{InstallContext, ResolutionResult}, manifest::helpers::{parse_manifest_from_bytes, read_manifest}, npm, project::Project, report::{with_report_result, StreamReport, StreamReportConfig}, resolvers};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ResolveOptions {
@@ -18,10 +22,141 @@ pub struct ResolveOptions {
     pub allow_reuse: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub struct LooseResolution {
     pub descriptor: Descriptor,
     pub locator: Option<Locator>,
+    pub resolution: Option<ResolutionResult>,
+}
+
+const ADD_PACKUMENT_CACHE_TTL: Duration = Duration::from_secs(30);
+
+#[serde_as]
+#[derive(Deserialize)]
+struct RegistryMetadata<'a> {
+    #[serde(default)]
+    #[serde(rename(deserialize = "dist-tags"))]
+    dist_tags: BTreeMap<String, zpm_semver::Version>,
+
+    #[serde_as(as = "Option<MapSkipError<_, _>>")]
+    time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
+
+    #[serde(borrow)]
+    versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
+}
+
+fn add_packument_cache_path(project: &Project, registry_base: &str, registry_path: &str) -> Path {
+    let cache_key
+        = Hash64::from_data(format!("{registry_base}{registry_path}"));
+
+    project.ignore_path()
+        .with_join_str("npm-metadata")
+        .with_join_str(format!("{}.json", cache_key.short()))
+}
+
+fn read_cached_packument(cache_path: &Path, allow_stale: bool) -> Result<Option<Vec<u8>>, Error> {
+    let metadata = match cache_path.fs_metadata() {
+        Ok(metadata) => metadata,
+
+        Err(error) if error.io_kind() == Some(ErrorKind::NotFound) => {
+            return Ok(None);
+        },
+
+        Err(error) => {
+            return Err(error.into());
+        },
+    };
+
+    if !allow_stale {
+        let age = SystemTime::now()
+            .duration_since(metadata.modified()?)
+            .unwrap_or_default();
+
+        if age > ADD_PACKUMENT_CACHE_TTL {
+            return Ok(None);
+        }
+    }
+
+    Ok(Some(cache_path.fs_read_prealloc()?))
+}
+
+async fn fetch_registry_metadata(context: &InstallContext<'_>, package_ident: &Ident) -> Result<Vec<u8>, Error> {
+    let project = context.project.as_ref()
+        .expect("Project is required for resolving registry metadata");
+
+    let registry_base
+        = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
+    let registry_path
+        = npm::registry_url_for_all_versions(package_ident);
+
+    let authorization
+        = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+            configuration: &project.config,
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: Some(package_ident),
+            auth_mode: http_npm::AuthorizationMode::RespectConfiguration,
+            allow_oidc: false,
+        }).await?;
+
+    let cache_path = authorization.is_none()
+        .then(|| add_packument_cache_path(project, &registry_base, &registry_path));
+
+    if let Some(cache_path) = cache_path.as_ref() {
+        if let Some(bytes) = read_cached_packument(cache_path, false)? {
+            return Ok(bytes);
+        }
+    }
+
+    let bytes = match http_npm::get(&http_npm::NpmHttpParams {
+        http_client: &project.http_client,
+        registry: &registry_base,
+        path: &registry_path,
+        authorization: authorization.as_deref(),
+        otp: None,
+    }).await {
+        Ok(bytes) => bytes.to_vec(),
+
+        Err(error @ Error::NetworkDisabledError(_)) => {
+            if let Some(cache_path) = cache_path.as_ref() {
+                if let Some(bytes) = read_cached_packument(cache_path, true)? {
+                    return Ok(bytes);
+                }
+            }
+
+            return Err(error);
+        },
+
+        Err(error) => {
+            return Err(error);
+        },
+    };
+
+    if let Some(cache_path) = cache_path.as_ref() {
+        let _ = cache_path.fs_create_parent()
+            .and_then(|_| cache_path.fs_write(&bytes));
+    }
+
+    Ok(bytes)
+}
+
+fn find_semver_candidate<'a>(context: &InstallContext<'_>, package_ident: &Ident, range: &zpm_semver::Range, registry_data: &'a RegistryMetadata<'a>) -> Option<(&'a zpm_semver::Version, &'a RawJsonValue<'a>)> {
+    let project = context.project.as_ref()
+        .expect("Project is required for resolving semver candidates");
+
+    registry_data.versions.iter().rev()
+        .filter(|(version, _)| range.check(version))
+        .find(|(version, _)| {
+            let release_time = project.config.settings.npm_minimal_age_gate.value
+                .and_then(|_| registry_data.time.as_ref())
+                .and_then(|times| times.get(*version));
+
+            resolvers::npm::is_package_approved(context, package_ident, version, release_time)
+        })
+}
+
+fn build_registry_resolution_result(context: &InstallContext<'_>, descriptor: &Descriptor, package_ident: &Ident, version: &zpm_semver::Version, manifest: resolvers::npm::RemoteManifestWithScripts) -> Result<ResolutionResult, Error> {
+    resolvers::npm::build_resolution_result(context, descriptor, package_ident, version.clone(), manifest)
 }
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidRange(s.to_string())))]
@@ -161,6 +296,7 @@ impl LooseDescriptor {
                 Ok(LooseResolution {
                     descriptor,
                     locator: None,
+                    resolution: None,
                 })
             }
 
@@ -182,6 +318,7 @@ impl LooseDescriptor {
                 Ok(LooseResolution {
                     descriptor,
                     locator: None,
+                    resolution: None,
                 })
             },
 
@@ -209,6 +346,7 @@ impl LooseDescriptor {
                 Ok(LooseResolution {
                     descriptor: descriptor.clone(),
                     locator: None,
+                    resolution: None,
                 })
             },
 
@@ -223,6 +361,7 @@ impl LooseDescriptor {
                     return Ok(LooseResolution {
                         descriptor,
                         locator: None,
+                        resolution: None,
                     });
                 }
 
@@ -231,6 +370,7 @@ impl LooseDescriptor {
                         return Ok(LooseResolution {
                             descriptor: descriptor.clone(),
                             locator: None,
+                            resolution: None,
                         });
                     }
                 }
@@ -256,22 +396,37 @@ impl LooseDescriptor {
             return Ok(LooseResolution {
                 descriptor,
                 locator: None,
+                resolution: None,
             });
         };
 
-        // Otherwise we resolve them
-        let resolution_result
-            = resolvers::npm::resolve_semver_descriptor(context, &descriptor, &range_params).await?;
+        let package_ident = range_ident
+            .unwrap_or(ident);
 
-        let range = resolution_result.resolution.version
+        let bytes
+            = fetch_registry_metadata(context, package_ident).await?;
+        let registry_data: RegistryMetadata<'_>
+            = JsonDocument::hydrate_from_slice(&bytes[..])?;
+
+        let (resolved_version, manifest_value) = find_semver_candidate(context, package_ident, &range_params.range, &registry_data)
+            .ok_or_else(|| Error::NoCandidatesFound(descriptor.range.clone()))?;
+
+        let manifest: resolvers::npm::RemoteManifestWithScripts
+            = JsonDocument::hydrate_from_value(manifest_value)?;
+
+        let range = resolved_version
             .to_range(range_kind);
 
         let descriptor
             = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
+        let resolution
+            = build_registry_resolution_result(context, &descriptor, package_ident, resolved_version, manifest)?;
+        let locator = resolution.resolution.locator.clone();
 
         Ok(LooseResolution {
             descriptor,
-            locator: Some(resolution_result.resolution.locator),
+            locator: Some(locator),
+            resolution: Some(resolution),
         })
     }
 
@@ -283,60 +438,59 @@ impl LooseDescriptor {
             return Ok(LooseResolution {
                 descriptor,
                 locator: None,
+                resolution: None,
             });
         }
 
-        let descriptor
-            = Descriptor::new(ident.clone(), RegistryTagRange {ident: range_ident.cloned(), tag: tag.into()}.into());
+        let package_ident = range_ident
+            .unwrap_or(ident);
 
-        let Range::RegistryTag(range_params) = &descriptor.range else {
-            panic!("Invalid range");
-        };
+        let bytes
+            = fetch_registry_metadata(context, package_ident).await?;
+        let registry_data: RegistryMetadata<'_>
+            = JsonDocument::hydrate_from_slice(&bytes[..])?;
 
-        let resolution_result
-            = resolvers::npm::resolve_tag_descriptor(context, &descriptor, &range_params).await?;
+        let latest_version = registry_data.dist_tags
+            .get(tag)
+            .ok_or_else(|| Error::TagNotFound(tag.to_string()))?;
 
-        let range = resolution_result.resolution.version
+        let (resolved_version, manifest_value) = registry_data.versions.iter().rev()
+            .filter(|(version, _)| *version <= latest_version)
+            .filter(|(version, _)| !version.rc.is_some() || latest_version.rc.is_some())
+            .find(|(version, _)| {
+                let release_time = registry_data.time.as_ref()
+                    .and_then(|times| times.get(*version));
+
+                resolvers::npm::is_package_approved(context, package_ident, version, release_time)
+            })
+            .ok_or_else(|| Error::NoCandidatesFound(AnonymousSemverRange {range: zpm_semver::Range::lte(latest_version.clone())}.into()))?;
+
+        let manifest: resolvers::npm::RemoteManifestWithScripts
+            = JsonDocument::hydrate_from_value(manifest_value)?;
+
+        let derived_range = resolved_version
             .to_range(options.range_kind);
+        let range_matches = find_semver_candidate(context, package_ident, &derived_range, &registry_data)
+            .map(|(version, _)| version == resolved_version)
+            .unwrap_or(false);
 
-        let descriptor
-            = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
-
-        let Range::RegistrySemver(range_params) = &descriptor.range else {
-            panic!("Invalid range");
+        let final_range = if range_matches {
+            derived_range
+        } else {
+            resolved_version.to_range(RangeKind::Exact)
         };
 
-        // We must check whether resolving the range would yield a
-        // different version than the one we just resolved (this can
-        // happen if, say, we have `rc: 1.0.0-rc.1`, and there's a
-        // release version `1.1.0`).
-        //
-        // In that case we force the descriptor to use a fixed version
-        // rather than the requested range_kind.
+        let descriptor
+            = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: final_range}.into());
+        let resolution
+            = build_registry_resolution_result(context, &descriptor, package_ident, resolved_version, manifest)?;
+        let locator = resolution.resolution.locator.clone();
 
-        let resolution_check_result
-            = resolvers::npm::resolve_semver_descriptor(context, &descriptor, &range_params).await?;
-
-        if resolution_check_result.resolution.version == resolution_result.resolution.version {
-            let descriptor
-                = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
-
-            Ok(LooseResolution {
-                descriptor,
-                locator: Some(resolution_check_result.resolution.locator),
-            })
-        } else {
-            let fixed_range = resolution_result.resolution.version
-                .to_range(RangeKind::Exact);
-
-            let descriptor
-                = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: fixed_range.clone()}.into());
-
-            Ok(LooseResolution {
-                descriptor,
-                locator: Some(resolution_result.resolution.locator),
-            })
-        }
+        Ok(LooseResolution {
+            descriptor,
+            locator: Some(locator),
+            resolution: Some(resolution),
+        })
     }
 }
 

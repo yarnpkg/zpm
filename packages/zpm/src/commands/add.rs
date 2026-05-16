@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, time::UNIX_EPOCH};
 
 use clipanion::cli;
 use zpm_parsers::{Document, JsonDocument, Value};
@@ -11,6 +11,7 @@ use crate::{
     descriptor_loose::{self, LooseDescriptor},
     error::Error,
     install::InstallContext,
+    manifest::helpers::parse_manifest_from_bytes,
     project::{self, InstallMode}
 };
 
@@ -194,7 +195,7 @@ pub struct Add {
 
 impl Add {
     pub async fn execute(&self) -> Result<(), Error> {
-        let project
+        let mut project
             = project::Project::new(None).await?;
 
         let range_kind = if self.fixed {
@@ -320,16 +321,30 @@ impl Add {
         manifest_path
             .fs_change(&document.input, false)?;
 
-        let mut project
-            = project::Project::new(None).await?;
+        let manifest_meta = manifest_path
+            .fs_metadata()?;
+        let last_changed_at = manifest_meta.modified()?
+            .duration_since(UNIX_EPOCH).unwrap()
+            .as_nanos();
+
+        let active_workspace = project.active_workspace_mut()?;
+        active_workspace.manifest = parse_manifest_from_bytes(&document.input)?;
+        active_workspace.last_changed_at = last_changed_at;
+        project.last_modified_at.update(last_changed_at);
 
         let enforced_resolutions
+            = resolutions.iter()
+                .filter_map(|resolution| resolution.locator.clone().map(|locator| (resolution.descriptor.clone(), Some(locator))))
+                .collect();
+
+        let enforced_resolution_results
             = resolutions.into_iter()
-                .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, Some(locator))))
+                .filter_map(|resolution| resolution.resolution.map(|result| (resolution.descriptor, result)))
                 .collect();
 
         project.run_install(project::RunInstallOptions {
             mode: self.mode,
+            enforced_resolution_results,
             enforced_resolutions,
             silent_or_error: self.silent,
             ..Default::default()
