@@ -200,6 +200,10 @@ pub struct Add {
 
     // ---
 
+    /// Disable the minimum release age check for this command
+    #[cli::option("--no-time-gate", default = false)]
+    no_time_gate: bool,
+
     /// Select the artifacts this install will generate
     #[cli::option("--mode")]
     mode: Option<InstallMode>,
@@ -216,8 +220,12 @@ pub struct Add {
 
 impl Add {
     pub async fn execute(&self) -> Result<(), Error> {
-        let project
+        let mut project
             = project::Project::new(None).await?;
+
+        if self.no_time_gate {
+            project.config.settings.npm_minimal_age_gate.force(std::time::Duration::ZERO, zpm_config::Source::Cli);
+        }
 
         let range_kind = if self.fixed {
             RangeKind::Exact

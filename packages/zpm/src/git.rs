@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use git_url_parse::GitUrl;
 use regex::Regex;
 use reqwest::Url;
+use zpm_config::Setting;
 use zpm_git::{GitRange, GitSource, GitTreeish};
 use zpm_primitives::AnonymousSemverRange;
 use zpm_utils::{repeat_until_ok, Path};
@@ -112,7 +113,46 @@ pub async fn diff_folders(original: &Path, user: &Path) -> Result<String, Error>
     Ok(diff)
 }
 
-fn validate_repo_url(url: &str, config: &HttpConfig) -> Result<(), Error> {
+fn glob_to_regex(glob: &str) -> String {
+    let mut result = String::from("^");
+    let chars: Vec<char> = glob.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '*' {
+            result.push_str(".*");
+            i += 2;
+        } else if chars[i] == '*' {
+            result.push_str("[^/]*");
+            i += 1;
+        } else if chars[i] == '?' {
+            result.push_str("[^/]");
+            i += 1;
+        } else {
+            if "\\^$.|+()[]{}".contains(chars[i]) {
+                result.push('\\');
+            }
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result.push('$');
+    result
+}
+
+fn matches_approved_git_repository(url: &str, patterns: &[Setting<String>]) -> bool {
+    if patterns.is_empty() {
+        return false;
+    }
+
+    patterns.iter().any(|pattern| {
+        let regex_str = glob_to_regex(&pattern.value);
+        Regex::new(&regex_str).map_or(false, |re| re.is_match(url))
+    })
+}
+
+fn validate_repo_url(url: &str, config: &HttpConfig, approved_repos: &[Setting<String>]) -> Result<(), Error> {
     let git_url
         = GitUrl::parse(url)
             .map_err(|_| Error::InvalidGitUrl(url.to_owned()))?;
@@ -121,21 +161,25 @@ fn validate_repo_url(url: &str, config: &HttpConfig) -> Result<(), Error> {
         return Ok(());
     };
 
-    let url
+    let host_url
         = format!("https://{}", host);
-    let url = Url::parse(&url)
-        .map_err(|_| Error::InvalidUrl(url.to_owned()))?;
+    let host_url = Url::parse(&host_url)
+        .map_err(|_| Error::InvalidUrl(host_url.to_owned()))?;
 
-    if !config.is_network_enabled(&url) {
-        return Err(Error::NetworkDisabledError(url));
+    if !config.is_network_enabled(&host_url) {
+        return Err(Error::NetworkDisabledError(host_url));
+    }
+
+    if !matches_approved_git_repository(url, approved_repos) {
+        return Err(Error::ApprovedGitRepositoriesError(url.to_owned()));
     }
 
     Ok(())
 }
 
-async fn ls_remote(repo: &GitSource, config: &HttpConfig) -> Result<BTreeMap<String, String>, Error> {
+async fn ls_remote(repo: &GitSource, config: &HttpConfig, approved_repos: &[Setting<String>]) -> Result<BTreeMap<String, String>, Error> {
     repeat_until_ok(repo.to_urls(), |url| async move {
-        validate_repo_url(&url, config)?;
+        validate_repo_url(&url, config, approved_repos)?;
 
         let output = ScriptEnvironment::new()?
             .with_env(make_git_env())
@@ -159,14 +203,14 @@ async fn ls_remote(repo: &GitSource, config: &HttpConfig) -> Result<BTreeMap<Str
     }).await
 }
 
-pub async fn resolve_git_treeish(git_range: &GitRange, config: &HttpConfig) -> Result<String, Error> {
+pub async fn resolve_git_treeish(git_range: &GitRange, config: &HttpConfig, approved_repos: &[Setting<String>]) -> Result<String, Error> {
     match &git_range.treeish {
         GitTreeish::AnythingGoes(treeish) => {
-            if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Commit(treeish.clone()), config).await {
+            if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Commit(treeish.clone()), config, approved_repos).await {
                 Ok(result)
-            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Tag(treeish.clone()), config).await {
+            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Tag(treeish.clone()), config, approved_repos).await {
                 Ok(result)
-            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Head(treeish.clone()), config).await {
+            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Head(treeish.clone()), config, approved_repos).await {
                 Ok(result)
             } else {
                 Err(Error::InvalidGitSpecifier)
@@ -174,13 +218,13 @@ pub async fn resolve_git_treeish(git_range: &GitRange, config: &HttpConfig) -> R
         },
 
         _ => {
-            resolve_git_treeish_stricter(&git_range.repo, git_range.treeish.clone(), config).await
+            resolve_git_treeish_stricter(&git_range.repo, git_range.treeish.clone(), config, approved_repos).await
         },
     }
 }
 
-async fn resolve_git_treeish_stricter(repo: &GitSource, treeish: GitTreeish, config: &HttpConfig) -> Result<String, Error> {
-    let refs = ls_remote(repo, config).await?;
+async fn resolve_git_treeish_stricter(repo: &GitSource, treeish: GitTreeish, config: &HttpConfig, approved_repos: &[Setting<String>]) -> Result<String, Error> {
+    let refs = ls_remote(repo, config, approved_repos).await?;
 
     match treeish {
         GitTreeish::AnythingGoes(_) => {
@@ -258,6 +302,8 @@ pub async fn clone_repository(context: &InstallContext<'_>, source: &GitSource, 
     let project = context.project
         .expect("The project is required for cloning repositories");
 
+    let approved_repos = &project.config.settings.approved_git_repositories;
+
     let clone_dir
         = Path::temp_dir()?;
 
@@ -271,7 +317,7 @@ pub async fn clone_repository(context: &InstallContext<'_>, source: &GitSource, 
             .await
             .expect("The clone limiter semaphore should not be closed");
 
-    git_clone_into(source, commit, &clone_dir, &project.http_client.config).await?;
+    git_clone_into(source, commit, &clone_dir, &project.http_client.config, approved_repos).await?;
     Ok(clone_dir)
 }
 
@@ -283,9 +329,9 @@ async fn download_into(source: &GitSource, commit: &str, download_dir: &Path, ht
     Ok(None)
 }
 
-async fn git_clone_into(source: &GitSource, commit: &str, clone_dir: &Path, config: &HttpConfig) -> Result<(), Error> {
+async fn git_clone_into(source: &GitSource, commit: &str, clone_dir: &Path, config: &HttpConfig, approved_repos: &[Setting<String>]) -> Result<(), Error> {
     repeat_until_ok(source.to_urls(), |clone_url| async move {
-        validate_repo_url(&clone_url, config)?;
+        validate_repo_url(&clone_url, config, approved_repos)?;
 
         ScriptEnvironment::new()?
             .with_env(make_git_env())

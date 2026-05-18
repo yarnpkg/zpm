@@ -6,6 +6,14 @@
     "enableAutoTypes": ["tsEnableAutoTypes"]
   },
   "properties": {
+    "approvedGitRepositories": {
+      "type": "array",
+      "description": "Array of glob patterns for git repository URLs that are allowed to be fetched. An empty list blocks all git dependencies.",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
     "changesetBaseRefs": {
       "type": "array",
       "description": "The list of git refs to use as base for changeset detection. Defaults to ['main', 'master'] if not set.",
@@ -113,7 +121,7 @@
     "enableScripts": {
       "type": "boolean",
       "description": "Whether to run postinstall scripts",
-      "default": true
+      "default": false
     },
     "enableStrictSsl": {
       "type": "boolean",
@@ -269,8 +277,9 @@
       "description": "The registry to use when auditing packages via `yarn npm audit`"
     },
     "npmMinimalAgeGate": {
-      "type": ["std::time::Duration", "null"],
-      "description": "Minimum age of a package version in minutes to be considered for installation. Can be used to prevent installing very new packages, either because they tend to be more likely to include accidental bugs, or because of supply-chain security concerns."
+      "type": "std::time::Duration",
+      "description": "Minimum age of a package version to be considered for installation. Can be used to prevent installing very new packages, either because they tend to be more likely to include accidental bugs, or because of supply-chain security concerns.",
+      "default": "1d"
     },
     "npmPreapprovedPackages": {
       "type": "array",

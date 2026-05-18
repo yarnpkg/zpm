@@ -104,7 +104,8 @@ fn is_package_approved(context: &InstallContext<'_>, ident: &Ident, version: &zp
     let check_config
         = || project.config.settings.npm_preapproved_packages.iter().any(|setting| setting.value.check(ident, version));
 
-    if let Some(minimal_age_gate) = project.config.settings.npm_minimal_age_gate.value {
+    let minimal_age_gate = project.config.settings.npm_minimal_age_gate.value;
+    if !minimal_age_gate.is_zero() {
         if release_time.map_or(false, |time| context.install_time < *time + minimal_age_gate) {
             return check_config();
         }
@@ -204,10 +205,11 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         }
 
         // Skip if the version is more recent than the minimum age gate
-        let time
-            = project.config.settings.npm_minimal_age_gate.value
-                .and_then(|_| registry_data.time.as_ref())
-                .and_then(|map| map.get(version));
+        let time = if !project.config.settings.npm_minimal_age_gate.value.is_zero() {
+            registry_data.time.as_ref().and_then(|map| map.get(version))
+        } else {
+            None
+        };
 
         if !is_package_approved(context, package_ident, version, time) {
             continue;

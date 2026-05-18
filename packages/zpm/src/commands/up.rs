@@ -75,6 +75,10 @@ pub struct Up {
 
     // ---
 
+    /// Disable the minimum release age check for this command
+    #[cli::option("--no-time-gate", default = false)]
+    no_time_gate: bool,
+
     /// Change what artifacts this install will generate
     #[cli::option("--mode")]
     mode: Option<InstallMode>,
@@ -91,8 +95,12 @@ impl Up {
             return self.execute_recursive().await;
         }
 
-        let project
+        let mut project
             = Project::new(None).await?;
+
+        if self.no_time_gate {
+            project.config.settings.npm_minimal_age_gate.force(std::time::Duration::ZERO, zpm_config::Source::Cli);
+        }
 
         let all_idents = project.workspaces.iter()
             .flat_map(|workspace| self.list_workspace_idents(workspace))
@@ -187,6 +195,10 @@ impl Up {
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut project = Project::new(None).await?;
+
+        if self.no_time_gate {
+            project.config.settings.npm_minimal_age_gate.force(std::time::Duration::ZERO, zpm_config::Source::Cli);
+        }
 
         let lockfile = project.lockfile()?;
 

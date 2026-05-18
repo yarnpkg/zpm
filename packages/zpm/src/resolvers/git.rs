@@ -12,7 +12,7 @@ pub async fn resolve_descriptor(context: &InstallContext<'_>, descriptor: &Descr
         .expect("The project is required for resolving a git package");
 
     let commit
-        = git::resolve_git_treeish(&params.git, &project.http_client.config).await?;
+        = git::resolve_git_treeish(&params.git, &project.http_client.config, &project.config.settings.approved_git_repositories).await?;
 
     let git_reference = zpm_git::GitReference {
         repo: params.git.repo.clone(),

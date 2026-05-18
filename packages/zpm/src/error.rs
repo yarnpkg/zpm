@@ -123,6 +123,9 @@ pub enum Error {
     #[error("Request to '{0}' has been blocked because of your configuration settings.")]
     NetworkDisabledError(reqwest::Url),
 
+    #[error("Request to '{0}' has been blocked because it doesn't match any of the patterns in 'approvedGitRepositories'.")]
+    ApprovedGitRepositoriesError(String),
+
     #[error("Unsafe http requests must be explicitly whitelisted in your configuration ({}).", .0.host_str().expect("\"http:\" URL should have a host"))]
     UnsafeHttpError(reqwest::Url),
 
