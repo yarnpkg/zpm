@@ -553,6 +553,10 @@
         }
       }
     },
+    "switchVersionRequirement": {
+      "type": ["zpm_semver::Range", "null"],
+      "description": "When set, validates that the Yarn Switch binary version satisfies this semver range before executing any command."
+    },
     "catalog": {
       "type": "object",
       "description": "Default catalog containing package name to version range mappings. This is an alias for catalogs.default.",

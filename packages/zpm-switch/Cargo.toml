@@ -24,6 +24,7 @@ futures = { workspace = true }
 open = { workspace = true }
 uuid = { version = "1.21.0", features = ["v4"] }
 zpm-allocator = { workspace = true }
+serde_yaml = { workspace = true }
 zpm-formats = { workspace = true }
 zpm-macro-enum = { workspace = true }
 zpm-parsers = { workspace = true }

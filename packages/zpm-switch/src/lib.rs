@@ -1,3 +1,4 @@
+pub mod config;
 pub mod daemons;
 mod errors;
 mod http;

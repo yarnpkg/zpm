@@ -3,7 +3,7 @@ use std::{process::{Command, ExitStatus, Stdio}, sync::Arc};
 use clipanion::cli;
 use zpm_utils::ToFileString;
 
-use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, ipc::YARNSW_PATH_ENV, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}, yarn::resolve_selector, yarn_enums::Selector};
+use crate::{config::validate_yarn_version, cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, ipc::YARNSW_PATH_ENV, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}, yarn::resolve_selector, yarn_enums::Selector};
 
 /// Call a custom Yarn binary for the current project
 #[cli::command(proxy)]
@@ -17,6 +17,10 @@ pub struct ExplicitCommand {
 
 impl ExplicitCommand {
     pub async fn run(reference: &PackageManagerReference, args: &[String]) -> Result<ExitStatus, Error> {
+        if let PackageManagerReference::Version(params) = reference {
+            validate_yarn_version(&params.version)?;
+        }
+
         let mut binary = match reference {
             PackageManagerReference::Version(params)
                 => install_package_manager(params).await?,

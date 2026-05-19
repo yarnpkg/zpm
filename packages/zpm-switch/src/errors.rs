@@ -27,6 +27,9 @@ pub enum Error {
     #[error(transparent)]
     JsonError(#[from] zpm_parsers::Error),
 
+    #[error(transparent)]
+    YamlError(#[from] Arc<serde_yaml::Error>),
+
     #[error("Internal error: Join failed ({0})")]
     JoinFailed(#[from] Arc<JoinError>),
 
@@ -93,6 +96,12 @@ pub enum Error {
     #[error("Failed to start daemon: {0}")]
     FailedToStartDaemon(Arc<std::io::Error>),
 
+    #[error("The resolved Yarn version ({actual}) does not satisfy the required range ({requirement})", actual = .actual.to_print_string(), requirement = .requirement.to_print_string())]
+    SwitchVersionMismatch {
+        requirement: zpm_semver::Range,
+        actual: zpm_semver::Version,
+    },
+
     #[error("No daemon is running for this project")]
     DaemonNotRunning,
 
@@ -138,6 +147,12 @@ impl From<JoinError> for Error {
 
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
+        Error::from(Arc::new(value))
+    }
+}
+
+impl From<serde_yaml::Error> for Error {
+    fn from(value: serde_yaml::Error) -> Self {
         Error::from(Arc::new(value))
     }
 }

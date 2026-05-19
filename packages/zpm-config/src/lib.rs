@@ -1166,6 +1166,9 @@ merge_optional_settings!(zpm_primitives::PeerRange);
 merge_optional_settings!(zpm_primitives::Range);
 merge_optional_settings!(zpm_primitives::Reference);
 
+merge_settings!(zpm_semver::Range, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_optional_settings!(zpm_semver::Range);
+
 merge_settings!(zpm_semver::RangeKind, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_optional_settings!(zpm_semver::RangeKind);
 

@@ -5005,6 +5005,7 @@ dependencies = [
  "serde_json",
  "serde_plain",
  "serde_with",
+ "serde_yaml",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
