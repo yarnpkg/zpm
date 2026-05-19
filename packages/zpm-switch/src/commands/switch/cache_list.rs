@@ -1,7 +1,7 @@
 use clipanion::cli;
 use zpm_utils::{tree, AbstractValue, IoResultExt, Path, TimeAgo};
 
-use crate::{cache, errors::Error};
+use crate::{cache, errors::Error, links::list_configs};
 
 /// List all cached Yarn binaries
 #[cli::command]
@@ -19,41 +19,57 @@ impl CacheListCommand {
         let cache_dir
             = cache::cache_dir()?;
 
-        let Some(cache_entries) = cache_dir.fs_read_dir().ok_missing()? else {
-            return Ok(());
-        };
+        if let Some(cache_entries) = cache_dir.fs_read_dir().ok_missing()? {
+            for entry in cache_entries {
+                let entry
+                    = entry?;
 
-        for entry in cache_entries {
-            let entry
-                = entry?;
+                let entry_path
+                    = Path::try_from(entry.path())?;
+                let entry_meta
+                    = cache::cache_metadata(&entry_path);
+                let entry_age
+                    = cache::cache_last_used(&entry_path);
 
-            let entry_path
-                = Path::try_from(entry.path())?;
-            let entry_meta
-                = cache::cache_metadata(&entry_path);
-            let entry_age
-                = cache::cache_last_used(&entry_path);
+                let Ok(entry_meta) = entry_meta else {
+                    continue;
+                };
 
-            let Ok(entry_meta) = entry_meta else {
-                continue;
-            };
+                let Ok(entry_age) = entry_age else {
+                    continue;
+                };
 
-            let Ok(entry_age) = entry_age else {
+                nodes.push(tree::Node {
+                    label: None,
+                    value: Some(AbstractValue::new(entry_meta.version)),
+                    children: Some(tree::TreeNodeChildren::Map(tree::Map::from([
+                        ("path".to_string(), tree::Node {
+                            label: Some("Path".to_string()),
+                            value: Some(AbstractValue::new(entry_path)),
+                            children: None,
+                        }),
+                        ("age".to_string(), tree::Node {
+                            label: Some("Age".to_string()),
+                            value: Some(AbstractValue::new(TimeAgo::new(entry_age.elapsed().unwrap()))),
+                            children: None,
+                        }),
+                    ]))),
+                });
+            }
+        }
+
+        for config in list_configs()? {
+            let Some(trusted) = config.trusted else {
                 continue;
             };
 
             nodes.push(tree::Node {
                 label: None,
-                value: Some(AbstractValue::new(entry_meta.version)),
+                value: Some(AbstractValue::new(config.project_cwd)),
                 children: Some(tree::TreeNodeChildren::Map(tree::Map::from([
-                    ("path".to_string(), tree::Node {
-                        label: Some("Path".to_string()),
-                        value: Some(AbstractValue::new(entry_path)),
-                        children: None,
-                    }),
-                    ("age".to_string(), tree::Node {
-                        label: Some("Age".to_string()),
-                        value: Some(AbstractValue::new(TimeAgo::new(entry_age.elapsed().unwrap()))),
+                    ("trusted".to_string(), tree::Node {
+                        label: Some("Trusted".to_string()),
+                        value: Some(AbstractValue::new(trusted)),
                         children: None,
                     }),
                 ]))),

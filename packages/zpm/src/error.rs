@@ -418,6 +418,12 @@ pub enum Error {
     #[error("Binary failed to spawn: {error} ({}, in {})", DataType::Code.colorize(name), path.to_print_string())]
     SpawnFailed { name: String, path: Path, error: Arc<Box<dyn std::error::Error + Send + Sync>> },
 
+    #[error("The project at {} must be trusted before Yarn can run install scripts; run {} to trust it.", .0.to_print_string(), DataType::Code.colorize(&format!("yarn switch trust --set true {}", .0.to_print_string())))]
+    ProjectTrustRequired(Path),
+
+    #[error("The project at {} isn't trusted, so Yarn won't run install scripts.", .0.to_print_string())]
+    ProjectNotTrusted(Path),
+
     #[error("No binaries available in the dlx context")]
     MissingBinariesDlxContent,
 

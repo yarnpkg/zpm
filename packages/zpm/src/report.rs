@@ -1,7 +1,7 @@
 use std::{cell::RefCell, future::Future, io::{self, Write}, sync::{Arc, LazyLock, atomic::AtomicU32, mpsc}, thread::JoinHandle, time::{Duration, SystemTime}};
 
 use colored::{Color, Colorize};
-use dialoguer::{Input, Password};
+use dialoguer::{Confirm, Input, Password};
 use itertools::Itertools;
 use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
 use zpm_config::Configuration;
@@ -185,6 +185,7 @@ impl Severity {
 
 #[derive(Debug)]
 pub enum PromptType {
+    Confirm(String),
     Input(String),
     Password(String),
 }
@@ -396,6 +397,18 @@ impl Reporter {
         self.last_message_type = Some(LastMessageType::Prompt);
 
         match prompt {
+            PromptType::Confirm(prompt) => {
+                let label
+                    = self.format_prompt(&prompt);
+
+                let confirmed = Confirm::new()
+                    .with_prompt(label)
+                    .interact()
+                    .unwrap();
+
+                self.prompt_tx.send(confirmed.to_string()).unwrap();
+            },
+
             PromptType::Input(prompt) => {
                 let label
                     = self.format_prompt(&prompt);

@@ -15,6 +15,39 @@ pub struct Link {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
+pub struct FolderConfig {
+    pub project_cwd: Path,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_target: Option<LinkTarget>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted: Option<bool>,
+}
+
+impl FolderConfig {
+    pub fn new(project_cwd: Path) -> Self {
+        Self {
+            project_cwd,
+            link_target: None,
+            trusted: None,
+        }
+    }
+
+    pub fn into_link(self) -> Option<Link> {
+        Some(Link {
+            project_cwd: self.project_cwd,
+            link_target: self.link_target?,
+        })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.link_target.is_none() && self.trusted.is_none()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase")]
 #[serde(tag = "type")]
 pub enum LinkTarget {
     Local {
@@ -44,34 +77,66 @@ pub fn links_dir() -> Result<Path, Error> {
     Ok(links_dir)
 }
 
-pub fn set_link(link: &Link) -> Result<(), Error> {
-    let hash
-        = Hash64::from_data(link.project_cwd.to_file_string().as_bytes());
-
-    let link_path = links_dir()?
-        .with_join_str(format!("{}.json", hash.short()));
-
-    link_path
-        .fs_create_parent()?
-        .fs_write(JsonDocument::to_string(link)?)?;
-
-    Ok(())
-}
-
-pub fn unset_link(project_cwd: &Path) -> Result<(), Error> {
+fn config_path(project_cwd: &Path) -> Result<Path, Error> {
     let hash
         = Hash64::from_data(project_cwd.to_file_string().as_bytes());
 
-    let link_path = links_dir()?
-        .with_join_str(format!("{}.json", hash.short()));
+    Ok(links_dir()?
+        .with_join_str(format!("{}.json", hash.short())))
+}
 
-    link_path
-        .fs_rm()?;
+fn save_config(config: &FolderConfig) -> Result<(), Error> {
+    let config_path
+        = config_path(&config.project_cwd)?;
+
+    if config.is_empty() {
+        config_path
+            .fs_rm()
+            .ok_missing()?;
+
+        return Ok(());
+    }
+
+    config_path
+        .fs_create_parent()?
+        .fs_write(JsonDocument::to_string(config)?)?;
 
     Ok(())
 }
 
-pub fn list_links() -> Result<BTreeSet<Link>, Error> {
+pub fn get_config(project_cwd: &Path) -> Result<Option<FolderConfig>, Error> {
+    let config_path
+        = config_path(project_cwd)?;
+
+    let config = config_path
+        .fs_read_text()
+        .ok_missing()?
+        .and_then(|config| JsonDocument::hydrate_from_str::<FolderConfig>(&config).ok());
+
+    Ok(config)
+}
+
+pub fn set_link(link: &Link) -> Result<(), Error> {
+    let mut config
+        = get_config(&link.project_cwd)?
+            .unwrap_or_else(|| FolderConfig::new(link.project_cwd.clone()));
+
+    config.link_target = Some(link.link_target.clone());
+
+    save_config(&config)
+}
+
+pub fn unset_link(project_cwd: &Path) -> Result<(), Error> {
+    let mut config
+        = get_config(project_cwd)?
+            .unwrap_or_else(|| FolderConfig::new(project_cwd.clone()));
+
+    config.link_target = None;
+
+    save_config(&config)
+}
+
+pub fn list_configs() -> Result<BTreeSet<FolderConfig>, Error> {
     let links_dir
         = links_dir()?;
 
@@ -79,28 +144,42 @@ pub fn list_links() -> Result<BTreeSet<Link>, Error> {
         return Ok(BTreeSet::new());
     };
 
-    let links = dir_entries
+    let configs = dir_entries
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().map_or(false, |f| f.is_file()))
         .filter_map(|link_path| Path::try_from(link_path.path()).ok())
         .filter_map(|link_path| link_path.fs_read_text().ok())
-        .filter_map(|contents| JsonDocument::hydrate_from_str::<Link>(&contents).ok())
+        .filter_map(|contents| JsonDocument::hydrate_from_str::<FolderConfig>(&contents).ok())
+        .collect::<BTreeSet<_>>();
+
+    Ok(configs)
+}
+
+pub fn list_links() -> Result<BTreeSet<Link>, Error> {
+    let links = list_configs()?
+        .into_iter()
+        .filter_map(FolderConfig::into_link)
         .collect::<BTreeSet<_>>();
 
     Ok(links)
 }
 
 pub fn get_link(path: &Path) -> Result<Option<Link>, Error> {
-    let hash
-        = Hash64::from_data(path.to_file_string().as_bytes());
+    Ok(get_config(path)?
+        .and_then(FolderConfig::into_link))
+}
 
-    let link_path = links_dir()?
-        .with_join_str(format!("{}.json", hash.short()));
+pub fn get_trusted(path: &Path) -> Result<Option<bool>, Error> {
+    Ok(get_config(path)?
+        .and_then(|config| config.trusted))
+}
 
-    let link = link_path
-        .fs_read_text()
-        .ok_missing()?
-        .and_then(|link| JsonDocument::hydrate_from_str::<Link>(&link).ok());
+pub fn set_trusted(project_cwd: &Path, trusted: Option<bool>) -> Result<(), Error> {
+    let mut config
+        = get_config(project_cwd)?
+            .unwrap_or_else(|| FolderConfig::new(project_cwd.clone()));
 
-    Ok(link)
+    config.trusted = trusted;
+
+    save_config(&config)
 }

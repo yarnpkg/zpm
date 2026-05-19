@@ -3,14 +3,14 @@
     "version": 9
   },
   "workspaces": {
-    "@yarnpkg/documentation": "3a36e375c2f880ca4b3727f2db3a67968d85b7112518ce2cf2fdc9ce2cde237ab1010ab1320a074b1cece29e0c3b79b415b1b48bca4518c0f9157f0a3818e55d",
-    "@yarnpkg/monorepo": "f5e81432184d8250cce7f479f2ebb436a9b0900c22d0393bf1502e06cdad038193a88a7c6d3d6341963c6426eef186f390b1b44eff3242dc606b9f4a5cdb5846",
+    "@yarnpkg/documentation": "0d2a49c59415f61833a329d0856a519a3dc2880e05a93fd4261a022f0495553489ba1c8fcf697c89630245b868729f076b0f4ece23f4269bf8b80dd0e43c590f",
+    "@yarnpkg/monorepo": "4123f81323b3dd92cfddb18dc51565972d9c5d96c5aaba7b5d06ba4892725320d823fe8761c437abd741f434183e78d4381920998dce38772d23355c6782cfba",
     "@yarnpkg/zpm-constraints": "a602e3cc3ea1dd931ef50091753a9f1de3a06ff9ee0efb29c8222fb3491132ccbac1581220770e74dcf06e2c30189f636b1d7eb691bfdeff36012d3169630bc6",
-    "@yarnpkg/zpm-daemon-ui": "eeab3988f3f683099d2ac293259ca85accca0b08345680953771cb8aea311d570c309aa1dd19294742d23e95a728c70c96b985684fe454ac4a0415ae333e16ee",
-    "acceptance-tests": "e3fd8d082d2569f2db5632be90586713161177de887b3baef196e920aa6eb7a15447fb097a93339f72786bb1de1dab65e30bc9954296037e4fc72a9835d3e178",
+    "@yarnpkg/zpm-daemon-ui": "7c495325ca8b2e78612ebe6fdfd37aaa867ebbc20a5ea9edeb78c8ff94ef5259f977d9f2031179710836353f9eb346e636bf5df5bd17141df9c0ae3b2c1c5f18",
+    "acceptance-tests": "1cdaf10ee16b946ba65e51a762d007c8aeebdf14ece19af987654ab58fcadae0688cec3fc6a495e9ffb2005c27d39cce44b637de7bb9e562a2d8568e62367e71",
     "pkg-tests-core": "27dc1794f148dca7d11639e6ea0877781dcf88daf2e38af45bae8a0f9f259d4f49cb3f960e27849a3ee1e9d702da717d0060409c37fe6b26b23e509382d945e9",
     "pkg-tests-fixtures": "634e2d39424349e30ef9ace3cbe374d6c2b404ab29491084908f538e4f9823567caa6d900e0c15e78c1515ed8b1418294c0e3063027fb7475982d0ddd62c2b64",
-    "pkg-tests-specs": "5cdd5861797fecf735eae28ef1480c96e7cbf11168c7459eaef247e8e9c8ab19a9940ba6436d7a982863a08286a2ca01d1a76cc926501a860822dda6f627ff4a"
+    "pkg-tests-specs": "0c057efce225d6c6b91d4fe5b46a5b8b117176458fd7766224c8e8e8525df58fb10e7b8d701d49d57b48a2c64e5e9111c956b6c90403cc3833183c76d614f10e"
   },
   "entries": {
     "@ai-sdk/gateway@npm:1.0.33": {
@@ -9096,6 +9096,13 @@
       "resolution": {
         "resolution": "defu@npm:6.1.4",
         "version": "6.1.4"
+      }
+    },
+    "demo-postinstall-test@npm:^1.3.0": {
+      "checksum": "58a2212950ce91ece6750350490fbf590c782e3431994958fcbc3bac03155ce335415c1038ceb6a234beb1a32acb14dc1f0eda35122bbabd0ee32ad604238dc9",
+      "resolution": {
+        "resolution": "demo-postinstall-test@npm:1.3.0",
+        "version": "1.3.0"
       }
     },
     "depd@npm:2.0.0, depd@npm:~2.0.0": {

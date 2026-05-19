@@ -48,6 +48,9 @@ pub enum Error {
     #[error("Invalid version selector: {0}")]
     InvalidVersionSelector(String),
 
+    #[error("Invalid trust level: {0}; expected true, false, or null")]
+    InvalidTrustLevel(String),
+
     #[error("Failed to parse manifest: {0}")]
     FailedToParseManifest(zpm_parsers::Error),
 

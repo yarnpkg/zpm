@@ -32,6 +32,7 @@
   "dependencies": {
     "@yarnpkg/eslint-config": "^3.1.0",
     "clipanion": "^4.0.0-rc.4",
+    "demo-postinstall-test": "^1.3.0",
     "eslint": "^9.36.0"
   },
   "resolutions": {

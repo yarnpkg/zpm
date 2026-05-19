@@ -29,6 +29,8 @@ enum SwitchExecCli {
     LinkMigrationCommand(switch::link_migration::LinkMigrationCommand),
     LinkCommand(switch::link::LinkCommand),
     PostinstallCommand(switch::postinstall::PostinstallCommand),
+    TrustCheckCommand(switch::trust::TrustCheckCommand),
+    TrustSetCommand(switch::trust::TrustSetCommand),
     UnlinkCommand(switch::unlink::UnlinkCommand),
     UpCommand(switch::up::UpCommand),
     UpdateCommand(switch::update::UpdateCommand),

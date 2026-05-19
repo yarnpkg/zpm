@@ -13,6 +13,7 @@ pub mod links_list;
 pub mod link_migration;
 pub mod link;
 pub mod postinstall;
+pub mod trust;
 pub mod unlink;
 pub mod up;
 pub mod update;

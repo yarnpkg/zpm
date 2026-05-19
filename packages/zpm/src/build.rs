@@ -65,6 +65,7 @@ impl BuildRequest {
 
         let mut script_env = ScriptEnvironment::new()?
             .with_project(project)
+            .enable_trust_check()
             .with_package(project, &self.locator)?
             .with_env_variable("INIT_CWD", cwd_abs.as_str())
             .with_cwd(cwd_abs.clone());

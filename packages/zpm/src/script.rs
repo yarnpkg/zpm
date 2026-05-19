@@ -3,19 +3,21 @@ use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
-use zpm_utils::{shell_escape, to_shell_line, FromFileString, Hash64, Path, ToFileString};
+use zpm_utils::{DataType, FromFileString, Hash64, Path, ToFileString, shell_escape, to_shell_line};
 use itertools::Itertools;
 use regex::Regex;
-use tokio::process::Command;
+use tokio::{process::Command, sync::Mutex};
 
 use crate::{
     error::Error,
     project::Project,
+    report::{current_report, PromptType},
 };
 
 static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
 static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
 static JS_EXTENSION: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
+static TRUST_PROMPT_RESULT: LazyLock<Mutex<Option<bool>>> = LazyLock::new(|| Mutex::new(None));
 
 fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, module: &str, object: &str) -> String {
     let binary_name
@@ -132,6 +134,12 @@ fn get_self_path() -> Result<Path, Error> {
         .unwrap_or_else(|| Path::current_exe())?;
 
     Ok(self_path)
+}
+
+fn get_switch_path() -> Option<Path> {
+    std::env::var(zpm_switch::YARNSW_PATH_ENV)
+        .ok()
+        .and_then(|path| Path::from_file_string(&path).ok())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -405,6 +413,8 @@ pub struct ScriptEnvironment {
     target_output: TargetOutput,
     stdin: Option<String>,
     signal_delegation: bool,
+    trust_check_enabled: bool,
+    trust_check_project_cwd: Option<Path>,
 }
 
 impl ScriptEnvironment {
@@ -417,6 +427,8 @@ impl ScriptEnvironment {
             target_output: TargetOutput::default(),
             stdin: None,
             signal_delegation: false,
+            trust_check_enabled: false,
+            trust_check_project_cwd: None,
         };
 
         if let Ok(val) = std::env::var("YARNSW_DETECTED_ROOT") {
@@ -504,6 +516,11 @@ impl ScriptEnvironment {
         self
     }
 
+    pub fn enable_trust_check(mut self) -> Self {
+        self.trust_check_enabled = true;
+        self
+    }
+
     pub fn with_project(mut self, project: &Project) -> Self {
         self.remove_pnp_loader();
 
@@ -523,6 +540,7 @@ impl ScriptEnvironment {
         self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
         self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
         self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_file_string()));
+        self.trust_check_project_cwd = Some(project.project_cwd.clone());
 
         self
     }
@@ -548,6 +566,104 @@ impl ScriptEnvironment {
             } else {
                 self.env.insert("NODE_OPTIONS".to_string(), Some(updated.to_string()));
             }
+        }
+    }
+
+    async fn check_project_trust(switch_path: &Path, project_cwd: &Path) -> Result<Option<bool>, Error> {
+        let status
+            = Command::new(switch_path.to_file_string())
+                .args(["switch", "trust", "--check", project_cwd.as_str()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await?;
+
+        match status.code() {
+            Some(0) => Ok(Some(true)),
+            Some(2) => Ok(Some(false)),
+            Some(3) => Ok(None),
+            _ => Err(Error::ChildProcessFailed("yarn switch trust --check".to_string())),
+        }
+    }
+
+    async fn set_project_trust(switch_path: &Path, project_cwd: &Path, trusted: bool) -> Result<(), Error> {
+        let trusted_arg
+            = trusted.to_string();
+
+        let status
+            = Command::new(switch_path.to_file_string())
+                .args(["switch", "trust", "--set", &trusted_arg, project_cwd.as_str()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await?;
+
+        if status.success() {
+            Ok(())
+        } else {
+            Err(Error::ChildProcessFailed("yarn switch trust --set".to_string()))
+        }
+    }
+
+    async fn prompt_project_trust(project_cwd: &Path) -> Result<bool, Error> {
+        if !zpm_utils::is_terminal() {
+            return Err(Error::ProjectTrustRequired(project_cwd.clone()));
+        }
+
+        let report_guard
+            = current_report().await;
+
+        let report
+            = report_guard.as_ref()
+                .ok_or_else(|| Error::ProjectTrustRequired(project_cwd.clone()))?;
+
+        let answer = report.prompt(PromptType::Confirm(format!(
+            "Yarn needs to run potentially dangerous commands in {}. Do you trust this project?",
+            DataType::Path.colorize(&project_cwd.to_home_string()),
+        ))).await;
+
+        Ok(answer == "true")
+    }
+
+    async fn ensure_trusted(&self) -> Result<(), Error> {
+        if !self.trust_check_enabled {
+            return Ok(());
+        }
+
+        let Some(project_cwd) = &self.trust_check_project_cwd else {
+            return Ok(());
+        };
+
+        let Some(switch_path) = get_switch_path() else {
+            return Ok(());
+        };
+
+        match Self::check_project_trust(&switch_path, project_cwd).await? {
+            Some(true) => return Ok(()),
+            Some(false) => return Err(Error::ProjectNotTrusted(project_cwd.clone())),
+            None => (),
+        }
+
+        let mut prompt_result
+            = TRUST_PROMPT_RESULT.lock().await;
+
+        let trusted = match *prompt_result {
+            Some(trusted) => trusted,
+            None => {
+                let trusted
+                    = Self::prompt_project_trust(project_cwd).await?;
+
+                *prompt_result = Some(trusted);
+
+                trusted
+            },
+        };
+
+        Self::set_project_trust(&switch_path, project_cwd, trusted).await?;
+
+        match trusted {
+            true => Ok(()),
+            false => Err(Error::ProjectNotTrusted(project_cwd.clone())),
         }
     }
 
@@ -680,6 +796,8 @@ impl ScriptEnvironment {
     }
 
     pub async fn run_exec<I, S>(&mut self, program: &str, args: I) -> Result<ScriptResult, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
+        self.ensure_trusted().await?;
+
         let args = args.into_iter()
             .map(|arg| arg.as_ref().to_string())
             .collect::<Vec<_>>();
@@ -735,6 +853,8 @@ impl ScriptEnvironment {
     /// Spawns a command and returns the running process with piped stdout/stderr.
     /// Use this when you need to read output incrementally (e.g., for interlaced task output).
     pub async fn spawn_exec<I, S>(&mut self, program: &str, args: I) -> Result<RunningScript, Error> where I: IntoIterator<Item = S>, S: AsRef<str> {
+        self.ensure_trusted().await?;
+
         let args = args.into_iter()
             .map(|arg| arg.as_ref().to_string())
             .collect::<Vec<_>>();
@@ -819,6 +939,8 @@ impl ScriptEnvironment {
     /// Runs a script with inherited stdio (output goes directly to terminal).
     /// Use this when you want the script's output to go directly to the terminal without capturing.
     pub async fn run_script_inherited<I, S>(&mut self, script: &str, args: I) -> Result<ExitStatus, Error> where I: IntoIterator<Item = S>, S: AsRef<OsStr> + ToString {
+        self.ensure_trusted().await?;
+
         let mut final_script
             = script.to_string();
 
