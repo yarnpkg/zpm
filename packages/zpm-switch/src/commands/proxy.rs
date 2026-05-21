@@ -4,7 +4,7 @@ use clipanion::cli;
 use clipanion::core::{Completion, CompletionContext};
 use zpm_utils::{DataType, Note, ToFileString};
 
-use crate::{cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, ipc::YARNSW_PATH_ENV, links::{LinkTarget, get_link, unset_link}, manifest::{LocalPackageManagerReference, PackageManagerField, PackageManagerReference, find_closest_package_manager}, yarn::get_default_yarn_version, yarn_enums::ReleaseLine};
+use crate::{config::validate_yarn_version, cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, ipc::YARNSW_PATH_ENV, links::{LinkTarget, get_link, unset_link}, manifest::{LocalPackageManagerReference, PackageManagerField, PackageManagerReference, find_closest_package_manager}, yarn::get_default_yarn_version, yarn_enums::ReleaseLine};
 
 use super::switch::explicit::ExplicitCommand;
 
@@ -74,6 +74,10 @@ async fn proxy_completer_async(ctx: &CompletionContext<'_>) -> Vec<Completion> {
 
     let mut binary = match &reference {
         PackageManagerReference::Version(params) => {
+            let Ok(()) = validate_yarn_version(&params.version) else {
+                return vec![];
+            };
+
             let Ok(cmd) = install_package_manager(params).await else {
                 return vec![];
             };
