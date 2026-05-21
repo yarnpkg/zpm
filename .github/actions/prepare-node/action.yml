@@ -5,11 +5,26 @@ inputs:
   link:
     description: 'The link to the local path'
     required: false
+  switch:
+    description: 'Path to a locally built yarn-switch binary to use in place of the released one'
+    required: false
 
 runs:
   using: composite
   steps:
     - uses: yarnpkg/setup-action@main
+      if: inputs.switch == ''
+
+    - name: Install the provided Yarn Switch binary
+      if: inputs.switch != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        chmod +x "${{inputs.switch}}"
+        install_dir="${RUNNER_TEMP}/yarn-switch-bin"
+        mkdir -p "${install_dir}"
+        cp -f "${{inputs.switch}}" "${install_dir}/yarn"
+        echo "${install_dir}" >> "${GITHUB_PATH}"
 
     - name: Add link to the local path
       if: inputs.link != ''

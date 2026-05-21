@@ -101,6 +101,7 @@ jobs:
         uses: ./.github/actions/prepare-node
         with:
           link: artifacts/yarn-bin
+          switch: artifacts/yarn
 
       - name: Generate the test report
         run: |
