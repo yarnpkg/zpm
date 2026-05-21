@@ -42,6 +42,11 @@ const baseEnv = (nativePath: string, nativeHomePath: string, registryUrl: string
   [`NODE_OPTIONS`]: ``,
   // Shorter warmup for faster tests (production default is 1s)
   [`YARN_DAEMON_DEFAULT_WARMUP_PERIOD`]: `500ms`,
+  // Berry security defaults would otherwise break the existing test suite;
+  // dedicated tests for each feature override these via withConfig.
+  [`YARN_ENABLE_SCRIPTS`]: `true`,
+  [`YARN_APPROVED_GIT_REPOSITORIES`]: `**`,
+  [`YARN_NPM_MINIMAL_AGE_GATE`]: `0`,
   ...rcEnv,
   ...env,
 });
