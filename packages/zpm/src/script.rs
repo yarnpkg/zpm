@@ -653,13 +653,13 @@ impl ScriptEnvironment {
                 let trusted
                     = Self::prompt_project_trust(project_cwd).await?;
 
+                Self::set_project_trust(&switch_path, project_cwd, trusted).await?;
+
                 *prompt_result = Some(trusted);
 
                 trusted
             },
         };
-
-        Self::set_project_trust(&switch_path, project_cwd, trusted).await?;
 
         match trusted {
             true => Ok(()),
