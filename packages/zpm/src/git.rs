@@ -157,21 +157,19 @@ fn validate_repo_url(url: &str, config: &HttpConfig, approved_repos: &[Setting<S
         = GitUrl::parse(url)
             .map_err(|_| Error::InvalidGitUrl(url.to_owned()))?;
 
-    let Some(host) = git_url.host else {
-        return Ok(());
-    };
-
-    let host_url
-        = format!("https://{}", host);
-    let host_url = Url::parse(&host_url)
-        .map_err(|_| Error::InvalidUrl(host_url.to_owned()))?;
-
-    if !config.is_network_enabled(&host_url) {
-        return Err(Error::NetworkDisabledError(host_url));
-    }
-
     if !matches_approved_git_repository(url, approved_repos) {
         return Err(Error::ApprovedGitRepositoriesError(url.to_owned()));
+    }
+
+    if let Some(host) = git_url.host {
+        let host_url
+            = format!("https://{}", host);
+        let host_url = Url::parse(&host_url)
+            .map_err(|_| Error::InvalidUrl(host_url.to_owned()))?;
+
+        if !config.is_network_enabled(&host_url) {
+            return Err(Error::NetworkDisabledError(host_url));
+        }
     }
 
     Ok(())
@@ -303,6 +301,25 @@ pub async fn clone_repository(context: &InstallContext<'_>, source: &GitSource, 
         .expect("The project is required for cloning repositories");
 
     let approved_repos = &project.config.settings.approved_git_repositories;
+    let http_config = &project.http_client.config;
+
+    // Validate that at least one of the source's canonical URLs is approved
+    // before attempting any clone path. Without this, the GitHub tarball
+    // fast-path in `download_into` would bypass `approvedGitRepositories`.
+    let source_urls = source.to_urls();
+    let mut last_validation_err: Option<Error> = None;
+    let mut any_approved = false;
+    for url in &source_urls {
+        match validate_repo_url(url, http_config, approved_repos) {
+            Ok(()) => { any_approved = true; break; }
+            Err(err) => { last_validation_err = Some(err); }
+        }
+    }
+    if !any_approved {
+        return Err(last_validation_err.unwrap_or_else(|| {
+            Error::ApprovedGitRepositoriesError(source_urls.first().cloned().unwrap_or_default())
+        }));
+    }
 
     let clone_dir
         = Path::temp_dir()?;
@@ -317,7 +334,7 @@ pub async fn clone_repository(context: &InstallContext<'_>, source: &GitSource, 
             .await
             .expect("The clone limiter semaphore should not be closed");
 
-    git_clone_into(source, commit, &clone_dir, &project.http_client.config, approved_repos).await?;
+    git_clone_into(source, commit, &clone_dir, http_config, approved_repos).await?;
     Ok(clone_dir)
 }
 

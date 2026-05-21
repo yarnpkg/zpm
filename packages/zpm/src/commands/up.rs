@@ -173,6 +173,10 @@ impl Up {
         let mut project
             = Project::new(None).await?;
 
+        if self.no_time_gate {
+            project.config.settings.npm_minimal_age_gate.force(std::time::Duration::ZERO, zpm_config::Source::Cli);
+        }
+
         let enforced_resolutions
             = loose_resolutions.into_iter()
                 .filter_map(|resolution| resolution.locator.map(|locator| (resolution.descriptor, Some(locator))))
