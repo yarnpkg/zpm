@@ -31,6 +31,10 @@ fn load_switch_version_requirement() -> Result<Option<Range>, Error> {
         return Ok(None);
     };
 
+    if text.is_empty() {
+        return Ok(None);
+    }
+
     let partial: PartialRcSettings
         = serde_yaml::from_str(&text)?;
 
