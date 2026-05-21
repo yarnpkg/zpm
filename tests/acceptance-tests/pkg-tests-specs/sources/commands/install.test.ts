@@ -880,7 +880,11 @@ describe(`Commands`, () => {
           enableScripts: false,
         });
 
-        const {stdout} = await run(`install`, `--inline-builds`);
+        const {stdout} = await run(`install`, `--inline-builds`, {
+          env: {
+            YARN_ENABLE_SCRIPTS: `false`,
+          },
+        });
         expect(stdout).toMatch(/lists build scripts, but its build has been explicitly disabled/g);
       }),
     );
@@ -901,7 +905,12 @@ describe(`Commands`, () => {
           enableScripts: false,
         });
 
-        const {stdout} = await run(`install`, `--inline-builds`);
+        const {stdout} = await run(`install`, `--inline-builds`, {
+          env: {
+            YARN_ENABLE_SCRIPTS: `false`,
+          },
+        });
+
         expect(stdout).toMatch(/lists build scripts, but its build has been explicitly disabled/g);
       }),
     );
