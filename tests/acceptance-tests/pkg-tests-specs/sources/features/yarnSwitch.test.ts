@@ -63,6 +63,24 @@ describe(`Features`, () => {
           });
         }),
       );
+
+      test(
+        `it should fail to start a daemon when the version does not match the requirement`,
+        makeTemporaryEnv({
+          packageManager: `yarn@6.0.0`,
+        }, async ({path, runSwitch}) => {
+          const homePath = ppath.dirname(path);
+
+          await xfs.writeJsonPromise(ppath.join(homePath, Filename.rc), {
+            switchVersionRequirement: `>=99.0.0`,
+          });
+
+          await expect(runSwitch(`switch`, `daemon`, `--start`)).rejects.toMatchObject({
+            code: 1,
+            stdout: expect.stringContaining(`does not satisfy the required range`),
+          });
+        }),
+      );
     });
   });
 });

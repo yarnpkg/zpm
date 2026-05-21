@@ -5,6 +5,7 @@ use zpm_semver::Version;
 use zpm_utils::{Path, ToFileString};
 
 use crate::{
+    config::validate_yarn_version,
     cwd::get_final_cwd,
     daemons::{self, DaemonEntry},
     errors::Error,
@@ -77,6 +78,8 @@ impl DaemonOpenCommand {
 
         match &reference {
             PackageManagerReference::Version(version_ref) => {
+                validate_yarn_version(&version_ref.version)?;
+
                 let mut binary
                     = install_package_manager(version_ref).await?;
 
