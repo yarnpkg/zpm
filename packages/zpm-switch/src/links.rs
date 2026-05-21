@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
-use zpm_utils::{DataType, Hash64, IoResultExt, Path, ToFileString, ToHumanString};
+use zpm_utils::{DataType, Hash64, IoResultExt, Path, ToFileString, ToHumanString, is_ci};
 
 use crate::errors::Error;
 
@@ -170,8 +170,16 @@ pub fn get_link(path: &Path) -> Result<Option<Link>, Error> {
 }
 
 pub fn get_trusted(path: &Path) -> Result<Option<bool>, Error> {
-    Ok(get_config(path)?
-        .and_then(|config| config.trusted))
+    let trusted = get_config(path)?
+        .and_then(|config| config.trusted);
+
+    // On CI, projects without an explicit trust setting are implicitly trusted,
+    // so unattended runs don't get blocked by the install-script trust gate.
+    if trusted.is_none() && is_ci().is_some() {
+        return Ok(Some(true));
+    }
+
+    Ok(trusted)
 }
 
 pub fn set_trusted(project_cwd: &Path, trusted: Option<bool>) -> Result<(), Error> {

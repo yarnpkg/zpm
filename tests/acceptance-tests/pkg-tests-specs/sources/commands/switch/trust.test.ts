@@ -74,6 +74,40 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should implicitly trust projects when running on CI`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps-scripted`]: `1.0.0`,
+        },
+      }, async ({path, runSwitch}) => {
+        await expect(runSwitch(`switch`, `trust`, `--check`, path, {
+          env: {CI: `1`},
+        })).resolves.toMatchObject({
+          code: 0,
+        });
+
+        await expect(runSwitch(`install`, {
+          env: {CI: `1`},
+        })).resolves.toMatchObject({
+          code: 0,
+        });
+      }),
+    );
+
+    test(
+      `it should still honor an explicit untrust on CI`,
+      makeTemporaryEnv({}, async ({path, runSwitch}) => {
+        await runSwitch(`switch`, `trust`, `--set`, `false`, path);
+
+        await expect(runSwitch(`switch`, `trust`, `--check`, path, {
+          env: {CI: `1`},
+        })).rejects.toMatchObject({
+          code: 2,
+        });
+      }),
+    );
+
+    test(
       `it should use Yarn Switch rather than the active Yarn binary to check trust`,
       makeTemporaryEnv({
         dependencies: {
