@@ -17,7 +17,17 @@ use crate::{
 static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
 static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
 static JS_EXTENSION: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
-static TRUST_PROMPT_RESULT: LazyLock<Mutex<Option<bool>>> = LazyLock::new(|| Mutex::new(None));
+type TrustPromptResultCache = BTreeMap<Path, bool>;
+
+static TRUST_PROMPT_RESULTS: LazyLock<Mutex<TrustPromptResultCache>> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
+fn get_cached_trust_prompt_result(cache: &TrustPromptResultCache, project_cwd: &Path) -> Option<bool> {
+    cache.get(project_cwd).copied()
+}
+
+fn set_cached_trust_prompt_result(cache: &mut TrustPromptResultCache, project_cwd: &Path, trusted: bool) {
+    cache.insert(project_cwd.clone(), trusted);
+}
 
 fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, module: &str, object: &str) -> String {
     let binary_name
@@ -644,10 +654,10 @@ impl ScriptEnvironment {
             None => (),
         }
 
-        let mut prompt_result
-            = TRUST_PROMPT_RESULT.lock().await;
+        let mut prompt_results
+            = TRUST_PROMPT_RESULTS.lock().await;
 
-        let trusted = match *prompt_result {
+        let trusted = match get_cached_trust_prompt_result(&prompt_results, project_cwd) {
             Some(trusted) => trusted,
             None => {
                 let trusted
@@ -655,7 +665,7 @@ impl ScriptEnvironment {
 
                 Self::set_project_trust(&switch_path, project_cwd, trusted).await?;
 
-                *prompt_result = Some(trusted);
+                set_cached_trust_prompt_result(&mut prompt_results, project_cwd, trusted);
 
                 trusted
             },
@@ -980,5 +990,25 @@ impl ScriptEnvironment {
                 .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 
         Ok(status)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trust_prompt_result_cache_is_scoped_by_project_cwd() {
+        let first_project
+            = Path::from_file_string("/tmp/first-project").unwrap();
+        let second_project
+            = Path::from_file_string("/tmp/second-project").unwrap();
+        let mut cache
+            = TrustPromptResultCache::new();
+
+        set_cached_trust_prompt_result(&mut cache, &first_project, true);
+
+        assert_eq!(get_cached_trust_prompt_result(&cache, &first_project), Some(true));
+        assert_eq!(get_cached_trust_prompt_result(&cache, &second_project), None);
     }
 }
