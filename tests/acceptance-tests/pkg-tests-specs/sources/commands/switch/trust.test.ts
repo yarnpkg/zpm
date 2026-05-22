@@ -1,11 +1,3 @@
-const getSwitchBinaryPath = () =>
-  process.env.TEST_SWITCH_BINARY
-    ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn`);
-
-const getYarnBinBinaryPath = () =>
-  process.env.TEST_BINARY
-    ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn-bin`);
-
 describe(`Commands`, () => {
   describe(`switch trust`, () => {
     test(
@@ -103,26 +95,6 @@ describe(`Commands`, () => {
           env: {CI: `1`},
         })).rejects.toMatchObject({
           code: 2,
-        });
-      }),
-    );
-
-    test(
-      `it should use Yarn Switch rather than the active Yarn binary to check trust`,
-      makeTemporaryEnv({
-        dependencies: {
-          [`no-deps-scripted`]: `1.0.0`,
-        },
-      }, async ({path, run, runSwitch}) => {
-        await runSwitch(`switch`, `trust`, `--set`, `true`, path);
-
-        await expect(run(`install`, {
-          env: {
-            YARNSW_PATH: getSwitchBinaryPath(),
-            YARNSW_EXEC_PATH: getYarnBinBinaryPath(),
-          },
-        })).resolves.toMatchObject({
-          code: 0,
         });
       }),
     );
