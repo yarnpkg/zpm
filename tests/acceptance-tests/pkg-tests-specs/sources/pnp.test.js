@@ -1043,7 +1043,9 @@ describe(`Plug'n'Play`, () => {
 
         await makeTemporaryEnv(
           {
-            [`no-deps`]: `1.0.0`,
+            dependencies: {
+              [`no-deps`]: `1.0.0`,
+            },
           },
           async ({path: path2, run: run2, source: source2}) => {
             // Move the install artifacts into a new location
@@ -1460,8 +1462,7 @@ describe(`Plug'n'Play`, () => {
       await expect(
         run(`node`, `-e`, `console.log(21);`, {env: {NODE_OPTIONS: `--require ${JSON.stringify(npath.join(npath.fromPortablePath(path), `foo`))}`}}),
       ).resolves.toMatchObject({
-        // Note that '42' is present twice: the first one because Node executes Yarn, and the second one because Yarn spawns Node
-        stdout: `42\n42\n21\n`,
+        stdout: expect.stringMatching(/^42\n(?:42\n21|21\n42)\n$/),
       });
     }),
   );
