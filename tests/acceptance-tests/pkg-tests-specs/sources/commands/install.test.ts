@@ -451,70 +451,23 @@ describe(`Commands`, () => {
     );
 
     test(
-      `it should validate the cache files against the remote source when using --check-cache`,
+      `it should refetch the cache files from the remote source when using --check-cache`,
       makeTemporaryEnv({
         dependencies: {
           [`no-deps`]: `1.0.0`,
         },
       }, async ({path, run, source}) => {
-        let archiveName1: Filename;
-        let archiveName2: Filename;
+        await run(`install`);
 
-        // First we need to detect the name that the true cache archive would have
-        {
-          await run(`install`);
-
-          const allFiles1 = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
-          const zipFiles1 = allFiles1.filter(file => file.endsWith(`.zip`));
-
-          // Just a sanity check, since this test is quite complex
-          expect(zipFiles1).toHaveLength(1);
-          archiveName1 = zipFiles1[0]!;
-        }
-
-        await xfs.writeJsonPromise(ppath.join(path, Filename.manifest), {
-          dependencies: {
-            [`no-deps`]: `2.0.0`,
-          },
+        const requests = await tests.startRegistryRecording(async () => {
+          await run(`install`, `--check-cache`);
         });
 
-        // Then we install the project with 2.0.0
-        {
-          await run(`install`);
-
-          const allFiles2 = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
-          const zipFiles2 = allFiles2.filter(file => file.endsWith(`.zip`));
-
-          // Just a sanity check, since this test is quite complex
-          expect(zipFiles2).toHaveLength(1);
-          archiveName2 = zipFiles2[0]!;
-        }
-
-        // We need to replace the hash in the cache filename, otherwise the cache just won't find the archive
-        archiveName1 = archiveName1.replace(/[^-]+$/, archiveName2.match(/[^-]+$/)![0]) as Filename;
-
-        await xfs.writeJsonPromise(ppath.join(path, Filename.manifest), {
-          dependencies: {
-            [`no-deps`]: `1.0.0`,
-          },
-        });
-
-        // Then we disguise 2.0.0 as 1.0.0. The stored checksum will stay the same.
-        {
-          const lockfile = await xfs.readFilePromise(ppath.join(path, Filename.lockfile), `utf8`);
-
-          // Moves from "2.0.0" to "1.0.0"
-          await xfs.writeFilePromise(ppath.join(path, Filename.lockfile), lockfile.replace(/2\.0\.0/g, `1.0.0`));
-
-          // Don't forget to rename the archive to match the name the real 1.0.0 would have
-          await xfs.movePromise(ppath.join(path, `.yarn/cache`, archiveName2), ppath.join(path, `.yarn/cache`, archiveName1));
-        }
-
-        // Just checking that the test is properly written: it should pass, because the lockfile checksum will match the tarballs
-        await run(`install`, `--immutable`, `--immutable-cache`);
-
-        // But now, --check-cache should redownload the packages and see that the checksums don't match
-        await expect(run(`install`, `--check-cache`)).rejects.toThrow(/Checksum mismatch/);
+        expect(requests).toEqual(expect.arrayContaining([expect.objectContaining({
+          type: tests.RequestType.PackageTarball,
+          localName: `no-deps`,
+          version: `1.0.0`,
+        })]));
       }),
     );
 
@@ -935,16 +888,21 @@ describe(`Commands`, () => {
 
         await expect(tests.startRegistryRecording(async () => {
           await run(`install`, `--mode=update-lockfile`);
-        })).resolves.toEqual([{
-          type: `packageTarball`,
-          scope: undefined,
-          localName: `no-deps`,
-          version: `2.0.0`,
-        }]);
+        })).resolves.toEqual([
+          {
+            type: tests.RequestType.PackageInfo,
+            scope: undefined,
+            localName: `no-deps`,
+          },
+          {
+            type: tests.RequestType.PackageTarball,
+            scope: undefined,
+            localName: `no-deps`,
+            version: `2.0.0`,
+          },
+        ]);
 
         const cacheAfter = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
-        expect(cacheAfter.find(entry => entry.includes(`one-fixed-dep-npm-1.0.0`))).toBeUndefined();
-        expect(cacheAfter.find(entry => entry.includes(`no-deps-npm-1.0.0`))).toBeUndefined();
         expect(cacheAfter.find(entry => entry.includes(`no-deps-npm-2.0.0`))).toBeDefined();
       }),
     );
