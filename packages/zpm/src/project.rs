@@ -647,7 +647,7 @@ impl Project {
         Ok(package_location)
     }
 
-    pub fn package_self_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
+    fn package_binaries_at(&self, locator: &Locator, package_location: &Path) -> Result<BTreeMap<String, Binary>, Error> {
         // Link dependencies never have any package.json, so we mustn't even try to read them.
         if matches!(locator.reference, Reference::Link(_)) {
             return Ok(BTreeMap::new());
@@ -655,9 +655,6 @@ impl Project {
 
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
-
-        let package_location = install_state.locations_by_package.get(locator)
-            .unwrap_or_else(|| panic!("Expected {} to have a package location", locator.to_print_string()));
 
         let content_flags = install_state.content_flags.get(&locator.physical_locator())
             .unwrap_or_else(|| panic!("Expected {} to have content flags", locator.to_print_string()));
@@ -686,6 +683,33 @@ impl Project {
         Ok(binaries)
     }
 
+    pub fn package_self_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
+        let install_state = self.install_state.as_ref()
+            .ok_or(Error::InstallStateNotFound)?;
+
+        let package_location = install_state.locations_by_package.get(locator)
+            .unwrap_or_else(|| panic!("Expected {} to have a package location", locator.to_print_string()));
+
+        self.package_binaries_at(locator, package_location)
+    }
+
+    fn find_visible_dependency_location(&self, issuer_location: &Path, ident: &Ident, locator: &Locator) -> Result<Option<Path>, Error> {
+        let install_state = self.install_state.as_ref()
+            .ok_or(Error::InstallStateNotFound)?;
+
+        for candidate_issuer_location in issuer_location.iter_path().rev() {
+            let candidate = candidate_issuer_location
+                .with_join_str("node_modules")
+                .with_join_str(ident.as_str());
+
+            if install_state.packages_by_location.get(&candidate) == Some(locator) {
+                return Ok(Some(candidate));
+            }
+        }
+
+        Ok(install_state.locations_by_package.get(locator).cloned())
+    }
+
     pub fn package_visible_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
@@ -693,10 +717,13 @@ impl Project {
         let resolution = install_state.resolution_tree.locator_resolutions.get(locator)
             .expect("Expected active package to have a resolution tree");
 
+        let package_location = install_state.locations_by_package.get(locator)
+            .unwrap_or_else(|| panic!("Expected {} to have a package location", locator.to_print_string()));
+
         let mut all_bins
             = BTreeMap::new();
 
-        for descriptor in resolution.dependencies.values() {
+        for (ident, descriptor) in &resolution.dependencies {
             let locator = install_state.resolution_tree.descriptor_to_locator.get(descriptor)
                 .expect("Expected resolution to be found in the resolution tree");
 
@@ -704,12 +731,12 @@ impl Project {
             // haven't been installed due to being unsupported on the current
             // platform. In this case, we ignore its binaries.
             //
-            if install_state.locations_by_package.contains_key(locator) {
-                all_bins.extend(self.package_self_binaries(locator)?);
+            if let Some(dependency_location) = self.find_visible_dependency_location(package_location, ident, locator)? {
+                all_bins.extend(self.package_binaries_at(locator, &dependency_location)?);
             }
         }
 
-        all_bins.extend(self.package_self_binaries(locator)?);
+        all_bins.extend(self.package_binaries_at(locator, package_location)?);
 
         Ok(BTreeMap::from_iter(all_bins.into_iter()))
     }
