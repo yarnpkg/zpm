@@ -8,6 +8,35 @@ use clipanion::cli;
 use crate::{commands::tasks::run_silent_dependencies::TaskRunSilentDependencies, error::Error, project, script::ScriptEnvironment};
 use super::tasks as task_run;
 
+/// List local scripts
+#[cli::command]
+#[cli::path("run")]
+#[cli::category("Scripting commands")]
+pub struct RunList {
+    /// If set, the output will follow a JSON-stream output
+    #[cli::option("--json", default = false)]
+    json: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct ScriptsManifest {
+    #[serde(default)]
+    scripts: IndexMap<String, String>,
+}
+
+impl RunList {
+    pub async fn execute(&self) -> Result<ExitStatus, Error> {
+        let mut project
+            = project::Project::new(None).await?;
+
+        project
+            .lazy_install().await?;
+
+        list_scripts(&project, self.json)?;
+        Ok(ExitStatus::from_raw(0))
+    }
+}
+
 /// Run a dependency binary or local script
 ///
 /// This command will run a tool. The exact tool that will be executed will depend on the current state of your workspace:
@@ -24,7 +53,6 @@ use super::tasks as task_run;
 ///
 /// Whatever happens, the cwd of the spawned process will be the workspace that declares the script (which makes it possible to call commands
 /// cross-workspaces using the third syntax).
-///
 #[cli::command(default, proxy)]
 #[cli::path("run")]
 #[cli::category("Scripting commands")]
@@ -62,52 +90,46 @@ pub struct Run {
     require: Option<String>,
 
     /// Name of the script or binary to run
-    name: Option<String>,
+    name: String,
 
     /// Arguments to pass to the script or binary
     args: Vec<String>,
 }
 
-#[derive(serde::Deserialize)]
-struct ScriptsManifest {
-    #[serde(default)]
-    scripts: IndexMap<String, String>,
+fn list_scripts(project: &project::Project, json: bool) -> Result<(), Error> {
+    let active_workspace = project.active_workspace()?;
+    let manifest_path = active_workspace.manifest_path();
+
+    let manifest_text = manifest_path
+        .fs_read_text()
+        .unwrap_or_default();
+
+    let manifest: ScriptsManifest = JsonDocument::hydrate_from_str(&manifest_text)
+        .unwrap_or_else(|_| ScriptsManifest { scripts: IndexMap::new() });
+
+    if json {
+        for (name, script) in &manifest.scripts {
+            let entry = serde_json::json!({"name": name, "script": script});
+            println!("{}", serde_json::to_string(&entry).unwrap());
+        }
+
+        return Ok(());
+    }
+
+    let max_name_len = manifest.scripts.keys()
+        .map(|k| k.len())
+        .max()
+        .unwrap_or(0);
+
+    for (name, script) in &manifest.scripts {
+        let padding = " ".repeat(max_name_len.saturating_sub(name.len()));
+        println!("{}{}   '{}'", name, padding, script);
+    }
+
+    Ok(())
 }
 
 impl Run {
-    fn list_scripts(&self, project: &project::Project, json: bool) -> Result<(), Error> {
-        let active_workspace = project.active_workspace()?;
-        let manifest_path = active_workspace.manifest_path();
-
-        let manifest_text = manifest_path
-            .fs_read_text()
-            .unwrap_or_default();
-
-        let manifest: ScriptsManifest = JsonDocument::hydrate_from_str(&manifest_text)
-            .unwrap_or_else(|_| ScriptsManifest { scripts: IndexMap::new() });
-
-        if json {
-            for (name, script) in &manifest.scripts {
-                let entry = serde_json::json!({"name": name, "script": script});
-                println!("{}", serde_json::to_string(&entry).unwrap());
-            }
-
-            return Ok(());
-        }
-
-        let max_name_len = manifest.scripts.keys()
-            .map(|k| k.len())
-            .max()
-            .unwrap_or(0);
-
-        for (name, script) in &manifest.scripts {
-            let padding = " ".repeat(max_name_len.saturating_sub(name.len()));
-            println!("{}{}   '{}'", name, padding, script);
-        }
-
-        Ok(())
-    }
-
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
         let mut project
             = project::Project::new(None).await?;
@@ -119,16 +141,7 @@ impl Run {
             project.package_cwd = Path::new();
         }
 
-        let (name, json_listing) = match self.name.as_deref() {
-            None if self.args.iter().any(|a| a == "--json") => (None, true),
-            None => (None, false),
-            Some(name) => (Some(name), false),
-        };
-
-        let Some(name) = name else {
-            self.list_scripts(&project, json_listing)?;
-            return Ok(ExitStatus::from_raw(0));
-        };
+        let name = self.name.as_str();
 
         let get_node_args = || {
             let mut node_args = Vec::new();

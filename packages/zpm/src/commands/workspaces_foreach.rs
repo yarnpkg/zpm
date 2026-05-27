@@ -509,8 +509,8 @@ impl WorkspacesForeach {
                 = params.binaries_only
                     .unwrap_or(false);
 
-            if let Some(Some(name)) = params.name {
-                return Some((name.clone(), binaries_only));
+            if let Some(name) = params.name {
+                return Some((name, binaries_only));
             }
         }
 
