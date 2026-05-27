@@ -1948,7 +1948,7 @@ describe(`Node Modules`, () => {
       {
         dependencies: {
           [`has-bin-entries`]: `1.0.0`,
-          [`scoped/has-bin-entry`]: `1.0.0`,
+          [`@scoped/has-bin-entry`]: `1.0.0`,
         },
       },
       {
@@ -2134,7 +2134,6 @@ describe(`Node Modules`, () => {
         await run(`install`);
 
         await expect(xfs.readdirPromise(ppath.join(path, Filename.nodeModules))).resolves.toEqual([
-          `.yarn-state.yml`,
           `native`,
           `native-foo-x64`,
           `native-foo-x86`,
