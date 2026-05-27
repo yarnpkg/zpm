@@ -9,13 +9,13 @@ describe(`Commands`, () => {
         const {stdout} = await run(`install`, `--json`);
 
         expect(misc.parseJsonStream(stdout)).toEqual([{
-          data: `Yarn 0.0.0`,
+          data: expect.stringMatching(/^Yarn \d+\.\d+\.\d+/),
           displayName: null,
           indent: `· `,
-          name: 0,
+          name: null,
           type: `info`,
         }, {
-          data: `┌ Resolution step`,
+          data: `┌ Installing packages`,
           displayName: null,
           indent: ``,
           name: null,
@@ -27,7 +27,7 @@ describe(`Commands`, () => {
           name: null,
           type: `info`,
         }, {
-          data: `┌ Fetch step`,
+          data: `┌ Linking the project`,
           displayName: null,
           indent: ``,
           name: null,
@@ -37,24 +37,6 @@ describe(`Commands`, () => {
           displayName: null,
           indent: ``,
           name: null,
-          type: `info`,
-        }, {
-          data: `┌ Link step`,
-          displayName: null,
-          indent: ``,
-          name: null,
-          type: `info`,
-        }, {
-          data: `└ Completed`,
-          displayName: null,
-          indent: ``,
-          name: null,
-          type: `info`,
-        }, {
-          data: `Done`,
-          displayName: null,
-          indent: `· `,
-          name: 0,
           type: `info`,
         }]);
       }),

@@ -152,6 +152,7 @@ pub struct StreamReportConfig {
     pub enable_progress_bars: bool,
     pub enable_timers: bool,
     pub include_version: bool,
+    pub json: bool,
     pub silent_or_error: bool,
 }
 
@@ -161,6 +162,7 @@ impl StreamReportConfig {
             enable_progress_bars: config.settings.enable_progress_bars.value,
             enable_timers: config.settings.enable_timers.value,
             include_version: false,
+            json: false,
             silent_or_error: false,
         }
     }
@@ -347,11 +349,18 @@ impl Reporter {
     }
 
     fn on_end<T: Write>(&mut self, writer: &mut T) {
-        for log_path in &self.log_paths {
-            writeln!(writer, "\n{}\n", log_path.to_print_string()).unwrap();
+        let log_paths = std::mem::take(&mut self.log_paths);
 
+        for log_path in &log_paths {
             let log_content = log_path.fs_read_text().unwrap();
-            writeln!(writer, "{}", log_content).unwrap();
+
+            if self.config.json {
+                self.write_line(writer, &log_path.to_print_string(), Severity::Info);
+                self.write_line(writer, &log_content, Severity::Info);
+            } else {
+                writeln!(writer, "\n{}\n", log_path.to_print_string()).unwrap();
+                writeln!(writer, "{}", log_content).unwrap();
+            }
         }
 
         if self.config.enable_progress_bars {
@@ -485,6 +494,32 @@ impl Reporter {
 
         self.last_message_type = Some(LastMessageType::Line);
 
+        if self.config.json {
+            let type_name = match severity {
+                Severity::Info => "info",
+                Severity::Warning => "warning",
+                Severity::Error => "error",
+            };
+
+            let payload = serde_json::json!({
+                "type": type_name,
+                "name": null,
+                "displayName": null,
+                "indent": self.format_indent(),
+                "data": line,
+            });
+
+            let line = serde_json::to_string(&payload).unwrap();
+
+            if let Some(buffered_lines) = &mut self.buffered_lines {
+                buffered_lines.push(line);
+            } else {
+                writeln!(writer, "{}", line).unwrap();
+            }
+
+            return;
+        }
+
         let prefix
             = self.format_prefix(severity);
 
@@ -538,7 +573,14 @@ impl StreamReport {
             }
 
             if reporter.config.include_version {
-                reporter.write_line(&mut io::stdout(), &format!("Yarn {}", get_bin_version()).bold().to_string(), Severity::Info);
+                let version_line = format!("Yarn {}", get_bin_version());
+                let version_line = if reporter.config.json {
+                    version_line
+                } else {
+                    version_line.bold().to_string()
+                };
+
+                reporter.write_line(&mut io::stdout(), &version_line, Severity::Info);
             }
 
             loop {

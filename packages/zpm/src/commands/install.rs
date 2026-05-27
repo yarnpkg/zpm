@@ -71,7 +71,7 @@ pub struct Install {
 
     /// Format the output as a NDJSON stream
     #[cli::option("--json", default = false)]
-    _json: bool,
+    json: bool,
 }
 
 impl Install {
@@ -146,6 +146,7 @@ impl Install {
             refresh_lockfile,
             mode: self.mode,
             silent_or_error: self.silent,
+            json: self.json,
             inline_builds: self.inline_builds,
             ..Default::default()
         }).await?;

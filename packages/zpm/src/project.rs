@@ -60,6 +60,7 @@ pub struct RunInstallOptions {
     pub refresh_lockfile: bool,
     pub roots: Option<BTreeSet<Ident>>,
     pub silent_or_error: bool,
+    pub json: bool,
     pub inline_builds: bool,
 }
 
@@ -850,6 +851,7 @@ impl Project {
 
         let report = StreamReport::new(StreamReportConfig {
             include_version: true,
+            json: options.json,
             silent_or_error: options.silent_or_error,
             ..StreamReportConfig::from_config(&self.config)
         });
