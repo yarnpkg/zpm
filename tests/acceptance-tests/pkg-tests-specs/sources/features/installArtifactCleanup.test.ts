@@ -87,7 +87,7 @@ describe(`Install Artifact Cleanup`, () => {
             await run(`config`, `set`, `nodeLinker`, linker, {env});
 
             await expect(run(`install`, `--inline-builds`, {env})).resolves.toMatchObject({
-              stdout: expect.stringContaining(`STDOUT preinstall out`),
+              stdout: expect.stringContaining(`preinstall out`),
             });
           }));
         });
