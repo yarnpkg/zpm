@@ -147,6 +147,10 @@ impl<'a> SyncTree<'a> {
     }
 
     pub fn is_node_filtered_out(&self, node_idx: usize) -> bool {
+        if node_idx == 0 {
+            return false;
+        }
+
         let node
             = &self.nodes[node_idx];
 
@@ -275,9 +279,12 @@ impl<'a> SyncTree<'a> {
             },
 
             SyncNode::Folder {template, ..} => {
+                let is_dir
+                    = path.fs_is_dir();
+
                 Ok(SyncCheck {
-                    must_remove: !metadata.is_dir(),
-                    must_create: !metadata.is_dir() && template.is_none(),
+                    must_remove: !is_dir,
+                    must_create: !is_dir && template.is_none(),
                 })
             },
 
