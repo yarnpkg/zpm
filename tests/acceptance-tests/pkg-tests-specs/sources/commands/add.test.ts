@@ -618,20 +618,20 @@ describe(`Commands`, () => {
     }, async ({path, run, source}) => {
       const sharedCachePath = await xfs.mktempPromise();
       const env = {
-        YARN_CACHE_FOLDER: sharedCachePath,
+        YARN_GLOBAL_FOLDER: sharedCachePath,
       };
 
       let cacheContent;
 
       await run(`install`, {env});
 
-      cacheContent = await xfs.readdirPromise(sharedCachePath);
+      cacheContent = await xfs.readdirPromise(ppath.join(sharedCachePath, `cache`));
 
       expect(cacheContent.find(entry => entry.includes(`no-deps-npm-1.0.0`))).toBeDefined();
 
       await run(`add`, `no-deps@2.0.0`, {env});
 
-      cacheContent = await xfs.readdirPromise(sharedCachePath);
+      cacheContent = await xfs.readdirPromise(ppath.join(sharedCachePath, `cache`));
 
       expect(cacheContent.find(entry => entry.includes(`no-deps-npm-1.0.0`))).toBeDefined();
       expect(cacheContent.find(entry => entry.includes(`no-deps-npm-2.0.0`))).toBeDefined();
