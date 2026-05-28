@@ -215,15 +215,17 @@ pub struct DiskCache {
     cache_path: Path,
     name_suffix: String,
     immutable: bool,
+    cleanable: bool,
     accessed_files: Arc<Mutex<HashSet<String>>>,
 }
 
 impl DiskCache {
-    pub fn new(cache_path: Path, name_suffix: String, immutable: bool) -> Self {
+    pub fn new(cache_path: Path, name_suffix: String, immutable: bool, cleanable: bool) -> Self {
         DiskCache {
             cache_path,
             name_suffix,
             immutable,
+            cleanable,
             accessed_files: Arc::new(Mutex::new(HashSet::new())),
         }
     }
@@ -421,6 +423,10 @@ impl DiskCache {
     }
 
     pub async fn clean(&self) -> Result<usize, Error> {
+        if !self.cleanable {
+            return Ok(0);
+        }
+
         let accessed_files
             = self.accessed_files.lock()
                 .map_err(|_| Error::Unsupported)?;

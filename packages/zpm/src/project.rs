@@ -1,7 +1,7 @@
 use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::Arc, time::{Duration, UNIX_EPOCH}};
 
 use globset::{GlobBuilder, GlobSetBuilder};
-use zpm_config::{Configuration, ConfigurationContext};
+use zpm_config::{Configuration, ConfigurationContext, Source};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
@@ -265,9 +265,7 @@ impl Project {
     }
 
     pub fn local_cache_path(&self) -> Path {
-        self.project_cwd
-            .with_join_str(".yarn")
-            .with_join_str(&self.config.settings.local_cache_folder_name.value)
+        self.config.settings.cache_folder.value.clone()
     }
 
     pub fn preferred_cache_path(&self) -> Path {
@@ -434,16 +432,19 @@ impl Project {
         let enable_immutable_cache
             = self.config.settings.enable_immutable_cache.value;
 
+        let cleanable_local_cache
+            = matches!(self.config.settings.cache_folder.source, Source::Default);
+
         let name_suffix = match compression_algorithm {
             Some(zpm_formats::CompressionAlgorithm::Deflate(_)) => format!("-d{}", compression_algorithm.unwrap().to_file_string()),
             None => "".to_string(),
         };
 
         let global_cache
-            = Some(DiskCache::new(global_cache_path, name_suffix.clone(), enable_immutable_cache));
+            = Some(DiskCache::new(global_cache_path, name_suffix.clone(), enable_immutable_cache, false));
 
         let local_cache = (!enable_global_cache)
-            .then(|| DiskCache::new(local_cache_path, name_suffix, enable_immutable_cache));
+            .then(|| DiskCache::new(local_cache_path, name_suffix, enable_immutable_cache, cleanable_local_cache));
 
         Ok(CompositeCache::new(
             compression_algorithm,
