@@ -161,8 +161,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
             let patched_entries = patched_entries
                 .into_iter()
-                .prepare_npm_entries(&package_subdir_for_entries)
-                .collect::<Vec<_>>();
+                .prepare_npm_entries(&package_subdir_for_entries)?;
 
             cache_packer.pack(patched_entries)
         }).await??;

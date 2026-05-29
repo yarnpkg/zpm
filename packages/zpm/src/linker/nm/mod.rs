@@ -222,9 +222,6 @@ fn generate_workspace_node_modules(
 
     workspace_nm_tree.dry_run = false;
 
-    let mut zip_binary_targets
-        = BTreeSet::new();
-
     let workspace_binaries
         = collect_workspace_binaries(install, &work_tree.nodes[workspace_node_idx]);
 
@@ -336,16 +333,6 @@ fn generate_workspace_node_modules(
                     // so the build cache doesn't short-circuit.
                     let dest_abs_path = abs_path.clone();
 
-                    if project.config.settings.nm_mode.value == zpm_config::NmMode::Classic {
-                        if let Some(content_flags) = install.install_state.content_flags.get(&child_node.locator.physical_locator()) {
-                            for binary in content_flags.binaries.values() {
-                                if let content_flags::Binary::Node(bin_path) = binary {
-                                    zip_binary_targets.insert(dest_abs_path.with_join(bin_path));
-                                }
-                            }
-                        }
-                    }
-
                     // Transitioning back to classic nmMode: drop the
                     // folder so SyncTree rewrites regular (nlink=1)
                     // files instead of reusing existing hardlinks.
@@ -419,37 +406,6 @@ fn generate_workspace_node_modules(
     // Always materialize node_modules: tools (and tests) expect the
     // directory to exist even when the workspace has no deps.
     workspace_abs_path.fs_create_dir_all()?;
-
-    mark_binary_targets_executable(&zip_binary_targets)?;
-
-    Ok(())
-}
-
-fn mark_binary_targets_executable(paths: &BTreeSet<Path>) -> Result<(), Error> {
-    #[cfg(unix)]
-    {
-        use std::{fs::Permissions, os::unix::fs::PermissionsExt};
-
-        for path in paths {
-            let Some(metadata) = path.fs_metadata().ok_missing()? else {
-                continue;
-            };
-
-            let current_mode
-                = metadata.permissions().mode();
-            let expected_mode
-                = current_mode | 0o111;
-
-            if current_mode != expected_mode {
-                path.fs_set_permissions(Permissions::from_mode(expected_mode))?;
-            }
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = paths;
-    }
 
     Ok(())
 }

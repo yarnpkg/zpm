@@ -55,8 +55,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             let entries
                 = zpm_formats::entries_from_folder(&context_directory_for_entries)?
                     .into_iter()
-                    .prepare_npm_entries(&package_subdir_for_entries)
-                    .collect::<Vec<_>>();
+                    .prepare_npm_entries(&package_subdir_for_entries)?;
 
             cache_packer.pack(entries)
         }).await??;
