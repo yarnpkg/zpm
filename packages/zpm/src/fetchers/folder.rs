@@ -50,7 +50,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let context_directory_for_entries
         = context_directory.clone();
 
-    let pkg_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
+    let pkg_blob = package_cache.refetch_blob_data(locator.clone(), ".zip", || async {
         let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
             let entries
                 = zpm_formats::entries_from_folder(&context_directory_for_entries)?

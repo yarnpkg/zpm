@@ -48,7 +48,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let package_subdir_for_entries
         = package_subdir.clone();
 
-    let cached_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
+    let cached_blob = package_cache.refetch_blob_data(locator.clone(), ".zip", || async {
         let tgz_data
             = tarball_path.fs_read()?;
 

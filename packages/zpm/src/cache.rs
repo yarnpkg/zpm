@@ -202,6 +202,28 @@ impl CompositeCache {
         panic!("Expected at least one cache to be set");
     }
 
+    pub async fn refetch_blob_data<R, F>(&self, key: Locator, ext: &str, func: F) -> Result<DataCacheEntry, Error>
+    where
+        R: Future<Output = Result<Vec<u8>, Error>>,
+        F: FnOnce() -> R,
+    {
+        if let Some(ref cache) = self.local_cache {
+            return cache.refetch_blob_data(key.clone(), ext, || async {
+                if let Some(ref cache) = self.global_cache {
+                    Ok(cache.refetch_blob_data(key, ext, || Self::load(func)).await?.data)
+                } else {
+                    Self::load(func).await
+                }
+            }).await;
+        }
+
+        if let Some(ref cache) = self.global_cache {
+            return cache.refetch_blob_data(key, ext, || Self::load(func)).await;
+        }
+
+        panic!("Expected at least one cache to be set");
+    }
+
     pub async fn clean(&self) -> Result<usize, Error> {
         if let Some(ref cache) = self.local_cache {
             return cache.clean().await;
