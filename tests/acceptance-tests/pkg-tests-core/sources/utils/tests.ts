@@ -324,6 +324,8 @@ const RELEASE_DATE_PACKAGES: Record<string, Record<string, number | string>> = {
   },
 };
 
+const DEFAULT_PACKAGE_TIME = `1984-01-01T00:00:00.000Z`;
+
 type PypiFixtureDistribution = {
   filename: string;
   packagetype: `bdist_wheel` | `sdist`;
@@ -620,6 +622,13 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
         ? serializeJsonWithEscapedAngles
         : JSON.stringify;
 
+      const time = {
+        created: DEFAULT_PACKAGE_TIME,
+        modified: DEFAULT_PACKAGE_TIME,
+        ...Object.fromEntries(versions.map(version => [version, DEFAULT_PACKAGE_TIME])),
+        ...RELEASE_DATE_PACKAGES[name],
+      };
+
       const data = serialize({
         name,
         versions: Object.assign(
@@ -642,7 +651,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
             }),
           )),
         ),
-        time: name in RELEASE_DATE_PACKAGES ? RELEASE_DATE_PACKAGES[name] : undefined,
+        time,
         [`dist-tags`]: {
           latest: semver.maxSatisfying(versions, `*`),
           ...distTags,
