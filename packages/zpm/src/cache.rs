@@ -113,6 +113,22 @@ impl CompositeCache {
         panic!("Expected at least one cache to be set");
     }
 
+    pub fn has_cache_entry(&self, key: Locator, ext: &str) -> Result<bool, Error> {
+        if let Some(ref cache) = self.local_cache {
+            if cache.check_cache_entry(key.clone(), ext)?.is_some() {
+                return Ok(true);
+            }
+        }
+
+        if let Some(ref cache) = self.global_cache {
+            if cache.check_cache_entry(key, ext)?.is_some() {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
     async fn load<R, F>(func: F) -> Result<Vec<u8>, Error>
     where
         R: Future<Output = Result<Vec<u8>, Error>>,

@@ -4,7 +4,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use bytes::Bytes;
 use dashmap::DashMap;
 use regex::{Captures, Regex};
-use reqwest::Response;
+use reqwest::{Response, Url};
 use serde::Deserialize;
 use sha2::{Sha256, Digest};
 use tokio::sync::OnceCell;
@@ -544,6 +544,15 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
     } else {
         None
     };
+
+    if let Some(ref cached) = cached {
+        let url_obj
+            = Url::parse(&url)?;
+
+        if !params.http_client.config.is_network_enabled(&url_obj) {
+            return Ok(Bytes::from(cached.metadata.clone()));
+        }
+    }
 
     let mut request
         = params.http_client.get(&url)?
