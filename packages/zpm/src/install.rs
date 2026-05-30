@@ -1911,7 +1911,14 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     }
 
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
-        peer_dependencies.entry(name.type_ident())
+        let types_ident
+            = name.type_ident();
+
+        if dependencies.contains_key(&types_ident) {
+            continue;
+        }
+
+        peer_dependencies.entry(types_ident)
             .or_insert(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}.into());
     }
 
