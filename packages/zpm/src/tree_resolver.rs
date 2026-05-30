@@ -40,16 +40,44 @@ pub struct TreeResolver {
     resolution_tree: ResolutionTree,
     virtual_stack: BTreeMap<Locator, u8>,
     resolution_stack: Vec<Locator>,
-    virtual_dependents: BTreeMap<Descriptor, BTreeSet<Locator>>,
     original_workspace_definitions: BTreeMap<Locator, Resolution>,
     peer_dependency_links: BTreeMap<Locator, BTreeMap<Ident, BTreeSet<Locator>>>,
     peer_dependency_dependents: BTreeMap<Locator, BTreeSet<Locator>>,
-    virtual_instances: BTreeMap<Locator, BTreeMap<(Ident, Vec<Locator>), Descriptor>>,
+    virtual_instances: BTreeMap<Locator, BTreeMap<Vec<Locator>, Descriptor>>,
     volatile_descriptor: BTreeSet<Descriptor>,
     volatile_locator: BTreeSet<Locator>,
 }
 
 impl TreeResolver {
+    fn package_identity(locator: &Locator) -> Locator {
+        let physical_locator = locator.physical_locator();
+
+        match &physical_locator.reference {
+            Reference::Registry(params) => {
+                Locator::new(params.ident.clone(), physical_locator.reference.clone())
+            },
+
+            Reference::PypiRegistry(params) => {
+                Locator::new(params.ident.clone(), physical_locator.reference.clone())
+            },
+
+            Reference::WorkspaceIdent(params) => {
+                Locator::new(params.ident.clone(), physical_locator.reference.clone())
+            },
+
+            _ => physical_locator,
+        }
+    }
+
+    fn package_ident(locator: &Locator) -> Ident {
+        match locator.reference.physical_reference() {
+            Reference::Registry(params) => params.ident.clone(),
+            Reference::PypiRegistry(params) => params.ident.clone(),
+            Reference::WorkspaceIdent(params) => params.ident.clone(),
+            _ => locator.ident.clone(),
+        }
+    }
+
     pub fn with_resolutions(mut self, descriptor_to_locators: &BTreeMap<Descriptor, Locator>, normalized_resolutions: &BTreeMap<Locator, Resolution>) -> Result<Self, Error> {
         self.resolution_tree.descriptor_to_locator.clear();
         self.resolution_tree.locator_resolutions.clear();
@@ -163,13 +191,16 @@ impl TreeResolver {
 
         let parent_dependencies: Vec<_> = self.resolution_tree.locator_resolutions.get(parent_locator)
             .expect("Expected the parent locator to have a resolution")
-            .dependencies.values().cloned().sorted().collect();
+            .dependencies.iter()
+            .map(|(ident, descriptor)| (ident.clone(), descriptor.clone()))
+            .sorted()
+            .collect();
 
-        for dependency_descriptor in &parent_dependencies {
+        for (dependency_ident, dependency_descriptor) in &parent_dependencies {
             let is_peer_dependency = self.resolution_tree.locator_resolutions
                 .get(parent_locator).unwrap()
                 .peer_dependencies
-                .contains_key(&dependency_descriptor.ident);
+                .contains_key(dependency_ident);
 
             if is_peer_dependency && parent_locator != top_locator {
                 continue;
@@ -184,7 +215,7 @@ impl TreeResolver {
             let is_optional = is_optional || self.resolution_tree.locator_resolutions
                 .get(parent_locator).unwrap()
                 .optional_dependencies
-                .contains(&dependency_descriptor.ident);
+                .contains(dependency_ident);
 
             let dependency_locator = self.resolution_tree.descriptor_to_locator.get(dependency_descriptor)
                 .unwrap_or_else(|| panic!("Expected a locator to be found for {}", dependency_descriptor.to_print_string()));
@@ -272,17 +303,8 @@ impl TreeResolver {
                     .dependencies
                     .get(&peer_ident).cloned();
 
-                if peer_descriptor.is_none() && parent_locator.ident == peer_ident {
-                    // If the parent isn't installed under an alias we can skip unnecessary steps
-                    if parent_descriptor.ident == parent_locator.ident {
-                        peer_descriptor = Some(parent_descriptor.clone());
-                    } else {
-                        let new_peer_descriptor
-                            = Descriptor::new(parent_locator.ident.clone(), parent_descriptor.range.clone());
-
-                        self.volatile_descriptor.remove(&new_peer_descriptor);
-                        peer_descriptor = Some(new_peer_descriptor);
-                    }
+                if peer_descriptor.is_none() && Self::package_ident(parent_locator) == peer_ident {
+                    peer_descriptor = Some(parent_descriptor.clone());
                 }
 
                 let is_provided_by_parent = match &peer_descriptor {
@@ -312,13 +334,6 @@ impl TreeResolver {
                     .get_mut(&operation.virtualized_locator).unwrap()
                     .dependencies
                     .insert(peer_ident.clone(), peer_descriptor.clone());
-
-                // Need to track when a virtual descriptor is set as a dependency in case
-                // the descriptor will be consolidated.
-                if matches!(peer_descriptor.range, Range::Virtual(_)) {
-                    self.virtual_dependents.entry(peer_descriptor.clone()).or_default()
-                        .insert(operation.virtualized_locator.clone());
-                }
 
                 if matches!(peer_descriptor.range, Range::MissingPeerDependency) {
                     missing_peer_dependencies.insert(peer_ident.clone());
@@ -357,12 +372,11 @@ impl TreeResolver {
                     .sorted()
                     .collect();
 
-                let virtual_instance_hash = (
-                    operation.virtualized_descriptor.ident.clone(),
-                    virtual_instance_resolutions,
-                );
+                let virtual_instance_hash = virtual_instance_resolutions;
 
-                let other_virtual_instances = self.virtual_instances.entry(operation.physical_locator.clone())
+                let package_identity = Self::package_identity(&operation.physical_locator);
+
+                let other_virtual_instances = self.virtual_instances.entry(package_identity)
                     .or_default();
 
                 let master_descriptor = other_virtual_instances.entry(virtual_instance_hash)
@@ -374,29 +388,17 @@ impl TreeResolver {
                     continue;
                 }
 
-                self.resolution_tree.descriptor_to_locator.remove(&operation.virtualized_descriptor);
+                let master_locator = self.resolution_tree.descriptor_to_locator.get(master_descriptor)
+                    .expect("Expected the virtual instance master to have a locator")
+                    .clone();
+
+                self.resolution_tree.descriptor_to_locator.insert(
+                    operation.virtualized_descriptor.clone(),
+                    master_locator,
+                );
+
                 self.resolution_tree.locator_resolutions.remove(&operation.virtualized_locator);
-
-                let mut all_dependents: Vec<_> = self.virtual_dependents
-                    .entry(operation.virtualized_descriptor.clone()).or_default()
-                    .iter().cloned().collect();
-
-                all_dependents.push(parent_locator.clone());
-
-                self.virtual_dependents.remove(&operation.virtualized_descriptor);
-
-                for dependent in all_dependents {
-                    if let Some(resolution) = self.resolution_tree.locator_resolutions.get_mut(&dependent) {
-                        if resolution.dependencies.get(&operation.virtualized_descriptor.ident).unwrap() != master_descriptor {
-                            stable = false;
-                        }
-
-                        resolution.dependencies.insert(
-                            operation.virtualized_descriptor.ident.clone(),
-                            master_descriptor.clone(),
-                        );
-                    }
-                }
+                stable = false;
             }
 
             if stable {
