@@ -14,6 +14,7 @@ use crate::{
 
 pub mod builtin;
 pub mod catalog;
+pub mod exec;
 pub mod folder;
 pub mod git;
 pub mod jsr;
@@ -227,6 +228,9 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
         Range::Folder(params)
             => folder::resolve_descriptor(&context, &descriptor, params, dependencies).await,
 
+        Range::Exec(params)
+            => exec::resolve_descriptor(&context, &descriptor, params, dependencies).await,
+
         Range::Portal(params)
             => portal::resolve_descriptor(&context, &descriptor, params, dependencies),
 
@@ -293,6 +297,9 @@ pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, depe
 
         Reference::Folder(params)
             => folder::resolve_locator(&context, &locator, params, dependencies).await,
+
+        Reference::Exec(params)
+            => exec::resolve_locator(&context, &locator, params, dependencies).await,
 
         Reference::Git(params)
             => git::resolve_locator(&context, &locator, params).await,

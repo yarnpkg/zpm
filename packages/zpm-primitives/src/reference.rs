@@ -121,6 +121,13 @@ pub enum Reference {
         path: String,
     },
 
+    #[pattern(r"exec:(?<path>.*)")]
+    #[to_file_string(|params| format!("exec:{}", params.path))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format!("exec:{}", params.path)))]
+    Exec {
+        path: String,
+    },
+
     #[pattern(r"patch:(?<inner>.*)#(?<path>.*)(?:&checksum=(?<checksum>[a-f0-9]*))?$")]
     #[to_file_string(|params| format_patch(&params.inner, &params.path, &params.checksum))]
     #[to_print_string(|params| DataType::Reference.colorize(&format_patch(&params.inner, &params.path, &params.checksum)))]
@@ -184,7 +191,7 @@ impl Reference {
             return params.inner.0.reference.must_bind() || (params.path.as_str() != "<builtin>" && !params.path.as_str().starts_with("~/"));
         }
 
-        matches!(&self, Reference::Link(_) | Reference::Portal(_) | Reference::Tarball(_) | Reference::Folder(_))
+        matches!(&self, Reference::Link(_) | Reference::Portal(_) | Reference::Tarball(_) | Reference::Folder(_) | Reference::Exec(_))
     }
 
     pub fn is_workspace_reference(&self) -> bool {
@@ -273,6 +280,10 @@ impl Reference {
 
             Reference::Portal(_) => {
                 "portal".to_string()
+            },
+
+            Reference::Exec(_) => {
+                "exec".to_string()
             },
 
             Reference::Url(_) => {

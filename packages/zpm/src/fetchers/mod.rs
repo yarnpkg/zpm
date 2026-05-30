@@ -8,6 +8,7 @@ use crate::{
 };
 
 pub mod builtin;
+pub mod exec;
 pub mod folder;
 pub mod git;
 pub mod link;
@@ -199,6 +200,9 @@ pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, i
 
         Reference::Folder(params)
             => folder::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
+
+        Reference::Exec(params)
+            => exec::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
 
         Reference::Git(params)
             => git::fetch_locator(&context, locator, params, is_mock_request).await,

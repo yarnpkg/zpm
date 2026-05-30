@@ -109,6 +109,7 @@ impl RangeExt for Range {
                 }
             },
 
+            Range::Exec(_) |
             Range::Folder(_) |
             Range::Portal(_) |
             Range::Tarball(_) => {

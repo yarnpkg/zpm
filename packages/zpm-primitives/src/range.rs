@@ -167,6 +167,13 @@ pub enum Range {
         path: String,
     },
 
+    #[pattern(r"exec:(?<path>.*)")]
+    #[to_file_string(|params| format!("exec:{}", params.path))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("exec:{}", params.path)))]
+    Exec {
+        path: String,
+    },
+
     #[pattern(r"file:(?<path>.*\.(?:tgz|tar\.gz))")]
     #[pattern(r"(?<path>\.{0,2}/.*\.(?:tgz|tar\.gz))")]
     #[to_file_string(|params| format_path_range(&params.path))]
