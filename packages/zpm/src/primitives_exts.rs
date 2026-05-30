@@ -77,13 +77,31 @@ impl RangeExt for Range {
                 }
             },
 
+            Range::JsrSemver(params) if params.ident.is_some() => {
+                RangeDetails {
+                    require_binding: false,
+                    fetch_before_resolve: false,
+                    transient_resolution: true,
+                }
+            },
+
+            Range::JsrTag(params) if params.ident.is_some() => {
+                RangeDetails {
+                    require_binding: false,
+                    fetch_before_resolve: false,
+                    transient_resolution: true,
+                }
+            },
+
             Range::Builtin(_) |
             Range::AnonymousSemver(_) |
             Range::AnonymousTag(_) |
             Range::RegistrySemver(_) |
             Range::RegistryTag(_) |
             Range::PypiSpecifier(_) |
-            Range::PypiTag(_) => {
+            Range::PypiTag(_) |
+            Range::JsrSemver(_) |
+            Range::JsrTag(_) => {
                 RangeDetails {
                     require_binding: false,
                     fetch_before_resolve: false,
@@ -178,6 +196,8 @@ impl RangeExt for Range {
             Range::RegistryTag(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
             Range::PypiSpecifier(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
             Range::PypiTag(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
+            Range::JsrSemver(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
+            Range::JsrTag(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
 
             // Patches need the fetched package contents to apply the patch
             Range::Patch(_) => Some(InnerDependencyKind::Fetch),

@@ -4,9 +4,9 @@ use futures::{future::BoxFuture, FutureExt};
 use wax::{Glob, Program};
 use zpm_formats::{iter_ext::IterExt, tar, tar_iter};
 use zpm_macro_enum::zpm_enum;
-use zpm_primitives::{AnonymousSemverRange, AnonymousTagRange, Descriptor, FolderRange, Ident, Locator, Range, RegistrySemverRange, RegistryTagRange, TarballRange, WorkspaceMagicRange};
+use zpm_primitives::{AnonymousSemverRange, AnonymousTagRange, Descriptor, FolderRange, Ident, JsrSemverRange, JsrTagRange, Locator, Range, RegistrySemverRange, RegistryTagRange, TarballRange, WorkspaceMagicRange};
 use zpm_semver::RangeKind;
-use zpm_utils::Path;
+use zpm_utils::{DataType, FromFileString, Path, ToFileString};
 
 use crate::{error::Error, install::InstallContext, manifest::helpers::{parse_manifest_from_bytes, read_manifest}, project::Project, report::{with_report_result, StreamReport, StreamReportConfig}, resolvers};
 
@@ -28,6 +28,20 @@ pub struct LooseResolution {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[derive_variants(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LooseDescriptor {
+    #[pattern(r"jsr:(?<ident>(?:@[^/]*/)?[^@/]+)(?:@(?<selector>.*))?")]
+    #[to_file_string(|params| match &params.selector {
+        Some(selector) => format!("jsr:{}@{}", params.ident.to_file_string(), selector),
+        None => format!("jsr:{}", params.ident.to_file_string()),
+    })]
+    #[to_print_string(|params| DataType::Ident.colorize(&match &params.selector {
+        Some(selector) => format!("jsr:{}@{}", params.ident.to_file_string(), selector),
+        None => format!("jsr:{}", params.ident.to_file_string()),
+    }))]
+    Jsr {
+        ident: Ident,
+        selector: Option<String>,
+    },
+
     #[pattern(r"(?<descriptor>.*)")]
     #[to_file_string(|params| params.descriptor.to_file_string())]
     #[to_print_string(|params| params.descriptor.to_print_string())]
@@ -65,7 +79,8 @@ impl LooseDescriptor {
                     .map(|ident| LooseDescriptor::Ident(IdentLooseDescriptor {ident}))
                     .collect(),
 
-            LooseDescriptor::Range(_) =>
+            LooseDescriptor::Range(_) |
+            LooseDescriptor::Jsr(_) =>
                 vec![self.clone()],
         }
     }
@@ -189,6 +204,22 @@ impl LooseDescriptor {
                 Err(Error::UnsufficientLooseDescriptor(range.clone()))
             },
 
+            LooseDescriptor::Jsr(JsrLooseDescriptor {ident, selector}) => {
+                match selector {
+                    Some(selector) => {
+                        if let Ok(range) = zpm_semver::Range::from_file_string(selector) {
+                            LooseDescriptor::resolve_jsr_semver(context, ident, None, &range).await
+                        } else {
+                            LooseDescriptor::resolve_jsr_tag(context, options, ident, None, selector).await
+                        }
+                    },
+
+                    None => {
+                        LooseDescriptor::resolve_jsr_tag(context, options, ident, None, "latest").await
+                    },
+                }
+            },
+
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::AnonymousSemver(AnonymousSemverRange {range}), ..}}) => {
                 LooseDescriptor::resolve_registry_semver(context, ident, None, range).await
             },
@@ -203,6 +234,14 @@ impl LooseDescriptor {
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::RegistryTag(RegistryTagRange {ident: ident_range, tag}), ..}}) => {
                 LooseDescriptor::resolve_registry_tag(context, options, ident, ident_range.as_ref(), tag.as_str()).await
+            },
+
+            LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::JsrSemver(JsrSemverRange {ident: ident_range, range}), ..}}) => {
+                LooseDescriptor::resolve_jsr_semver(context, ident, ident_range.as_ref(), range).await
+            },
+
+            LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor: Descriptor {ident, range: Range::JsrTag(JsrTagRange {ident: ident_range, tag}), ..}}) => {
+                LooseDescriptor::resolve_jsr_tag(context, options, ident, ident_range.as_ref(), tag.as_str()).await
             },
 
             LooseDescriptor::Descriptor(DescriptorLooseDescriptor {descriptor}) => {
@@ -335,6 +374,89 @@ impl LooseDescriptor {
             Ok(LooseResolution {
                 descriptor,
                 locator: Some(resolution_result.resolution.locator),
+            })
+        }
+    }
+
+    async fn resolve_jsr_semver(context: &InstallContext<'_>, ident: &Ident, range_ident: Option<&Ident>, range: &zpm_semver::Range) -> Result<LooseResolution, Error> {
+        let descriptor
+            = Descriptor::new(ident.clone(), JsrSemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
+
+        let Range::JsrSemver(range_params) = &descriptor.range else {
+            panic!("Invalid range");
+        };
+
+        let Some(range_kind) = range_params.range.kind() else {
+            return Ok(LooseResolution {
+                descriptor,
+                locator: None,
+            });
+        };
+
+        let resolution_result
+            = resolvers::jsr::resolve_semver_descriptor(context, &descriptor, &range_params).await?;
+
+        let range = resolution_result.resolution.version
+            .to_range(range_kind);
+
+        let descriptor
+            = Descriptor::new(ident.clone(), JsrSemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
+
+        Ok(LooseResolution {
+            descriptor,
+            locator: None,
+        })
+    }
+
+    async fn resolve_jsr_tag(context: &InstallContext<'_>, options: &ResolveOptions, ident: &Ident, range_ident: Option<&Ident>, tag: &str) -> Result<LooseResolution, Error> {
+        if !options.resolve_tags {
+            let descriptor
+                = Descriptor::new(ident.clone(), JsrTagRange {ident: range_ident.cloned(), tag: tag.into()}.into());
+
+            return Ok(LooseResolution {
+                descriptor,
+                locator: None,
+            });
+        }
+
+        let descriptor
+            = Descriptor::new(ident.clone(), JsrTagRange {ident: range_ident.cloned(), tag: tag.into()}.into());
+
+        let Range::JsrTag(range_params) = &descriptor.range else {
+            panic!("Invalid range");
+        };
+
+        let resolution_result
+            = resolvers::jsr::resolve_tag_descriptor(context, &descriptor, &range_params).await?;
+
+        let range = resolution_result.resolution.version
+            .to_range(options.range_kind);
+
+        let descriptor
+            = Descriptor::new(ident.clone(), JsrSemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
+
+        let Range::JsrSemver(range_params) = &descriptor.range else {
+            panic!("Invalid range");
+        };
+
+        let resolution_check_result
+            = resolvers::jsr::resolve_semver_descriptor(context, &descriptor, &range_params).await?;
+
+        if resolution_check_result.resolution.version == resolution_result.resolution.version {
+            Ok(LooseResolution {
+                descriptor,
+                locator: None,
+            })
+        } else {
+            let fixed_range = resolution_result.resolution.version
+                .to_range(RangeKind::Exact);
+
+            let descriptor
+                = Descriptor::new(ident.clone(), JsrSemverRange {ident: range_ident.cloned(), range: fixed_range.clone()}.into());
+
+            Ok(LooseResolution {
+                descriptor,
+                locator: None,
             })
         }
     }
