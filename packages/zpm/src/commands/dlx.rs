@@ -65,6 +65,12 @@ impl DlxWithPackages {
         let descriptors
             = LooseDescriptor::resolve_all(&install_context, &resolve_options, &self.packages).await?;
 
+        if !self.quiet {
+            for locator in descriptors.iter().filter_map(|resolution| resolution.locator.as_ref()) {
+                println!("➤ · {}", locator.to_file_string());
+            }
+        }
+
         let dlx_project
             = install_dependencies(&dlx_project.project_cwd, descriptors, self.quiet).await?;
         let bin
