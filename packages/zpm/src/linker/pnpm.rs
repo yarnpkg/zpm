@@ -194,7 +194,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             .relative_to(&link_abs_dirname);
 
         link_abs_path
-            .fs_rm_file()
+            .fs_rm()
             .ok_missing()?
             .unwrap_or(&link_abs_path)
             .fs_create_parent()?
@@ -240,7 +240,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 .relative_to(&link_abs_dirname);
 
         link_abs_path
-            .fs_rm_file()
+            .fs_rm()
             .ok_missing()?
             .unwrap_or(&link_abs_path)
             .fs_create_parent()?
@@ -304,7 +304,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                     .relative_to(&link_abs_dirname);
 
             link_abs_path
-                .fs_rm_file()
+                .fs_rm()
                 .ok_missing()?
                 .unwrap_or(&link_abs_path)
                 .fs_create_parent()?
