@@ -214,6 +214,18 @@
           "enableNetwork": {
             "type": ["boolean", "null"],
             "description": "Whether to allow network access for this specific glob"
+          },
+          "httpsCaFilePath": {
+            "type": ["zpm_utils::Path", "null"],
+            "description": "Path to a file containing one or multiple Certificate Authority signing certificates"
+          },
+          "httpsCertFilePath": {
+            "type": ["zpm_utils::Path", "null"],
+            "description": "Path to a file containing a certificate chain in PEM format"
+          },
+          "httpsKeyFilePath": {
+            "type": ["zpm_utils::Path", "null"],
+            "description": "Path to a file containing a private key in PEM format"
           }
         }
       }

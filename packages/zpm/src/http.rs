@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use hickory_resolver::{config::LookupIpStrategy, TokioResolver};
 use http::HeaderMap;
 use itertools::Itertools;
-use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Certificate, Client, Identity, Method, Proxy, RequestBuilder, Response, Url};
+use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Certificate, Client, ClientBuilder, Identity, Method, Proxy, RequestBuilder, Response, Url};
 use tokio::sync::OnceCell;
 use wax::Program;
 use zpm_config::{Configuration, NetworkSettings, Setting};
@@ -114,6 +114,7 @@ pub struct HttpClient {
     pub config: HttpConfig,
 
     client: Client,
+    network_clients: Vec<(Glob, Client)>,
 
     /// Cache for GET requests to avoid duplicate network calls for the same URL.
     /// Uses OnceCell for each URL to handle concurrent requests to the same URL.
@@ -125,6 +126,7 @@ impl std::fmt::Debug for HttpClient {
         f.debug_struct("HttpClient")
             .field("config", &self.config)
             .field("client", &self.client)
+            .field("network_clients", &format!("<{} entries>", self.network_clients.len()))
             .field("get_cache", &format!("<{} entries>", self.get_cache.len()))
             .finish()
     }
@@ -142,7 +144,7 @@ pub struct HttpRequest<'a> {
 impl<'a> HttpRequest<'a> {
     pub fn new(client: &'a HttpClient, url: Url, method: Method) -> Self {
         let builder
-            = client.client.request(method.clone(), url.clone());
+            = client.client_for_url(&url).request(method.clone(), url.clone());
 
         Self {
             builder,
@@ -275,7 +277,7 @@ impl<'a> HttpRequest<'a> {
 }
 
 impl HttpClient {
-    pub fn new(config: &Configuration) -> Result<Arc<Self>, Error> {
+    fn build_client(config: &Configuration, network_settings: Option<&NetworkSettings>) -> Result<Client, Error> {
         let mut client_builder = reqwest::Client::builder()
             // Connection pooling settings
             .pool_max_idle_per_host(config.settings.network_concurrency.value)
@@ -314,19 +316,28 @@ impl HttpClient {
         }
 
         if let Some(ca_path) = config.settings.https_ca_file_path.value.as_ref() {
-            let ca_content
-                = ca_path.fs_read_prealloc()?;
-
-            let certificate
-                = Certificate::from_pem(&ca_content)?;
-
-            client_builder = client_builder.add_root_certificate(certificate);
+            client_builder = Self::add_root_certificate(client_builder, ca_path)?;
         }
 
-        match (
-            config.settings.https_cert_file_path.value.as_ref(),
-            config.settings.https_key_file_path.value.as_ref(),
-        ) {
+        if let Some(settings) = network_settings {
+            if let Some(ca_path) = settings.https_ca_file_path.value.as_ref() {
+                client_builder = Self::add_root_certificate(client_builder, ca_path)?;
+            }
+        }
+
+        let (https_cert_file_path, https_key_file_path) = match network_settings {
+            Some(settings) if settings.https_cert_file_path.value.is_some() || settings.https_key_file_path.value.is_some() => (
+                settings.https_cert_file_path.value.as_ref(),
+                settings.https_key_file_path.value.as_ref(),
+            ),
+
+            _ => (
+                config.settings.https_cert_file_path.value.as_ref(),
+                config.settings.https_key_file_path.value.as_ref(),
+            ),
+        };
+
+        match (https_cert_file_path, https_key_file_path) {
             (Some(cert_path), Some(key_path)) => {
                 let cert_content
                     = cert_path.fs_read_prealloc()?;
@@ -360,6 +371,44 @@ impl HttpClient {
                 extra: Some("Failed to build HTTP client from current network/proxy/TLS settings".to_string()),
             })?;
 
+        Ok(client)
+    }
+
+    fn add_root_certificate(client_builder: ClientBuilder, ca_path: &zpm_utils::Path) -> Result<ClientBuilder, Error> {
+        let ca_content
+            = ca_path.fs_read_prealloc()?;
+
+        let certificate
+            = Certificate::from_pem(&ca_content)?;
+
+        Ok(client_builder.add_root_certificate(certificate))
+    }
+
+    fn has_tls_settings(settings: &NetworkSettings) -> bool {
+        settings.https_ca_file_path.value.is_some()
+            || settings.https_cert_file_path.value.is_some()
+            || settings.https_key_file_path.value.is_some()
+    }
+
+    pub fn new(config: &Configuration) -> Result<Arc<Self>, Error> {
+        let network_settings: Vec<_> = config.settings.network_settings.clone()
+            .into_iter()
+            // Sort the config by key length to match on the most specific pattern.
+            .sorted_by_cached_key(|(glob, _)| -(glob.raw().len() as isize))
+            .collect();
+
+        let client
+            = Self::build_client(config, None)?;
+
+        let mut network_clients
+            = Vec::new();
+
+        for (glob, settings) in &network_settings {
+            if Self::has_tls_settings(settings) {
+                network_clients.push((glob.clone(), Self::build_client(config, Some(settings))?));
+            }
+        }
+
         let config = HttpConfig {
             enforce_unsafe_http: config.settings.enforce_unsafe_http.value,
             http_retry: config.settings.http_retry.value,
@@ -368,18 +417,29 @@ impl HttpClient {
 
             enable_network: config.settings.enable_network.value,
 
-            network_settings: config.settings.network_settings.clone()
-                .into_iter()
-                // Sort the config by key length to match on the most specific pattern.
-                .sorted_by_cached_key(|(glob, _)| -(glob.raw().len() as isize))
-                .collect(),
+            network_settings,
         };
 
         Ok(Arc::new(Self {
             client,
+            network_clients,
             config,
             get_cache: DashMap::new(),
         }))
+    }
+
+    fn client_for_url(&self, url: &Url) -> &Client {
+        let Some(host_str) = url.host_str() else {
+            return &self.client;
+        };
+
+        for (glob, client) in &self.network_clients {
+            if glob.matcher().is_match(host_str) {
+                return client;
+            }
+        }
+
+        &self.client
     }
 
     pub fn request(&self, url: impl AsRef<str>, method: Method) -> Result<HttpRequest<'_>, Error> {
