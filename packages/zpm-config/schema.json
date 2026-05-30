@@ -76,6 +76,11 @@
       "description": "Whether to keep the packages in a global cache rather than inside the project",
       "default": true
     },
+    "enableMirror": {
+      "type": "boolean",
+      "description": "Whether to mirror local cache entries into the global cache",
+      "default": true
+    },
     "enableLocalCacheCleanup": {
       "type": "boolean",
       "description": "Whether to remove unused packages from the local cache after each install",

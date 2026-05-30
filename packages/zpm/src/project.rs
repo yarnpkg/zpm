@@ -428,6 +428,8 @@ impl Project {
 
         let enable_global_cache
             = self.config.settings.enable_global_cache.value;
+        let enable_mirror
+            = self.config.settings.enable_mirror.value;
 
         let enable_immutable_cache
             = self.config.settings.enable_immutable_cache.value;
@@ -440,8 +442,8 @@ impl Project {
             None => "".to_string(),
         };
 
-        let global_cache
-            = Some(DiskCache::new(global_cache_path, name_suffix.clone(), enable_immutable_cache, false));
+        let global_cache = (enable_global_cache || enable_mirror)
+            .then(|| DiskCache::new(global_cache_path, name_suffix.clone(), enable_immutable_cache, false));
 
         let local_cache = (!enable_global_cache)
             .then(|| DiskCache::new(local_cache_path, name_suffix, enable_immutable_cache, cleanable_local_cache));
