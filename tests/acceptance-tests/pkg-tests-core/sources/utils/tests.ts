@@ -1048,14 +1048,14 @@ exit 0
         type: RequestType.NodeDistTarball,
         name: match[2]!,
       };
-    } else if ((match = url.match(/^\/@yarnpkg\/yarn-([a-z0-9-]+)\/-\/yarn-\1-(.+)\.tgz$/))) {
+    } else if ((match = url.match(/^\/@yarnpkg\/yarn-([^/]+)\/-\/yarn-\1-([^/]+)\.tgz$/))) {
       // Yarn Switch tarball: /@yarnpkg/yarn-{platform}/-/yarn-{platform}-{version}.tgz
       return {
         type: RequestType.YarnSwitchTarball,
         platform: match[1]!,
         version: match[2]!,
       };
-    } else if ((match = url.match(/^\/@yarnpkg\/yarn-([a-z0-9-]+)$/))) {
+    } else if ((match = url.match(/^\/@yarnpkg\/yarn-([^/]+)$/))) {
       // Yarn Switch package info: /@yarnpkg/yarn-{platform}
       return {
         type: RequestType.YarnSwitchInfo,
