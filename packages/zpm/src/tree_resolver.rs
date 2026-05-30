@@ -43,7 +43,7 @@ pub struct TreeResolver {
     original_workspace_definitions: BTreeMap<Locator, Resolution>,
     peer_dependency_links: BTreeMap<Locator, BTreeMap<Ident, BTreeSet<Locator>>>,
     peer_dependency_dependents: BTreeMap<Locator, BTreeSet<Locator>>,
-    virtual_instances: BTreeMap<Locator, BTreeMap<Vec<Locator>, Descriptor>>,
+    virtual_instances: BTreeMap<Locator, BTreeMap<(Vec<Ident>, Vec<Locator>), Descriptor>>,
     volatile_descriptor: BTreeSet<Descriptor>,
     volatile_locator: BTreeSet<Locator>,
 }
@@ -365,14 +365,23 @@ impl TreeResolver {
                     continue;
                 }
 
-                let virtual_instance_resolutions: Vec<_> = self.resolution_tree.locator_resolutions
-                    .get(&operation.virtualized_locator).unwrap()
+                let virtualized_resolution = self.resolution_tree.locator_resolutions
+                    .get(&operation.virtualized_locator).unwrap();
+
+                let virtual_instance_peers = virtualized_resolution
+                    .peer_dependencies
+                    .keys()
+                    .cloned()
+                    .sorted()
+                    .collect();
+
+                let virtual_instance_resolutions: Vec<_> = virtualized_resolution
                     .dependencies.values()
                     .filter_map(|d| self.resolution_tree.descriptor_to_locator.get(d).cloned())
                     .sorted()
                     .collect();
 
-                let virtual_instance_hash = virtual_instance_resolutions;
+                let virtual_instance_hash = (virtual_instance_peers, virtual_instance_resolutions);
 
                 let package_identity = Self::package_identity(&operation.physical_locator);
 
