@@ -439,6 +439,15 @@ pub enum Error {
     #[error("Some build scripts failed to run")]
     BuildScriptsFailedToRun,
 
+    #[error("{} lists {} as dependency, but only workspaces can depend on exec: packages.", .parent.to_print_string(), .descriptor.to_print_string())]
+    ExecDependencyFromNonWorkspace {
+        parent: Locator,
+        descriptor: Descriptor,
+    },
+
+    #[error("{} can't be built with the exec: protocol because all scripts have been disabled.", .0.to_print_string())]
+    ExecScriptsDisabled(Locator),
+
     #[error("Invalid pack pattern ({0})")]
     InvalidPackPattern(String),
 

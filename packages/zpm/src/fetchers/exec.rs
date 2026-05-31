@@ -5,6 +5,7 @@ use zpm_utils::{FromFileString, Path, ToFileString};
 use crate::{
     error::Error,
     install::{FetchResult, InstallContext, InstallOpResult},
+    linker::helpers::TopLevelConfiguration,
     manifest::RemoteManifest,
     npm::NpmEntryExt,
     resolvers::Resolution,
@@ -54,7 +55,11 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     let locator_str
         = locator.to_file_string();
 
-    let pkg_blob = package_cache.refetch_blob_data(locator.clone(), ".zip", || async {
+    let pkg_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
+        if !is_exec_allowed(context, locator) {
+            return Err(Error::ExecScriptsDisabled(locator.clone()));
+        }
+
         let temp_dir
             = Path::temp_dir_pattern("exec-<>")?;
         let build_dir
@@ -66,6 +71,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         wrapper_path.fs_change(make_wrapper(&temp_dir, &build_dir, &locator_str)?.as_bytes(), false)?;
 
         ScriptEnvironment::new()?
+            .without_pnp_loader()
             .with_cwd(parent_context_directory.clone())
             .run_exec("node", [wrapper_path.to_file_string(), script_path.to_file_string()])
             .await?
@@ -106,6 +112,34 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     })
 }
 
+fn is_exec_allowed(context: &InstallContext<'_>, locator: &Locator) -> bool {
+    let project = context.project
+        .expect("The project is required for fetching exec packages");
+
+    if project.config.settings.enable_scripts.value {
+        return true;
+    }
+
+    let dependencies_meta
+        = TopLevelConfiguration::from_project(project);
+
+    dependencies_meta.into_iter().any(|(selector, meta)| {
+        if meta.built != Some(true) {
+            return false;
+        }
+
+        match selector {
+            zpm_primitives::VersionFilter::Ident(params) => {
+                params.ident.check(&locator.ident)
+            },
+
+            zpm_primitives::VersionFilter::Range(_) => {
+                false
+            },
+        }
+    })
+}
+
 fn make_wrapper(temp_dir: &Path, build_dir: &Path, locator: &str) -> Result<String, Error> {
     let exec_env = serde_json::json!({
         "tempDir": temp_dir.to_file_string(),
@@ -114,21 +148,28 @@ fn make_wrapper(temp_dir: &Path, build_dir: &Path, locator: &str) -> Result<Stri
     });
 
     Ok(format!(r#"
-const Module = require('module');
+Object.defineProperty(globalThis, 'Module', {{
+  get: () => require('module'),
+  configurable: true,
+  enumerable: false,
+}});
 
 for (const name of Module.builtinModules) {{
   if (name === 'module' || name.startsWith('_'))
     continue;
 
-  try {{
-    globalThis[name] = require(name);
-  }} catch {{
-    globalThis[name] = undefined;
-  }}
+  Object.defineProperty(globalThis, name, {{
+    get: () => require(name),
+    configurable: true,
+    enumerable: false,
+  }});
 }}
 
-globalThis.Module = Module;
-globalThis.execEnv = {};
+Object.defineProperty(globalThis, 'execEnv', {{
+  value: {},
+  configurable: true,
+  enumerable: true,
+}});
 
 require(process.argv[2]);
 "#, serde_json::to_string(&exec_env).unwrap()))

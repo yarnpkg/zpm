@@ -33,6 +33,14 @@ fn format_pypi_registry(ident: &Ident, version: &crate::PypiVersion, url: Option
         None => format!("pypi:{}@{}", ident.to_file_string(), version.to_file_string()),
     }
 }
+
+fn format_local(protocol: &str, path: &str, hash: &Option<Hash64>) -> String {
+    match hash {
+        Some(hash) => format!("{}:{}#{}", protocol, path, hash.to_file_string()),
+        None => format!("{}:{}", protocol, path),
+    }
+}
+
 fn format_workspace_path(path: &Path) -> String {
     if path.is_empty() {
         "workspace:.".to_string()
@@ -93,18 +101,20 @@ pub enum Reference {
         url: Option<UrlEncoded<String>>,
     },
 
-    #[pattern(r"file:(?<path>.*\.(?:tgz|tar\.gz))")]
-    #[to_file_string(|params| format!("file:{}", params.path))]
-    #[to_print_string(|params| DataType::Reference.colorize(&format!("file:{}", params.path)))]
+    #[pattern(r"file:(?<path>.*\.(?:tgz|tar\.gz))(?:#(?<hash>[a-f0-9]*))?")]
+    #[to_file_string(|params| format_local("file", &params.path, &params.hash))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format_local("file", &params.path, &params.hash)))]
     Tarball {
         path: String,
+        hash: Option<Hash64>,
     },
 
-    #[pattern(r"file:(?<path>.*)")]
-    #[to_file_string(|params| format!("file:{}", params.path))]
-    #[to_print_string(|params| DataType::Reference.colorize(&format!("file:{}", params.path)))]
+    #[pattern(r"file:(?<path>.*?)(?:#(?<hash>[a-f0-9]*))?")]
+    #[to_file_string(|params| format_local("file", &params.path, &params.hash))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format_local("file", &params.path, &params.hash)))]
     Folder {
         path: String,
+        hash: Option<Hash64>,
     },
 
     #[pattern(r"link:(?<path>.*)")]
@@ -121,11 +131,12 @@ pub enum Reference {
         path: String,
     },
 
-    #[pattern(r"exec:(?<path>.*)")]
-    #[to_file_string(|params| format!("exec:{}", params.path))]
-    #[to_print_string(|params| DataType::Reference.colorize(&format!("exec:{}", params.path)))]
+    #[pattern(r"exec:(?<path>.*?)(?:#(?<hash>[a-f0-9]*))?")]
+    #[to_file_string(|params| format_local("exec", &params.path, &params.hash))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format_local("exec", &params.path, &params.hash)))]
     Exec {
         path: String,
+        hash: Option<Hash64>,
     },
 
     #[pattern(r"patch:(?<inner>.*)#(?<path>.*)(?:&checksum=(?<checksum>[a-f0-9]*))?$")]
