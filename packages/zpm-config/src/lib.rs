@@ -936,6 +936,9 @@ fn normalize_conflict_metadata(value: &mut serde_yaml::Value) -> (Option<Conflic
     let mut field_modes
         = BTreeMap::new();
 
+    let mut fields_to_remove
+        = Vec::new();
+
     for (key, field_value) in mapping.iter_mut() {
         let serde_yaml::Value::String(key) = key else {
             continue;
@@ -956,7 +959,13 @@ fn normalize_conflict_metadata(value: &mut serde_yaml::Value) -> (Option<Conflic
 
         if let Some(value) = field_mapping.remove(&value_key) {
             *field_value = value;
+        } else if field_mapping.is_empty() {
+            fields_to_remove.push(key.clone());
         }
+    }
+
+    for key in fields_to_remove {
+        mapping.remove(serde_yaml::Value::String(key));
     }
 
     (root_mode, field_modes)

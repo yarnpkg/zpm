@@ -110,6 +110,25 @@ describe(`Features`, () => {
       await expect(run(`config`, `get`, `--json`, `immutablePatterns`)).resolves.toMatchObject({stdout: `["foo","bar"]\n`});
     }));
 
+    test(`it should allow resetting a home configuration field without providing a project value`, makeTemporaryEnv({
+    }, async ({path, run, source}) => {
+      await xfs.mkdirPromise(ppath.join(path, `..`), {recursive: true});
+
+      await xfs.writeJsonPromise(ppath.join(path, `..`, Filename.rc), {
+        immutablePatterns: [`foo`],
+      });
+
+      await expect(run(`config`, `get`, `--json`, `immutablePatterns`)).resolves.toMatchObject({stdout: `["foo"]\n`});
+
+      await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
+        immutablePatterns: {
+          onConflict: `reset`,
+        },
+      });
+
+      await expect(run(`config`, `get`, `--json`, `immutablePatterns`)).resolves.toMatchObject({stdout: `[]\n`});
+    }));
+
     test(`it should return a helpful error if the rc file is wrong`, makeTemporaryEnv({
     }, async ({path, run, source}) => {
       await xfs.mkdirPromise(ppath.join(path, `..` as PortablePath), {recursive: true});

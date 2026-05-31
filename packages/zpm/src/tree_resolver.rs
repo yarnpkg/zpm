@@ -464,17 +464,19 @@ impl TreeResolver {
                 .entry(final_resolution.clone()).or_default()
                 .insert(parent_locator.clone());
 
-            if !self.resolution_tree.locator_resolutions.contains_key(&operation.virtualized_locator) {
-                continue;
-            }
-
             let peer_dependencies = &self.resolution_tree.locator_resolutions
-                .get(&operation.virtualized_locator).unwrap()
+                .get(&final_resolution).unwrap()
                 .peer_dependencies;
 
             for peer_ident in peer_dependencies.keys().sorted() {
                 let root = operation.next_peer_slots.get(peer_ident)
                     .expect("Expected the peer dependency ident to be listed in the next peer slots");
+
+                let root = if root == &operation.virtualized_locator {
+                    &final_resolution
+                } else {
+                    root
+                };
 
                 self.peer_dependency_links
                     .entry(root.clone())
@@ -484,7 +486,7 @@ impl TreeResolver {
             }
 
             let virtualized_resolution = self.resolution_tree.locator_resolutions
-                .get_mut(&operation.virtualized_locator).unwrap();
+                .get_mut(&final_resolution).unwrap();
 
             for missing_peer_dependency in &virtualized_resolution.missing_peer_dependencies {
                 virtualized_resolution.dependencies.remove(missing_peer_dependency);
