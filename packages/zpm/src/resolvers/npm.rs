@@ -91,6 +91,43 @@ fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, pa
         .into_resolution_result(context)
 }
 
+async fn load_manifest_from_full_metadata(
+    context: &InstallContext<'_>,
+    registry_base: &str,
+    authorization: Option<&str>,
+    params: &RegistryReference,
+) -> Result<RemoteManifestWithScripts, Error> {
+    let project = context.project
+        .expect("The project is required for resolving a workspace package");
+
+    let bytes
+        = http_npm::get_package_metadata(&http_npm::GetPackageMetadataParams {
+            http_client: &project.http_client,
+            registry: registry_base,
+            ident: &params.ident,
+            authorization,
+            global_folder: &project.config.settings.global_folder.value,
+            refresh_lockfile: context.refresh_lockfile,
+            background_writes: context.background_writes.as_deref(),
+        }).await?;
+
+    #[serde_as]
+    #[derive(Deserialize)]
+    struct RegistryMetadata<'a> {
+        #[serde(borrow)]
+        versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
+    }
+
+    let registry_data: RegistryMetadata<'_>
+        = JsonDocument::hydrate_from_slice(&bytes[..])?;
+
+    let manifest
+        = registry_data.versions.get(&params.version)
+            .ok_or_else(|| Error::NoCandidatesFound(AnonymousSemverRange {range: zpm_semver::Range::exact(params.version.clone())}.into()))?;
+
+    Ok(JsonDocument::hydrate_from_value(manifest)?)
+}
+
 pub async fn resolve_semver_or_workspace_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistrySemverRange) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
@@ -351,33 +388,8 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     let locator_url
         = url::Url::parse(&format!("{}{}", registry_base, registry_path))?;
 
-    let mut manifest: RemoteManifestWithScripts = if !project.http_client.config.is_network_enabled(&locator_url) {
-        let bytes
-            = http_npm::get_package_metadata(&http_npm::GetPackageMetadataParams {
-                http_client: &project.http_client,
-                registry: &registry_base,
-                ident: &params.ident,
-                authorization: authorization.as_deref(),
-                global_folder: &project.config.settings.global_folder.value,
-                refresh_lockfile: context.refresh_lockfile,
-                background_writes: context.background_writes.as_deref(),
-            }).await?;
-
-        #[serde_as]
-        #[derive(Deserialize)]
-        struct RegistryMetadata<'a> {
-            #[serde(borrow)]
-            versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
-        }
-
-        let registry_data: RegistryMetadata<'_>
-            = JsonDocument::hydrate_from_slice(&bytes[..])?;
-
-        let manifest
-            = registry_data.versions.get(&params.version)
-                .ok_or_else(|| Error::NoCandidatesFound(AnonymousSemverRange {range: zpm_semver::Range::exact(params.version.clone())}.into()))?;
-
-        JsonDocument::hydrate_from_value(manifest)?
+    let mut manifest: RemoteManifestWithScripts = if !project.http_client.config.is_network_enabled(&locator_url) || params.ident.scope() == Some("@jsr") {
+        load_manifest_from_full_metadata(context, &registry_base, authorization.as_deref(), params).await?
     } else {
         let bytes
             = http_npm::get(&http_npm::NpmHttpParams {

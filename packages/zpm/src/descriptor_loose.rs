@@ -404,7 +404,7 @@ impl LooseDescriptor {
 
         Ok(LooseResolution {
             descriptor,
-            locator: None,
+            locator: Some(resolution_result.resolution.locator),
         })
     }
 
@@ -445,7 +445,7 @@ impl LooseDescriptor {
         if resolution_check_result.resolution.version == resolution_result.resolution.version {
             Ok(LooseResolution {
                 descriptor,
-                locator: None,
+                locator: Some(resolution_check_result.resolution.locator),
             })
         } else {
             let fixed_range = resolution_result.resolution.version
@@ -456,7 +456,7 @@ impl LooseDescriptor {
 
             Ok(LooseResolution {
                 descriptor,
-                locator: None,
+                locator: Some(resolution_result.resolution.locator),
             })
         }
     }
