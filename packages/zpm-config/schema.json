@@ -206,6 +206,28 @@
       "description": "The number of concurrent network requests Yarn can perform",
       "default": 100
     },
+    "logFilters": {
+      "type": "array",
+      "description": "Filters that can discard log entries or change their reported level",
+      "items": {
+        "type": "object",
+        "title": "LogFilter",
+        "properties": {
+          "text": {
+            "type": ["string", "null"],
+            "description": "Exact log text to match"
+          },
+          "pattern": {
+            "type": ["zpm_utils::Glob", "null"],
+            "description": "Glob pattern to match against log text"
+          },
+          "level": {
+            "type": "crate::types::LogLevel",
+            "description": "Level to assign to matching log entries"
+          }
+        }
+      }
+    },
     "networkSettings": {
       "type": "object",
       "description": "Configuration specific to each network setting",
@@ -474,6 +496,11 @@
     "preferInteractive": {
       "type": "boolean",
       "description": "Whether to use interactive prompts by default when running yarn commands",
+      "default": false
+    },
+    "preferTruncatedLines": {
+      "type": "boolean",
+      "description": "Whether to prefer truncating lines in the terminal output",
       "default": false
     },
     "preferReuse": {

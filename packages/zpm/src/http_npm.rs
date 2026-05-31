@@ -834,7 +834,9 @@ async fn render_otp_notice(response: &Response) {
             DataType::Url.colorize(caps.get(0).unwrap().as_str()).to_string()
         });
 
-        crate::report::if_active_async(|report| report.info(formatted_notice.to_string())).await;
+        crate::report::if_active_async(|report| {
+            report.info(formatted_notice.to_string());
+        }).await;
     }
 }
 

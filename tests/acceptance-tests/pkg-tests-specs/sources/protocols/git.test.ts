@@ -421,17 +421,13 @@ describe(`Protocols`, () => {
           },
         },
         async ({path, run, source}) => {
-          // This checks that the `set version classic` part of `scriptUtils.prepareExternalProject` doesn't use Corepack.
-          // The rest of the install will fail though.
+          // This checks that preparing Yarn Classic repositories doesn't use Corepack.
           await expect(run(`install`, {
             env: {
               COREPACK_ROOT: npath.join(npath.fromPortablePath(path), `404`),
               YARN_ENABLE_INLINE_BUILDS: `true`,
             },
-          })).rejects.toMatchObject({
-            code: 1,
-            stdout: expect.stringContaining(`Saving the new release`),
-          });
+          })).resolves.toBeDefined();
         },
       ),
     );

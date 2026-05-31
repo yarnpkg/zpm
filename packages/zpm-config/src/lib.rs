@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Display, ops::Deref, sync::Arc, time::UNIX_EPOCH};
+use std::{collections::{BTreeMap, BTreeSet}, fmt::Display, ops::Deref, sync::Arc, time::UNIX_EPOCH};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, IoResultExt, LastModifiedAt, Libc, Os, Path, RawString, Serialized, System, ToFileString, ToHumanString, tree};
@@ -900,6 +900,136 @@ struct RcFile {
     text: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConflictMode {
+    Extend,
+    Reset,
+}
+
+fn parse_conflict_mode(value: &serde_yaml::Value) -> Option<ConflictMode> {
+    let serde_yaml::Value::String(value) = value else {
+        return None;
+    };
+
+    match value.as_str() {
+        "extend" => Some(ConflictMode::Extend),
+        "reset" => Some(ConflictMode::Reset),
+        _ => None,
+    }
+}
+
+fn normalize_conflict_metadata(value: &mut serde_yaml::Value) -> (Option<ConflictMode>, BTreeMap<String, ConflictMode>) {
+    let serde_yaml::Value::Mapping(mapping) = value else {
+        return (None, BTreeMap::new());
+    };
+
+    let on_conflict_key
+        = serde_yaml::Value::String("onConflict".to_string());
+    let value_key
+        = serde_yaml::Value::String("value".to_string());
+
+    let root_mode
+        = mapping.remove(&on_conflict_key)
+            .as_ref()
+            .and_then(parse_conflict_mode);
+
+    let mut field_modes
+        = BTreeMap::new();
+
+    for (key, field_value) in mapping.iter_mut() {
+        let serde_yaml::Value::String(key) = key else {
+            continue;
+        };
+
+        let serde_yaml::Value::Mapping(field_mapping) = field_value else {
+            continue;
+        };
+
+        let Some(mode) = field_mapping
+            .remove(&on_conflict_key)
+            .as_ref()
+            .and_then(parse_conflict_mode) else {
+                continue;
+            };
+
+        field_modes.insert(key.clone(), mode);
+
+        if let Some(value) = field_mapping.remove(&value_key) {
+            *field_value = value;
+        }
+    }
+
+    (root_mode, field_modes)
+}
+
+fn retain_user_conflict_fields(value: &mut serde_yaml::Value, root_mode: Option<ConflictMode>, field_modes: &BTreeMap<String, ConflictMode>) {
+    let serde_yaml::Value::Mapping(mapping) = value else {
+        return;
+    };
+
+    let retained_fields = field_modes
+        .iter()
+        .filter_map(|(key, mode)| (*mode == ConflictMode::Extend).then_some(key.as_str()))
+        .collect::<BTreeSet<_>>();
+
+    if root_mode == Some(ConflictMode::Reset) {
+        mapping.retain(|key, _| {
+            let serde_yaml::Value::String(key) = key else {
+                return false;
+            };
+
+            retained_fields.contains(key.as_str())
+        });
+    } else {
+        for (key, mode) in field_modes {
+            if *mode == ConflictMode::Reset {
+                mapping.remove(serde_yaml::Value::String(key.clone()));
+            }
+        }
+    }
+}
+
+fn deserialize_rc_pair(user_rc: Option<&RcFile>, project_rc: Option<&RcFile>) -> Result<(Partial<intermediate::Settings>, Partial<intermediate::Settings>), ConfigurationError> {
+    let mut user_value = user_rc
+        .and_then(|rc| rc.text.as_ref())
+        .map(|text| serde_yaml::from_str::<serde_yaml::Value>(text))
+        .transpose()?;
+
+    let mut project_value = project_rc
+        .and_then(|rc| rc.text.as_ref())
+        .map(|text| serde_yaml::from_str::<serde_yaml::Value>(text))
+        .transpose()?;
+
+    let user_field_modes = user_value
+        .as_mut()
+        .map(normalize_conflict_metadata);
+
+    if let Some((root_mode, field_modes)) = user_field_modes {
+        retain_user_conflict_fields(user_value.as_mut().unwrap(), root_mode, &field_modes);
+    }
+
+    let (project_root_mode, project_field_modes) = project_value
+        .as_mut()
+        .map(normalize_conflict_metadata)
+        .unwrap_or((None, BTreeMap::new()));
+
+    if let Some(user_value) = user_value.as_mut() {
+        retain_user_conflict_fields(user_value, project_root_mode, &project_field_modes);
+    }
+
+    let user = match user_value {
+        Some(value) => Partial::Value(serde_yaml::from_value(value)?),
+        None => Partial::Missing,
+    };
+
+    let project = match project_value {
+        Some(value) => Partial::Value(serde_yaml::from_value(value)?),
+        None => Partial::Missing,
+    };
+
+    Ok((user, project))
+}
+
 impl RcFile {
     fn try_read(dir: Option<&Path>, rc_filename: &str, last_modified_at: &mut LastModifiedAt) -> Result<Option<Self>, ConfigurationError> {
         let Some(dir) = dir else {
@@ -928,12 +1058,6 @@ impl RcFile {
             = path.fs_read_text_with_size(metadata.len())?;
 
         Ok(Some(RcFile {path, text: Some(text)}))
-    }
-
-    fn deserialize(&self) -> Option<Result<intermediate::Settings, ConfigurationError>> {
-        self.text.as_ref().map(|text| {
-            Ok(serde_yaml::from_str(text)?)
-        })
     }
 
     /// Extract the `injectEnvironmentFiles` value from the raw YAML text.
@@ -1079,15 +1203,8 @@ impl Configuration {
             = project_rc.as_ref()
                 .map(|rc| rc.path.clone());
 
-        let intermediate_user_config = match user_rc.and_then(|rc| rc.deserialize()) {
-            Some(result) => Partial::Value(result?),
-            None => Partial::Missing,
-        };
-
-        let intermediate_project_config = match project_rc.and_then(|rc| rc.deserialize()) {
-            Some(result) => Partial::Value(result?),
-            None => Partial::Missing,
-        };
+        let (intermediate_user_config, intermediate_project_config)
+            = deserialize_rc_pair(user_rc.as_ref(), project_rc.as_ref())?;
 
         let mut settings = Settings::merge(
             &enriched_context,
@@ -1189,10 +1306,12 @@ merge_settings!(crate::types::PnpFallbackMode, |s: &str| FromFileString::from_fi
 merge_settings!(crate::types::NmHoistingLimits, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::NmMode, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::WinLinkType, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::LogLevel, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_optional_settings!(crate::types::NodeLinker);
 merge_optional_settings!(crate::types::IslandLinker);
 merge_optional_settings!(crate::types::PnpFallbackMode);
 merge_optional_settings!(crate::types::NmHoistingLimits);
 merge_optional_settings!(crate::types::NmMode);
 merge_optional_settings!(crate::types::WinLinkType);
+merge_optional_settings!(crate::types::LogLevel);
 merge_optional_settings!(Path);

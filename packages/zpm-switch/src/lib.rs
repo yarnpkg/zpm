@@ -1,17 +1,23 @@
 pub mod config;
 pub mod daemons;
+mod cache;
 mod errors;
 mod http;
 mod ipc;
 mod manifest;
 mod yarn_enums;
 mod yarn;
+mod install;
 
 pub use errors::{
   Error,
 };
 
 pub use ipc::YARNSW_PATH_ENV;
+
+pub use install::{
+    install_package_manager,
+};
 
 pub use manifest::{
     PackageManagerField,

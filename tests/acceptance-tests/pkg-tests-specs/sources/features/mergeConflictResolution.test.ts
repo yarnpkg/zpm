@@ -9,6 +9,13 @@ function cleanLockfile(lockfile: string) {
   return lockfile;
 }
 
+function cleanRunResult<T extends {stdout: string}>(result: T): T {
+  return {
+    ...result,
+    stdout: result.stdout.replace(/^➤ · Yarn .*\n/m, `➤ · Yarn <version>\n`),
+  };
+}
+
 describe(`Features`, () => {
   describe(`Merge Conflict Resolution`, () => {
     test(
@@ -222,7 +229,7 @@ describe(`Features`, () => {
 
           await expect(run(`install`, {
             enableNetwork: false,
-          })).resolves.toMatchSnapshot();
+          }).then(cleanRunResult)).resolves.toMatchSnapshot();
         },
       ),
     );

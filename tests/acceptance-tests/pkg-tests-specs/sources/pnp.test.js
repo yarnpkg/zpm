@@ -1829,7 +1829,7 @@ describe(`Plug'n'Play`, () => {
         await run(`install`, {cwd: secondProject, env: {YARN_ENABLE_GLOBAL_CACHE: `1`}});
         await run(`install`, {env: {YARN_ENABLE_GLOBAL_CACHE: `1`}});
 
-        await expect(run(`node`, `./index.js`)).rejects.toMatchObject({
+        await expect(run(`node`, `./index.js`, {env: {YARN_ENABLE_GLOBAL_CACHE: `1`}})).rejects.toMatchObject({
           code: 1,
           stderr: expect.stringContaining(`is controlled by multiple pnpapi instances`),
         });

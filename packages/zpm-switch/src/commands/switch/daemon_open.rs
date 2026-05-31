@@ -34,6 +34,11 @@ impl DaemonOpenCommand {
         }
     }
 
+    fn is_machine_open(&self) -> bool {
+        self.cli_environment.argv.iter().any(|arg| arg == "--open")
+            && !self.cli_environment.argv.iter().any(|arg| arg == "--start")
+    }
+
     pub async fn execute(&self) -> Result<(), Error> {
         let project_cwd
             = get_final_cwd()?;
@@ -52,8 +57,10 @@ impl DaemonOpenCommand {
                 if self.check_daemon_ready(existing.port, token).await.is_ok() {
                     // The first line must remain the WS URL.
                     println!("{}", build_ws_url(existing.port, token));
-                    println!("Daemon already running for project {}", detected_root.to_file_string());
-                    println!("PID: {}", existing.pid);
+                    if !self.is_machine_open() {
+                        println!("Daemon already running for project {}", detected_root.to_file_string());
+                        println!("PID: {}", existing.pid);
+                    }
                     return Ok(());
                 }
 
@@ -155,8 +162,10 @@ impl DaemonOpenCommand {
         // The first line must remain the WS URL (yarn-bin reads it back to
         // know where to send IPC requests).
         println!("{}", build_ws_url(port, Some(&auth_token)));
-        println!("Started daemon for project {}", detected_root.to_file_string());
-        println!("PID: {}", pid);
+        if !self.is_machine_open() {
+            println!("Started daemon for project {}", detected_root.to_file_string());
+            println!("PID: {}", pid);
+        }
 
         Ok(())
     }

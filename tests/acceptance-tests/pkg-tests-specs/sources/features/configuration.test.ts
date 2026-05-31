@@ -130,8 +130,7 @@ describe(`Features`, () => {
         },
       });
 
-      // https://github.com/yarnpkg/berry/pull/5213
-      await expect(run(`config`, `get`, `--json`, `packageExtensions`)).rejects.toMatchObject({stdout: expect.stringContaining(`Internal Error: Expected configuration setting "packageExtensions['@lezer/html@*'].dependencies['@lezer/javascript@*']" to be a string, got object`)});
+      await expect(run(`config`, `get`, `--json`, `packageExtensions`)).rejects.toMatchObject({stdout: expect.stringContaining(`Invalid ident: @lezer/javascript@*`)});
     }));
   });
 });

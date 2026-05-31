@@ -297,7 +297,7 @@ describe(`Commands`, () => {
     );
 
     test(
-      `it should successfully apply "decline" on top of the stored version`,
+      `it should successfully record "decline" on top of the stored version`,
       makeTemporaryEnv({
         version: `1.0.0`,
       }, async ({path, run, source}) => {
@@ -308,7 +308,7 @@ describe(`Commands`, () => {
         });
 
         await expect(xfs.readJsonPromise(`${path}/package.json` as PortablePath)).resolves.toMatchObject({
-          version: `2.0.0`,
+          version: `1.0.0`,
         });
       }),
     );

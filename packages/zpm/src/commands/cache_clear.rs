@@ -117,7 +117,7 @@ async fn clear_cache(old: bool, mirror: bool, all: bool) -> Result<(), Error> {
 
         crate::report::if_active_async(|report| {
             if cleared_entries > 0 {
-                report.info(format!("Cleared {} entries from the cache.", DataType::Number.colorize(&cleared_entries.to_string())))
+                report.info(format!("Cleared {} entries from the cache.", DataType::Number.colorize(&cleared_entries.to_string())));
             } else {
                 report.info("No entries to clear from the cache.".to_string());
             }

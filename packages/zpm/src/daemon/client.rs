@@ -4,7 +4,7 @@ use futures::{SinkExt, stream::StreamExt};
 use tokio::{io::AsyncBufReadExt, sync::{mpsc, oneshot, Mutex}, task::AbortHandle};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
 use zpm_switch::YARNSW_PATH_ENV;
-use zpm_utils::Path;
+use zpm_utils::{Path, ToFileString};
 
 use super::{
     coordinator::{start_daemon_inline_with_handle, DaemonShutdownHandle},
@@ -486,9 +486,22 @@ pub struct DaemonStatsResult {
 
 async fn start_daemon(project_root: &Path) -> Result<String, Error> {
     let switch_path
-        = std::env::var(YARNSW_PATH_ENV).map_err(|_| {
-            Error::MissingYarnSwitchContext
-        })?;
+        = std::env::var(YARNSW_PATH_ENV)
+            .or_else(|_| {
+                let current_exe
+                    = Path::current_exe().map_err(|_| ())?;
+                let current_dir
+                    = current_exe.dirname().ok_or(())?;
+                let sibling_switch
+                    = current_dir.with_join_str("yarn");
+
+                if sibling_switch.fs_exists() {
+                    Ok(sibling_switch.to_file_string())
+                } else {
+                    Err(())
+                }
+            })
+            .map_err(|_| Error::MissingYarnSwitchContext)?;
 
     let mut cmd
         = tokio::process::Command::new(&switch_path);
@@ -498,6 +511,12 @@ async fn start_daemon(project_root: &Path) -> Result<String, Error> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .stdin(Stdio::null());
+
+    if std::env::var("YARNSW_DEFAULT").is_err() {
+        if let Ok(current_exe) = Path::current_exe() {
+            cmd.env("YARNSW_DEFAULT", format!("local:{}", current_exe.to_file_string()));
+        }
+    }
 
     let mut child
         = cmd

@@ -22,7 +22,7 @@ use crate::{
     lockfile::{Lockfile, from_legacy_berry_lockfile, from_pnpm_node_modules},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
-    report::{StreamReport, StreamReportConfig, with_report_result},
+    report::{StreamReport, StreamReportConfig, async_section, current_report, with_report_result},
     script::{Binary, ScriptEnvironment},
     tasks::TASK_FILE_NAME,
 };
@@ -901,6 +901,24 @@ impl Project {
 
             let mut lockfile
                 = self.lockfile();
+
+            async_section("Project validation", async {
+                let report_guard = current_report().await;
+                let Some(report) = report_guard.as_ref() else {
+                    return;
+                };
+
+                for workspace in self.workspaces.iter().skip(1) {
+                    if workspace.manifest.resolutions.is_empty() {
+                        continue;
+                    }
+
+                    report.warn(format!(
+                        "{}: Resolutions field will be ignored",
+                        workspace.pretty_name(),
+                    ));
+                }
+            }).await;
 
             if let Err(Error::LockfileParseError(_)) = lockfile {
                 let lockfile_path

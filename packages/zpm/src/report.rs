@@ -4,7 +4,7 @@ use colored::{Color, Colorize};
 use dialoguer::{Confirm, Input, Password};
 use itertools::Itertools;
 use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
-use zpm_config::Configuration;
+use zpm_config::{Configuration, LogFilter, LogLevel};
 use zpm_primitives::{Descriptor, Locator};
 use zpm_switch::get_bin_version;
 use zpm_utils::{DataType, Path, ToHumanString, Unit};
@@ -58,7 +58,9 @@ pub async fn if_active_async<F: FnOnce(&StreamReport)>(f: F) -> bool {
 
 /// Emits an info banner via the active report.
 pub async fn info_banner(message: impl AsRef<str>) {
-    if_active_async(|r| r.info(message.as_ref().to_string())).await;
+    if_active_async(|r| {
+        r.info(message.as_ref().to_string());
+    }).await;
 }
 
 pub async fn async_section<F: Future>(name: &str, f: F) -> F::Output {
@@ -125,6 +127,10 @@ pub async fn with_report_result<F, R>(report: StreamReport, f: F) -> Result<R, E
             return Err(Error::SilentError);
         }
 
+        if current_report().await.as_ref().is_some_and(|r| r.has_filtered_errors()) {
+            return Err(Error::SilentError);
+        }
+
         res
     }).await
 }
@@ -153,6 +159,7 @@ pub struct StreamReportConfig {
     pub enable_timers: bool,
     pub include_version: bool,
     pub json: bool,
+    pub log_filters: Vec<LogFilter>,
     pub silent_or_error: bool,
 }
 
@@ -163,12 +170,13 @@ impl StreamReportConfig {
             enable_timers: config.settings.enable_timers.value,
             include_version: false,
             json: false,
+            log_filters: config.settings.log_filters.clone(),
             silent_or_error: false,
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Info,
     Warning,
@@ -203,6 +211,8 @@ pub struct ReportCounters {
     pub resolution_count: AtomicU32,
     pub fetch_count: AtomicU32,
     pub fetch_size: AtomicU32,
+    pub filtered_warning_count: AtomicU32,
+    pub filtered_error_count: AtomicU32,
 }
 
 #[derive(Debug)]
@@ -214,6 +224,82 @@ pub enum ReportMessage {
     Prompt(PromptType),
 }
 
+fn strip_ansi_codes(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && chars.peek() == Some(&'[') {
+            chars.next();
+
+            for ch in chars.by_ref() {
+                if ch.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            output.push(ch);
+        }
+    }
+
+    output
+}
+
+fn pattern_matches_log_entry(pattern: &zpm_utils::Glob, message: &str) -> bool {
+    if pattern.is_match(message) {
+        return true;
+    }
+
+    let raw = pattern.raw();
+
+    let mut wrapped = String::with_capacity(raw.len() + 2);
+    if !raw.starts_with('*') {
+        wrapped.push('*');
+    }
+    wrapped.push_str(raw);
+    if !raw.ends_with('*') {
+        wrapped.push('*');
+    }
+
+    let mut remainder = message;
+    let mut first_segment = true;
+
+    for segment in wrapped.split('*').filter(|segment| !segment.is_empty()) {
+        let Some(offset) = remainder.find(segment) else {
+            return false;
+        };
+
+        if first_segment && !wrapped.starts_with('*') && offset != 0 {
+            return false;
+        }
+
+        remainder = &remainder[offset + segment.len()..];
+        first_segment = false;
+    }
+
+    wrapped.ends_with('*') || remainder.is_empty()
+}
+
+fn filter_matches_log_entry(filter: &LogFilter, message: &str) -> bool {
+    if filter.text.value.as_ref().is_some_and(|text| text == message) {
+        return true;
+    }
+
+    if filter.pattern.value.as_ref().is_some_and(|pattern| pattern_matches_log_entry(pattern, message)) {
+        return true;
+    }
+
+    false
+}
+
+#[derive(Debug)]
+struct SectionState {
+    name: String,
+    printed: bool,
+    has_content: bool,
+    start_time: Option<SystemTime>,
+}
+
 struct Reporter {
     config: StreamReportConfig,
 
@@ -222,9 +308,9 @@ struct Reporter {
     counters: Arc<ReportCounters>,
 
     last_message_type: Option<LastMessageType>,
-    start_time: Option<SystemTime>,
     buffered_lines: Option<Vec<String>>,
     log_paths: Vec<Path>,
+    sections: Vec<SectionState>,
     spinner_idx: Option<usize>,
     prompt_tx: mpsc::Sender<String>,
 }
@@ -240,9 +326,9 @@ impl Reporter {
             indent: 0,
             counters,
             last_message_type: None,
-            start_time: None,
             buffered_lines,
             log_paths: Vec::new(),
+            sections: Vec::new(),
             spinner_idx: None,
             prompt_tx,
         }
@@ -363,6 +449,17 @@ impl Reporter {
             }
         }
 
+        let filtered_error_count
+            = self.counters.filtered_error_count.load(std::sync::atomic::Ordering::Relaxed);
+        let filtered_warning_count
+            = self.counters.filtered_warning_count.load(std::sync::atomic::Ordering::Relaxed);
+
+        if filtered_error_count > 0 {
+            self.write_line_raw(writer, "Failed with errors", Severity::Error, 0, 0);
+        } else if filtered_warning_count > 0 {
+            self.write_line_raw(writer, "Done with warnings", Severity::Warning, 0, 0);
+        }
+
         if self.config.enable_progress_bars {
             writer.write_all(b"\x1b[?25h").unwrap();
         }
@@ -378,18 +475,19 @@ impl Reporter {
         self.write_line(writer, message, severity);
     }
 
-    fn on_push_section<T: Write>(&mut self, writer: &mut T, name: &str) {
+    fn on_push_section<T: Write>(&mut self, _writer: &mut T, name: &str) {
         self.level += 1;
-
-        self.write_line(writer, &format!("┌ {}", name), Severity::Info);
 
         self.indent += 1;
 
         self.spinner_idx = Some(0);
 
-        if self.config.enable_timers {
-            self.start_time = Some(SystemTime::now());
-        }
+        self.sections.push(SectionState {
+            name: name.to_string(),
+            printed: false,
+            has_content: false,
+            start_time: self.config.enable_timers.then(SystemTime::now),
+        });
     }
 
     fn format_prompt(&self, prompt: &str) -> String {
@@ -459,33 +557,50 @@ impl Reporter {
         self.counters.fetch_size.store(0, std::sync::atomic::Ordering::Relaxed);
 
         if !spinner_label.is_empty() {
-            self.write_line(writer, &spinner_label, Severity::Info);
+            self.flush_pending_sections(writer);
+            self.sections.last_mut().unwrap().has_content = true;
+            self.write_line_raw(writer, &spinner_label, Severity::Info, self.level, self.indent);
         }
 
         self.indent -= 1;
 
-        if let Some(start_time) = self.start_time && let Ok(elapsed) = start_time.elapsed() {
-            self.write_line(writer, &format!("└ Completed in {}", Unit::duration_ms_raw(elapsed.as_millis()).to_print_string()), Severity::Info);
-        } else {
-            self.write_line(writer, "└ Completed", Severity::Info);
+        let section
+            = self.sections.pop().unwrap();
+
+        if section.printed || section.has_content {
+            if let Some(start_time) = section.start_time && let Ok(elapsed) = start_time.elapsed() {
+                self.write_line_raw(writer, &format!("└ Completed in {}", Unit::duration_ms_raw(elapsed.as_millis()).to_print_string()), Severity::Info, self.level, self.indent);
+            } else {
+                self.write_line_raw(writer, "└ Completed", Severity::Info, self.level, self.indent);
+            }
         }
 
         self.level -= 1;
     }
 
-    fn format_indent(&self) -> String {
-        if self.level > 0 {
-            "│ ".repeat(self.indent)
+    fn format_indent_at(level: usize, indent: usize) -> String {
+        if level > 0 {
+            "│ ".repeat(indent)
         } else {
             format!("{} ", TOP_LEVEL_PREFIX)
         }
     }
 
-    fn format_prefix(&self, severity: Severity) -> String {
-        format!("{} {}", severity.color().colorize("➤"), self.format_indent())
+    fn format_prefix_at(severity: Severity, level: usize, indent: usize) -> String {
+        format!("{} {}", severity.color().colorize("➤"), Self::format_indent_at(level, indent))
     }
 
     fn write_line<T: Write>(&mut self, writer: &mut T, line: &str, severity: Severity) {
+        self.flush_pending_sections(writer);
+
+        if let Some(section) = self.sections.last_mut() {
+            section.has_content = true;
+        }
+
+        self.write_line_raw(writer, line, severity, self.level, self.indent);
+    }
+
+    fn write_line_raw<T: Write>(&mut self, writer: &mut T, line: &str, severity: Severity, level: usize, indent: usize) {
         if let Some(last_message_type) = self.last_message_type {
             if last_message_type == LastMessageType::Prompt {
                 writeln!(writer, "").unwrap();
@@ -505,7 +620,7 @@ impl Reporter {
                 "type": type_name,
                 "name": null,
                 "displayName": null,
-                "indent": self.format_indent(),
+                "indent": Self::format_indent_at(level, indent),
                 "data": line,
             });
 
@@ -521,12 +636,29 @@ impl Reporter {
         }
 
         let prefix
-            = self.format_prefix(severity);
+            = Self::format_prefix_at(severity, level, indent);
 
         if let Some(buffered_lines) = &mut self.buffered_lines {
             buffered_lines.push(format!("{}{}", prefix, line));
         } else {
             writeln!(writer, "{}{}", prefix, line).unwrap();
+        }
+    }
+
+    fn flush_pending_sections<T: Write>(&mut self, writer: &mut T) {
+        let mut depth = 0;
+
+        while depth < self.sections.len() {
+            if !self.sections[depth].printed {
+                let name
+                    = self.sections[depth].name.clone();
+
+                self.write_line_raw(writer, &format!("┌ {}", name), Severity::Info, depth + 1, depth);
+
+                self.sections[depth].printed = true;
+            }
+
+            depth += 1;
         }
     }
 
@@ -544,6 +676,7 @@ impl Reporter {
 pub struct StreamReport {
     pub counters: Arc<ReportCounters>,
 
+    log_filters: Vec<LogFilter>,
     handle: JoinHandle<()>,
     break_request_tx: mpsc::Sender<bool>,
     msg_queue_tx: mpsc::Sender<ReportMessage>,
@@ -561,6 +694,9 @@ impl StreamReport {
             = mpsc::channel::<ReportMessage>();
         let (prompt_tx, prompt_rx)
             = mpsc::channel::<String>();
+
+        let log_filters
+            = config.log_filters.clone();
 
         let mut reporter
             = Reporter::new(config, counters.clone(), prompt_tx);
@@ -588,6 +724,17 @@ impl StreamReport {
                     = break_request_rx.recv_timeout(Duration::from_millis(50));
 
                 if break_request == Ok(true) {
+                    let mut stdout
+                        = io::stdout();
+
+                    reporter.clear_spinner(&mut stdout);
+
+                    for msg in msg_queue_rx.try_iter() {
+                        reporter.report(&mut stdout, msg);
+                    }
+
+                    stdout.flush().unwrap();
+
                     break;
                 }
 
@@ -612,6 +759,7 @@ impl StreamReport {
 
         Self {
             counters,
+            log_filters,
             handle,
             break_request_tx,
             msg_queue_tx,
@@ -619,26 +767,30 @@ impl StreamReport {
         }
     }
 
-    pub fn info(&self, message: String) {
-        self.report(ReportMessage::Line(Severity::Info, self.with_content_prefix(message)));
+    pub fn info(&self, message: String) -> bool {
+        self.line(Severity::Info, message)
     }
 
-    pub fn warn(&self, message: String) {
-        self.report(ReportMessage::Line(Severity::Warning, self.with_content_prefix(message)));
+    pub fn warn(&self, message: String) -> bool {
+        self.line(Severity::Warning, message)
     }
 
     pub fn add_log_file(&self, log_path: Path) {
         self.report(ReportMessage::LogFile(log_path));
     }
 
-    pub fn error(&self, error: Error) {
+    pub fn error(&self, error: Error) -> bool {
+        let mut emitted = false;
+
         if !matches!(error, Error::SilentError) {
-            self.report(ReportMessage::Line(Severity::Error, self.with_content_prefix(error.to_string())));
+            emitted = self.line(Severity::Error, error.to_string());
         }
 
         if let Error::ChildProcessFailedWithLog(_, log_path) = error {
             self.report(ReportMessage::LogFile(log_path));
         }
+
+        emitted
     }
 
     pub fn push_section(&self, name: String) {
@@ -670,6 +822,63 @@ impl StreamReport {
 
             message
         })
+    }
+
+    fn line(&self, severity: Severity, message: String) -> bool {
+        let message
+            = self.with_content_prefix(message);
+
+        let Some((severity, was_filtered)) = self.apply_log_filters(severity, &message) else {
+            return false;
+        };
+
+        if was_filtered {
+            match severity {
+                Severity::Info => {},
+                Severity::Warning => {
+                    self.counters.filtered_warning_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                },
+                Severity::Error => {
+                    self.counters.filtered_error_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                },
+            }
+        }
+
+        self.report(ReportMessage::Line(severity, message));
+
+        true
+    }
+
+    fn apply_log_filters(&self, severity: Severity, message: &str) -> Option<(Severity, bool)> {
+        if self.log_filters.is_empty() {
+            return Some((severity, false));
+        }
+
+        let message
+            = strip_ansi_codes(message);
+
+        for filter in &self.log_filters {
+            if !filter_matches_log_entry(filter, &message) {
+                continue;
+            }
+
+            return match filter.level.value {
+                LogLevel::Discard => None,
+                LogLevel::Info => Some((Severity::Info, true)),
+                LogLevel::Warning => Some((Severity::Warning, true)),
+                LogLevel::ErrorLevel => Some((Severity::Error, true)),
+            };
+        }
+
+        Some((severity, false))
+    }
+
+    pub fn would_discard(&self, severity: Severity, message: &str) -> bool {
+        self.apply_log_filters(severity, message).is_none()
+    }
+
+    pub fn has_filtered_errors(&self) -> bool {
+        self.counters.filtered_error_count.load(std::sync::atomic::Ordering::Relaxed) > 0
     }
 
     fn report(&self, message: ReportMessage) {

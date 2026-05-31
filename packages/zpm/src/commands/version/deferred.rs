@@ -66,17 +66,6 @@ impl VersionDeferred {
         let versioning
             = Versioning::new(&project);
 
-        if self.strategy == DeferredStrategy::Decline {
-            let releases
-                = versioning.resolve_releases(crate::versioning::ResolveOptions {
-                    prerelease: None,
-                })?;
-
-            if let Some(version) = releases.get(&active_workspace.name) {
-                versioning.apply_version(&active_workspace.name, version)?;
-            }
-        }
-
         versioning.set_workspace_release_strategy(
             &active_workspace.name,
             self.strategy.clone().into(),

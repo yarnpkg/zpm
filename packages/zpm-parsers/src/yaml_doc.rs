@@ -302,8 +302,15 @@ impl YamlDocument {
     }
 
     fn insert_top_level_key(&mut self, new_key: &str, value: Value) -> Result<(), Error> {
+        let (self_indent, style)
+            = self.paths.iter()
+                .filter(|(path, _)| path.is_direct_child_of(&Path::new()))
+                .filter_map(|(_, offset)| self.find_indent_at(*offset))
+                .min_by_key(|(indent, _)| *indent)
+                .unwrap_or((0, IndentStyle::Spaces));
+
         let top_level_indent
-            = Indent::with_style(Some(0), Some(2), IndentStyle::Spaces);
+            = Indent::with_style(Some(self_indent), Some(self_indent + 2), style);
 
         self.insert_at(0, &Path::new(), new_key, top_level_indent, value)
     }
@@ -1123,6 +1130,7 @@ mod tests {
 
     // Insert new top-level keys
     #[case(b"existing: value\n", vec!["new_key"], Value::String("another".to_string()), b"existing: value\nnew_key: another\n")]
+    #[case(b"        existing: value\n", vec!["new_key"], Value::String("another".to_string()), b"        existing: value\n        new_key: another\n")]
 
     // Insert nested keys
     #[case(b"parent:\n  existing: value\n", vec!["parent", "new_child"], Value::String("new".to_string()), b"parent:\n  existing: value\n  new_child: new\n")]

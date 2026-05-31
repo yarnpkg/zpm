@@ -184,12 +184,26 @@ pub async fn run_task(
 
     handler.on_tasks_pushed(&ctx);
 
+    #[cfg(unix)]
+    let mut sigint
+        = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+
     loop {
         let notification
             = tokio::select! {
                 biased;
 
-                _ = tokio::signal::ctrl_c() => {
+                _ = async {
+                    #[cfg(unix)]
+                    {
+                        sigint.recv().await;
+                    }
+
+                    #[cfg(not(unix))]
+                    {
+                        tokio::signal::ctrl_c().await.ok();
+                    }
+                } => {
                     if ctx.has_long_lived_target() {
                         handler.on_ctrl_c();
 

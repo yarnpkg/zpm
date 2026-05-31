@@ -35,11 +35,7 @@ exports[`Features Merge Conflict Resolution it shouldn't re-fetch the lockfile m
 {
   "code": 0,
   "stderr": "",
-  "stdout": "➤ · Yarn 6.0.0-rc.18.local
-➤ ┌ Installing packages
-➤ └ Completed
-➤ ┌ Linking the project
-➤ └ Completed
+  "stdout": "➤ · Yarn <version>
 ",
 }
 `;

@@ -33,6 +33,11 @@ runs:
         chmod +x ${{inputs.link}}
         yarn switch link ${{inputs.link}}
 
+    - name: Install pnpm
+      shell: bash
+      run: |
+        npm install --global pnpm@10
+
     - name: Install dependencies
       shell: bash
       run: |
