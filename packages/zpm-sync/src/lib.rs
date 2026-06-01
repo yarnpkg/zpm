@@ -147,10 +147,6 @@ impl<'a> SyncTree<'a> {
     }
 
     pub fn is_node_filtered_out(&self, node_idx: usize) -> bool {
-        if node_idx == 0 {
-            return false;
-        }
-
         let node
             = &self.nodes[node_idx];
 
