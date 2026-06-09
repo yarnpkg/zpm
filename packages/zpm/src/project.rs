@@ -895,7 +895,7 @@ impl Project {
         });
 
         let systems
-            = self.config.settings.supported_architectures.to_systems();
+            = self.config.settings.supported_systems();
 
         let background_writes
             = Arc::new(http_npm::BackgroundWrites::new());

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 colored = { workspace = true }
+pep-508 = { workspace = true }
 pep440_rs = { workspace = true }
 regex = { workspace = true }
 rkyv = { workspace = true, features = ["bytecheck"] }

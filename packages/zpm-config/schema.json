@@ -527,6 +527,13 @@
       "description": "The timeout in milliseconds to wait for a network request to complete before considering it slow",
       "default": 5000
     },
+    "supportedTargets": {
+      "type": "array",
+      "description": "The list of concrete target environments that should be covered by ecosystem-specific universal lockfiles.",
+      "items": {
+        "type": "crate::types::SupportedTarget"
+      }
+    },
     "supportedArchitectures": {
       "type": "object",
       "title": "SupportedArchitectures",

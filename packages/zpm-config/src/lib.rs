@@ -826,6 +826,34 @@ impl SupportedArchitectures {
     }
 }
 
+impl Settings {
+    pub fn supported_systems(&self) -> Vec<System> {
+        if !self.supported_targets.is_empty() {
+            return self.supported_targets.iter()
+                .map(|target| target.value.to_system())
+                .collect();
+        }
+
+        self.supported_architectures.to_systems()
+    }
+
+    pub fn python_target_envs(&self) -> Result<Vec<zpm_primitives::PythonTargetEnv>, zpm_primitives::PythonTargetError> {
+        let mut targets
+            = Vec::new();
+
+        for target in &self.supported_targets {
+            if let Some(target_env) = target.value.to_python_target_env()? {
+                targets.push(target_env);
+            }
+        }
+
+        targets.sort();
+        targets.dedup();
+
+        Ok(targets)
+    }
+}
+
 pub struct Configuration {
     pub settings: Settings,
     pub user_config_path: Option<Path>,
@@ -1317,6 +1345,7 @@ merge_settings!(crate::types::NmMode, |s: &str| FromFileString::from_file_string
 merge_settings!(crate::types::WinLinkType, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::LogLevel, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::NpmPublishAccess, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::SupportedTarget, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_optional_settings!(crate::types::NodeLinker);
 merge_optional_settings!(crate::types::IslandLinker);
 merge_optional_settings!(crate::types::PnpFallbackMode);

@@ -4962,6 +4962,7 @@ version = "6.0.0-alpha.0"
 dependencies = [
  "colored 3.1.1",
  "globset",
+ "pep-508",
  "pep440_rs",
  "regex",
  "rkyv",
