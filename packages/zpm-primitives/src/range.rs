@@ -472,6 +472,14 @@ impl Range {
                 Registry::Npm(params.ident.clone().unwrap_or_else(|| default_ident.clone()))
             },
 
+            Range::PypiSpecifier(params) => {
+                Registry::Pypi(params.ident.clone().unwrap_or_else(|| default_ident.clone()))
+            },
+
+            Range::PypiTag(params) => {
+                Registry::Pypi(params.ident.clone().unwrap_or_else(|| default_ident.clone()))
+            },
+
             Range::JsrSemver(params) => {
                 let ident = params.ident.as_ref()
                     .unwrap_or(default_ident);

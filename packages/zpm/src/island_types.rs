@@ -2,7 +2,7 @@ use std::fmt;
 
 use pubgrub::{Ranges, VersionSet};
 use smallvec::SmallVec;
-use zpm_primitives::{Ident, Locator, Reference};
+use zpm_primitives::{Descriptor, Ident, Locator, Reference, Registry};
 use zpm_semver::pubgrub::PubgrubVersion;
 use zpm_utils::ToFileString;
 
@@ -11,16 +11,83 @@ use zpm_utils::ToFileString;
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub enum IslandRegistry {
+    Npm,
+    Pypi,
+    Workspace,
+    Other,
+}
+
+impl fmt::Display for IslandRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IslandRegistry::Npm => write!(f, "npm"),
+            IslandRegistry::Pypi => write!(f, "pypi"),
+            IslandRegistry::Workspace => write!(f, "workspace"),
+            IslandRegistry::Other => write!(f, "other"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub struct IslandPackageKey {
+    pub ident: Ident,
+    pub registry: IslandRegistry,
+}
+
+impl IslandPackageKey {
+    pub fn new(ident: Ident, registry: IslandRegistry) -> Self {
+        Self {
+            ident,
+            registry,
+        }
+    }
+
+    pub fn from_descriptor(descriptor: &Descriptor) -> Self {
+        match descriptor.range.registry(&descriptor.ident) {
+            Registry::None => Self::new(descriptor.ident.clone(), IslandRegistry::Other),
+            registry => Self::from_registry(registry),
+        }
+    }
+
+    pub fn from_locator(locator: &Locator) -> Self {
+        let registry = match locator.reference.physical_reference() {
+            Reference::Registry(_) | Reference::Shorthand(_) => IslandRegistry::Npm,
+            Reference::PypiRegistry(_) | Reference::PypiShorthand(_) => IslandRegistry::Pypi,
+            Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_) => IslandRegistry::Workspace,
+            _ => IslandRegistry::Other,
+        };
+
+        Self::new(locator.ident.clone(), registry)
+    }
+
+    pub fn from_registry(registry: Registry) -> Self {
+        match registry {
+            Registry::Npm(ident) => Self::new(ident, IslandRegistry::Npm),
+            Registry::Pypi(ident) => Self::new(ident, IslandRegistry::Pypi),
+            Registry::Workspace(ident) => Self::new(ident, IslandRegistry::Workspace),
+            Registry::None => Self::new(Ident::default(), IslandRegistry::Other),
+        }
+    }
+}
+
+impl fmt::Display for IslandPackageKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.registry, self.ident)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub enum IslandPackage {
     Root,
-    Named(Ident),
+    Named(IslandPackageKey),
 }
 
 impl fmt::Display for IslandPackage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             IslandPackage::Root => write!(f, "<root>"),
-            IslandPackage::Named(ident) => write!(f, "{}", ident),
+            IslandPackage::Named(key) => write!(f, "{}", key),
         }
     }
 }
@@ -41,9 +108,17 @@ impl IslandVersion {
     /// one (Shorthand or Registry references). Returns `None` for non-semver
     /// references.
     pub fn version(&self) -> Option<zpm_semver::Version> {
-        match &self.0.reference {
+        match self.0.reference.physical_reference() {
             Reference::Shorthand(params) => Some(params.version.clone()),
             Reference::Registry(params) => Some(params.version.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn pypi_version(&self) -> Option<zpm_primitives::PypiVersion> {
+        match self.0.reference.physical_reference() {
+            Reference::PypiShorthand(params) => Some(params.version.clone()),
+            Reference::PypiRegistry(params) => Some(params.version.clone()),
             _ => None,
         }
     }
@@ -74,6 +149,10 @@ pub enum ExactSet {
 }
 
 impl ExactSet {
+    pub fn one_of(versions: impl IntoIterator<Item = IslandVersion>) -> ExactSet {
+        ExactSet::OneOf(versions.into_iter().collect())
+    }
+
     pub fn complement(&self) -> ExactSet {
         match self {
             ExactSet::OneOf(vs) => ExactSet::NoneOf(vs.clone()),
@@ -307,5 +386,36 @@ impl VersionSet for IslandVersionSet {
             // Cross-variant: only if self is empty
             _ => self.is_logically_empty(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zpm_utils::{FromFileString, Hash64, ToFileString};
+
+    #[test]
+    fn test_package_keys_are_registry_aware() {
+        let npm
+            = Descriptor::from_file_string("foo@npm:^1.0.0").unwrap();
+        let pypi
+            = Descriptor::from_file_string("foo@pypi:>=1.0.0").unwrap();
+
+        assert_eq!(IslandRegistry::Npm, IslandPackageKey::from_descriptor(&npm).registry);
+        assert_eq!(IslandRegistry::Pypi, IslandPackageKey::from_descriptor(&pypi).registry);
+        assert_ne!(IslandPackageKey::from_descriptor(&npm), IslandPackageKey::from_descriptor(&pypi));
+    }
+
+    #[test]
+    fn test_pypi_version_uses_physical_env_locator() {
+        let hash
+            = Hash64::from_data("fork");
+        let locator
+            = Locator::from_file_string(&format!("foo@env:{}#pypi:foo@1.2.0", hash.to_file_string())).unwrap();
+        let version
+            = IslandVersion(locator);
+
+        assert_eq!("1.2.0", version.pypi_version().unwrap().to_file_string());
+        assert_eq!(None, version.version());
     }
 }

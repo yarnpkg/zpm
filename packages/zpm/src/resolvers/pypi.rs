@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{de::DeserializeOwned, Deserialize};
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Descriptor, Ident, Locator, MarkerExpr, MarkerValue, MarkerVariable, PypiRegistryReference, PypiSpecifierRange, PypiSpecifierSet, PypiTagRange, Reference, Range, canonicalize_pypi_name};
+use zpm_primitives::{Descriptor, Ident, Locator, MarkerExpr, MarkerValue, MarkerVariable, PypiRegistryReference, PypiSpecifierRange, PypiSpecifierSet, PypiTagRange, PythonFork, Reference, Range, canonicalize_pypi_name};
 use zpm_utils::{FromFileString, ToFileString, UrlEncoded};
 
 use crate::{
@@ -110,6 +110,41 @@ fn parse_requires_dist(requirements: &[String]) -> Result<Vec<PypiRequirement>, 
 
 fn build_unconditional_dependency_map(requirements: &[PypiRequirement]) -> Result<BTreeMap<Ident, Descriptor>, Error> {
     build_dependency_map(requirements.iter().filter(|requirement| requirement.marker == MarkerExpr::Any))
+}
+
+fn build_fork_dependency_map(requirements: &[PypiRequirement], fork: &PythonFork) -> Result<BTreeMap<Ident, Descriptor>, Error> {
+    let mut active_requirements
+        = Vec::new();
+
+    for requirement in requirements {
+        if is_requirement_active_for_fork(requirement, fork)? {
+            active_requirements.push(requirement);
+        }
+    }
+
+    let dependencies
+        = build_dependency_map(active_requirements)?;
+
+    Ok(dependencies.into_iter()
+        .map(|(ident, descriptor)| {
+            (ident, descriptor.env_qualified_with_hash(fork.id.clone()))
+        })
+        .collect())
+}
+
+fn is_requirement_active_for_fork(requirement: &PypiRequirement, fork: &PythonFork) -> Result<bool, Error> {
+    match &requirement.marker {
+        MarkerExpr::Any => Ok(true),
+        MarkerExpr::Never => Ok(false),
+        marker => {
+            let target
+                = fork.target.as_ref()
+                    .ok_or_else(|| Error::InvalidResolution(format!("Cannot evaluate PyPI marker for {} without a Python target environment", requirement.ident.to_file_string())))?;
+
+            marker.evaluate(target)
+                .map_err(|err| Error::InvalidResolution(format!("Cannot evaluate PyPI marker for {}: {err}", requirement.ident.to_file_string())))
+        },
+    }
 }
 
 pub fn build_dependency_map<'a>(requirements: impl IntoIterator<Item = &'a PypiRequirement>) -> Result<BTreeMap<Ident, Descriptor>, Error> {
@@ -225,6 +260,15 @@ fn build_resolution_result(context: &InstallContext<'_>, locator: Locator, versi
     let requirements
         = parse_requires_dist(requires_dist)?;
     resolution.dependencies = build_unconditional_dependency_map(&requirements)?;
+    resolution.into_resolution_result(context)
+}
+
+fn build_fork_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String], fork: &PythonFork) -> Result<ResolutionResult, Error> {
+    let mut resolution
+        = Resolution::new_empty(locator.env_qualified_with_hash(fork.id.clone()), project_pep440_to_semver(version)?);
+    let requirements
+        = parse_requires_dist(requires_dist)?;
+    resolution.dependencies = build_fork_dependency_map(&requirements, fork)?;
     resolution.into_resolution_result(context)
 }
 
@@ -345,6 +389,48 @@ async fn fetch_version_metadata(context: &InstallContext<'_>, package_ident: &Id
     fetch_json(context, &url).await
 }
 
+pub async fn resolve_versions(context: &InstallContext<'_>, package_ident: &Ident) -> Result<Vec<Locator>, Error> {
+    let project_metadata
+        = fetch_project_metadata(context, package_ident).await?;
+
+    let mut locators
+        = Vec::new();
+
+    for (raw_version, release_distributions) in project_metadata.releases {
+        let Ok(version) = zpm_primitives::PypiVersion::from_file_string(&raw_version) else {
+            continue;
+        };
+
+        let Some(wheel) = select_best_wheel(&release_distributions) else {
+            continue;
+        };
+
+        locators.push(Locator::new(package_ident.clone(), PypiRegistryReference {
+            ident: package_ident.clone(),
+            version,
+            url: Some(UrlEncoded::new(wheel.url.clone())),
+        }.into()));
+    }
+
+    locators.sort_by(|a, b| {
+        let a_version = match a.reference.physical_reference() {
+            Reference::PypiRegistry(params) => &params.version,
+            Reference::PypiShorthand(params) => &params.version,
+            _ => return a.cmp(b),
+        };
+        let b_version = match b.reference.physical_reference() {
+            Reference::PypiRegistry(params) => &params.version,
+            Reference::PypiShorthand(params) => &params.version,
+            _ => return a.cmp(b),
+        };
+
+        a_version.cmp_pep440(b_version)
+            .unwrap_or_else(|_| a.cmp(b))
+    });
+
+    Ok(locators)
+}
+
 pub fn resolve_aliased(descriptor: &Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     let mut inner_resolution
         = dependencies.iter()
@@ -454,6 +540,15 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
         = version_metadata.info.requires_dist.unwrap_or_default();
 
     build_resolution_result(context, locator.clone(), &params.version, &requires_dist)
+}
+
+pub async fn resolve_locator_for_fork(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, fork: &PythonFork) -> Result<ResolutionResult, Error> {
+    let version_metadata
+        = fetch_version_metadata(context, &params.ident, &params.version).await?;
+    let requires_dist
+        = version_metadata.info.requires_dist.unwrap_or_default();
+
+    build_fork_resolution_result(context, locator.clone(), &params.version, &requires_dist, fork)
 }
 
 #[cfg(test)]

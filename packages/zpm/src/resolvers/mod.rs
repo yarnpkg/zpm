@@ -405,6 +405,10 @@ pub async fn resolve_versions(context: &InstallContext<'_>, registry: &Registry)
             Ok(vec![locator])
         }
 
+        Registry::Pypi(ident) => {
+            pypi::resolve_versions(context, ident).await
+        }
+
         Registry::None => Ok(vec![]),
     }
 }
