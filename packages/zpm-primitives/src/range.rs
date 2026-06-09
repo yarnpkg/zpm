@@ -4,6 +4,8 @@ use zpm_utils::EcoString;
 use regex::Regex;
 use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
+#[cfg(test)]
+use zpm_utils::FromFileString;
 use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
 
 use crate::{PeerRange, PypiSpecifierSet, SemverPeerRange};
@@ -19,6 +21,41 @@ fn format_registry_semver(ident: &Option<Ident>, range: &zpm_semver::Range) -> S
         Some(ident) => format!("npm:{}@{}", ident.to_file_string(), range.to_file_string()),
         None => format!("npm:{}", range.to_file_string()),
     }
+}
+
+#[test]
+fn test_env_range_serialization() {
+    let hash
+        = Hash64::from_data("fork").to_file_string();
+    let range
+        = format!("env:{hash}#pypi:>=1.0.0");
+
+    assert_eq!(range, Range::from_file_string(&range).unwrap().to_file_string());
+}
+
+#[test]
+fn test_env_range_physical_range() {
+    let hash
+        = Hash64::from_data("fork");
+    let range
+        = Range::from_file_string(&format!("env:{}#pypi:>=1.0.0", hash.to_file_string())).unwrap();
+
+    assert_eq!("pypi:>=1.0.0", range.physical_range().to_file_string());
+}
+
+#[test]
+fn test_env_range_preserves_virtual_outer_wrapper() {
+    let fork_hash
+        = Hash64::from_data("fork");
+    let peer_hash
+        = Hash64::from_data("peer");
+    let range
+        = Range::from_file_string(&format!("virtual:pypi:>=1.0.0#{}", peer_hash.to_file_string())).unwrap();
+
+    assert_eq!(
+        format!("virtual:env:{}#pypi:>=1.0.0#{}", fork_hash.to_file_string(), peer_hash.to_file_string()),
+        range.env_qualified_with_hash(fork_hash).to_file_string(),
+    );
 }
 
 fn format_registry_tag(ident: &Option<Ident>, tag: &str) -> String {
@@ -251,7 +288,7 @@ pub enum Range {
         url: String,
     },
 
-    #[pattern(r"(?<tag>.*)")]
+    #[pattern(r"(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
     #[to_file_string(|params| params.tag.as_str().to_string())]
     #[to_print_string(|params| DataType::Range.colorize(params.tag.as_str()))]
     AnonymousTag {
@@ -266,6 +303,18 @@ pub enum Range {
     #[struct_attr(rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
     #[struct_attr(rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))))]
     Virtual {
+        #[rkyv(omit_bounds)]
+        inner: Box<Range>,
+        hash: Hash64,
+    },
+
+    #[pattern(r"env:(?<hash>[a-f0-9]*)#(?<inner>.*)$")]
+    #[to_file_string(|params| format!("env:{}#{}", params.hash.to_file_string(), params.inner.to_file_string()))]
+    #[to_print_string(|params| format!("{} {}", params.inner.to_print_string(), DataType::Range.colorize(&format!("[env:{}]", params.hash.mini()))))]
+    #[struct_attr(rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+    #[struct_attr(rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+    #[struct_attr(rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))))]
+    Env {
         #[rkyv(omit_bounds)]
         inner: Box<Range>,
         hash: Hash64,
@@ -303,24 +352,62 @@ impl Range {
             Range::Patch(params)
                 => Some(params.inner.0.clone()),
 
+            Range::Env(params)
+                => params.inner.inner_descriptor()
+                    .map(|descriptor| descriptor.env_qualified_with_hash(params.hash.clone())),
+
             _ => None,
         }
     }
 
     pub fn physical_range(&self) -> &Range {
-        if let Range::Virtual(params) = self {
-            params.inner.physical_range()
-        } else {
-            self
+        match self {
+            Range::Virtual(params) => {
+                params.inner.physical_range()
+            },
+
+            Range::Env(params) => {
+                params.inner.physical_range()
+            },
+
+            _ => {
+                self
+            },
+        }
+    }
+
+    pub fn env_qualified_with_hash(&self, hash: Hash64) -> Range {
+        match self {
+            Range::Virtual(params) => {
+                Range::Virtual(VirtualRange {
+                    inner: Box::new(params.inner.env_qualified_with_hash(hash)),
+                    hash: params.hash.clone(),
+                })
+            },
+
+            Range::Env(params) if params.hash == hash => {
+                self.clone()
+            },
+
+            _ => {
+                Range::Env(EnvRange {
+                    inner: Box::new(self.clone()),
+                    hash,
+                })
+            },
         }
     }
 
     pub fn is_workspace(&self) -> bool {
-        matches!(self, Range::WorkspaceMagic(_) | Range::WorkspaceSemver(_) | Range::WorkspaceIdent(_) | Range::WorkspacePath(_))
+        matches!(self.physical_range(), Range::WorkspaceMagic(_) | Range::WorkspaceSemver(_) | Range::WorkspaceIdent(_) | Range::WorkspacePath(_))
     }
 
     pub fn to_anonymous_range(&self) -> Range {
         match self {
+            Range::Env(params) => {
+                params.inner.to_anonymous_range().env_qualified_with_hash(params.hash.clone())
+            },
+
             Range::RegistrySemver(params) => {
                 Range::AnonymousSemver(AnonymousSemverRange {range: params.range.clone()})
             },
@@ -351,6 +438,10 @@ impl Range {
 
     pub fn to_semver_range(&self) -> Option<zpm_semver::Range> {
         match self {
+            Range::Env(params) => {
+                params.inner.to_semver_range()
+            },
+
             Range::AnonymousSemver(params) => {
                 Some(params.range.clone())
             },
@@ -369,6 +460,10 @@ impl Range {
 
     pub fn registry(&self, default_ident: &Ident) -> Registry {
         match self {
+            Range::Env(params) => {
+                params.inner.registry(default_ident)
+            },
+
             Range::AnonymousSemver(_) => {
                 Registry::Npm(default_ident.clone())
             },
@@ -401,6 +496,10 @@ impl Range {
 
     pub fn to_peer_range(&self) -> Result<PeerRange, RangeError> {
         match self {
+            Range::Env(params) => {
+                params.inner.to_peer_range()
+            },
+
             Range::AnonymousSemver(params) => {
                 Ok(PeerRange::Semver(SemverPeerRange {range: params.range.clone()}))
             },

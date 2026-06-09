@@ -73,11 +73,13 @@ impl Descriptor {
     }
 
     pub fn physical_descriptor(&self) -> Descriptor {
-        if let Range::Virtual(params) = &self.range {
-            Descriptor::new_bound(self.ident.clone(), params.inner.physical_range().clone(), self.parent.clone())
-        } else {
-            self.clone()
+        let physical_range = self.range.physical_range();
+
+        if physical_range == &self.range {
+            return self.clone();
         }
+
+        Descriptor::new_bound(self.ident.clone(), physical_range.clone(), self.parent.clone())
     }
 
     pub fn resolve_with(&self, reference: Reference) -> Locator {
@@ -115,6 +117,14 @@ impl Descriptor {
         Descriptor {
             ident: self.ident.clone(),
             range,
+            parent: self.parent.clone(),
+        }
+    }
+
+    pub fn env_qualified_with_hash(&self, hash: Hash64) -> Descriptor {
+        Descriptor {
+            ident: self.ident.clone(),
+            range: self.range.env_qualified_with_hash(hash),
             parent: self.parent.clone(),
         }
     }
@@ -253,7 +263,35 @@ impl_file_string_serialization!(Descriptor);
 #[rstest]
 #[case("foo@npm:1.0.0")]
 #[case("foo@pypi:1.0.0")]
+#[case(&format!("foo@env:{}#pypi:>=1.0.0", Hash64::from_data("fork").to_file_string()))]
 #[case("foo@npm:1.0.0::parent=root@workspace:.")]
 fn test_descriptor_serialization(#[case] str: &str) {
     assert_eq!(str, Descriptor::from_file_string(str).unwrap().to_file_string());
+}
+
+#[test]
+fn test_env_descriptor_physical_descriptor() {
+    let hash
+        = Hash64::from_data("fork");
+    let descriptor
+        = Descriptor::from_file_string(&format!("foo@env:{}#pypi:>=1.0.0", hash.to_file_string())).unwrap();
+
+    assert_eq!("foo@pypi:>=1.0.0", descriptor.physical_descriptor().to_file_string());
+}
+
+#[test]
+fn test_env_descriptor_preserves_virtual_outer_wrapper() {
+    let fork_hash
+        = Hash64::from_data("fork");
+    let peer_hash
+        = Hash64::from_data("peer");
+    let descriptor
+        = Descriptor::from_file_string("foo@pypi:>=1.0.0").unwrap()
+            .virtualized_with_hash(peer_hash.clone())
+            .env_qualified_with_hash(fork_hash.clone());
+
+    assert_eq!(
+        format!("foo@virtual:env:{}#pypi:>=1.0.0#{}", fork_hash.to_file_string(), peer_hash.to_file_string()),
+        descriptor.to_file_string(),
+    );
 }

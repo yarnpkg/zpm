@@ -656,7 +656,7 @@ fn render_peer_warning(
 fn verify_resolution_consistency(descriptor: &Descriptor, locator: &Locator) -> Result<(), Error> {
     let mismatch = || Error::ResolutionMismatch(descriptor.clone(), locator.clone());
 
-    match &descriptor.range {
+    match descriptor.range.physical_range() {
         Range::RegistrySemver(range_params) => {
             let physical_reference = locator.reference.physical_reference();
 
@@ -1553,15 +1553,25 @@ impl<'a> InstallManager<'a> {
     }
 
     fn record_fetch(&mut self, locator: Locator, package_data: PackageData) -> Result<(), Error> {
+        let physical_locator
+            = locator.physical_locator();
+
         let content_flags
             = self.previous_state
-                .and_then(|previous_state| previous_state.content_flags.get(&locator))
+                .and_then(|previous_state| {
+                    previous_state.content_flags.get(&locator)
+                        .or_else(|| previous_state.content_flags.get(&physical_locator))
+                })
                 .cloned()
-                .map_or_else(|| ContentFlags::extract(&locator, &package_data), Ok)?;
+                .map_or_else(|| ContentFlags::extract(&physical_locator, &package_data), Ok)?;
 
-        self.result.package_data.insert(locator.clone(), package_data);
+        self.result.package_data.insert(locator.clone(), package_data.clone());
+        self.result.install_state.content_flags.insert(locator.clone(), content_flags.clone());
 
-        self.result.install_state.content_flags.insert(locator, content_flags);
+        if physical_locator != locator {
+            self.result.package_data.insert(physical_locator.clone(), package_data);
+            self.result.install_state.content_flags.insert(physical_locator, content_flags);
+        }
 
         Ok(())
     }

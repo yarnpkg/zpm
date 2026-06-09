@@ -136,22 +136,25 @@ pub enum SyncFetchAttempt {
 }
 
 pub fn try_fetch_locator_sync(context: InstallContext, locator: &Locator, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<SyncFetchAttempt, Error> {
-    match &locator.reference {
+    let physical_locator
+        = locator.physical_locator();
+
+    match &physical_locator.reference {
         Reference::Shorthand(params)
-            => match npm::try_fetch_locator_sync(&context, locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone(), url: None}, is_mock_request)? {
+            => match npm::try_fetch_locator_sync(&context, &physical_locator, &RegistryReference {ident: physical_locator.ident.clone(), version: params.version.clone(), url: None}, is_mock_request)? {
                 Some(fetch_result) => Ok(SyncFetchAttempt::Success(fetch_result)),
                 None => Ok(SyncFetchAttempt::Failure(dependencies)),
             },
 
         Reference::Registry(params)
-            => match npm::try_fetch_locator_sync(&context, locator, params, is_mock_request)? {
+            => match npm::try_fetch_locator_sync(&context, &physical_locator, params, is_mock_request)? {
                 Some(fetch_result) => Ok(SyncFetchAttempt::Success(fetch_result)),
                 None => Ok(SyncFetchAttempt::Failure(dependencies)),
             },
 
         Reference::PypiShorthand(params)
-            => match pypi::try_fetch_locator_sync(&context, locator, &PypiRegistryReference {
-                ident: locator.ident.clone(),
+            => match pypi::try_fetch_locator_sync(&context, &physical_locator, &PypiRegistryReference {
+                ident: physical_locator.ident.clone(),
                 version: params.version.clone(),
                 url: params.url.clone(),
             }, is_mock_request)? {
@@ -160,78 +163,81 @@ pub fn try_fetch_locator_sync(context: InstallContext, locator: &Locator, is_moc
             },
 
         Reference::PypiRegistry(params)
-            => match pypi::try_fetch_locator_sync(&context, locator, params, is_mock_request)? {
+            => match pypi::try_fetch_locator_sync(&context, &physical_locator, params, is_mock_request)? {
                 Some(fetch_result) => Ok(SyncFetchAttempt::Success(fetch_result)),
                 None => Ok(SyncFetchAttempt::Failure(dependencies)),
             },
 
         Reference::Link(params)
-            => Ok(SyncFetchAttempt::Success(link::fetch_locator(&context, locator, params, dependencies)?)),
+            => Ok(SyncFetchAttempt::Success(link::fetch_locator(&context, &physical_locator, params, dependencies)?)),
 
         Reference::Portal(params)
-            => Ok(SyncFetchAttempt::Success(portal::fetch_locator(&context, locator, params, dependencies)?)),
+            => Ok(SyncFetchAttempt::Success(portal::fetch_locator(&context, &physical_locator, params, dependencies)?)),
 
         Reference::WorkspaceIdent(params)
-            => Ok(SyncFetchAttempt::Success(workspace::fetch_locator_ident(&context, locator, params)?)),
+            => Ok(SyncFetchAttempt::Success(workspace::fetch_locator_ident(&context, &physical_locator, params)?)),
 
         Reference::WorkspacePath(params)
-            => Ok(SyncFetchAttempt::Success(workspace::fetch_locator_path(&context, locator, params)?)),
+            => Ok(SyncFetchAttempt::Success(workspace::fetch_locator_path(&context, &physical_locator, params)?)),
 
         _ => Ok(SyncFetchAttempt::Failure(dependencies)),
     }
 }
 
 pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
-    match &locator.reference {
+    let physical_locator
+        = locator.physical_locator();
+
+    match &physical_locator.reference {
         Reference::Builtin(params)
-            => builtin::fetch_builtin_locator(&context, locator, params, is_mock_request).await,
+            => builtin::fetch_builtin_locator(&context, &physical_locator, params, is_mock_request).await,
 
         Reference::Link(params)
-            => link::fetch_locator(&context, locator, params, dependencies),
+            => link::fetch_locator(&context, &physical_locator, params, dependencies),
 
         Reference::Portal(params)
-            => portal::fetch_locator(&context, locator, params, dependencies),
+            => portal::fetch_locator(&context, &physical_locator, params, dependencies),
 
         Reference::Url(params)
-            => url::fetch_locator(&context, locator, params, is_mock_request).await,
+            => url::fetch_locator(&context, &physical_locator, params, is_mock_request).await,
 
         Reference::Tarball(params)
-            => tarball::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
+            => tarball::fetch_locator(&context, &physical_locator, params, is_mock_request, dependencies).await,
 
         Reference::Folder(params)
-            => folder::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
+            => folder::fetch_locator(&context, &physical_locator, params, is_mock_request, dependencies).await,
 
         Reference::Exec(params)
-            => exec::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
+            => exec::fetch_locator(&context, &physical_locator, params, is_mock_request, dependencies).await,
 
         Reference::Git(params)
-            => git::fetch_locator(&context, locator, params, is_mock_request).await,
+            => git::fetch_locator(&context, &physical_locator, params, is_mock_request).await,
 
         Reference::Patch(params)
-            => patch::fetch_locator(&context, locator, params, is_mock_request, dependencies).await,
+            => patch::fetch_locator(&context, &physical_locator, params, is_mock_request, dependencies).await,
 
         Reference::Shorthand(params)
-            => npm::fetch_locator(&context, locator, &RegistryReference {ident: locator.ident.clone(), version: params.version.clone(), url: None}, is_mock_request).await,
+            => npm::fetch_locator(&context, &physical_locator, &RegistryReference {ident: physical_locator.ident.clone(), version: params.version.clone(), url: None}, is_mock_request).await,
 
         Reference::Registry(params)
-            => npm::fetch_locator(&context, locator, params, is_mock_request).await,
+            => npm::fetch_locator(&context, &physical_locator, params, is_mock_request).await,
 
         Reference::PypiShorthand(params)
-            => pypi::fetch_locator(&context, locator, &PypiRegistryReference {
-                ident: locator.ident.clone(),
+            => pypi::fetch_locator(&context, &physical_locator, &PypiRegistryReference {
+                ident: physical_locator.ident.clone(),
                 version: params.version.clone(),
                 url: params.url.clone(),
             }, is_mock_request).await,
 
         Reference::PypiRegistry(params)
-            => pypi::fetch_locator(&context, locator, params, is_mock_request).await,
+            => pypi::fetch_locator(&context, &physical_locator, params, is_mock_request).await,
 
         Reference::WorkspaceIdent(params)
-            => workspace::fetch_locator_ident(&context, locator, params),
+            => workspace::fetch_locator_ident(&context, &physical_locator, params),
 
         Reference::WorkspacePath(params)
-            => workspace::fetch_locator_path(&context, locator, params),
+            => workspace::fetch_locator_path(&context, &physical_locator, params),
 
-        _ => panic!("This reference ({}) should never end up being passed to a fetcher", locator.reference.to_print_string()),
+        _ => panic!("This reference ({}) should never end up being passed to a fetcher", physical_locator.reference.to_print_string()),
     }
 }

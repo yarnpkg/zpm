@@ -45,6 +45,10 @@ impl RangeExt for Range {
     #[inline]
     fn details(&self) -> RangeDetails {
         match self {
+            Range::Env(params) => {
+                params.inner.details()
+            },
+
             Range::RegistrySemver(params) if params.ident.is_some() => {
                 RangeDetails {
                     require_binding: false,
@@ -192,6 +196,8 @@ impl RangeExt for Range {
     fn inner_dependency(&self) -> Option<InnerDependencyKind> {
         // This should be kept in sync with Range::inner_descriptor in zpm-primitives
         match self {
+            Range::Env(params) => params.inner.inner_dependency(),
+
             // Aliased packages only need the resolution (to remap the ident)
             Range::RegistrySemver(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),
             Range::RegistryTag(params) if params.ident.is_some() => Some(InnerDependencyKind::Resolution),

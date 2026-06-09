@@ -2,6 +2,8 @@ use std::hash::Hash;
 
 use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
+#[cfg(test)]
+use zpm_utils::FromFileString;
 use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
 
 use super::{Ident, Locator};
@@ -164,6 +166,18 @@ pub enum Reference {
         hash: Hash64,
     },
 
+    #[pattern(r"env:(?<hash>[a-f0-9]*)#(?<inner>.*)$")]
+    #[to_file_string(|params| format!("env:{}#{}", params.hash.to_file_string(), params.inner.to_file_string()))]
+    #[to_print_string(|params| format!("{} {}", params.inner.to_print_string(), DataType::Reference.colorize(&format!("[env:{}]", params.hash.mini()))))]
+    #[struct_attr(rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+    #[struct_attr(rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+    #[struct_attr(rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))))]
+    Env {
+        #[rkyv(omit_bounds)]
+        inner: Box<Reference>,
+        hash: Hash64,
+    },
+
     #[pattern(r"workspace:(?<ident>.*)")]
     #[to_file_string(|params| format!("workspace:{}", params.ident.to_file_string()))]
     #[to_print_string(|params| DataType::Reference.colorize(&format!("workspace:{}", params.ident.to_file_string())))]
@@ -202,15 +216,23 @@ impl Reference {
             return params.inner.0.reference.must_bind() || (params.path.as_str() != "<builtin>" && !params.path.as_str().starts_with("~/"));
         }
 
+        if let Reference::Virtual(params) = self {
+            return params.inner.must_bind();
+        }
+
+        if let Reference::Env(params) = self {
+            return params.inner.must_bind();
+        }
+
         matches!(&self, Reference::Link(_) | Reference::Portal(_) | Reference::Tarball(_) | Reference::Folder(_) | Reference::Exec(_))
     }
 
     pub fn is_workspace_reference(&self) -> bool {
-        matches!(&self, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_))
+        matches!(self.physical_reference(), Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_))
     }
 
     pub fn is_disk_reference(&self) -> bool {
-        matches!(&self, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_) | Reference::Portal(_) | Reference::Link(_))
+        matches!(self.physical_reference(), Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_) | Reference::Portal(_) | Reference::Link(_))
     }
 
     pub fn is_virtual_reference(&self) -> bool {
@@ -218,11 +240,11 @@ impl Reference {
     }
 
     pub fn is_portal(&self) -> bool {
-        matches!(&self, Reference::Portal(_))
+        matches!(self.physical_reference(), Reference::Portal(_))
     }
 
     pub fn is_link(&self) -> bool {
-        matches!(&self, Reference::Link(_))
+        matches!(self.physical_reference(), Reference::Link(_))
     }
 
     pub fn inner_locator(&self) -> Option<&Locator> {
@@ -233,6 +255,14 @@ impl Reference {
                 Some(&params.inner.0)
             },
 
+            Reference::Virtual(params) => {
+                params.inner.inner_locator()
+            },
+
+            Reference::Env(params) => {
+                params.inner.inner_locator()
+            },
+
             _ => {
                 None
             },
@@ -240,10 +270,40 @@ impl Reference {
     }
 
     pub fn physical_reference(&self) -> &Reference {
-        if let Reference::Virtual(params) = self {
-            params.inner.physical_reference()
-        } else {
-            self
+        match self {
+            Reference::Virtual(params) => {
+                params.inner.physical_reference()
+            },
+
+            Reference::Env(params) => {
+                params.inner.physical_reference()
+            },
+
+            _ => {
+                self
+            },
+        }
+    }
+
+    pub fn env_qualified_with_hash(&self, hash: Hash64) -> Reference {
+        match self {
+            Reference::Virtual(params) => {
+                Reference::Virtual(VirtualReference {
+                    inner: Box::new(params.inner.env_qualified_with_hash(hash)),
+                    hash: params.hash.clone(),
+                })
+            },
+
+            Reference::Env(params) if params.hash == hash => {
+                self.clone()
+            },
+
+            _ => {
+                Reference::Env(EnvReference {
+                    inner: Box::new(self.clone()),
+                    hash,
+                })
+            },
         }
     }
 
@@ -305,6 +365,10 @@ impl Reference {
                 "virtual".to_string()
             },
 
+            Reference::Env(params) => {
+                params.inner.slug()
+            },
+
             Reference::WorkspaceIdent(_) => {
                 "workspace".to_string()
             },
@@ -314,4 +378,40 @@ impl Reference {
             },
         }
     }
+}
+
+#[test]
+fn test_env_reference_serialization() {
+    let hash
+        = Hash64::from_data("fork").to_file_string();
+    let reference
+        = format!("env:{hash}#pypi:1.0.0");
+
+    assert_eq!(reference, Reference::from_file_string(&reference).unwrap().to_file_string());
+}
+
+#[test]
+fn test_env_reference_physical_reference() {
+    let hash
+        = Hash64::from_data("fork");
+    let reference
+        = Reference::from_file_string(&format!("env:{}#pypi:1.0.0", hash.to_file_string())).unwrap();
+
+    assert_eq!("pypi:1.0.0", reference.physical_reference().to_file_string());
+    assert_eq!("pypi-1.0.0", reference.slug());
+}
+
+#[test]
+fn test_env_reference_preserves_virtual_outer_wrapper() {
+    let fork_hash
+        = Hash64::from_data("fork");
+    let peer_hash
+        = Hash64::from_data("peer");
+    let reference
+        = Reference::from_file_string(&format!("virtual:{}#pypi:1.0.0", peer_hash.to_file_string())).unwrap();
+
+    assert_eq!(
+        format!("virtual:{}#env:{}#pypi:1.0.0", peer_hash.to_file_string(), fork_hash.to_file_string()),
+        reference.env_qualified_with_hash(fork_hash).to_file_string(),
+    );
 }

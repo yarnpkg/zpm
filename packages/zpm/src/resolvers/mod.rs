@@ -268,6 +268,7 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
             => workspace::resolve_path_descriptor(&context, &descriptor, params),
 
         Range::Catalog(_) |
+        Range::Env(_) |
         Range::MissingPeerDependency |
         Range::WorkspaceMagic(_) |
         Range::WorkspaceSemver(_) |
@@ -324,6 +325,7 @@ pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, depe
             => pypi::resolve_locator(&context, &locator, params).await,
 
         Reference::Virtual(_)
+        | Reference::Env(_)
             => Err(Error::Unsupported)?,
 
         Reference::WorkspaceIdent(params)
