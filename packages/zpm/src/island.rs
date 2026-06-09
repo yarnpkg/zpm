@@ -21,6 +21,7 @@ pub struct ResolvedIsland {
     pub workspace_idents: BTreeSet<Ident>,
     pub root_descriptors: BTreeSet<Descriptor>,
     pub linker: zpm_config::IslandLinker,
+    pub python_link_version: Option<String>,
 }
 
 /// The result of resolving an island's dependency graph.
@@ -73,6 +74,7 @@ pub fn resolve_islands(
             workspace_idents,
             root_descriptors,
             linker: island_def.linker.value,
+            python_link_version: island_def.python.value.link_version.clone(),
         });
     }
 

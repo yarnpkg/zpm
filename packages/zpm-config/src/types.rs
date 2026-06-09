@@ -269,6 +269,38 @@ impl ToFileString for SupportedTarget {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IslandPython {
+    #[serde(default)]
+    pub link_version: Option<String>,
+}
+
+impl ToHumanString for IslandPython {
+    fn to_print_string(&self) -> String {
+        match &self.link_version {
+            Some(link_version) => format!("python{{linkVersion={link_version}}}"),
+            None => "python{}".to_string(),
+        }
+    }
+}
+
+impl FromFileString for IslandPython {
+    type Error = StructuredSettingParseError;
+
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
+        serde_yaml::from_str(src)
+            .map_err(|err| StructuredSettingParseError::Message(err.to_string()))
+    }
+}
+
+impl ToFileString for IslandPython {
+    fn to_file_string(&self) -> String {
+        serde_yaml::to_string(self)
+            .unwrap_or_else(|err| panic!("Failed to serialize island python settings: {err}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,6 +318,15 @@ mod tests {
     fn test_python_target_rejects_unknown_fields() {
         let err
             = serde_yaml::from_str::<SupportedTarget>("python:\n  version: '3.12'\n  unknown: true\n")
+                .unwrap_err();
+
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn test_island_python_rejects_unknown_fields() {
+        let err
+            = serde_yaml::from_str::<IslandPython>("linkVersion: '3.12'\nunknown: true\n")
                 .unwrap_err();
 
         assert!(err.to_string().contains("unknown field"));

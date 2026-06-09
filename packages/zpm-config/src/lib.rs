@@ -1345,6 +1345,7 @@ merge_settings!(crate::types::NmMode, |s: &str| FromFileString::from_file_string
 merge_settings!(crate::types::WinLinkType, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::LogLevel, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::NpmPublishAccess, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::IslandPython, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::SupportedTarget, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_optional_settings!(crate::types::NodeLinker);
 merge_optional_settings!(crate::types::IslandLinker);
