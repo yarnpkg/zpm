@@ -330,6 +330,7 @@ type PypiFixtureDistribution = {
   filename: string;
   packagetype: `bdist_wheel` | `sdist`;
   path: string;
+  requiresPython?: string;
   uploadTime: string;
 };
 
@@ -388,6 +389,26 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
         packagetype: `bdist_wheel`,
         path: `/repositories/pypi/pypi_marker_split-1.0.0-py3-none-any.whl`,
         uploadTime: `2024-08-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-python-version-split`]: {
+    [`1.0.0`]: {
+      files: [{
+        filename: `pypi_python_version_split-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_python_version_split-1.0.0-py3-none-any.whl`,
+        requiresPython: `<3.12`,
+        uploadTime: `2024-09-01T00:00:00Z`,
+      }],
+    },
+    [`1.1.0`]: {
+      files: [{
+        filename: `pypi_python_version_split-1.1.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_python_version_split-1.1.0-py3-none-any.whl`,
+        requiresPython: `>=3.12`,
+        uploadTime: `2024-09-02T00:00:00Z`,
       }],
     },
   },
@@ -736,6 +757,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
           filename: file.filename,
           packagetype: file.packagetype,
           url: `${serverUrl}${file.path}`,
+          requires_python: file.requiresPython,
           upload_time_iso_8601: file.uploadTime,
         }))];
       }));
@@ -774,6 +796,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
           filename: file.filename,
           packagetype: file.packagetype,
           url: `${serverUrl}${file.path}`,
+          requires_python: file.requiresPython,
           upload_time_iso_8601: file.uploadTime,
         })),
       }));

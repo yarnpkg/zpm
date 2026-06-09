@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{de::DeserializeOwned, Deserialize};
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Descriptor, Ident, Locator, MarkerExpr, MarkerValue, MarkerVariable, PypiRegistryReference, PypiSpecifierRange, PypiSpecifierSet, PypiTagRange, PythonFork, Reference, Range, canonicalize_pypi_name};
+use zpm_primitives::{Descriptor, Ident, Locator, MarkerExpr, MarkerValue, MarkerVariable, PypiRegistryReference, PypiSpecifierRange, PypiSpecifierSet, PypiTagRange, PythonFork, PythonTargetEnv, Reference, Range, canonicalize_pypi_name};
 use zpm_utils::{FromFileString, ToFileString, UrlEncoded};
 
 use crate::{
@@ -465,6 +465,10 @@ async fn fetch_version_metadata(context: &InstallContext<'_>, package_ident: &Id
 }
 
 pub async fn resolve_versions(context: &InstallContext<'_>, package_ident: &Ident) -> Result<Vec<Locator>, Error> {
+    resolve_versions_for_target(context, package_ident, None).await
+}
+
+pub async fn resolve_versions_for_target(context: &InstallContext<'_>, package_ident: &Ident, target: Option<&PythonTargetEnv>) -> Result<Vec<Locator>, Error> {
     let package_ident
         = canonicalize_pypi_ident(package_ident)?;
     let project_metadata
@@ -478,7 +482,7 @@ pub async fn resolve_versions(context: &InstallContext<'_>, package_ident: &Iden
             continue;
         };
 
-        let Some(wheel) = select_best_wheel(&release_distributions) else {
+        let Some(wheel) = select_best_wheel(&release_distributions, target) else {
             continue;
         };
 
@@ -558,8 +562,8 @@ pub async fn resolve_specifier_descriptor(context: &InstallContext<'_>, descript
             .ok_or_else(|| Error::NoCandidatesFound(descriptor.range.clone()))?;
 
     let wheel
-        = select_best_wheel(&release_distributions)
-            .ok_or_else(|| Error::InvalidResolution(format!("No wheel artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
+        = select_best_wheel(&release_distributions, None)
+            .ok_or_else(|| Error::InvalidResolution(format!("No compatible wheel artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
 
     let version_metadata
         = fetch_version_metadata(context, &package_ident, &resolved_version).await?;
@@ -601,8 +605,8 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
             .ok_or_else(|| Error::NoCandidatesFound(descriptor.range.clone()))?;
 
     let wheel
-        = select_best_wheel(&release_distributions)
-            .ok_or_else(|| Error::InvalidResolution(format!("No wheel artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
+        = select_best_wheel(&release_distributions, None)
+            .ok_or_else(|| Error::InvalidResolution(format!("No compatible wheel artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
 
     let version_metadata
         = fetch_version_metadata(context, &package_ident, &resolved_version).await?;

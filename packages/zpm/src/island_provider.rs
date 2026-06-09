@@ -139,11 +139,25 @@ impl<'a> IslandDependencyProvider<'a> {
     /// Fetch all available versions for a package from the registry,
     /// returning them as IslandVersions in descending order (newest first).
     fn fetch_versions(&self, package: &IslandPackageKey) -> Result<Vec<IslandVersion>, IslandResolutionError> {
+        if matches!(package.registry, IslandRegistry::Pypi) {
+            let target
+                = self.fork.as_ref()
+                    .and_then(|fork| fork.target.as_ref());
+            let versions = self.handle.block_on(
+                crate::resolvers::pypi::resolve_versions_for_target(self.ctx, &package.ident, target)
+            ).map_err(IslandResolutionError::from)?;
+
+            return Ok(versions.into_iter()
+                .rev()
+                .map(|locator| IslandVersion(self.qualify_locator(&locator)))
+                .collect());
+        }
+
         let registry = match package.registry {
             IslandRegistry::Npm => Registry::Npm(package.ident.clone()),
-            IslandRegistry::Pypi => Registry::Pypi(package.ident.clone()),
             IslandRegistry::Workspace => Registry::Workspace(package.ident.clone()),
             IslandRegistry::Other => Registry::None,
+            IslandRegistry::Pypi => unreachable!("PyPI versions are resolved with Python target filtering above"),
         };
         let versions = self.handle.block_on(
             resolvers::resolve_versions(self.ctx, &registry)
@@ -188,10 +202,11 @@ impl<'a> IslandDependencyProvider<'a> {
             _ => return Ok(None),
         };
 
-        let registry
-            = Registry::Pypi(package_ident);
+        let target
+            = self.fork.as_ref()
+                .and_then(|fork| fork.target.as_ref());
         let versions
-            = self.handle.block_on(resolvers::resolve_versions(self.ctx, &registry))
+            = self.handle.block_on(crate::resolvers::pypi::resolve_versions_for_target(self.ctx, &package_ident, target))
                 .map_err(IslandResolutionError::from)?;
 
         let mut candidates

@@ -40,7 +40,7 @@ async fn resolve_artifact_url(context: &InstallContext<'_>, params: &PypiRegistr
         = JsonDocument::hydrate_from_slice(&bytes[..])?;
 
     let wheel
-        = select_best_wheel(&metadata.urls)
+        = select_best_wheel(&metadata.urls, None)
             .ok_or_else(|| Error::InvalidResolution(format!(
                 "No wheel artifact found for {}@{}",
                 params.ident.to_file_string(),

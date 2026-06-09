@@ -148,4 +148,64 @@ describe(`Venv tests`, () => {
       },
     ),
   );
+
+  test(
+    `it should resolve PyPI releases compatible with each Python target`,
+    makeTemporaryMonorepoEnv(
+      {
+        workspaces: [`packages/*`],
+      },
+      {
+        [`packages/workspace-a`]: {
+          name: `workspace-a`,
+          version: `1.0.0`,
+          dependencies: {
+            [`pypi-python-version-split`]: `pypi:>=1.0.0`,
+          },
+        },
+      },
+      async ({path, run}) => {
+        const registryUrl = await tests.startPackageServer();
+
+        await yarn.writeConfiguration(path, {
+          supportedTargets: [
+            currentSupportedTarget(`3.11`),
+            currentSupportedTarget(`3.12`),
+          ],
+          unstableIslands: {
+            main: {
+              workspaces: [`workspace-a`],
+              linker: `venv`,
+              python: {
+                linkVersion: `3.12`,
+              },
+            },
+          },
+        });
+
+        await run(`install`, {
+          env: {
+            ZPM_PYPI_REGISTRY: registryUrl,
+          },
+        });
+
+        const lockfile = await readLockfile(path);
+        const forks = Object.values(lockfile.islands.main.forks) as Array<any>;
+        expect(forks).toHaveLength(2);
+
+        const forkResolutions = forks.flatMap(fork => {
+          return Object.values(fork.entries ?? {}).map((entry: any) => entry.resolution.resolution);
+        });
+
+        expect(forkResolutions.some((resolution: string) => resolution.includes(`pypi-python-version-split`) && resolution.includes(`1.0.0`))).toBe(true);
+        expect(forkResolutions.some((resolution: string) => resolution.includes(`pypi-python-version-split`) && resolution.includes(`1.1.0`))).toBe(true);
+
+        const linkedSelectedDistInfo = npath.toPortablePath(`${path}/packages/workspace-a/.venv/lib/site-packages/pypi-python-version-split/pypi_python_version_split-1.1.0.dist-info/METADATA`);
+        const linkedOtherDistInfo = npath.toPortablePath(`${path}/packages/workspace-a/.venv/lib/site-packages/pypi-python-version-split/pypi_python_version_split-1.0.0.dist-info/METADATA`);
+
+        await expect(xfs.existsPromise(linkedSelectedDistInfo)).resolves.toBe(true);
+        await expect(xfs.existsPromise(linkedOtherDistInfo)).resolves.toBe(false);
+      },
+    ),
+  );
 });
