@@ -14,6 +14,12 @@ pub enum PythonTargetError {
         field: &'static str,
         value: String,
     },
+
+    #[error("Invalid Python target version in {field}: {value}")]
+    InvalidVersion {
+        field: &'static str,
+        value: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -44,14 +50,23 @@ pub struct PythonTargetEnv {
 
 impl PythonTargetEnv {
     pub fn from_system(system: &System, python: PythonTargetInput<'_>) -> Result<Self, PythonTargetError> {
-        let python_version
+        let configured_python_version
             = python.version.ok_or(PythonTargetError::MissingPythonVersion)?;
+        let (python_version, default_python_full_version)
+            = normalize_python_version(configured_python_version, "python.version")?;
+
+        let python_full_version
+            = match python.full_version {
+                Some(full_version) => normalize_full_python_version(full_version, "python.fullVersion")?,
+                None => default_python_full_version,
+            };
+
         let implementation_name
             = python.implementation_name.unwrap_or("cpython");
-        let python_full_version
-            = python.full_version.unwrap_or(python_version);
         let implementation_version
-            = python.implementation_version.unwrap_or(python_full_version);
+            = python.implementation_version
+                .map(|version| version.to_string())
+                .unwrap_or_else(|| python_full_version.clone());
 
         let (os_name, sys_platform, platform_system)
             = python_os_fields(system.os.as_ref())?;
@@ -59,8 +74,8 @@ impl PythonTargetEnv {
             = python_platform_machine(system.arch.as_ref(), system.os.as_ref())?;
 
         Ok(Self {
-            python_version: python_version.to_string(),
-            python_full_version: Some(python_full_version.to_string()),
+            python_version,
+            python_full_version: Some(python_full_version),
             os_name,
             sys_platform,
             platform_machine,
@@ -69,7 +84,7 @@ impl PythonTargetEnv {
             platform_version: python.platform_version.map(|value| value.to_string()),
             platform_python_implementation: Some(platform_python_implementation(implementation_name)),
             implementation_name: Some(implementation_name.to_string()),
-            implementation_version: Some(implementation_version.to_string()),
+            implementation_version: Some(implementation_version),
         })
     }
 
@@ -491,6 +506,42 @@ fn platform_python_implementation(implementation_name: &str) -> String {
     }
 }
 
+fn normalize_python_version(version: &str, field: &'static str) -> Result<(String, String), PythonTargetError> {
+    let full_version
+        = normalize_full_python_version(version, field)?;
+    let parsed
+        = pep440_rs::Version::from_str(&full_version)
+            .map_err(|_| PythonTargetError::InvalidVersion {
+                field,
+                value: version.to_string(),
+            })?;
+    let release
+        = parsed.release();
+    let major
+        = release.first()
+            .ok_or_else(|| PythonTargetError::InvalidVersion {
+                field,
+                value: version.to_string(),
+            })?;
+    let minor
+        = release.get(1)
+            .ok_or_else(|| PythonTargetError::InvalidVersion {
+                field,
+                value: version.to_string(),
+            })?;
+
+    Ok((format!("{major}.{minor}"), full_version))
+}
+
+fn normalize_full_python_version(version: &str, field: &'static str) -> Result<String, PythonTargetError> {
+    pep440_rs::Version::from_str(version)
+        .map(|version| version.to_string())
+        .map_err(|_| PythonTargetError::InvalidVersion {
+            field,
+            value: version.to_string(),
+        })
+}
+
 fn write_canonical_field(out: &mut String, name: &str, value: Option<&String>) {
     out.push_str(name);
     out.push('=');
@@ -535,6 +586,22 @@ mod tests {
         assert_eq!(target.platform_machine.as_deref(), Some("x86_64"));
         assert_eq!(target.platform_python_implementation.as_deref(), Some("CPython"));
         assert_eq!(target.implementation_name.as_deref(), Some("cpython"));
+    }
+
+    #[test]
+    fn test_python_version_uses_pep508_major_minor() {
+        let target
+            = PythonTargetEnv::from_system(
+                &System::new(Some(Cpu::X86_64), Some(Os::Linux), None),
+                PythonTargetInput {
+                    version: Some("3.12.2"),
+                    ..PythonTargetInput::default()
+                },
+            ).unwrap();
+
+        assert_eq!(target.python_version, "3.12");
+        assert_eq!(target.python_full_version.as_deref(), Some("3.12.2"));
+        assert_eq!(target.implementation_version.as_deref(), Some("3.12.2"));
     }
 
     #[test]
