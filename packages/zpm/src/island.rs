@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use pubgrub::Reporter;
 use zpm_primitives::{Descriptor, Ident, Locator, PypiSpecifierRange, PypiSpecifierSet, PythonFork, Range, Reference, ShorthandReference, WorkspaceIdentReference};
-use zpm_utils::{FromFileString, ToFileString};
+use zpm_utils::{FromFileString, Hash64, ToFileString};
 
 use crate::error::Error;
 use crate::install::InstallContext;
@@ -136,7 +136,11 @@ async fn resolve_island_once(
     fork: Option<PythonFork>,
 ) -> Result<IslandResolutionResult, Error> {
     // Phase 2: Build locked_versions map (preferred locators from lockfile)
-    let locked_versions = build_locked_versions(island, lockfile);
+    let fork_id
+        = fork.as_ref()
+            .map(|fork| fork.id.clone())
+            .unwrap_or_else(LockfileIsland::default_fork_id);
+    let locked_versions = build_locked_versions(island, lockfile, &fork_id);
 
     // Phase 3: Build root_deps (workspace singletons) and workspace_deps
     let project = ctx.project
@@ -363,11 +367,13 @@ fn island_result_from_lockfile(
 fn build_locked_versions(
     island: &ResolvedIsland,
     lockfile: &Lockfile,
+    fork_id: &Hash64,
 ) -> BTreeMap<IslandPackageKey, Locator> {
     let mut locked = BTreeMap::new();
 
-    if let Some(locked_island) = lockfile.islands.get(&island.id) {
-        for locator in locked_island.flatten_resolutions().values() {
+    if let Some(locked_fork) = lockfile.islands.get(&island.id)
+        .and_then(|locked_island| locked_island.forks.get(fork_id)) {
+        for locator in locked_fork.resolutions.values() {
             locked.entry(IslandPackageKey::from_locator(locator)).or_insert_with(|| locator.clone());
         }
     }
@@ -602,5 +608,69 @@ fn handle_pubgrub_error(
     Error::IslandResolutionFailed {
         island_id: island_id.to_string(),
         message,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn descriptor_for(fork_id: &Hash64, range: &str) -> Descriptor {
+        Descriptor::from_file_string(&format!(
+            "foo@env:{}#{}",
+            fork_id.to_file_string(),
+            range,
+        )).unwrap()
+    }
+
+    fn locator_for(fork_id: &Hash64, reference: &str) -> Locator {
+        Locator::from_file_string(&format!(
+            "foo@env:{}#{}",
+            fork_id.to_file_string(),
+            reference,
+        )).unwrap()
+    }
+
+    #[test]
+    fn test_locked_versions_are_scoped_to_active_fork() {
+        let island = ResolvedIsland {
+            id: "main".to_string(),
+            workspace_idents: BTreeSet::new(),
+            root_descriptors: BTreeSet::new(),
+            linker: zpm_config::IslandLinker::Venv,
+            python_link_version: None,
+        };
+        let fork_a
+            = Hash64::from_data("fork-a");
+        let fork_b
+            = Hash64::from_data("fork-b");
+        let locator_a
+            = locator_for(&fork_a, "npm:1.0.0");
+        let locator_b
+            = locator_for(&fork_b, "npm:2.0.0");
+
+        let mut lockfile_island
+            = LockfileIsland::default();
+        lockfile_island.forks.insert(fork_a.clone(), LockfileIslandFork {
+            target: None,
+            resolutions: BTreeMap::from([(descriptor_for(&fork_a, "npm:^1.0.0"), locator_a)]),
+        });
+        lockfile_island.forks.insert(fork_b.clone(), LockfileIslandFork {
+            target: None,
+            resolutions: BTreeMap::from([(descriptor_for(&fork_b, "npm:^1.0.0"), locator_b.clone())]),
+        });
+
+        let mut lockfile
+            = Lockfile::new();
+        lockfile.islands.insert("main".to_string(), lockfile_island);
+
+        let locked
+            = build_locked_versions(&island, &lockfile, &fork_b);
+
+        assert_eq!(1, locked.len());
+        assert_eq!(
+            Some(&locator_b),
+            locked.get(&IslandPackageKey::new(Ident::from_file_string("foo").unwrap(), IslandRegistry::Npm)),
+        );
     }
 }
