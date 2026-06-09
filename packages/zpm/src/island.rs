@@ -8,7 +8,7 @@ use crate::error::Error;
 use crate::install::InstallContext;
 use crate::island_provider::IslandDependencyProvider;
 use crate::island_types::{IslandPackage, IslandPackageKey, IslandRegistry, IslandVersion, IslandVersionSet};
-use crate::lockfile::Lockfile;
+use crate::lockfile::{Lockfile, LockfileIsland, LockfileIslandFork};
 use crate::project::Workspace;
 use crate::resolvers::Resolution;
 
@@ -29,6 +29,7 @@ pub struct IslandResolutionResult {
     pub island_id: String,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
     pub normalized_resolutions: BTreeMap<Locator, Resolution>,
+    pub lockfile_island: LockfileIsland,
 }
 
 /// Build resolved islands from config settings + project workspaces.
@@ -111,6 +112,7 @@ pub async fn resolve_island(
         island_id: island.id.clone(),
         descriptor_to_locator: BTreeMap::new(),
         normalized_resolutions: BTreeMap::new(),
+        lockfile_island: LockfileIsland::default(),
     };
 
     for fork in forks {
@@ -119,6 +121,7 @@ pub async fn resolve_island(
 
         merged.descriptor_to_locator.extend(result.descriptor_to_locator);
         merged.normalized_resolutions.extend(result.normalized_resolutions);
+        merged.lockfile_island.forks.extend(result.lockfile_island.forks);
     }
 
     Ok(merged)
@@ -312,12 +315,14 @@ fn is_island_lockfile_valid(
 /// Build an IslandResolutionResult from cached lockfile data.
 fn island_result_from_lockfile(
     island_id: &str,
-    locked_island: &BTreeMap<Descriptor, Locator>,
+    locked_island: &LockfileIsland,
     lockfile: &Lockfile,
 ) -> Result<IslandResolutionResult, Error> {
     let mut normalized_resolutions = BTreeMap::new();
+    let descriptor_to_locator
+        = locked_island.flatten_resolutions();
 
-    for locator in locked_island.values() {
+    for locator in descriptor_to_locator.values() {
         if let Some(entry) = lockfile.entries.get(locator) {
             normalized_resolutions.insert(locator.clone(), entry.resolution.clone());
         }
@@ -325,8 +330,9 @@ fn island_result_from_lockfile(
 
     Ok(IslandResolutionResult {
         island_id: island_id.to_string(),
-        descriptor_to_locator: locked_island.clone(),
+        descriptor_to_locator,
         normalized_resolutions,
+        lockfile_island: locked_island.clone(),
     })
 }
 
@@ -338,7 +344,7 @@ fn build_locked_versions(
     let mut locked = BTreeMap::new();
 
     if let Some(locked_island) = lockfile.islands.get(&island.id) {
-        for locator in locked_island.values() {
+        for locator in locked_island.flatten_resolutions().values() {
             locked.entry(IslandPackageKey::from_locator(locator)).or_insert_with(|| locator.clone());
         }
     }
@@ -510,10 +516,24 @@ fn convert_solution(
         }
     }
 
+    let fork_id
+        = fork.map(|fork| fork.id.clone())
+            .unwrap_or_else(LockfileIsland::default_fork_id);
+    let fork_target
+        = fork.and_then(|fork| fork.target.clone());
+    let mut lockfile_island
+        = LockfileIsland::default();
+
+    lockfile_island.forks.insert(fork_id, LockfileIslandFork {
+        target: fork_target,
+        resolutions: descriptor_to_locator.clone(),
+    });
+
     Ok(IslandResolutionResult {
         island_id: island_id.to_string(),
         descriptor_to_locator,
         normalized_resolutions,
+        lockfile_island,
     })
 }
 

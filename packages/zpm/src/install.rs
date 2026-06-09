@@ -1267,7 +1267,7 @@ impl<'a> InstallManager<'a> {
 
                     // Store island descriptor→locator in lockfile
                     self.result.lockfile.islands
-                        .insert(island_id, island_result.descriptor_to_locator);
+                        .insert(island_id, island_result.lockfile_island);
                 }
 
                 // Fetch all island-resolved packages so package_data is

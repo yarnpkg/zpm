@@ -5,14 +5,14 @@ use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
 use zpm_config::{Configuration, ConfigurationContext};
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, RegistryReference, RegistrySemverRange};
+use zpm_primitives::{Descriptor, Ident, Locator, PythonTargetEnv, Range, Reference, RegistryReference, RegistrySemverRange};
 use zpm_utils::{FromFileString, Hash64, LastModifiedAt, Path, ToFileString, UrlEncoded};
 
 use crate::{
     error::Error, http_npm, npm, primitives_exts::RangeExt, resolvers::Resolution
 };
 
-const LOCKFILE_VERSION: u64 = 9;
+const LOCKFILE_VERSION: u64 = 10;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
@@ -27,12 +27,60 @@ pub struct LockfileEntry {
 #[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
 #[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
 #[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+pub struct LockfileIslandFork {
+    pub target: Option<PythonTargetEnv>,
+    pub resolutions: BTreeMap<Descriptor, Locator>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+pub struct LockfileIsland {
+    pub forks: BTreeMap<Hash64, LockfileIslandFork>,
+}
+
+impl LockfileIsland {
+    pub fn default_fork_id() -> Hash64 {
+        Hash64::from_data("default-island-fork-v1")
+    }
+
+    pub fn from_resolutions(resolutions: BTreeMap<Descriptor, Locator>) -> Self {
+        let mut forks
+            = BTreeMap::new();
+
+        forks.insert(Self::default_fork_id(), LockfileIslandFork {
+            target: None,
+            resolutions,
+        });
+
+        Self {
+            forks,
+        }
+    }
+
+    pub fn flatten_resolutions(&self) -> BTreeMap<Descriptor, Locator> {
+        let mut resolutions
+            = BTreeMap::new();
+
+        for fork in self.forks.values() {
+            resolutions.extend(fork.resolutions.clone());
+        }
+
+        resolutions
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
 pub struct Lockfile {
     pub metadata: LockfileMetadata,
     pub resolutions: BTreeMap<Descriptor, Locator>,
     pub entries: BTreeMap<Locator, LockfileEntry>,
     pub workspaces: BTreeMap<Ident, Hash64>,
-    pub islands: BTreeMap<String, BTreeMap<Descriptor, Locator>>,
+    pub islands: BTreeMap<String, LockfileIsland>,
 }
 
 impl Lockfile {
@@ -65,15 +113,46 @@ impl<'de> Deserialize<'de> for Lockfile {
         }
 
         // Deserialize island entries
-        for (island_id, island_entries) in payload.islands {
-            let mut island_resolutions = BTreeMap::new();
-            for (key, entry) in island_entries {
-                for descriptor in key.0 {
-                    island_resolutions.insert(descriptor, entry.resolution.locator.clone());
-                }
-                lockfile.entries.insert(entry.resolution.locator.clone(), entry);
+        for (island_id, island_payload) in payload.islands {
+            let mut island
+                = LockfileIsland::default();
+
+            match island_payload {
+                LockfileIslandPayload::Forked {forks} => {
+                    for (fork_id, fork_payload) in forks {
+                        let mut resolutions
+                            = BTreeMap::new();
+
+                        for (key, entry) in fork_payload.entries {
+                            for descriptor in key.0 {
+                                resolutions.insert(descriptor, entry.resolution.locator.clone());
+                            }
+                            lockfile.entries.insert(entry.resolution.locator.clone(), entry);
+                        }
+
+                        island.forks.insert(fork_id, LockfileIslandFork {
+                            target: fork_payload.target,
+                            resolutions,
+                        });
+                    }
+                },
+
+                LockfileIslandPayload::Legacy(legacy_entries) => {
+                    let mut resolutions
+                        = BTreeMap::new();
+
+                    for (key, entry) in legacy_entries {
+                        for descriptor in key.0 {
+                            resolutions.insert(descriptor, entry.resolution.locator.clone());
+                        }
+                        lockfile.entries.insert(entry.resolution.locator.clone(), entry);
+                    }
+
+                    island = LockfileIsland::from_resolutions(resolutions);
+                },
             }
-            lockfile.islands.insert(island_id, island_resolutions);
+
+            lockfile.islands.insert(island_id, island);
         }
 
         Ok(lockfile)
@@ -109,28 +188,41 @@ impl Serialize for Lockfile {
         }
 
         // Serialize island entries
-        let mut islands_payload: BTreeMap<String, BTreeMap<MultiKey<Descriptor>, LockfileEntry>> = BTreeMap::new();
-        for (island_id, island_resolutions) in &self.islands {
-            let mut island_entries_map: BTreeMap<Locator, MultiKeyLockfileEntry> = BTreeMap::new();
-            for (descriptor, locator) in island_resolutions.iter().sorted_by_key(|(descriptor, _)| (*descriptor).clone()) {
-                if descriptor.range.details().transient_resolution {
-                    continue;
+        let mut islands_payload: BTreeMap<String, LockfileIslandPayload> = BTreeMap::new();
+        for (island_id, island) in &self.islands {
+            let mut forks_payload
+                = BTreeMap::new();
+
+            for (fork_id, fork) in &island.forks {
+                let mut island_entries_map: BTreeMap<Locator, MultiKeyLockfileEntry> = BTreeMap::new();
+                for (descriptor, locator) in fork.resolutions.iter().sorted_by_key(|(descriptor, _)| (*descriptor).clone()) {
+                    if descriptor.range.details().transient_resolution {
+                        continue;
+                    }
+
+                    let entry = self.entries.get(locator)
+                        .expect("Expected a matching resolution to be found in the lockfile for any resolved island locator.");
+
+                    island_entries_map.entry(entry.resolution.locator.clone())
+                        .or_insert_with(|| MultiKeyLockfileEntry {inner: entry.clone(), key: MultiKey::new()})
+                        .key.0
+                        .push(descriptor.clone());
                 }
 
-                let entry = self.entries.get(locator)
-                    .expect("Expected a matching resolution to be found in the lockfile for any resolved island locator.");
+                let mut fork_entries = BTreeMap::new();
+                for entry in island_entries_map.into_values() {
+                    fork_entries.insert(entry.key, entry.inner);
+                }
 
-                island_entries_map.entry(entry.resolution.locator.clone())
-                    .or_insert_with(|| MultiKeyLockfileEntry {inner: entry.clone(), key: MultiKey::new()})
-                    .key.0
-                    .push(descriptor.clone());
+                forks_payload.insert(fork_id.clone(), LockfileIslandForkPayload {
+                    target: fork.target.clone(),
+                    entries: fork_entries,
+                });
             }
 
-            let mut island_entries = BTreeMap::new();
-            for entry in island_entries_map.into_values() {
-                island_entries.insert(entry.key, entry.inner);
-            }
-            islands_payload.insert(island_id.clone(), island_entries);
+            islands_payload.insert(island_id.clone(), LockfileIslandPayload::Forked {
+                forks: forks_payload,
+            });
         }
 
         let payload = LockfilePayload {
@@ -317,7 +409,27 @@ struct LockfilePayload {
 
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    islands: BTreeMap<String, BTreeMap<MultiKey<Descriptor>, LockfileEntry>>,
+    islands: BTreeMap<String, LockfileIslandPayload>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+enum LockfileIslandPayload {
+    Forked {
+        forks: BTreeMap<Hash64, LockfileIslandForkPayload>,
+    },
+    Legacy(BTreeMap<MultiKey<Descriptor>, LockfileEntry>),
+}
+
+#[derive(Deserialize, Serialize)]
+struct LockfileIslandForkPayload {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<PythonTargetEnv>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    entries: BTreeMap<MultiKey<Descriptor>, LockfileEntry>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -586,4 +698,90 @@ pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
     }
 
     Ok(lockfile)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zpm_primitives::PythonTargetEnv;
+
+    fn linux_python_target() -> PythonTargetEnv {
+        PythonTargetEnv {
+            python_version: "3.12".to_string(),
+            python_full_version: Some("3.12.0".to_string()),
+            os_name: Some("posix".to_string()),
+            sys_platform: Some("linux".to_string()),
+            platform_machine: Some("x86_64".to_string()),
+            platform_system: Some("Linux".to_string()),
+            platform_release: None,
+            platform_version: None,
+            platform_python_implementation: Some("CPython".to_string()),
+            implementation_name: Some("cpython".to_string()),
+            implementation_version: Some("3.12.0".to_string()),
+        }
+    }
+
+    #[test]
+    fn test_lockfile_serializes_structured_island_forks() {
+        let fork_id
+            = Hash64::from_data("linux-python");
+        let descriptor
+            = Descriptor::from_file_string(&format!("foo@env:{}#pypi:>=1.0.0", fork_id.to_file_string())).unwrap();
+        let locator
+            = Locator::from_file_string(&format!("foo@env:{}#pypi:foo@1.0.0", fork_id.to_file_string())).unwrap();
+
+        let mut lockfile
+            = Lockfile::new();
+        lockfile.entries.insert(locator.clone(), LockfileEntry {
+            checksum: None,
+            resolution: Resolution::new_empty(locator.clone(), zpm_semver::Version::default()),
+        });
+        lockfile.islands.insert("python".to_string(), LockfileIsland {
+            forks: BTreeMap::from([(
+                fork_id.clone(),
+                LockfileIslandFork {
+                    target: Some(linux_python_target()),
+                    resolutions: BTreeMap::from([(descriptor.clone(), locator.clone())]),
+                },
+            )]),
+        });
+
+        let serialized
+            = serde_yaml::to_string(&lockfile).unwrap();
+
+        assert!(serialized.contains("forks:"));
+        assert!(serialized.contains("target:"));
+        assert!(serialized.contains("entries:"));
+
+        let reparsed: Lockfile
+            = serde_yaml::from_str(&serialized).unwrap();
+
+        assert_eq!(lockfile.islands, reparsed.islands);
+        assert_eq!(Some(&locator), reparsed.islands["python"].forks[&fork_id].resolutions.get(&descriptor));
+    }
+
+    #[test]
+    fn test_lockfile_deserializes_legacy_islands_into_default_fork() {
+        let lockfile: Lockfile
+            = serde_yaml::from_str(
+                r#"
+islands:
+  main:
+    "foo@npm:^1.0.0":
+      resolution:
+        resolution: "foo@npm:1.0.0"
+        version: "1.0.0"
+"#,
+            ).unwrap();
+
+        let default_fork_id
+            = LockfileIsland::default_fork_id();
+        let descriptor
+            = Descriptor::from_file_string("foo@npm:^1.0.0").unwrap();
+        let locator
+            = Locator::from_file_string("foo@npm:1.0.0").unwrap();
+
+        assert_eq!(1, lockfile.islands["main"].forks.len());
+        assert_eq!(Some(&locator), lockfile.islands["main"].forks[&default_fork_id].resolutions.get(&descriptor));
+    }
 }
