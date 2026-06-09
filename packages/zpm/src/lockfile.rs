@@ -713,6 +713,7 @@ mod tests {
             sys_platform: Some("linux".to_string()),
             platform_machine: Some("x86_64".to_string()),
             platform_system: Some("Linux".to_string()),
+            libc: Some("glibc".to_string()),
             platform_release: None,
             platform_version: None,
             platform_python_implementation: Some("CPython".to_string()),

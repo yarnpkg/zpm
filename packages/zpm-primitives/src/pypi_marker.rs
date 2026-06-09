@@ -2,7 +2,7 @@ use std::{borrow::Cow, cmp::Ordering, str::FromStr};
 
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
-use zpm_utils::{Cpu, Hash64, Os, System, ToFileString};
+use zpm_utils::{Cpu, Hash64, Libc, Os, System, ToFileString};
 
 #[derive(thiserror::Error, Clone, Debug, PartialEq, Eq)]
 pub enum PythonTargetError {
@@ -41,6 +41,8 @@ pub struct PythonTargetEnv {
     pub sys_platform: Option<String>,
     pub platform_machine: Option<String>,
     pub platform_system: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub libc: Option<String>,
     pub platform_release: Option<String>,
     pub platform_version: Option<String>,
     pub platform_python_implementation: Option<String>,
@@ -80,6 +82,7 @@ impl PythonTargetEnv {
             sys_platform,
             platform_machine,
             platform_system,
+            libc: python_libc(system.libc.as_ref())?,
             platform_release: python.platform_release.map(|value| value.to_string()),
             platform_version: python.platform_version.map(|value| value.to_string()),
             platform_python_implementation: Some(platform_python_implementation(implementation_name)),
@@ -89,7 +92,11 @@ impl PythonTargetEnv {
     }
 
     pub fn fork_id(&self) -> Hash64 {
-        Hash64::from_data(format!("python-target-v1\n{}", self.to_file_string()))
+        if self.libc.is_none() {
+            Hash64::from_data(format!("python-target-v1\n{}", self.to_file_string_without_libc()))
+        } else {
+            Hash64::from_data(format!("python-target-v2\n{}", self.to_file_string()))
+        }
     }
 
     pub fn to_exact_marker_expr(&self) -> MarkerExpr {
@@ -141,6 +148,34 @@ impl PythonTargetEnv {
             MarkerVariable::Extra => None,
         }
     }
+
+    fn to_file_string_without_libc(&self) -> String {
+        let mut out
+            = String::new();
+
+        self.write_canonical_fields(&mut out, false);
+
+        out
+    }
+
+    fn write_canonical_fields(&self, out: &mut String, include_libc: bool) {
+        write_canonical_field(out, "python_version", Some(&self.python_version));
+        write_canonical_field(out, "python_full_version", self.python_full_version.as_ref());
+        write_canonical_field(out, "os_name", self.os_name.as_ref());
+        write_canonical_field(out, "sys_platform", self.sys_platform.as_ref());
+        write_canonical_field(out, "platform_machine", self.platform_machine.as_ref());
+        write_canonical_field(out, "platform_system", self.platform_system.as_ref());
+
+        if include_libc {
+            write_canonical_field(out, "libc", self.libc.as_ref());
+        }
+
+        write_canonical_field(out, "platform_release", self.platform_release.as_ref());
+        write_canonical_field(out, "platform_version", self.platform_version.as_ref());
+        write_canonical_field(out, "platform_python_implementation", self.platform_python_implementation.as_ref());
+        write_canonical_field(out, "implementation_name", self.implementation_name.as_ref());
+        write_canonical_field(out, "implementation_version", self.implementation_version.as_ref());
+    }
 }
 
 impl ToFileString for PythonTargetEnv {
@@ -148,17 +183,7 @@ impl ToFileString for PythonTargetEnv {
         let mut out
             = String::new();
 
-        write_canonical_field(&mut out, "python_version", Some(&self.python_version));
-        write_canonical_field(&mut out, "python_full_version", self.python_full_version.as_ref());
-        write_canonical_field(&mut out, "os_name", self.os_name.as_ref());
-        write_canonical_field(&mut out, "sys_platform", self.sys_platform.as_ref());
-        write_canonical_field(&mut out, "platform_machine", self.platform_machine.as_ref());
-        write_canonical_field(&mut out, "platform_system", self.platform_system.as_ref());
-        write_canonical_field(&mut out, "platform_release", self.platform_release.as_ref());
-        write_canonical_field(&mut out, "platform_version", self.platform_version.as_ref());
-        write_canonical_field(&mut out, "platform_python_implementation", self.platform_python_implementation.as_ref());
-        write_canonical_field(&mut out, "implementation_name", self.implementation_name.as_ref());
-        write_canonical_field(&mut out, "implementation_version", self.implementation_version.as_ref());
+        self.write_canonical_fields(&mut out, true);
 
         out
     }
@@ -498,6 +523,21 @@ fn python_platform_machine(arch: Option<&Cpu>, os: Option<&Os>) -> Result<Option
     }
 }
 
+fn python_libc(libc: Option<&Libc>) -> Result<Option<String>, PythonTargetError> {
+    let Some(libc) = libc else {
+        return Ok(None);
+    };
+
+    match libc {
+        Libc::Glibc => Ok(Some("glibc".to_string())),
+        Libc::Musl => Ok(Some("musl".to_string())),
+        Libc::Current | Libc::Other(_) => Err(PythonTargetError::UnsupportedSystemValue {
+            field: "libc",
+            value: libc.to_file_string(),
+        }),
+    }
+}
+
 fn platform_python_implementation(implementation_name: &str) -> String {
     match implementation_name {
         "cpython" => "CPython".to_string(),
@@ -566,7 +606,7 @@ mod tests {
 
     fn linux_target() -> PythonTargetEnv {
         PythonTargetEnv::from_system(
-            &System::new(Some(Cpu::X86_64), Some(Os::Linux), None),
+            &System::new(Some(Cpu::X86_64), Some(Os::Linux), Some(Libc::Glibc)),
             PythonTargetInput {
                 version: Some("3.12"),
                 ..PythonTargetInput::default()
@@ -584,6 +624,7 @@ mod tests {
         assert_eq!(target.os_name.as_deref(), Some("posix"));
         assert_eq!(target.sys_platform.as_deref(), Some("linux"));
         assert_eq!(target.platform_machine.as_deref(), Some("x86_64"));
+        assert_eq!(target.libc.as_deref(), Some("glibc"));
         assert_eq!(target.platform_python_implementation.as_deref(), Some("CPython"));
         assert_eq!(target.implementation_name.as_deref(), Some("cpython"));
     }
@@ -602,6 +643,7 @@ mod tests {
         assert_eq!(target.python_version, "3.12");
         assert_eq!(target.python_full_version.as_deref(), Some("3.12.2"));
         assert_eq!(target.implementation_version.as_deref(), Some("3.12.2"));
+        assert_eq!(target.libc, None);
     }
 
     #[test]

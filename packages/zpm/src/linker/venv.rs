@@ -81,6 +81,7 @@ fn target_matches_current_system(target: &PythonTargetEnv) -> Result<bool, Error
             && target_field_matches(&target.sys_platform, &current_target.sys_platform)
             && target_field_matches(&target.platform_machine, &current_target.platform_machine)
             && target_field_matches(&target.platform_system, &current_target.platform_system)
+            && target_field_matches(&target.libc, &current_target.libc)
     )
 }
 

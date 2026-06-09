@@ -335,12 +335,13 @@ mod tests {
     #[test]
     fn test_supported_target_to_python_target_env() {
         let target: SupportedTarget
-            = serde_yaml::from_str("os: linux\ncpu: x64\npython:\n  version: '3.12'\n").unwrap();
+            = serde_yaml::from_str("os: linux\ncpu: x64\nlibc: glibc\npython:\n  version: '3.12'\n").unwrap();
         let target_env
             = target.to_python_target_env().unwrap().unwrap();
 
         assert_eq!(target_env.python_version, "3.12");
         assert_eq!(target_env.sys_platform.as_deref(), Some("linux"));
         assert_eq!(target_env.platform_machine.as_deref(), Some("x86_64"));
+        assert_eq!(target_env.libc.as_deref(), Some("glibc"));
     }
 }
