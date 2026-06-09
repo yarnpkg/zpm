@@ -1,0 +1,4 @@
+Metadata-Version: 2.1
+Name: pypi_marker_split
+Version: 1.0.0
+Summary: fixture wheel for marker split integration tests

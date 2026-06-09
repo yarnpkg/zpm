@@ -377,6 +377,20 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
       }],
     },
   },
+  [`pypi-marker-split`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-no-deps (==1.0.0); python_version < "3.12"`,
+        `pypi-no-deps (==1.1.0); python_version >= "3.12"`,
+      ],
+      files: [{
+        filename: `pypi_marker_split-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_marker_split-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-08-01T00:00:00Z`,
+      }],
+    },
+  },
   [`pypi-entry-points`]: {
     [`1.0.0`]: {
       files: [{

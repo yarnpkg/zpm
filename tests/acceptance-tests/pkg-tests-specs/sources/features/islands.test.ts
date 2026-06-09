@@ -10,8 +10,19 @@ function getIslandNames(lockfile: any): Array<string> {
   return Object.keys(lockfile.islands ?? {});
 }
 
+function getIslandEntries(lockfile: any, islandName: string): Record<string, any> {
+  const island = lockfile.islands?.[islandName];
+  if (!island)
+    return {};
+
+  if (!island.forks)
+    return island;
+
+  return Object.assign({}, ...Object.values(island.forks).map((fork: any) => fork.entries ?? {}));
+}
+
 function getIslandDescriptorKeys(lockfile: any, islandName: string): Array<string> {
-  return Object.keys(lockfile.islands?.[islandName] ?? {});
+  return Object.keys(getIslandEntries(lockfile, islandName));
 }
 
 describe(`Features`, () => {
@@ -774,7 +785,7 @@ describe(`Features`, () => {
           const lockfile = await readLockfile(path);
 
           // The island section should resolve no-deps@1.0.0
-          const islandEntries = lockfile.islands.main;
+          const islandEntries = getIslandEntries(lockfile, `main`);
           const islandResolutions = Object.values(islandEntries)
             .map((entry: any) => entry.resolution.resolution)
             .filter((r: string) => r.includes(`no-deps`));
@@ -931,12 +942,12 @@ describe(`Features`, () => {
           // Lockfile should show each island resolving the correct version
           const lockfile = await readLockfile(path);
 
-          const island1Resolutions = Object.values(lockfile.islands.island1)
+          const island1Resolutions = Object.values(getIslandEntries(lockfile, `island1`))
             .map((entry: any) => entry.resolution.resolution)
             .filter((r: string) => r.includes(`no-deps`));
           expect(island1Resolutions.some((r: string) => r.includes(`1.0.0`))).toBe(true);
 
-          const island2Resolutions = Object.values(lockfile.islands.island2)
+          const island2Resolutions = Object.values(getIslandEntries(lockfile, `island2`))
             .map((entry: any) => entry.resolution.resolution)
             .filter((r: string) => r.includes(`no-deps`));
           expect(island2Resolutions.some((r: string) => r.includes(`2.0.0`))).toBe(true);
@@ -1265,7 +1276,7 @@ describe(`Features`, () => {
 
           // The resolved version should be in the entries and should be 1.1.0
           // (highest version matching ^1.0.0)
-          const islandEntries = lockfile.islands.main;
+          const islandEntries = getIslandEntries(lockfile, `main`);
           const noDepKey = Object.keys(islandEntries).find((k: string) => k.includes(`no-deps`));
           expect(noDepKey).toBeDefined();
 
@@ -1318,7 +1329,7 @@ describe(`Features`, () => {
           expect(noDepKeys.length).toBeGreaterThan(0);
 
           // There should be exactly one no-deps resolution (not two separate ones)
-          const islandEntries = lockfile.islands.main;
+          const islandEntries = getIslandEntries(lockfile, `main`);
           const noDepResolutions = Object.values(islandEntries)
             .map((entry: any) => entry.resolution.resolution)
             .filter((r: string) => r.includes(`no-deps`));
@@ -1439,7 +1450,7 @@ describe(`Features`, () => {
           await run(`install`);
 
           const lockfile = await readLockfile(path);
-          const islandEntries = lockfile.islands.main;
+          const islandEntries = getIslandEntries(lockfile, `main`);
 
           // no-deps should resolve to exactly 1.0.0 (pinned by the direct dep),
           // which also satisfies one-range-dep's ^1.0.0 requirement
@@ -1533,8 +1544,8 @@ describe(`Features`, () => {
 
           // One workspace wants no-deps from the registry (semver) and
           // the other wants it via link: (non-semver). The island resolver
-          // uses single-version resolution, so it cannot satisfy both.
-          await expect(run(`install`)).rejects.toThrow(/No solution found/i);
+          // rejects unsupported non-registry references explicitly.
+          await expect(run(`install`)).rejects.toThrow(/Unsupported code path/i);
         },
       ),
     );
