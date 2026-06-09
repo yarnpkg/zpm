@@ -181,6 +181,18 @@ impl PypiSpecifierSet {
 
         Ok(parsed_version == pinned)
     }
+
+    pub fn intersection(&self, other: &Self) -> Result<Self, PypiError> {
+        if self.is_any() {
+            return Ok(other.clone());
+        }
+
+        if other.is_any() {
+            return Ok(self.clone());
+        }
+
+        Self::from_file_string(&format!("{},{}", self.raw, other.raw))
+    }
 }
 
 impl Default for PypiSpecifierSet {
@@ -230,3 +242,47 @@ impl ToHumanString for PypiSpecifierSet {
 
 impl_file_string_from_str!(PypiSpecifierSet);
 impl_file_string_serialization!(PypiSpecifierSet);
+
+pub fn canonicalize_pypi_name(name: &str) -> String {
+    let mut result
+        = String::new();
+    let mut previous_was_separator
+        = false;
+
+    for ch in name.chars().flat_map(char::to_lowercase) {
+        if matches!(ch, '-' | '_' | '.') {
+            if !previous_was_separator {
+                result.push('-');
+                previous_was_separator = true;
+            }
+        } else {
+            result.push(ch);
+            previous_was_separator = false;
+        }
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use zpm_utils::ToFileString;
+
+    use super::*;
+
+    #[test]
+    fn test_canonicalize_pypi_name() {
+        assert_eq!("friendly-bard", canonicalize_pypi_name("Friendly__Bard"));
+        assert_eq!("a-b-c", canonicalize_pypi_name("A-_-.B___C"));
+    }
+
+    #[test]
+    fn test_pypi_specifier_intersection() {
+        let a
+            = PypiSpecifierSet::from_file_string(">=1.0.0").unwrap();
+        let b
+            = PypiSpecifierSet::from_file_string("<2.0.0").unwrap();
+
+        assert_eq!(">=1.0.0, <2.0.0", a.intersection(&b).unwrap().to_file_string());
+    }
+}

@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{de::DeserializeOwned, Deserialize};
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Descriptor, Ident, Locator, PypiRegistryReference, PypiSpecifierRange, PypiTagRange, Reference, Range};
+use zpm_primitives::{Descriptor, Ident, Locator, MarkerExpr, MarkerValue, MarkerVariable, PypiRegistryReference, PypiSpecifierRange, PypiSpecifierSet, PypiTagRange, Reference, Range, canonicalize_pypi_name};
 use zpm_utils::{FromFileString, ToFileString, UrlEncoded};
 
 use crate::{
@@ -30,87 +30,186 @@ struct PypiVersionInfo {
     requires_dist: Option<Vec<String>>,
 }
 
-fn parse_requires_dist_entry(requirement: &str) -> Option<(Ident, Descriptor)> {
-    if requirement.contains(';') {
-        return None;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PypiRequirement {
+    pub ident: Ident,
+    pub descriptor: Descriptor,
+    pub marker: MarkerExpr,
+}
+
+impl PypiRequirement {
+    fn specifier(&self) -> &PypiSpecifierSet {
+        let Range::PypiSpecifier(params) = &self.descriptor.range else {
+            unreachable!("PyPI requirements should always use PyPI specifier descriptors");
+        };
+
+        &params.specifier
+    }
+}
+
+fn parse_requires_dist_entry(requirement: &str) -> Result<Option<PypiRequirement>, Error> {
+    let dependency
+        = pep_508::parse(requirement)
+            .map_err(|errors| Error::InvalidResolution(format!("Invalid PyPI Requires-Dist entry `{requirement}`: {errors:?}")))?;
+
+    if !dependency.extras.is_empty() {
+        return Err(Error::InvalidResolution(format!(
+            "Unsupported PyPI Requires-Dist entry `{requirement}`: requested dependency extras are not supported yet",
+        )));
     }
 
-    let requirement
-        = requirement.trim();
+    let marker
+        = dependency.marker.as_ref()
+            .map(MarkerExpr::from_pep508_marker)
+            .transpose()
+            .map_err(|err| Error::InvalidResolution(format!("Unsupported PyPI Requires-Dist marker in `{requirement}`: {err}")))?
+            .unwrap_or(MarkerExpr::Any);
 
-    if requirement.is_empty() || requirement.contains(" @ ") {
-        return None;
+    let marker_variables
+        = marker_variables(&marker);
+
+    if marker_variables.contains(&MarkerVariable::Extra) {
+        if marker_variables.len() == 1 {
+            return Ok(None);
+        }
+
+        return Err(Error::InvalidResolution(format!(
+            "Unsupported PyPI Requires-Dist marker in `{requirement}`: mixed `extra` markers are not supported yet",
+        )));
     }
 
-    let mut name_end
-        = 0usize;
+    let specifier
+        = specifier_from_pep508_spec(dependency.spec.as_ref(), requirement)?;
 
-    for (index, ch) in requirement.char_indices() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
-            name_end = index + ch.len_utf8();
-        } else {
-            break;
+    let ident
+        = Ident::from_file_string(&canonicalize_pypi_name(dependency.name))
+            .map_err(|err| Error::InvalidIdent(err.to_string()))?;
+
+    let descriptor
+        = descriptor_from_pypi_requirement(ident.clone(), specifier);
+
+    Ok(Some(PypiRequirement {
+        ident,
+        descriptor,
+        marker,
+    }))
+}
+
+fn parse_requires_dist(requirements: &[String]) -> Result<Vec<PypiRequirement>, Error> {
+    let mut parsed
+        = Vec::new();
+
+    for requirement in requirements {
+        if let Some(requirement) = parse_requires_dist_entry(requirement)? {
+            parsed.push(requirement);
         }
     }
 
-    if name_end == 0 {
-        return None;
-    }
-
-    let name
-        = &requirement[..name_end];
-    let mut tail
-        = requirement[name_end..].trim();
-
-    if tail.starts_with('[') {
-        let extras_end
-            = tail.find(']')?;
-        tail = tail[extras_end + 1..].trim();
-    }
-
-    let specifier
-        = if tail.starts_with('(') {
-            let close
-                = tail.find(')')?;
-            let inner
-                = tail[1..close].trim();
-            let rest
-                = tail[close + 1..].trim();
-
-            if !rest.is_empty() {
-                return None;
-            }
-
-            inner
-        } else {
-            tail
-        };
-
-    let ident
-        = Ident::from_file_string(name).ok()?;
-
-    let specifier
-        = match zpm_primitives::PypiSpecifierSet::from_file_string(specifier) {
-            Ok(specifier)
-                => specifier,
-
-            Err(_)
-                => return None,
-        };
-
-    let descriptor
-        = Descriptor::new(ident.clone(), Range::PypiSpecifier(PypiSpecifierRange {
-            ident: None,
-            specifier,
-        }));
-
-    Some((ident, descriptor))
+    Ok(parsed)
 }
 
-fn parse_requires_dist(requirements: &[String]) -> BTreeMap<Ident, Descriptor> {
-    requirements.iter()
-        .filter_map(|requirement| parse_requires_dist_entry(requirement))
-        .collect()
+fn build_unconditional_dependency_map(requirements: &[PypiRequirement]) -> Result<BTreeMap<Ident, Descriptor>, Error> {
+    build_dependency_map(requirements.iter().filter(|requirement| requirement.marker == MarkerExpr::Any))
+}
+
+pub fn build_dependency_map<'a>(requirements: impl IntoIterator<Item = &'a PypiRequirement>) -> Result<BTreeMap<Ident, Descriptor>, Error> {
+    let mut grouped
+        = BTreeMap::<Ident, PypiSpecifierSet>::new();
+
+    for requirement in requirements {
+        if let Some(specifier) = grouped.get_mut(&requirement.ident) {
+            *specifier = specifier.intersection(requirement.specifier())
+                .map_err(|err| Error::InvalidRange(err.to_string()))?;
+        } else {
+            grouped.insert(requirement.ident.clone(), requirement.specifier().clone());
+        }
+    }
+
+    Ok(grouped.into_iter()
+        .map(|(ident, specifier)| {
+            let descriptor
+                = descriptor_from_pypi_requirement(ident.clone(), specifier);
+
+            (ident, descriptor)
+        })
+        .collect())
+}
+
+fn descriptor_from_pypi_requirement(ident: Ident, specifier: PypiSpecifierSet) -> Descriptor {
+    Descriptor::new(ident, Range::PypiSpecifier(PypiSpecifierRange {
+        ident: None,
+        specifier,
+    }))
+}
+
+fn specifier_from_pep508_spec(spec: Option<&pep_508::Spec<'_>>, requirement: &str) -> Result<PypiSpecifierSet, Error> {
+    let Some(spec) = spec else {
+        return Ok(PypiSpecifierSet::any());
+    };
+
+    match spec {
+        pep_508::Spec::Url(_)
+            => Err(Error::InvalidResolution(format!("Unsupported PyPI Requires-Dist entry `{requirement}`: direct URL requirements are not supported yet"))),
+
+        pep_508::Spec::Version(specifiers) => {
+            let specifier
+                = specifiers.iter()
+                    .map(|specifier| format!("{}{}", format_pep508_comparator(specifier.comparator), specifier.version))
+                    .collect::<Vec<_>>()
+                    .join(",");
+
+            PypiSpecifierSet::from_file_string(&specifier)
+                .map_err(|err| Error::InvalidRange(err.to_string()))
+        },
+    }
+}
+
+fn format_pep508_comparator(comparator: pep_508::Comparator) -> &'static str {
+    match comparator {
+        pep_508::Comparator::Lt => "<",
+        pep_508::Comparator::Le => "<=",
+        pep_508::Comparator::Ne => "!=",
+        pep_508::Comparator::Eq => "==",
+        pep_508::Comparator::Ge => ">=",
+        pep_508::Comparator::Gt => ">",
+        pep_508::Comparator::Cp => "~=",
+        pep_508::Comparator::Ae => "===",
+    }
+}
+
+fn marker_variables(marker: &MarkerExpr) -> BTreeSet<MarkerVariable> {
+    let mut variables
+        = BTreeSet::new();
+
+    collect_marker_variables(marker, &mut variables);
+
+    variables
+}
+
+fn collect_marker_variables(marker: &MarkerExpr, variables: &mut BTreeSet<MarkerVariable>) {
+    match marker {
+        MarkerExpr::Any | MarkerExpr::Never => {},
+
+        MarkerExpr::And {lhs, rhs} | MarkerExpr::Or {lhs, rhs} => {
+            collect_marker_variables(lhs, variables);
+            collect_marker_variables(rhs, variables);
+        },
+
+        MarkerExpr::Not {expr} => {
+            collect_marker_variables(expr, variables);
+        },
+
+        MarkerExpr::Compare {lhs, rhs, ..} => {
+            collect_marker_value_variables(lhs, variables);
+            collect_marker_value_variables(rhs, variables);
+        },
+    }
+}
+
+fn collect_marker_value_variables(value: &MarkerValue, variables: &mut BTreeSet<MarkerVariable>) {
+    if let MarkerValue::Variable(variable) = value {
+        variables.insert(*variable);
+    }
 }
 
 fn project_pep440_to_semver(version: &zpm_primitives::PypiVersion) -> Result<zpm_semver::Version, Error> {
@@ -123,7 +222,9 @@ fn project_pep440_to_semver(version: &zpm_primitives::PypiVersion) -> Result<zpm
 fn build_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String]) -> Result<ResolutionResult, Error> {
     let mut resolution
         = Resolution::new_empty(locator, project_pep440_to_semver(version)?);
-    resolution.dependencies = parse_requires_dist(requires_dist);
+    let requirements
+        = parse_requires_dist(requires_dist)?;
+    resolution.dependencies = build_unconditional_dependency_map(&requirements)?;
     resolution.into_resolution_result(context)
 }
 
@@ -353,4 +454,90 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
         = version_metadata.info.requires_dist.unwrap_or_default();
 
     build_resolution_result(context, locator.clone(), &params.version, &requires_dist)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_one(requirement: &str) -> PypiRequirement {
+        parse_requires_dist_entry(requirement).unwrap().unwrap()
+    }
+
+    fn invalid_resolution_message(err: Error) -> String {
+        match err {
+            Error::InvalidResolution(message) => message,
+            other => panic!("Expected InvalidResolution error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_requires_dist_canonicalizes_names_and_keeps_markers() {
+        let requirement
+            = parse_one("Friendly_Bard.Name (>=1.0.0); python_version >= '3.11'");
+
+        assert_eq!("friendly-bard-name", requirement.ident.to_file_string());
+        assert_eq!("friendly-bard-name@pypi:>=1.0.0", requirement.descriptor.to_file_string());
+        assert_ne!(MarkerExpr::Any, requirement.marker);
+    }
+
+    #[test]
+    fn test_parse_requires_dist_rejects_requested_extras() {
+        let message
+            = invalid_resolution_message(parse_requires_dist_entry("friendly-bard[http] >=1.0.0").unwrap_err());
+
+        assert!(message.contains("requested dependency extras"));
+    }
+
+    #[test]
+    fn test_parse_requires_dist_extra_only_markers_are_inactive() {
+        assert!(parse_requires_dist_entry("friendly-bard >=1.0.0; extra == 'http'").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_parse_requires_dist_rejects_mixed_extra_markers() {
+        let message
+            = invalid_resolution_message(parse_requires_dist_entry("friendly-bard >=1.0.0; extra == 'http' and python_version >= '3.11'").unwrap_err());
+
+        assert!(message.contains("mixed `extra` markers"));
+    }
+
+    #[test]
+    fn test_parse_requires_dist_rejects_direct_urls() {
+        let message
+            = invalid_resolution_message(parse_requires_dist_entry("friendly-bard @ http://foo.com").unwrap_err());
+
+        assert!(message.contains("direct URL requirements"));
+    }
+
+    #[test]
+    fn test_build_dependency_map_intersects_same_ident_requirements() {
+        let requirements
+            = vec![
+                parse_one("Friendly_Bard >=1.0.0"),
+                parse_one("friendly.bard <2.0.0"),
+            ];
+        let dependencies
+            = build_dependency_map(requirements.iter()).unwrap();
+
+        assert_eq!(1, dependencies.len());
+        assert_eq!(
+            "friendly-bard@pypi:>=1.0.0, <2.0.0",
+            dependencies.get(&Ident::from_file_string("friendly-bard").unwrap()).unwrap().to_file_string(),
+        );
+    }
+
+    #[test]
+    fn test_unconditional_dependency_map_ignores_marker_requirements_for_now() {
+        let requirements
+            = parse_requires_dist(&[
+                "friendly-bard >=1.0.0; sys_platform == 'linux'".to_string(),
+                "always-bard >=1.0.0".to_string(),
+            ]).unwrap();
+        let dependencies
+            = build_unconditional_dependency_map(&requirements).unwrap();
+
+        assert_eq!(1, dependencies.len());
+        assert!(dependencies.contains_key(&Ident::from_file_string("always-bard").unwrap()));
+    }
 }
