@@ -166,6 +166,9 @@ impl<'a> IslandDependencyProvider<'a> {
                     = params.ident.as_ref()
                         .unwrap_or(&descriptor.ident)
                         .clone();
+                let package_ident
+                    = crate::resolvers::pypi::canonicalize_pypi_ident(&package_ident)
+                        .map_err(IslandResolutionError::from)?;
 
                 (package_ident, Some(params.specifier.clone()), false)
             },
@@ -175,6 +178,9 @@ impl<'a> IslandDependencyProvider<'a> {
                     = params.ident.as_ref()
                         .unwrap_or(&descriptor.ident)
                         .clone();
+                let package_ident
+                    = crate::resolvers::pypi::canonicalize_pypi_ident(&package_ident)
+                        .map_err(IslandResolutionError::from)?;
 
                 (package_ident, None, true)
             },
@@ -226,7 +232,11 @@ impl<'a> IslandDependencyProvider<'a> {
 
         for (_, descriptor) in descriptors {
             let descriptor
-                = self.qualify_descriptor(descriptor);
+                = crate::resolvers::pypi::canonicalize_pypi_descriptor(descriptor)
+                    .map(|(_, descriptor)| descriptor)
+                    .map_err(IslandResolutionError::from)?;
+            let descriptor
+                = self.qualify_descriptor(&descriptor);
             let package
                 = IslandPackageKey::from_descriptor(&descriptor);
 

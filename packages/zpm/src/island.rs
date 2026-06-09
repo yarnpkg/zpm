@@ -175,12 +175,30 @@ async fn resolve_island_once(
         let mut deps: BTreeMap<Ident, Descriptor> = BTreeMap::new();
 
         for (ident, descriptor) in &workspace.manifest.remote.dependencies {
-            deps.insert(ident.clone(), descriptor.clone());
+            let (ident, descriptor)
+                = crate::resolvers::pypi::canonicalize_pypi_descriptor(descriptor)
+                    .map(|(package_ident, descriptor)| {
+                        if package_ident == descriptor.ident {
+                            (package_ident, descriptor)
+                        } else {
+                            (ident.clone(), descriptor)
+                        }
+                    })?;
+            deps.insert(ident, descriptor);
         }
 
         if !ctx.prune_dev_dependencies {
             for (ident, descriptor) in &workspace.manifest.dev_dependencies {
-                deps.insert(ident.clone(), descriptor.clone());
+                let (ident, descriptor)
+                    = crate::resolvers::pypi::canonicalize_pypi_descriptor(descriptor)
+                        .map(|(package_ident, descriptor)| {
+                            if package_ident == descriptor.ident {
+                                (package_ident, descriptor)
+                            } else {
+                                (ident.clone(), descriptor)
+                            }
+                        })?;
+                deps.insert(ident, descriptor);
             }
         }
 

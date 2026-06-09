@@ -47,6 +47,55 @@ impl PypiRequirement {
     }
 }
 
+pub fn canonicalize_pypi_ident(ident: &Ident) -> Result<Ident, Error> {
+    Ident::from_file_string(&canonicalize_pypi_name(ident.as_str()))
+        .map_err(|err| Error::InvalidIdent(err.to_string()))
+}
+
+pub fn canonicalize_pypi_descriptor(descriptor: &Descriptor) -> Result<(Ident, Descriptor), Error> {
+    let canonicalize_range_ident = |ident: &Ident| -> Result<Ident, Error> {
+        canonicalize_pypi_ident(ident)
+    };
+
+    match &descriptor.range {
+        Range::PypiSpecifier(params) => {
+            let package_ident
+                = canonicalize_range_ident(params.ident.as_ref().unwrap_or(&descriptor.ident))?;
+            let descriptor_ident
+                = if params.ident.is_some() {
+                    descriptor.ident.clone()
+                } else {
+                    package_ident.clone()
+                };
+            let range = Range::PypiSpecifier(PypiSpecifierRange {
+                ident: params.ident.as_ref().map(|_| package_ident.clone()),
+                specifier: params.specifier.clone(),
+            });
+
+            Ok((package_ident, Descriptor::new_bound(descriptor_ident, range, descriptor.parent.clone())))
+        },
+
+        Range::PypiTag(params) => {
+            let package_ident
+                = canonicalize_range_ident(params.ident.as_ref().unwrap_or(&descriptor.ident))?;
+            let descriptor_ident
+                = if params.ident.is_some() {
+                    descriptor.ident.clone()
+                } else {
+                    package_ident.clone()
+                };
+            let range = Range::PypiTag(PypiTagRange {
+                ident: params.ident.as_ref().map(|_| package_ident.clone()),
+                tag: params.tag.clone(),
+            });
+
+            Ok((package_ident, Descriptor::new_bound(descriptor_ident, range, descriptor.parent.clone())))
+        },
+
+        _ => Ok((descriptor.ident.clone(), descriptor.clone())),
+    }
+}
+
 fn parse_requires_dist_entry(requirement: &str) -> Result<Option<PypiRequirement>, Error> {
     let dependency
         = pep_508::parse(requirement)
@@ -82,8 +131,8 @@ fn parse_requires_dist_entry(requirement: &str) -> Result<Option<PypiRequirement
         = specifier_from_pep508_spec(dependency.spec.as_ref(), requirement)?;
 
     let ident
-        = Ident::from_file_string(&canonicalize_pypi_name(dependency.name))
-            .map_err(|err| Error::InvalidIdent(err.to_string()))?;
+        = canonicalize_pypi_ident(&Ident::from_file_string(dependency.name)
+            .map_err(|err| Error::InvalidIdent(err.to_string()))?)?;
 
     let descriptor
         = descriptor_from_pypi_requirement(ident.clone(), specifier);
@@ -390,6 +439,8 @@ where
 }
 
 async fn fetch_project_metadata(context: &InstallContext<'_>, package_ident: &Ident) -> Result<PypiProjectMetadata, Error> {
+    let package_ident
+        = canonicalize_pypi_ident(package_ident)?;
     let base
         = pypi_registry_base();
     let url
@@ -398,6 +449,8 @@ async fn fetch_project_metadata(context: &InstallContext<'_>, package_ident: &Id
 }
 
 async fn fetch_version_metadata(context: &InstallContext<'_>, package_ident: &Ident, version: &zpm_primitives::PypiVersion) -> Result<PypiVersionMetadata, Error> {
+    let package_ident
+        = canonicalize_pypi_ident(package_ident)?;
     let base
         = pypi_registry_base();
     let url
@@ -412,8 +465,10 @@ async fn fetch_version_metadata(context: &InstallContext<'_>, package_ident: &Id
 }
 
 pub async fn resolve_versions(context: &InstallContext<'_>, package_ident: &Ident) -> Result<Vec<Locator>, Error> {
+    let package_ident
+        = canonicalize_pypi_ident(package_ident)?;
     let project_metadata
-        = fetch_project_metadata(context, package_ident).await?;
+        = fetch_project_metadata(context, &package_ident).await?;
 
     let mut locators
         = Vec::new();
@@ -493,9 +548,11 @@ pub async fn resolve_specifier_descriptor(context: &InstallContext<'_>, descript
     let package_ident
         = params.ident.as_ref()
         .unwrap_or(&descriptor.ident);
+    let package_ident
+        = canonicalize_pypi_ident(package_ident)?;
 
     let project_metadata
-        = fetch_project_metadata(context, package_ident).await?;
+        = fetch_project_metadata(context, &package_ident).await?;
     let (resolved_version, release_distributions)
         = select_version_for_specifier(&project_metadata.releases, &params.specifier)?
             .ok_or_else(|| Error::NoCandidatesFound(descriptor.range.clone()))?;
@@ -505,14 +562,20 @@ pub async fn resolve_specifier_descriptor(context: &InstallContext<'_>, descript
             .ok_or_else(|| Error::InvalidResolution(format!("No wheel artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
 
     let version_metadata
-        = fetch_version_metadata(context, package_ident, &resolved_version).await?;
+        = fetch_version_metadata(context, &package_ident, &resolved_version).await?;
 
-    let locator
-        = descriptor.resolve_with(PypiRegistryReference {
+    let reference: Reference
+        = PypiRegistryReference {
             ident: package_ident.clone(),
             version: resolved_version.clone(),
             url: Some(UrlEncoded::new(wheel.url.clone())),
-        }.into());
+        }.into();
+    let locator
+        = if params.ident.is_some() {
+            descriptor.resolve_with(reference)
+        } else {
+            Locator::new(package_ident.clone(), reference)
+        };
 
     let requires_dist
         = version_metadata.info.requires_dist.unwrap_or_default();
@@ -528,9 +591,11 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let package_ident
         = params.ident.as_ref()
         .unwrap_or(&descriptor.ident);
+    let package_ident
+        = canonicalize_pypi_ident(package_ident)?;
 
     let project_metadata
-        = fetch_project_metadata(context, package_ident).await?;
+        = fetch_project_metadata(context, &package_ident).await?;
     let (resolved_version, release_distributions)
         = select_latest_version(&project_metadata.releases)?
             .ok_or_else(|| Error::NoCandidatesFound(descriptor.range.clone()))?;
@@ -540,14 +605,20 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
             .ok_or_else(|| Error::InvalidResolution(format!("No wheel artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
 
     let version_metadata
-        = fetch_version_metadata(context, package_ident, &resolved_version).await?;
+        = fetch_version_metadata(context, &package_ident, &resolved_version).await?;
 
-    let locator
-        = descriptor.resolve_with(PypiRegistryReference {
+    let reference: Reference
+        = PypiRegistryReference {
             ident: package_ident.clone(),
             version: resolved_version.clone(),
             url: Some(UrlEncoded::new(wheel.url.clone())),
-        }.into());
+        }.into();
+    let locator
+        = if params.ident.is_some() {
+            descriptor.resolve_with(reference)
+        } else {
+            Locator::new(package_ident.clone(), reference)
+        };
 
     let requires_dist
         = version_metadata.info.requires_dist.unwrap_or_default();
@@ -556,8 +627,10 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
 }
 
 pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference) -> Result<ResolutionResult, Error> {
+    let package_ident
+        = canonicalize_pypi_ident(&params.ident)?;
     let version_metadata
-        = fetch_version_metadata(context, &params.ident, &params.version).await?;
+        = fetch_version_metadata(context, &package_ident, &params.version).await?;
     let requires_dist
         = version_metadata.info.requires_dist.unwrap_or_default();
 
@@ -565,8 +638,10 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
 }
 
 pub async fn resolve_locator_requiring_python_target(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference) -> Result<ResolutionResult, Error> {
+    let package_ident
+        = canonicalize_pypi_ident(&params.ident)?;
     let version_metadata
-        = fetch_version_metadata(context, &params.ident, &params.version).await?;
+        = fetch_version_metadata(context, &package_ident, &params.version).await?;
     let requires_dist
         = version_metadata.info.requires_dist.unwrap_or_default();
 
@@ -574,8 +649,10 @@ pub async fn resolve_locator_requiring_python_target(context: &InstallContext<'_
 }
 
 pub async fn resolve_locator_for_fork(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, fork: &PythonFork) -> Result<ResolutionResult, Error> {
+    let package_ident
+        = canonicalize_pypi_ident(&params.ident)?;
     let version_metadata
-        = fetch_version_metadata(context, &params.ident, &params.version).await?;
+        = fetch_version_metadata(context, &package_ident, &params.version).await?;
     let requires_dist
         = version_metadata.info.requires_dist.unwrap_or_default();
 
@@ -605,6 +682,28 @@ mod tests {
         assert_eq!("friendly-bard-name", requirement.ident.to_file_string());
         assert_eq!("friendly-bard-name@pypi:>=1.0.0", requirement.descriptor.to_file_string());
         assert_ne!(MarkerExpr::Any, requirement.marker);
+    }
+
+    #[test]
+    fn test_canonicalize_pypi_descriptor_normalizes_direct_names() {
+        let descriptor
+            = Descriptor::from_file_string("Friendly_Bard.Name@pypi:>=1.0.0").unwrap();
+        let (package_ident, descriptor)
+            = canonicalize_pypi_descriptor(&descriptor).unwrap();
+
+        assert_eq!("friendly-bard-name", package_ident.to_file_string());
+        assert_eq!("friendly-bard-name@pypi:>=1.0.0", descriptor.to_file_string());
+    }
+
+    #[test]
+    fn test_canonicalize_pypi_descriptor_preserves_alias_names() {
+        let descriptor
+            = Descriptor::from_file_string("alias@pypi:Friendly_Bard.Name@>=1.0.0").unwrap();
+        let (package_ident, descriptor)
+            = canonicalize_pypi_descriptor(&descriptor).unwrap();
+
+        assert_eq!("friendly-bard-name", package_ident.to_file_string());
+        assert_eq!("alias@pypi:friendly-bard-name@>=1.0.0", descriptor.to_file_string());
     }
 
     #[test]
