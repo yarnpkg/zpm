@@ -214,6 +214,8 @@ async fn resolve_island_once(
 
     let workspace_deps_for_provider = workspace_deps.clone();
     let fork_for_provider = fork.clone();
+    let requires_python_target
+        = island.linker == zpm_config::IslandLinker::Venv && fork_for_provider.is_none();
 
     let (solution, resolution_cache) = tokio::task::spawn_blocking(move || {
         let provider = IslandDependencyProvider::new(
@@ -225,6 +227,7 @@ async fn resolve_island_once(
             ctx_static,
             workspace_deps_for_provider,
             fork_for_provider,
+            requires_python_target,
         );
 
         let root_locator = Locator::new(

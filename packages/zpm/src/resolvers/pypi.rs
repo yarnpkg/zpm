@@ -112,6 +112,19 @@ fn build_unconditional_dependency_map(requirements: &[PypiRequirement]) -> Resul
     build_dependency_map(requirements.iter().filter(|requirement| requirement.marker == MarkerExpr::Any))
 }
 
+fn build_targetless_island_dependency_map(requirements: &[PypiRequirement]) -> Result<BTreeMap<Ident, Descriptor>, Error> {
+    for requirement in requirements {
+        if requirement.marker != MarkerExpr::Any && requirement.marker != MarkerExpr::Never {
+            return Err(Error::InvalidResolution(format!(
+                "Cannot evaluate PyPI marker for {} without a Python target environment; configure supportedTargets with python.version",
+                requirement.ident.to_file_string(),
+            )));
+        }
+    }
+
+    build_unconditional_dependency_map(requirements)
+}
+
 fn build_fork_dependency_map(requirements: &[PypiRequirement], fork: &PythonFork) -> Result<BTreeMap<Ident, Descriptor>, Error> {
     let mut active_requirements
         = Vec::new();
@@ -260,6 +273,15 @@ fn build_resolution_result(context: &InstallContext<'_>, locator: Locator, versi
     let requirements
         = parse_requires_dist(requires_dist)?;
     resolution.dependencies = build_unconditional_dependency_map(&requirements)?;
+    resolution.into_resolution_result(context)
+}
+
+fn build_targetless_island_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String]) -> Result<ResolutionResult, Error> {
+    let mut resolution
+        = Resolution::new_empty(locator, project_pep440_to_semver(version)?);
+    let requirements
+        = parse_requires_dist(requires_dist)?;
+    resolution.dependencies = build_targetless_island_dependency_map(&requirements)?;
     resolution.into_resolution_result(context)
 }
 
@@ -542,6 +564,15 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     build_resolution_result(context, locator.clone(), &params.version, &requires_dist)
 }
 
+pub async fn resolve_locator_requiring_python_target(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference) -> Result<ResolutionResult, Error> {
+    let version_metadata
+        = fetch_version_metadata(context, &params.ident, &params.version).await?;
+    let requires_dist
+        = version_metadata.info.requires_dist.unwrap_or_default();
+
+    build_targetless_island_resolution_result(context, locator.clone(), &params.version, &requires_dist)
+}
+
 pub async fn resolve_locator_for_fork(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, fork: &PythonFork) -> Result<ResolutionResult, Error> {
     let version_metadata
         = fetch_version_metadata(context, &params.ident, &params.version).await?;
@@ -634,5 +665,18 @@ mod tests {
 
         assert_eq!(1, dependencies.len());
         assert!(dependencies.contains_key(&Ident::from_file_string("always-bard").unwrap()));
+    }
+
+    #[test]
+    fn test_targetless_island_dependency_map_rejects_marker_requirements() {
+        let requirements
+            = parse_requires_dist(&[
+                "friendly-bard >=1.0.0; sys_platform == 'linux'".to_string(),
+            ]).unwrap();
+        let message
+            = invalid_resolution_message(build_targetless_island_dependency_map(&requirements).unwrap_err());
+
+        assert!(message.contains("without a Python target environment"), "{message}");
+        assert!(message.contains("supportedTargets"), "{message}");
     }
 }

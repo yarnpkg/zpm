@@ -73,6 +73,9 @@ pub struct IslandDependencyProvider<'a> {
     /// Optional Python target fork. When present, all descriptors and locators
     /// produced by this provider are qualified with the fork id.
     pub fork: Option<PythonFork>,
+    /// Whether marker-bearing PyPI metadata must fail instead of using the
+    /// legacy non-island behavior that ignores inactive markers.
+    pub requires_python_target: bool,
     /// Monotonic counter for discovery order (breadth-first priority).
     discovery_counter: Cell<usize>,
     /// Maps package ident → discovery index (first time seen in prioritize).
@@ -89,6 +92,7 @@ impl<'a> IslandDependencyProvider<'a> {
         ctx: &'a InstallContext<'a>,
         workspace_deps: BTreeMap<IslandPackageKey, BTreeMap<Ident, Descriptor>>,
         fork: Option<PythonFork>,
+        requires_python_target: bool,
     ) -> Self {
         Self {
             island_id,
@@ -100,6 +104,7 @@ impl<'a> IslandDependencyProvider<'a> {
             workspace_deps,
             resolution_cache: RefCell::new(BTreeMap::new()),
             fork,
+            requires_python_target,
             discovery_counter: Cell::new(0),
             discovery_order: RefCell::new(BTreeMap::new()),
         }
@@ -316,6 +321,9 @@ impl<'a> IslandDependencyProvider<'a> {
                     Some(fork) => self.handle.block_on(
                         crate::resolvers::pypi::resolve_locator_for_fork(self.ctx, locator, params, fork)
                     ),
+                    None if self.requires_python_target => self.handle.block_on(
+                        crate::resolvers::pypi::resolve_locator_requiring_python_target(self.ctx, &physical_locator, params)
+                    ),
                     None => self.handle.block_on(
                         crate::resolvers::pypi::resolve_locator(self.ctx, &physical_locator, params)
                     ),
@@ -333,6 +341,9 @@ impl<'a> IslandDependencyProvider<'a> {
                 let result = match &self.fork {
                     Some(fork) => self.handle.block_on(
                         crate::resolvers::pypi::resolve_locator_for_fork(self.ctx, locator, &registry_params, fork)
+                    ),
+                    None if self.requires_python_target => self.handle.block_on(
+                        crate::resolvers::pypi::resolve_locator_requiring_python_target(self.ctx, &physical_locator, &registry_params)
                     ),
                     None => self.handle.block_on(
                         crate::resolvers::pypi::resolve_locator(self.ctx, &physical_locator, &registry_params)
