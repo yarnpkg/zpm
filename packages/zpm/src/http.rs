@@ -5,7 +5,9 @@ use dashmap::DashMap;
 use hickory_resolver::{config::LookupIpStrategy, TokioResolver};
 use http::HeaderMap;
 use itertools::Itertools;
-use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Certificate, Client, ClientBuilder, Identity, Method, Proxy, RequestBuilder, Response, Url};
+#[cfg(not(all(target_arch = "wasm64", target_vendor = "browserpod")))]
+use reqwest::Identity;
+use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Certificate, Client, ClientBuilder, Method, Proxy, RequestBuilder, Response, Url};
 use tokio::sync::OnceCell;
 use wax::Program;
 use zpm_config::{Configuration, NetworkSettings, Setting};
@@ -278,7 +280,14 @@ impl<'a> HttpRequest<'a> {
 
 impl HttpClient {
     fn build_client(config: &Configuration, network_settings: Option<&NetworkSettings>) -> Result<Client, Error> {
-        let mut client_builder = reqwest::Client::builder()
+        let mut client_builder = reqwest::Client::builder();
+
+        #[cfg(not(all(target_arch = "wasm64", target_vendor = "browserpod")))]
+        {
+            client_builder = client_builder.use_rustls_tls();
+        }
+
+        let mut client_builder = client_builder
             // Connection pooling settings
             .pool_max_idle_per_host(config.settings.network_concurrency.value)
             .pool_idle_timeout(Duration::from_secs(30))
@@ -298,7 +307,6 @@ impl HttpClient {
 
             .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(config.settings.network_concurrency.value))
 
-            .use_rustls_tls()
             .dns_resolver(Arc::new(HickoryDnsResolver::default()));
 
         if !config.settings.enable_strict_ssl.value {
@@ -339,6 +347,15 @@ impl HttpClient {
 
         match (https_cert_file_path, https_key_file_path) {
             (Some(cert_path), Some(key_path)) => {
+                #[cfg(all(target_arch = "wasm64", target_vendor = "browserpod"))]
+                {
+                    let _ = (cert_path, key_path);
+
+                    return Err(Error::ConflictingOptions("httpsCertFilePath / httpsKeyFilePath (PEM client identity) require reqwest's rustls-tls feature, currently disabled for the browserpod target".to_string()));
+                }
+
+                #[cfg(not(all(target_arch = "wasm64", target_vendor = "browserpod")))]
+                {
                 let cert_content
                     = cert_path.fs_read_prealloc()?;
 
@@ -355,6 +372,7 @@ impl HttpClient {
                     = Identity::from_pem(&identity_content)?;
 
                 client_builder = client_builder.identity(identity);
+                }
             },
 
             (Some(_), None) | (None, Some(_)) => {
