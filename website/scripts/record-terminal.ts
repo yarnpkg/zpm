@@ -1,7 +1,7 @@
-import {spawn} from 'node:child_process';
+import {spawn}                    from 'node:child_process';
 import {writeFileSync, mkdirSync} from 'node:fs';
-import {resolve, dirname} from 'node:path';
-import {platform} from 'node:os';
+import {platform}                 from 'node:os';
+import {resolve, dirname}         from 'node:path';
 
 const SGR_MAP: Record<number, string | null> = {
   0: null,
@@ -28,22 +28,24 @@ function ansiToHtml(line: string): string {
 
   while ((m = re.exec(line)) !== null) {
     const text = line.slice(last, m.index);
-    if (text) {
+    if (text)
       parts.push(cls ? `<span class="${cls}">${escapeHtml(text)}</span>` : escapeHtml(text));
-    }
+
+
     last = m.index + m[0].length;
 
     const codes = m[1] ? m[1].split(`;`).map(Number) : [0];
     for (const code of codes) {
-      if (code in SGR_MAP)
+      if (code in SGR_MAP) {
         cls = SGR_MAP[code];
+      }
     }
   }
 
   const tail = line.slice(last);
-  if (tail) {
+  if (tail)
     parts.push(cls ? `<span class="${cls}">${escapeHtml(tail)}</span>` : escapeHtml(tail));
-  }
+
 
   return parts.join(``);
 }
@@ -76,7 +78,7 @@ const args = process.argv.slice(ddIdx + 1);
 const cmd = args[0];
 const cmdArgs = args.slice(1);
 
-type Entry = {html: string; delay: number; clear?: number};
+type Entry = {html: string, delay: number, clear?: number};
 const entries: Array<Entry> = [];
 
 entries.push({
@@ -84,7 +86,7 @@ entries.push({
   delay: 0,
 });
 
-const env = {...process.env, FORCE_COLOR: `3`, CLICOLOR_FORCE: `1`};
+const env: Record<string, string | undefined> = {...process.env, FORCE_COLOR: `3`, CLICOLOR_FORCE: `1`};
 delete env.NO_COLOR;
 
 let spawnCmd: string;
@@ -173,7 +175,7 @@ child.on(`close`, () => {
     entries.push(entry);
   }
 
-  const json = JSON.stringify(entries, null, 2) + `\n`;
+  const json = `${JSON.stringify(entries, null, 2)}\n`;
 
   if (terminalId) {
     const outPath = resolve(import.meta.dirname!, `../src/data/terminals/${terminalId}.json`);

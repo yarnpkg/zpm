@@ -1,8 +1,8 @@
-import { createHighlighter, createCssVariablesTheme } from 'shiki';
+import {createHighlighter, createCssVariablesTheme} from 'shiki';
 
 const cssVarsTheme = createCssVariablesTheme({
-  name: 'css-variables',
-  variablePrefix: '--shiki-',
+  name: `css-variables`,
+  variablePrefix: `--shiki-`,
   variableDefaults: {},
   fontStyle: true,
 });
@@ -14,16 +14,16 @@ async function getHighlighter() {
 
   highlighter = await createHighlighter({
     themes: [cssVarsTheme],
-    langs: ['javascript', 'typescript', 'json', 'yaml', 'bash', 'html', 'css', 'jsx', 'tsx', 'diff', 'shell'],
+    langs: [`javascript`, `typescript`, `json`, `yaml`, `bash`, `html`, `css`, `jsx`, `tsx`, `diff`, `shell`],
   });
 
   return highlighter;
 }
 
 const LANG_ALIASES: Record<string, string> = {
-  js: 'javascript',
-  ts: 'typescript',
-  sh: 'shell',
+  js: `javascript`,
+  ts: `typescript`,
+  sh: `shell`,
 };
 
 export async function highlight(code: string, lang: string): Promise<string> {
@@ -37,7 +37,7 @@ export async function highlight(code: string, lang: string): Promise<string> {
 
   const html = hl.codeToHtml(code, {
     lang: resolved,
-    theme: 'css-variables',
+    theme: `css-variables`,
   });
 
   const match = html.match(/<code>(.+?)<\/code>/s);
@@ -46,8 +46,8 @@ export async function highlight(code: string, lang: string): Promise<string> {
 
 function escapeHtml(str: string): string {
   return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/&/g, `&amp;`)
+    .replace(/</g, `&lt;`)
+    .replace(/>/g, `&gt;`)
+    .replace(/"/g, `&quot;`);
 }

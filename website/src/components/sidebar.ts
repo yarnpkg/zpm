@@ -15,13 +15,13 @@ export type SidebarItem = SidebarLink | SidebarSubtitle;
 
 export interface SidebarGroup {
   title: string;
-  items: SidebarItem[];
+  items: Array<SidebarItem>;
 }
 
 const metaGlob = import.meta.glob<string>(`../docs/**/_meta.{yml,yaml}`, {eager: true, query: `?raw`, import: `default`});
 const docGlob = import.meta.glob<string>(`../docs/**/*.md`, {eager: true, query: `?raw`, import: `default`});
 
-const metaLookup = new Map<string, {label: string; order: number}>();
+const metaLookup = new Map<string, {label: string, order: number}>();
 
 for (const [filePath, content] of Object.entries(metaGlob)) {
   const relDir = filePath
@@ -29,7 +29,7 @@ for (const [filePath, content] of Object.entries(metaGlob)) {
     .replace(/\/_meta\.(yml|yaml)$/, ``);
   const label = content.match(/^label:\s*(.+)$/m)?.[1]?.trim();
   const order = parseInt(content.match(/^order:\s*(\d+)$/m)?.[1] ?? `99`, 10);
-  metaLookup.set(relDir, { label: label ?? relDir, order });
+  metaLookup.set(relDir, {label: label ?? relDir, order});
 }
 
 const slugToDir = new Map<string, string>();
@@ -54,7 +54,7 @@ export function getDirForSlug(slug: string): string | undefined {
   return slugToDir.get(slug);
 }
 
-export function getMetaForDir(dir: string): { label: string; order: number } | undefined {
+export function getMetaForDir(dir: string): {label: string, order: number} | undefined {
   return metaLookup.get(dir);
 }
 
@@ -66,10 +66,10 @@ export function getGroupLabelForSlug(slug: string): string | undefined {
 }
 
 export function buildSidebarGroups(
-  allDocs: Array<{data: {slug: string; title: string; sidebar?: {order?: number; hidden?: boolean}; sidebar_position?: number}}>,
+  allDocs: Array<{data: {slug: string, title: string, sidebar?: {order?: number, hidden?: boolean}, sidebar_position?: number}}>,
   section: string,
   activePage: string,
-): SidebarGroup[] {
+): Array<SidebarGroup> {
   const docs = allDocs.filter(doc => {
     const dir = getDirForSlug(doc.data.slug);
     if (!dir?.startsWith(section)) return false;
@@ -78,7 +78,7 @@ export function buildSidebarGroups(
     return true;
   });
 
-  const groupMap = new Map<string, {label: string; sortKey: number; docs: typeof docs}>();
+  const groupMap = new Map<string, {label: string, sortKey: number, docs: typeof docs}>();
 
   for (const doc of docs) {
     const fsDir = getDirForSlug(doc.data.slug) ?? `.`;
@@ -97,7 +97,7 @@ export function buildSidebarGroups(
 
   return [...groupMap.values()]
     .sort((a, b) => a.sortKey - b.sortKey)
-    .map(({ label, docs: groupDocs }) => ({
+    .map(({label, docs: groupDocs}) => ({
       title: label,
       items: groupDocs
         .sort((a, b) => {

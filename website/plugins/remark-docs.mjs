@@ -1,5 +1,5 @@
-import {visit} from 'unist-util-visit';
 import {createHighlighter, createCssVariablesTheme} from 'shiki';
+import {visit}                                      from 'unist-util-visit';
 
 const cssVarsTheme = createCssVariablesTheme({
   name: `css-variables`,
@@ -180,7 +180,7 @@ export default function remarkDocs() {
           type: `html`,
           value: buildTerminalHtml(node.value),
         };
-        return index;
+        return;
       }
 
       codeNodes.push({node, index, parent});
@@ -219,7 +219,7 @@ export default function remarkDocs() {
           const data = ol.data || (ol.data = {});
           data.hProperties = {...(data.hProperties || {}), className: [`steps`]};
           parent.children[index] = ol;
-          return index;
+          return;
         }
       }
     });
@@ -253,7 +253,7 @@ export default function remarkDocs() {
       if (!parent || !PILL_NAMES.includes(node.name)) return;
       const content = toString(node);
       parent.children[index] = {type: `html`, value: pillToHtml(node.name, content)};
-      return index;
+      return;
     });
   };
 }

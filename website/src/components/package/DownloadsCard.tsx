@@ -1,4 +1,4 @@
-import type {DownloadDay} from './types';
+import type {DownloadDay}                from './types';
 import {formatNumberFull, sparklinePath} from './utils';
 
 export function DownloadsCard({downloads}: {downloads: Array<DownloadDay> | null}) {

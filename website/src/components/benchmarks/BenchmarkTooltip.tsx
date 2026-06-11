@@ -1,5 +1,6 @@
 import {useRef, useLayoutEffect, type JSX} from 'react';
-import {SERIES_COLORS, type SeriesMeta} from './BenchmarksDashboard';
+
+import {SERIES_COLORS, type SeriesMeta}    from './BenchmarksDashboard';
 
 export interface HoverInfo {
   mouseX: number;
@@ -10,7 +11,7 @@ export interface HoverInfo {
   projectName: string;
   isIncident: boolean;
   incidentLabel?: string;
-  rows: Array<{id: string; value: number}>;
+  rows: Array<{id: string, value: number}>;
   versionMap: Record<string, string> | null;
   showVersions: boolean;
   seriesMeta: Record<string, SeriesMeta>;
@@ -48,31 +49,31 @@ export function BenchmarkTooltip({info}: {info: HoverInfo | null}): JSX.Element 
     <div className={`bench-tip show`} ref={ref}>
       {info.isIncident ? (
         <>
-          <div className="tip-x">{info.dateStr} &middot; {info.projectName}</div>
+          <div className={`tip-x`}>{info.dateStr} &middot; {info.projectName}</div>
           <div style={{color: `oklch(0.78 0.15 25)`, fontSize: `10px`, marginTop: `2px`}}>
             {info.incidentLabel}
           </div>
         </>
       ) : (
         <>
-          <div className="tip-x">
+          <div className={`tip-x`}>
             {info.dateStr} &middot; {info.scenarioTitle} &middot; {info.projectName}
           </div>
           {info.rows.map(r => {
-            let nameStr = info.seriesMeta[r.id].name;
+            const nameStr = info.seriesMeta[r.id].name;
             let verEl: JSX.Element | null = null;
             if (info.showVersions) {
               if (r.id === `zpm`) {
-                verEl = <span className="tip-ver"> main</span>;
+                verEl = <span className={`tip-ver`}> main</span>;
               } else if (info.versionMap?.[r.id]) {
-                verEl = <span className="tip-ver"> v{info.versionMap[r.id]}</span>;
+                verEl = <span className={`tip-ver`}> v{info.versionMap[r.id]}</span>;
               }
             }
             return (
-              <div key={r.id} className="tip-row" style={{[`--c` as any]: SERIES_COLORS[r.id]}}>
-                <span className="sw" />
-                <span className="nm">{nameStr}{verEl}</span>
-                <span className="vl">{r.value.toFixed(2)}s</span>
+              <div key={r.id} className={`tip-row`} style={{[`--c` as any]: SERIES_COLORS[r.id]}}>
+                <span className={`sw`} />
+                <span className={`nm`}>{nameStr}{verEl}</span>
+                <span className={`vl`}>{r.value.toFixed(2)}s</span>
               </div>
             );
           })}

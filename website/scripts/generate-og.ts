@@ -1,8 +1,8 @@
-import {createServer} from 'node:http';
 import {readdirSync, readFileSync, mkdirSync, existsSync} from 'node:fs';
-import {resolve, dirname, relative, extname, join} from 'node:path';
-import {fileURLToPath} from 'node:url';
-import puppeteer from 'puppeteer';
+import {createServer}                                     from 'node:http';
+import {resolve, dirname, relative, extname, join}        from 'node:path';
+import {fileURLToPath}                                    from 'node:url';
+import puppeteer                                          from 'puppeteer';
 
 const __dirname = fileURLToPath(new URL(`.`, import.meta.url));
 const distDir = resolve(__dirname, `..`, `dist`);
@@ -11,9 +11,9 @@ const CONCURRENCY = 4;
 const WIDTH = 1200;
 const HEIGHT = 630;
 
-function collectHtmlFiles(dir: string, base: string = dir): string[] {
+function collectHtmlFiles(dir: string, base: string = dir): Array<string> {
   const entries = readdirSync(dir, {withFileTypes: true});
-  const files: string[] = [];
+  const files: Array<string> = [];
 
   for (const entry of entries) {
     const full = join(dir, entry.name);
@@ -21,16 +21,17 @@ function collectHtmlFiles(dir: string, base: string = dir): string[] {
       files.push(...collectHtmlFiles(full, base));
     } else if (entry.name.endsWith(`.html`)) {
       const rel = relative(base, full);
-      if (!rel.startsWith(`presentation/`))
+      if (!rel.startsWith(`presentation/`)) {
         files.push(rel);
+      }
     }
   }
 
   return files;
 }
 
-function startStaticServer(root: string): Promise<{url: string; close: () => void}> {
-  return new Promise((resolve) => {
+function startStaticServer(root: string): Promise<{url: string, close: () => void}> {
+  return new Promise(resolve => {
     const mimeTypes: Record<string, string> = {
       '.html': `text/html`,
       '.css': `text/css`,
@@ -51,8 +52,9 @@ function startStaticServer(root: string): Promise<{url: string; close: () => voi
         const withHtml = filePath.endsWith(`/`)
           ? join(filePath, `index.html`)
           : `${filePath}.html`;
-        if (existsSync(withHtml))
+        if (existsSync(withHtml)) {
           filePath = withHtml;
+        }
       }
 
       if (!existsSync(filePath)) {
@@ -102,8 +104,9 @@ async function run() {
     await page.close();
 
     completed++;
-    if (completed % 10 === 0 || completed === htmlFiles.length)
+    if (completed % 10 === 0 || completed === htmlFiles.length) {
       console.log(`  ${completed}/${htmlFiles.length}`);
+    }
   }
 
   const queue = [...htmlFiles];
@@ -122,7 +125,7 @@ async function run() {
   console.log(`Generated ${completed} OG images in dist/og/`);
 }
 
-run().catch((err) => {
+run().catch(err => {
   console.error(err);
   process.exit(1);
 });
