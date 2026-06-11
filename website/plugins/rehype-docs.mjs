@@ -7,7 +7,7 @@ const admonitionSvgs = {
   danger: `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="5.5"/><path d="M7 4v4M7 9.5v0.3"/></svg>`,
 };
 
-// eslint-disable-next-line arca/no-default-export
+
 export default function rehypeDocs() {
   return tree => {
     visit(tree, `element`, node => {
@@ -60,9 +60,9 @@ export default function rehypeDocs() {
     visit(tree, `element`, node => {
       if (![`h2`, `h3`, `h4`].includes(node.tagName)) return;
 
-      if (!node.properties.id) {
+      if (!node.properties.id)
         node.properties.id = slugifyId(textContent(node));
-      }
+
 
       const id = node.properties.id;
       const text = {type: `element`, tagName: `span`, properties: {}, children: node.children};

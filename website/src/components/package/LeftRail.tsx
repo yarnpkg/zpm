@@ -1,6 +1,6 @@
-import {useIcons} from './contexts';
-import {OctIcon, BrandIcon} from './icons';
 import {NavLink, NavLinkExternal} from './NavLink';
+import {useIcons}                 from './contexts';
+import {OctIcon, BrandIcon}       from './icons';
 
 export function LeftRail({
   name, version, distTags, homepage, repoUrl,

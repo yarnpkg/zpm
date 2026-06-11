@@ -1,11 +1,12 @@
-import {unified} from 'unified';
-import remarkParse from 'remark-parse';
-import remarkDirective from 'remark-directive';
-import remarkDocs from '../../plugins/remark-docs.mjs';
-import remarkRehype from 'remark-rehype';
-import rehypeRaw from 'rehype-raw';
-import rehypeDocs from '../../plugins/rehype-docs.mjs';
+import rehypeRaw       from 'rehype-raw';
 import rehypeStringify from 'rehype-stringify';
+import remarkDirective from 'remark-directive';
+import remarkParse     from 'remark-parse';
+import remarkRehype    from 'remark-rehype';
+import {unified}       from 'unified';
+
+import rehypeDocs      from '../../plugins/rehype-docs.mjs';
+import remarkDocs      from '../../plugins/remark-docs.mjs';
 
 const processor = unified()
   .use(remarkParse)

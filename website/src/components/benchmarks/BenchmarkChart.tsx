@@ -34,17 +34,23 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el)
+      return () => {};
+
     const ro = new ResizeObserver(entries => {
       const {width, height} = entries[0].contentRect;
       setSize({w: width, h: height});
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+    };
   }, []);
 
   const chartData = useMemo(() => {
-    if (!size) return null;
+    if (!size)
+      return null;
+
 
     const {w, h} = size;
     const pw = w - ML - MR;
@@ -57,11 +63,16 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
     const allVals: Array<number> = [];
     for (const sid of visible) {
       const vals = getSeriesValues(data, sid);
-      for (const v of vals)
-        if (v !== null) allVals.push(v);
+      for (const v of vals) {
+        if (v !== null) {
+          allVals.push(v);
+        }
+      }
     }
 
-    if (!allVals.length) return null;
+    if (!allVals.length)
+      return null;
+
 
     const yMin = 0;
     let yMax = Math.max(...allVals);
@@ -70,7 +81,9 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
 
     const points = data[seriesOrder[0]];
     const N = points?.length ?? 0;
-    if (!N) return null;
+    if (!N)
+      return null;
+
 
     const xScale = (i: number) => ML + (i / (N - 1)) * pw;
     const yScale = (v: number) => MT + ph - ((v - yMin) / (yMax - yMin)) * ph;
@@ -82,12 +95,20 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
       let iStart = -1, iEnd = -1;
       for (let ip = 0; ip < N; ip++) {
         const ts = points[ip].timestamp;
-        if (ts >= inc.start && iStart === -1) iStart = ip;
-        if (ts <= inc.end) iEnd = ip;
+        if (ts >= inc.start && iStart === -1)
+          iStart = ip;
+
+        if (ts <= inc.end) {
+          iEnd = ip;
+        }
       }
-      if (iStart === -1 || iEnd === -1 || iEnd < iStart) continue;
+      if (iStart === -1 || iEnd === -1 || iEnd < iStart)
+        continue;
+
       incidentRanges.push({start: iStart, end: iEnd, label: inc.label});
-      for (let ik = iStart; ik <= iEnd; ik++) incidentSet[ik] = true;
+      for (let ik = iStart; ik <= iEnd; ik++) {
+        incidentSet[ik] = true;
+      }
     }
 
     const drawOrder = seriesOrder.filter(s => s !== `zpm`).concat(`zpm`);
@@ -122,13 +143,17 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
       const zpmMed = median(zpmVals);
       const top = yScale(zpmMed * 1.08);
       const bot = yScale(zpmMed * 0.92);
-      if (bot > top) band = {x: ML, y: top, w: pw, h: bot - top};
+      if (bot > top) {
+        band = {x: ML, y: top, w: pw, h: bot - top};
+      }
     }
 
     const versionDots: Array<{cx: number, cy: number, r: number, color: string, cls: string, url: string | null}> = [];
     if (showVersions && versions) {
       for (const sid of drawOrder) {
-        if (mutedSeries[sid]) continue;
+        if (mutedSeries[sid])
+          continue;
+
         const vers = versions[sid] ?? [];
         const seriesP = data[sid];
         if (!seriesP || !vers.length) continue;
@@ -203,21 +228,28 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
 
     const medians: Array<{id: string, m: number}> = [];
     for (const sid of seriesOrder) {
-      if (mutedSeries[sid]) continue;
+      if (mutedSeries[sid])
+        continue;
+
       const m = median(getSeriesValues(data, sid));
-      if (m > 0) medians.push({id: sid, m});
+      if (m > 0) {
+        medians.push({id: sid, m});
+      }
     }
 
     const others = medians.filter(x => x.id !== `zpm`);
     if (!others.length)
       return {cls: `fastest`, text: `no comparison data`};
 
+
     const fastest = others.reduce((min, x) => x.m < min.m ? x : min, others[0]);
     const name = seriesMeta[fastest.id]?.name ?? fastest.id;
 
     if (zpmMedian <= fastest.m) {
       const diff = +(fastest.m - zpmMedian).toFixed(1);
-      if (diff === 0) return {cls: `contested`, text: `tied with ${name}`};
+      if (diff === 0)
+        return {cls: `contested`, text: `tied with ${name}`};
+
       return {cls: `fastest`, text: `${diff}s faster than ${name}`};
     }
 
@@ -230,7 +262,9 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
   const prevIdxRef = useRef<number | null>(null);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!chartData || !svgRef.current) return;
+    if (!chartData || !svgRef.current)
+      return;
+
     const rect = svgRef.current.getBoundingClientRect();
     const sx = e.clientX - rect.left;
 
@@ -256,10 +290,12 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
 
     if (inIncident) {
       let incLabel = ``;
-      for (const ir of chartData.incidentRanges)
+      for (const ir of chartData.incidentRanges) {
         if (idx >= ir.start && idx <= ir.end) {
-          incLabel = ir.label; break;
+          incLabel = ir.label;
+          break;
         }
+      }
 
       onHover({
         mouseX: e.clientX, mouseY: e.clientY, index: idx,
@@ -312,7 +348,8 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
 
   useEffect(() => {
     const el = cellRef.current;
-    if (!el) return;
+    if (!el)
+      return () => {};
 
     const onTouch = (e: TouchEvent) => {
       const {chartData: cd, data: d, seriesOrder: so, seriesMeta: sm, mutedSeries: ms, scenario: sc, project: pr, versions: ver, showVersions: sv, onHover: oh} = touchDepsRef.current;
@@ -347,10 +384,12 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
 
       if (inIncident) {
         let incLabel = ``;
-        for (const ir of cd.incidentRanges)
+        for (const ir of cd.incidentRanges) {
           if (idx >= ir.start && idx <= ir.end) {
-            incLabel = ir.label; break;
+            incLabel = ir.label;
+            break;
           }
+        }
 
         oh({mouseX: touch.clientX, mouseY: touch.clientY, index: idx, dateStr, scenarioTitle: sc.title, projectName: pr.name, isIncident: true, incidentLabel: incLabel, rows: [], versionMap: null, showVersions: sv, seriesMeta: sm});
         return;
@@ -358,9 +397,13 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
 
       const rows: Array<{id: string, value: number}> = [];
       for (const sid of so) {
-        if (ms[sid]) continue;
+        if (ms[sid])
+          continue;
+
         const sp = d[sid];
-        if (!sp?.[idx] || sp[idx].value === null) continue;
+        if (!sp?.[idx] || sp[idx].value === null)
+          continue;
+
         rows.push({id: sid, value: sp[idx].value!});
       }
       rows.sort((a, b) => a.value - b.value);
@@ -370,10 +413,13 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
         versionMap = {};
         for (const sid of so) {
           const vs = ver[sid];
-          if (!vs?.length) continue;
+          if (!vs?.length)
+            continue;
+
           for (let i = vs.length - 1; i >= 0; i--) {
             if (vs[i].t <= ts) {
-              versionMap[sid] = vs[i].v; break;
+              versionMap[sid] = vs[i].v;
+              break;
             }
           }
         }

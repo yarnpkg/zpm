@@ -1,5 +1,5 @@
-import {useIcons} from './contexts';
-import {OctIcon} from './icons';
+import {useIcons}       from './contexts';
+import {OctIcon}        from './icons';
 import {renderMarkdown} from './utils';
 
 export function ReadmePanel({readme, name}: {readme: string, name: string}) {

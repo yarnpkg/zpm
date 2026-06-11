@@ -26,12 +26,13 @@ function serializeNode(node) {
 
     const attrs = [];
     for (const [k, v] of Object.entries(props)) {
-      if (k === `className`)
+      if (k === `className`) {
         attrs.push(`class="${escAttr(v.join(` `))}"`);
-      else if (typeof v === `string`)
+      } else if (typeof v === `string`) {
         attrs.push(`${k.replace(/([A-Z])/g, `-$1`).toLowerCase()}="${escAttr(v)}"`);
-      else if (v === true)
+      } else if (v === true) {
         attrs.push(k.replace(/([A-Z])/g, `-$1`).toLowerCase());
+      }
     }
 
     const open = attrs.length ? `<${tag} ${attrs.join(` `)}>` : `<${tag}>`;
@@ -61,29 +62,40 @@ export default function rehypeFootnoteTooltips() {
     const footnotes = new Map();
 
     visit(tree, `element`, node => {
-      if (node.tagName !== `li`) return;
+      if (node.tagName !== `li`)
+        return;
+
       const id = node.properties?.id;
-      if (!id || !id.startsWith(`user-content-fn-`)) return;
+      if (!id || !id.startsWith(`user-content-fn-`))
+        return;
+
 
       const key = id.replace(`user-content-fn-`, ``);
       const html = serializeFootnote(node.children);
-      if (html)
+      if (html) {
         footnotes.set(key, html);
+      }
     });
 
     if (!footnotes.size) return;
 
     visit(tree, `element`, node => {
-      if (node.tagName !== `sup`) return;
+      if (node.tagName !== `sup`)
+        return undefined;
+
 
       const link = (node.children || []).find(c =>
         c.type === `element` && c.tagName === `a` && c.properties?.dataFootnoteRef != null,
       );
-      if (!link) return;
+      if (!link)
+        return undefined;
+
 
       const key = (link.properties.href || ``).replace(`#user-content-fn-`, ``);
       const html = footnotes.get(key);
-      if (!html) return;
+      if (!html)
+        return undefined;
+
 
       node.properties = node.properties || {};
       node.properties.className = [...(node.properties.className || []), `fn-ref`];

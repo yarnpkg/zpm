@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useState}                                              from 'react';
 
 import {formatDateShort, compareSemverDesc, isNoisyPrerelease} from './utils';
 

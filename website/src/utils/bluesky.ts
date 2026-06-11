@@ -8,14 +8,14 @@ interface BskyFacetFeature {
 }
 
 interface BskyFacet {
-  index: { byteStart: number; byteEnd: number };
-  features: BskyFacetFeature[];
+  index: {byteStart: number, byteEnd: number};
+  features: Array<BskyFacetFeature>;
 }
 
 interface BskyPostRecord {
   text: string;
   createdAt: string;
-  facets?: BskyFacet[];
+  facets?: Array<BskyFacet>;
   reply?: unknown;
 }
 
@@ -46,7 +46,7 @@ export interface Skeet {
   likeCount: number;
 }
 
-function renderFacets(text: string, facets?: BskyFacet[]): string {
+function renderFacets(text: string, facets?: Array<BskyFacet>): string {
   if (!facets || facets.length === 0)
     return escapeHtml(text);
 
@@ -71,15 +71,15 @@ function renderFacets(text: string, facets?: BskyFacet[]): string {
     const mention = facet.features.find(f => f.$type === `app.bsky.richtext.facet#mention`);
     const tag = facet.features.find(f => f.$type === `app.bsky.richtext.facet#tag`);
 
-    if (link?.uri) {
+    if (link?.uri)
       html += `<a href="${escapeAttr(link.uri)}" target="_blank" rel="noopener">${segment}</a>`;
-    } else if (mention?.did) {
+    else if (mention?.did)
       html += `<a href="https://bsky.app/profile/${escapeAttr(mention.did)}" target="_blank" rel="noopener">${segment}</a>`;
-    } else if (tag?.tag) {
+    else if (tag?.tag)
       html += `<a href="https://bsky.app/hashtag/${escapeAttr(tag.tag)}" target="_blank" rel="noopener">${segment}</a>`;
-    } else {
+    else
       html += segment;
-    }
+
 
     cursor = byteEnd;
   }
@@ -109,14 +109,14 @@ function postUrlFromUri(uri: string, handle: string): string {
   return `https://bsky.app/profile/${handle}/post/${rkey}`;
 }
 
-export async function fetchSkeets(handle: string, limit = 5): Promise<Skeet[]> {
+export async function fetchSkeets(handle: string, limit = 5): Promise<Array<Skeet>> {
   try {
     const url = `${API_BASE}/app.bsky.feed.getAuthorFeed?actor=${encodeURIComponent(handle)}&limit=${limit * 2}`;
 
     const res = await fetch(url);
     if (!res.ok) return [];
 
-    const data = await res.json() as { feed: BskyFeedItem[] };
+    const data = await res.json() as {feed: Array<BskyFeedItem>};
 
     return data.feed
       .filter(item => !item.reason && !item.post.record.reply)

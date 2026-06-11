@@ -5,7 +5,7 @@ export interface VersionEntry {
   t: number;
 }
 
-const VERSION_PACKAGES: [string, string, string | null][] = [
+const VERSION_PACKAGES: Array<[string, string, string | null]> = [
   [`npm`, `npm`, null],
   [`pnpm`, `pnpm`, null],
   [`classic`, `yarn`, `1.`],
@@ -29,28 +29,38 @@ export function useVersions(benchMinTs: number, benchMaxTs: number, enabled: boo
         fetch(`https://registry.npmjs.org/${pkg}`)
           .then(r => r.ok ? r.json() : null)
           .then(data => {
-            if (!data?.time) return [pm, []] as const;
+            if (!data?.time) return [pm, [] as Array<VersionEntry>] as const;
             const entries: Array<VersionEntry> = [];
             let latestBefore: VersionEntry | null = null;
 
             for (const v in data.time) {
-              if (v === `created` || v === `modified`) continue;
-              if (v.includes(`-`)) continue;
-              if (prefix && !v.startsWith(prefix)) continue;
+              if (v === `created` || v === `modified`)
+                continue;
+
+              if (v.includes(`-`))
+                continue;
+
+              if (prefix && !v.startsWith(prefix))
+                continue;
+
 
               const t = Math.floor(new Date(data.time[v]).getTime() / 1000);
               if (t >= benchMinTs && t <= benchMaxTs) {
                 entries.push({v, t});
               } else if (t < benchMinTs) {
-                if (!latestBefore || t > latestBefore.t) latestBefore = {v, t};
+                if (!latestBefore || t > latestBefore.t) {
+                  latestBefore = {v, t};
+                }
               }
             }
 
-            if (latestBefore) entries.push(latestBefore);
+            if (latestBefore)
+              entries.push(latestBefore);
+
             entries.sort((a, b) => a.t - b.t);
             return [pm, entries] as const;
           })
-          .catch(() => [pm, []] as const),
+          .catch(() => [pm, [] as Array<VersionEntry>] as const),
       ),
     ).then(results => {
       const map: Record<string, Array<VersionEntry>> = {};

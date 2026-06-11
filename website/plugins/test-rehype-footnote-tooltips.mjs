@@ -1,9 +1,9 @@
-import {unified}        from 'unified';
-import remarkParse      from 'remark-parse';
-import remarkGfm        from 'remark-gfm';
-import remarkRehype     from 'remark-rehype';
-import rehypeRaw        from 'rehype-raw';
-import rehypeStringify  from 'rehype-stringify';
+import rehypeRaw              from 'rehype-raw';
+import rehypeStringify        from 'rehype-stringify';
+import remarkGfm              from 'remark-gfm';
+import remarkParse            from 'remark-parse';
+import remarkRehype           from 'remark-rehype';
+import {unified}              from 'unified';
 
 import rehypeFootnoteTooltips from './rehype-footnote-tooltips.mjs';
 
@@ -170,8 +170,8 @@ assert(content8 !== null && !content8.includes(`<p>`), `no <p> in multi-paragrap
 
 // ── Summary ──
 
-console.log(`${'═'.repeat(40)}`);
+console.log(`${`═`.repeat(40)}`);
 console.log(`  ${passed} passed, ${failed} failed`);
-console.log(`${'═'.repeat(40)}\n`);
+console.log(`${`═`.repeat(40)}\n`);
 
 process.exit(failed > 0 ? 1 : 0);
