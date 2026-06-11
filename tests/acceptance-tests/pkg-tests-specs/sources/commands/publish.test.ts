@@ -145,7 +145,7 @@ describe(`publish`, () =>   {
   }, async ({path, run}) => {
     const registryUrl = await startPackageServer();
 
-    await xfs.writeFilePromise(`${path}/.yarnrc.yml`, [
+    await xfs.writeFilePromise(npath.toPortablePath(`${path}/.yarnrc.yml`), [
       `npmPublishRegistry: ${registryUrl}/publish`,
       `packageRules:`,
       `  - packageFilter: "@scope/*"`,
@@ -167,7 +167,7 @@ describe(`publish`, () =>   {
   }, async ({path, run}) => {
     const registryUrl = await startPackageServer();
 
-    await xfs.writeFilePromise(`${path}/.yarnrc.yml`, [
+    await xfs.writeFilePromise(npath.toPortablePath(`${path}/.yarnrc.yml`), [
       `npmPublishRegistry: ${registryUrl}/publish`,
       `npmScopes:`,
       `  scope:`,

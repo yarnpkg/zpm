@@ -1,4 +1,4 @@
-import {ppath, xfs} from '@yarnpkg/fslib';
+import {ppath, xfs}  from '@yarnpkg/fslib';
 import {tests, yarn} from 'pkg-tests-core';
 
 describe(`Protocols`, () => {
