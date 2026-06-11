@@ -9,7 +9,7 @@ use serde::Deserialize;
 use sha2::{Sha256, Digest};
 use tokio::sync::OnceCell;
 use tokio::task::JoinHandle;
-use zpm_config::Configuration;
+use zpm_config::{Configuration, EcosystemFilter, NpmRegistry, NpmScope, PackageRule, SourceRule};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
 use zpm_utils::{DataType, Path};
@@ -36,87 +36,237 @@ pub enum AuthorizationMode {
     BestEffort,
 }
 
-macro_rules! scope_registry_setting {
-    ($config:expr, $registry:expr, $ident:expr, $field:ident) => {
-        (|| {
-            if let Some(ident) = &$ident {
-                if let Some(scope) = ident.scope() {
-                    let scope_key = scope.strip_prefix('@').unwrap_or(scope);
-                    let scope_settings
-                        = $config.settings.npm_scopes.get(scope_key);
-
-                    if let Some(scope_settings) = scope_settings {
-                        if let Some(value) = scope_settings.$field.value.as_ref() {
-                            return Some(value);
-                        }
-                    }
-                }
-            }
-
-            // Try exact match first
-            if let Some(registry_settings) = $config.settings.npm_registries.get($registry) {
-                if let Some(value) = registry_settings.$field.value.as_ref() {
-                    return Some(value);
-                }
-            }
-
-            // Also try with trailing slash (for normalization)
-            let registry_with_slash = format!("{}/", $registry);
-            if let Some(registry_settings) = $config.settings.npm_registries.get(&registry_with_slash) {
-                if let Some(value) = registry_settings.$field.value.as_ref() {
-                    return Some(value);
-                }
-            }
-
-            None
-        })()
-    }
+fn normalize_registry_url(registry: &str) -> &str {
+    registry.trim_end_matches('/')
 }
 
-fn get_registry_raw<'a>(config: &'a Configuration, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
-    if let Some(scope) = scope {
-        let scope_settings
-            = config.settings.npm_scopes.get(scope.strip_prefix('@').unwrap_or(scope));
+fn ecosystem_matches(filter: Option<EcosystemFilter>, ecosystem: EcosystemFilter) -> bool {
+    filter.map_or(true, |filter| filter == ecosystem)
+}
 
-        if let Some(scope_settings) = scope_settings {
-            if publish {
-                let npm_publish_registry
-                    = scope_settings.npm_publish_registry.value.as_ref().map(|s| s.as_str());
+fn package_rule_matches(rule: &PackageRule, ecosystem: EcosystemFilter, ident: Option<&Ident>) -> bool {
+    ecosystem_matches(rule.ecosystem_filter.value, ecosystem)
+        && rule.package_filter.value.as_ref().map_or(true, |filter| {
+            ident.map_or(false, |ident| filter.check(ident))
+        })
+}
 
-                if let Some(registry) = npm_publish_registry {
-                    return Ok(registry);
-                }
+fn source_rule_matches(rule: &SourceRule, ecosystem: EcosystemFilter, registry: &str) -> bool {
+    ecosystem_matches(rule.ecosystem_filter.value, ecosystem)
+        && rule.registry_filter.value.as_ref().map_or(true, |filter| {
+            normalize_registry_url(filter) == normalize_registry_url(registry)
+        })
+}
+
+fn legacy_scope_settings<'a>(config: &'a Configuration, ident: Option<&Ident>) -> Option<&'a NpmScope> {
+    let scope = ident?.scope()?;
+    config.settings.npm_scopes.get(scope.strip_prefix('@').unwrap_or(scope))
+}
+
+fn legacy_registry_settings<'a>(config: &'a Configuration, registry: &str) -> Option<&'a NpmRegistry> {
+    if let Some(registry_settings) = config.settings.npm_registries.get(registry) {
+        return Some(registry_settings);
+    }
+
+    let registry_with_slash = format!("{}/", registry);
+    if let Some(registry_settings) = config.settings.npm_registries.get(&registry_with_slash) {
+        return Some(registry_settings);
+    }
+
+    let normalized_registry
+        = normalize_registry_url(registry);
+
+    config.settings.npm_registries.iter()
+        .find_map(|(candidate, settings)| {
+            (normalize_registry_url(candidate) == normalized_registry).then_some(settings)
+        })
+}
+
+fn get_registry_raw<'a>(config: &'a Configuration, ident: Option<&Ident>, publish: bool) -> Result<&'a str, Error> {
+    let mut registry
+        = config.settings.npm_registry_server.value.as_str();
+
+    if publish {
+        if let Some(value) = config.settings.npm_publish_registry.value.as_deref() {
+            registry = value;
+        }
+    }
+
+    if let Some(scope_settings) = legacy_scope_settings(config, ident) {
+        if let Some(value) = scope_settings.npm_registry_server.value.as_deref() {
+            registry = value;
+        }
+    }
+
+    if publish {
+        if let Some(scope_settings) = legacy_scope_settings(config, ident) {
+            if let Some(value) = scope_settings.npm_publish_registry.value.as_deref() {
+                registry = value;
             }
+        }
+    }
 
-            let npm_registry_server
-                = scope_settings.npm_registry_server.value.as_ref().map(|s| s.as_str());
-
-            if let Some(registry) = npm_registry_server {
-                return Ok(registry);
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, EcosystemFilter::Npm, ident) {
+            if let Some(value) = rule.npm_registry_server.value.as_deref() {
+                registry = value;
             }
         }
     }
 
     if publish {
-        let publish_registry
-            = config.settings.npm_publish_registry.value.as_ref().map(|s| s.as_str());
-
-        if let Some(registry) = publish_registry {
-            return Ok(registry);
+        for rule in &config.settings.package_rules {
+            if package_rule_matches(rule, EcosystemFilter::Npm, ident) {
+                if let Some(value) = rule.npm_publish_registry.value.as_deref() {
+                    registry = value;
+                }
+            }
         }
     }
 
-    let registry_server
-        = config.settings.npm_registry_server.value.as_str();
+    Ok(registry)
+}
 
-    Ok(registry_server)
+pub fn get_registry_for_ident<'a>(config: &'a Configuration, ident: Option<&Ident>, publish: bool) -> Result<&'a str, Error> {
+    let registry
+        = get_registry_raw(config, ident, publish)?;
+
+    Ok(normalize_registry_url(registry))
 }
 
 pub fn get_registry<'a>(config: &'a Configuration, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
-    let registry
-        = get_registry_raw(config, scope, publish)?;
+    let scoped_ident
+        = scope.map(|scope| Ident::new(format!("@{}/*", scope.strip_prefix('@').unwrap_or(scope))));
 
-    Ok(registry.strip_suffix('/').unwrap_or(registry))
+    get_registry_for_ident(config, scoped_ident.as_ref(), publish)
+}
+
+fn get_npm_always_auth(config: &Configuration, registry: &str, ident: Option<&Ident>) -> Option<bool> {
+    let mut value
+        = None;
+
+    if let Some(registry_settings) = legacy_registry_settings(config, registry) {
+        if let Some(next) = registry_settings.npm_always_auth.value {
+            value = Some(next);
+        }
+    }
+
+    if let Some(scope_settings) = legacy_scope_settings(config, ident) {
+        if let Some(next) = scope_settings.npm_always_auth.value {
+            value = Some(next);
+        }
+    }
+
+    for rule in &config.settings.source_rules {
+        if source_rule_matches(rule, EcosystemFilter::Npm, registry) {
+            if let Some(next) = rule.npm_always_auth.value {
+                value = Some(next);
+            }
+        }
+    }
+
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, EcosystemFilter::Npm, ident) {
+            if let Some(next) = rule.npm_always_auth.value {
+                value = Some(next);
+            }
+        }
+    }
+
+    value
+}
+
+fn get_npm_auth_token<'a>(config: &'a Configuration, registry: &str, ident: Option<&Ident>) -> Option<&'a zpm_utils::Secret<String>> {
+    let mut value
+        = None;
+
+    if let Some(registry_settings) = legacy_registry_settings(config, registry) {
+        if let Some(next) = registry_settings.npm_auth_token.value.as_ref() {
+            value = Some(next);
+        }
+    }
+
+    if let Some(scope_settings) = legacy_scope_settings(config, ident) {
+        if let Some(next) = scope_settings.npm_auth_token.value.as_ref() {
+            value = Some(next);
+        }
+    }
+
+    for rule in &config.settings.source_rules {
+        if source_rule_matches(rule, EcosystemFilter::Npm, registry) {
+            if let Some(next) = rule.npm_auth_token.value.as_ref() {
+                value = Some(next);
+            }
+        }
+    }
+
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, EcosystemFilter::Npm, ident) {
+            if let Some(next) = rule.npm_auth_token.value.as_ref() {
+                value = Some(next);
+            }
+        }
+    }
+
+    value
+}
+
+fn get_npm_auth_ident<'a>(config: &'a Configuration, registry: &str, ident: Option<&Ident>) -> Option<&'a String> {
+    let mut value
+        = None;
+
+    if let Some(registry_settings) = legacy_registry_settings(config, registry) {
+        if let Some(next) = registry_settings.npm_auth_ident.value.as_ref() {
+            value = Some(next);
+        }
+    }
+
+    if let Some(scope_settings) = legacy_scope_settings(config, ident) {
+        if let Some(next) = scope_settings.npm_auth_ident.value.as_ref() {
+            value = Some(next);
+        }
+    }
+
+    for rule in &config.settings.source_rules {
+        if source_rule_matches(rule, EcosystemFilter::Npm, registry) {
+            if let Some(next) = rule.npm_auth_ident.value.as_ref() {
+                value = Some(next);
+            }
+        }
+    }
+
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, EcosystemFilter::Npm, ident) {
+            if let Some(next) = rule.npm_auth_ident.value.as_ref() {
+                value = Some(next);
+            }
+        }
+    }
+
+    value
+}
+
+pub fn get_minimal_age_gate(config: &Configuration, registry: &str, ident: &Ident) -> std::time::Duration {
+    let mut value
+        = config.settings.npm_minimal_age_gate.value;
+
+    for rule in &config.settings.source_rules {
+        if source_rule_matches(rule, EcosystemFilter::Npm, registry) {
+            if let Some(next) = rule.npm_minimal_age_gate.value {
+                value = next;
+            }
+        }
+    }
+
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, EcosystemFilter::Npm, Some(ident)) {
+            if let Some(next) = rule.npm_minimal_age_gate.value {
+                value = next;
+            }
+        }
+    }
+
+    value
 }
 
 pub struct GetAuthorizationOptions<'a> {
@@ -141,8 +291,8 @@ pub fn should_authenticate(options: &GetAuthorizationOptions<'_>) -> bool {
             }
 
             // For unscoped packages, only authenticate if npmAlwaysAuth is true
-            *scope_registry_setting!(options.configuration, options.registry, options.ident, npm_always_auth)
-                .unwrap_or(&options.configuration.settings.npm_always_auth.value)
+            get_npm_always_auth(options.configuration, options.registry, options.ident)
+                .unwrap_or(options.configuration.settings.npm_always_auth.value)
         },
 
         AuthorizationMode::AlwaysAuthenticate | AuthorizationMode::BestEffort => {
@@ -274,8 +424,8 @@ fn is_auth_strictly_required(options: &GetAuthorizationOptions<'_>) -> bool {
             }
 
             // For unscoped packages, npmAlwaysAuth=true means auth is strictly required
-            *scope_registry_setting!(options.configuration, options.registry, options.ident, npm_always_auth)
-                .unwrap_or(&options.configuration.settings.npm_always_auth.value)
+            get_npm_always_auth(options.configuration, options.registry, options.ident)
+                .unwrap_or(options.configuration.settings.npm_always_auth.value)
         },
 
         AuthorizationMode::BestEffort | AuthorizationMode::NeverAuthenticate => false,
@@ -291,7 +441,7 @@ pub async fn get_authorization(options: &GetAuthorizationOptions<'_>) -> Result<
     }
 
     let auth_token
-        = scope_registry_setting!(options.configuration, options.registry, options.ident, npm_auth_token)
+        = get_npm_auth_token(options.configuration, options.registry, options.ident)
             .or_else(|| options.configuration.settings.npm_auth_token.value.as_ref());
 
     if let Some(auth_token) = auth_token {
@@ -299,7 +449,7 @@ pub async fn get_authorization(options: &GetAuthorizationOptions<'_>) -> Result<
     }
 
     let auth_ident
-        = scope_registry_setting!(options.configuration, options.registry, options.ident, npm_auth_ident)
+        = get_npm_auth_ident(options.configuration, options.registry, options.ident)
             .or_else(|| options.configuration.settings.npm_auth_ident.value.as_ref());
 
     if let Some(auth_ident) = auth_ident {

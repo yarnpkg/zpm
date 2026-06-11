@@ -108,6 +108,32 @@ describe(`Auth tests`, () => {
   );
 
   test(
+    `it should install scoped packages using package rule registry and authentication`,
+    makeTemporaryEnv(
+      {
+        dependencies: {[`@private/package`]: `1.0.0`},
+      },
+      async ({path, run, source}) => {
+        const url = await startPackageServer();
+
+        await writeFile(`${path}/.yarnrc.yml`, [
+          `packageRules:`,
+          `  - packageFilter: "@private/*"`,
+          `    npmRegistryServer: "${url}"`,
+          `    npmAuthToken: "${validLogins.fooUser.npmAuthToken}"`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        await expect(source(`require('@private/package')`)).resolves.toMatchObject({
+          name: `@private/package`,
+          version: `1.0.0`,
+        });
+      },
+    ),
+  );
+
+  test(
     `it should install unscoped packages which require authentication if npmAlwaysAuth is set to true and an authentication token is present`,
     makeTemporaryEnv(
       {
@@ -227,6 +253,64 @@ describe(`Auth tests`, () => {
 
         await expect(source(`require('@private/package')`)).resolves.toMatchObject({
           name: `@private/package`,
+          version: `1.0.0`,
+        });
+      },
+    ),
+  );
+
+  test(
+    `it should install packages using source rule authentication`,
+    makeTemporaryEnv(
+      {
+        dependencies: {[`@private/package`]: `1.0.0`},
+      },
+      async ({path, run, source}) => {
+        const url = await startPackageServer();
+
+        await writeFile(`${path}/.yarnrc.yml`, [
+          `npmScopes:`,
+          `  private:`,
+          `    npmRegistryServer: "${url}"`,
+          `sourceRules:`,
+          `  - registryFilter: "${url}/"`,
+          `    npmAuthToken: ${validLogins.fooUser.npmAuthToken}`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        await expect(source(`require('@private/package')`)).resolves.toMatchObject({
+          name: `@private/package`,
+          version: `1.0.0`,
+        });
+      },
+    ),
+  );
+
+  test(
+    `it should let package rule authentication override source rule authentication`,
+    makeTemporaryEnv(
+      {
+        dependencies: {[`private-package`]: `1.0.0`},
+      },
+      async ({path, run, source}) => {
+        const url = await startPackageServer();
+
+        await writeFile(`${path}/.yarnrc.yml`, [
+          `npmRegistryServer: "${url}"`,
+          `sourceRules:`,
+          `  - ecosystemFilter: npm`,
+          `    npmAlwaysAuth: true`,
+          `    npmAuthToken: ${INVALID_AUTH_TOKEN}`,
+          `packageRules:`,
+          `  - packageFilter: "private-package"`,
+          `    npmAuthToken: ${validLogins.fooUser.npmAuthToken}`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        await expect(source(`require('private-package')`)).resolves.toMatchObject({
+          name: `private-package`,
           version: `1.0.0`,
         });
       },

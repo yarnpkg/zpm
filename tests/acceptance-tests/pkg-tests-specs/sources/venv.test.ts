@@ -3,6 +3,7 @@ import {tests, yarn}  from 'pkg-tests-core';
 
 async function configureVenvIsland(path: PortablePath, workspaces: Array<string>) {
   await yarn.writeConfiguration(path, {
+    pypiRegistryServer: await tests.startPackageServer(),
     unstableIslands: {
       main: {
         workspaces,
@@ -29,14 +30,8 @@ describe(`Venv tests`, () => {
         },
       },
       async ({path, run}) => {
-        const registryUrl = await tests.startPackageServer();
-
         await configureVenvIsland(path, [`workspace-a`]);
-        await run(`install`, {
-          env: {
-            ZPM_PYPI_REGISTRY: registryUrl,
-          },
-        });
+        await run(`install`);
 
         const {stdout} = await run(
           `python`,

@@ -1,5 +1,5 @@
 import {ppath, xfs} from '@yarnpkg/fslib';
-import {tests}      from 'pkg-tests-core';
+import {tests, yarn} from 'pkg-tests-core';
 
 describe(`Protocols`, () => {
   describe(`pypi:`, () => {
@@ -14,11 +14,11 @@ describe(`Protocols`, () => {
         async ({path, run}) => {
           const registryUrl = await tests.startPackageServer();
 
-          await run(`install`, {
-            env: {
-              ZPM_PYPI_REGISTRY: registryUrl,
-            },
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
           });
+
+          await run(`install`);
 
           const cacheDir = ppath.join(path, `.yarn/cache`);
           const cacheEntries = await xfs.readdirPromise(cacheDir);
@@ -46,16 +46,44 @@ describe(`Protocols`, () => {
         async ({path, run}) => {
           const registryUrl = await tests.startPackageServer();
 
-          await run(`install`, {
-            env: {
-              ZPM_PYPI_REGISTRY: registryUrl,
-            },
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
           });
+
+          await run(`install`);
 
           const cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
           const zipEntries = cacheEntries.filter(entry => entry.endsWith(`.zip`));
 
           expect(zipEntries.some(entry => entry.includes(`pypi-no-deps-pypi-1.1.0`))).toEqual(true);
+        },
+      ),
+    );
+
+    test(
+      `it should resolve PyPI packages through package rules`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`pypi-no-deps`]: `pypi:1.0.0`,
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+
+          await yarn.writeConfiguration(path, {
+            packageRules: [{
+              ecosystemFilter: `pypi`,
+              pypiRegistryServer: registryUrl,
+            }],
+          });
+
+          await run(`install`);
+
+          const cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+          const zipEntries = cacheEntries.filter(entry => entry.endsWith(`.zip`));
+
+          expect(zipEntries.some(entry => entry.includes(`pypi-no-deps-pypi-1.0.0`))).toEqual(true);
         },
       ),
     );
@@ -71,11 +99,11 @@ describe(`Protocols`, () => {
         async ({path, run}) => {
           const registryUrl = await tests.startPackageServer();
 
-          await run(`install`, {
-            env: {
-              ZPM_PYPI_REGISTRY: registryUrl,
-            },
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
           });
+
+          await run(`install`);
 
           const cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
           const zipEntries = cacheEntries.filter(entry => entry.endsWith(`.zip`));
@@ -95,15 +123,15 @@ describe(`Protocols`, () => {
             [`pypi-no-deps`]: `pypi:>=1.0.0,<2.0.0`,
           },
         },
-        async ({run}) => {
+        async ({path, run}) => {
           const registryUrl = await tests.startPackageServer();
 
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
+          });
+
           for (let i = 0; i < 2; i++) {
-            await run(`install`, {
-              env: {
-                ZPM_PYPI_REGISTRY: registryUrl,
-              },
-            });
+            await run(`install`);
           }
         },
       ),

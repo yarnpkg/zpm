@@ -60,7 +60,7 @@ fn registry_reference_for_manifest(
         .expect("Expected the registry to return a 'dist' field amongst the manifest data");
 
     let registry_base
-        = http_npm::get_registry(config, package_ident.scope(), false)?;
+        = http_npm::get_registry_for_ident(config, Some(package_ident), false)?;
 
     let url = if npm::is_conventional_tarball_url(&registry_base, &package_ident, version, dist_manifest.tarball.clone()) {
         None
@@ -143,14 +143,13 @@ pub async fn resolve_semver_or_workspace_descriptor(context: &InstallContext<'_>
     resolve_semver_descriptor(context, descriptor, params).await
 }
 
-fn is_package_approved(context: &InstallContext<'_>, ident: &Ident, version: &zpm_semver::Version, release_time: Option<&DateTime<Utc>>) -> bool {
+fn is_package_approved(context: &InstallContext<'_>, ident: &Ident, version: &zpm_semver::Version, release_time: Option<&DateTime<Utc>>, minimal_age_gate: std::time::Duration) -> bool {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
     let check_config
         = || project.config.settings.npm_preapproved_packages.iter().any(|setting| setting.value.check(ident, version));
 
-    let minimal_age_gate = project.config.settings.npm_minimal_age_gate.value;
     if !minimal_age_gate.is_zero() {
         if release_time.map_or(false, |time| context.install_time < *time + minimal_age_gate) {
             return check_config();
@@ -208,7 +207,9 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         .unwrap_or(&descriptor.ident);
 
     let registry_base
-        = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
+        = http_npm::get_registry_for_ident(&project.config, Some(package_ident), false)?;
+    let minimal_age_gate
+        = http_npm::get_minimal_age_gate(&project.config, registry_base, package_ident);
 
     let authorization
         = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
@@ -251,13 +252,13 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         }
 
         // Skip if the version is more recent than the minimum age gate
-        let time = if !project.config.settings.npm_minimal_age_gate.value.is_zero() {
+        let time = if !minimal_age_gate.is_zero() {
             registry_data.time.as_ref().and_then(|map| map.get(version))
         } else {
             None
         };
 
-        if !is_package_approved(context, package_ident, version, time) {
+        if !is_package_approved(context, package_ident, version, time, minimal_age_gate) {
             continue;
         }
 
@@ -278,7 +279,9 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
         .unwrap_or(&descriptor.ident);
 
     let registry_base
-        = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
+        = http_npm::get_registry_for_ident(&project.config, Some(package_ident), false)?;
+    let minimal_age_gate
+        = http_npm::get_minimal_age_gate(&project.config, registry_base, package_ident);
 
     let authorization
         = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
@@ -338,7 +341,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
             continue;
         }
 
-        if !is_package_approved(context, package_ident, &version, time.as_ref().and_then(|map| map.get(&version))) {
+        if !is_package_approved(context, package_ident, &version, time.as_ref().and_then(|map| map.get(&version)), minimal_age_gate) {
             continue;
         }
 
@@ -371,7 +374,7 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
         .expect("The project is required for resolving a workspace package");
 
     let registry_base
-        = http_npm::get_registry(&project.config, params.ident.scope(), false)?;
+        = http_npm::get_registry_for_ident(&project.config, Some(&params.ident), false)?;
     let registry_path
         = npm::registry_url_for_one_version(&params.ident, &params.version);
 

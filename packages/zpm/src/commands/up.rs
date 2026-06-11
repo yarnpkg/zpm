@@ -95,7 +95,7 @@ impl Up {
             = Project::new(None).await?;
 
         if self.no_time_gate {
-            project.config.settings.npm_minimal_age_gate.force(std::time::Duration::ZERO, zpm_config::Source::Cli);
+            project.config.settings.disable_age_gate();
         }
 
         let all_idents = project.workspaces.iter()
@@ -170,7 +170,7 @@ impl Up {
             = Project::new(None).await?;
 
         if self.no_time_gate {
-            project.config.settings.npm_minimal_age_gate.force(std::time::Duration::ZERO, zpm_config::Source::Cli);
+            project.config.settings.disable_age_gate();
         }
 
         let enforced_resolutions
@@ -197,7 +197,7 @@ impl Up {
         let mut project = Project::new(None).await?;
 
         if self.no_time_gate {
-            project.config.settings.npm_minimal_age_gate.force(std::time::Duration::ZERO, zpm_config::Source::Cli);
+            project.config.settings.disable_age_gate();
         }
 
         let lockfile = project.lockfile()?;

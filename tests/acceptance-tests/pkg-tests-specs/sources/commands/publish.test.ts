@@ -1,7 +1,7 @@
 import {npath, xfs} from '@yarnpkg/fslib';
 
 const {
-  tests: {testIf},
+  tests: {startPackageServer, testIf},
   misc,
 } = require(`pkg-tests-core`);
 
@@ -137,6 +137,50 @@ describe(`publish`, () =>   {
 
     expect(result).toHaveProperty(`files`);
     expect(Array.isArray(result.files)).toBe(true);
+  }));
+
+  test(`should let package rules override the top-level publish registry`, makeTemporaryEnv({
+    name: `@scope/json-test`,
+    version: `1.0.0`,
+  }, async ({path, run}) => {
+    const registryUrl = await startPackageServer();
+
+    await xfs.writeFilePromise(`${path}/.yarnrc.yml`, [
+      `npmPublishRegistry: ${registryUrl}/publish`,
+      `packageRules:`,
+      `  - packageFilter: "@scope/*"`,
+      `    npmRegistryServer: ${registryUrl}/package`,
+    ].join(`\n`));
+
+    await run(`install`);
+
+    const {stdout} = await run(`npm`, `publish`, `--json`, `--dry-run`, `--tolerate-republish`);
+    const jsonObjects = misc.parseJsonStream(stdout);
+    const result = jsonObjects.find((obj: any) => obj.name && obj.version);
+
+    expect(result).toHaveProperty(`registry`, `http://registry.example.org/package`);
+  }));
+
+  test(`should keep scope registries ahead of the top-level publish registry`, makeTemporaryEnv({
+    name: `@scope/json-test`,
+    version: `1.0.0`,
+  }, async ({path, run}) => {
+    const registryUrl = await startPackageServer();
+
+    await xfs.writeFilePromise(`${path}/.yarnrc.yml`, [
+      `npmPublishRegistry: ${registryUrl}/publish`,
+      `npmScopes:`,
+      `  scope:`,
+      `    npmRegistryServer: ${registryUrl}/scope`,
+    ].join(`\n`));
+
+    await run(`install`);
+
+    const {stdout} = await run(`npm`, `publish`, `--json`, `--dry-run`, `--tolerate-republish`);
+    const jsonObjects = misc.parseJsonStream(stdout);
+    const result = jsonObjects.find((obj: any) => obj.name && obj.version);
+
+    expect(result).toHaveProperty(`registry`, `http://registry.example.org/scope`);
   }));
 
   test(`should honor publishConfig access and registry`, makeTemporaryEnv({

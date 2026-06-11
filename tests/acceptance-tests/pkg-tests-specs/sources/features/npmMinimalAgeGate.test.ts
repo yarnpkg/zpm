@@ -237,6 +237,48 @@ describe(`Features`, () => {
       );
 
       test(
+        `it should allow package rules to override the minimum release age`,
+        makeTemporaryEnv({
+          dependencies: {[`release-date`]: `1.1.1`},
+        }, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({run, source}) => {
+          await run(`config`, `set`, `packageRules`, `--json`, JSON.stringify([{
+            packageFilter: `release-date`,
+            npmMinimalAgeGate: `0`,
+          }]));
+
+          await run(`install`);
+
+          await expect(source(`require('release-date/package.json')`)).resolves.toMatchObject({
+            name: `release-date`,
+            version: `1.1.1`,
+          });
+        }),
+      );
+
+      test(
+        `it should allow source rules to override the minimum release age`,
+        makeTemporaryEnv({
+          dependencies: {[`release-date`]: `1.1.1`},
+        }, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({run, source}) => {
+          await run(`config`, `set`, `sourceRules`, `--json`, JSON.stringify([{
+            ecosystemFilter: `npm`,
+            npmMinimalAgeGate: `0`,
+          }]));
+
+          await run(`install`);
+
+          await expect(source(`require('release-date/package.json')`)).resolves.toMatchObject({
+            name: `release-date`,
+            version: `1.1.1`,
+          });
+        }),
+      );
+
+      test(
         `it should work with scoped packages`,
         makeTemporaryEnv({
           dependencies: {[`@scoped/release-date`]: `1.1.1`},

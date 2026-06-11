@@ -1,5 +1,7 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
+use zpm_config::{Configuration, EcosystemFilter, PackageRule};
+use zpm_primitives::Ident;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct PypiDistribution {
@@ -18,12 +20,24 @@ pub struct PypiDistribution {
     pub upload_time_iso_8601: Option<String>,
 }
 
-pub fn pypi_registry_base() -> String {
-    std::env::var("ZPM_PYPI_REGISTRY")
-        .ok()
-        .unwrap_or_else(|| "https://pypi.org".to_string())
-        .trim_end_matches('/')
-        .to_string()
+fn package_rule_matches(rule: &PackageRule, ident: &Ident) -> bool {
+    rule.ecosystem_filter.value.map_or(true, |filter| filter == EcosystemFilter::Pypi)
+        && rule.package_filter.value.as_ref().map_or(true, |filter| filter.check(ident))
+}
+
+pub fn get_registry<'a>(config: &'a Configuration, ident: &Ident) -> &'a str {
+    let mut registry
+        = config.settings.pypi_registry_server.value.as_str();
+
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, ident) {
+            if let Some(value) = rule.pypi_registry_server.value.as_deref() {
+                registry = value;
+            }
+        }
+    }
+
+    registry.trim_end_matches('/')
 }
 
 pub fn encode_path_segment(segment: &str) -> String {
