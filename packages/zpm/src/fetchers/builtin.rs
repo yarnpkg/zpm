@@ -7,8 +7,15 @@ pub async fn fetch_builtin_locator(context: &InstallContext<'_>, locator: &Locat
         return builtins::node::fetch_nodejs_locator(context, locator, &params.version, is_mock_request).await;
     }
 
+    if locator.ident.as_str().starts_with("@yarnpkg/python-") {
+        return builtins::python::fetch_python_locator(context, locator, &params.version, is_mock_request).await;
+    }
+
     match locator.ident.as_str() {
         "@yarnpkg/node"
+            => Ok(FetchResult::new(PackageData::Abstract)),
+
+        "@yarnpkg/python"
             => Ok(FetchResult::new(PackageData::Abstract)),
 
         _ => Err(Error::Unsupported)?,

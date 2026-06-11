@@ -131,6 +131,9 @@ impl<'a> IslandDependencyProvider<'a> {
             resolution.dependencies = resolution.dependencies.into_iter()
                 .map(|(ident, descriptor)| (ident, self.qualify_descriptor(&descriptor)))
                 .collect();
+            resolution.variants = resolution.variants.into_iter()
+                .map(|descriptor| self.qualify_descriptor(&descriptor))
+                .collect();
         }
 
         resolution
@@ -297,7 +300,14 @@ impl<'a> IslandDependencyProvider<'a> {
 
     /// Convert a Resolution's dependencies into IslandVersionSets for pubgrub.
     fn resolution_to_deps(&self, resolution: &Resolution) -> Result<BTreeMap<IslandPackage, IslandVersionSet>, IslandResolutionError> {
-        self.descriptors_to_deps(&resolution.dependencies)
+        let mut descriptors
+            = resolution.dependencies.clone();
+
+        for descriptor in &resolution.variants {
+            descriptors.insert(descriptor.ident.clone(), descriptor.clone());
+        }
+
+        self.descriptors_to_deps(&descriptors)
     }
 
     /// Fetch the dependencies of a specific package version from the registry.

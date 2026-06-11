@@ -1,4 +1,4 @@
-use std::process::ExitStatus;
+use std::{collections::BTreeSet, process::ExitStatus};
 
 use clipanion::cli;
 use zpm_config::IslandLinker;
@@ -17,11 +17,14 @@ fn prepend_env_path(key: &str, value: &str, separator: char) -> String {
     }
 }
 
-fn build_site_packages_pythonpath(site_packages_path: &zpm_utils::Path, separator: char) -> String {
-    let mut entries
-        = vec![site_packages_path.to_file_string()];
+fn discover_site_packages_paths(venv_path: &zpm_utils::Path) -> Vec<zpm_utils::Path> {
+    let mut paths
+        = BTreeSet::new();
 
-    if let Ok(read_dir) = site_packages_path.fs_read_dir() {
+    let lib_path
+        = venv_path.with_join_str("lib");
+
+    if let Ok(read_dir) = lib_path.fs_read_dir() {
         for entry in read_dir.flatten() {
             let Ok(file_type) = entry.file_type() else {
                 continue;
@@ -37,15 +40,64 @@ fn build_site_packages_pythonpath(site_packages_path: &zpm_utils::Path, separato
             let dirname
                 = dirname.to_string_lossy();
 
-            if dirname.starts_with('.') {
+            if !dirname.starts_with("python") {
                 continue;
             }
 
-            entries.push(
-                site_packages_path
+            let site_packages_path
+                = lib_path
                     .with_join_str(dirname.as_ref())
-                    .to_file_string(),
-            );
+                    .with_join_str("site-packages");
+
+            if site_packages_path.fs_exists() {
+                paths.insert(site_packages_path);
+            }
+        }
+    }
+
+    let legacy_site_packages_path
+        = lib_path.with_join_str("site-packages");
+
+    if legacy_site_packages_path.fs_exists() {
+        paths.insert(legacy_site_packages_path);
+    }
+
+    paths.into_iter().collect()
+}
+
+fn build_site_packages_pythonpath(site_packages_paths: &[zpm_utils::Path], separator: char) -> String {
+    let mut entries
+        = Vec::new();
+
+    for site_packages_path in site_packages_paths {
+        entries.push(site_packages_path.to_file_string());
+
+        if let Ok(read_dir) = site_packages_path.fs_read_dir() {
+            for entry in read_dir.flatten() {
+                let Ok(file_type) = entry.file_type() else {
+                    continue;
+                };
+
+                if !file_type.is_dir() {
+                    continue;
+                }
+
+                let dirname
+                    = entry.file_name();
+
+                let dirname
+                    = dirname.to_string_lossy();
+
+                if dirname.starts_with('.') {
+                    continue;
+                }
+
+                entries.push(
+                    site_packages_path
+                        .with_join_str(dirname.as_ref())
+                        .to_file_string(),
+                );
+            }
         }
     }
 
@@ -101,11 +153,12 @@ impl Python {
             .enable_shell_forwarding()
             .enable_signal_delegation();
 
+        let mut python_program
+            = "python".to_string();
+
         if let Some(venv_path) = active_workspace_venv(&project) {
-            let site_packages_path
-                = venv_path
-                    .with_join_str("lib")
-                    .with_join_str("site-packages");
+            let site_packages_paths
+                = discover_site_packages_paths(&venv_path);
 
             let bin_path = if cfg!(windows) {
                 venv_path.with_join_str("Scripts")
@@ -122,10 +175,17 @@ impl Python {
             let path
                 = prepend_env_path("PATH", &bin_path.to_file_string(), path_separator);
 
+            let venv_python_path
+                = bin_path.with_join_str("python");
+
+            if venv_python_path.fs_exists() {
+                python_program = venv_python_path.to_file_string();
+            }
+
             let pythonpath
                 = prepend_env_path(
                     "PYTHONPATH",
-                    &build_site_packages_pythonpath(&site_packages_path, path_separator),
+                    &build_site_packages_pythonpath(&site_packages_paths, path_separator),
                     path_separator,
                 );
 
@@ -136,7 +196,7 @@ impl Python {
         }
 
         let result
-            = env.run_exec("python", &self.args).await?;
+            = env.run_exec(&python_program, &self.args).await?;
 
         Ok(result.into())
     }

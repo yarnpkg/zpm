@@ -543,6 +543,17 @@ fn convert_solution(
                     .or_insert_with(|| dep_locator.clone());
             }
         }
+
+        for variant_descriptor in &resolution.variants {
+            let variant_package
+                = IslandPackageKey::from_descriptor(variant_descriptor);
+
+            if let Some(variant_locator) = package_to_locator.get(&variant_package) {
+                descriptor_to_locator
+                    .entry(variant_descriptor.clone())
+                    .or_insert_with(|| variant_locator.clone());
+            }
+        }
     }
 
     let fork_id

@@ -262,6 +262,16 @@
       "description": "The URL to use for downloading Node.js distributions",
       "default": "https://nodejs.org/dist"
     },
+    "pythonDistUrl": {
+      "type": "string",
+      "description": "The URL to use for downloading Python distributions",
+      "default": "https://github.com/astral-sh/python-build-standalone/releases/download"
+    },
+    "pythonDistMetadataUrl": {
+      "type": "string",
+      "description": "The URL to use for resolving Python distribution metadata",
+      "default": "https://releases.astral.sh/github/versions/main/v1/python-build-standalone.ndjson"
+    },
     "nodeLinker": {
       "type": "crate::NodeLinker",
       "description": "The linker to use for node_modules",

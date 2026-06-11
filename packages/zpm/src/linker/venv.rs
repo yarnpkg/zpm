@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zpm_primitives::{Ident, Locator, PythonTargetEnv, PythonTargetInput, Reference};
-use zpm_utils::{FromFileString, Hash64, Path, System, ToHumanString};
+use zpm_utils::{FromFileString, Hash64, Path, System, ToFileString, ToHumanString};
 
 use crate::{
     build::BuildRequests,
@@ -11,6 +11,21 @@ use crate::{
     linker::{self, LinkResult},
     project::Project,
 };
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ActivePythonFork {
+    id: Option<Hash64>,
+    target: Option<PythonTargetEnv>,
+}
+
+fn is_python_builtin_ident(ident: &Ident) -> bool {
+    ident.as_str() == "@yarnpkg/python"
+        || ident.as_str().starts_with("@yarnpkg/python-")
+}
+
+fn is_python_variant_ident(ident: &Ident) -> bool {
+    ident.as_str().starts_with("@yarnpkg/python-")
+}
 
 fn collect_workspace_package_locators(install: &Install, workspace_locator: &Locator) -> Result<BTreeMap<Ident, Locator>, Error> {
     let mut packages
@@ -31,7 +46,7 @@ fn collect_workspace_package_locators(install: &Install, workspace_locator: &Loc
             = install.install_state.resolution_tree.locator_resolutions.get(&locator)
                 .unwrap_or_else(|| panic!("Expected resolution entry for {}", locator.to_print_string()));
 
-        for descriptor in resolution.dependencies.values() {
+        for descriptor in resolution.dependencies.values().chain(resolution.variants.iter()) {
             let dependency_locator
                 = install.install_state.resolution_tree.descriptor_to_locator.get(descriptor)
                     .unwrap_or_else(|| panic!("Expected locator for descriptor {}", descriptor.to_print_string()))
@@ -90,10 +105,13 @@ fn target_matches_link_version(target: &PythonTargetEnv, link_version: &str) -> 
         || target.python_full_version.as_deref() == Some(link_version)
 }
 
-fn select_active_fork_id(install: &Install, island: &crate::island::ResolvedIsland) -> Result<Option<Hash64>, Error> {
+fn select_active_fork(install: &Install, island: &crate::island::ResolvedIsland) -> Result<ActivePythonFork, Error> {
     let Some(lockfile_island)
         = install.lockfile.islands.get(&island.id) else {
-            return Ok(None);
+            return Ok(ActivePythonFork {
+                id: None,
+                target: None,
+            });
         };
 
     let mut matches
@@ -102,7 +120,10 @@ fn select_active_fork_id(install: &Install, island: &crate::island::ResolvedIsla
     for (fork_id, fork) in &lockfile_island.forks {
         let Some(target) = &fork.target else {
             if island.python_link_version.is_none() {
-                matches.push(fork_id.clone());
+                matches.push(ActivePythonFork {
+                    id: Some(fork_id.clone()),
+                    target: None,
+                });
             }
             continue;
         };
@@ -117,7 +138,10 @@ fn select_active_fork_id(install: &Install, island: &crate::island::ResolvedIsla
             }
         }
 
-        matches.push(fork_id.clone());
+        matches.push(ActivePythonFork {
+            id: Some(fork_id.clone()),
+            target: Some(target.clone()),
+        });
     }
 
     match matches.len() {
@@ -133,7 +157,7 @@ fn select_active_fork_id(install: &Install, island: &crate::island::ResolvedIsla
             )))
         },
 
-        1 => Ok(matches.into_iter().next()),
+        1 => Ok(matches.into_iter().next().unwrap()),
 
         _ if island.python_link_version.is_none() => {
             Err(Error::InvalidResolution(format!(
@@ -224,11 +248,169 @@ fn link_package_into_venv(
     }
 }
 
-fn get_workspace_site_packages_path(workspace_path: &Path) -> Path {
+fn python_lib_dir_name(target: Option<&PythonTargetEnv>) -> String {
+    target
+        .map(|target| format!("python{}", target.python_version))
+        .unwrap_or_else(|| "python".to_string())
+}
+
+fn get_workspace_venv_path(workspace_path: &Path) -> Path {
     workspace_path
         .with_join_str(".venv")
+}
+
+fn get_workspace_site_packages_path(workspace_path: &Path, target: Option<&PythonTargetEnv>) -> Path {
+    get_workspace_venv_path(workspace_path)
+        .with_join_str("lib")
+        .with_join_str(python_lib_dir_name(target))
+        .with_join_str("site-packages")
+}
+
+fn get_legacy_site_packages_path(workspace_path: &Path) -> Path {
+    get_workspace_venv_path(workspace_path)
         .with_join_str("lib")
         .with_join_str("site-packages")
+}
+
+fn prepare_venv_root(venv_path: &Path) -> Result<(), Error> {
+    venv_path.fs_create_dir_all()?;
+    venv_path
+        .with_join_str(".gitignore")
+        .fs_write_text("*\n")?;
+
+    Ok(())
+}
+
+fn recreate_legacy_site_packages_alias(workspace_path: &Path, site_packages_path: &Path) -> Result<(), Error> {
+    let legacy_site_packages_path
+        = get_legacy_site_packages_path(workspace_path);
+
+    if legacy_site_packages_path.fs_exists() || legacy_site_packages_path.fs_is_symlink() {
+        legacy_site_packages_path.fs_rm()?;
+    }
+
+    legacy_site_packages_path.fs_create_parent()?;
+    legacy_site_packages_path.fs_symlink(site_packages_path)?;
+
+    Ok(())
+}
+
+fn find_managed_python_locator(package_locators: &BTreeMap<Ident, Locator>) -> Option<&Locator> {
+    package_locators
+        .values()
+        .find(|locator| is_python_variant_ident(&locator.ident))
+}
+
+fn find_python_executable_path(python_home: &Path, target: Option<&PythonTargetEnv>) -> Option<Path> {
+    let mut candidates
+        = Vec::new();
+
+    if let Some(target) = target {
+        candidates.push(format!("bin/python{}", target.python_version));
+    }
+
+    candidates.extend(["bin/python3".to_string(), "bin/python".to_string()]);
+
+    candidates.into_iter()
+        .map(|candidate| python_home.with_join_str(candidate))
+        .find(|candidate| candidate.fs_exists())
+}
+
+fn write_pyvenv_cfg(venv_path: &Path, python_executable: &Path, target: Option<&PythonTargetEnv>) -> Result<(), Error> {
+    let home
+        = python_executable.dirname()
+            .unwrap_or_else(|| python_executable.clone());
+
+    let version
+        = target
+            .map(|target| target.python_full_version.as_deref().unwrap_or(&target.python_version))
+            .unwrap_or("unknown");
+
+    venv_path
+        .with_join_str("pyvenv.cfg")
+        .fs_write_text(format!(
+            "home = {}\nimplementation = CPython\nversion_info = {}\ninclude-system-site-packages = false\nversion = {}\nexecutable = {}\n",
+            home.to_file_string(),
+            version,
+            version,
+            python_executable.to_file_string(),
+        ))?;
+
+    Ok(())
+}
+
+fn link_venv_python_binary(venv_path: &Path, python_executable: &Path, target: Option<&PythonTargetEnv>) -> Result<(), Error> {
+    let bin_path
+        = venv_path.with_join_str("bin");
+
+    bin_path.fs_create_dir_all()?;
+
+    let mut names
+        = vec!["python".to_string(), "python3".to_string()];
+
+    if let Some(target) = target {
+        names.push(format!("python{}", target.python_version));
+    }
+
+    names.sort();
+    names.dedup();
+
+    for name in names {
+        let link_path
+            = bin_path.with_join_str(name);
+
+        if link_path.fs_exists() || link_path.fs_is_symlink() {
+            link_path.fs_rm()?;
+        }
+
+        link_path.fs_symlink(python_executable)?;
+    }
+
+    Ok(())
+}
+
+fn materialize_managed_python(
+    install: &Install,
+    locator: &Locator,
+    venv_path: &Path,
+    target: Option<&PythonTargetEnv>,
+) -> Result<(), Error> {
+    let python_home
+        = venv_path.with_join_str(".python");
+
+    if python_home.fs_exists() || python_home.fs_is_symlink() {
+        python_home.fs_rm()?;
+    }
+
+    python_home.fs_create_parent()?;
+
+    let package_data
+        = install.package_data.get(&locator.physical_locator())
+            .unwrap_or_else(|| panic!("Expected package data for {}", locator.to_print_string()));
+
+    match package_data {
+        PackageData::Zip {..} => {
+            python_home.fs_create_dir_all()?;
+            linker::helpers::fs_extract_archive(&python_home, package_data)?;
+        },
+
+        PackageData::Local {package_directory, ..} => {
+            python_home.fs_symlink(package_directory)?;
+        },
+
+        PackageData::MissingZip {..} | PackageData::Abstract => {
+            return Err(Error::Unsupported);
+        },
+    }
+
+    let python_executable
+        = find_python_executable_path(&python_home, target)
+            .ok_or_else(|| Error::InvalidResolution(format!("Unable to find a Python executable in {}", python_home.to_file_string())))?;
+
+    write_pyvenv_cfg(venv_path, &python_executable, target)?;
+    link_venv_python_binary(venv_path, &python_executable, target)?;
+
+    Ok(())
 }
 
 pub async fn link_island_venv(
@@ -238,15 +420,15 @@ pub async fn link_island_venv(
 ) -> Result<LinkResult, Error> {
     let mut packages_by_location
         = BTreeMap::new();
-    let active_fork_id
-        = select_active_fork_id(install, island)?;
+    let active_fork
+        = select_active_fork(install, island)?;
 
     for workspace_ident in &island.workspace_idents {
         let workspace
             = project.workspace_by_ident(workspace_ident)?;
 
         let workspace_locator
-            = workspace_locator_for_fork(workspace.locator(), active_fork_id.as_ref());
+            = workspace_locator_for_fork(workspace.locator(), active_fork.id.as_ref());
 
         packages_by_location.insert(workspace.rel_path.clone(), workspace_locator.clone());
 
@@ -254,19 +436,37 @@ pub async fn link_island_venv(
             = project.project_cwd
                 .with_join(&workspace.rel_path);
 
+        let package_locators
+            = collect_workspace_package_locators(install, &workspace_locator)?;
+
+        let venv_path
+            = get_workspace_venv_path(&workspace_path);
+        prepare_venv_root(&venv_path)?;
+
         let site_packages_path
-            = get_workspace_site_packages_path(&workspace_path);
+            = get_workspace_site_packages_path(&workspace_path, active_fork.target.as_ref());
 
         if site_packages_path.fs_exists() {
             site_packages_path.fs_rm()?;
         }
 
         site_packages_path.fs_create_dir_all()?;
+        recreate_legacy_site_packages_alias(&workspace_path, &site_packages_path)?;
 
-        let package_locators
-            = collect_workspace_package_locators(install, &workspace_locator)?;
+        if let Some(python_locator) = find_managed_python_locator(&package_locators) {
+            materialize_managed_python(
+                install,
+                python_locator,
+                &venv_path,
+                active_fork.target.as_ref(),
+            )?;
+        }
 
         for package_locator in package_locators.values() {
+            if is_python_builtin_ident(&package_locator.ident) {
+                continue;
+            }
+
             link_package_into_venv(
                 project,
                 install,
@@ -337,11 +537,17 @@ mod tests {
         let fork_312
             = target_312.fork_id();
         let install
-            = install_with_targets(vec![target_311, target_312]);
+            = install_with_targets(vec![target_311, target_312.clone()]);
         let island
             = island_with_link_version(Some("3.12"));
 
-        assert_eq!(Some(fork_312), select_active_fork_id(&install, &island).unwrap());
+        assert_eq!(
+            ActivePythonFork {
+                id: Some(fork_312),
+                target: Some(target_312),
+            },
+            select_active_fork(&install, &island).unwrap(),
+        );
     }
 
     #[test]
@@ -351,7 +557,7 @@ mod tests {
         let island
             = island_with_link_version(None);
         let err
-            = select_active_fork_id(&install, &island).unwrap_err();
+            = select_active_fork(&install, &island).unwrap_err();
         let Error::InvalidResolution(message) = err else {
             panic!("Expected InvalidResolution, got {err:?}");
         };
@@ -369,8 +575,11 @@ mod tests {
             = island_with_link_version(None);
 
         assert_eq!(
-            Some(LockfileIsland::default_fork_id()),
-            select_active_fork_id(&install, &island).unwrap(),
+            ActivePythonFork {
+                id: Some(LockfileIsland::default_fork_id()),
+                target: None,
+            },
+            select_active_fork(&install, &island).unwrap(),
         );
     }
 }

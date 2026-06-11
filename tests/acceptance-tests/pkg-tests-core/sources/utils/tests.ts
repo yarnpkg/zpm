@@ -178,6 +178,8 @@ export enum RequestType {
   BulkAdvisories = `bulkAdvisories`,
   NodeDistIndex = `nodeDistIndex`,
   NodeDistTarball = `nodeDistTarball`,
+  PythonDistIndex = `pythonDistIndex`,
+  PythonDistTarball = `pythonDistTarball`,
   YarnSwitchInfo = `yarnSwitchInfo`,
   YarnSwitchTarball = `yarnSwitchTarball`,
 }
@@ -228,6 +230,11 @@ export type Request = {
   type: RequestType.NodeDistIndex;
 } | {
   type: RequestType.NodeDistTarball;
+  name: string;
+} | {
+  type: RequestType.PythonDistIndex;
+} | {
+  type: RequestType.PythonDistTarball;
   name: string;
 } | {
   type: RequestType.YarnSwitchInfo;
@@ -995,6 +1002,40 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       stream.pipeline(tar, gzip, response, () => {});
     },
 
+    async [RequestType.PythonDistIndex](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.PythonDistIndex)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const data = [
+        {version: `3.13.0`},
+        {version: `3.12.4`},
+        {version: `3.11.9`},
+      ];
+
+      response.writeHead(200, {[`Content-Type`]: `application/json`});
+      response.end(JSON.stringify(data));
+    },
+
+    async [RequestType.PythonDistTarball](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.PythonDistTarball)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const version = parsedRequest.name.match(/^python-v([0-9]+\.[0-9]+\.[0-9]+)-/)?.[1] ?? `0.0.0`;
+      const [major, minor] = version.split(`.`);
+      const pythonName = `python${major}.${minor}`;
+
+      response.writeHead(200, {[`Content-Type`]: `application/octet-stream`});
+
+      const tar = tarStream.pack();
+      tar.entry({name: `python/install/bin/${pythonName}`, mode: 0o755}, `#!/usr/bin/env bash\necho "Python ${version}"\n`);
+      tar.entry({name: `python/install/lib/${pythonName}/os.py`, mode: 0o644}, ``);
+      tar.finalize();
+
+      const gzip = zlib.createGzip();
+
+      stream.pipeline(tar, gzip, response, () => {});
+    },
+
     async [RequestType.YarnSwitchInfo](parsedRequest, request, response) {
       if (parsedRequest.type !== RequestType.YarnSwitchInfo)
         throw new Error(`Assertion failed: Invalid request type`);
@@ -1092,6 +1133,15 @@ exit 0
     } else if ((match = url.match(/^\/node\/dist\/v([0-9]+\.[0-9]+\.[0-9]+)\/(node-v(\1)-[a-z0-9-]+)\.tar\.gz$/))) {
       return {
         type: RequestType.NodeDistTarball,
+        name: match[2]!,
+      };
+    } else if ((match = url.match(/^\/python\/dist\/index.json$/))) {
+      return {
+        type: RequestType.PythonDistIndex,
+      };
+    } else if ((match = url.match(/^\/python\/dist\/v([0-9]+\.[0-9]+\.[0-9]+)\/(python-v(\1)-[a-z0-9-]+)\.tar\.gz$/))) {
+      return {
+        type: RequestType.PythonDistTarball,
         name: match[2]!,
       };
     } else if ((match = url.match(/^\/@yarnpkg\/yarn-([^/]+)\/-\/yarn-\1-([^/]+)\.tgz$/))) {
