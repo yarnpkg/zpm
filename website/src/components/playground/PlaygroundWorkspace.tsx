@@ -524,12 +524,22 @@ export function PlaygroundWorkspace({version, octicons}: {version: string, octic
         </div>
 
         <div className="relative min-h-0 min-w-0">
-          <div className={classNames(`invisible pointer-events-none absolute inset-0 min-h-0 min-w-0 opacity-0`, selectedEntry.kind === `terminal` && `visible pointer-events-auto opacity-100`)}>
+          <div className={classNames(
+            `absolute inset-0 min-h-0 min-w-0`,
+            selectedEntry.kind === `terminal`
+              ? `visible pointer-events-auto opacity-100`
+              : `invisible pointer-events-none opacity-0`,
+          )}>
             <PlaygroundTerminal files={terminalFiles} version={version} />
           </div>
 
           {editorEntry && (
-            <div className={classNames(`invisible pointer-events-none absolute inset-0 min-h-0 min-w-0 opacity-0`, selectedEntry.kind === `file` && `visible pointer-events-auto opacity-100`)}>
+            <div className={classNames(
+              `absolute inset-0 min-h-0 min-w-0`,
+              selectedEntry.kind === `file`
+                ? `visible pointer-events-auto opacity-100`
+                : `invisible pointer-events-none opacity-0`,
+            )}>
               <div className="playground-editor-shell absolute inset-0 min-h-0 min-w-0">
                 <Suspense fallback={<div className="flex items-center p-[18px] font-mono text-xs text-[var(--fg-mute)]">Loading editor...</div>}>
                   <MonacoEditor
