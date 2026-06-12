@@ -1,8 +1,6 @@
 import '@xterm/xterm/css/xterm.css';
-
-import {useEffect, useRef} from 'react';
-
 import type {Terminal as XtermTerminal} from '@xterm/xterm';
+import {useEffect, useRef}              from 'react';
 
 interface Props {
   files: Array<PlaygroundFile>;
@@ -78,7 +76,7 @@ function writeBootScreen(term: XtermTerminal, version: string) {
 
 function getBrowserPodApiKey() {
   const env = import.meta.env as Record<string, string | undefined>;
-  return env.PUBLIC_BROWSERPOD_API_KEY ?? env.VITE_BP_APIKEY ?? ``;
+  return env.PUBLIC_BROWSERPOD_API_KEY ?? env.VITE_BPAPIKEY ?? env.VITE_BP_APIKEY ?? ``;
 }
 
 function dirname(path: string) {
@@ -226,6 +224,7 @@ export function PlaygroundTerminal({files, version}: Props) {
 
         writeLines(term, [`${cyan}[browserpod]${reset} Booting pod...`]);
 
+        console.log(`Booting pod...`, apiKey);
         const pod = await BrowserPod.boot({apiKey});
 
         if (disposed || !term)
@@ -281,5 +280,5 @@ export function PlaygroundTerminal({files, version}: Props) {
     };
   }, [files, version]);
 
-  return <div ref={containerRef} className="playground-terminal-mount absolute inset-[20px_22px] min-h-0 min-w-0 max-[560px]:inset-3.5" />;
+  return <div ref={containerRef} className={`playground-terminal-mount absolute inset-[20px_22px] min-h-0 min-w-0 rounded-xl border border-white/10 bg-black/85 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] max-[560px]:inset-3.5`} />;
 }

@@ -64,8 +64,8 @@ const shareIcon = extractOct(`share-16`);
   </script>
 
   <main class="playground-shell box-border flex h-[calc(100dvh_-_var(--playground-nav-height,73px))] min-h-0 items-stretch justify-center p-[clamp(18px,3.4vw,42px)] max-[900px]:p-4 max-[560px]:p-2.5">
-    <section class="playground-window grid h-[min(820px,100%)] min-h-0 w-[min(1480px,100%)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[18px] border border-[rgba(168,176,212,0.18)] bg-black/75 [background-image:linear-gradient(135deg,rgba(255,255,255,0.055),transparent_42%)] shadow-[0_30px_90px_-45px_rgba(0,0,0,0.78),inset_0_1px_0_rgba(255,255,255,0.16)] backdrop-blur-[28px] backdrop-saturate-150 max-[900px]:h-full max-[900px]:rounded-[14px]" aria-label="Yarn playground">
-      <div class="grid min-h-[46px] grid-cols-[96px_minmax(0,1fr)_auto] items-center gap-4 border-b border-[var(--line)] bg-[rgba(6,8,18,0.84)] px-[18px] max-[900px]:grid-cols-[auto_minmax(0,1fr)_auto] max-[560px]:gap-2.5 max-[560px]:px-3">
+    <section class="playground-window grid h-[min(820px,100%)] min-h-0 w-[min(1480px,100%)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[18px] border border-[rgba(168,176,212,0.18)] bg-black/95 [background-image:linear-gradient(135deg,rgba(255,255,255,0.045),transparent_42%)] shadow-[0_30px_90px_-45px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.14)] backdrop-blur-[28px] backdrop-saturate-150 max-[900px]:h-full max-[900px]:rounded-[14px]" aria-label="Yarn playground">
+      <div class="grid min-h-[46px] grid-cols-[96px_minmax(0,1fr)_auto] items-center gap-4 border-b border-[var(--line)] bg-black/90 px-[18px] max-[900px]:grid-cols-[auto_minmax(0,1fr)_auto] max-[560px]:gap-2.5 max-[560px]:px-3">
         <div class="flex gap-2 max-[560px]:gap-1.5" aria-hidden="true">
           <span class="h-[11px] w-[11px] rounded-full border border-[color-mix(in_oklch,var(--fg)_18%,transparent)] bg-red-400/80"></span>
           <span class="h-[11px] w-[11px] rounded-full border border-[color-mix(in_oklch,var(--fg)_18%,transparent)] bg-yellow-300/80"></span>
@@ -87,7 +87,7 @@ const shareIcon = extractOct(`share-16`);
 
       <PlaygroundWorkspace client:load version={yarnVersion} octicons={treeOcticons} />
 
-      <div class="border-t border-[var(--line)] bg-[rgba(6,10,20,0.84)] px-[18px] py-[13px] text-center text-[13px] leading-[1.4] text-[var(--fg-dim)]">
+      <div class="border-t border-[var(--line)] bg-black/90 px-[18px] py-[13px] text-center text-[13px] leading-[1.4] text-[var(--fg-dim)]">
         This playground runs Yarn {yarnVersion} compiled to WASM, thanks to the incredible work of the BrowserPod folks.
       </div>
     </section>

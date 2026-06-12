@@ -429,7 +429,7 @@ export function PlaygroundWorkspace({version, octicons}: {version: string, octic
 
   return (
     <div className="grid min-h-0 grid-cols-[minmax(210px,18vw)_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]">
-      <aside className="min-w-0 overflow-auto border-r border-[var(--line)] bg-[rgba(3,6,16,0.78)] p-[18px] max-[900px]:max-h-[min(240px,32dvh)] max-[900px]:border-r-0 max-[900px]:border-b max-[560px]:p-3.5" aria-label="Playground files">
+      <aside className="min-w-0 overflow-auto border-r border-[var(--line)] bg-black/85 p-[18px] max-[900px]:max-h-[min(240px,32dvh)] max-[900px]:border-r-0 max-[900px]:border-b max-[560px]:p-3.5" aria-label="Playground files">
         <select id="playground-version" className={`${selectClassName} mb-4`} aria-label="Yarn version" defaultValue={`Yarn ${version}`}>
           <option>{`Yarn ${version}`}</option>
           <option>Yarn stable</option>
@@ -490,12 +490,12 @@ export function PlaygroundWorkspace({version, octicons}: {version: string, octic
         className={classNames(
           `relative grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)]`,
           selectedEntry.kind === `terminal`
-            ? `bg-[radial-gradient(ellipse_70%_55%_at_75%_0%,oklch(0.55_0.10_205_/_0.10),transparent_70%),linear-gradient(180deg,rgba(2,5,14,0.92),rgba(2,3,10,0.84))] backdrop-blur-[20px] backdrop-saturate-150`
-            : `bg-[radial-gradient(ellipse_70%_55%_at_75%_0%,oklch(0.62_0.12_195_/_0.10),transparent_70%),rgba(2,4,12,0.78)]`,
+            ? `bg-[radial-gradient(ellipse_70%_55%_at_75%_0%,oklch(0.55_0.10_205_/_0.08),transparent_70%),linear-gradient(180deg,rgba(0,0,0,0.96),rgba(0,0,0,0.92))] backdrop-blur-[20px] backdrop-saturate-150`
+            : `bg-[radial-gradient(ellipse_70%_55%_at_75%_0%,oklch(0.62_0.12_195_/_0.08),transparent_70%),rgba(0,0,0,0.9)]`,
         )}
         aria-label={selectedEntry.kind === `terminal` ? `Terminal output` : `Editor`}
       >
-        <div className="flex min-w-0 items-end gap-0.5 overflow-x-auto border-b border-[var(--line)] bg-[rgba(3,6,16,0.72)] px-3 [scrollbar-width:thin]" role="tablist" aria-label="Open playground views">
+        <div className="flex min-w-0 items-end gap-0.5 overflow-x-auto border-b border-[var(--line)] bg-black/85 px-3 [scrollbar-width:thin]" role="tablist" aria-label="Open playground views">
           <button
             type="button"
             className={classNames(tabClassName, selectedPath === `terminal` && activeTabClassName)}

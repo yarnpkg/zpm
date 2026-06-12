@@ -11,7 +11,23 @@ target=wasm32-browserpod-linux-musl
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/../.." && pwd)
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
+lock_backup="$tmp/Cargo.lock"
+cp "$repo_root/Cargo.lock" "$lock_backup"
+
+cleanup() {
+  cp "$lock_backup" "$repo_root/Cargo.lock"
+  rm -rf "$tmp"
+}
+
+trap cleanup EXIT INT TERM
+
+if command -v brew >/dev/null 2>&1; then
+  llvm_prefix=$(brew --prefix llvm 2>/dev/null || true)
+
+  if [[ -n "$llvm_prefix" && -d "$llvm_prefix/bin" ]]; then
+    export PATH="$llvm_prefix/bin:$PATH"
+  fi
+fi
 
 if ! rustup toolchain list | grep -q "^$toolchain"; then
   curl -fsSL "$base_url/install.sh" -o "$tmp/install.sh"
