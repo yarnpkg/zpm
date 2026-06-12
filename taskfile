@@ -1,6 +1,6 @@
 @long-lived
 doc:
-  cd documentation && yarn astro dev
+  yarn ./website dev
 
 typecheck:
   yarn tsc --build
