@@ -1,12 +1,13 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::Arc, time::{Duration, UNIX_EPOCH}};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::{Arc, mpsc}, time::{Duration, UNIX_EPOCH}};
 
+use colored::Colorize;
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext, Source};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
 use zpm_tasks::{parse as parse_taskfile, ResolvedTasks, TaskFile, TaskId};
-use zpm_utils::{Glob, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
+use zpm_utils::{DataType, Glob, IoResultExt, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -32,6 +33,64 @@ pub const MANIFEST_NAME: &str = "package.json";
 pub const PNP_CJS_NAME: &str = ".pnp.cjs";
 pub const PNP_ESM_NAME: &str = ".pnp.loader.mjs";
 pub const PNP_DATA_NAME: &str = ".pnp.data.json";
+const LOCKFILE_DIFF_LINE_LIMIT: usize = 100;
+const LOCKFILE_DIFF_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn colorize_diff_line(line: &str) -> String {
+    if line.starts_with("+") && !line.starts_with("+++") {
+        line.green().to_string()
+    } else if line.starts_with("-") && !line.starts_with("---") {
+        line.red().to_string()
+    } else if line.starts_with("@@") {
+        DataType::Info.colorize(line)
+    } else if line.starts_with("+++") || line.starts_with("---") {
+        DataType::Path.colorize(line)
+    } else {
+        line.to_string()
+    }
+}
+
+fn render_lockfile_diff(current: Option<Vec<u8>>, expected: Vec<u8>) -> Option<String> {
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let current_text = current
+            .as_deref()
+            .map(String::from_utf8_lossy)
+            .unwrap_or_else(|| "".into())
+            .into_owned();
+        let expected_text
+            = String::from_utf8_lossy(&expected).into_owned();
+
+        let diff = similar::TextDiff::from_lines(&current_text, &expected_text)
+            .unified_diff()
+            .header("current yarn.lock", "generated yarn.lock")
+            .to_string();
+
+        let mut truncated = false;
+        let mut lines = Vec::new();
+
+        for (idx, line) in diff.lines().enumerate() {
+            if idx >= LOCKFILE_DIFF_LINE_LIMIT {
+                truncated = true;
+                break;
+            }
+
+            lines.push(colorize_diff_line(line));
+        }
+
+        if truncated {
+            lines.push(DataType::Code.colorize(&format!(
+                "... Diff truncated after {} lines.",
+                LOCKFILE_DIFF_LINE_LIMIT,
+            )));
+        }
+
+        let _ = tx.send(lines.join("\n"));
+    });
+
+    rx.recv_timeout(LOCKFILE_DIFF_TIMEOUT).ok()
+}
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidInstallMode(s.to_string())))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -407,7 +466,21 @@ impl Project {
             = JsonDocument::to_string_pretty(lockfile)?;
 
         if self.config.settings.enable_immutable_installs.value {
-            lockfile_path.fs_expect_with(contents.as_bytes(), || Error::ImmutableLockfile)?;
+            let current_content = lockfile_path
+                .fs_read()
+                .ok_missing()?;
+
+            if current_content.as_ref().is_some_and(|current| current.as_slice() == contents.as_bytes()) {
+                return Ok(());
+            }
+
+            let diff
+                = render_lockfile_diff(current_content.clone(), contents.into_bytes());
+
+            return Err(match current_content {
+                Some(_) => Error::ImmutableLockfileModification { diff },
+                None => Error::ImmutableLockfileCreation { diff },
+            });
         } else {
             lockfile_path.fs_change(contents, false)?;
         }

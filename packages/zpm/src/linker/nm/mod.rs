@@ -450,16 +450,16 @@ fn build_requests_from_locations(
             physical_package_data,
         );
 
-        let Some(build_commands) = info.build_commands else {
+        if info.build_step.is_noop() {
             continue;
-        };
+        }
 
         package_build_entries.insert(locator.clone(), all_build_entries.len());
 
         all_build_entries.push(build::BuildRequest {
             cwd: build_cwd.clone(),
             locator: locator.clone(),
-            commands: build_commands,
+            build_step: info.build_step,
             allowed_to_fail: tree.optional_builds.contains(locator),
             force_rebuild: force_rebuild_locators.contains(locator),
             inline_builds: install.inline_builds,

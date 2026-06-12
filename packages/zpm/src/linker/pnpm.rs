@@ -131,7 +131,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             physical_package_data,
         );
 
-        if let Some(build_commands) = package_build_info.build_commands {
+        if !package_build_info.build_step.is_noop() {
             // Virtualized locators share their build with the physical
             // counterpart — only the physical entry should drive a build.
             if !locator.reference.is_virtual_reference() {
@@ -143,7 +143,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 all_build_entries.push(build::BuildRequest {
                     cwd: package_location_rel,
                     locator: locator.clone(),
-                    commands: build_commands,
+                    build_step: package_build_info.build_step,
                     allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
                     force_rebuild: false, // TODO: track this properly for pnpm
                     inline_builds: install.inline_builds,

@@ -14,30 +14,6 @@ describe(`Commands`, () => {
           indent: `· `,
           name: null,
           type: `info`,
-        }, {
-          data: `┌ Installing packages`,
-          displayName: null,
-          indent: ``,
-          name: null,
-          type: `info`,
-        }, {
-          data: `└ Completed`,
-          displayName: null,
-          indent: ``,
-          name: null,
-          type: `info`,
-        }, {
-          data: `┌ Linking the project`,
-          displayName: null,
-          indent: ``,
-          name: null,
-          type: `info`,
-        }, {
-          data: `└ Completed`,
-          displayName: null,
-          indent: ``,
-          name: null,
-          type: `info`,
         }]);
       }),
     );
@@ -130,6 +106,27 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should print a diff when refusing to change the lockfile when using --immutable`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`install`);
+
+        await xfs.writeJsonPromise(ppath.join(path, `yarn.lock`), {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        });
+
+        await expect(run(`install`, `--immutable`, {
+          env: {
+            FORCE_COLOR: `1`,
+          },
+        })).rejects.toMatchObject({
+          stdout: expect.stringMatching(/Lockfile changes:[\s\S]*\x1b\[[0-9;]*m[-+]/),
+        });
+      }),
+    );
+
+    test(
       `it should refuse to create a lockfile when using --frozen-lockfile`,
       makeTemporaryEnv({
         dependencies: {
@@ -151,7 +148,7 @@ describe(`Commands`, () => {
           },
         });
 
-        await expect(run(`install`, `--immutable`)).rejects.toThrow(/The lockfile would have been created by this install/);
+        await expect(run(`install`, `--immutable`)).rejects.toThrow(/The lockfile would have been modified by this install/);
       }),
     );
 
@@ -227,7 +224,7 @@ describe(`Commands`, () => {
 
         await run(`install`);
 
-        await expect(run(`install`, `--immutable`, `--refresh-lockfile`)).rejects.toThrow(/The lockfile would have been created by this install/);
+        await expect(run(`install`, `--immutable`, `--refresh-lockfile`)).rejects.toThrow(/The lockfile would have been modified by this install/);
       }),
     );
 
@@ -260,7 +257,7 @@ describe(`Commands`, () => {
             GITHUB_EVENT_NAME: `pull_request`,
             GITHUB_EVENT_PATH: npath.fromPortablePath(eventPath),
           },
-        })).rejects.toThrow(/The lockfile would have been created by this install/);
+        })).rejects.toThrow(/The lockfile would have been modified by this install/);
       }),
     );
 
@@ -831,12 +828,13 @@ describe(`Commands`, () => {
             YARN_ENABLE_SCRIPTS: `false`,
           },
         });
+        expect(stdout).toContain(`┌ Building packages`);
         expect(stdout).toMatch(/lists build scripts, but its build has been explicitly disabled/g);
       }),
     );
 
     test(
-      `it should print an info when \`dependenciesMeta[].built: false\`, even when using using \`enableScripts: false\``,
+      `it should print a warning when \`dependenciesMeta[].built: false\`, even when using using \`enableScripts: false\``,
       makeTemporaryEnv({
         dependencies: {
           [`no-deps-scripted`]: `1.0.0`,
@@ -856,6 +854,44 @@ describe(`Commands`, () => {
             YARN_ENABLE_SCRIPTS: `false`,
           },
         });
+
+        expect(stdout).toContain(`┌ Building packages`);
+        expect(stdout).toMatch(/lists build scripts, but its build has been explicitly disabled/g);
+      }),
+    );
+
+    test(
+      `it should not repeat disabled build warnings until the package is rebuilt`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps-scripted`]: `1.0.0`,
+        },
+      }, async ({path, run, source}) => {
+        await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
+          enableScripts: false,
+        });
+
+        let {stdout} = await run(`install`, `--inline-builds`, {
+          env: {
+            YARN_ENABLE_SCRIPTS: `false`,
+          },
+        });
+
+        expect(stdout).toMatch(/lists build scripts, but its build has been explicitly disabled/g);
+
+        ({stdout} = await run(`install`, `--inline-builds`, {
+          env: {
+            YARN_ENABLE_SCRIPTS: `false`,
+          },
+        }));
+
+        expect(stdout).not.toMatch(/lists build scripts, but its build has been explicitly disabled/g);
+
+        ({stdout} = await run(`rebuild`, {
+          env: {
+            YARN_ENABLE_SCRIPTS: `false`,
+          },
+        }));
 
         expect(stdout).toMatch(/lists build scripts, but its build has been explicitly disabled/g);
       }),
