@@ -1,0 +1,118 @@
+---
+import {readFile} from 'node:fs/promises';
+
+import octIconData from '@iconify-json/octicon/icons.json';
+
+import BaseLayout from '../layouts/BaseLayout.astro';
+import {PlaygroundWorkspace} from '../components/playground/PlaygroundWorkspace';
+import '../styles/theme.css';
+
+const rootPackage = JSON.parse(await readFile(new URL(`../../../package.json`, import.meta.url), `utf8`));
+const yarnVersion = rootPackage.packageManager.replace(/^yarn@/, ``);
+
+function extractOct(name: string) {
+  const icon = (octIconData as any).icons[name];
+  if (!icon) throw new Error(`Unknown octicon: ${name}`);
+  const suffix = name.match(/-(\d+)$/)?.[1];
+  const base = suffix ? Number(suffix) : 16;
+  return {body: icon.body, width: icon.width ?? base, height: icon.height ?? base};
+}
+
+const treeOcticons = {
+  file: extractOct(`file-code-16`),
+  folder: extractOct(`file-directory-fill-16`),
+  terminal: extractOct(`terminal-16`),
+};
+const shareIcon = extractOct(`share-16`);
+---
+
+<BaseLayout title="Playground — Yarn" variant="docs" activePage="playground" description="A browser-based Yarn playground preview.">
+  <script is:inline>
+    (function() {
+      var nav = document.querySelector(`nav`);
+      var share = document.getElementById(`playground-share`);
+
+      function syncNavHeight() {
+        document.documentElement.style.setProperty(
+          `--playground-nav-height`,
+          (nav ? nav.getBoundingClientRect().height : 73) + `px`,
+        );
+      }
+
+      syncNavHeight();
+      window.addEventListener(`resize`, syncNavHeight);
+
+      if (nav && `ResizeObserver` in window)
+        new ResizeObserver(syncNavHeight).observe(nav);
+
+      if (share)
+        share.addEventListener(`click`, function() {
+          var previous = share.querySelector(`span`).textContent;
+          var done = function() {
+            share.querySelector(`span`).textContent = `Copied`;
+            setTimeout(function() {
+              share.querySelector(`span`).textContent = previous;
+            }, 1400);
+          };
+
+          if (navigator.clipboard && window.isSecureContext)
+            navigator.clipboard.writeText(location.href).then(done, done);
+          else
+            done();
+        });
+    })();
+  </script>
+
+  <main class="playground-shell box-border flex h-[calc(100dvh_-_var(--playground-nav-height,73px))] min-h-0 items-stretch justify-center p-[clamp(18px,3.4vw,42px)] max-[900px]:p-4 max-[560px]:p-2.5">
+    <section class="playground-window grid h-[min(820px,100%)] min-h-0 w-[min(1480px,100%)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[18px] border border-[rgba(168,176,212,0.18)] bg-black/75 [background-image:linear-gradient(135deg,rgba(255,255,255,0.055),transparent_42%)] shadow-[0_30px_90px_-45px_rgba(0,0,0,0.78),inset_0_1px_0_rgba(255,255,255,0.16)] backdrop-blur-[28px] backdrop-saturate-150 max-[900px]:h-full max-[900px]:rounded-[14px]" aria-label="Yarn playground">
+      <div class="grid min-h-[46px] grid-cols-[96px_minmax(0,1fr)_auto] items-center gap-4 border-b border-[var(--line)] bg-[rgba(6,8,18,0.84)] px-[18px] max-[900px]:grid-cols-[auto_minmax(0,1fr)_auto] max-[560px]:gap-2.5 max-[560px]:px-3">
+        <div class="flex gap-2 max-[560px]:gap-1.5" aria-hidden="true">
+          <span class="h-[11px] w-[11px] rounded-full border border-[color-mix(in_oklch,var(--fg)_18%,transparent)] bg-red-400/80"></span>
+          <span class="h-[11px] w-[11px] rounded-full border border-[color-mix(in_oklch,var(--fg)_18%,transparent)] bg-yellow-300/80"></span>
+          <span class="h-[11px] w-[11px] rounded-full border border-[color-mix(in_oklch,var(--fg)_18%,transparent)] bg-emerald-400/80"></span>
+        </div>
+
+        <div class="flex min-w-0 justify-self-center items-baseline gap-2.5 text-[13px] font-semibold text-[var(--fg)] max-[900px]:justify-self-start max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-px max-[560px]:leading-[1.15]">
+          <span>Yarn Playground</span>
+          <code class="text-[11px] font-medium text-[var(--fg-mute)]">/workspace</code>
+        </div>
+
+        <button id="playground-share" class="inline-flex h-[30px] cursor-pointer items-center justify-self-end gap-[7px] whitespace-nowrap rounded-lg border border-[var(--line-strong)] bg-[color-mix(in_oklch,var(--fg)_5%,transparent)] px-[11px] font-mono text-[11px] text-[var(--fg-dim)] transition-[border-color,color,background] duration-150 hover:border-[var(--accent-line)] hover:bg-[color-mix(in_oklch,var(--accent)_10%,transparent)] hover:text-[var(--fg)]" type="button">
+          <svg width="14" height="14" viewBox={`0 0 ${shareIcon.width} ${shareIcon.height}`} fill="currentColor" aria-hidden="true">
+            <Fragment set:html={shareIcon.body} />
+          </svg>
+          <span>Share</span>
+        </button>
+      </div>
+
+      <PlaygroundWorkspace client:load version={yarnVersion} octicons={treeOcticons} />
+
+      <div class="border-t border-[var(--line)] bg-[rgba(6,10,20,0.84)] px-[18px] py-[13px] text-center text-[13px] leading-[1.4] text-[var(--fg-dim)]">
+        This playground runs Yarn {yarnVersion} compiled to WASM, thanks to the incredible work of the BrowserPod folks.
+      </div>
+    </section>
+  </main>
+
+  <style is:global>
+    html:has(.playground-shell),
+    body:has(.playground-shell) {
+      overflow: hidden;
+    }
+
+    .playground-terminal-mount .xterm,
+    .playground-terminal-mount .xterm-viewport,
+    .playground-terminal-mount .xterm-screen {
+      background: transparent !important;
+    }
+
+    .playground-terminal-mount .xterm {
+      height: 100%;
+    }
+
+    .playground-editor-shell .monaco-editor,
+    .playground-editor-shell .monaco-editor-background,
+    .playground-editor-shell .monaco-editor .margin {
+      background-color: transparent !important;
+    }
+  </style>
+</BaseLayout>

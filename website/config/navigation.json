@@ -1,6 +1,7 @@
 {
   "topbar": [
     { "label": "Install", "key": "install", "href": "/getting-started/" },
+    { "label": "Playground", "key": "playground", "href": "/playground/" },
     { "label": "Concepts", "key": "concepts", "href": "/concepts/switch/" },
     { "label": "Reference", "key": "reference", "href": "/configuration/manifest/" },
     { "label": "Extra", "key": "extra", "href": "/appendix/workspaces-and-peer-deps/" },
