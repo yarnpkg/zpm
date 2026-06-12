@@ -11,6 +11,30 @@ import remarkBluesky        from './plugins/remark-bluesky.mjs';
 import remarkDocs           from './plugins/remark-docs.mjs';
 import remarkMermaid        from './plugins/remark-mermaid.mjs';
 
+const browserPodHeaders = {
+  'Cross-Origin-Embedder-Policy': `require-corp`,
+  'Cross-Origin-Opener-Policy': `same-origin`,
+};
+
+function browserPodPreviewHeaders() {
+  const applyHeaders = (server) => {
+    server.middlewares.use((req, res, next) => {
+      if (req.url?.startsWith(`/playground`)) {
+        for (const [name, value] of Object.entries(browserPodHeaders))
+          res.setHeader(name, value);
+      }
+
+      next();
+    });
+  };
+
+  return {
+    name: `browserpod-preview-headers`,
+    configurePreviewServer: applyHeaders,
+    configureServer: applyHeaders,
+  };
+}
+
 export default defineConfig({
   site: `https://v6.yarnpkg.com`,
   integrations: [react(), sitemap({filter: page => !page.includes(`/presentation/`)})],
@@ -18,7 +42,7 @@ export default defineConfig({
     format: `file`,
   },
   vite: {
-    plugins: [tailwindcss()],
+    plugins: [tailwindcss(), browserPodPreviewHeaders()],
     optimizeDeps: {
       include: [
         `prettier/standalone`,

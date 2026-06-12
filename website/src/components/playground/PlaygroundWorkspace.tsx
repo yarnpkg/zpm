@@ -4,6 +4,7 @@ import {OctIcon} from '../package/icons';
 import {PlaygroundTerminal} from './PlaygroundTerminal';
 
 import type {IconData} from '../package/types';
+import type {PlaygroundFile} from './PlaygroundTerminal';
 
 const MonacoEditor = lazy(() => import(`@monaco-editor/react`).then(m => ({default: m.default})));
 
@@ -379,6 +380,12 @@ export function PlaygroundWorkspace({version, octicons}: {version: string, octic
       .filter((entry): entry is PlaygroundEntry => !!entry);
   }, [entries, openFilePaths]);
 
+  const terminalFiles = useMemo<Array<PlaygroundFile>>(() => {
+    return entries
+      .filter((entry): entry is PlaygroundEntry & {content: string} => entry.kind === `file` && typeof entry.content === `string`)
+      .map(entry => ({path: entry.path, content: entry.content}));
+  }, [entries]);
+
   const editorEntry = useMemo(() => {
     if (selectedEntry.kind === `file`)
       return selectedEntry;
@@ -518,7 +525,7 @@ export function PlaygroundWorkspace({version, octicons}: {version: string, octic
 
         <div className="relative min-h-0 min-w-0">
           <div className={classNames(`invisible pointer-events-none absolute inset-0 min-h-0 min-w-0 opacity-0`, selectedEntry.kind === `terminal` && `visible pointer-events-auto opacity-100`)}>
-            <PlaygroundTerminal version={version} />
+            <PlaygroundTerminal files={terminalFiles} version={version} />
           </div>
 
           {editorEntry && (
