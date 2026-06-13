@@ -37,6 +37,31 @@ describe(`Protocols`, () => {
     );
 
     test(
+      `it should reuse a file:./folder cache entry when the cache is immutable`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`pkg`]: `file:./folder`,
+        },
+      }, async ({path, run, source}) => {
+        await xfs.mkdirPromise(`${path}/folder` as PortablePath);
+
+        await xfs.writeJsonPromise(`${path}/folder/package.json` as PortablePath, {
+          name: `pkg`,
+          version: `1.0.0`,
+        });
+
+        await xfs.writeFilePromise(`${path}/folder/index.js` as PortablePath, `
+          module.exports = 42;
+        `);
+
+        await run(`install`);
+        await run(`install`, `--immutable-cache`);
+
+        await expect(source(`require('pkg')`)).resolves.toEqual(42);
+      }),
+    );
+
+    test(
       `it should update the cache when a file:./file.tgz reference gets updated`,
       makeTemporaryEnv({
         dependencies: {
@@ -60,6 +85,28 @@ describe(`Protocols`, () => {
         await expect(source(`require('pkg/package.json')`)).resolves.toMatchObject({
           name: `no-deps`,
           version: `2.0.0`,
+        });
+      }),
+    );
+
+    test(
+      `it should reuse a file:./file.tgz cache entry when the cache is immutable`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`pkg`]: `file:./pkg.tgz`,
+        },
+      }, async ({path, run, source}) => {
+        const noDeps = await getPackageArchivePath(`no-deps`, `1.0.0`);
+        const destination = ppath.join(path, `pkg.tgz`);
+
+        await xfs.copyPromise(destination, noDeps);
+
+        await run(`install`);
+        await run(`install`, `--immutable-cache`);
+
+        await expect(source(`require('pkg/package.json')`)).resolves.toMatchObject({
+          name: `no-deps`,
+          version: `1.0.0`,
         });
       }),
     );

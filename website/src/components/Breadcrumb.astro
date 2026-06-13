@@ -1,0 +1,19 @@
+---
+interface Props {
+  segments: string[];
+}
+
+const { segments } = Astro.props;
+---
+
+<div class="flex items-center gap-2 mono text-[11px] text-[var(--fg-mute)] tracking-[0.1em] uppercase mb-5">
+  {segments.map((seg, i) => (
+    <Fragment>
+      {i > 0 && <span class="opacity-40">/</span>}
+      {i === segments.length - 1
+        ? <span class="text-[var(--fg-dim)]">{seg}</span>
+        : <span>{seg}</span>
+      }
+    </Fragment>
+  ))}
+</div>

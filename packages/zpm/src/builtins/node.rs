@@ -215,8 +215,7 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
                     .strip_first_segment()
                     .filter(|entry| entry.name.as_str() == bin_file.as_str())
                     .chain(once(Entry::new_file(Path::from_str("package.json").unwrap(), Cow::Owned(serialized_manifest.into_bytes()))))
-                    .prepare_npm_entries(&package_subdir_for_entries)
-                    .collect_vec();
+                    .prepare_npm_entries(&package_subdir_for_entries)?;
 
             Ok(cache_packer.pack(entries)?)
         }).await??;

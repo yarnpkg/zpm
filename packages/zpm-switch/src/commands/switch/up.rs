@@ -12,18 +12,17 @@ use crate::{
     yarn_enums::{ChannelSelector, ReleaseLine, Selector},
 };
 
-/// Set the version of Yarn to use with the local project to the latest stable release
+/// Upgrade the Yarn version used by the current project
 ///
-/// When called without arguments, downloads the latest stable Yarn version from the `zpm` release
-/// line and runs `yarn set version zpm` with it. An optional version selector can be passed to
-/// pick a specific release line, channel, version, or range, using the same syntax as the
-/// explicit `yarn switch <selector>` form.
+/// Without arguments, this command selects the latest stable version from the `zpm` release line and forwards `yarn set version zpm` to it. Pass a
+/// selector to choose a specific release line, channel, version, or range.
 ///
 #[cli::command]
 #[cli::path("switch", "up")]
 #[cli::category("General commands")]
 #[derive(Debug)]
 pub struct UpCommand {
+    /// Yarn selector to upgrade to; defaults to the latest stable `zpm` release
     selector: Option<Selector>,
 }
 

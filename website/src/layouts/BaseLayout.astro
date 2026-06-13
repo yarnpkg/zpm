@@ -1,0 +1,66 @@
+---
+import Nav from '../components/Nav.astro';
+import '../styles/tailwind.css';
+import '../styles/search.css';
+
+interface Props {
+  title: string;
+  variant?: 'index' | 'docs';
+  activePage?: string;
+  description?: string;
+  canonicalPath?: string;
+  ogType?: string;
+  ogImage?: string;
+}
+
+const { title, variant = `index`, activePage, description, canonicalPath, ogType = `website`, ogImage } = Astro.props;
+const isDocs = variant === `docs`;
+const canonicalUrl = new URL(canonicalPath ?? Astro.url.pathname, Astro.site).href;
+const pathname = Astro.url.pathname.replace(/\.html$/, ``).replace(/\/$/, ``) || `/index`;
+const ogImageUrl = ogImage ?? new URL(`/og${pathname}.png`, Astro.site).href;
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{title}</title>
+{description && <meta name="description" content={description} />}
+<link rel="canonical" href={canonicalUrl} />
+<meta property="og:title" content={title} />
+{description && <meta property="og:description" content={description} />}
+<meta property="og:url" content={canonicalUrl} />
+<meta property="og:type" content={ogType} />
+<meta property="og:site_name" content="Yarn" />
+<meta property="og:image" content={ogImageUrl} />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content={title} />
+{description && <meta name="twitter:description" content={description} />}
+<meta name="twitter:image" content={ogImageUrl} />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script is:inline>
+  (function(){var t=localStorage.getItem('yarn-theme');if(t)document.documentElement.setAttribute('data-theme',t)})();
+</script>
+<slot name="head" />
+</head>
+<body class="m-0 p-0 overflow-x-hidden antialiased">
+
+<div class="sky fixed inset-0 z-0"></div>
+
+<canvas id="stars" class="stars-canvas fixed inset-0 z-[1] pointer-events-none"></canvas>
+
+{isDocs && (
+  <div class="fixed inset-0 z-[2] pointer-events-none bg-[color-mix(in_oklch,var(--bg-0)_35%,transparent)]"></div>
+)}
+
+<div class="relative z-[3]">
+  <Nav variant={variant} activePage={activePage} />
+  <slot />
+</div>
+
+</body>
+</html>

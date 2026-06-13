@@ -153,6 +153,10 @@ pub struct RemoteManifest {
 pub struct PublishConfig {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub access: Option<ManifestNpmPublishAccess>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "type")]
     pub type_: Option<String>,
 
@@ -195,6 +199,17 @@ pub struct PublishConfig {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provenance: Option<bool>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ManifestNpmPublishAccess {
+    Public,
+    Restricted,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Archive, rkyv::Serialize, rkyv::Deserialize)]

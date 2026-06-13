@@ -1,0 +1,189 @@
+/* Deck presentation styles — CSS custom properties */
+.deck-root {
+  --accent-h: 38;
+  --accent: oklch(0.78 0.16 var(--accent-h));
+  --accent-soft: oklch(0.78 0.16 var(--accent-h) / 0.14);
+  --accent-line: oklch(0.78 0.16 var(--accent-h) / 0.35);
+
+  --code-bg: rgba(8, 10, 30, 0.78);
+  --code-border: rgba(120, 130, 180, 0.20);
+  --term-bg: rgba(4, 6, 18, 0.85);
+
+  --sx-keyword: oklch(0.78 0.16 38);
+  --sx-string:  oklch(0.78 0.10 150);
+  --sx-number:  oklch(0.78 0.13 280);
+  --sx-comment: oklch(0.55 0.04 260);
+  --sx-fn:      oklch(0.82 0.10 220);
+  --sx-prop:    oklch(0.85 0.06 60);
+  --sx-punct:   oklch(0.65 0.03 260);
+  --sx-tag:     oklch(0.78 0.13 340);
+
+  --term-prompt: oklch(0.78 0.16 38);
+  --term-out:    oklch(0.85 0.04 260);
+  --term-dim:    oklch(0.62 0.04 260);
+  --term-ok:     oklch(0.80 0.13 145);
+  --term-warn:   oklch(0.80 0.14 80);
+  --term-err:    oklch(0.72 0.18 25);
+}
+
+html[data-theme="light"] .deck-root {
+  --code-bg: rgba(255, 255, 255, 0.78);
+  --code-border: rgba(12, 16, 48, 0.10);
+  --term-bg: rgba(255, 255, 255, 0.86);
+
+  --sx-keyword: oklch(0.55 0.18 38);
+  --sx-string:  oklch(0.50 0.13 150);
+  --sx-number:  oklch(0.50 0.18 280);
+  --sx-comment: oklch(0.55 0.04 260);
+  --sx-fn:      oklch(0.50 0.14 230);
+  --sx-prop:    oklch(0.45 0.08 60);
+  --sx-punct:   oklch(0.45 0.03 260);
+  --sx-tag:     oklch(0.55 0.18 340);
+
+  --term-prompt: oklch(0.55 0.18 38);
+  --term-out:    oklch(0.30 0.04 260);
+  --term-dim:    oklch(0.55 0.04 260);
+  --term-ok:     oklch(0.55 0.15 145);
+  --term-warn:   oklch(0.60 0.15 80);
+  --term-err:    oklch(0.55 0.20 25);
+}
+
+/* deck-stage transparent passthrough */
+deck-stage { display: block; width: 100%; height: 100vh; background: transparent !important; }
+
+/* ── Stars background ── */
+.slide-stars {
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, rgba(255,255,255,0.7), transparent 60%),
+    radial-gradient(1px 1px at 28% 64%, rgba(255,255,255,0.5), transparent 60%),
+    radial-gradient(1.4px 1.4px at 47% 22%, rgba(255,255,255,0.85), transparent 60%),
+    radial-gradient(1px 1px at 62% 80%, rgba(255,255,255,0.55), transparent 60%),
+    radial-gradient(1px 1px at 78% 12%, rgba(255,255,255,0.7), transparent 60%),
+    radial-gradient(1.2px 1.2px at 84% 52%, rgba(255,255,255,0.65), transparent 60%),
+    radial-gradient(1px 1px at 36% 38%, rgba(255,255,255,0.45), transparent 60%),
+    radial-gradient(1px 1px at 70% 32%, rgba(255,255,255,0.5), transparent 60%),
+    radial-gradient(1px 1px at 92% 86%, rgba(255,255,255,0.55), transparent 60%),
+    radial-gradient(1px 1px at 6% 78%, rgba(255,255,255,0.5), transparent 60%),
+    radial-gradient(1px 1px at 50% 8%, rgba(255,255,255,0.6), transparent 60%),
+    radial-gradient(1px 1px at 18% 92%, rgba(255,255,255,0.5), transparent 60%);
+}
+html[data-theme="light"] .slide-stars { opacity: 0; }
+
+/* ── Title em styling ── */
+h1.slide-hero-title em { font-style: normal; color: var(--fg-dim); font-weight: 300; }
+h2.slide-title em { font-style: normal; color: var(--fg-dim); font-weight: 300; }
+
+/* ── Inline formatting cascades ── */
+.slide-body-text strong, .slide-lede strong, .slide-bullets li strong, .slide-numbered li strong { color: var(--fg); font-weight: 500; }
+.slide-body-text em, .slide-lede em, .slide-bullets li em, .slide-numbered li em { font-style: italic; color: var(--fg); }
+.slide-body-text u, .slide-bullets li u, .slide-numbered li u { text-decoration-color: var(--accent); text-underline-offset: 4px; text-decoration-thickness: 2px; }
+.slide-body-text a, .slide-lede a, .slide-bullets li a, .slide-numbered li a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-line);
+  padding-bottom: 1px;
+  transition: border-color 0.2s;
+}
+.slide-body-text a:hover { border-bottom-color: var(--accent); }
+.slide-body-text + .slide-body-text { margin-top: 22px; }
+
+/* ── List pseudo-elements ── */
+.slide-bullets li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 28px;
+  width: 18px;
+  height: 1px;
+  background: var(--accent);
+}
+.slide-bullets li:last-child, .slide-numbered li:last-child { border-bottom: none; }
+.slide-numbered { counter-reset: oli; }
+.slide-numbered li { counter-increment: oli; }
+.slide-numbered li::before {
+  content: counter(oli, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  font-weight: 500;
+}
+
+/* ── Column rule ── */
+.slide-col-rule .slide-cols-2 > div:nth-child(2) { border-left: 1px solid var(--line); padding-left: 80px; }
+
+/* ── Code block dot colors ── */
+.slide-codeblock-dot:nth-child(1) { background: oklch(0.70 0.16 25 / 0.6); }
+.slide-codeblock-dot:nth-child(2) { background: oklch(0.80 0.14 80 / 0.6); }
+.slide-codeblock-dot:nth-child(3) { background: oklch(0.78 0.13 145 / 0.6); }
+
+/* ── Shiki overrides ── */
+.slide-codeblock .shiki { background: transparent !important; }
+.slide-codeblock .shiki code { font-family: inherit; }
+
+/* ── Terminal dot colors ── */
+.slide-terminal-dot:nth-child(1) { background: oklch(0.70 0.16 25 / 0.6); }
+.slide-terminal-dot:nth-child(2) { background: oklch(0.80 0.14 80 / 0.6); }
+.slide-terminal-dot:nth-child(3) { background: oklch(0.78 0.13 145 / 0.6); }
+
+/* ── Terminal JS token classes ── */
+.slide-terminal .line { display: block; min-height: 1.55em; white-space: pre-wrap; }
+.slide-terminal .prompt { color: var(--term-prompt); }
+.slide-terminal .cmd { color: var(--fg); }
+.slide-terminal .out { color: var(--term-out); }
+.slide-terminal .dim { color: var(--term-dim); }
+.slide-terminal .ok { color: var(--term-ok); }
+.slide-terminal .warn { color: var(--term-warn); }
+.slide-terminal .err { color: var(--term-err); }
+.slide-terminal .accent { color: var(--accent); }
+.slide-terminal .cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  background: var(--fg);
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  animation: deck-blink 1.05s steps(1) infinite;
+}
+@keyframes deck-blink { 50% { opacity: 0; } }
+
+/* ── Image frame backgrounds ── */
+.slide-image-frame .placeholder {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0,
+    transparent 14px,
+    var(--line) 14px,
+    var(--line) 15px
+  );
+}
+.slide-image-frame .caption {
+  background: linear-gradient(0deg, var(--card) 0%, transparent 100%);
+}
+
+/* ── Entrance animations ── */
+section.slide[data-deck-active].is-entering .reveal {
+  animation: deck-reveal 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+section.slide[data-deck-active].is-entering .reveal-1 { animation-delay: 60ms; }
+section.slide[data-deck-active].is-entering .reveal-2 { animation-delay: 180ms; }
+section.slide[data-deck-active].is-entering .reveal-3 { animation-delay: 300ms; }
+section.slide[data-deck-active].is-entering .reveal-4 { animation-delay: 420ms; }
+section.slide[data-deck-active].is-entering .reveal-5 { animation-delay: 540ms; }
+@keyframes deck-reveal {
+  from { opacity: 0; transform: translateY(14px); filter: blur(2px); }
+  to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+section.slide[data-deck-active].is-entering {
+  animation: deck-slidein 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes deck-slidein {
+  from { transform: translateY(18px); }
+  to   { transform: translateY(0); }
+}
+
+/* ── Theme toggle hover ── */
+.deck-theme-toggle:hover { color: var(--fg); border-color: var(--fg-dim); transform: scale(1.05); }

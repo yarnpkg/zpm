@@ -1,0 +1,411 @@
+---
+import DeckLayout from '../../layouts/DeckLayout.astro';
+import TitleLayout from '../../components/deck/layouts/TitleLayout.astro';
+import OneColumnLayout from '../../components/deck/layouts/OneColumnLayout.astro';
+import QuoteLayout from '../../components/deck/layouts/QuoteLayout.astro';
+import TwoColumnLayout from '../../components/deck/layouts/TwoColumnLayout.astro';
+import ImageLayout from '../../components/deck/layouts/ImageLayout.astro';
+import ClosingLayout from '../../components/deck/layouts/ClosingLayout.astro';
+import Terminal from '../../components/deck/Terminal.astro';
+import FullCodeLayout from '../../components/deck/layouts/FullCodeLayout.astro';
+import SimpleIcon from '../../components/SimpleIcon.astro';
+---
+
+<DeckLayout title="Yarn in Rust: a bet on the decade — JSNation 2026">
+
+  <TitleLayout
+    label="01 Title"
+    tag="// jsnation eu · 2026"
+    eyebrow="A talk by Maël Nison"
+    eyebrowSuffix="Lead maintainer of Yarn"
+    title='Yarn in Rust'
+    lede="A bet on the decade"
+    bottomRight="// jsnation eu · 2026"
+  />
+
+  <OneColumnLayout
+    title='A bit of history'
+    eyebrow="Chapter 1"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div class="flex">
+        <div class="w-[300px]">2017</div>
+        <div class="w-[400px]">Yarn 1.x</div>
+        <div>first stable release</div>
+      </div>
+      <div class="flex">
+        <div class="w-[300px]">2019</div>
+        <div class="w-[400px]">Yarn 2.x</div>
+        <div>rewrite in <b>TypeScript</b></div>
+      </div>
+      <div class="flex">
+        <div class="w-[300px]">2026</div>
+        <div class="w-[400px]">Yarn 6.x</div>
+        <div>rewrite in <b>Rust</b></div>
+      </div>
+    </div>
+  </OneColumnLayout>
+
+  <QuoteLayout>
+    What are we doing?
+  </QuoteLayout>
+
+  {/* ── SLIDE 4 — YARN, AS IT STANDS ── */}
+  <OneColumnLayout
+    title='Yarn was <em>stable</em>'
+    eyebrow="Chapter 1"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div>
+        We rarely had install bugs.
+      </div>
+      <div>
+        Installs were reasonably fast.
+      </div>
+      <div>
+        Building new features was easy.
+      </div>
+    </div>
+  </OneColumnLayout>
+
+  <OneColumnLayout
+    title='But we had reached the ceiling'
+    eyebrow="Chapter 1"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div>We supported monorepos with hundreds of packages. Supporting thousands was more difficult.</div>
+      <div>On such repos, <span class="font-bold">yarn run</span> could have more than 1s of latency.</div>
+    </div>
+  </OneColumnLayout>
+
+  <OneColumnLayout
+    title='Some improvements needed massive performance'
+    eyebrow="Chapter 1"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      Such as <span class="font-bold">Lazy Installs</span>, which let Yarn check whether your projects are up-to-date with their dependencies, installing them if not.
+    </div>
+  </OneColumnLayout>
+
+  <OneColumnLayout
+    title='One package manager for several ecosystems'
+    eyebrow="Chapter 1"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div>Ever since the TS rewrite I always wanted Yarn to be more than a tool for JavaScript. What about Python? Rust?</div>
+      <div>And Node.js didn't make it easy to do so, primarily because of distribution.</div>
+    </div>
+  </OneColumnLayout>
+
+  <QuoteLayout>
+    It was time to reinvent ourselves.
+  </QuoteLayout>
+
+  <OneColumnLayout
+    title='Lessons from the past'
+    eyebrow="Chapter 2"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div>The TS rewrite was a teaching moment.</div>
+      <div>Too many breaking changes.</div>
+      <div>Too much friction.</div>
+    </div>
+  </OneColumnLayout>
+
+  <OneColumnLayout
+    title='Start from scratch? Not quite.'
+    eyebrow="Chapter 2"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div>Back in 2019, all our tests had to be rewritten...</div>
+      <div>But now in 2026, we can reuse the tests from the TS rewrite!</div>
+    </div>
+  </OneColumnLayout>
+
+  <FullCodeLayout
+    eyebrow="Chapter 2"
+    title="Testing at the CLI level"
+    filename="package-manager.test.ts"
+    lang="javascript"
+    compact={true}
+    code={`test(
+  \`it should correctly install a dependency that itself contains a fixed dependency\`,
+  makeTemporaryEnv({
+    dependencies: {
+      [\`one-fixed-dep\`]: \`1.0.0\`,
+    },
+  }, async ({path, run, source}) => {
+    // The magic was in this run function - it can point to any binary!
+    await run(\`install\`);
+
+    await expect(source(\`require('one-fixed-dep')\`)).resolves.toMatchObject({
+      name: \`one-fixed-dep\`,
+      version: \`1.0.0\`,
+      dependencies: {
+        [\`no-deps\`]: {
+          name: \`no-deps\`,
+          version: \`1.0.0\`,
+        },
+      },
+    });
+  }),
+);`}
+  />
+
+  <ImageLayout
+    eyebrow="Chapter 2"
+    title="Then you can build a neat UI to track progress."
+    href="/jsnation-2026-06-test-results.png"
+    alt="Yarn 6 test results climbing toward full coverage"
+  />
+
+  <QuoteLayout>
+    Out of 1590 tests, 1468 are now passing.
+  </QuoteLayout>
+
+  <OneColumnLayout
+    title='Learning a new language'
+    eyebrow="Chapter 2"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div>This project started early during the AI boom. But <i>"tell me how you'd do &lt;JS code&gt; but in Rust"</i> was already useful.</div>
+      <div>Also very motivating to see my Rust proficiency grow over the course of the project!</div>
+    </div>
+  </OneColumnLayout>
+
+  <OneColumnLayout
+    title='Couple of things learned from Rust'
+    eyebrow="Chapter 2"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div>Rust has good tooling, Cargo is nice.</div>
+      <div>A lot of experimental features stuck in limbo.</div>
+      <div>Rust prevented a LOT of concurrency / shared mem pitfalls.</div>
+      <div>It however required mental model shifts.</div>
+    </div>
+  </OneColumnLayout>
+
+  <OneColumnLayout
+    title='AI-powered rewrite?'
+    eyebrow="Chapter 2"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div>Unlike Bun, we used AI sparingly.</div>
+      <div>Considering Rust's complexity, I feel more comfortable with a human-driven rewrite.</div>
+      <div>It was still used for <b>code review</b>, <b>heisenbug investigations</b>, <b>experimental features</b>, and <b>porting easy tests</b>.</div>
+    </div>
+  </OneColumnLayout>
+
+  <QuoteLayout>
+    We're reaching the conclusion.
+  </QuoteLayout>
+
+  <OneColumnLayout
+    title='Did anything go wrong?'
+    eyebrow="Chapter 3"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div>Any rewrite is a <span class="font-bold">brutal</span> endeavor.</div>
+      <div>If I spend my time rewriting the thing, when do I integrate it?</div>
+      <div>Can you afford freezing your main branch for N months?</div>
+      <div>First few months feel like walking in the desert.</div>
+    </div>
+  </OneColumnLayout>
+
+  <OneColumnLayout
+    title='Should all projects be rewritten into Rust?'
+    eyebrow="Chapter 3"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div>I'd be cautious about that. Rebuilding a project comes with a long tail of problems. <span class="font-bold">Rust isn't a silver bullet.</span></div>
+      <div>AI is changing the trade-offs, but comes with hidden long-term costs - can we afford to not be <span class="font-bold">intimately familiar</span> with our codebase?</div>
+    </div>
+  </OneColumnLayout>
+
+  <QuoteLayout>
+    Curious about performances?
+  </QuoteLayout>
+
+  <OneColumnLayout
+    title='Median across all scenarios.'
+    eyebrow="Chapter 3"
+    bodyClass='flex flex-1 mx-0'
+  >
+    <div class="bench-summary">
+      <div class="bench-summary-card reveal reveal-3">
+        <h4>Cold install · seconds</h4>
+        {[
+          { name: `yarn 6.x`,     time: `3.98`,  w: `0.165`, self: true  },
+          { name: `pnpm`,         time: `6.67`,  w: `0.277`, self: false },
+          { name: `yarn 4.x`,     time: `8.55`,  w: `0.355`, self: false },
+          { name: `yarn classic`, time: `22.74`, w: `0.945`, self: false },
+          { name: `npm`,          time: `24.06`, w: `1.000`, self: false },
+        ].map(b => (
+          <div class="bench-summary-bar">
+            <div class:list={[`lbl`, b.self && `self`]}>{b.name}</div>
+            <div class="track"><div class:list={[`fill`, b.self && `self`]} style={`--w: ${b.w}`}></div></div>
+            <div class:list={[`val`, b.self && `self`]}>{b.time}s</div>
+          </div>
+        ))}
+      </div>
+
+      <div class="bench-summary-card reveal reveal-4">
+        <h4>Warm install · seconds</h4>
+        {[
+          { name: `yarn 6.x`,     time: `0.84`, w: `0.095`, self: true  },
+          { name: `pnpm`,         time: `1.36`, w: `0.154`, self: false },
+          { name: `yarn 4.x`,     time: `1.56`, w: `0.177`, self: false },
+          { name: `yarn classic`, time: `4.42`, w: `0.501`, self: false },
+          { name: `npm`,          time: `8.83`, w: `1.000`, self: false },
+        ].map(b => (
+          <div class="bench-summary-bar">
+            <div class:list={[`lbl`, b.self && `self`]}>{b.name}</div>
+            <div class="track"><div class:list={[`fill`, b.self && `self`]} style={`--w: ${b.w}`}></div></div>
+            <div class:list={[`val`, b.self && `self`]}>{b.time}s</div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <p class="reveal reveal-5 font-mono text-[18px] text-[var(--fg-mute)] mt-10 leading-[1.5] max-w-[1200px]">
+      Geometric mean of per-project medians (Next.js, Gatsby) for each series. Bar widths normalize against the slowest series. Source: <span class="text-[var(--fg-dim)]">repo.yarnpkg.com/benchmarks</span>.
+    </p>
+  </OneColumnLayout>
+
+  <OneColumnLayout
+    title='And some scenarios outperform.'
+    eyebrow="Chapter 3"
+  >
+    <div class="bench-summary bench-summary-solo">
+      <div class="bench-summary-card reveal reveal-3">
+        <h4>Small installs · seconds</h4>
+        {[
+          { name: `yarn 6.x`,     time: `0.17`, w: `0.065`, self: true  },
+          { name: `yarn 4.x`,     time: `1.01`, w: `0.393`, self: false },
+          { name: `pnpm`,         time: `1.28`, w: `0.495`, self: false },
+          { name: `yarn classic`, time: `1.61`, w: `0.624`, self: false },
+          { name: `npm`,          time: `2.58`, w: `1.000`, self: false },
+        ].map(b => (
+          <div class="bench-summary-bar">
+            <div class:list={[`lbl`, b.self && `self`]}>{b.name}</div>
+            <div class="track"><div class:list={[`fill`, b.self && `self`]} style={`--w: ${b.w}`}></div></div>
+            <div class:list={[`val`, b.self && `self`]}>{b.time}s</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </OneColumnLayout>
+
+  <OneColumnLayout
+    title="Was this project the right choice for Yarn?"
+    eyebrow="Chapter 3"
+  >
+    <div class="space-y-[50px] text-[55px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <div>We built the package manager we need for the next decade.</div>
+      <div>This doesn't scale; motivation and resilience were key.</div>
+      <div>And yes, <span class="font-bold">the multi-ecosystem story is coming.</span></div>
+      <div>More devlogs to come, stay tuned!</div>
+      <div class="flex mt-20 items-center justify-end gap-14 text-white text-[30px]">
+        <span class="inline-flex items-center gap-3">
+          <SimpleIcon name="bluesky" size={48} class="text-[#1185FE]" />
+          @yarnpkg.dev
+        </span>
+        <span class="inline-flex items-center gap-3">
+          <SimpleIcon name="twitter" size={48} class="text-[#1DA1F2]" />
+          @yarnpkg
+        </span>
+        <span class="inline-flex items-center gap-3">
+          <SimpleIcon name="discord" size={48} class="text-[#5865F2]" />
+          discord.gg/yarnpkg
+        </span>
+      </div>
+    </div>
+  </OneColumnLayout>
+
+  {/* ── Slide entrance animation ── */}
+  <script is:inline slot="scripts">
+    var slides = Array.from(document.querySelectorAll('section.slide'));
+
+    function onSlideActive(slide) {
+      slide.classList.remove('is-entering');
+      void slide.offsetWidth;
+      slide.classList.add('is-entering');
+      setTimeout(function() { slide.classList.remove('is-entering'); }, 1400);
+    }
+
+    var slideObserver = new MutationObserver(function(mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        var m = mutations[i];
+        if (m.attributeName === 'data-deck-active' && m.target.hasAttribute('data-deck-active')) {
+          onSlideActive(m.target);
+        }
+      }
+    });
+    slides.forEach(function(s) { slideObserver.observe(s, { attributes: true, attributeFilter: ['data-deck-active'] }); });
+
+    setTimeout(function() {
+      slides.forEach(function(s) { if (s.hasAttribute('data-deck-active')) onSlideActive(s); });
+    }, 100);
+  </script>
+
+</DeckLayout>
+
+<style is:global>
+  /* Mirrors .summary-card / .summary-bar in benchmarks.astro, scaled up for the 1920x1080 stage. */
+  .bench-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+  }
+  .bench-summary.bench-summary-solo {
+    grid-template-columns: minmax(0, 1100px);
+    justify-content: center;
+  }
+  .bench-summary-card {
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    background: color-mix(in oklch, var(--card) 55%, transparent);
+    padding: 36px 44px;
+    backdrop-filter: blur(12px);
+  }
+  .bench-summary-card h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 20px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fg-mute);
+    margin: 0 0 28px;
+    font-weight: 500;
+  }
+  .bench-summary-bar {
+    display: grid;
+    grid-template-columns: 220px 1fr 140px;
+    align-items: center;
+    gap: 28px;
+    padding: 14px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 26px;
+  }
+  .bench-summary-bar .lbl { color: var(--fg-dim); }
+  .bench-summary-bar .lbl.self { color: var(--fg); font-weight: 500; }
+  .bench-summary-bar .track {
+    height: 16px;
+    background: color-mix(in oklch, var(--fg) 5%, transparent);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-summary-bar .fill {
+    height: 100%;
+    background: var(--fg-mute);
+    border-radius: 8px;
+    transform-origin: left;
+    transform: scaleX(0);
+  }
+  .bench-summary-bar .fill.self { background: var(--accent); }
+  .bench-summary-bar .val { color: var(--fg); text-align: right; font-variant-numeric: tabular-nums; }
+  .bench-summary-bar .val.self { color: var(--accent); }
+  section.slide[data-deck-active] .bench-summary-bar .fill {
+    animation: bench-grow 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  @keyframes bench-grow { to { transform: scaleX(var(--w, 1)); } }
+</style>

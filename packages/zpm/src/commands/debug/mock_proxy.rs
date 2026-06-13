@@ -9,6 +9,10 @@ use tokio::{net::TcpListener, sync::RwLock};
 
 use crate::error::Error;
 
+/// Start a caching mock HTTP proxy
+///
+/// This debug command starts a local proxy for requests to a remote URL. Responses are cached in memory for the life of the process.
+///
 #[cli::command]
 #[cli::path("debug", "mock-proxy")]
 pub struct MockProxy {

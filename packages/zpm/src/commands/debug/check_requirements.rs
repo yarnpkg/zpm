@@ -4,9 +4,14 @@ use zpm_utils::Requirements;
 
 use crate::{error::Error, project::Project};
 
+/// Validate package requirements against supported architectures
+///
+/// This debug command prints the configured supported systems, the parsed requirements, and whether any supported system satisfies them.
+///
 #[cli::command]
 #[cli::path("debug", "check-requirements")]
 pub struct CheckRequirements {
+    /// Requirements JSON to validate
     requirements: JsonSource<Requirements>,
 }
 

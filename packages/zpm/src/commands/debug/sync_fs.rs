@@ -7,10 +7,17 @@ use zpm_utils::Path;
 
 use crate::error::Error;
 
+/// Preview filesystem sync operations
+///
+/// This debug command reads a JSON sync definition, applies it to the destination tree in memory, and prints the operations that would be run.
+///
 #[cli::command]
 #[cli::path("debug", "sync-fs")]
 pub struct SyncFs {
+    /// Destination directory for the sync plan
     destination: Path,
+
+    /// JSON file containing the sync definition
     definition_file: Path,
 }
 

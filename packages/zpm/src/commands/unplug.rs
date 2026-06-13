@@ -11,17 +11,14 @@ use crate::{
     project,
 };
 
-/// Requests a package to be materialized on disk
+/// Mark packages to be unpacked on disk
 ///
-/// This command will add the selectors matching the specified patterns to the list of packages that must be unplugged when installed.
+/// This command stores `dependenciesMeta` entries that force matching packages to be unplugged when installed.
 ///
-/// A package being unplugged means that instead of being referenced directly through its archive, it will be unpacked at install time in the
-/// directory configured via `pnpUnpluggedFolder`. Note that unpacking packages this way is generally not recommended because it'll make it harder to
-/// store your packages within the repository. However, it's a good approach to quickly and safely debug some packages, and can even sometimes be
-/// required depending on the context (for example when the package contains shellscripts).
+/// An unplugged package is extracted into `pnpUnpluggedFolder` instead of being loaded directly from its archive. This is useful for debugging or for
+/// packages that need real files on disk, such as packages with native sources or shell scripts.
 ///
-/// Running the command will set a persistent flag inside your top-level `package.json`, in the `dependenciesMeta` field. As such, to undo its effects,
-/// you'll need to revert the changes made to the manifest and run `yarn install` to apply the modification.
+/// The setting is persistent. Use `--revert` or edit the top-level manifest, then run `yarn install` to apply the change.
 ///
 /// By default, only direct dependencies from the current workspace are affected. If `-A,--all` is set, direct dependencies from the entire project are
 /// affected. Using the `-R,--recursive` flag will affect transitive dependencies as well as direct ones.
@@ -33,7 +30,7 @@ use crate::{
 #[cli::path("unplug")]
 #[cli::category("Dependency management")]
 pub struct Unplug {
-    /// Revert the changes made to the manifest
+    /// Remove the unplugged flag for the selected packages
     #[cli::option("--revert", default = false)]
     revert: bool,
 
@@ -49,7 +46,7 @@ pub struct Unplug {
     #[cli::option("--json", default = false)]
     json: bool,
 
-    /// The patterns to unplug
+    /// Package patterns to unplug
     patterns: Vec<VersionFilter>,
 }
 

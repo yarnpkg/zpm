@@ -120,6 +120,7 @@ pub enum YarnCli {
     Patch(patch::Patch),
     Rebuild(rebuild::Rebuild),
     Remove(remove::Remove),
+    RunList(run::RunList),
     Run(run::Run),
     TaskHistory(tasks::history::TaskHistory),
     TaskList(tasks::list::TaskList),

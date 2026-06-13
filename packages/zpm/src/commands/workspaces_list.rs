@@ -13,17 +13,17 @@ use crate::{
 
 /// List the workspaces in the project
 ///
-/// This command will print the list of all workspaces in the project.
+/// This command prints the list of workspaces in the project.
 ///
-/// - If `--since` is set, Yarn will only list workspaces that have been modified since the specified ref. By default Yarn will use the refs
-///   specified by the `changesetBaseRefs configuration option.
+/// - If `--since` is set, Yarn only lists workspaces modified since the specified ref. Without an explicit ref, Yarn uses the
+///   `changesetBaseRefs` configuration.
 ///
 /// - If `-R,--recursive` is set along with `--since`, Yarn will also list workspaces that depend on workspaces that have been changed since the
 ///   specified ref, recursively following `dependencies` and `devDependencies` fields.
 ///
-/// - If `--no-private` is set, Yarn will not list any workspaces that have the `private` field set to true.
+/// - If `--no-private` is set, Yarn omits workspaces whose manifest has `private: true`.
 ///
-/// If both the `-v,--verbose` and `--json` options are set, Yarn will also return the cross-dependencies between each workspaces (useful when you
+/// If both `-v,--verbose` and `--json` are set, Yarn also returns cross-dependencies between workspaces (useful when you
 /// wish to automatically generate Bazel rules).
 ///
 #[cli::command]
@@ -42,7 +42,7 @@ pub struct WorkspacesList {
     #[cli::option("--since")]
     since: Option<Option<String>>,
 
-    /// Follow dependencies
+    /// Include dependents of changed workspaces when used with `--since`
     #[cli::option("-R,--recursive", default = false)]
     recursive: bool,
 
@@ -50,7 +50,7 @@ pub struct WorkspacesList {
     #[cli::option("--json", default = false)]
     json: bool,
 
-    /// Include a hash of the workspace's dependency tree (requires --json)
+    /// Include a hash of each workspace dependency tree (requires `--json`)
     #[cli::option("--tree-hash", default = false)]
     tree_hash: bool,
 }

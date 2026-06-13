@@ -8,11 +8,13 @@ use crate::{
     manifest::find_closest_package_manager,
 };
 
+/// Stop the daemon for the current project
 #[cli::command]
 #[cli::path("switch", "daemon")]
 #[cli::category("Daemon management")]
 #[derive(Debug)]
 pub struct DaemonKillCommand {
+    /// Stop the current project's daemon
     #[cli::option("--kill")]
     _kill: bool,
 }

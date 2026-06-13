@@ -16,10 +16,10 @@ use crate::{
     project::Project,
 };
 
-/// Perform a vulnerability audit against the installed packages.
+/// Audit installed npm packages for known vulnerabilities
 ///
-/// This command checks for known security reports on the packages you use. The reports are by default extracted from
-/// the npm registry, and may or may not be relevant to your actual program (not all vulnerabilities affect all code paths).
+/// This command checks selected npm packages against advisory data from the configured audit registry. Advisory relevance depends on how the package
+/// is used in your project.
 ///
 /// For consistency with our other commands the default is to only check the direct dependencies for the active workspace.
 /// To extend this search to all workspaces, use `-A,--all`. To extend this search to both direct and transitive dependencies,
@@ -44,15 +44,15 @@ use crate::{
 #[cli::path("npm", "audit")]
 #[cli::category("Npm-related commands")]
 pub struct Audit {
-    /// Audit dependencies from all workspaces
+    /// Audit direct dependencies from all workspaces
     #[cli::option("-A,--all", default = false)]
     all: bool,
 
-    /// Audit transitive dependencies as well
+    /// Include transitive dependencies in the audit
     #[cli::option("-R,--recursive", default = false)]
     recursive: bool,
 
-    /// Which environments to cover (all, production, development)
+    /// Dependency environment to audit (`all`, `production`, or `development`)
     #[cli::option("--environment", default = "all".to_string())]
     environment: String,
 
@@ -60,19 +60,19 @@ pub struct Audit {
     #[cli::option("--json", default = false)]
     json: bool,
 
-    /// Don't warn about deprecated packages
+    /// Omit deprecation warnings from the audit request
     #[cli::option("--no-deprecations", default = false)]
     no_deprecations: bool,
 
-    /// Minimal severity requested for packages to be displayed (info, low, moderate, high, critical)
+    /// Minimum advisory severity to display (`info`, `low`, `moderate`, `high`, or `critical`)
     #[cli::option("--severity", default = "info".to_string())]
     severity: String,
 
-    /// Array of glob patterns of packages to exclude from audit
+    /// Package name glob patterns to exclude from the audit
     #[cli::option("--exclude", default = Vec::new())]
     excludes: Vec<String>,
 
-    /// Array of glob patterns of advisory ID's to ignore in the audit report
+    /// Advisory ID glob patterns to ignore in the audit report
     #[cli::option("--ignore", default = Vec::new())]
     ignores: Vec<String>,
 }

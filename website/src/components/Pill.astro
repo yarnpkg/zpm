@@ -1,0 +1,18 @@
+---
+interface Props {
+  variant: 'type' | 'required' | 'since' | 'default' | 'deprecated';
+}
+
+const { variant } = Astro.props;
+
+const base = `inline-flex items-center font-mono text-[11px] leading-none px-[7px] py-1 rounded-[5px] border tracking-[0.01em] whitespace-nowrap`;
+const variants: Record<string, string> = {
+  type: `border-[var(--pill-type-border)] bg-[var(--pill-type-bg)] text-[var(--pill-type-fg)]`,
+  required: `border-[var(--pill-req-border)] bg-[var(--pill-req-bg)] text-[var(--pill-req-fg)]`,
+  since: `border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent)]`,
+  default: `border-[var(--line)] bg-[color-mix(in_oklch,var(--fg)_5%,transparent)] text-[var(--fg-dim)]`,
+  deprecated: `border-[var(--line)] bg-[color-mix(in_oklch,var(--fg)_5%,transparent)] text-[var(--fg-mute)] line-through decoration-[var(--pill-dep-strike)] decoration-1`,
+};
+---
+
+<span class={`${base} ${variants[variant]}`}><slot /></span>

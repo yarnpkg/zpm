@@ -142,9 +142,23 @@ impl BuildRequest {
                         },
 
                         false => {
-                            // `script_result.ok()` writes the captured
-                            // log itself; emitting a success log here
-                            // would print it twice.
+                            let script_result = if inline_builds {
+                                match script_result {
+                                    ScriptResult::Failure(mut output, program, shell_line) => {
+                                        output.stdout = combined_stdout;
+                                        output.stderr = combined_stderr;
+                                        ScriptResult::Failure(output, program, shell_line)
+                                    },
+
+                                    ScriptResult::Success(_) => unreachable!(),
+                                }
+                            } else {
+                                script_result
+                            };
+
+                            // `script_result.ok()` writes the captured log
+                            // itself; emitting a success log here would print
+                            // it twice.
                             Err(script_result.ok().unwrap_err())
                         },
                     };

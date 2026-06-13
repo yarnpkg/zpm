@@ -12,11 +12,10 @@ use crate::{
     versioning::VersioningFile,
 };
 
-/// Check that all the relevant packages have been bumped
+/// Check that changed workspaces have version decisions
 ///
-/// This command will check that all the workspaces that have been modified
-/// (compared to the branch base) have been declared (or declined) in the
-/// versioning file (`.yarn/versions`).
+/// This command checks that every workspace changed since the branch base, plus its affected dependents, has either a release decision or a decline
+/// entry in `.yarn/versions`.
 ///
 #[cli::command]
 #[cli::path("version", "check")]
@@ -122,4 +121,3 @@ async fn collect_versioning_state(project: &Project) -> Result<VersioningState, 
 
     Ok(VersioningState { releases, declined })
 }
-

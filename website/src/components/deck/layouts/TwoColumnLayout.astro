@@ -1,0 +1,31 @@
+---
+import ContentSlide from '../ContentSlide.astro';
+
+interface Props {
+  eyebrow: string;
+  title: string;
+  titleSize?: string;
+  sectionTag: string;
+  bottomLeft?: string;
+  bottomRight?: string;
+  label?: string;
+  colRule?: boolean;
+  uneven?: boolean;
+  gap?: string;
+}
+
+const { eyebrow, title, titleSize = `76px`, sectionTag, bottomLeft, bottomRight, label, colRule = false, uneven = false, gap = `80px` } = Astro.props;
+---
+
+<ContentSlide sectionTag={sectionTag} bottomLeft={bottomLeft} bottomRight={bottomRight} label={label} colRule={colRule}>
+  <div class="reveal reveal-1 font-mono text-sm tracking-[0.14em] text-[var(--fg-mute)] uppercase mb-7">
+    {eyebrow}
+  </div>
+
+  <h2 class="slide-title reveal reveal-2 leading-[1.02] tracking-[-0.028em] font-medium m-0 mb-9 text-balance" style={`font-size: ${titleSize}`} set:html={title} />
+
+  <div class:list={['slide-cols-2 reveal reveal-3 grid items-start mt-8', uneven ? 'grid-cols-[1.15fr_0.85fr]' : 'grid-cols-2']} style={`gap: ${gap}`}>
+    <div><slot name="left" /></div>
+    <div><slot name="right" /></div>
+  </div>
+</ContentSlide>

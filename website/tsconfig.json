@@ -1,0 +1,23 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "noEmit": false,
+    "outDir": "./dist/types"
+  },
+  "include": [
+    ".astro/**/*.d.ts",
+    "astro.config.mjs",
+    "config/**/*",
+    "plugins/**/*",
+    "public/**/*",
+    "scripts/**/*",
+    "src/**/*"
+  ],
+  "files": [
+    "config/manifest.json",
+    "config/yarnrc.json"
+  ]
+}

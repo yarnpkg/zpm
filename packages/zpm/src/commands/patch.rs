@@ -9,21 +9,20 @@ use zpm_utils::{DataType, Path, ToFileString, ToHumanString};
 
 use crate::{error::Error, fetchers::PackageData, install::InstallResult, project::{self, Project, RunInstallOptions}};
 
-/// Start writing a patch for the package
+/// Extract a package so it can be patched
 ///
-/// This command will cause a package to be extracted in a temporary directory intended to be editable at will.
+/// This command extracts a package into a temporary directory where you can edit its files.
 ///
-/// Once you're done with your changes, run `yarn patch-commit -s path` (with `path` being the temporary directory you received) to generate a
-/// patchfile and register it into your top-level manifest via the `patch:` protocol. Run `yarn patch-commit -h` for more details.
+/// Once you're done, run `yarn patch-commit -s <path>` with the printed temporary directory to generate a patch file and register it through the
+/// `patch:` protocol.
 ///
-/// Calling the command when you already have a patch won't import it by default (in other words, the default behavior is to reset existing
-/// patches). However, adding the `-u,--update` flag will import any current patch.
+/// If the package is already patched, Yarn starts from the original package by default. Use `-u,--update` to apply the existing patch before editing.
 ///
 #[cli::command]
 #[cli::path("patch")]
 #[cli::category("Dependency management")]
 pub struct Patch {
-    /// Reapply local patches that already apply to this packages
+    /// Apply existing local patches before opening the editable copy
     #[cli::option("-u,--update", default = false)]
     update: bool,
 
@@ -31,7 +30,7 @@ pub struct Patch {
     #[cli::option("--json", default = false)]
     json: bool,
 
-    /// Package to patch
+    /// Package ident to patch
     ident: Ident,
 }
 

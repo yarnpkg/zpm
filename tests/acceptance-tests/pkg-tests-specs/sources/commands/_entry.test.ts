@@ -2,19 +2,21 @@ import {PortablePath, npath, xfs} from '@yarnpkg/fslib';
 
 describe(`Entry`, () => {
   describe(`--version`, () => {
+    const versionPattern = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
     test(
-      `it should print the version from the package.json when given --version`,
+      `it should print the binary version when given --version`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         const {stdout} = await run(`--version`);
-        expect(stdout.trim()).toEqual(`0.0.0`);
+        expect(stdout.trim()).toMatch(versionPattern);
       }),
     );
 
     test(
-      `it should print the version from the package.json when given -v`,
+      `it should print the binary version when given -v`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         const {stdout} = await run(`-v`);
-        expect(stdout.trim()).toEqual(`0.0.0`);
+        expect(stdout.trim()).toMatch(versionPattern);
       }),
     );
   });

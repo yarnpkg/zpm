@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /presentation/
+
+Sitemap: https://yarnpkg.com/sitemap-index.xml

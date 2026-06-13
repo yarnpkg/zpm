@@ -579,6 +579,11 @@ impl ScriptEnvironment {
         }
     }
 
+    pub fn without_pnp_loader(mut self) -> Self {
+        self.remove_pnp_loader();
+        self
+    }
+
     async fn check_project_trust(switch_path: &Path, project_cwd: &Path) -> Result<Option<bool>, Error> {
         let status
             = Command::new(switch_path.to_file_string())

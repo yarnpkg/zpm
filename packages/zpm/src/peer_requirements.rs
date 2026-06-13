@@ -57,6 +57,20 @@ pub struct PeerData {
     pub warnings: Vec<PeerWarning>,
 }
 
+fn untype_ident(ident: &Ident) -> Option<Ident> {
+    if ident.scope() != Some("@types") {
+        return None;
+    }
+
+    let name = ident.name();
+
+    if let Some((scope, name)) = name.split_once("__") {
+        Some(Ident::new(format!("@{scope}/{name}")))
+    } else {
+        Some(Ident::new(name))
+    }
+}
+
 pub fn compute(project: &Project, install_state: &InstallState) -> PeerData {
     let tree = &install_state.resolution_tree;
 
@@ -124,13 +138,13 @@ pub fn compute(project: &Project, install_state: &InstallState) -> PeerData {
         };
 
         for (peer_ident, peer_range) in &phys_resolution.peer_dependencies {
-            // Optional peers are silent in berry; auto-injected
-            // `@types/*` peers are an implementation detail and the
-            // existing reporters filter them out too.
+            // Optional peers are silent in berry. Auto-injected
+            // `@types/*` peers are an implementation detail, but
+            // explicitly configured type peers should still be reported.
             if phys_resolution.optional_peer_dependencies.contains(peer_ident) {
                 continue;
             }
-            if peer_ident.scope() == Some("@types") {
+            if let Some(untyped_ident) = untype_ident(peer_ident) && phys_resolution.peer_dependencies.contains_key(&untyped_ident) {
                 continue;
             }
 

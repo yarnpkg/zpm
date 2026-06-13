@@ -15,14 +15,14 @@ use crate::{
 
 /// Install a temporary package and run it
 ///
-/// This command will install a package within a temporary environment, and run its binary script if it contains any. The binary will run within the
-/// current cwd.
+/// This command installs packages in a temporary project and runs a binary from that temporary install. The binary runs from the current working
+/// directory.
 ///
-/// By default Yarn will download the package named command, but this can be changed through the use of the `-p,--package` flag which will instruct
-/// Yarn to still run the same command but from a different package.
+/// By default Yarn installs the package named by the command. Use `-p,--package` to install one or more packages while running a binary with a
+/// different name.
 ///
-/// Using `yarn dlx` as a replacement of `yarn add` isn't recommended as it makes your project non-deterministic. Yarn doesn't keep track of the
-/// packages installed through dlx - neither their name, nor their version).
+/// `yarn dlx` is intended for one-off commands. It doesn't record the installed packages in your project, so it shouldn't replace `yarn add` for
+/// dependencies you rely on.
 ///
 #[cli::command(proxy)]
 #[cli::path("dlx")]
@@ -77,13 +77,21 @@ impl DlxWithPackages {
     }
 }
 
+/// Install a temporary package and run its default binary
+///
+/// This form installs the specified package in a temporary project and runs its binary. Arguments after the package are forwarded to the binary.
+///
 #[cli::command(proxy)]
 #[cli::path("dlx")]
 pub struct Dlx {
+    /// Suppress the install unless it errors
     #[cli::option("-q,--quiet", default = false)]
     quiet: bool,
 
+    /// Package to install and execute
     package: LooseDescriptor,
+
+    /// Arguments to pass to the selected binary
     args: Vec<String>,
 }
 

@@ -1,0 +1,39 @@
+---
+import { highlight } from '../../utils/highlight';
+
+interface Props {
+  filename?: string;
+  lang?: string;
+  code?: string;
+  compact?: boolean;
+}
+
+const { filename, lang, code, compact = false } = Astro.props;
+
+const highlighted = code && lang ? await highlight(code, lang) : null;
+---
+
+<div class="slide-codeblock relative bg-[var(--code-bg)] border border-[var(--code-border)] rounded-[14px] overflow-hidden backdrop-blur-[8px] font-mono shadow-[0_30px_80px_-40px_rgba(0,0,0,0.6)] [--shiki-token-keyword:var(--sx-keyword)] [--shiki-token-string:var(--sx-string)] [--shiki-token-string-expression:var(--sx-string)] [--shiki-token-constant:var(--sx-number)] [--shiki-token-function:var(--sx-fn)] [--shiki-token-parameter:var(--sx-prop)] [--shiki-token-punctuation:var(--sx-punct)] [--shiki-token-comment:var(--sx-comment)] [--shiki-token-link:var(--sx-string)] [--shiki-foreground:var(--fg)] [--shiki-background:transparent]">
+  <div class="flex items-center gap-3 py-3 px-4.5 border-b border-[var(--code-border)] text-[13px] text-[var(--fg-mute)] tracking-[0.04em]">
+    <span class="inline-flex gap-1.5">
+      <span class="slide-codeblock-dot size-2.5 rounded-full bg-[var(--line-strong)]"></span>
+      <span class="slide-codeblock-dot size-2.5 rounded-full bg-[var(--line-strong)]"></span>
+      <span class="slide-codeblock-dot size-2.5 rounded-full bg-[var(--line-strong)]"></span>
+    </span>
+    {filename && (
+      <span class="text-[13px] text-[var(--fg-dim)]">
+        {filename}
+      </span>
+    )}
+
+    {lang && (
+      <span class="ml-auto text-[11px] tracking-[0.12em] uppercase py-1 px-[9px] border border-[var(--line-strong)] rounded-full text-[var(--fg-mute)]">
+        {lang}
+      </span>
+    )}
+  </div>
+
+  {highlighted
+    ? <pre class:list={[compact ? 'py-5.5 px-[26px] text-[17px] leading-[1.6]' : 'pt-[26px] px-[30px] pb-7 text-xl leading-[1.65]', 'm-0 overflow-auto text-[var(--fg)] tab-[2]']}><Fragment set:html={highlighted} /></pre>
+    : <pre class:list={[compact ? 'py-5.5 px-[26px] text-[17px] leading-[1.6]' : 'pt-[26px] px-[30px] pb-7 text-xl leading-[1.65]', 'm-0 overflow-auto text-[var(--fg)] tab-[2]']}><slot /></pre>}
+</div>

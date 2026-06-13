@@ -3,12 +3,11 @@ use zpm_utils::set_redacted;
 
 use crate::{error::Error, project::Project};
 
-/// Get a configuration value
+/// Print a configuration value
 ///
-/// This command will print a configuration setting.
+/// This command prints a single configuration setting as resolved for the current project.
 ///
-/// Secrets (such as tokens) will be redacted from the output by default. If this behavior isn't desired, set the `--no-redacted` to get the
-/// untransformed value.
+/// Secrets such as tokens are redacted from the output by default. Use `--no-redacted` only when you need the untransformed value.
 ///
 #[cli::command]
 #[cli::path("config", "get")]
@@ -22,7 +21,7 @@ pub struct ConfigGet {
     #[cli::option("--redacted", default = true)]
     redacted: bool,
 
-    /// The name of the configuration field to retrieve
+    /// Configuration field to retrieve
     name: zpm_parsers::Path,
 }
 

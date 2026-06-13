@@ -1,0 +1,47 @@
+---
+interface Props {
+  author: { name: string; url?: string; image_url?: string };
+  date: string;
+  readingTime: number;
+  variant?: 'card' | 'article';
+}
+
+const { author, date, readingTime, variant = `card` } = Astro.props;
+const initials = author.name.split(` `).map((w: string) => w[0]).join(``).slice(0, 2);
+
+const wrapperClass = variant === `article`
+  ? `flex items-center gap-3.5 text-[13.5px] text-[var(--fg-dim)] flex-wrap`
+  : `flex items-center gap-3.5 text-[12.5px] text-[var(--fg-mute)]`;
+---
+
+<span class={wrapperClass}>
+  <span class="post-author">
+    {author.image_url ? (
+      <span class="post-avatar real-img">
+        <img src={author.image_url} alt="" width="22" height="22" />
+      </span>
+    ) : (
+      <span class="post-avatar">
+        {initials}
+      </span>
+    )}
+    {author.url && variant === `article` ? (
+      <a href={author.url} rel="noopener noreferrer" target="_blank">
+        {author.name}
+      </a>
+    ) : (
+      <span>
+        {author.name}
+      </span>
+    )}
+  </span>
+
+  <span class="post-dot" />
+  <span>
+    {date}
+  </span>
+  <span class="post-dot" />
+  <span>
+    {readingTime} min read
+  </span>
+</span>

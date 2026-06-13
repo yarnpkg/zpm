@@ -6,25 +6,25 @@ use crate::{
     error::Error, http_npm::get_registry, project::Project, report::{with_report_result, StreamReport, StreamReportConfig}
 };
 
-/// Logout from the npm registry
+/// Remove credentials for an npm registry
 ///
-/// This command will log you out by modifying your local configuration (in your home folder, never in the project itself) to delete all credentials linked to a registry.
+/// This command edits the home configuration file to remove credentials linked to a registry. It never edits project configuration.
 ///
-/// Adding the `-s,--scope` flag will cause the deletion to be done against whatever registry is configured for the associated scope (see also `npmScopes`).
+/// Use `-s,--scope` to remove credentials stored for a scope.
 ///
-/// Adding the `--publish` flag will cause the deletion to be done against the registry used when publishing the package (see also `publishConfig.registry` and `npmPublishRegistry`).
+/// Use `--publish` to remove credentials for the publish registry.
 ///
-/// Adding the `-A,--all` flag will cause the deletion to be done against all registries and scopes.
+/// Use `-A,--all` to remove credentials for all registries and scopes.
 ///
 #[cli::command]
 #[cli::path("npm", "logout")]
 #[cli::category("Npm-related commands")]
 pub struct Logout {
-    /// Logout from the registry configured for a given scope
+    /// Remove credentials for the registry configured for this scope
     #[cli::option("-s,--scope")]
     scope: Option<String>,
 
-    /// Logout from the publish registry
+    /// Remove credentials for the publish registry
     #[cli::option("--publish", default = false)]
     publish: bool,
 }

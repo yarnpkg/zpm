@@ -1,0 +1,25 @@
+---
+import data from '@iconify-json/simple-icons/icons.json';
+
+interface Props {
+  name: string;
+  size?: number;
+  class?: string;
+}
+
+const { name, size = 16, class: className } = Astro.props;
+const icon = (data as any).icons[name];
+if (!icon) throw new Error(`Unknown simple-icon: ${name}`);
+const viewBox = `0 0 ${icon.width ?? data.width ?? 24} ${icon.height ?? data.height ?? 24}`;
+---
+
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width={size}
+  height={size}
+  viewBox={viewBox}
+  fill="currentColor"
+  aria-hidden="true"
+  class={className}
+  set:html={icon.body}
+/>

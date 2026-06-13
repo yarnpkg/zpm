@@ -7,19 +7,18 @@ use crate::{error::Error, project, script::ScriptEnvironment};
 
 /// Run a shell command in the package environment
 ///
-/// This command simply executes a shell command within the context of the root directory of the active workspace.
+/// This command executes a shell command from the current directory, with the environment prepared for the active workspace.
 ///
-/// It also makes sure to call it in a way that's compatible with the current project (for example, on PnP projects the environment will be setup in
-/// such a way that PnP will be correctly injected into the environment).
+/// The spawned process receives the same project environment as scripts and binaries, including Plug'n'Play injection when the project uses PnP.
 ///
 #[cli::command(proxy)]
 #[cli::path("exec")]
 #[cli::category("Scripting commands")]
 pub struct Exec {
-    /// The shell command to execute
+    /// Shell command to execute
     script: String,
 
-    /// The arguments to pass to the script
+    /// Arguments to pass to the command
     args: Vec<String>,
 }
 

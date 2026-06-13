@@ -1,0 +1,765 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import {BenchmarksDashboard} from '../components/benchmarks/BenchmarksDashboard';
+import '../styles/theme.css';
+import '../styles/docs.css';
+
+const benchmarkData = await fetch('https://repo.yarnpkg.com/benchmarks').then(r => r.json());
+
+interface BenchPoint { timestamp: number; value: number | null; }
+interface BenchEntry { subtest: string; test: string; pm: string; points: BenchPoint[]; }
+
+const SERIES_ORDER = ['zpm', 'yarn', 'npm', 'pnpm', 'classic'] as const;
+const SERIES_META: Record<string, { name: string; dashed: boolean; accent: boolean }> = {
+  zpm:     { name: 'yarn 6.x',     dashed: false, accent: true  },
+  yarn:    { name: 'yarn 4.x',    dashed: false, accent: false },
+  npm:     { name: 'npm',          dashed: false, accent: false },
+  pnpm:    { name: 'pnpm',        dashed: false, accent: false },
+  classic: { name: 'yarn classic', dashed: true,  accent: false },
+};
+
+const PROJECTS = [
+  { id: 'next',     name: 'Next.js' },
+  { id: 'gatsby',   name: 'Gatsby' },
+  { id: 'monorepo', name: 'Monorepo' },
+];
+
+const SCENARIOS = [
+  { id: 'install-full-cold',      num: '01', title: 'Full cold install',  desc: 'Simulates the very first install on a machine that has never seen the project — no cache, no lockfile, no artifacts. Everything is fetched from the registry and written from scratch.' },
+  { id: 'install-cache-only',     num: '02', title: 'Cache only',         desc: 'Like checking out a repo for the first time on a CI runner that has already built other projects. The lockfile is missing so resolution runs from scratch, but tarballs are reused from the global cache.' },
+  { id: 'install-cache-and-lock', num: '03', title: 'Cache + lockfile',   desc: 'The most common CI and day-to-day path. The lockfile and cache are both present — the manager just needs to materialize dependencies on disk.' },
+  { id: 'install-ready',          num: '04', title: 'Recurrent call',     desc: 'Everything is already in place. Measures how quickly the manager can verify the tree and exit — matters every time you run install as part of a script or editor hook.' },
+];
+
+const DATA: Record<string, Record<string, Record<string, { timestamp: number; value: number | null }[]>>> = {};
+for (const entry of benchmarkData as BenchEntry[]) {
+  if (!SERIES_ORDER.includes(entry.pm as any)) continue;
+  if (!PROJECTS.some(p => p.id === entry.test)) continue;
+  if (!DATA[entry.subtest]) DATA[entry.subtest] = {};
+  if (!DATA[entry.subtest][entry.test]) DATA[entry.subtest][entry.test] = {};
+  DATA[entry.subtest][entry.test][entry.pm] = entry.points;
+}
+
+const lastPoint = (benchmarkData as BenchEntry[]).find(e => e.pm === 'zpm')?.points.filter(p => p.value !== null).pop();
+const lastRunDate = lastPoint ? new Date(lastPoint.timestamp * 1000).toISOString().slice(0, 10) : 'N/A';
+
+const allTimestamps = (benchmarkData as BenchEntry[]).flatMap(e => e.points.map(p => p.timestamp));
+const benchMinTs = Math.min(...allTimestamps);
+const benchMaxTs = Math.max(...allTimestamps);
+
+const INCIDENTS = [
+  {
+    start: Date.UTC(2026, 1, 24, 18, 20, 0) / 1000,
+    end:   Date.UTC(2026, 2, 11, 18, 18, 0) / 1000,
+    label: 'Accidental regression in Node.js 25.7 broke our benchmarks',
+  },
+];
+---
+
+<BaseLayout title="Benchmarks — Yarn" variant="docs" activePage="benchmarks" description="Interactive benchmarks comparing Yarn, npm, and pnpm install performance across real-world projects.">
+<style is:global slot="head">
+  .bench-header {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 32px;
+    align-items: end;
+  }
+
+  .bench-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: color-mix(in oklch, var(--card) 55%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    overflow: hidden;
+  }
+  .bench-meta > div {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .bench-meta > div:last-child { border-bottom: 0; }
+  .bench-meta .k {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fg-mute);
+    margin-bottom: 2px;
+  }
+  .bench-meta .v {
+    font-size: 13px;
+    color: var(--fg);
+    font-weight: 500;
+    line-height: 1.3;
+  }
+  .bench-meta .v .unit {
+    color: var(--fg-mute);
+    font-weight: 400;
+    font-size: 11.5px;
+    margin-left: 3px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .bench-controls {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: color-mix(in oklch, var(--card) 55%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+  }
+  .controls-toggle {
+    display: none;
+  }
+  .controls-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 18px;
+  }
+  .legend-section {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 18px;
+  }
+  .legend-hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--fg-mute);
+  }
+  .desktop-only { }
+  .controls-badge { display: none; }
+  .legend-section .lg {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--fg-dim);
+    cursor: pointer;
+    user-select: none;
+    transition: opacity 0.15s;
+    background: none;
+    border: 0;
+    font-family: inherit;
+    font-size: inherit;
+    padding: 0;
+  }
+  .legend-section .lg.muted { opacity: 0.35; }
+  .legend-section .lg .swatch {
+    width: 18px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--c, var(--fg));
+    flex-shrink: 0;
+  }
+  .legend-section .lg .swatch.dashed {
+    height: 0;
+    border-top: 2px dashed var(--c, var(--fg));
+    border-radius: 0;
+  }
+  .legend-section .lg .name { color: var(--fg); font-weight: 500; }
+  .legend-section .sep {
+    width: 1px;
+    height: 14px;
+    background: var(--line-strong);
+  }
+
+  .bench-grid {
+    display: grid;
+    grid-template-columns: 190px repeat(var(--bench-cols, 3), minmax(0, 1fr));
+    background: color-mix(in oklch, var(--card) 55%, transparent);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .bench-grid .col-head {
+    padding: 18px 18px 14px;
+    border-left: 1px solid var(--line);
+    border-bottom: 1px solid var(--line-strong);
+    background: color-mix(in oklch, var(--fg) 2%, transparent);
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .bench-grid .col-head:first-of-type { border-left: 0; }
+  .bench-grid .col-head .name {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: -0.005em;
+  }
+  .bench-grid .corner {
+    border-bottom: 1px solid var(--line-strong);
+    padding: 18px 18px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fg-mute);
+    display: flex;
+    align-items: end;
+  }
+
+  .bench-grid .row-head {
+    padding: 16px 14px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .bench-grid .row-head .row-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--fg-mute);
+  }
+  .bench-grid .row-head h3 {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+    margin: 0;
+    line-height: 1.2;
+  }
+  .bench-grid .row-head p {
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--fg-dim);
+    margin: 0;
+    text-wrap: pretty;
+  }
+  .bench-grid .row-head .row-tag {
+    margin-top: auto;
+    align-self: flex-start;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--fg-mute);
+    padding: 3px 7px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: color-mix(in oklch, var(--fg) 3%, transparent);
+    letter-spacing: 0.04em;
+  }
+
+  .chart-cell {
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+    padding: 14px 10px 10px;
+    position: relative;
+    min-height: 130px;
+    user-select: none;
+    -webkit-user-select: none;
+    display: flex;
+    flex-direction: column;
+  }
+  .chart-cell .cell-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+    gap: 8px;
+    min-height: 16px;
+  }
+  .chart-cell .cell-meta .median {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-mute);
+  }
+  .chart-cell .cell-meta .median b {
+    color: var(--fg);
+    font-weight: 500;
+  }
+  .chart-cell .cell-meta .cell-pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .cell-pill.fastest {
+    color: var(--accent);
+    border: 1px solid var(--accent-line);
+    background: var(--accent-soft);
+  }
+  .cell-pill.contested {
+    color: oklch(0.82 0.13 85);
+    border: 1px solid oklch(0.65 0.13 85 / 0.45);
+    background: oklch(0.45 0.12 85 / 0.15);
+  }
+  .cell-pill.slower {
+    color: oklch(0.78 0.15 25);
+    border: 1px solid oklch(0.60 0.15 25 / 0.45);
+    background: oklch(0.45 0.14 25 / 0.15);
+  }
+  html[data-theme="light"] .cell-pill.contested {
+    color: oklch(0.42 0.14 75);
+    border-color: oklch(0.60 0.14 75 / 0.5);
+    background: oklch(0.90 0.08 75 / 0.5);
+  }
+  html[data-theme="light"] .cell-pill.slower {
+    color: oklch(0.45 0.18 25);
+    border-color: oklch(0.55 0.18 25 / 0.5);
+    background: oklch(0.92 0.06 25 / 0.5);
+  }
+
+  .incident-area { fill: oklch(0.55 0.18 25 / 0.10); }
+  .incident-border { stroke: oklch(0.60 0.18 25 / 0.35); stroke-width: 1; stroke-dasharray: 3 2; fill: none; }
+  html[data-theme="light"] .incident-area { fill: oklch(0.55 0.18 25 / 0.08); }
+  html[data-theme="light"] .incident-border { stroke: oklch(0.55 0.18 25 / 0.3); }
+
+  .version-dot {
+    stroke: var(--bg-0);
+    stroke-width: 1.5;
+    pointer-events: none;
+  }
+  .version-dot-link {
+    pointer-events: auto;
+    cursor: pointer;
+  }
+  .version-dot-link:hover .version-dot {
+    stroke-width: 2.5;
+    filter: brightness(1.2);
+  }
+
+  .legend-section .toggle-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-dim);
+  }
+  .legend-section .toggle-label input {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    background: color-mix(in oklch, var(--fg) 4%, transparent);
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .legend-section .toggle-label input:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .legend-section .toggle-label input:checked::after {
+    content: '';
+    position: absolute;
+    left: 3.5px;
+    top: 1px;
+    width: 4px;
+    height: 7px;
+    border: solid var(--bg-0);
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+  }
+
+  .ax-line { stroke: var(--line); stroke-width: 1; }
+  .ax-line-strong { stroke: var(--line-strong); stroke-width: 1; }
+  .ax-band { fill: var(--accent-soft); opacity: 0.6; }
+  .crosshair {
+    stroke: var(--fg-mute);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+    pointer-events: none;
+  }
+  .series-line {
+    fill: none;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .series-line.dashed { stroke-dasharray: 4 3; }
+  .series-line.highlight {
+    stroke-width: 2;
+    filter: drop-shadow(0 0 6px var(--c));
+  }
+
+  .ax-label {
+    position: absolute;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--fg-mute);
+    letter-spacing: 0.04em;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .ax-label-y {
+    transform: translate(-100%, -50%);
+  }
+  .ax-label-x {
+    transform: translateX(-50%);
+  }
+
+  .bench-tip {
+    position: fixed;
+    pointer-events: none;
+    z-index: 50;
+    background: var(--card);
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    transition: opacity 0.12s;
+    min-width: 160px;
+  }
+  .bench-tip.show { opacity: 1; }
+  .bench-tip .tip-x { color: var(--fg-mute); margin-bottom: 5px; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; }
+  .bench-tip .tip-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 2px 0;
+  }
+  .bench-tip .tip-row .sw {
+    width: 8px; height: 8px; border-radius: 2px;
+    background: var(--c);
+    flex-shrink: 0;
+  }
+  .bench-tip .tip-row .nm { color: var(--fg-dim); flex: 1; }
+  .bench-tip .tip-row .vl { color: var(--fg); font-weight: 500; }
+  .bench-tip .tip-ver { color: var(--fg-mute); font-weight: 400; font-size: 9px; }
+
+  @keyframes bench-spin { to { transform: rotate(360deg); } }
+  .version-spinner {
+    display: none;
+    width: 12px;
+    height: 12px;
+    border: 1.5px solid var(--fg-mute);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: bench-spin 0.6s linear infinite;
+    flex-shrink: 0;
+  }
+  .toggle-label.loading .version-spinner { display: inline-block; }
+  .toggle-label.loading span { color: var(--fg-mute); }
+
+  .summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .summary-card {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: color-mix(in oklch, var(--card) 55%, transparent);
+    padding: 18px 20px;
+    backdrop-filter: blur(12px);
+  }
+  .summary-card h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fg-mute);
+    margin: 0 0 14px;
+    font-weight: 500;
+  }
+  .summary-bar {
+    display: grid;
+    grid-template-columns: 100px 1fr 70px;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+  .summary-bar .lbl { color: var(--fg-dim); }
+  .summary-bar .lbl.self { color: var(--fg); font-weight: 500; }
+  .summary-bar .track {
+    height: 8px;
+    background: color-mix(in oklch, var(--fg) 5%, transparent);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .summary-bar .fill {
+    height: 100%;
+    background: var(--fg-mute);
+    border-radius: 4px;
+    transform-origin: left;
+    transform: scaleX(0);
+    animation: bench-grow 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .summary-bar .fill.self { background: var(--accent); }
+  .summary-bar .val { color: var(--fg); text-align: right; font-variant-numeric: tabular-nums; }
+  .summary-bar .val.self { color: var(--accent); }
+  @keyframes bench-grow { to { transform: scaleX(var(--w, 1)); } }
+
+  .bench-sticky {
+    position: sticky;
+    top: var(--nav-h, 61px);
+    z-index: 15;
+    user-select: none;
+    -webkit-user-select: none;
+    background: color-mix(in oklch, var(--bg-0) 85%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    margin-left: calc(-50vw + 50%);
+    margin-right: calc(-50vw + 50%);
+    padding: 12px max(calc(50vw - 50%), 1rem);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+  }
+
+  .filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .filter-bar .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fg-mute);
+    margin-right: 6px;
+  }
+  .filter-pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--fg-dim);
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .filter-pill:hover {
+    color: var(--fg);
+    border-color: var(--line-strong);
+  }
+  .filter-pill.active {
+    color: var(--accent);
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+  }
+
+  .chart-cell .cell-project {
+    display: none;
+  }
+
+  @media (max-width: 980px) {
+    .bench-sticky {
+      margin-left: -1.5rem;
+      margin-right: -1.5rem;
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+    .bench-header { grid-template-columns: 1fr; gap: 20px; }
+    .bench-meta > div:last-child { border-bottom: 0; }
+
+    .controls-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 12px 16px;
+      background: none;
+      border: 0;
+      cursor: pointer;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--fg-mute);
+    }
+    .controls-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .controls-badge {
+      display: inline-block;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      border: 1px solid var(--accent-line);
+      background: var(--accent-soft);
+      border-radius: 4px;
+      padding: 2px 6px;
+    }
+    .controls-chevron {
+      width: 8px;
+      height: 8px;
+      border-right: 1.5px solid var(--fg-mute);
+      border-bottom: 1.5px solid var(--fg-mute);
+      transform: rotate(45deg);
+      transition: transform 0.2s;
+    }
+    .bench-controls.open .controls-chevron {
+      transform: rotate(-135deg);
+    }
+    .controls-body {
+      display: none;
+      padding: 0 16px 14px;
+      gap: 14px;
+    }
+    .bench-controls.open .controls-body {
+      display: flex;
+    }
+    .filter-bar {
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .desktop-only { display: none; }
+    .legend-section .sep { display: none; }
+    .legend-hint { display: none; }
+
+    .bench-grid {
+      grid-template-columns: 1fr !important;
+    }
+    .bench-grid .corner { display: none; }
+    .bench-grid .col-head { display: none; }
+    .bench-grid .row-head {
+      border-top: 1px solid var(--line-strong);
+      background: color-mix(in oklch, var(--fg) 2%, transparent);
+    }
+    .chart-cell {
+      border-left: 0;
+      min-height: 160px;
+    }
+    .chart-cell .cell-project {
+      display: block;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--fg-mute);
+      margin-bottom: 4px;
+    }
+    .summary { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="max-w-[1320px] mx-auto px-6 pt-10 pb-32">
+
+  <!-- Breadcrumb -->
+  <div class="flex items-center gap-2 mono text-[11px] text-[var(--fg-mute)] tracking-[0.1em] uppercase mb-5">
+    <span>Docs</span>
+    <span class="opacity-40">/</span>
+    <span class="text-[var(--fg-dim)]">Benchmarks</span>
+  </div>
+
+  <!-- Heading + Run metadata -->
+  <div class="bench-header mb-10">
+    <div>
+      <h1 class="text-[clamp(36px,4.4vw,52px)] font-medium tracking-[-0.025em] leading-[1.05] text-balance m-0">How fast are we?</h1>
+      <p class="m-0 mt-5 text-[18px] leading-[1.55] text-[var(--fg-dim)] max-w-[640px] text-pretty">
+        Continuous benchmarks of{' '}
+        <a class="text-[var(--fg)] underline decoration-dotted underline-offset-2 hover:decoration-solid" href="/concepts/yarn-6">Yarn 6.x</a>,
+        <span class="text-[var(--fg)]">Yarn 4.x</span>,
+        <span class="text-[var(--fg)]">npm</span>,
+        <span class="text-[var(--fg)]">pnpm</span>, and
+        <span class="text-[var(--fg)]">Yarn Classic</span> across four install scenarios on three reference projects. Lower is better.
+      </p>
+    </div>
+    <div class="bench-meta">
+      <div>
+        <div class="k">Last run</div>
+        <div class="v">{lastRunDate}</div>
+      </div>
+      <div>
+        <div class="k">Runner</div>
+        <div class="v">ubuntu-22.04 <span class="unit">4 vCPU · 16 GB</span></div>
+      </div>
+      <div>
+        <div class="k">Data points</div>
+        <div class="v">90 <span class="unit">days of history</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive dashboard (React) -->
+  <BenchmarksDashboard
+    client:load
+    data={DATA}
+    seriesOrder={SERIES_ORDER}
+    seriesMeta={SERIES_META}
+    projects={PROJECTS}
+    scenarios={SCENARIOS}
+    incidents={INCIDENTS}
+    benchMinTs={benchMinTs}
+    benchMaxTs={benchMaxTs}
+  />
+
+  <!-- Methodology -->
+  <div class="mt-16 prose">
+    <h2 id="methodology">Methodology</h2>
+    <p>Every four hours &mdash; and on every push to <code>main</code> &mdash; a GitHub Actions workflow runs the full benchmark matrix. Each combination of scenario, project, and package manager is timed with <a href="https://github.com/sharkdp/hyperfine">Hyperfine</a>, measuring wall-clock duration. The results are published here automatically.</p>
+
+    <h3 id="how-benchmarks-run">How benchmarks run</h3>
+    <p>Hyperfine executes each install command a minimum of 10 times after 1 warmup run. Before every timed run, a <em>prepare</em> step resets the environment to match the scenario &mdash; for example, deleting <code>node_modules</code>, the lockfile, or the global cache &mdash; so each measurement starts from the same state. The final result is the median of all timed runs.</p>
+    <p>The runner is <code>ubuntu-latest</code> on GitHub Actions. zpm is compiled from source with the <code>release-lto</code> profile; all other managers use their latest stable release at the time of each run.</p>
+
+    <div class="admonition note">
+      <div class="adm-header">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="5.5"/><path d="M7 6.5v3.5M7 4v0.5"/></svg>
+        <span>NOTE</span>
+      </div>
+      <div class="adm-body">
+        Series rendered with a dashed stroke (<span class="mono">yarn classic</span>) are kept for historical reference. Yarn classic is in maintenance and we do not recommend it for new projects &mdash; the modern release line is what you want for production work.
+      </div>
+    </div>
+
+    <h3 id="reference-projects">Reference projects</h3>
+    <p>We chose real-world TypeScript projects with different dependency profiles to test a wide variety of use cases.</p>
+
+    <div class="table-wrap">
+      <table>
+        <caption>Reference projects</caption>
+        <thead>
+          <tr>
+            <th scope="col">Project</th>
+            <th scope="col">Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>next</td>
+            <td>Next.js vendors most of its dependencies except native ones. Small dependency graphs with very heavy packages.</td>
+          </tr>
+          <tr>
+            <td>gatsby</td>
+            <td>Gatsby lists its dependencies raw, without vendoring. Very large dependency graph made up of small packages.</td>
+          </tr>
+          <tr>
+            <td>monorepo</td>
+            <td>Synthetic monorepo of around ~1.5k workspaces, each with their own arbitrary set of dependencies.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script is:inline>
+  var nav = document.querySelector('nav');
+  if (nav) document.documentElement.style.setProperty('--nav-h', nav.offsetHeight + 'px');
+</script>
+<script is:inline src="/docs/docs.js"></script>
+</BaseLayout>

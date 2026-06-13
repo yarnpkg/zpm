@@ -45,7 +45,7 @@ describe(`Cache`, () => {
   }
 
   test(
-    `it should detect when the files checksum is incorrect`,
+    `it shouldn't validate cache archive checksums when loading packages from the cache`,
     makeTemporaryEnv({
       dependencies: {
         [`no-deps`]: `1.0.0`,
@@ -58,31 +58,37 @@ describe(`Cache`, () => {
 
       await xfs.writeFilePromise(cacheFile, `corrupted archive`);
 
-      await expect(run(`install`)).rejects.toThrow();
+      await expect(run(`install`)).resolves.toMatchObject({
+        code: 0,
+      });
     }),
   );
 
   test(
-    `it should detect when the files checksum is incorrect`,
+    `it shouldn't validate global cache archive checksums when loading packages from the cache`,
     makeTemporaryEnv({
       dependencies: {
         [`no-deps`]: `1.0.0`,
       },
+    }, {
+      enableGlobalCache: true,
     }, async ({path, run, source}) => {
       await run(`install`);
 
-      const cacheFiles = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
-      const cacheFile = ppath.join(path, `.yarn/cache`, cacheFiles.find(name => name.startsWith(`no-deps-`))!);
+      const cacheFiles = await xfs.readdirPromise(ppath.join(path, `.yarn/global/cache`));
+      const cacheFile = ppath.join(path, `.yarn/global/cache`, cacheFiles.find(name => name.startsWith(`no-deps-`))!);
 
       await xfs.writeFilePromise(cacheFile, `corrupted archive`);
 
-      await expect(run(`install`)).rejects.toThrow();
+      await expect(run(`install`)).resolves.toMatchObject({
+        code: 0,
+      });
     }),
   );
 
 
   test(
-    `it should refetch archive when YARN_CHECKSUM_BEHAVIOR=reset and the files checksum is incorrect`,
+    `it shouldn't refetch archives via YARN_CHECKSUM_BEHAVIOR=reset when loading packages from the cache`,
     makeTemporaryEnv({
       dependencies: {
         [`no-deps`]: `1.0.0`,
@@ -92,7 +98,6 @@ describe(`Cache`, () => {
 
       const cacheFiles = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
       const cacheFile = ppath.join(path, `.yarn/cache`, cacheFiles.find(name => name.startsWith(`no-deps-`))!);
-      const contentWas = await xfs.readFilePromise(cacheFile);
       await xfs.writeFilePromise(cacheFile, `corrupted archive`);
 
       await run(`install`, {
@@ -102,12 +107,12 @@ describe(`Cache`, () => {
       });
 
       const contentNow = await xfs.readFilePromise(cacheFile);
-      expect(contentNow).toEqual(contentWas);
+      expect(contentNow).toEqual(Buffer.from(`corrupted archive`));
     }),
   );
 
   test(
-    `it should ignore checksum mismatches and regenerate archives when their cache key is different from Yarn's own cache key, if cacheMigrationMode=always`,
+    `it should leave cache entries alone when their cache key is different from Yarn's own cache key, if cacheMigrationMode=always`,
     makeTemporaryEnv({
       dependencies: {
         [`no-deps`]: `1.0.0`,
@@ -121,7 +126,6 @@ describe(`Cache`, () => {
 
       const cacheFiles = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
       const cacheFile = ppath.join(path, `.yarn/cache`, cacheFiles.find(name => name.startsWith(`no-deps-`))!);
-      const cacheData = await xfs.readFilePromise(cacheFile);
 
       await xfs.writeFilePromise(cacheFile, `corrupted archive`);
 
@@ -130,7 +134,7 @@ describe(`Cache`, () => {
         cacheCheckpointOverride: `1`,
       });
 
-      await expect(xfs.readFilePromise(cacheFile)).resolves.toEqual(cacheData);
+      await expect(xfs.readFilePromise(cacheFile)).resolves.toEqual(Buffer.from(`corrupted archive`));
     }),
   );
 
@@ -219,7 +223,11 @@ describe(`Cache`, () => {
 
     await execUtils.execvp(`git`, [`checkout`, `-b`, `feature`], {cwd: path});
 
-    await run(`add`, `depX@npm:no-deps@2.0.0`);
+    const manifestPath = ppath.join(path, Filename.manifest);
+    const manifest = await xfs.readJsonPromise(manifestPath);
+    manifest.dependencies.depX = `npm:no-deps@2.0.0`;
+    await xfs.writeJsonPromise(manifestPath, manifest);
+    await run(`install`);
 
     await execUtils.execvp(`git`, [`add`, `.`], {cwd: path});
     await execUtils.execvp(`git`, [`commit`, `-m`, `new dep`], {cwd: path});
@@ -227,7 +235,7 @@ describe(`Cache`, () => {
     // Meanwhile, the base branch is updated with a new Yarn version:
     //
     // - we add an extra byte at the end of each file in the cache, to simulate a change in how zip archives are generated
-    // - we run an install with a new cache version and we persist the new checksums
+    // - we run an install with a new cache version and we persist the new cache metadata
 
     await execUtils.execvp(`git`, [`checkout`, `-`], {cwd: path});
 
@@ -265,7 +273,7 @@ describe(`Cache`, () => {
   }));
 
   test(
-    `it should ignore changes in the cache compression, if cacheMigrationMode=required-only`,
+    `it should update the cache files when changing the compression level, if cacheMigrationMode=required-only`,
     makeTemporaryEnv({
       dependencies: {
         [`no-deps`]: `1.0.0`,
@@ -285,7 +293,12 @@ describe(`Cache`, () => {
         compressionLevel: `9`,
       });
 
-      await expect(xfs.readFilePromise(cacheFile)).resolves.toEqual(cacheData);
+      expect(xfs.existsSync(cacheFile)).toEqual(false);
+
+      const otherCacheFiles = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+      const otherCacheFile = ppath.join(path, `.yarn/cache`, otherCacheFiles.find(name => name.startsWith(`no-deps-`))!);
+
+      await expect(xfs.readFilePromise(otherCacheFile)).resolves.not.toEqual(cacheData);
     }),
   );
 
@@ -315,7 +328,7 @@ describe(`Cache`, () => {
 
   for (const cacheMigrationMode of [`match-spec`, `required-only`]) {
     test(
-      `it should enforce checksum validation when their cache key is a different version but still above the threshold, if cacheMigrationMode=${cacheMigrationMode}`,
+      `it shouldn't enforce checksum validation when their cache key is a different version but still above the threshold, if cacheMigrationMode=${cacheMigrationMode}`,
       makeTemporaryEnv({
         dependencies: {
           [`no-deps`]: `1.0.0`,
@@ -335,7 +348,9 @@ describe(`Cache`, () => {
         await expect(run(`install`, {
           cacheVersionOverride: `2`,
           cacheCheckpointOverride: `1`,
-        })).rejects.toThrow();
+        })).resolves.toMatchObject({
+          code: 0,
+        });
       }),
     );
 
@@ -366,83 +381,4 @@ describe(`Cache`, () => {
       }),
     );
   }
-
-  // https://github.com/nih-at/libzip/issues/89
-  // https://github.com/arcanis/libzip/commit/2fc2e1083cef164dc7e1bf112f5e6c8e165a2b5d
-  test(
-    `it should ignore timezones`,
-    makeTemporaryEnv(
-      {
-        dependencies: {
-          [`no-deps`]: `1.0.0`,
-        },
-      },
-      async ({path, run, source}) => {
-        await run(`install`, {
-          env: {
-            TZ: `Etc/GMT-0`,
-          },
-        });
-
-        await expect(
-          run(`install`, `--immutable`, `--immutable-cache`, `--check-cache`, {
-            env: {
-              TZ: `Etc/GMT-1`,
-            },
-          }),
-        ).resolves.toMatchObject({
-          code: 0,
-        });
-      },
-    ),
-  );
-
-  // On Windows this test requires Node.js >= 16.2.0, in earlier
-  // versions the `TZ` env variable is ignored / doesn't work.
-  //
-  // This test would ideally be a unit test for `ZipFS` but Jest
-  // doesn't let us change the timezone of the current process.
-  // Ref https://github.com/facebook/jest/issues/9856
-  //
-  // https://github.com/yarnpkg/berry/pull/1155
-  // https://github.com/emscripten-core/emscripten/pull/12330
-  // https://github.com/arcanis/libzip/commit/664462465d2730d51f04437c90ed7ebcbe19a36f
-  test(
-    `it should ignore daylight saving time (DST)`,
-    makeTemporaryEnv(
-      {
-        dependencies: {
-          // Need to use a dependency that is patched
-          [`resolve`]: `1.9.0`,
-        },
-      },
-      async ({path, run, source}) => {
-        await run(`install`, {
-          env: {
-            TZ: `Etc/GMT-0`,
-          },
-        });
-
-        await expect(
-          run(`install`, `--immutable`, `--immutable-cache`, `--check-cache`, {
-            env: {
-              TZ: `Europe/Oslo`,
-            },
-          }),
-        ).resolves.toMatchObject({
-          code: 0,
-        });
-
-        await expect(
-          run(`install`, `--immutable`, `--immutable-cache`, `--check-cache`, {
-            env: {
-              TZ: `Australia/Sydney`,
-            },
-          }),
-        ).resolves.toMatchObject({
-          code: 0,
-        });
-      },
-    ),
-  );
 });

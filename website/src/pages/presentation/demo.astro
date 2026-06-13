@@ -1,0 +1,448 @@
+---
+import DeckLayout from '../../layouts/DeckLayout.astro';
+import TitleLayout from '../../components/deck/layouts/TitleLayout.astro';
+import SectionLayout from '../../components/deck/layouts/SectionLayout.astro';
+import OneColumnLayout from '../../components/deck/layouts/OneColumnLayout.astro';
+import TwoColumnLayout from '../../components/deck/layouts/TwoColumnLayout.astro';
+import TextImageLayout from '../../components/deck/layouts/TextImageLayout.astro';
+import CodeSideLayout from '../../components/deck/layouts/CodeSideLayout.astro';
+import FullCodeLayout from '../../components/deck/layouts/FullCodeLayout.astro';
+import TerminalLayout from '../../components/deck/layouts/TerminalLayout.astro';
+import ImageLayout from '../../components/deck/layouts/ImageLayout.astro';
+import TextTerminalLayout from '../../components/deck/layouts/TextTerminalLayout.astro';
+import ClosingLayout from '../../components/deck/layouts/ClosingLayout.astro';
+import Terminal from '../../components/deck/Terminal.astro';
+---
+
+<DeckLayout title="Yarn — Deck Template">
+
+  {/* ── SLIDE 1 — TITLE ── */}
+  <TitleLayout
+    label="01 Title"
+    tag="// internal · 2026.04"
+    eyebrow="A talk by your name"
+    eyebrowSuffix="Frontend Platform"
+    title='Pulls its<br/><em>weight.</em>'
+    lede='An introductory tour of <strong>Yarn 4</strong> — what changed, what to expect, and why your CI is about to feel different.'
+    versions={[
+      { badge: `stable`, version: `v4.8.1` },
+      { badge: `rc`, version: `v5.0.0-rc.2`, badgeStyle: `background: rgba(168,176,212,0.18); color: var(--fg-dim);` },
+    ]}
+    bottomRight="deterministic · offline-first · monorepo-native"
+  />
+
+  {/* ── SLIDE 2 — SECTION DIVIDER ── */}
+  <SectionLayout
+    label="02 Section"
+    sectionTag="§ 01 — Foundations"
+    partLabel="Part one"
+    title="Foundations"
+    subtitle="— what makes Yarn, Yarn."
+    lede="Three ideas that everything else in the toolchain is downstream of."
+    bottomLeft="part 1 of 4"
+    bottomRight="// foundations"
+  />
+
+  {/* ── SLIDE 3 — ONE COLUMN ── */}
+  <OneColumnLayout
+    label="03 One column"
+    eyebrow="§ 01.1 — Determinism"
+    title='If it installs for you,<br/>it installs for them.'
+    bottomLeft="// determinism"
+    bottomRight="03 / 14"
+  >
+    <p class="slide-body-text text-2xl leading-[1.55] text-[var(--fg-dim)] text-pretty font-light reveal reveal-3">
+      A single <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">yarn.lock</code> produces <strong>byte-identical</strong> <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">node_modules</code> across every machine, OS, and CI provider that touches the repo. No more "works on my laptop." No more 3am cache-busting in CI.
+    </p>
+    <p class="slide-body-text text-2xl leading-[1.55] text-[var(--fg-dim)] text-pretty font-light reveal reveal-4">
+      Determinism is the floor, not a feature. Everything else — the cache, Plug'n'Play, workspaces — only works because resolution is <em>boring and predictable</em>. Read the <a href="#">design doc</a> if you want the gory parts.
+    </p>
+  </OneColumnLayout>
+
+  {/* ── SLIDE 4 — TWO COLUMNS ── */}
+  <TwoColumnLayout
+    label="04 Two columns"
+    eyebrow="§ 01.2 — Resolution"
+    title="Plug'n'Play, in plain English."
+    sectionTag="§ 01.2 — Two columns"
+    bottomLeft="// resolution · pnp"
+    bottomRight="04 / 14"
+    colRule={true}
+  >
+    <Fragment slot="left">
+      <h3 class="text-[28px] font-medium m-0 mb-4.5 text-[var(--fg)]">The old way</h3>
+      <p class="slide-body-text text-[22px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+        Resolve, then <strong>copy thousands of files</strong> into <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">node_modules</code>. Hope the layout matches what your bundler expects. Pray nothing duplicates.
+      </p>
+      <ul class="slide-bullets list-none p-0 m-0 text-[21px] leading-[1.5] text-[var(--fg-dim)] font-light mt-5.5">
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">~40,000 file copies, typical app</li>
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">Phantom dependencies hide bugs</li>
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">Cold installs are I/O-bound</li>
+      </ul>
+    </Fragment>
+    <Fragment slot="right">
+      <h3 class="text-[28px] font-medium m-0 mb-4.5 text-[var(--fg)]">The PnP way</h3>
+      <p class="slide-body-text text-[22px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+        Resolve once, write a single <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">.pnp.cjs</code>. Imports map directly to the content-addressable cache. No copies, no duplicates, <em>no surprises</em>.
+      </p>
+      <ul class="slide-bullets list-none p-0 m-0 text-[21px] leading-[1.5] text-[var(--fg-dim)] font-light mt-5.5">
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">One file, ~3MB, fully indexed</li>
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">Strict — phantom deps are errors</li>
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">Cold installs are network-bound</li>
+      </ul>
+    </Fragment>
+  </TwoColumnLayout>
+
+  {/* ── SLIDE 5 — TEXT + IMAGE ── */}
+  <TextImageLayout
+    label="05 Text + image"
+    eyebrow="§ 01.3 — Cache"
+    title='Offline-first isn&apos;t<br/>a marketing word.'
+    sectionTag="§ 01.3 — Text + image"
+    bottomLeft="// cache"
+    bottomRight="05 / 14"
+    placeholder="screenshot · cache hit summary"
+    imageCaption="// figure 1.3 — yarn install --immutable, warm cache"
+  >
+    <p class="slide-body-text text-2xl leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      Every package you've ever resolved lives in a <strong>global, content-addressable cache</strong>. Subsequent installs — even in fresh clones, even on a new laptop — hit the registry <em>zero times</em>.
+    </p>
+    <ul class="slide-bullets list-none p-0 m-0 text-2xl leading-[1.5] text-[var(--fg-dim)] font-light mt-6.5">
+      <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty"><strong>Zero-install</strong> repos commit the offline mirror</li>
+      <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">Tarballs are checksummed; tampering is a hard error</li>
+      <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">CI cache restores in seconds, not minutes</li>
+    </ul>
+  </TextImageLayout>
+
+  {/* ── SLIDE 6 — LARGE CODE BLOCK ── */}
+  <CodeSideLayout
+    label="06 Code block"
+    eyebrow="§ 02 — Configuration"
+    title='A real <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">package.json</code>.'
+    sectionTag="§ 02 — Code block"
+    bottomLeft="// package.json"
+    bottomRight="06 / 14"
+    filename="package.json"
+    lang="json"
+    code={`{
+  "name": "@acme/app",
+  "version": "1.4.0",
+  "packageManager": "yarn@4.8.1",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "yarn workspaces foreach -pt run build",
+    "test":  "yarn workspaces foreach -p run test"
+  },
+  "dependencies": {
+    "react":     "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "resolutions": {
+    "lodash": "4.17.21"
+  }
+}`}
+  >
+    <p class="slide-body-text text-[22px] leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      Three things to notice:
+    </p>
+    <ol class="slide-numbered list-none p-0 m-0 text-[21px] leading-[1.5] text-[var(--fg-dim)] font-light mt-5.5">
+      <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty"><strong>packageManager</strong> pins the Yarn version per-project. Corepack handles the install.</li>
+      <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty"><strong>workspaces</strong> is a glob — that's all the monorepo configuration most teams need.</li>
+      <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty"><strong>resolutions</strong> override transitive deps without forking. Use sparingly.</li>
+    </ol>
+  </CodeSideLayout>
+
+  {/* ── SLIDE 7 — CODE WITH HIGHLIGHT ── */}
+  <FullCodeLayout
+    label="07 Highlighted code"
+    eyebrow="§ 02.1 — Constraints"
+    title="Policy as code, not a wiki page."
+    bottomLeft="// constraints engine"
+    bottomRight="07 / 14"
+    filename="yarn.config.cjs"
+    lang="javascript"
+    compact={true}
+    caption={`The <span class="bg-[var(--accent-soft)] px-1.5 rounded">highlighted block</span> is the whole policy — every <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">react</code> dep, anywhere in the monorepo, gets pinned to <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">^19.1.0</code>. Run <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">yarn constraints --fix</code> to apply.`}
+    code={`// Enforce a single React version across every workspace.
+// Drift is a CI failure, not a code review nit.
+
+module.exports = {
+  async constraints({ Yarn }) {
+    for (const dep of Yarn.dependencies({ ident: 'react' })) {
+      dep.update('^19.1.0');
+    }
+
+    for (const ws of Yarn.workspaces()) {
+      ws.set('engines.node', '>=20.11');
+      ws.set('license',      'BSD-2-Clause');
+    }
+  },
+};`}
+  />
+
+  {/* ── SLIDE 8 — TERMINAL ANIMATION ── */}
+  <TerminalLayout
+    label="08 Terminal"
+    eyebrow="§ 02.2 — Install, live"
+    title='10,204 deps. Cold cache. <em>14.2 seconds.</em>'
+    sectionTag="§ 02.2 — Terminal"
+    bottomLeft="// $ yarn install"
+    bottomRight="08 / 14"
+    terminalTitle="~/work/acme · zsh"
+    terminalId="term-1"
+  />
+
+  {/* ── SLIDE 9 — IMAGE / SCREENSHOT ── */}
+  <ImageLayout
+    label="09 Image"
+    eyebrow="§ 02.3 — Benchmarks"
+    title="The chart you came for."
+    bottomLeft="// benchmark · hyperfine"
+    bottomRight="09 / 14"
+    placeholder="screenshot · benchmark chart · 1600 × 900"
+    caption="// figure 2.3 — cold install, 10k-dependency monorepo, 4-core ci runner · median of 50 runs"
+  />
+
+  {/* ── SLIDE 10 — INLINE STYLES KITCHEN SINK ── */}
+  <TwoColumnLayout
+    label="10 Inline styles"
+    eyebrow="§ 03 — Inline reference"
+    title='Inline formatting,<br/>all in one place.'
+    titleSize="60px"
+    sectionTag="§ 03 — Inline styles"
+    bottomLeft="// inline reference"
+    bottomRight="10 / 14"
+    gap="100px"
+  >
+    <Fragment slot="left">
+      <h3 class="text-[22px] font-medium text-[var(--fg-mute)] m-0 mb-4.5 font-mono tracking-[0.1em] uppercase">Text formatting</h3>
+      <p class="slide-body-text text-2xl leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+        <strong>Bold</strong> for emphasis you'd actually say out loud. <em>Italic</em> for register shifts and titles like <em>The Mythical Man-Month</em>. <u>Underlined</u> when something is a defined term.
+      </p>
+      <p class="slide-body-text text-2xl leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+        Use <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">inline code</code> for filenames like <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">.yarnrc.yml</code>, commands like <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">yarn add</code>, and identifiers like <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">packageManager</code>.
+      </p>
+      <p class="slide-body-text text-2xl leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+        Links go to <a href="https://yarnpkg.com">yarnpkg.com</a> or to the <a href="#">internal RFC tracker</a>. Keyboard shortcuts use <span class="font-mono text-xs py-[3px] px-2 border border-[var(--line-strong)] rounded-[6px] bg-[rgba(255,255,255,0.04)] text-[var(--fg-dim)]">⌘</span> <span class="font-mono text-xs py-[3px] px-2 border border-[var(--line-strong)] rounded-[6px] bg-[rgba(255,255,255,0.04)] text-[var(--fg-dim)]">K</span>.
+      </p>
+    </Fragment>
+
+    <Fragment slot="right">
+      <h3 class="text-[22px] font-medium text-[var(--fg-mute)] m-0 mb-4.5 font-mono tracking-[0.1em] uppercase">Lists</h3>
+
+      <p class="font-mono text-lg text-[var(--fg-mute)] m-0 mb-2.5">// unordered</p>
+      <ul class="slide-bullets list-none p-0 m-0 text-[22px] leading-[1.5] text-[var(--fg-dim)] font-light">
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">Determinism is the <strong>floor</strong>, not a feature</li>
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">The cache makes <em>everything else</em> possible</li>
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">Workspaces are <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">first-class</code></li>
+      </ul>
+
+      <p class="font-mono text-lg text-[var(--fg-mute)] mt-7 mb-2.5">// ordered</p>
+      <ol class="slide-numbered list-none p-0 m-0 text-[22px] leading-[1.5] text-[var(--fg-dim)] font-light">
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">Run <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">corepack enable</code></li>
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">Pin with <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">yarn set version stable</code></li>
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">Commit the <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">.yarn/releases</code> binary</li>
+      </ol>
+    </Fragment>
+  </TwoColumnLayout>
+
+  {/* ── SLIDE 11 — TERMINAL + TEXT ── */}
+  <TextTerminalLayout
+    label="11 Terminal + text"
+    eyebrow="§ 03.1 — Workspaces"
+    title='Topological, in parallel,<br/>by default.'
+    sectionTag="§ 03.1 — Workspaces"
+    bottomLeft="// workspaces foreach -pt"
+    bottomRight="11 / 14"
+    terminalTitle="workspaces foreach"
+    terminalId="term-2"
+  >
+    <p class="slide-body-text text-2xl leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">yarn workspaces foreach</code> runs scripts across every package in topological order. The <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">-pt</code> flag enables <strong>parallel</strong> execution with <strong>topological</strong> awareness — dependents wait for dependencies, everything else runs at once.
+    </p>
+    <p class="slide-body-text text-2xl leading-[1.55] text-[var(--fg-dim)] text-pretty font-light">
+      No Lerna. No Nx config. No glue.
+    </p>
+  </TextTerminalLayout>
+
+  {/* ── SLIDE 12 — SECTION DIVIDER 2 ── */}
+  <SectionLayout
+    label="12 Section"
+    sectionTag="§ 04 — Migration"
+    partLabel="Part four"
+    title="Migration"
+    subtitle="— from npm, in an afternoon."
+    lede="A four-step path that doesn't require a working group."
+    bottomLeft="part 4 of 4"
+    bottomRight="// migration"
+  />
+
+  {/* ── SLIDE 13 — STEPS + CODE ── */}
+  <TwoColumnLayout
+    label="13 Steps + code"
+    eyebrow="§ 04.1 — Four steps"
+    title='Migration in <em>four</em> commands.'
+    titleSize="60px"
+    sectionTag="§ 04.1 — Steps"
+    bottomLeft="// migration"
+    bottomRight="13 / 14"
+    colRule={true}
+  >
+    <Fragment slot="left">
+      <ol class="slide-numbered list-none p-0 m-0 text-[23px] leading-[1.5] text-[var(--fg-dim)] font-light">
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">
+          <strong>Enable corepack.</strong><br/>
+          Ships with Node ≥16.10. One-time setup, system-wide.
+        </li>
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">
+          <strong>Pin the version.</strong><br/>
+          Writes <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">packageManager</code> into <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">package.json</code>.
+        </li>
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">
+          <strong>Convert the lockfile.</strong><br/>
+          <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">yarn import</code> reads <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">package-lock.json</code> and produces <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">yarn.lock</code>.
+        </li>
+        <li class="py-3.5 pl-11 relative border-b border-[var(--line)] text-pretty">
+          <strong>Verify in CI.</strong><br/>
+          <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">--immutable</code> fails the build if the lockfile would change.
+        </li>
+      </ol>
+    </Fragment>
+
+    <Fragment slot="right">
+      <Terminal title="migrate.sh">
+        <span class="line"><span class="dim"># 1. enable corepack</span></span>
+        <span class="line"><span class="prompt">$</span> <span class="cmd">corepack enable</span></span>
+        <span class="line"></span>
+        <span class="line"><span class="dim"># 2. pin yarn 4.8.1</span></span>
+        <span class="line"><span class="prompt">$</span> <span class="cmd">yarn set version stable</span></span>
+        <span class="line"><span class="ok">✔</span> Yarn 4.8.1 written to .yarn/releases</span>
+        <span class="line"></span>
+        <span class="line"><span class="dim"># 3. convert lockfile</span></span>
+        <span class="line"><span class="prompt">$</span> <span class="cmd">yarn import</span></span>
+        <span class="line"><span class="ok">✔</span> Imported 412 entries from package-lock.json</span>
+        <span class="line"></span>
+        <span class="line"><span class="dim"># 4. lock down ci</span></span>
+        <span class="line"><span class="prompt">$</span> <span class="cmd">yarn install --immutable</span></span>
+        <span class="line"><span class="ok">✔</span> Done in 14.2s.</span>
+      </Terminal>
+    </Fragment>
+  </TwoColumnLayout>
+
+  {/* ── SLIDE 14 — CLOSING / Q&A ── */}
+  <ClosingLayout
+    label="14 Closing"
+    eyebrow="Questions, comments, complaints"
+    title="Thanks."
+    lede='Slides &amp; code: <a href="#">github.com/your-org/yarn-talk</a>. Catch me in <code class="font-mono text-[0.86em] px-2 py-0.5 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent-line)] whitespace-nowrap">#frontend-platform</code> or grab a coffee.'
+    bottomLeft="// q&amp;a"
+    bottomRight="14 / 14"
+    resources={[
+      { label: `Docs`, href: `https://yarnpkg.com`, text: `yarnpkg.com` },
+      { label: `Discord`, href: `#`, text: `/invite/yarnpkg` },
+      { label: `Source`, href: `#`, text: `github.com/yarnpkg/berry` },
+    ]}
+  />
+
+  {/* ── Terminal animation script ── */}
+  <script is:inline slot="scripts">
+    var slides = Array.from(document.querySelectorAll('section.slide'));
+
+    function onSlideActive(slide) {
+      slide.querySelectorAll('.slide-terminal[data-anim]').forEach(function(t) { animateTerminal(t); });
+      slide.classList.remove('is-entering');
+      void slide.offsetWidth;
+      slide.classList.add('is-entering');
+      setTimeout(function() { slide.classList.remove('is-entering'); }, 1400);
+    }
+
+    var slideObserver = new MutationObserver(function(mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        var m = mutations[i];
+        if (m.attributeName === 'data-deck-active' && m.target.hasAttribute('data-deck-active')) {
+          onSlideActive(m.target);
+        }
+      }
+    });
+    slides.forEach(function(s) { slideObserver.observe(s, { attributes: true, attributeFilter: ['data-deck-active'] }); });
+
+    var TERMINALS = {
+      'term-1': [
+        { html: '<span class="prompt">$</span> <span class="cmd">yarn install</span>', delay: 0 },
+        { html: '<span class="dim">➤ YN0000: ┌ Resolution step</span>', delay: 320 },
+        { html: '<span class="dim">➤ YN0085:</span> │ <span class="accent">react</span> npm:^19.1.0 → npm:19.1.0', delay: 80 },
+        { html: '<span class="dim">➤ YN0085:</span> │ <span class="accent">@types/node</span> npm:^20.11.0 → npm:20.11.30', delay: 80 },
+        { html: '<span class="dim">➤ YN0000:</span> │ <span class="ok">✓</span> resolved 10,204 deps in 1.84s', delay: 220 },
+        { html: '<span class="dim">➤ YN0000: └ Completed</span>', delay: 80 },
+        { html: '', delay: 60 },
+        { html: '<span class="dim">➤ YN0000: ┌ Fetch step</span>', delay: 200 },
+        { html: '<span class="dim">➤ YN0013:</span> │ <span class="accent">14 packages</span> were already cached', delay: 100 },
+        { html: '<span class="dim">➤ YN0013:</span> │ <span class="accent">10,190 packages</span> fetched in <span class="ok">9.6s</span>', delay: 100 },
+        { html: '<span class="dim">➤ YN0000: └ Completed</span>', delay: 60 },
+        { html: '', delay: 40 },
+        { html: '<span class="dim">➤ YN0000: ┌ Link step</span>', delay: 180 },
+        { html: '<span class="dim">➤ YN0000:</span> │ pnp.cjs <span class="ok">✓</span> · pnp.loader.mjs <span class="ok">✓</span>', delay: 100 },
+        { html: '<span class="dim">➤ YN0000: └ Completed in 2.7s</span>', delay: 80 },
+        { html: '', delay: 40 },
+        { html: '<span class="ok">➤ YN0000: · Done in 14.2s</span>', delay: 220 }
+      ],
+      'term-2': [
+        { html: '<span class="prompt">$</span> <span class="cmd">yarn workspaces foreach -pt run build</span>', delay: 0 },
+        { html: '<span class="dim">➤ YN0000:</span> [<span class="accent">@acme/utils</span>]: <span class="ok">✓</span> built in 1.2s', delay: 300 },
+        { html: '<span class="dim">➤ YN0000:</span> [<span class="accent">@acme/icons</span>]: <span class="ok">✓</span> built in 1.4s', delay: 80 },
+        { html: '<span class="dim">➤ YN0000:</span> [<span class="accent">@acme/ui</span>]: <span class="ok">✓</span> built in 3.1s', delay: 200 },
+        { html: '<span class="dim">➤ YN0000:</span> [<span class="accent">@acme/api</span>]: <span class="ok">✓</span> built in 2.7s', delay: 80 },
+        { html: '<span class="dim">➤ YN0000:</span> [<span class="accent">@acme/app</span>]: <span class="ok">✓</span> built in 4.6s', delay: 200 },
+        { html: '', delay: 60 },
+        { html: '<span class="ok">➤ YN0000: · 5 / 5 workspaces succeeded in 7.2s</span>', delay: 200 }
+      ]
+    };
+
+    var termTimers = new WeakMap();
+    function animateTerminal(termEl) {
+      var body = termEl.querySelector('.slide-terminal-body');
+      if (!body) return;
+      var recipeEl = termEl.querySelector('script.terminal-recipe');
+      var recipe;
+      if (recipeEl) {
+        recipe = JSON.parse(recipeEl.textContent);
+      } else {
+        var bodyId = body.id;
+        if (!bodyId || !TERMINALS[bodyId]) return;
+        recipe = TERMINALS[bodyId];
+      }
+      if (!recipe) return;
+      if (termTimers.has(termEl)) {
+        termTimers.get(termEl).forEach(function(t) { clearTimeout(t); });
+      }
+      body.innerHTML = '';
+      var timers = [];
+      var t = 0;
+      recipe.forEach(function(step, i) {
+        t += step.delay;
+        timers.push(setTimeout(function() {
+          if (step.clear) {
+            for (var c = 0; c < step.clear; c++) {
+              if (body.lastChild) body.removeChild(body.lastChild);
+            }
+          }
+          var span = document.createElement('span');
+          span.className = 'line';
+          span.innerHTML = step.html || '&nbsp;';
+          body.appendChild(span);
+          if (i === recipe.length - 1) {
+            var cur = document.createElement('span');
+            cur.className = 'cursor';
+            body.lastChild.appendChild(cur);
+          }
+        }, t));
+      });
+      termTimers.set(termEl, timers);
+    }
+
+    setTimeout(function() {
+      slides.forEach(function(s) { if (s.hasAttribute('data-deck-active')) onSlideActive(s); });
+    }, 100);
+  </script>
+
+</DeckLayout>

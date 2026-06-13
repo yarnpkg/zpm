@@ -3,15 +3,17 @@ use zpm_utils::{get_system_string};
 
 use crate::{cache, errors::Error};
 
-/// Check if the specified versions are available in the cache
+/// Check whether Yarn versions are cached
 #[cli::command]
 #[cli::path("switch", "cache")]
 #[cli::category("Cache management")]
 #[derive(Debug)]
 pub struct CacheCheckCommand {
+    /// Check for cached entries instead of installing or listing them
     #[cli::option("--check")]
     _check: bool,
 
+    /// Yarn versions that must be present in the cache
     versions: Vec<zpm_semver::Version>,
 }
 

@@ -1,0 +1,34 @@
+---
+import ContentSlide from '../ContentSlide.astro';
+import ImageFrame from '../ImageFrame.astro';
+import { titleToSectionTag } from '../sectionTag';
+
+interface Props {
+  eyebrow: string;
+  title: string;
+  titleSize?: string;
+  bottomLeft?: string;
+  bottomRight?: string;
+  label?: string;
+  href?: string;
+  alt?: string;
+  placeholder?: string;
+  caption?: string;
+}
+
+const { eyebrow, title, titleSize = `60px`, bottomLeft, bottomRight, label, href, alt, placeholder, caption } = Astro.props;
+
+const sectionTag = titleToSectionTag(title);
+---
+
+<ContentSlide sectionTag={sectionTag} bottomLeft={bottomLeft} bottomRight={bottomRight} autoCounter label={label}>
+  <div class="reveal reveal-1 font-mono text-sm tracking-[0.14em] text-[var(--fg-mute)] uppercase mb-7">
+    {eyebrow}
+  </div>
+
+  <h2 class="slide-title reveal reveal-2 leading-[1.02] tracking-[-0.028em] font-medium m-0 mb-9 text-balance" style={`font-size: ${titleSize}`} set:html={title} />
+
+  <div class="reveal reveal-3 flex-1 min-h-0 max-h-[620px]">
+    <ImageFrame href={href} alt={alt} placeholder={placeholder} caption={caption} style="height: 100%" />
+  </div>
+</ContentSlide>

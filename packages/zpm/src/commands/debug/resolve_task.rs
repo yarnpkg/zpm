@@ -3,9 +3,14 @@ use zpm_tasks::{TaskId, TaskName};
 
 use crate::{error::Error, project};
 
+/// Resolve a task from the active workspace
+///
+/// This debug command prints the resolved task graph for a task name as JSON.
+///
 #[cli::command]
 #[cli::path("debug", "resolve-task")]
 pub struct ResolveTask {
+    /// Task name to resolve
     name: String,
 }
 

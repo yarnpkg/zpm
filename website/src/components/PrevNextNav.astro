@@ -1,0 +1,38 @@
+---
+interface Props {
+  prev?: { href: string; label: string };
+  next?: { href: string; label: string };
+  prevEyebrow?: string;
+  nextEyebrow?: string;
+}
+
+const { prev, next, prevEyebrow = `← Previous`, nextEyebrow = `Next →` } = Astro.props;
+---
+
+{(prev || next) && (
+  <nav class="mt-20 pt-8 border-t border-[var(--line)] grid grid-cols-2 gap-4 not-prose">
+    {prev && (
+      <a href={prev.href} class="no-prose-link block p-5 rounded-xl border border-[var(--line)] hover:border-[var(--line-strong)] bg-[var(--card)] backdrop-blur-md transition-colors no-underline">
+        <div class="mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.1em] uppercase mb-1.5">
+          {prevEyebrow}
+        </div>
+
+        <div class="text-[15px] text-[var(--fg)] font-medium">
+          {prev.label}
+        </div>
+      </a>
+    )}
+
+    {next && (
+      <a href={next.href} class="no-prose-link block p-5 rounded-xl border border-[var(--line)] hover:border-[var(--line-strong)] bg-[var(--card)] backdrop-blur-md transition-colors no-underline text-right">
+        <div class="mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.1em] uppercase mb-1.5">
+          {nextEyebrow}
+        </div>
+
+        <div class="text-[15px] text-[var(--fg)] font-medium">
+          {next.label}
+        </div>
+      </a>
+    )}
+  </nav>
+)}

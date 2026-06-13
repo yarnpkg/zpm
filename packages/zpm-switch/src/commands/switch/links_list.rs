@@ -3,7 +3,10 @@ use zpm_utils::{tree, AbstractValue};
 
 use crate::{links::list_links, errors::Error};
 
-/// List all local links
+/// List projects with Yarn Switch links
+///
+/// This command shows projects that are currently linked to a local Yarn binary or migration version.
+///
 #[cli::command]
 #[cli::path("switch", "links")]
 #[cli::category("Local Yarn development")]

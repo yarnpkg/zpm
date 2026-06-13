@@ -5,13 +5,19 @@ use zpm_utils::ToFileString;
 
 use crate::{config::validate_yarn_version, cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, ipc::YARNSW_PATH_ENV, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}, yarn::resolve_selector, yarn_enums::Selector};
 
-/// Call a custom Yarn binary for the current project
+/// Run a command with an explicit Yarn selector
+///
+/// This command resolves the selector, installs the matching Yarn binary if needed, and forwards the remaining arguments to it.
+///
 #[cli::command(proxy)]
 #[cli::path("switch")]
 #[cli::category("General commands")]
 #[derive(Debug)]
 pub struct ExplicitCommand {
+    /// Yarn selector to execute
     selector: Selector,
+
+    /// Yarn command and arguments to forward
     args: Vec<String>,
 }
 

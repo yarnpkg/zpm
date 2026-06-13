@@ -1,0 +1,7 @@
+@import "tailwindcss";
+@source "../../plugins";
+
+@theme {
+  --font-sans: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}

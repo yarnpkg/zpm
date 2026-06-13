@@ -21,6 +21,7 @@ use super::helpers::format_start_time;
 #[cli::path("tasks")]
 #[cli::category("Task management commands")]
 pub struct TaskList {
+    /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
     pub json: bool,
 }

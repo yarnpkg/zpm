@@ -1,0 +1,18 @@
+---
+interface Props {
+  badge: string;
+  version: string;
+  badgeStyle?: string;
+}
+
+const { badge, version, badgeStyle } = Astro.props;
+---
+
+<span class="inline-flex items-center gap-2 py-[5px] pr-3 pl-1.5 border border-[var(--line-strong)] rounded-full text-[13px] text-[var(--fg-mute)] tracking-[0.02em]">
+  <span class="font-mono py-[3px] px-[9px] rounded-full bg-[var(--accent-soft)] text-[var(--accent)] text-[11px] tracking-[0.1em] uppercase" style={badgeStyle}>
+    {badge}
+  </span>
+  <span class="font-mono text-[var(--fg)] text-[13px]">
+    {version}
+  </span>
+</span>

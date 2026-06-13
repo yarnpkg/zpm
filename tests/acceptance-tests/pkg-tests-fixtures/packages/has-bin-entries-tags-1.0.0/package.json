@@ -1,0 +1,11 @@
+{
+    "name": "has-bin-entries-tags",
+    "version": "1.0.0",
+    "bin": {
+        "has-bin-entries-tags": "./bin.js"
+    },
+    "dist-tags": {
+        "latest": "2.0.0",
+        "rc": "1.0.0"
+    }
+}

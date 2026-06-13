@@ -1,0 +1,537 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import SectionHeader from '../components/index/SectionHeader.astro';
+import FeatureCard from '../components/index/FeatureCard.astro';
+import FooterColumn from '../components/index/FooterColumn.astro';
+import VersionPill from '../components/index/VersionPill.astro';
+
+const [stableVersion, canaryVersion, benchmarkSummary] = await Promise.all([
+  fetch(`https://repo.yarnpkg.com/channels/berry/stable`).then(r => r.text()).then(v => v.trim()),
+  fetch(`https://repo.yarnpkg.com/channels/zpm/canary`).then(r => r.text()).then(v => v.trim()),
+  fetch(`https://repo.yarnpkg.com/benchmarks/gatsby/summary`).then(r => r.json()),
+]);
+
+const installFullCold = benchmarkSummary
+  .filter((d: {subtest: string}) => d.subtest === `install-full-cold`)
+  .sort((a: {median: number}, b: {median: number}) => a.median - b.median);
+---
+
+<BaseLayout title="Yarn — the modern JavaScript package manager" description="Fast, reliable, and secure JavaScript package manager. Install dependencies in seconds with deterministic installs, workspaces, and plug-and-play support.">
+<script is:inline>
+(function(){var t=localStorage.getItem('yarn-theme')||'dark';document.documentElement.setAttribute('data-theme',t)})();
+</script>
+<style is:global slot="head">
+:root {
+  --accent-h: 280;
+  --accent: oklch(0.78 0.16 var(--accent-h));
+  --accent-soft: oklch(0.78 0.16 var(--accent-h) / 0.14);
+  --accent-line: oklch(0.78 0.16 var(--accent-h) / 0.35);
+
+  /* dark (default) */
+  --bg-0: #05060f;
+  --bg-1: #0a0e28;
+  --bg-2: #141552;
+  --bg-3: #2a1a6e;
+  --fg: #e8ecff;
+  --fg-dim: #a8b0d4;
+  --fg-mute: #6872a0;
+  --line: rgba(168, 176, 212, 0.14);
+  --line-strong: rgba(168, 176, 212, 0.28);
+  --card: rgba(12, 16, 44, 0.55);
+  --card-border: rgba(120, 130, 180, 0.18);
+  --cat-fill: #05060f;
+  --star: #ffffff;
+  --constellation: rgba(200, 210, 255, 0.35);
+}
+
+html[data-theme="light"] {
+  --accent: oklch(0.45 0.18 var(--accent-h));
+  --accent-soft: oklch(0.45 0.18 var(--accent-h) / 0.10);
+  --accent-line: oklch(0.45 0.18 var(--accent-h) / 0.30);
+  --bg-0: #eef3ff;
+  --bg-1: #dce7fb;
+  --bg-2: #c5d5f2;
+  --bg-3: #f0e4cf;
+  --fg: #0c1030;
+  --fg-dim: #252d50;
+  --fg-mute: #515a7a;
+  --line: rgba(12, 16, 48, 0.12);
+  --line-strong: rgba(12, 16, 48, 0.28);
+  --card: rgba(255, 255, 255, 0.72);
+  --card-border: rgba(12, 16, 48, 0.14);
+  --cat-fill: #0c1030;
+  --star: #ffd98a;
+  --constellation: rgba(12, 16, 48, 0.18);
+}
+
+body {
+  font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  background: var(--bg-0);
+  color: var(--fg);
+  transition: background 0.6s ease, color 0.6s ease;
+}
+
+.mono, code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+/* ── Sky background (complex multi-radial gradient kept in CSS) ── */
+.sky {
+  background:
+    radial-gradient(ellipse 60% 35% at 78% 18%, oklch(0.42 0.18 290 / 0.45) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 40% at 20% 92%, oklch(0.38 0.14 220 / 0.35) 0%, transparent 55%),
+    radial-gradient(ellipse 55% 45% at 8% 55%, oklch(0.40 0.14 235 / 0.30) 0%, transparent 60%),
+    radial-gradient(ellipse 100% 70% at 50% 30%, oklch(0.28 0.12 270) 0%, transparent 65%),
+    radial-gradient(ellipse 120% 100% at 50% 50%, transparent 40%, oklch(0.10 0.04 265 / 0.55) 100%),
+    linear-gradient(180deg in oklch,
+      oklch(0.12 0.05 265) 0%,
+      oklch(0.18 0.09 270) 22%,
+      oklch(0.22 0.11 275) 48%,
+      oklch(0.16 0.08 272) 78%,
+      oklch(0.09 0.04 265) 100%);
+  transition: background 0.6s ease;
+}
+.sky::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.06;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+html[data-theme="light"] .sky {
+  background:
+    radial-gradient(ellipse 50% 35% at 82% 12%, oklch(0.97 0.06 85 / 0.85) 0%, transparent 55%),
+    radial-gradient(ellipse 110% 35% at 50% 98%, oklch(0.92 0.08 65) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 50% at 20% 40%, oklch(0.95 0.04 240 / 0.6) 0%, transparent 60%),
+    radial-gradient(ellipse 140% 100% at 50% 50%, transparent 55%, oklch(0.75 0.06 240 / 0.25) 100%),
+    linear-gradient(180deg in oklch,
+      oklch(0.96 0.03 240) 0%,
+      oklch(0.92 0.05 240) 35%,
+      oklch(0.88 0.06 230) 65%,
+      oklch(0.92 0.06 70) 100%);
+}
+
+/* Install-box atmospheric glow (pseudo-element) */
+.install-glow::before {
+  content: '';
+  position: absolute;
+  inset: -120px -80px -120px -260px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 60% 45% at 38% 50%,
+    oklch(0.32 0.14 235 / 0.75) 0%,
+    oklch(0.22 0.10 245 / 0.45) 40%,
+    transparent 72%);
+  filter: blur(10px);
+}
+html[data-theme="light"] .install-glow::before {
+  background: radial-gradient(ellipse 60% 45% at 38% 50%,
+    oklch(0.72 0.12 60 / 0.70) 0%,
+    oklch(0.80 0.08 70 / 0.40) 40%,
+    transparent 72%);
+}
+
+/* Cat light-mode filter */
+html[data-theme="light"] img.cat { filter: brightness(0.15); }
+
+/* Tip body crossfade */
+#tip-body { transition: opacity 0.22s ease; }
+#tip-body.fading { opacity: 0; }
+
+/* Perf bar animation */
+@keyframes grow { to { transform: scaleX(1); } }
+.bar-fill {
+  transform-origin: left;
+  transform: scaleX(0);
+}
+#chart.in-view .bar-fill {
+  animation: grow var(--grow-duration) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* State classes that JS toggles — minimal rules */
+#install-box.copied { border-color: var(--accent-line); }
+#install-box.copied #copy-btn { color: var(--accent); border-color: var(--accent-line); }
+.tip-dot.active { background: var(--accent); transform: scale(1.25); }
+.bar-fill.self { background: var(--accent) !important; }
+.bar-label.self { color: var(--fg) !important; font-weight: 500; }
+.bar-value.self { color: var(--accent) !important; font-weight: 500; }
+
+</style>
+
+  <!-- Hero -->
+  <section class="relative min-h-[calc(100vh-67px)] px-5 sm:px-8 pb-24 md:pb-0 py-[clamp(48px,8vh,120px)] flex items-center justify-center">
+    <div class="max-w-[1240px] w-full mx-auto relative">
+      <div class="grid grid-cols-1 md:grid-cols-[1.1fr_0.9fr] gap-10 md:gap-20 items-center">
+        <div>
+          <div class="flex gap-2 flex-wrap mb-7">
+            <VersionPill label="stable" title="Stable" version={`v${stableVersion}`} accent />
+            {stableVersion !== canaryVersion && (
+              <div class="relative">
+                <VersionPill label="canary" title="Canary" version={`v${canaryVersion}`} href="/concepts/yarn-6" />
+                <div class="group absolute bottom-[8px] left-[calc(100%_+_4px)] rotate-[-2deg] transition-transform hover:rotate-[1deg] hover:scale-105">
+                  <div class="absolute top-1 left-1 w-full h-full rounded-[14px] bg-black"/>
+                  <a class="relative inline-flex items-center px-4 py-1.5 rounded-[14px] text-[12px] font-bold tracking-[0.01em] no-underline bg-white text-black whitespace-nowrap" href="/concepts/yarn-6">
+                    <svg class="absolute bottom-[10px] right-[calc(100%_-_12px)] w-5 h-2.5" viewBox="0 0 20 10">
+                      <path d="M 0 10 L 20 0 L 20 10 L 0 10" fill="white"/>
+                    </svg>
+                    Click to know more!
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+          <h1 class="text-[clamp(48px,6.4vw,92px)] leading-[0.96] tracking-[-0.035em] font-medium m-0 mb-7 text-balance">
+            Ship with<br/>
+            <em class="not-italic text-[var(--fg-dim)] font-light">
+              confidence.
+            </em>
+          </h1>
+
+          <p class="text-[19px] leading-[1.55] text-[var(--fg-dim)] max-w-[540px] m-0 mb-10 text-pretty">
+            Deterministic, offline-first package management for JavaScript.
+            Built for monorepos.
+          </p>
+
+          <div class="flex gap-3 items-center flex-wrap mb-12">
+            <a class="inline-flex items-center gap-2 px-[22px] py-[13px] rounded-[10px] text-[14.5px] font-medium no-underline border border-transparent cursor-pointer transition-all bg-[var(--fg)] text-[var(--bg-0)] hover:-translate-y-px" href="/getting-started/">
+              Install
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M3 7h8M8 4l3 3-3 3"/>
+              </svg>
+            </a>
+            <a class="inline-flex items-center gap-2 px-[22px] py-[13px] rounded-[10px] text-[14.5px] font-medium no-underline bg-transparent text-[var(--fg)] border border-[var(--line-strong)] transition-colors hover:border-[var(--fg-dim)]" href="/welcome/">
+              Why Yarn?
+            </a>
+          </div>
+
+          <div id="install-box" role="group" aria-label="Install command" class="install-glow relative bg-[var(--card)] border border-[var(--card-border)] rounded-[14px] pl-[18px] pr-1.5 py-1.5 flex items-center gap-3.5 font-mono text-xs sm:text-sm max-w-[480px] backdrop-blur-md transition-colors hover:border-[var(--line-strong)] cursor-pointer">
+            <span class="text-[var(--fg-mute)] select-none">$</span>
+            <span class="text-[var(--fg)] flex-1 whitespace-nowrap overflow-hidden text-ellipsis"><span class="text-[var(--accent)]">curl</span> repo.yarnpkg.com/install | <span class="text-[var(--accent)]">bash</span></span>
+            <button id="copy-btn" aria-label="Copy install command" class="bg-transparent text-[var(--fg-dim)] border border-[var(--line)] rounded-lg px-3 py-2 font-[inherit] text-xs cursor-pointer inline-flex items-center gap-1.5 transition-all hover:text-[var(--fg)] hover:border-[var(--line-strong)]">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4">
+                <rect x="3" y="3" width="7" height="7" rx="1"/>
+                <path d="M2 8V2h6" opacity="0.6"/>
+              </svg>
+              <span id="copy-label">
+                Copy
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div class="relative aspect-square w-full max-w-[280px] mx-auto md:max-w-[520px] md:mx-0 md:justify-self-end">
+          <div class="absolute inset-0 border border-[var(--line)] rounded-full pointer-events-none"></div>
+
+          <div class="hidden md:block absolute -inset-10 border border-[var(--line)] rounded-full pointer-events-none opacity-50"></div>
+
+          <div class="hidden md:block absolute -inset-20 border border-[var(--line)] rounded-full pointer-events-none opacity-25"></div>
+
+          <img
+            id="cat-img"
+            class="cat w-full h-full block object-contain"
+            src="cat.png"
+            alt=""
+            aria-hidden="true"
+            crossorigin="anonymous"
+          />
+
+          <div id="tip-card" aria-live="polite" class="absolute -bottom-6 left-0 right-0 md:left-auto md:right-[-12px] w-full md:w-80 max-w-full px-[18px] py-3.5 bg-[var(--card)] border border-[var(--card-border)] rounded-xl backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_40px_-20px_rgba(0,0,0,0.6)] z-[2] font-sans">
+            <div class="flex items-center justify-between gap-3 mb-1.5">
+              <span class="mono text-[10.5px] tracking-[0.1em] text-[var(--fg-mute)] uppercase whitespace-nowrap">
+                // did you know
+              </span>
+              <span id="tip-count" class="mono text-[10.5px] text-[var(--fg-mute)] tabular-nums">
+                01 / 06
+              </span>
+            </div>
+
+            <p id="tip-body" class="text-[13px] leading-[1.5] text-[var(--fg-dim)] text-pretty min-h-[3.9em] m-0 mb-2.5"></p>
+
+            <div class="flex items-center gap-1 justify-end">
+              <div id="tip-dots" class="inline-flex gap-1 px-2"></div>
+              <button id="tip-prev" aria-label="Previous tip" class="w-[26px] h-[26px] border border-[var(--line)] rounded-md bg-transparent text-[var(--fg-dim)] cursor-pointer inline-flex items-center justify-center transition-all p-0 hover:text-[var(--fg)] hover:border-[var(--line-strong)] active:scale-95">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6.5 2L3 5l3.5 3"/></svg>
+              </button>
+              <button id="tip-next" aria-label="Next tip" class="w-[26px] h-[26px] border border-[var(--line)] rounded-md bg-transparent text-[var(--fg-dim)] cursor-pointer inline-flex items-center justify-center transition-all p-0 hover:text-[var(--fg)] hover:border-[var(--line-strong)] active:scale-95">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3.5 2L7 5l-3.5 3"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="relative py-[120px] px-8 border-t border-[var(--line)] bg-[color-mix(in_oklch,var(--bg-0)_75%,transparent)] backdrop-blur-[2px]">
+    <div class="max-w-[1240px] mx-auto">
+      <SectionHeader label="§ 01 — PRINCIPLES" description="Every decision in Yarn is measured against determinism, speed, usability, and monorepo-scale ergonomics.">
+        Principled
+      </SectionHeader>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 border-t border-l border-[var(--line)]">
+        <FeatureCard number="01" title="Deterministic by default">
+          <svg slot="icon" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3" width="12" height="12" rx="1"/><path d="M3 7h12M7 3v12"/></svg>
+          A single <span class="mono">yarn.lock</span> produces byte-identical <span class="mono">node_modules</span> across machines, OSes, and CI providers. If it installs for you, it installs for them.
+        </FeatureCard>
+        <FeatureCard number="02" title="Plug'n'Play resolution">
+          <svg slot="icon" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 2v14M2 9h14" opacity="0.5"/><path d="M4 4l10 10M14 4L4 14"/></svg>
+          Skip <span class="mono">node_modules</span> entirely. PnP maps imports directly to the content-addressable cache — one install instead of thousands of file copies.
+        </FeatureCard>
+        <FeatureCard number="03" title="Offline-first cache">
+          <svg slot="icon" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="9" cy="9" r="6"/><path d="M9 5v4l3 2"/></svg>
+          Every package you've ever resolved lives in the global cache. Subsequent installs — even in fresh clones — never hit the registry.
+        </FeatureCard>
+        <FeatureCard number="04" title="Workspaces, first-class">
+          <svg slot="icon" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3" width="5" height="5"/><rect x="10" y="3" width="5" height="5"/><rect x="3" y="10" width="5" height="5"/><rect x="10" y="10" width="5" height="5"/></svg>
+          Monorepo primitives are native, not bolted on: topological builds, shared ranges, and constraint-based version policies across hundreds of packages.
+        </FeatureCard>
+        <FeatureCard number="05" title="Parallel everything">
+          <svg slot="icon" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 14l5-8 3 5 2-3 4 6"/><path d="M2 14h14" opacity="0.5"/></svg>
+          Fetch, link, and build stages run concurrently with bounded worker pools. <span class="mono">yarn install</span> saturates your CPU, not your patience.
+        </FeatureCard>
+        <FeatureCard number="06" title="Constraints engine">
+          <svg slot="icon" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="12" height="10" rx="1"/><path d="M6 8h6M6 11h4"/></svg>
+          Enforce version policy declaratively across a monorepo. Prolog-style rules catch drift before it lands in <span class="mono">main</span>.
+        </FeatureCard>
+      </div>
+    </div>
+  </section>
+
+  <!-- Performance -->
+  <section id="performance" class="relative py-[120px] px-8 border-t border-[var(--line)] bg-[color-mix(in_oklch,var(--bg-0)_75%,transparent)] backdrop-blur-[2px]">
+    <div class="max-w-[1240px] mx-auto">
+      <SectionHeader label="§ 02 — BENCHMARKS" description="We don't just say we're fast - we prove it to ourselves. Our team runs automated tests every hour to catch any regression.">
+        Performant
+      </SectionHeader>
+
+      <div class="grid grid-cols-1 md:grid-cols-[1fr_1.3fr] gap-10 md:gap-20 items-center">
+        <div class="text-sm text-[var(--fg-dim)] leading-[1.6]">
+          <div class="mb-3.5">
+            <span class="inline-flex items-center gap-2 mr-5 mono text-xs text-[var(--fg)]">
+              <span class="w-2.5 h-2.5 rounded-sm bg-[var(--accent)]"></span>
+              Yarn 6.x
+            </span>
+            <span class="inline-flex items-center gap-2 mr-5 mono text-xs text-[var(--fg)]">
+              <span class="w-2.5 h-2.5 rounded-sm bg-[var(--fg-dim)]"></span>
+              others
+            </span>
+          </div>
+          <p>Full cold install (<span class="mono">install-full-cold</span>) of the Gatsby fixture — no cache, no lockfile, no <span class="mono">node_modules</span>. Median of multiple runs.</p>
+          <p class="text-xs text-[var(--fg-mute)] mono mt-8 pt-5 border-t border-[var(--line)]">
+            // source: repo.yarnpkg.com/benchmarks/gatsby/summary
+          </p>
+        </div>
+
+        <div id="chart" class="flex flex-col gap-5" data-benchmarks={JSON.stringify(installFullCold)}></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Ecosystem -->
+  <section id="ecosystem" class="relative py-[120px] px-8 border-t border-[var(--line)] bg-[color-mix(in_oklch,var(--bg-0)_75%,transparent)] backdrop-blur-[2px]">
+    <div class="max-w-[1240px] mx-auto">
+      <SectionHeader label="§ 03 — ADOPTION" description="Yarn powers open-source projects and corporate repositories alike. You may have heard some of these names before?">
+        Trusted
+      </SectionHeader>
+      <div class="flex flex-wrap gap-x-16 gap-y-12 items-center justify-center py-5 opacity-80">
+        {['fintech co.', 'social network', 'video platform', 'e-commerce', 'dev tools', 'cloud provider', 'ride-hailing', 'streaming'].map(name => (
+          <div class="text-[22px] font-medium tracking-[-0.02em] text-[var(--fg-dim)] flex items-center gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-sm bg-[var(--fg-mute)] opacity-60"></span>
+            {name}
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="border-t border-[var(--line)] pt-[60px] pb-10 px-8 bg-[color-mix(in_oklch,var(--bg-0)_85%,transparent)]">
+    <div class="max-w-[1240px] mx-auto grid grid-cols-2 md:grid-cols-[1.4fr_1fr_1fr_1fr_1fr] gap-12">
+      <div class="text-sm text-[var(--fg-dim)] leading-[1.6] col-span-2 md:col-span-1">
+        <div class="flex items-center gap-2.5 font-semibold text-[17px] tracking-[-0.01em] mb-4 text-[var(--fg)]">
+          <span class="w-[26px] h-[26px] inline-flex items-center justify-center">
+            <svg viewBox="0 0 26 26" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.3">
+              <circle cx="13" cy="13" r="10"/>
+              <path d="M5 10 Q13 6 21 10 M4 14 Q13 10 22 14 M6 18 Q13 14 20 18" opacity="0.7"/>
+              <path d="M13 3 Q10 10 13 13 Q16 16 13 23" opacity="0.5"/>
+            </svg>
+          </span>
+          <span>
+            yarn
+          </span>
+        </div>
+        The modern JavaScript package manager.
+      </div>
+      <FooterColumn title="DOCS" links={[
+        { label: 'Getting started', href: '/getting-started/' },
+        { label: 'Configuration', href: '/configuration/yarnrc/' },
+        { label: 'CLI reference', href: '/cli/install/' },
+        { label: 'Migration', href: '/getting-started/migration-mode/' },
+      ]} />
+      <FooterColumn title="FEATURES" links={[
+        { label: 'Workspaces', href: '/concepts/workspaces/' },
+        { label: "Plug'n'Play", href: '/concepts/pnp/' },
+        { label: 'Constraints', href: '/concepts/constraints/' },
+        { label: 'Protocols', href: '/concepts/protocols/' },
+      ]} />
+      <FooterColumn title="COMMUNITY" links={[
+        { label: 'GitHub', href: 'https://github.com/yarnpkg/berry' },
+        { label: 'Discord', href: 'https://discord.gg/yarnpkg' },
+        { label: 'Contributing', href: '/contributing/welcome/' },
+        { label: 'Architecture', href: '/advanced/architecture/' },
+      ]} />
+      <FooterColumn title="MORE" links={[
+        { label: 'Blog', href: '/blog' },
+        { label: 'Changelog', href: '/advanced/changelog/' },
+        { label: 'Quiz', href: '/quiz/' },
+      ]} />
+    </div>
+    <div class="max-w-[1240px] mx-auto mt-12 pt-6 border-t border-[var(--line)] flex justify-between text-xs text-[var(--fg-mute)] mono">
+      <span>// Yarn @ 2026 — GPL 3.0</span>
+    </div>
+  </footer>
+</div>
+
+<script>
+import { createStarfield } from '../scripts/starfield';
+import TIPS from '../../config/tips.json';
+
+const state = {
+  theme: `dark`,
+  starDensity: 57,
+  starMotion: 41,
+  starOpacity: 43,
+  constellations: true,
+  accentHue: 280,
+};
+
+const _savedTheme = localStorage.getItem(`yarn-theme`);
+if (_savedTheme) state.theme = _savedTheme;
+
+function motionToRad(m) { return (m / 100) * 0.08; }
+state.starSpeed = motionToRad(state.starMotion);
+
+let reinitStars;
+
+function applyTheme(t) {
+  document.documentElement.setAttribute(`data-theme`, t);
+  localStorage.setItem(`yarn-theme`, t);
+  state.theme = t;
+  reinitStars?.();
+}
+
+function applyAccent(h) {
+  document.documentElement.style.setProperty(`--accent-h`, h);
+}
+applyTheme(state.theme);
+applyAccent(state.accentHue);
+
+document.getElementById(`theme-toggle`).addEventListener(`click`, () => {
+  applyTheme(state.theme === `dark` ? `light` : `dark`);
+});
+
+const installBox = document.getElementById(`install-box`);
+const copyBtn = document.getElementById(`copy-btn`);
+const copyLabel = document.getElementById(`copy-label`);
+
+installBox.addEventListener(`click`, async () => {
+  try {
+    await navigator.clipboard.writeText(`curl repo.yarnpkg.com/install | bash`);
+    installBox.classList.add(`copied`);
+    copyLabel.textContent = `Copied`;
+    setTimeout(() => { installBox.classList.remove(`copied`); copyLabel.textContent = `Copy`; }, 1400);
+  } catch (e) {
+    copyLabel.textContent = `Ctrl+C`;
+  }
+});
+
+const tipBody = document.getElementById(`tip-body`);
+const tipCount = document.getElementById(`tip-count`);
+const tipDots = document.getElementById(`tip-dots`);
+
+for (let i = TIPS.length - 1; i > 0; i--) {
+  const j = Math.floor(Math.random() * (i + 1));
+  [TIPS[i], TIPS[j]] = [TIPS[j], TIPS[i]];
+}
+
+TIPS.forEach((_, i) => {
+  const d = document.createElement(`span`);
+  d.className = `tip-dot w-[5px] h-[5px] rounded-full bg-[var(--line-strong)] transition-all cursor-pointer` + (i === 0 ? ` active` : ``);
+  d.addEventListener(`click`, () => setTip(i));
+  tipDots.appendChild(d);
+});
+
+let tipIdx = 0;
+let tipTimer = null;
+
+function pad(n) { return n < 10 ? `0` + n : `` + n; }
+
+function renderTip() {
+  tipBody.classList.add(`fading`);
+  setTimeout(() => {
+    tipBody.innerHTML = TIPS[tipIdx];
+    tipCount.textContent = `${pad(tipIdx + 1)} / ${pad(TIPS.length)}`;
+    tipDots.querySelectorAll(`.tip-dot`).forEach((d, i) => d.classList.toggle(`active`, i === tipIdx));
+    tipBody.classList.remove(`fading`);
+  }, 180);
+}
+
+function setTip(i) {
+  tipIdx = ((i % TIPS.length) + TIPS.length) % TIPS.length;
+  renderTip();
+  restartTimer();
+}
+
+function restartTimer() {
+  if (tipTimer) clearInterval(tipTimer);
+  tipTimer = setInterval(() => setTip(tipIdx + 1), 7000);
+}
+
+document.getElementById(`tip-prev`).addEventListener(`click`, () => setTip(tipIdx - 1));
+document.getElementById(`tip-next`).addEventListener(`click`, () => setTip(tipIdx + 1));
+
+tipBody.innerHTML = TIPS[0];
+tipCount.textContent = `01 / ${pad(TIPS.length)}`;
+
+restartTimer();
+
+/* ─────────────────── Starfield ─────────────────── */
+
+const canvas = document.getElementById(`stars`);
+const { initStars } = createStarfield(canvas, state);
+reinitStars = initStars;
+
+/* ─────────────────── Perf chart bars ─────────────────── */
+
+const chart = document.getElementById(`chart`);
+const renameMap = { zpm: `Yarn 6.x`, yarn: `Yarn 4.x` };
+const chartData = JSON.parse(chart.dataset.benchmarks).map((d) => ({
+  name: renameMap[d.pm] ?? d.pm,
+  value: d.median,
+  self: d.pm === `zpm`,
+}));
+const maxVal = Math.max(...chartData.map(d => d.value));
+chartData.forEach((d, i) => {
+  const pct = (d.value / maxVal) * 100;
+  const row = document.createElement(`div`);
+
+  row.className = `grid grid-cols-[120px_1fr_70px] gap-5 items-center`;
+  row.innerHTML = `
+    <div class="bar-label ${d.self ? 'self' : ''} text-[13px] text-[var(--fg-dim)] mono">${d.name}</div>
+    <div class="h-7 bg-[var(--card)] border border-[var(--card-border)] rounded-md overflow-hidden relative">
+      <div class="bar-fill ${d.self ? 'self' : ''} h-full rounded-[5px] bg-[var(--fg-dim)]" style="width:${pct.toFixed(1)}%; --grow-duration: ${(pct / 100 * 1.2).toFixed(2)}s;"></div>
+    </div>
+    <div class="bar-value ${d.self ? 'self' : ''} mono text-[13px] text-[var(--fg-dim)] text-right tabular-nums">${d.value.toFixed(1)}s</div>
+  `;
+
+  chart.appendChild(row);
+});
+
+new IntersectionObserver(([e]) => {
+  if (e.isIntersecting) chart.classList.add(`in-view`);
+}, { threshold: 0.3 }).observe(chart);
+
+</script>
+
+</BaseLayout>

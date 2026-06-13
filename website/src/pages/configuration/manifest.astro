@@ -1,0 +1,25 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import ReferenceSidebar from '../../components/ReferenceSidebar.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import Breadcrumb from '../../components/Breadcrumb.astro';
+import { schemaToMarkdown, schemaFieldNames } from '../../utils/schema';
+import { renderDocsMarkdown } from '../../utils/render-markdown';
+
+import schema from '../../../config/manifest.json';
+
+const html = await renderDocsMarkdown(schemaToMarkdown(schema));
+const fields = schemaFieldNames(schema);
+---
+
+<DocsLayout title="Manifest (package.json)" activePage="manifest" mainMaxWidth="820px" description="Reference for all supported package.json fields in Yarn projects.">
+  <Fragment slot="sidebar">
+    <ReferenceSidebar activePage="manifest" fields={fields} />
+  </Fragment>
+
+  <Breadcrumb segments={["Docs", "Reference", "Manifest"]} />
+
+  <PageHeader title="Manifest (package.json)" lead="Allowed fields in package.json files" />
+
+  <div class="prose" set:html={html} />
+</DocsLayout>

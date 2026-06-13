@@ -74,6 +74,20 @@ describe(`publish`, () =>   {
     })).resolves.toBeTruthy();
   }));
 
+  test(`should accept an injected otp when required`, makeTemporaryEnv({
+    name: `otp-prompt-required`,
+    version: `1.0.0`,
+  }, async ({path, run, source}) => {
+    await run(`install`);
+
+    await expect(run(`npm`, `publish`, {
+      env: {
+        YARN_NPM_AUTH_TOKEN: validLogins.otpUser.npmAuthToken,
+        YARN_INJECT_NPM_2FA_TOKEN: validLogins.otpUser.npmOtpToken,
+      },
+    })).resolves.toBeTruthy();
+  }));
+
   test(`should publish a package with the readme content`, makeTemporaryEnv({
     name: `readme-required`,
     version: `1.0.0`,
@@ -123,6 +137,24 @@ describe(`publish`, () =>   {
 
     expect(result).toHaveProperty(`files`);
     expect(Array.isArray(result.files)).toBe(true);
+  }));
+
+  test(`should honor publishConfig access and registry`, makeTemporaryEnv({
+    name: `publish-config-test`,
+    version: `1.0.0`,
+    publishConfig: {
+      access: `restricted`,
+      registry: `http://registry.example.org/custom/`,
+    },
+  }, async ({path, run, source}) => {
+    await run(`install`);
+
+    const {stdout} = await run(`npm`, `publish`, `--json`, `--dry-run`);
+    const jsonObjects = misc.parseJsonStream(stdout);
+    const result = jsonObjects.find((obj: any) => obj.name && obj.version);
+
+    expect(result).toHaveProperty(`registry`, `http://registry.example.org/custom`);
+    expect(result).toHaveProperty(`access`, `restricted`);
   }));
 
   test(`should correctly log name of scoped workspace`, makeTemporaryEnv({

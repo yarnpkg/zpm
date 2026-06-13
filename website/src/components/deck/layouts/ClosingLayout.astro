@@ -1,0 +1,45 @@
+---
+import ClosingSlide from '../ClosingSlide.astro';
+
+interface Props {
+  eyebrow?: string;
+  title?: string;
+  titleSize?: string;
+  lede?: string;
+  bottomLeft?: string;
+  bottomRight?: string;
+  label?: string;
+  resources?: { label: string; href: string; text: string }[];
+}
+
+const { eyebrow, title = `Thanks.`, titleSize = `168px`, lede, bottomLeft, bottomRight, label, resources } = Astro.props;
+---
+
+<ClosingSlide label={label} bottomLeft={bottomLeft} bottomRight={bottomRight}>
+  {eyebrow && (
+    <div class="reveal reveal-1 font-mono text-sm tracking-[0.14em] text-[var(--fg-mute)] uppercase mb-7">
+      {eyebrow}
+    </div>
+  )}
+
+  <h1 class="slide-hero-title reveal reveal-2 leading-[0.94] tracking-[-0.035em] font-medium m-0 mb-8 text-balance" style={`font-size: ${titleSize}`}>
+    {title}
+  </h1>
+
+  {lede && <p class="slide-lede reveal reveal-3 text-[28px] leading-[1.45] text-[var(--fg-dim)] text-pretty font-light m-0 mt-2 max-w-[1100px]" set:html={lede} />}
+
+  {resources && resources.length > 0 && (
+    <div class="reveal reveal-4 mt-20 grid grid-cols-3 gap-10 max-w-[1100px]">
+      {resources.map(r => (
+        <div>
+          <div class="font-mono text-[13px] tracking-[0.14em] text-[var(--fg-mute)] uppercase mb-2">
+            {r.label}
+          </div>
+          <a class="slide-body-text text-2xl leading-[1.55] text-[var(--fg-dim)] text-pretty font-light text-[22px]" href={r.href}>
+            {r.text}
+          </a>
+        </div>
+      ))}
+    </div>
+  )}
+</ClosingSlide>

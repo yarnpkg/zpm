@@ -7,15 +7,14 @@ use zpm_parsers::{Document, JsonDocument, Value};
 
 use crate::{constraints::{check_constraints, structs::{ConstraintsOutput, WorkspaceError, WorkspaceOperation}}, error::Error, project::Project};
 
-/// Check constraints
+/// Check project constraints
 ///
-/// This command will run constraints on your project and emit errors for each one that is found but isn't met. If any error is emitted the process
-/// will exit with a non-zero exit code.
+/// This command runs constraints on your project and reports each unmet rule. If any error remains, the command exits with a non-zero exit code.
 ///
-/// If the `--fix` flag is used, Yarn will attempt to automatically fix the issues the best it can, following a multi-pass process (with a maximum of
-/// 10 iterations). Some ambiguous patterns cannot be autofixed, in which case you'll have to manually specify the right resolution.
+/// If the `--fix` flag is used, Yarn attempts to automatically fix unambiguous issues through a multi-pass process capped at 10 iterations. Some
+/// ambiguous patterns cannot be autofixed; in those cases, you must manually specify the right resolution.
 ///
-/// For more information as to how to write constraints, please consult our dedicated page on our website: https://yarnpkg.com/features/constraints.
+/// Constraints are configured through JavaScript or TypeScript constraint files.
 ///
 #[cli::command]
 #[cli::path("constraints")]

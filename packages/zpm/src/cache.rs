@@ -113,6 +113,22 @@ impl CompositeCache {
         panic!("Expected at least one cache to be set");
     }
 
+    pub fn has_cache_entry(&self, key: Locator, ext: &str) -> Result<bool, Error> {
+        if let Some(ref cache) = self.local_cache {
+            if cache.check_cache_entry(key.clone(), ext)?.is_some() {
+                return Ok(true);
+            }
+        }
+
+        if let Some(ref cache) = self.global_cache {
+            if cache.check_cache_entry(key, ext)?.is_some() {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
     async fn load<R, F>(func: F) -> Result<Vec<u8>, Error>
     where
         R: Future<Output = Result<Vec<u8>, Error>>,
@@ -202,6 +218,28 @@ impl CompositeCache {
         panic!("Expected at least one cache to be set");
     }
 
+    pub async fn refetch_blob_data<R, F>(&self, key: Locator, ext: &str, func: F) -> Result<DataCacheEntry, Error>
+    where
+        R: Future<Output = Result<Vec<u8>, Error>>,
+        F: FnOnce() -> R,
+    {
+        if let Some(ref cache) = self.local_cache {
+            return cache.refetch_blob_data(key.clone(), ext, || async {
+                if let Some(ref cache) = self.global_cache {
+                    Ok(cache.refetch_blob_data(key, ext, || Self::load(func)).await?.data)
+                } else {
+                    Self::load(func).await
+                }
+            }).await;
+        }
+
+        if let Some(ref cache) = self.global_cache {
+            return cache.refetch_blob_data(key, ext, || Self::load(func)).await;
+        }
+
+        panic!("Expected at least one cache to be set");
+    }
+
     pub async fn clean(&self) -> Result<usize, Error> {
         if let Some(ref cache) = self.local_cache {
             return cache.clean().await;
@@ -215,15 +253,17 @@ pub struct DiskCache {
     cache_path: Path,
     name_suffix: String,
     immutable: bool,
+    cleanable: bool,
     accessed_files: Arc<Mutex<HashSet<String>>>,
 }
 
 impl DiskCache {
-    pub fn new(cache_path: Path, name_suffix: String, immutable: bool) -> Self {
+    pub fn new(cache_path: Path, name_suffix: String, immutable: bool, cleanable: bool) -> Self {
         DiskCache {
             cache_path,
             name_suffix,
             immutable,
+            cleanable,
             accessed_files: Arc::new(Mutex::new(HashSet::new())),
         }
     }
@@ -421,6 +461,10 @@ impl DiskCache {
     }
 
     pub async fn clean(&self) -> Result<usize, Error> {
+        if !self.cleanable {
+            return Ok(0);
+        }
+
         let accessed_files
             = self.accessed_files.lock()
                 .map_err(|_| Error::Unsupported)?;

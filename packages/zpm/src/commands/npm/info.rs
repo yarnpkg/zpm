@@ -15,7 +15,7 @@ use crate::{
 
 /// Show information about a package
 ///
-/// This command fetches information about a package from the registry and prints it as JSON.
+/// This command fetches package metadata from the configured npm registry and prints the selected version manifest as JSON.
 ///
 /// The argument can be any of the following forms:
 ///
@@ -31,7 +31,7 @@ use crate::{
 #[cli::path("npm", "info")]
 #[cli::category("Npm-related commands")]
 pub struct Info {
-    /// Format the output as JSON (the default)
+    /// Keep the output in JSON format
     #[cli::option("--json", default = false)]
     _json: bool,
 

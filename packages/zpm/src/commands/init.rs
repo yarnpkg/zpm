@@ -15,43 +15,43 @@ use crate::{
     script::ScriptEnvironment,
 };
 
-/// This command will setup a new package in your local directory.
+/// Initialize a package in the current directory
+///
+/// This command creates a manifest and supporting project files in the current directory.
 ///
 /// If the `-p,--private` or `-w,--workspace` options are set, the package will be private by default.
 ///
 /// If the `-w,--workspace` option is set, the package will be configured to accept a set of workspaces in the `packages/` directory.
 ///
-/// If the `-i,--install` option is given a value, Yarn will first download it using `yarn set version` and only then forward the init call to the
-/// newly downloaded bundle. Without arguments, the downloaded bundle will be latest.
-///
-/// The initial settings of the manifest can be changed by using the `initScope` and `initFields` configuration values. Additionally, Yarn will
-/// generate an `.editorconfig` file whose rules can be altered via `initEditorConfig`, and will initialize a Git repository in the current directory.
+/// When a template is provided, Yarn initializes the project, installs the template in a temporary context, and runs its binary from the new project.
 ///
 #[cli::command(proxy)]
 #[cli::path("init")]
 #[cli::category("Project management")]
 pub struct InitWithTemplate {
-    /// Set the package to be private
+    /// Mark the new package as private
     #[cli::option("-p,--private")]
     private: Option<bool>,
 
-    /// Set the package to be a workspace
+    /// Configure the package as a workspace root
     #[cli::option("-w,--workspace", default = false)]
     workspace: bool,
 
-    /// Set the name of the package
+    /// Package name to write to the manifest
     #[cli::option("-n,--name")]
     name: Option<String>,
 
-    /// The template to use for the package
+    /// Template package to install and run
     template: LooseDescriptor,
 
-    /// The arguments to pass to the template
+    /// Arguments to pass to the template binary
     args: Vec<String>,
 
+    /// Hidden legacy Yarn 1 compatibility flag
     #[cli::option("-2", default = false)]
     usev2: bool,
 
+    /// Hidden legacy Yarn 1 compatibility flag
     #[cli::option("-y,--yes", default = false)]
     yes: bool,
 }
@@ -112,23 +112,32 @@ impl InitWithTemplate {
     }
 }
 
+/// Initialize a package in the current directory
+///
+/// This command creates a manifest and supporting project files in the current directory.
+///
 #[cli::command]
 #[cli::path("init")]
 #[derive(Debug)]
 pub struct Init {
+    /// Mark the new package as private
     #[cli::option("-p,--private")]
     private: Option<bool>,
 
+    /// Configure the package as a workspace root
     #[cli::option("-w,--workspace", default = false)]
     workspace: bool,
 
+    /// Package name to write to the manifest
     #[cli::option("-n,--name")]
     name: Option<String>,
 
     // Hidden legacy options
+    /// Hidden legacy Yarn 1 compatibility flag
     #[cli::option("-2", default = false)]
     usev2: bool,
 
+    /// Hidden legacy Yarn 1 compatibility flag
     #[cli::option("-y,--yes", default = false)]
     yes: bool,
 }

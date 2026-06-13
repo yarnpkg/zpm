@@ -12,6 +12,8 @@ use zpm_primitives::Descriptor;
 use zpm_primitives::Locator;
 use zpm_primitives::PeerRange;
 use zpm_primitives::Range;
+use zpm_primitives::Reference;
+use zpm_primitives::RegistrySemverRange;
 use zpm_utils::Path;
 use globset::GlobBuilder;
 use globset::GlobMatcher;
@@ -19,6 +21,7 @@ use regex::Regex;
 use zpm_utils::ToFileString;
 
 use crate::resolvers::catalog::lookup_catalog_entry;
+use crate::resolvers::jsr::npm_ident_for_jsr_ident;
 use crate::script::ScriptEnvironment;
 use crate::{
     error::Error,
@@ -484,6 +487,23 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: &PackOpt
                         Some(lookup_catalog_entry(project, params, ident)?)
                     },
 
+                    Range::JsrSemver(params) => {
+                        let jsr_ident = params.ident.as_ref()
+                            .unwrap_or(&descriptor.ident);
+
+                        let version = project.install_state.as_ref()
+                            .and_then(|install_state| install_state.descriptor_to_locator.get(descriptor))
+                            .and_then(locator_version)
+                            .or_else(|| params.range.exact_version());
+
+                        version.map(|version| {
+                            Range::RegistrySemver(RegistrySemverRange {
+                                ident: Some(npm_ident_for_jsr_ident(jsr_ident)),
+                                range: version.to_range(zpm_semver::RangeKind::Exact),
+                            })
+                        })
+                    },
+
                     _ => {
                         None
                     },
@@ -546,6 +566,14 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: &PackOpt
     }
 
     Ok(String::from_utf8_lossy(&document.input).to_string())
+}
+
+fn locator_version(locator: &Locator) -> Option<zpm_semver::Version> {
+    match &locator.reference {
+        Reference::Shorthand(params) => Some(params.version.clone()),
+        Reference::Registry(params) => Some(params.version.clone()),
+        _ => None,
+    }
 }
 
 pub fn pack_list(project: &Project, workspace: &Workspace, manifest: &Manifest) -> Result<Vec<zpm_utils::Path>, Error> {

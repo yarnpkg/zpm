@@ -14,7 +14,7 @@ use crate::{
 
 /// Remove dependencies from the project
 ///
-/// This command will remove the packages matching the specified patterns from the current workspace.
+/// This command removes the packages matching the specified names or glob patterns from the current workspace, then runs an install.
 ///
 /// If the `--mode=<mode>` option is set, Yarn will change which artifacts are generated. The modes currently supported are:
 ///
@@ -32,16 +32,17 @@ use crate::{
 #[cli::path("remove")]
 #[cli::category("Dependency management")]
 pub struct Remove {
-    /// Apply the operation to all workspaces from the current project
+    /// Remove matching dependencies from all workspaces in the project
     #[cli::option("-A,--all", default = false)]
     all: bool,
 
-    /// Change what artifacts this install will generate
+    /// Select which install artifacts Yarn should generate
     #[cli::option("--mode")]
     mode: Option<InstallMode>,
 
     // ---
 
+    /// Package names or glob patterns to remove
     identifiers: Vec<Ident>,
 }
 

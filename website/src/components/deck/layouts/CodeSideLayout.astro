@@ -1,0 +1,32 @@
+---
+import ContentSlide from '../ContentSlide.astro';
+import CodeBlock from '../CodeBlock.astro';
+
+interface Props {
+  eyebrow: string;
+  title: string;
+  titleSize?: string;
+  sectionTag: string;
+  bottomLeft?: string;
+  bottomRight?: string;
+  label?: string;
+  filename?: string;
+  lang?: string;
+  code?: string;
+}
+
+const { eyebrow, title, titleSize = `60px`, sectionTag, bottomLeft, bottomRight, label, filename, lang, code } = Astro.props;
+---
+
+<ContentSlide sectionTag={sectionTag} bottomLeft={bottomLeft} bottomRight={bottomRight} label={label}>
+  <div class="reveal reveal-1 font-mono text-sm tracking-[0.14em] text-[var(--fg-mute)] uppercase mb-7">
+    {eyebrow}
+  </div>
+
+  <h2 class="slide-title reveal reveal-2 leading-[1.02] tracking-[-0.028em] font-medium m-0 mb-9 text-balance" style={`font-size: ${titleSize}`} set:html={title} />
+
+  <div class="slide-cols-2 grid grid-cols-[1.15fr_0.85fr] reveal reveal-3 mt-4 gap-16">
+    <CodeBlock filename={filename} lang={lang} code={code} />
+    <div><slot /></div>
+  </div>
+</ContentSlide>

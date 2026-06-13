@@ -4,11 +4,16 @@ use zpm_utils::{DataType, Path, ToHumanString};
 use crate::{cwd::get_final_cwd, errors::Error, links::{Link, LinkTarget, set_link}, manifest::find_closest_package_manager};
 
 /// Link a local Yarn binary to the current project
+///
+/// After this command succeeds, Yarn commands run in the project will execute the specified local binary instead of the version from
+/// `packageManager`. Use this for local Yarn development builds.
+///
 #[cli::command]
 #[cli::path("switch", "link")]
 #[cli::category("Local Yarn development")]
 #[derive(Debug)]
 pub struct LinkCommand {
+    /// Path to the local Yarn binary
     path: Path,
 }
 

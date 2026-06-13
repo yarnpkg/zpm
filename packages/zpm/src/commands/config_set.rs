@@ -13,30 +13,30 @@ use crate::{
 
 /// Set a configuration value
 ///
-/// This command will set a configuration setting, by default in the project configuration file unless the `-H,--home` flag is set, in which case it
-/// will be set in the home configuration file.
+/// This command writes a configuration setting to the project configuration file by default. Use `-H,--home` to write to the home configuration file
+/// instead.
 ///
-/// When used without the `--json` flag, the new value will be hydrated depending on the type of the field being set: primitives such as strings will
-/// be hydrated directly, while complex types such as arrays and objects will be hydrated through JSON.
+/// Without `--json`, the value is interpreted according to the setting type: primitive values can be passed directly, while arrays and objects are
+/// parsed from JSON.
 ///
-/// When used with the `--json` flag, the new value will always be parsed as JSON before being written to the configuration file.
+/// With `--json`, the value is always parsed as JSON before it is written.
 ///
 #[cli::command]
 #[cli::path("config", "set")]
 #[cli::category("Configuration commands")]
 pub struct ConfigSet {
-    /// If set, the configuration will be set in the home configuration file
+    /// Write to the home configuration file instead of the project file
     #[cli::option("-H,--home", default = false)]
     home: bool,
 
-    /// Set complex configuration settings to JSON values
+    /// Parse the value as JSON before writing it
     #[cli::option("--json", default = false)]
     json: bool,
 
-    /// The name of the configuration value to set
+    /// Configuration field to set
     name: zpm_parsers::Path,
 
-    /// The value to set the configuration value to
+    /// Value to assign to the configuration field
     value: String,
 }
 

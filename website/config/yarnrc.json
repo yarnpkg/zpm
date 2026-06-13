@@ -1,0 +1,1356 @@
+{
+  "title": "JSON Schema for Yarnrc files",
+  "$schema": "https://json-schema.org/draft/2019-09/schema#",
+  "description": "Yarnrc files (named this way because they must be called `.yarnrc.yml`) are the one place where you'll be able to configure Yarn's internal settings. While Yarn will automatically find them in the parent directories, they should usually be kept at the root of your project (often your repository). **Starting from the v2, they must be written in valid Yaml and have the right extension** (simply calling your file `.yarnrc` won't do).\n\nEnvironment variables can be accessed from setting definitions by using the `${NAME}` syntax when defining the values. By default Yarn will require the variables to be present, but this can be turned off by using either `${NAME-fallback}` (which will return `fallback` if `NAME` isn't set) or `${NAME:-fallback}` (which will return `fallback` if `NAME` isn't set, or is an empty string).\n\nFinally, note that most settings can also be defined through environment variables (at least for the simpler ones; arrays and objects aren't supported yet). To do this, just prefix the names and write them in snake case: `YARN_CACHE_FOLDER` will set the cache folder (such values will overwrite any that might have been defined in the RC files - use them sparingly).",
+  "__info": [
+    "This file contains the JSON Schema for Yarnrc files and is:",
+    "1) Hosted on the Yarn Website at http://yarnpkg.com/configuration/yarnrc.json",
+    "2) Registered on the SchemaStore catalog so that editors can offer autocompletion and validation.",
+    "3) Used to generate the documentation page at http://yarnpkg.com/configuration/yarnrc",
+
+    "Note: Properties prefixed with a single underscore (e.g. _exampleItems, _exampleKeys, _hidden)",
+    "are unique to our documentation generation interpreter. All others will be picked up",
+    "by most JSON schema interpreters.",
+
+    "Rules:",
+    "1) Don't set a default if it's null, dynamic, or an object.",
+    "2) Use `examples` for scalars, `_exampleItems` for arrays, and `_exampleKeys` for objects.",
+    "3) Always add a _package property to each configuration setting."
+  ],
+  "type": "object",
+  "properties": {
+    "cacheFolder": {
+      "_package": "@yarnpkg/core",
+      "title": "Path where the downloaded packages are stored on your system.",
+      "description": "They'll be normalized, compressed, and saved under the form of zip archives with standardized names. The cache is deemed to be relatively safe to be shared by multiple projects, even when multiple Yarn instances run at the same time on different projects. For setting a global cache folder, you should use `enableGlobalCache` instead.",
+      "type": "string",
+      "format": "uri-reference",
+      "default": "crate::compute_cache_folder(context)"
+    },
+    "changesetBaseRefs": {
+      "_package": "@yarnpkg/plugin-git",
+      "title": "List of git refs against which Yarn will compare your branch when it needs to detect changes.",
+      "description": "Supports git branches, tags, and commits. The default configuration will compare against main and master.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": ["main", "master"],
+      "_examples": [
+        {
+          "description": "Compare changes against the main branch only.",
+          "value": ["main", "origin/main"]
+        },
+        {
+          "description": "Compare changes against both stable branch names used by the project.",
+          "value": ["main", "origin/main", "master", "origin/master"]
+        }
+      ]
+    },
+    "cloneConcurrency": {
+      "_package": "@yarnpkg/plugin-git",
+      "title": "Amount of `git clone` operations that Yarn will run at the same time.",
+      "description": "We by default limit it to 2 concurrent clone operations.",
+      "type": "number",
+      "default": 2
+    },
+    "compressionLevel": {
+      "_package": "@yarnpkg/core",
+      "type": ["number", "string"],
+      "title": "Compression level employed for zip archives",
+      "description": "Possible values go from `0` (\"no compression, faster\") to `9` (\"heavy compression, slower\").",
+      "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    },
+    "defaultSemverRangePrefix": {
+      "_package": "@yarnpkg/plugin-essentials",
+      "type": "string",
+      "title": "Default prefix used in semver ranges created by `yarn add` and similar commands.",
+      "description": "Possible values are `caret` (the default), `tilde`, and `exact`; the symbolic aliases `^`, `~`, `=`, `*`, and the empty string are also accepted.",
+      "enum": ["caret", "^", "tilde", "~", "exact", "=", "*", ""],
+      "default": "caret"
+    },
+    "deferredVersionFolder": {
+      "_package": "@yarnpkg/plugin-version",
+      "title": "Folder where the versioning files are stored.",
+      "type": "string",
+      "format": "uri-reference",
+      "default": ".yarn/versions"
+    },
+    "enableConstraintsChecks": {
+      "_package": "@yarnpkg/plugin-constraints",
+      "title": "Define whether constraints should run on every install.",
+      "description": "If true, Yarn will run your constraints right after finishing its installs. This may help decrease the feedback loop delay by catching errors long before your CI would even report them.",
+      "type": "boolean",
+      "default": false,
+      "examples": [true]
+    },
+    "enableGlobalCache": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether the cache should be shared between all local projects.",
+      "description": "If true (the default), Yarn will store the cache files into a folder located within `globalFolder` instead of respecting `cacheFolder`.",
+      "type": "boolean",
+      "default": true
+    },
+    "enableHardenedMode": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether Yarn should attempt to check for malicious changes.",
+      "description": "If true, Yarn will query the remote registries to validate that the lockfile content matches the remote information. These checks make installs slower, so you should only run them on branches managed by users outside your circle of trust.\n\nYarn will automatically enable the hardened mode on GitHub pull requests from public repository. Should you want to disable it, explicitly set it to `false` in your yarnrc file.",
+      "type": "boolean",
+      "default": "crate::is_public_pr_ci(context)"
+    },
+    "enableImmutableCache": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether to allow adding/removing files from the cache or not.",
+      "description": "If true, Yarn will refuse to change the cache in any way, whether it would add files or remove them, and will abort installs instead of letting that happen.",
+      "type": "boolean",
+      "default": false
+    },
+    "enableImmutableInstalls": {
+      "_package": "@yarnpkg/plugin-essentials",
+      "title": "Define whether to allow adding/removing entries from the lockfile or not.",
+      "description": "If true (the default on CI), Yarn will refuse to change the lockfile in any way, whether it would add new entries or remove them. Other files can be added to the checklist via the `immutablePatterns` setting.",
+      "type": "boolean",
+      "default": false
+    },
+    "enableMirror": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether to mirror local cache entries into the global cache or not.",
+      "description": "If true (the default), Yarn will use the global folder as indirection between the network and the actual cache. This is only useful if `enableGlobalCache` is explicitly set to `false`, as otherwise the cache entries are persisted to the global cache no matter what.",
+      "type": "boolean",
+      "default": true
+    },
+    "enableNetwork": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether remote network requests are allowed or not.",
+      "description": "If false, Yarn will never make any request to the network by itself, and will throw an exception rather than let it happen. It's a very useful setting for CI, which typically want to make sure they aren't loading their dependencies from the network by mistake.",
+      "type": "boolean",
+      "default": true
+    },
+    "enableProgressBars": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether animated progress bars should be shown or not.",
+      "description": "If true (the default outside of CI environments), Yarn will show progress bars for long-running events.",
+      "type": "boolean",
+      "default": "zpm_utils::is_terminal()",
+      "examples": [true]
+    },
+    "enableScripts": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether to run postinstall scripts or not.",
+      "description": "If false, Yarn will not execute the `postinstall` scripts from third-party packages when installing the project (workspaces will still see their postinstall scripts evaluated, as they're assumed to be safe if you're running an install within them).\n\nNote that you also have the ability to disable scripts on a per-package basis using `dependenciesMeta`, or to re-enable a specific script by combining `enableScripts` and `dependenciesMeta`.",
+      "type": "boolean",
+      "default": false
+    },
+    "enableStrictSsl": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether SSL errors should fail requests or not.",
+      "description": "If false, SSL certificate errors will be ignored",
+      "type": "boolean",
+      "default": true
+    },
+    "enableTimers": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether to print the time spent running each sub-step or not.",
+      "description": "If false, Yarn will not print the time spent running each sub-step when running various commands. This is only needed for testing purposes, when you want each execution to have exactly the same output as the previous ones.",
+      "type": "boolean",
+      "default": true
+    },
+    "enableTransparentWorkspaces": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether pure semver ranges should allow workspace resolution or not.",
+      "description": "If false, Yarn won't link workspaces just because their versions happen to match a semver range. Disabling this setting will require all workspaces to reference one another using the explicit `workspace:` protocol.\n\nThis setting is usually only needed when your project needs to use the published version in order to build the new one (that's for example what happens with Babel, which depends on the latest stable release to build the future ones).",
+      "type": "boolean",
+      "default": true
+    },
+    "globalFolder": {
+      "_package": "@yarnpkg/core",
+      "title": "Path where all files global to the system will be stored.",
+      "description": "Various files we be stored there: global cache, metadata cache, ...",
+      "type": "string",
+      "format": "uri-reference",
+      "default": "Path::home_dir().unwrap().unwrap().with_join_str(\".yarn/zpm\")",
+      "examples": ["${HOME}/.yarn/berry"]
+    },
+    "httpProxy": {
+      "_package": "@yarnpkg/core",
+      "title": "Proxy to use when making an HTTP request.",
+      "type": "string",
+      "format": "uri",
+      "examples": ["http://proxy:4040"]
+    },
+    "httpRetry": {
+      "_package": "@yarnpkg/core",
+      "title": "Amount of time to wait in seconds before retrying a failed HTTP request.",
+      "type": "number",
+      "default": 3
+    },
+    "httpTimeout": {
+      "_package": "@yarnpkg/core",
+      "title": "Amount of time to wait in milliseconds before cancelling pending HTTP requests.",
+      "type": "number",
+      "default": 60000
+    },
+    "httpsCaFilePath": {
+      "_package": "@yarnpkg/core",
+      "title": "Path to a file containing one or multiple Certificate Authority signing certificates.",
+      "type": "string",
+      "format": "uri-reference",
+      "examples": ["./exampleCA.pem"]
+    },
+    "httpsCertFilePath": {
+      "_package": "@yarnpkg/core",
+      "title": "Path to a file containing a certificate chain in PEM format.",
+      "type": "string",
+      "format": "uri-reference",
+      "examples": ["./exampleCert.pem"]
+    },
+    "httpsKeyFilePath": {
+      "_package": "@yarnpkg/core",
+      "title": "Path to a file containing a private key in PEM format.",
+      "type": "string",
+      "format": "uri-reference",
+      "examples": ["./exampleKey.pem"]
+    },
+    "httpsProxy": {
+      "_package": "@yarnpkg/core",
+      "title": "Define a proxy to use when making an HTTPS request.",
+      "type": "string",
+      "format": "uri",
+      "examples": ["http://proxy:4040"]
+    },
+    "immutablePatterns": {
+      "_package": "@yarnpkg/core",
+      "title": "Array of file patterns whose content won't be allowed to change if `enableImmutableInstalls` is set.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "_exampleItems": ["**/.pnp.*"],
+      "_examples": [
+        {
+          "description": "Protect PnP loader files during immutable installs.",
+          "value": ["**/.pnp.*"]
+        },
+        {
+          "description": "Protect both generated install artifacts and checked-in package archives.",
+          "value": [".pnp.cjs", ".pnp.loader.mjs", ".yarn/cache/**"]
+        }
+      ]
+    },
+    "initScope": {
+      "_package": "@yarnpkg/plugin-init",
+      "title": "Scope used when creating packages via the `init` command.",
+      "type": "string",
+      "pattern": "^([^/]+?)$",
+      "default": "yarnpkg"
+    },
+    "injectEnvironmentFiles": {
+      "_package": "@yarnpkg/core",
+      "title": "Array of .env files which will get injected into any subprocess spawned by Yarn.",
+      "description": "By default Yarn will automatically inject the variables stored in the `.env.yarn` file, but you can use this setting to change this behavior.\n\nNote that adding a question mark at the end of the path will silence the error Yarn would throw should the file be missing, which may come in handy when declaring local configuration files.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uri-reference"
+      },
+      "default": [".env.yarn?"],
+      "_exampleItems": [".my-env", ".my-local-env?"],
+      "_examples": [
+        {
+          "description": "Load the default Yarn env file and fail if it is missing.",
+          "value": [".env.yarn"]
+        },
+        {
+          "description": "Load one shared file and one optional local override.",
+          "value": [".env.yarn", ".env.local?"]
+        }
+      ]
+    },
+    "logFilters": {
+      "title": "Alter the log levels for emitted messages.",
+      "description": "This can be used to hide specific messages, or instead make them more prominent. Rules defined there accept filtering messages by exact text or glob pattern.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Match messages whose content is strictly equal to the given text.",
+            "examples": ["lorem-ipsum@npm:1.2.3 lists build scripts, but its build has been explicitly disabled through configuration"]
+          },
+          "pattern": {
+            "type": "string",
+            "title": "Match messages whose content match the given glob pattern.",
+            "description": "Patterns can be overridden on a case-by-case basis by using the `text` filter, which has precedence over `pattern`.",
+            "examples": ["lorem-ipsum@* lists build scripts, but its build has been explicitly disabled through configuration"]
+          },
+          "level": {
+            "type": "string",
+            "title": "New log level to apply to the matching messages. Use `discard` if you wish to hide those messages altogether.",
+            "enum": ["info", "warning", "error", "discard"]
+          }
+        }
+      },
+      "_exampleItems": [
+        {
+          "text": "lorem-ipsum@npm:1.2.3 lists build scripts, but its build has been explicitly disabled through configuration",
+          "level": "error"
+        },
+        {
+          "pattern": "lorem-ipsum@* lists build scripts, but its build has been explicitly disabled through configuration",
+          "level": "error"
+        }
+      ],
+      "_examples": [
+        {
+          "description": "Hide all messages matching a glob pattern.",
+          "value": [
+            {
+              "pattern": "optional dependency * skipped",
+              "level": "discard"
+            }
+          ]
+        },
+        {
+          "description": "Upgrade one exact log message to an error.",
+          "value": [
+            {
+              "text": "Package build failed",
+              "level": "error"
+            }
+          ]
+        }
+      ]
+    },
+    "networkConcurrency": {
+      "_package": "@yarnpkg/core",
+      "title": "Amount of HTTP requests that are allowed to run at the same time.",
+      "description": "We default to 100 concurrent requests, but it may be required to limit it even more when working behind proxies that can't handle large amounts of traffic.",
+      "type": "number",
+      "default": 100
+    },
+    "networkSettings": {
+      "_package": "@yarnpkg/core",
+      "title": "Additional network settings, per hostname",
+      "type": "object",
+      "patternProperties": {
+        "^(.+)$": {
+          "type": "object",
+          "properties": {
+            "enableNetwork": {
+              "$ref": "#/properties/enableNetwork",
+              "_hidden": true
+            },
+            "httpsCaFilePath": {
+              "$ref": "#/properties/httpsCaFilePath",
+              "_hidden": true
+            },
+            "httpsCertFilePath": {
+              "$ref": "#/properties/httpsCertFilePath",
+              "_hidden": true
+            },
+            "httpsKeyFilePath": {
+              "$ref": "#/properties/httpsKeyFilePath",
+              "_hidden": true
+            }
+          }
+        }
+      },
+      "_exampleKeys": ["*.example.com"],
+      "_examples": [
+        {
+          "description": "Disable network access for one host pattern.",
+          "value": {
+            "*.example.com": {
+              "enableNetwork": false
+            }
+          }
+        },
+        {
+          "description": "Use a custom CA certificate for an internal registry.",
+          "value": {
+            "registry.corp.example": {
+              "httpsCaFilePath": "./certs/corp-ca.pem"
+            }
+          }
+        }
+      ]
+    },
+    "nmHoistingLimits": {
+      "_package": "@yarnpkg/plugin-nm",
+      "title": "Highest point where packages can be hoisted.",
+      "description": "Replacement of the former `nohoist` setting. Possible values are:\n\n- If `none` (the default), packages are hoisted as per the usual rules.\n- If `workspaces`, packages won't be hoisted past the workspace that depends on them.\n- If `dependencies`, transitive dependencies also won't be hoisted past your direct dependencies.\n\nThis setting can be overridden on a per-workspace basis using the `installConfig.hoistingLimits` field.",
+      "type": "string",
+      "enum": ["workspaces", "dependencies", "none"],
+      "default": "none"
+    },
+    "nmSelfReferences": {
+      "_package": "@yarnpkg/plugin-nm",
+      "title": "Define whether workspaces are allowed to require themselves.",
+      "description": "If false, Yarn won't create self-referencing symlinks when using `nodeLinker: node-modules`. This setting can be overridden on a per-workspace basis using the `installConfig.selfReferences` field.",
+      "type": "boolean",
+      "default": true
+    },
+    "nmMode": {
+      "_package": "@yarnpkg/plugin-nm",
+      "title": "Define how to copy files to their target destination.",
+      "description": "Possible values are:\n\n- If `classic`, regular copy or clone operations are performed.\n- If `hardlinks-global`, hardlinks to a global content-addressable store will be used.\n- If `hardlinks-local`, hardlinks will only be created between similar packages from the same project.\n\nFor compatibility with the ecosystem, the default is `classic`.",
+      "type": "string",
+      "enum": ["classic", "hardlinks-local", "hardlinks-global"],
+      "default": "classic"
+    },
+    "nodeLinker": {
+      "_package": "@yarnpkg/plugin-pnp",
+      "title": "Define how Node packages should be installed.",
+      "description": "Yarn supports three ways to install your project's dependencies, based on the `nodeLinker` setting. Possible values are:\n\n- If `pnp`, a single Node.js loader file will be generated.\n- If `pnpm`, a `node-modules` will be created using symlinks and hardlinks to a global content-addressable store.\n- If `node-modules`, a regular `node_modules` folder just like in Yarn Classic or npm will be created.",
+      "anyOf": [
+        { "type": "string" },
+        { "enum": ["pnp", "pnpm", "node-modules"] }
+      ],
+      "type": "string",
+      "default": "pnp",
+      "_examples": [
+        {
+          "description": "Use Plug'n'Play installs.",
+          "value": "pnp"
+        },
+        {
+          "description": "Use a traditional node_modules install.",
+          "value": "node-modules"
+        }
+      ]
+    },
+    "pnpmStoreFolder": {
+      "_package": "@yarnpkg/plugin-pnpm",
+      "title": "Path where the pnpm store will be stored",
+      "description": "By default, the store is stored in the `node_modules/.pnpm` of the project. Sometimes in CI scenario's it is convenient to store this in a different location so it can be cached and reused.",
+      "type": "string",
+      "format": "uri-reference",
+      "default": "node_modules/.pnpm",
+      "examples": [".cache/.pnpm"],
+      "_examples": [
+        {
+          "description": "Use the default virtual store inside node_modules.",
+          "value": "node_modules/.pnpm"
+        },
+        {
+          "description": "Move the virtual store to a cacheable project folder.",
+          "value": ".cache/.pnpm"
+        }
+      ]
+    },
+    "winLinkType": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether to use junctions or symlinks when creating links on Windows.",
+      "description": "Possible values are:\n\n- If `junctions`, Yarn will use Windows junctions when linking workspaces into `node_modules` directories, which are always absolute paths.\n- If `symlinks`, Yarn will use symlinks, which will use relative paths, and is consistent with Yarn's behavior on non-Windows platforms.",
+      "type": "string",
+      "enum": ["junctions", "symlinks"],
+      "default": "symlinks"
+    },
+    "npmAlwaysAuth": {
+      "_package": "@yarnpkg/plugin-npm",
+      "title": "Define whether to always send authentication credentials when querying the npm registry.",
+      "description": "If true, authentication credentials will always be sent when sending requests to the registries. This shouldn't be needed unless you configured the registry to reference a private npm mirror.",
+      "type": "boolean",
+      "default": false
+    },
+    "npmAuditRegistry": {
+      "_package": "@yarnpkg/plugin-npm",
+      "title": "Define the registry to use when auditing dependencies.",
+      "description": "If not explicitly set, the value of `npmRegistryServer` will be used.",
+      "type": "string",
+      "format": "uri",
+      "examples": ["https://registry.npmjs.org"]
+    },
+    "npmAuthIdent": {
+      "_package": "@yarnpkg/plugin-npm",
+      "title": "Define the authentication credentials to use by default when accessing your registries.",
+      "description": "Replacement of the former `_auth` setting. Because it requires storing unencrypted values in your configuration, `npmAuthToken` should be preferred when possible.",
+      "type": "string",
+      "examples": ["username:password"]
+    },
+    "npmAuthToken": {
+      "_package": "@yarnpkg/plugin-npm",
+      "title": "Define the authentication token to use by default when accessing your registries.",
+      "description": "Replacement of the former `_authToken` settings. If you're using `npmScopes` to define multiple registries, the `npmRegistries` dictionary allows you to override these credentials on a per-registry basis.",
+      "type": "string",
+      "examples": ["ffffffff-ffff-ffff-ffff-ffffffffffff"]
+    },
+    "npmPublishAccess": {
+      "_package": "@yarnpkg/plugin-npm-cli",
+      "type": "string",
+      "title": "Define the default access to use when publishing packages to the npm registry.",
+      "description": "Valid values are `public` and `restricted`, but `restricted` usually requires to register for a paid plan (this is up to the registry you use). Can be overridden on a per-package basis using the [`publishConfig.access`](manifest#publishConfig.access) field.",
+      "enum": ["public", "restricted"]
+    },
+    "npmPublishProvenance": {
+      "_package": "@yarnpkg/plugin-npm-cli",
+      "title": "Define whether to attach a provenance statement when publishing packages to the npm registry.",
+      "description": "If true, Yarn will generate and publish the provenance information when publishing packages. Can be overridden on a per-package basis using the [`publishConfig.provenance`](manifest#publishConfig.provenance) field.",
+      "type": "boolean",
+      "default": false
+    },
+    "npmAuditExcludePackages": {
+      "_package": "@yarnpkg/plugin-npm-cli",
+      "title": "Array of package name glob patterns to exclude from `yarn npm audit`.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "examples": ["known_insecure_package"],
+      "_examples": [
+        {
+          "description": "Exclude one package from audit reports.",
+          "value": ["known_insecure_package"]
+        },
+        {
+          "description": "Exclude a family of internal test fixtures.",
+          "value": ["@example/fixture-*", "legacy-test-helper"]
+        }
+      ]
+    },
+    "npmAuditIgnoreAdvisories": {
+      "_package": "@yarnpkg/plugin-npm-cli",
+      "title": "Array of advisory ID glob patterns to ignore from `yarn npm audit` results.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "examples": ["1234567"],
+      "_examples": [
+        {
+          "description": "Ignore a single advisory ID.",
+          "value": ["1234567"]
+        },
+        {
+          "description": "Ignore a short-term allowlist of advisory IDs while patches are pending.",
+          "value": ["1234567", "GHSA-xxxx-yyyy-zzzz"]
+        }
+      ]
+    },
+    "npmPublishRegistry": {
+      "_package": "@yarnpkg/plugin-npm",
+      "title": "Define the registry to use when pushing packages.",
+      "description": "If not explicitly set, the value of `npmRegistryServer` will be used. Overridden by `publishConfig.registry`.",
+      "type": "string",
+      "format": "uri",
+      "examples": ["https://npm.pkg.github.com"]
+    },
+    "npmRegistries": {
+      "_package": "@yarnpkg/plugin-npm",
+      "title": "Per-registry configurations.",
+      "type": "object",
+      "patternProperties": {
+        "^(?:^[a-zA-Z][a-zA-Z0-9+-.]*:)?[^\\s]*$": {
+          "type": "object",
+          "properties": {
+            "npmAlwaysAuth": {
+              "$ref": "#/properties/npmAlwaysAuth",
+              "_hidden": true
+            },
+            "npmAuthIdent": {
+              "$ref": "#/properties/npmAuthIdent",
+              "_hidden": true
+            },
+            "npmAuthToken": {
+              "$ref": "#/properties/npmAuthToken",
+              "_hidden": true
+            }
+          }
+        }
+      },
+      "additionalProperties": false,
+      "_exampleKeys": ["//npm.pkg.github.com"],
+      "_examples": [
+        {
+          "description": "Configure authentication for the public npm registry.",
+          "value": {
+            "//registry.npmjs.org": {
+              "npmAuthToken": "${NPM_TOKEN}"
+            }
+          }
+        },
+        {
+          "description": "Always send auth for a private registry.",
+          "value": {
+            "//npm.pkg.github.com": {
+              "npmAlwaysAuth": true,
+              "npmAuthToken": "${GITHUB_TOKEN}"
+            }
+          }
+        }
+      ]
+    },
+    "npmRegistryServer": {
+      "_package": "@yarnpkg/plugin-npm",
+      "title": "Define the registry to use when fetching packages.",
+      "description": "Should you want to define different registries for different scopes, see `npmScopes`. To define the authentication scheme for your servers, see `npmAuthToken`. The url must use HTTPS by default, but this can be changed by adding it to the `unsafeHttpWhitelist`.",
+      "type": "string",
+      "format": "uri",
+      "default": "https://registry.npmjs.org"
+    },
+    "npmScopes": {
+      "_package": "@yarnpkg/plugin-npm",
+      "title": "Per-scope registry configurations.",
+      "type": "object",
+      "patternProperties": {
+        "^\\S+$": {
+          "type": "object",
+          "properties": {
+            "npmPublishRegistry": {
+              "$ref": "#/properties/npmPublishRegistry",
+              "examples": ["https://registry.yarnpkg.com"],
+              "_hidden": true
+            },
+            "npmRegistryServer": {
+              "$ref": "#/properties/npmRegistryServer",
+              "_hidden": true
+            },
+            "npmAlwaysAuth": {
+              "$ref": "#/properties/npmAlwaysAuth",
+              "_hidden": true
+            },
+            "npmAuthIdent": {
+              "$ref": "#/properties/npmAuthIdent",
+              "_hidden": true
+            },
+            "npmAuthToken": {
+              "$ref": "#/properties/npmAuthToken",
+              "_hidden": true
+            }
+          }
+        }
+      },
+      "additionalProperties": false,
+      "_exampleKeys": ["my-company"],
+      "_examples": [
+        {
+          "description": "Route one scope to a GitHub Packages registry.",
+          "value": {
+            "my-company": {
+              "npmRegistryServer": "https://npm.pkg.github.com",
+              "npmAuthToken": "${GITHUB_TOKEN}"
+            }
+          }
+        },
+        {
+          "description": "Use a different registry only when publishing a scope.",
+          "value": {
+            "my-company": {
+              "npmPublishRegistry": "https://npm.pkg.github.com",
+              "npmRegistryServer": "https://registry.npmjs.org"
+            }
+          }
+        }
+      ]
+    },
+    "packageExtensions": {
+      "_package": "@yarnpkg/core",
+      "title": "Extend the package definitions of your dependencies; useful to fix third-party issues.",
+      "description": "Some packages may have been specified incorrectly with regard to their dependencies - for example with one dependency being missing, causing Yarn to refuse it the access. The `packageExtensions` fields offer a way to extend the existing package definitions with additional information. If you use it, consider sending a PR upstream and contributing your extension to the [`plugin-compat` database](https://github.com/yarnpkg/berry/blob/master/packages/yarnpkg-extensions/sources/index.ts).\n\nNote: This field is made to add dependencies; if you need to rewrite existing ones, prefer the `resolutions` field instead.",
+      "type": "object",
+      "patternProperties": {
+        "^(?:@([^/]+?)/)?([^/]+?)(?:@(.+))$": {
+          "description": "Each key is a descriptor covering a semver range. The extensions will be applied to any package whose version matches the specified range. This is true regardless of where the package comes from, so no distinction on whether they come from git or a registry, for example. Only the version matters.",
+          "type": "object",
+          "properties": {
+            "dependencies": {
+              "_hidden": true,
+              "type": "object",
+              "patternProperties": {
+                "^(?:@([^/]+?)/)?([^/]+?)$": {
+                  "type": "string",
+                  "pattern": "^(.+)$",
+                  "examples": ["^4.15.0"]
+                }
+              },
+              "additionalProperties": false,
+              "_exampleKeys": ["lodash"]
+            },
+            "peerDependencies": {
+              "_hidden": true,
+              "type": "object",
+              "patternProperties": {
+                "^(?:@([^/]+?)/)?([^/]+?)$": {
+                  "type": "string",
+                  "pattern": "^(.+)$",
+                  "examples": ["*"]
+                }
+              },
+              "additionalProperties": false,
+              "_exampleKeys": ["webpack-cli"]
+            },
+            "peerDependenciesMeta": {
+              "_hidden": true,
+              "type": "object",
+              "patternProperties": {
+                "^(?:@([^/]+?)/)?([^/]+?)$": {
+                  "type": "object",
+                  "properties": {
+                    "optional": {
+                      "_hidden": true,
+                      "type": "boolean",
+                      "examples": [true]
+                    }
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "_exampleKeys": ["webpack-cli"]
+            }
+          },
+          "_margin": false
+        }
+      },
+      "additionalProperties": false,
+      "_exampleKeys": ["webpack@*"],
+      "_examples": [
+        {
+          "description": "Add a missing regular dependency to a third-party package.",
+          "value": {
+            "some-package@*": {
+              "dependencies": {
+                "lodash": "^4.17.21"
+              }
+            }
+          }
+        },
+        {
+          "description": "Declare an optional peer dependency for a package that forgot its metadata.",
+          "value": {
+            "webpack-plugin-example@*": {
+              "peerDependencies": {
+                "webpack": "*"
+              },
+              "peerDependenciesMeta": {
+                "webpack": {
+                  "optional": true
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "patchFolder": {
+      "_package": "@yarnpkg/plugin-patch",
+      "title": "Folder where patch files will be written to.",
+      "type": "string",
+      "format": "uri-reference",
+      "default": ".yarn/patches"
+    },
+    "pnpEnableInlining": {
+      "_package": "@yarnpkg/plugin-pnp",
+      "title": "Define whether to store the PnP data in the generated file or not.",
+      "description": "If false, Yarn will generate an additional `.pnp.data.json` file.",
+      "type": "boolean",
+      "default": true
+    },
+    "pnpFallbackMode": {
+      "_package": "@yarnpkg/plugin-pnp",
+      "type": "string",
+      "title": "Define whether to allow packages to rely on the builtin PnP fallback mechanism.",
+      "description": "Possible values are:\n\n- If `all`, all packages can access dependencies made available in the fallback.\n- If `dependencies-only` (the default), dependencies will have access to them but not your workspaces.\n- If `none`, no packages will have access to them.",
+      "enum": ["none", "dependencies-only", "all"],
+      "default": "dependencies-only"
+    },
+    "pnpIgnorePatterns": {
+      "_package": "@yarnpkg/plugin-pnp",
+      "title": "Array of file glob patterns that should be forced to use the default CommonJS resolution.",
+      "description": "Files matching those locations will not be covered by PnP and will use the regular Node.js resolution algorithm. Typically only needed if you have subprojects that aren't yet part of your workspace tree.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "_exampleItems": ["./subdir/*"],
+      "_examples": [
+        {
+          "description": "Exclude one legacy subproject from Plug'n'Play resolution.",
+          "value": ["./legacy/*"]
+        },
+        {
+          "description": "Exclude multiple generated package folders.",
+          "value": ["./examples/*", "./fixtures/*"]
+        }
+      ]
+    },
+    "pnpShebang": {
+      "_package": "@yarnpkg/plugin-pnp",
+      "title": "String prepended to the generated PnP loader.",
+      "type": "string",
+      "pattern": "^(#!.*\n?)+",
+      "default": "#!/usr/bin/env node"
+    },
+    "pnpUnpluggedFolder": {
+      "_package": "@yarnpkg/plugin-pnp",
+      "title": "Path where unplugged packages are stored.",
+      "description": "While Yarn attempts to reference and load packages directly from their zip archives, it may not always be possible. In those cases, Yarn will extract the files to the unplugged folder.",
+      "type": "string",
+      "format": "uri-reference",
+      "default": ".yarn/unplugged"
+    },
+    "preferDeferredVersions": {
+      "_package": "@yarnpkg/plugin-version",
+      "title": "Define whether to use deferred versioning by default or not.",
+      "description": "If true, deferred versioning by default when running the `yarn version` family of commands.",
+      "type": "boolean",
+      "default": false
+    },
+    "preferInteractive": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether to use interactive prompts by default or not.",
+      "description": "If true, Yarn will ask for your guidance when some actions would be improved by being disambiguated. Enabling this setting also unlocks some features (for example the `yarn add` command will suggest to reuse the same dependencies as other workspaces if pertinent).",
+      "type": "boolean",
+      "default": false
+    },
+    "preferReuse": {
+      "_package": "@yarnpkg/plugin-essentials",
+      "title": "Define whether to reuse most common dependency ranges or not when adding dependencies to a package.",
+      "description": "If true, `yarn add` will attempt to reuse the most common dependency range in other workspaces.",
+      "type": "boolean",
+      "default": false
+    },
+    "preferTruncatedLines": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether to truncate lines that would go beyond the size of the terminal or not.",
+      "description": "If true, Yarn will truncate lines that would go beyond the size of the terminal. If progress bars are disabled, lines will never be truncated.",
+      "type": "boolean",
+      "default": false
+    },
+    "supportedArchitectures": {
+      "_package": "@yarnpkg/core",
+      "title": "Systems for which Yarn should install packages.",
+      "type": "object",
+      "properties": {
+        "os": {
+          "title": "List of operating systems to cover.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "_exampleItems": ["current", "darwin", "linux", "win32"]
+        },
+        "cpu": {
+          "title": "List of CPU architectures to cover.",
+          "description": "See https://nodejs.org/docs/latest/api/process.html#processarch for the architectures supported by Node.js",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "_exampleItems": ["current", "x64", "ia32", "arm64"]
+        },
+        "libc": {
+          "title": "The list of standard C libraries to cover.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "_exampleItems": ["current", "glibc", "musl"]
+        }
+      },
+      "_examples": [
+        {
+          "description": "Install packages for the current platform plus Linux x64.",
+          "value": {
+            "os": ["current", "linux"],
+            "cpu": ["current", "x64"],
+            "libc": ["current", "glibc"]
+          }
+        },
+        {
+          "description": "Pre-resolve common macOS and Linux variants for a mixed team.",
+          "value": {
+            "os": ["darwin", "linux"],
+            "cpu": ["x64", "arm64"],
+            "libc": ["glibc", "musl"]
+          }
+        }
+      ]
+    },
+    "tsEnableAutoTypes": {
+      "_package": "@yarnpkg/plugin-typescript",
+      "title": "Define whether to automatically install @types dependencies.",
+      "description": "If true, Yarn will automatically add `@types` dependencies when running `yarn add` with packages that don't provide their own typings (as reported by the Algolia npm database). This behavior is enabled by default if you have a tsconfig.json file at the root of your project, or in your current workspace.",
+      "type": "boolean",
+      "examples": [true]
+    },
+    "approvedGitRepositories": {
+      "_package": "@yarnpkg/plugin-git",
+      "title": "Array of git repository URL patterns that are allowed to be fetched.",
+      "description": "Git dependencies are rejected unless their repository URL matches one of these glob patterns. The default empty list blocks all git dependencies.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "_examples": [
+        {
+          "description": "Allow every repository from one GitHub organization.",
+          "value": ["https://github.com/yarnpkg/*"]
+        },
+        {
+          "description": "Allow a single SSH repository.",
+          "value": ["git@github.com:my-company/internal-package.git"]
+        }
+      ]
+    },
+    "daemonOutputBufferMaxLines": {
+      "_package": "@yarnpkg/core",
+      "title": "Maximum number of output lines kept in memory per daemon task.",
+      "description": "Long-running daemon tasks keep a bounded output buffer so recent logs remain available without unbounded memory growth.",
+      "type": "number",
+      "default": 1000,
+      "_examples": [
+        {
+          "description": "Keep only a short tail for very chatty tasks.",
+          "value": 200
+        },
+        {
+          "description": "Keep a larger in-memory history while debugging task output.",
+          "value": 5000
+        }
+      ]
+    },
+    "daemonMaxClosedTasks": {
+      "_package": "@yarnpkg/core",
+      "title": "Maximum number of completed daemon tasks kept in memory.",
+      "description": "Once this limit is reached, older completed or failed daemon tasks may be discarded from the daemon's in-memory history.",
+      "type": "number",
+      "default": 100,
+      "_examples": [
+        {
+          "description": "Keep a smaller history on memory-constrained machines.",
+          "value": 25
+        },
+        {
+          "description": "Keep more completed tasks available for inspection.",
+          "value": 250
+        }
+      ]
+    },
+    "daemonDefaultWarmupPeriod": {
+      "_package": "@yarnpkg/core",
+      "title": "Default warm-up period for long-lived daemon tasks.",
+      "description": "After a long-lived task starts, dependents are unblocked once this duration elapses.",
+      "type": "string",
+      "default": "1s",
+      "_examples": [
+        {
+          "description": "Use a shorter warm-up for tasks that become ready quickly.",
+          "value": "500ms"
+        },
+        {
+          "description": "Use a longer warm-up for services that take time to become ready.",
+          "value": "10s"
+        }
+      ]
+    },
+    "enableAutoTypes": {
+      "_package": "@yarnpkg/plugin-typescript",
+      "title": "Define whether Yarn should automatically add @types packages.",
+      "description": "When enabled, Yarn may add matching `@types/*` packages when adding dependencies that don't ship their own TypeScript declarations. This setting is also available through the `tsEnableAutoTypes` alias.",
+      "type": "boolean",
+      "default": "crate::check_tsconfig(context)",
+      "_examples": [
+        {
+          "description": "Enable automatic type acquisition explicitly.",
+          "value": true
+        },
+        {
+          "description": "Disable automatic type acquisition for projects that manage types manually.",
+          "value": false
+        }
+      ]
+    },
+    "enableCacheClean": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether the cache clean command is allowed to remove cache entries.",
+      "description": "If false, cache clean operations won't remove entries from the cache.",
+      "type": "boolean",
+      "default": true,
+      "_examples": [
+        {
+          "description": "Prevent cache clean operations in shared environments.",
+          "value": false
+        },
+        {
+          "description": "Allow cache clean operations.",
+          "value": true
+        }
+      ]
+    },
+    "enableLocalCacheCleanup": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether unused packages should be removed from the local cache after installs.",
+      "description": "When enabled, Yarn can remove unused entries from the project-local cache after each install.",
+      "type": "boolean",
+      "default": true,
+      "_examples": [
+        {
+          "description": "Keep stale local cache entries around for manual inspection.",
+          "value": false
+        },
+        {
+          "description": "Clean unused local cache entries after installs.",
+          "value": true
+        }
+      ]
+    },
+    "enableMigrationMode": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether migration mode should be enabled.",
+      "description": "Migration mode changes various settings to make migration easier. It is usually applied automatically by Yarn Switch when necessary rather than set manually.",
+      "type": "boolean",
+      "default": false,
+      "_examples": [
+        {
+          "description": "Enable migration compatibility behavior for a project.",
+          "value": true
+        },
+        {
+          "description": "Use the regular behavior once migration is complete.",
+          "value": false
+        }
+      ]
+    },
+    "enforceUnsafeHttp": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether Yarn should enforce unsafe HTTP requests over HTTPS.",
+      "description": "This setting is intended for controlled environments that deliberately need to force unsafe HTTP behavior.",
+      "type": "boolean",
+      "default": false,
+      "_examples": [
+        {
+          "description": "Keep HTTPS enforcement enabled.",
+          "value": false
+        },
+        {
+          "description": "Force unsafe HTTP in a controlled test environment.",
+          "value": true
+        }
+      ]
+    },
+    "nodeDistUrl": {
+      "_package": "@yarnpkg/core",
+      "title": "URL used to download Node.js distributions.",
+      "description": "Yarn uses this endpoint when resolving managed Node.js binaries.",
+      "type": "string",
+      "format": "uri",
+      "default": "https://nodejs.org/dist",
+      "_examples": [
+        {
+          "description": "Use the official Node.js distribution endpoint.",
+          "value": "https://nodejs.org/dist"
+        },
+        {
+          "description": "Use an internal mirror for Node.js distributions.",
+          "value": "https://artifacts.example.com/nodejs/dist"
+        }
+      ]
+    },
+    "npmMinimalAgeGate": {
+      "_package": "@yarnpkg/plugin-npm",
+      "title": "Minimum package version age required before installation.",
+      "description": "Versions newer than this duration won't be considered for installation unless they are preapproved. This can reduce exposure to newly-published supply-chain incidents.",
+      "type": "string",
+      "default": "1d",
+      "_examples": [
+        {
+          "description": "Require packages to be at least one day old.",
+          "value": "1d"
+        },
+        {
+          "description": "Use a shorter gate for fast-moving internal projects.",
+          "value": "1h"
+        }
+      ]
+    },
+    "npmPreapprovedPackages": {
+      "_package": "@yarnpkg/plugin-npm",
+      "title": "Package descriptors that bypass the minimum age gate.",
+      "description": "Use this list for packages you trust or that must be installed immediately despite `npmMinimalAgeGate`.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "_examples": [
+        {
+          "description": "Preapprove one package range.",
+          "value": ["typescript@^5.0.0"]
+        },
+        {
+          "description": "Preapprove multiple trusted packages.",
+          "value": ["@my-scope/*@*", "eslint@^9.0.0"]
+        }
+      ]
+    },
+    "pnpmHoistPatterns": {
+      "_package": "@yarnpkg/plugin-pnpm",
+      "title": "Package patterns hoisted to node_modules/.pnpm/node_modules.",
+      "description": "By default all packages are hoisted into the hidden modules directory inside the pnpm virtual store. Use an empty array to disable this hoisting.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": ["*"],
+      "_examples": [
+        {
+          "description": "Disable hidden-store hoisting.",
+          "value": []
+        },
+        {
+          "description": "Hoist every package plus a scoped package family.",
+          "value": ["*", "@babel/*"]
+        }
+      ]
+    },
+    "pnpmPublicHoistPatterns": {
+      "_package": "@yarnpkg/plugin-pnpm",
+      "title": "Package patterns hoisted to the root node_modules directory.",
+      "description": "Unlike `pnpmHoistPatterns`, this setting hoists matching packages to the public root `node_modules` directory.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "_examples": [
+        {
+          "description": "Expose selected tooling packages at the project root.",
+          "value": ["eslint", "prettier"]
+        },
+        {
+          "description": "Disable public hoisting.",
+          "value": []
+        }
+      ]
+    },
+    "slowNetworkTimeout": {
+      "_package": "@yarnpkg/core",
+      "title": "Timeout before a network request is considered slow.",
+      "description": "The value is expressed in milliseconds and controls when Yarn reports a network request as slow.",
+      "type": "number",
+      "default": 5000,
+      "_examples": [
+        {
+          "description": "Report slow requests after five seconds.",
+          "value": 5000
+        },
+        {
+          "description": "Use a more patient threshold on slow networks.",
+          "value": 30000
+        }
+      ]
+    },
+    "unstableIslands": {
+      "_package": "@yarnpkg/core",
+      "title": "Configuration of resolution islands.",
+      "description": "Each island resolves its transitive dependencies in isolation using a constraint solver, producing at most one version of each package per island.",
+      "type": "object",
+      "patternProperties": {
+        "^(.+)$": {
+          "type": "object",
+          "properties": {
+            "workspaces": {
+              "_hidden": true,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "linker": {
+              "_hidden": true,
+              "type": "string",
+              "enum": ["node-modules", "venv"]
+            }
+          }
+        }
+      },
+      "_examples": [
+        {
+          "description": "Resolve a subset of workspaces through the node-modules linker.",
+          "value": {
+            "web": {
+              "workspaces": ["@acme/web-*"],
+              "linker": "node-modules"
+            }
+          }
+        },
+        {
+          "description": "Resolve Python workspaces through the venv linker.",
+          "value": {
+            "python": {
+              "workspaces": ["@acme/py-*"],
+              "linker": "venv"
+            }
+          }
+        }
+      ]
+    },
+    "workspaceProfiles": {
+      "_package": "@yarnpkg/core",
+      "title": "Per-profile dependencies that can be applied to workspaces.",
+      "description": "Workspace profiles let you define reusable dev dependency sets. Workspaces can inherit them through their manifest `extends` field, and the `default` profile is applied automatically.",
+      "type": "object",
+      "patternProperties": {
+        "^(.+)$": {
+          "type": "object",
+          "properties": {
+            "extends": {
+              "_hidden": true,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "devDependencies": {
+              "_hidden": true,
+              "type": "object",
+              "patternProperties": {
+                "^(?:@([^/]+?)/)?([^/]+?)$": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "_examples": [
+        {
+          "description": "Apply a managed Node.js version to every workspace.",
+          "value": {
+            "default": {
+              "devDependencies": {
+                "@yarnpkg/node": "builtin:^22.0.0"
+              }
+            }
+          }
+        },
+        {
+          "description": "Compose a web profile from a shared tooling profile.",
+          "value": {
+            "tooling": {
+              "devDependencies": {
+                "typescript": "^5.0.0"
+              }
+            },
+            "web": {
+              "extends": ["tooling"],
+              "devDependencies": {
+                "vite": "^6.0.0"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "switchVersionRequirement": {
+      "_package": "@yarnpkg/core",
+      "title": "Version range required for the Yarn Switch binary.",
+      "description": "When set, Yarn validates that the Yarn Switch binary version satisfies this semver range before executing any command.",
+      "type": ["string", "null"],
+      "_examples": [
+        {
+          "description": "Require Yarn Switch 6 or newer.",
+          "value": "^6.0.0"
+        },
+        {
+          "description": "Disable the Switch version requirement.",
+          "value": null
+        }
+      ]
+    },
+    "catalog": {
+      "_package": "@yarnpkg/core",
+      "title": "Default dependency catalog.",
+      "description": "Maps package names to version ranges. This is an alias for `catalogs.default`, and entries can be referenced through the `catalog:` protocol.",
+      "type": "object",
+      "patternProperties": {
+        "^(?:@([^/]+?)/)?([^/]+?)$": {
+          "type": "string"
+        }
+      },
+      "_examples": [
+        {
+          "description": "Define shared ranges for common dependencies.",
+          "value": {
+            "react": "^19.0.0",
+            "typescript": "^5.0.0"
+          }
+        },
+        {
+          "description": "Define scoped package ranges.",
+          "value": {
+            "@types/node": "^22.0.0"
+          }
+        }
+      ]
+    },
+    "catalogs": {
+      "_package": "@yarnpkg/core",
+      "title": "Named dependency catalogs.",
+      "description": "Named catalogs contain predefined version ranges for packages. Use `catalog:name` in dependencies to reference a named catalog.",
+      "type": "object",
+      "patternProperties": {
+        "^(.+)$": {
+          "type": "object",
+          "patternProperties": {
+            "^(?:@([^/]+?)/)?([^/]+?)$": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "_examples": [
+        {
+          "description": "Define separate catalogs for app and tooling dependencies.",
+          "value": {
+            "react19": {
+              "react": "^19.0.0",
+              "react-dom": "^19.0.0"
+            },
+            "tooling": {
+              "typescript": "^5.0.0"
+            }
+          }
+        },
+        {
+          "description": "Define an empty named catalog to fill in later.",
+          "value": {
+            "future": {}
+          }
+        }
+      ]
+    },
+    "unsafeHttpWhitelist": {
+      "_package": "@yarnpkg/core",
+      "title": "Array of hostname glob patterns for which using the HTTP protocol is allowed.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b([-a-zA-Z0-9()@:%_\\+.~#?&//=]*)"
+      },
+      "_exampleItems": ["*.example.org", "example.org"],
+      "_examples": [
+        {
+          "description": "Allow HTTP for a single internal host.",
+          "value": ["registry.internal.example"]
+        },
+        {
+          "description": "Allow HTTP for a whole internal domain.",
+          "value": ["*.corp.example"]
+        }
+      ]
+    },
+    "virtualFolder": {
+      "_package": "@yarnpkg/core",
+      "title": "Path where virtual packages will be stored.",
+      "description": "Due to a particularity in how Yarn installs packages which list peer dependencies, some packages will be mapped to multiple virtual directories that don't actually exist on the filesystem. This settings tells Yarn where to put them. Note that the folder name *must* be `__virtual__`.",
+      "type": "string",
+      "format": "uri-reference",
+      "pattern": "^.*__virtual__$",
+      "default": ".yarn/__virtual__"
+    }
+  }
+}

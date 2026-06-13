@@ -6,25 +6,29 @@ use crate::{error::Error, immutable, project::{self, InstallMode, RunInstallOpti
 
 /// Install dependencies
 ///
-/// This command sets up your project if needed. The installation is split into four different steps that each have their own characteristics:
+/// This command resolves, fetches, links, and builds the dependencies for the current project.
 ///
-/// - **Resolution:** First the package manager will resolve your dependencies. The exact way a dependency version is privileged over another isn't standardized outside of the regular semver guarantees. If a package doesn't resolve to what you would expect, check that all dependencies are correctly declared (also check our website for more information: ).
+/// - **Resolution:** Yarn selects concrete package versions that satisfy the dependency ranges declared by your workspaces.
 ///
-/// - **Fetch:** Then we download all the dependencies if needed, and make sure that they're all stored within our cache (check the value of `cacheFolder` in `yarn config` to see where the cache files are stored).
+/// - **Fetch:** Yarn downloads missing packages and stores them in the cache configured by `cacheFolder`.
 ///
-/// - **Link:** Then we send the dependency tree information to internal plugins tasked with writing them on the disk in some form (for example by generating the `.pnp.cjs` file you might know).
+/// - **Link:** Yarn writes the dependency tree to disk using the configured linker, such as Plug'n'Play or `node_modules`.
 ///
-/// - **Build:** Once the dependency tree has been written on the disk, the package manager will now be free to run the build scripts for all packages that might need it, in a topological order compatible with the way they depend on one another. See https://yarnpkg.com/advanced/lifecycle-scripts for detail.
+/// - **Build:** Yarn runs required build scripts in dependency order, subject to `enableScripts` and package trust rules.
 ///
-/// Note that running this command is not part of the recommended workflow. Yarn supports zero-installs, which means that as long as you store your cache and your `.pnp.cjs` file inside your repository, everything will work without requiring any install right after cloning your repository or switching branches.
+/// Projects using zero-installs may not need to run this command after every clone or branch switch, provided the cache and install artifacts are
+/// checked into the repository.
 ///
-/// If the `--immutable` option is set (defaults to true on CI), Yarn will abort with an error exit code if the lockfile was to be modified (other paths can be added using the `immutablePatterns` configuration setting). For backward compatibility we offer an alias under the name of `--frozen-lockfile`, but it will be removed in a later release.
+/// If `--immutable` is set, Yarn aborts if the lockfile or any configured immutable pattern would be modified. `--frozen-lockfile` is accepted as
+/// an alias for compatibility.
 ///
 /// If the `--immutable-cache` option is set, Yarn will abort with an error exit code if the cache folder was to be modified (either because files would be added, or because they'd be removed).
 ///
-/// If the `--refresh-lockfile` option is set, Yarn will keep the same resolution for the packages currently in the lockfile but will refresh their metadata. If used together with `--immutable`, it can validate that the lockfile information are consistent. This flag is enabled by default when Yarn detects it runs within a pull request context.
+/// If `--refresh-lockfile` is set, Yarn keeps the same resolutions but refreshes their metadata. Combined with `--immutable`, it validates that the
+/// lockfile metadata is still consistent. Hardened mode enables this behavior automatically in public pull-request contexts.
 ///
-/// If the `--check-cache` option is set, Yarn will always refetch the packages and will ensure that their checksum matches what's 1/ described in the lockfile 2/ inside the existing cache files (if present). This is recommended as part of your CI workflow if you're both following the Zero-Installs model and accepting PRs from third-parties, as they'd otherwise have the ability to alter the checked-in packages before submitting them.
+/// If `--check-cache` is set, Yarn refetches packages and verifies that the remote checksum matches both the lockfile and any existing cache entry.
+/// This is useful for zero-install projects that accept third-party pull requests.
 ///
 /// If the `--inline-builds` option is set, Yarn will verbosely print the output of the build steps of your dependencies (instead of writing them into individual files). This is likely useful mostly for debug purposes only when using Docker-like environments.
 ///
@@ -38,26 +42,27 @@ use crate::{error::Error, immutable, project::{self, InstallMode, RunInstallOpti
 #[cli::path("install")]
 #[cli::category("Dependency management")]
 pub struct Install {
-    /// Validates that the package resolutions are coherent
+    /// Validate that lockfile resolutions are coherent
     #[cli::option("--check-resolutions", default = false)]
     check_resolutions: bool,
 
-    /// Abort with an error exit code if the lockfile was to be modified
-    #[cli::option("--immutable")]
+    /// Abort if the lockfile or immutable patterns would be modified
+    #[cli::option("--immutable,--frozen-lockfile")]
     immutable: Option<bool>,
 
-    /// Abort with an error exit code if the cache folder was to be modified
+    /// Abort if the cache folder would be modified
     #[cli::option("--immutable-cache")]
     immutable_cache: Option<bool>,
 
+    /// Refetch packages and verify their checksums against the lockfile and cache
     #[cli::option("--check-checksums,--check-cache", default = false)]
     check_checksums: bool,
 
-    /// Refresh the package metadata stored in the lockfile
+    /// Refresh package metadata stored in the lockfile
     #[cli::option("--refresh-lockfile", default = false)]
     refresh_lockfile: bool,
 
-    /// Select the artifacts this install will generate
+    /// Select which install artifacts Yarn should generate
     #[cli::option("--mode")]
     mode: Option<InstallMode>,
 
@@ -69,9 +74,9 @@ pub struct Install {
     #[cli::option("--inline-builds", default = false)]
     inline_builds: bool,
 
-    /// Format the output as a NDJSON stream
+    /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
-    _json: bool,
+    json: bool,
 }
 
 impl Install {
@@ -146,6 +151,7 @@ impl Install {
             refresh_lockfile,
             mode: self.mode,
             silent_or_error: self.silent,
+            json: self.json,
             inline_builds: self.inline_builds,
             ..Default::default()
         }).await?;

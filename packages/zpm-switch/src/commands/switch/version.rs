@@ -6,6 +6,7 @@ use clipanion::cli;
 #[cli::category("Switch commands")]
 #[derive(Debug)]
 pub struct VersionCommand {
+    /// Print the Yarn Switch version
     #[cli::option("-v,--version")]
     version: bool,
 }

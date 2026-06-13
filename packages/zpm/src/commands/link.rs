@@ -8,10 +8,10 @@ use crate::{
     project::{Project, Workspace, MANIFEST_NAME},
 };
 
-/// Link the current project with another one
+/// Link another project into the current project
 ///
-/// This command will add a resolutions entry in the current project manifest (package.json
-/// at the top-level workspace), linking it to a remote workspace.
+/// This command adds `portal:` resolutions to the current project's top-level manifest, making packages from another local project resolve to their
+/// local files.
 ///
 /// This is useful when developing packages that depend on each other: you can link them
 /// together to test your changes without having to publish them first.
@@ -38,7 +38,7 @@ pub struct Link {
     #[cli::option("-r,--relative", default = false)]
     relative: bool,
 
-    /// The path(s) to the project(s) to link
+    /// Paths to the projects or workspaces to link
     destinations: Vec<Path>,
 }
 

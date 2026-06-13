@@ -3,7 +3,10 @@ use zpm_utils::{tree, AbstractValue, IoResultExt, Path, TimeAgo};
 
 use crate::{cache, errors::Error, links::list_configs};
 
-/// List all cached Yarn binaries
+/// List cached Yarn binaries
+///
+/// This command prints cached Yarn releases and related Switch metadata known on the current machine.
+///
 #[cli::command]
 #[cli::path("switch", "cache")]
 #[cli::category("Cache management")]

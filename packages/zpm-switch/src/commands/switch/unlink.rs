@@ -3,12 +3,16 @@ use zpm_utils::Path;
 
 use crate::{links::unset_link, cwd::get_final_cwd, errors::Error, manifest::find_closest_package_manager};
 
-/// Unlink local Yarn binaries from the current project
+/// Remove a Yarn Switch link from a project
+///
+/// This command removes a local binary link or migration link so the project goes back to the version declared in `packageManager`.
+///
 #[cli::command]
 #[cli::path("switch", "unlink")]
 #[cli::category("Local Yarn development")]
 #[derive(Debug)]
 pub struct UnlinkCommand {
+    /// Project path whose link should be removed; defaults to the current project
     project_cwd: Option<Path>,
 }
 

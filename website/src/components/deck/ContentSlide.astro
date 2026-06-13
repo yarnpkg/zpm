@@ -1,0 +1,23 @@
+---
+import SlideChrome from './SlideChrome.astro';
+
+interface Props {
+  sectionTag: string;
+  bottomLeft?: string;
+  bottomRight?: string;
+  autoCounter?: boolean;
+  label?: string;
+  colRule?: boolean;
+}
+
+const { sectionTag, bottomLeft, bottomRight, autoCounter = false, label, colRule = false } = Astro.props;
+---
+
+<section
+  class:list={[`slide relative w-[1920px] h-[1080px] overflow-hidden text-[var(--fg)] font-['Space_Grotesk',system-ui,sans-serif] bg-transparent! flex flex-col px-[88px] py-[56px]`, { 'slide-col-rule': colRule }]}
+  data-screen-label={label}
+>
+  <SlideChrome tag={sectionTag} bottomLeft={bottomLeft} bottomRight={bottomRight} autoCounter={autoCounter}>
+    <slot />
+  </SlideChrome>
+</section>

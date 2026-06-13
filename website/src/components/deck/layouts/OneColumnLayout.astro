@@ -1,0 +1,32 @@
+---
+import ContentSlide from '../ContentSlide.astro';
+import { titleToSectionTag } from '../sectionTag';
+
+interface Props {
+  eyebrow: string;
+  title: string;
+  bottomLeft?: string;
+  bottomRight?: string;
+  label?: string;
+  titleMaxWidth?: string;
+  bodyClass?: string;
+}
+
+const { eyebrow, title, bottomLeft, bottomRight, label, titleMaxWidth = `1500px`, bodyClass = `flex flex-1` } = Astro.props;
+
+const sectionTag = titleToSectionTag(title);
+---
+
+<ContentSlide sectionTag={sectionTag} bottomLeft={bottomLeft} bottomRight={bottomRight} autoCounter label={label}>
+  <div class="reveal reveal-1 font-mono text-sm tracking-[0.14em] text-[var(--fg-mute)] uppercase mb-7">
+    {eyebrow}
+  </div>
+
+  <h2 class="slide-title reveal reveal-2 text-[76px] leading-[1.02] tracking-[-0.028em] font-medium m-0 mb-9 text-balance" style={`max-width: ${titleMaxWidth}`} set:html={title} />
+
+  <div class={bodyClass}>
+    <div class="w-full my-auto">
+      <slot />
+    </div>
+  </div>
+</ContentSlide>

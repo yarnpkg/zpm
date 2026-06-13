@@ -3,9 +3,9 @@ use zpm_utils::ToFileString;
 
 use crate::{error::Error, project};
 
-/// Print the list of all the binaries available in the current workspace.
+/// List binaries available to the current workspace
 ///
-/// Adding the `-v,--verbose` flag will cause the output to contain both the binary name and the locator of the package that provides the binary.
+/// This command lists executable binaries exposed by dependencies of the current workspace.
 ///
 #[cli::command]
 #[cli::path("bin")]
@@ -20,13 +20,13 @@ impl BinList {
 
 /// Print the path of an accessible binary
 ///
-/// Print the path to the binary on the standard output and exit. Note that the reported path may be stored within a zip archive.
+/// This command prints the path to a binary exposed by one of the current workspace's dependencies. The reported path may point inside a zip archive.
 ///
 #[cli::command]
 #[cli::path("bin")]
 #[cli::category("Scripting commands")]
 pub struct Bin {
-    /// The name of the binary to print the path of
+    /// Binary name to resolve
     name: String,
 }
 

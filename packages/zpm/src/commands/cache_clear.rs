@@ -6,23 +6,22 @@ use crate::{error::Error, project, report::{StreamReport, StreamReportConfig, wi
 
 /// Remove cache files
 ///
-/// By default this command removes only the per-project cache. The mirror (the
-/// project-global registry cache) is left untouched unless `--mirror` or `--all`
-/// is set.
+/// By default this command removes only the per-project cache. The mirror, which is the project-global registry cache, is left untouched unless
+/// `--mirror` or `--all` is set.
 #[cli::command]
 #[cli::path("cache", "clear")]
 #[cli::path("cache", "clean")]
 #[cli::category("Cache management")]
 pub struct CacheClear {
-    /// Clear cache entries older than 7 days
+    /// Remove only cache entries older than seven days
     #[cli::option("--old", default = false)]
     old: bool,
 
-    /// Also remove the registry mirror cache
+    /// Remove the registry mirror cache instead of the project cache
     #[cli::option("--mirror", default = false)]
     mirror: bool,
 
-    /// Remove both the local cache and the mirror
+    /// Remove both the project cache and the registry mirror
     #[cli::option("--all", default = false)]
     all: bool,
 }
@@ -33,22 +32,27 @@ impl CacheClear {
     }
 }
 
+/// Remove cache files
+///
+/// This is a shorthand for `yarn cache clear` when used with `--clear` or `--clean`.
+///
 #[cli::command]
 #[cli::path("cache")]
 #[cli::category("Cache management")]
 pub struct CacheClear2 {
+    /// Run the cache cleanup operation
     #[cli::option("-c,--clear,--clean")]
     _clear: bool,
 
-    /// Clear cache entries older than 7 days
+    /// Remove only cache entries older than seven days
     #[cli::option("--old", default = false)]
     old: bool,
 
-    /// Also remove the registry mirror cache
+    /// Remove the registry mirror cache instead of the project cache
     #[cli::option("--mirror", default = false)]
     mirror: bool,
 
-    /// Remove both the local cache and the mirror
+    /// Remove both the project cache and the registry mirror
     #[cli::option("--all", default = false)]
     all: bool,
 }
@@ -117,7 +121,7 @@ async fn clear_cache(old: bool, mirror: bool, all: bool) -> Result<(), Error> {
 
         crate::report::if_active_async(|report| {
             if cleared_entries > 0 {
-                report.info(format!("Cleared {} entries from the cache.", DataType::Number.colorize(&cleared_entries.to_string())))
+                report.info(format!("Cleared {} entries from the cache.", DataType::Number.colorize(&cleared_entries.to_string())));
             } else {
                 report.info("No entries to clear from the cache.".to_string());
             }

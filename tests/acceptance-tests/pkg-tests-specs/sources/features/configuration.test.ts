@@ -110,6 +110,25 @@ describe(`Features`, () => {
       await expect(run(`config`, `get`, `--json`, `immutablePatterns`)).resolves.toMatchObject({stdout: `["foo","bar"]\n`});
     }));
 
+    test(`it should allow resetting a home configuration field without providing a project value`, makeTemporaryEnv({
+    }, async ({path, run, source}) => {
+      await xfs.mkdirPromise(ppath.join(path, `..`), {recursive: true});
+
+      await xfs.writeJsonPromise(ppath.join(path, `..`, Filename.rc), {
+        immutablePatterns: [`foo`],
+      });
+
+      await expect(run(`config`, `get`, `--json`, `immutablePatterns`)).resolves.toMatchObject({stdout: `["foo"]\n`});
+
+      await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
+        immutablePatterns: {
+          onConflict: `reset`,
+        },
+      });
+
+      await expect(run(`config`, `get`, `--json`, `immutablePatterns`)).resolves.toMatchObject({stdout: `[]\n`});
+    }));
+
     test(`it should return a helpful error if the rc file is wrong`, makeTemporaryEnv({
     }, async ({path, run, source}) => {
       await xfs.mkdirPromise(ppath.join(path, `..` as PortablePath), {recursive: true});
@@ -130,8 +149,7 @@ describe(`Features`, () => {
         },
       });
 
-      // https://github.com/yarnpkg/berry/pull/5213
-      await expect(run(`config`, `get`, `--json`, `packageExtensions`)).rejects.toMatchObject({stdout: expect.stringContaining(`Internal Error: Expected configuration setting "packageExtensions['@lezer/html@*'].dependencies['@lezer/javascript@*']" to be a string, got object`)});
+      await expect(run(`config`, `get`, `--json`, `packageExtensions`)).rejects.toMatchObject({stdout: expect.stringContaining(`Invalid ident: @lezer/javascript@*`)});
     }));
   });
 });

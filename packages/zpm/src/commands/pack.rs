@@ -10,25 +10,24 @@ use crate::{
 
 /// Pack the project into a distributable archive
 ///
-/// This command will turn the active workspace into a compressed archive suitable for publishing. The archive will by default be stored at the root
-/// of the workspace (`package.tgz`).
+/// This command turns the active workspace into a compressed archive suitable for publishing. By default the archive is written to `package.tgz` at
+/// the workspace root.
 ///
-/// If the `-o,--out` is set the archive will be created at the specified path. The `%s` and `%v` variables can be used within the path and will be
-/// respectively replaced by the package name and version.
+/// If `--out` is set, the archive is written to the specified path. The `%s` and `%v` placeholders are replaced by the package name and version.
 ///
 #[cli::command]
 #[cli::path("pack")]
 #[cli::category("Release commands")]
 pub struct Pack {
-    /// Print the file paths without actually generating the package archive
+    /// Print the files that would be included without generating the archive
     #[cli::option("-n,--dry-run", default = false)]
     dry_run: bool,
 
-    /// Run a preliminary `yarn install` if the package contains build scripts
+    /// Run `yarn install` first when the package needs build scripts
     #[cli::option("--install-if-needed", default = false)]
     install_if_needed: bool,
 
-    /// Keep the `workspace:` protocols as-is in the generated archive
+    /// Keep `workspace:` ranges unchanged in the generated package manifest
     #[cli::option("--preserve-workspaces", default = false)]
     preserve_workspaces: bool,
 
@@ -36,7 +35,7 @@ pub struct Pack {
     #[cli::option("--json", default = false)]
     json: bool,
 
-    /// Create the archive at the specified path
+    /// Path where the archive should be written
     #[cli::option("--out")]
     out: Option<Path>,
 }

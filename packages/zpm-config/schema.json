@@ -76,6 +76,11 @@
       "description": "Whether to keep the packages in a global cache rather than inside the project",
       "default": true
     },
+    "enableMirror": {
+      "type": "boolean",
+      "description": "Whether to mirror local cache entries into the global cache",
+      "default": true
+    },
     "enableLocalCacheCleanup": {
       "type": "boolean",
       "description": "Whether to remove unused packages from the local cache after each install",
@@ -196,15 +201,32 @@
       "type": ["string", "null"],
       "description": "Define a proxy to use when making an HTTPS request"
     },
-    "localCacheFolderName": {
-      "type": "string",
-      "description": "The name of the folder where the local cache will be stored inside the .yarn folder",
-      "default": "cache"
-    },
     "networkConcurrency": {
       "type": "usize",
       "description": "The number of concurrent network requests Yarn can perform",
       "default": 100
+    },
+    "logFilters": {
+      "type": "array",
+      "description": "Filters that can discard log entries or change their reported level",
+      "items": {
+        "type": "object",
+        "title": "LogFilter",
+        "properties": {
+          "text": {
+            "type": ["string", "null"],
+            "description": "Exact log text to match"
+          },
+          "pattern": {
+            "type": ["zpm_utils::Glob", "null"],
+            "description": "Glob pattern to match against log text"
+          },
+          "level": {
+            "type": "crate::types::LogLevel",
+            "description": "Level to assign to matching log entries"
+          }
+        }
+      }
     },
     "networkSettings": {
       "type": "object",
@@ -219,6 +241,18 @@
           "enableNetwork": {
             "type": ["boolean", "null"],
             "description": "Whether to allow network access for this specific glob"
+          },
+          "httpsCaFilePath": {
+            "type": ["zpm_utils::Path", "null"],
+            "description": "Path to a file containing one or multiple Certificate Authority signing certificates"
+          },
+          "httpsCertFilePath": {
+            "type": ["zpm_utils::Path", "null"],
+            "description": "Path to a file containing a certificate chain in PEM format"
+          },
+          "httpsKeyFilePath": {
+            "type": ["zpm_utils::Path", "null"],
+            "description": "Path to a file containing a private key in PEM format"
           }
         }
       }
@@ -300,6 +334,10 @@
       "type": "boolean",
       "description": "Whether to generate and publish provenance information when publishing packages",
       "default": false
+    },
+    "npmPublishAccess": {
+      "type": ["crate::NpmPublishAccess", "null"],
+      "description": "Default access to use when publishing packages to the npm registry"
     },
     "npmPublishRegistry": {
       "type": ["string", "null"],
@@ -412,6 +450,11 @@
         }
       }
     },
+    "patchFolder": {
+      "type": "zpm_utils::Path",
+      "description": "Folder where patch files are written by `yarn patch-commit --save`",
+      "default": ".yarn/patches"
+    },
     "pnpEnableInlining": {
       "type": "boolean",
       "description": "Whether to inline the PnP dependency tree in the generated .pnp.cjs file",
@@ -433,6 +476,11 @@
       "type": "string",
       "description": "The shebang to use for the generated .pnp.cjs file",
       "default": "#!/usr/bin/env node"
+    },
+    "pnpUnpluggedFolder": {
+      "type": "zpm_utils::Path",
+      "description": "Folder where packages are materialized when they need to be unplugged",
+      "default": ".yarn/unplugged"
     },
     "pnpmHoistPatterns": {
       "type": "array",
@@ -462,6 +510,11 @@
     "preferInteractive": {
       "type": "boolean",
       "description": "Whether to use interactive prompts by default when running yarn commands",
+      "default": false
+    },
+    "preferTruncatedLines": {
+      "type": "boolean",
+      "description": "Whether to prefer truncating lines in the terminal output",
       "default": false
     },
     "preferReuse": {

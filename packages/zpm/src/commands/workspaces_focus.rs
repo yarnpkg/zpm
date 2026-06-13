@@ -8,14 +8,13 @@ use crate::{
     project::{Project, RunInstallOptions, Workspace},
 };
 
-/// Install a single workspace and its dependencies
+/// Install a focused set of workspaces
 ///
-/// This command will run an install as if the specified workspaces (and all other workspaces they depend on) were the only ones in the project. If
-/// no workspaces are explicitly listed, the active one will be assumed.
+/// This command runs an install as if the specified workspaces, and the workspaces they depend on, were the only workspaces in the project. If no
+/// workspace is listed, Yarn focuses the active workspace.
 ///
-/// Note that this command is only very moderately useful when using zero-installs, since the cache will contain all the packages anyway - meaning
-/// that the only difference between a full install and a focused install would just be a few extra lines in the .pnp.cjs file, at the cost of
-/// introducing an extra complexity.
+/// This command has limited impact when using zero-installs, since the cache already contains all packages. In that case, the main difference between
+/// a full install and a focused install is a few extra lines in the `.pnp.cjs` file, at the cost of additional workflow complexity.
 ///
 /// If the `-A,--all` flag is set, the entire project will be installed. Combine with `--production` to replicate the old `yarn install --production`.
 ///
@@ -27,7 +26,7 @@ pub struct WorkspacesFocus {
     #[cli::option("-A,--all", default = false)]
     all: bool,
 
-    /// Only install production dependencies
+    /// Exclude development dependencies from the focused install
     #[cli::option("--production", default = false)]
     production: bool,
 
@@ -35,7 +34,7 @@ pub struct WorkspacesFocus {
     #[cli::option("--json", default = false)]
     json: bool,
 
-    /// The workspaces to focus on
+    /// Workspaces to include in the focused install
     workspaces: Vec<Ident>,
 }
 

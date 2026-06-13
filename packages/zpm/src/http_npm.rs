@@ -4,7 +4,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use bytes::Bytes;
 use dashmap::DashMap;
 use regex::{Captures, Regex};
-use reqwest::Response;
+use reqwest::{Response, Url};
 use serde::Deserialize;
 use sha2::{Sha256, Digest};
 use tokio::sync::OnceCell;
@@ -545,6 +545,15 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
         None
     };
 
+    if let Some(ref cached) = cached {
+        let url_obj
+            = Url::parse(&url)?;
+
+        if !params.http_client.config.is_network_enabled(&url_obj) {
+            return Ok(Bytes::from(cached.metadata.clone()));
+        }
+    }
+
     let mut request
         = params.http_client.get(&url)?
             .enable_status_check(false);
@@ -825,7 +834,9 @@ async fn render_otp_notice(response: &Response) {
             DataType::Url.colorize(caps.get(0).unwrap().as_str()).to_string()
         });
 
-        crate::report::if_active_async(|report| report.info(formatted_notice.to_string())).await;
+        crate::report::if_active_async(|report| {
+            report.info(formatted_notice.to_string());
+        }).await;
     }
 }
 
@@ -840,9 +851,17 @@ async fn ask_for_otp(params: &NpmHttpParams<'_>, response: &Response) -> Result<
 
     render_otp_notice(&response).await;
 
-    let otp = current_report().await.as_ref()
-        .map(|report| report.prompt(PromptType::Input("One-time password".to_string())))
-        .unwrap()
+    let report_guard
+        = current_report().await;
+
+    let Some(report) = report_guard.as_ref() else {
+        return Err(Error::AuthenticationError(
+            "One-time password required; rerun this command with --otp <code>".to_string()
+        ));
+    };
+
+    let otp = report
+        .prompt(PromptType::Input("One-time password".to_string()))
         .await;
 
     Ok(otp)

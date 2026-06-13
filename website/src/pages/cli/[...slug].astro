@@ -1,0 +1,40 @@
+---
+import {getCollection, render} from 'astro:content';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import ReferenceSidebar from '../../components/ReferenceSidebar.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import Breadcrumb from '../../components/Breadcrumb.astro';
+
+const cliEntries = await getCollection(`cli`);
+
+export async function getStaticPaths() {
+  const entries = await getCollection(`cli`);
+  return entries.map(entry => ({
+    params: {slug: entry.id.replace(/^cli\//, ``)},
+    props: {entry},
+  }));
+}
+
+const {entry} = Astro.props;
+const {Content} = await render(entry);
+const description = entry.data.commandSpec.documentation?.description ?? ``;
+const pathSegments = entry.data.commandSpec.primaryPath;
+---
+
+<DocsLayout title={`${entry.data.title} — Yarn CLI reference`} activePage="reference" mainMaxWidth="820px" description={description}>
+  <Fragment slot="sidebar">
+    <ReferenceSidebar activePage={entry.id} cliEntries={cliEntries} />
+  </Fragment>
+
+  <Breadcrumb segments={["Docs", "Reference", "CLI", ...pathSegments]} />
+
+  <PageHeader
+    title={entry.data.title}
+    lead={description}
+    mono
+  />
+
+  <div class="prose">
+    <Content />
+  </div>
+</DocsLayout>

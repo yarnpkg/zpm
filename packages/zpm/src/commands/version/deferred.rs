@@ -45,13 +45,20 @@ impl From<DeferredStrategy> for Option<ReleaseStrategy> {
     }
 }
 
+/// Record a deferred version decision for the active workspace
+///
+/// This command writes the requested release strategy to the versioning files instead of changing the manifest immediately. Use `yarn version apply`
+/// later to apply the collected decisions.
+///
 #[cli::command]
 #[cli::path("version")]
 #[cli::category("Project management")]
 pub struct VersionDeferred {
+    /// Record the decision as deferred version metadata
     #[cli::option("-d,--deferred")]
     pub _deferred: bool,
 
+    /// Release strategy, exact version, or `decline`
     pub strategy: DeferredStrategy,
 }
 

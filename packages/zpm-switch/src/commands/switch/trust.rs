@@ -29,15 +29,17 @@ impl TrustLevel {
     }
 }
 
-/// Check whether a project has been trusted
+/// Check whether a project is trusted by Yarn Switch
 #[cli::command]
 #[cli::path("switch", "trust")]
 #[cli::category("Project trust")]
 #[derive(Debug)]
 pub struct TrustCheckCommand {
+    /// Check the stored trust state
     #[cli::option("--check")]
     _check: bool,
 
+    /// Project path to check
     path: Path,
 }
 
@@ -55,15 +57,17 @@ impl TrustCheckCommand {
     }
 }
 
-/// Set whether a project is trusted
+/// Set the Yarn Switch trust state for a project
 #[cli::command]
 #[cli::path("switch", "trust")]
 #[cli::category("Project trust")]
 #[derive(Debug)]
 pub struct TrustSetCommand {
+    /// Trust value to store: `true`, `false`, or `null`
     #[cli::option("--set")]
     trusted: TrustLevel,
 
+    /// Project path to update
     path: Path,
 }
 

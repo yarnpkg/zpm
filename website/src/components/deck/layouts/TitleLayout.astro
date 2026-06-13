@@ -1,0 +1,38 @@
+---
+import TitleSlide from '../TitleSlide.astro';
+import TagPill from '../TagPill.astro';
+
+interface Props {
+  tag?: string;
+  label?: string;
+  eyebrow: string;
+  eyebrowSuffix?: string;
+  title: string;
+  lede?: string;
+  versions?: { badge: string; version: string; badgeStyle?: string }[];
+  bottomRight?: string;
+}
+
+const { tag, label, eyebrow, eyebrowSuffix, title, lede, versions, bottomRight } = Astro.props;
+---
+
+<TitleSlide tag={tag} label={label}>
+  <div class="reveal reveal-2 font-mono text-2xl tracking-[0.14em] text-[var(--fg-mute)] uppercase mb-7">
+    {eyebrow}
+    {eyebrowSuffix && <><span class="inline-block w-4.5 h-px bg-[var(--accent)] align-middle mx-2.5 text-[var(--accent)]"></span>{eyebrowSuffix}</>}
+  </div>
+  <h1 class="slide-hero-title reveal reveal-3 text-[132px] leading-[0.94] tracking-[-0.035em] font-medium m-0 mb-8 text-balance" set:html={title} />
+  {lede && <p class="slide-lede reveal reveal-4 text-[28px] leading-[1.45] text-[var(--fg-dim)] max-w-[900px] text-pretty font-light m-0" set:html={lede} />}
+
+  {versions && versions.length > 0 && (
+    <div class="reveal reveal-5 mt-24 flex gap-3.5 flex-wrap">
+      {versions.map(v => <TagPill badge={v.badge} version={v.version} badgeStyle={v.badgeStyle} />)}
+    </div>
+  )}
+
+  {bottomRight && (
+    <span class="reveal reveal-5" slot="bottom-right">
+      {bottomRight}
+    </span>
+  )}
+</TitleSlide>

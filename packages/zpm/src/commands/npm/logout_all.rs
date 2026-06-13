@@ -6,11 +6,12 @@ use crate::{
     project::Project, report::{with_report_result, StreamReport, StreamReportConfig},
 };
 
-/// Logout from all npm registries
+/// Remove all stored npm registry credentials
 #[cli::command]
 #[cli::path("npm", "logout")]
 #[cli::category("Npm-related commands")]
 pub struct LogoutAll {
+    /// Remove credentials for every configured npm registry and scope
     #[cli::option("-A,--all")]
     _all: bool,
 }

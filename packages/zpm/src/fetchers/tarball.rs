@@ -60,8 +60,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
                 = zpm_formats::tar::entries_from_tar(&tar_data)?
                     .into_iter()
                     .strip_first_segment()
-                    .prepare_npm_entries(&package_subdir_for_entries)
-                    .collect::<Vec<_>>();
+                    .prepare_npm_entries(&package_subdir_for_entries)?;
 
             Ok(cache_packer.pack(entries)?)
         }).await??;

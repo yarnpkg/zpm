@@ -1,9 +1,9 @@
-use std::str::FromStr;
+use std::{process::{Command, Output}, str::FromStr};
 
 use itertools::Itertools;
 use zpm_git::PrepareParams;
 use zpm_primitives::Locator;
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::{Path, ToFileString, to_shell_line};
 
 use crate::{
     error::Error,
@@ -41,6 +41,72 @@ pub async fn prepare_project(_locator: &Locator, folder_path: &Path, params: &Pr
         PackageManager::YarnZpm
             => prepare_yarn_zpm_project(folder_path, params).await,
     }
+}
+
+async fn run_prepared_command<I, S>(
+    mut command: Command,
+    folder_path: &Path,
+    args: I,
+    env: impl IntoIterator<Item = (&'static str, String)>,
+    delete_env: impl IntoIterator<Item = &'static str>,
+) -> Result<Output, Error>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    command.current_dir(folder_path.to_path_buf());
+    command.args(args.into_iter().map(|arg| arg.as_ref().to_string()));
+
+    for key in ["CACHE_CWD", "INIT_CWD", "NODE_OPTIONS", "PROJECT_CWD", "npm_config_user_agent", "npm_execpath"] {
+        command.env_remove(key);
+    }
+
+    for (key, value) in env {
+        command.env(key, value);
+    }
+
+    for key in delete_env {
+        command.env_remove(key);
+    }
+
+    let program = command.get_program().to_string_lossy().to_string();
+    let shell_line = to_shell_line(&command).unwrap_or_else(|_| program.clone());
+
+    let output = tokio::task::spawn_blocking(move || command.output()).await??;
+
+    if output.status.success() {
+        return Ok(output);
+    }
+
+    if let Ok(temp_dir) = Path::temp_dir() {
+        let log_path = temp_dir
+            .with_join_str("error.log");
+
+        let stdout
+            = String::from_utf8_lossy(&output.stdout);
+        let stderr
+            = String::from_utf8_lossy(&output.stderr);
+
+        let log_write = log_path
+            .fs_write_text(format!("=== COMMAND ===\n\n{}\n\n=== STDOUT ===\n\n{}\n=== STDERR ===\n\n{}", shell_line, stdout, stderr));
+
+        if log_write.is_ok() {
+            return Err(Error::ChildProcessFailedWithLog(program, log_path));
+        }
+    }
+
+    Err(Error::ChildProcessFailed(program))
+}
+
+async fn make_yarn_command(release_line: zpm_switch::ReleaseLine) -> Result<Command, Error> {
+    let channel_selector
+        = release_line.stable();
+
+    let version
+        = zpm_switch::resolve_channel_selector(&channel_selector)
+            .await?;
+
+    Ok(zpm_switch::install_package_manager(&zpm_switch::VersionPackageManagerReference {version}).await?)
 }
 
 fn get_package_manager(folder_path: &Path) -> Result<PackageManager, Error> {
@@ -120,6 +186,10 @@ async fn prepare_npm_project(folder_path: &Path, params: &PrepareParams) -> Resu
 
     let pack_result = ScriptEnvironment::new()?
         .with_cwd(folder_path.clone())
+
+        // Otherwise npm won't properly set the user agent, using the Yarn one instead
+        .delete_env_variable("npm_config_user_agent")
+
         .run_exec("npm", pack_args)
         .await?
         .ok()?;
@@ -155,25 +225,13 @@ async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams
         .with_join_str(".npmignore")
         .fs_append("/.yarn\n")?;
 
-    let channel_selector
-        = zpm_switch::ReleaseLine::Classic
-            .stable();
-
-    let default_yarn
-        = zpm_switch::resolve_channel_selector(&channel_selector)
-            .await?
-            .to_file_string();
-
-    ScriptEnvironment::new()?
-        .with_cwd(folder_path.clone())
-        .with_env_variable("YARNSW_DEFAULT", &default_yarn)
-
-        // Remove environment variables that limit the install to just production dependencies
-        .delete_env_variable("NODE_ENV")
-
-        .run_exec("yarn", vec!["install"])
-        .await?
-        .ok()?;
+    run_prepared_command(
+        make_yarn_command(zpm_switch::ReleaseLine::Classic).await?,
+        folder_path,
+        ["install"],
+        [],
+        ["NODE_ENV"],
+    ).await?;
 
     let pack_path = folder_path
         .with_join_str("package.tgz");
@@ -183,12 +241,13 @@ async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams
         None => vec!["pack", "--filename", pack_path.as_str()],
     };
 
-    ScriptEnvironment::new()?
-        .with_cwd(folder_path.clone())
-        .with_env_variable("YARNSW_DEFAULT", &default_yarn)
-        .run_exec("yarn", pack_args)
-        .await?
-        .ok()?;
+    run_prepared_command(
+        make_yarn_command(zpm_switch::ReleaseLine::Classic).await?,
+        folder_path,
+        pack_args,
+        [],
+        [],
+    ).await?;
 
     let pack_tgz
         = pack_path.fs_read()?;
@@ -207,15 +266,6 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
     if !lockfile_path.fs_exists() {
         lockfile_path.fs_write(b"")?;
     }
-
-    let channel_selector
-        = zpm_switch::ReleaseLine::Berry
-            .stable();
-
-    let default_yarn
-        = zpm_switch::resolve_channel_selector(&channel_selector)
-            .await?
-            .to_file_string();
 
     let mut pack_args
         = vec![];
@@ -242,18 +292,13 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
     pack_args.push("--filename");
     pack_args.push(pack_path.as_str());
 
-    ScriptEnvironment::new()?
-        .with_cwd(folder_path.clone())
-        .with_standard_binaries()
-
-        // We enable inline builds, because nobody wants to
-        // read a logfile telling them to open another logfile
-        .with_env_variable("YARN_ENABLE_INLINE_BUILDS", "1")
-        .with_env_variable("YARNSW_DEFAULT", &default_yarn)
-
-        .run_exec("yarn", pack_args)
-        .await?
-        .ok()?;
+    run_prepared_command(
+        make_yarn_command(zpm_switch::ReleaseLine::Berry).await?,
+        folder_path,
+        pack_args,
+        [("YARN_ENABLE_INLINE_BUILDS", "1".to_string())],
+        [],
+    ).await?;
 
     let pack_tgz = pack_path
         .fs_read()?;
@@ -312,6 +357,12 @@ async fn prepare_yarn_zpm_project(folder_path: &Path, params: &PrepareParams) ->
         .with_cwd(cwd_path.clone())
 
         .with_env_variable("YARNSW_DEFAULT", &format!("local:{}", current_exe.to_file_string()))
+        .delete_env_variable("CACHE_CWD")
+        .delete_env_variable("INIT_CWD")
+        .delete_env_variable("NODE_OPTIONS")
+        .delete_env_variable("PROJECT_CWD")
+        .delete_env_variable("npm_config_user_agent")
+        .delete_env_variable("npm_execpath")
 
         .run_exec("yarn", pack_args)
         .await?

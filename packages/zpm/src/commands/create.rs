@@ -12,7 +12,7 @@ use crate::{
 
 /// Create a new package from a starter kit
 ///
-/// This command will use `dlx` to fetch a package referenced as `create-<name>` (or `@<scope>/create-<name>` for scoped packages), then run its bin.
+/// This command uses `dlx` to fetch a package named `create-<name>` (or `@<scope>/create-<name>` for scoped packages), then runs its binary.
 ///
 /// For example:
 ///
@@ -27,7 +27,7 @@ pub struct Create {
     #[cli::option("-q,--quiet", default = false)]
     quiet: bool,
 
-    /// Name of the starter kit (e.g. `react-app`, `@scope/app`)
+    /// Starter kit name, such as `react-app` or `@scope/app`
     starter: String,
 
     /// Arguments to pass to the starter kit's binary

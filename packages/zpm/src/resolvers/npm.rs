@@ -49,37 +49,83 @@ fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
     }
 }
 
+fn registry_reference_for_manifest(
+    config: &zpm_config::Configuration,
+    package_ident: &Ident,
+    version: &zpm_semver::Version,
+    manifest: &RemoteManifestWithScripts,
+) -> Result<RegistryReference, Error> {
+    let dist_manifest = manifest.remote.dist
+        .as_ref()
+        .expect("Expected the registry to return a 'dist' field amongst the manifest data");
+
+    let registry_base
+        = http_npm::get_registry(config, package_ident.scope(), false)?;
+
+    let url = if npm::is_conventional_tarball_url(&registry_base, &package_ident, version, dist_manifest.tarball.clone()) {
+        None
+    } else {
+        Some(UrlEncoded::new(dist_manifest.tarball.clone()))
+    };
+
+    Ok(RegistryReference {
+        ident: package_ident.clone(),
+        version: version.clone(),
+        url,
+    })
+}
+
 fn build_resolution_result(context: &InstallContext, descriptor: &Descriptor, package_ident: &Ident, version: zpm_semver::Version, mut manifest: RemoteManifestWithScripts) -> Result<ResolutionResult, Error> {
     let project = context.project
         .expect("The project is required for resolving a workspace package");
 
     fix_manifest(&mut manifest);
 
-    let dist_manifest = manifest.remote.dist
-        .as_ref()
-        .expect("Expected the registry to return a 'dist' field amongst the manifest data");
-
-    let registry_base
-        = http_npm::get_registry(&project.config, package_ident.scope(), false)?;
-
-    // Store the tarball URL only if it's non-conventional (can't be computed from registry + path)
-    let url = if npm::is_conventional_tarball_url(&registry_base, &package_ident, &version, dist_manifest.tarball.clone()) {
-        None
-    } else {
-        Some(UrlEncoded::new(dist_manifest.tarball.clone()))
-    };
-
-    let registry_reference = RegistryReference {
-        ident: package_ident.clone(),
-        version,
-        url,
-    };
+    let registry_reference
+        = registry_reference_for_manifest(&project.config, package_ident, &version, &manifest)?;
 
     let locator
         = descriptor.resolve_with(registry_reference.into());
 
     Resolution::from_remote_manifest(locator, manifest.remote)
         .into_resolution_result(context)
+}
+
+async fn load_manifest_from_full_metadata(
+    context: &InstallContext<'_>,
+    registry_base: &str,
+    authorization: Option<&str>,
+    params: &RegistryReference,
+) -> Result<RemoteManifestWithScripts, Error> {
+    let project = context.project
+        .expect("The project is required for resolving a workspace package");
+
+    let bytes
+        = http_npm::get_package_metadata(&http_npm::GetPackageMetadataParams {
+            http_client: &project.http_client,
+            registry: registry_base,
+            ident: &params.ident,
+            authorization,
+            global_folder: &project.config.settings.global_folder.value,
+            refresh_lockfile: context.refresh_lockfile,
+            background_writes: context.background_writes.as_deref(),
+        }).await?;
+
+    #[serde_as]
+    #[derive(Deserialize)]
+    struct RegistryMetadata<'a> {
+        #[serde(borrow)]
+        versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
+    }
+
+    let registry_data: RegistryMetadata<'_>
+        = JsonDocument::hydrate_from_slice(&bytes[..])?;
+
+    let manifest
+        = registry_data.versions.get(&params.version)
+            .ok_or_else(|| Error::NoCandidatesFound(AnonymousSemverRange {range: zpm_semver::Range::exact(params.version.clone())}.into()))?;
+
+    Ok(JsonDocument::hydrate_from_value(manifest)?)
 }
 
 pub async fn resolve_semver_or_workspace_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistrySemverRange) -> Result<ResolutionResult, Error> {
@@ -278,18 +324,46 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let time
         = registry_data.time;
 
-    let (version, manifest)
-        = registry_data.versions.into_iter()
-            .rev()
-            .filter(|(version, _)| version <= &latest_version)
-            .filter(|(version, _)| !version.rc.is_some() || latest_version.rc.is_some())
-            .find(|(version, _)| is_package_approved(context, package_ident, version, time.as_ref().and_then(|map| map.get(version))))
-            .ok_or_else(|| Error::NoCandidatesFound(AnonymousSemverRange {range: zpm_semver::Range::lte(latest_version.clone())}.into()))?;
+    let metadata_url
+        = url::Url::parse(&format!("{}{}", registry_base, npm::registry_url_for_all_versions(package_ident)))?;
+    let is_offline
+        = !project.http_client.config.is_network_enabled(&metadata_url);
 
-    let manifest
-        = JsonDocument::hydrate_from_value(&manifest)?;
+    for (version, manifest) in registry_data.versions.into_iter().rev() {
+        if &version > latest_version {
+            continue;
+        }
 
-    build_resolution_result(context, descriptor, package_ident, version, manifest)
+        if version.rc.is_some() && latest_version.rc.is_none() {
+            continue;
+        }
+
+        if !is_package_approved(context, package_ident, &version, time.as_ref().and_then(|map| map.get(&version))) {
+            continue;
+        }
+
+        let manifest
+            = JsonDocument::hydrate_from_value(&manifest)?;
+
+        if is_offline {
+            let Some(package_cache) = context.package_cache else {
+                continue;
+            };
+
+            let registry_reference
+                = registry_reference_for_manifest(&project.config, package_ident, &version, &manifest)?;
+            let locator
+                = descriptor.resolve_with(registry_reference.into());
+
+            if !package_cache.has_cache_entry(locator, ".zip")? {
+                continue;
+            }
+        }
+
+        return build_resolution_result(context, descriptor, package_ident, version, manifest);
+    }
+
+    Err(Error::NoCandidatesFound(AnonymousSemverRange {range: zpm_semver::Range::lte(latest_version.clone())}.into()))
 }
 
 pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &RegistryReference) -> Result<ResolutionResult, Error> {
@@ -311,17 +385,23 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
             allow_oidc: false,
         }).await?;
 
-    let bytes
-        = http_npm::get(&http_npm::NpmHttpParams {
-            http_client: &project.http_client,
-            registry: &registry_base,
-            path: &registry_path,
-            authorization: authorization.as_deref(),
-            otp: None,
-        }).await?;
+    let locator_url
+        = url::Url::parse(&format!("{}{}", registry_base, registry_path))?;
 
-    let mut manifest: RemoteManifestWithScripts
-        = JsonDocument::hydrate_from_slice(&bytes[..])?;
+    let mut manifest: RemoteManifestWithScripts = if !project.http_client.config.is_network_enabled(&locator_url) || params.ident.scope() == Some("@jsr") {
+        load_manifest_from_full_metadata(context, &registry_base, authorization.as_deref(), params).await?
+    } else {
+        let bytes
+            = http_npm::get(&http_npm::NpmHttpParams {
+                http_client: &project.http_client,
+                registry: &registry_base,
+                path: &registry_path,
+                authorization: authorization.as_deref(),
+                otp: None,
+            }).await?;
+
+        JsonDocument::hydrate_from_slice(&bytes[..])?
+    };
 
     fix_manifest(&mut manifest);
 

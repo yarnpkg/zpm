@@ -1,0 +1,18 @@
+---
+import SectionSlide from '../SectionSlide.astro';
+
+interface Props {
+  sectionTag: string;
+  partLabel: string;
+  title: string;
+  subtitle?: string;
+  lede?: string;
+  bottomLeft?: string;
+  bottomRight?: string;
+  label?: string;
+}
+
+const props = Astro.props;
+---
+
+<SectionSlide {...props} />

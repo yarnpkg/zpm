@@ -26,21 +26,20 @@ fn path_exists<'a>(value: &serde_json::Value, mut segments: impl Iterator<Item =
     }
 }
 
-/// Unset a configuration value
+/// Remove a configuration value
 ///
-/// This command will remove a configuration setting, by default in the project configuration file
-/// unless the `-H,--home` flag is set, in which case it will be removed from the home
-/// configuration file.
+/// This command removes a configuration setting from the project configuration file by default. Use `-H,--home` to remove it from the home
+/// configuration file instead.
 ///
 #[cli::command]
 #[cli::path("config", "unset")]
 #[cli::category("Configuration commands")]
 pub struct ConfigUnset {
-    /// If set, the configuration will be unset in the home configuration file
+    /// Remove the value from the home configuration file instead of the project file
     #[cli::option("-H,--home", default = false)]
     home: bool,
 
-    /// The name of the configuration value to unset
+    /// Configuration field to remove
     name: zpm_parsers::Path,
 }
 

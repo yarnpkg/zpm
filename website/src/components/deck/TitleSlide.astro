@@ -1,0 +1,25 @@
+---
+import SlideChrome from './SlideChrome.astro';
+
+interface Props {
+  tag?: string;
+  label?: string;
+}
+
+const { tag = `// internal`, label = `01 Title` } = Astro.props;
+---
+
+<section class="slide relative w-[1920px] h-[1080px] overflow-hidden text-[var(--fg)] font-['Space_Grotesk',system-ui,sans-serif] bg-transparent! flex flex-col px-[88px] py-[56px]" data-screen-label={label}>
+  <SlideChrome tag={tag} revealBrand={true}>
+    <div class="flex-1 flex flex-col justify-center">
+      <slot />
+    </div>
+  </SlideChrome>
+
+  <footer class="relative z-3 flex justify-between items-end font-mono text-xs text-[var(--fg-mute)] pointer-events-none">
+    <slot name="bottom-left">
+      <span class="reveal reveal-5">&rarr; press space to continue</span>
+    </slot>
+    <slot name="bottom-right" />
+  </footer>
+</section>

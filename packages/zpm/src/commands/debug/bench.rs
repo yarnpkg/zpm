@@ -139,10 +139,17 @@ impl BenchMode {
     }
 }
 
+/// Run an installation benchmark
+///
+/// This debug command prepares a benchmark fixture, runs it through `hyperfine`, and writes the benchmark results to a JSON file.
+///
 #[cli::command]
 #[cli::path("debug", "bench")]
 pub struct BenchRun {
+    /// Benchmark fixture to use
     name: BenchName,
+
+    /// Installation scenario to benchmark
     mode: BenchMode,
 }
 
@@ -191,12 +198,18 @@ impl BenchRun {
     }
 }
 
+/// Prepare a benchmark fixture
+///
+/// This debug subcommand is used internally by `yarn debug bench`.
+///
 #[cli::command]
 #[cli::path("debug", "bench")]
 pub struct BenchPrepare {
+    /// Benchmark fixture to prepare
     #[cli::option("--prepare")]
     name: BenchName,
 
+    /// Installation scenario to prepare for
     mode: BenchMode,
 }
 
@@ -212,12 +225,18 @@ impl BenchPrepare {
     }
 }
 
+/// Run one benchmark iteration
+///
+/// This debug subcommand is used internally by `yarn debug bench`.
+///
 #[cli::command]
 #[cli::path("debug", "bench")]
 pub struct BenchIter {
+    /// Run one benchmark iteration
     #[cli::option("--iteration")]
     _run: bool,
 
+    /// Installation scenario to run
     mode: BenchMode,
 }
 
@@ -229,12 +248,18 @@ impl BenchIter {
     }
 }
 
+/// Clean benchmark artifacts
+///
+/// This debug subcommand is used internally by `yarn debug bench`.
+///
 #[cli::command]
 #[cli::path("debug", "bench")]
 pub struct BenchCleanup {
+    /// Remove files generated for the benchmark scenario
     #[cli::option("--cleanup")]
     _cleanup: bool,
 
+    /// Installation scenario to clean
     mode: BenchMode,
 }
 

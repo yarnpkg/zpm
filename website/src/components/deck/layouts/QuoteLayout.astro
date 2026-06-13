@@ -1,0 +1,42 @@
+---
+import SlideChrome from '../SlideChrome.astro';
+
+interface Props {
+  label?: string;
+  sectionTag?: string;
+  bottomLeft?: string;
+  bottomRight?: string;
+  attribution?: string;
+  size?: string;
+  maxWidth?: string;
+}
+
+const {
+  label,
+  sectionTag = `// pause`,
+  bottomLeft,
+  bottomRight,
+  attribution,
+  size = `120px`,
+  maxWidth = `1400px`,
+} = Astro.props;
+---
+
+<section class="slide relative w-[1920px] h-[1080px] overflow-hidden text-[var(--fg)] font-['Space_Grotesk',system-ui,sans-serif] bg-transparent! flex flex-col px-[88px] py-[56px]" data-screen-label={label}>
+  <SlideChrome tag={sectionTag} bottomLeft={bottomLeft} bottomRight={bottomRight} autoCounter>
+    <div class="flex-1 flex flex-col items-center justify-center text-center">
+      <blockquote
+        class="reveal reveal-2 slide-quote m-0 font-light tracking-[-0.02em] leading-[1.08] text-balance text-[var(--fg)]"
+        style={`font-size: ${size}; max-width: ${maxWidth}`}
+      >
+        <slot />
+      </blockquote>
+
+      {attribution && (
+        <cite class="reveal reveal-3 mt-14 font-mono text-[20px] tracking-[0.14em] uppercase text-[var(--fg-mute)] not-italic">
+          — <span set:html={attribution} />
+        </cite>
+      )}
+    </div>
+  </SlideChrome>
+</section>

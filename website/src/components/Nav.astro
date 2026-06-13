@@ -1,0 +1,200 @@
+---
+import Logo from '../../public/logo.svg';
+import SimpleIcon from './SimpleIcon.astro';
+import SearchModal from './SearchModal.tsx';
+
+interface Props {
+  variant?: 'index' | 'docs';
+  activePage?: string;
+}
+
+import navigation from '../../config/navigation.json';
+
+const { variant = `index`, activePage } = Astro.props;
+
+const isDocs = variant === `docs`;
+const navBgOpacity = isDocs ? `55%` : `25%`;
+
+const links = navigation.topbar;
+
+const activeClass = `no-underline text-[var(--fg)] font-medium`;
+const inactiveClass = `hover:text-[var(--fg)] transition-colors no-underline text-inherit`;
+
+const socialLinkClass = `text-[var(--fg-dim)] inline-flex items-center justify-center w-8 h-8 rounded-lg transition-colors no-underline hover:text-[var(--fg)] hover:bg-[color-mix(in_oklch,var(--fg)_8%,transparent)]`;
+---
+
+<nav class={`sticky top-0 z-20 backdrop-blur-xl backdrop-saturate-150 bg-[color-mix(in_oklch,var(--bg-0)_${navBgOpacity},transparent)] border-b border-[var(--line)]`}>
+  <div class="max-w-[1400px] mx-auto px-7 py-[18px] flex items-center gap-6">
+    <a class="flex items-center gap-2.5 font-semibold text-[17px] tracking-[-0.01em] no-underline text-[var(--fg)]" href="/">
+      <Logo width="20" height="20" fill="currentColor"/>
+
+      <span>
+        yarn
+      </span>
+    </a>
+
+    <div class="hide-on-md-narrow flex gap-5 text-sm text-[var(--fg-dim)] ml-1 whitespace-nowrap">
+      {links.map(link => (
+        <a class={activePage === link.key ? activeClass : inactiveClass} href={link.href}>
+          {link.label}
+        </a>
+      ))}
+    </div>
+
+    <div class="flex-1"></div>
+
+    <div class="flex items-center gap-2.5 text-[13px] text-[var(--fg-mute)]">
+      <div role="search" class="hide-on-md-narrow inline-flex items-center gap-2 pl-3 pr-2 py-1.5 bg-[color-mix(in_oklch,var(--fg)_4%,transparent)] border border-[var(--line-strong)] rounded-[10px] min-w-[170px] text-[var(--fg-mute)] transition-colors cursor-pointer hover:border-[var(--accent-line)] hover:bg-[color-mix(in_oklch,var(--fg)_7%,transparent)]">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5"/>
+          <path d="M10.5 10.5 L14 14"/>
+        </svg>
+        <span class="flex-1 text-[var(--fg-mute)] text-[13px]">
+          Search docs, packages…
+        </span>
+        <kbd class="mono text-[10.5px] px-1.5 py-0.5 border border-[var(--line-strong)] rounded-[5px] text-[var(--fg-mute)] bg-[color-mix(in_oklch,var(--fg)_6%,transparent)] tracking-[0.02em]">⌘K</kbd>
+      </div>
+
+      <a href="https://discord.gg/yarnpkg" aria-label="Discord" class={`hide-on-md-narrow ${socialLinkClass}`}>
+        <SimpleIcon name="discord" size={17} />
+      </a>
+
+      <a href="https://bsky.app/profile/yarnpkg.dev" aria-label="Bluesky" class={`hide-on-md-narrow ${socialLinkClass}`}>
+        <SimpleIcon name="bluesky" size={16} />
+      </a>
+
+      <a href="http://github.com/yarnpkg/zpm" aria-label="GitHub" class={`hide-on-md-narrow ${socialLinkClass}`}>
+        <SimpleIcon name="github" size={16} />
+      </a>
+
+      <button id="theme-toggle" aria-label="Toggle theme" class="bg-transparent border border-[var(--line-strong)] text-[var(--fg-dim)] w-9 h-9 rounded-[10px] cursor-pointer inline-flex items-center justify-center transition-all hover:text-[var(--fg)] hover:border-[var(--fg-dim)]">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+          <path class="moon-path" d="M13 9.5 A5 5 0 1 1 6.5 3 A4 4 0 0 0 13 9.5Z" fill="currentColor"/>
+        </svg>
+      </button>
+
+      <button id="mobile-menu-toggle" aria-label="Open menu" class="show-on-md-narrow bg-transparent border border-[var(--line-strong)] text-[var(--fg-dim)] w-9 h-9 rounded-[10px] cursor-pointer inline-flex items-center justify-center transition-all hover:text-[var(--fg)] hover:border-[var(--fg-dim)]">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M2 4h12M2 8h12M2 12h12"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<SearchModal client:only="react" />
+
+<div id="mobile-menu" class="mobile-menu">
+  <div id="mobile-menu-backdrop" class="mobile-menu-backdrop"></div>
+  <div class="mobile-menu-panel">
+    <div class="flex items-center justify-between px-7 py-[18px] border-b border-[var(--line)]">
+      <a class="flex items-center gap-2.5 font-semibold text-[17px] tracking-[-0.01em] no-underline text-[var(--fg)]" href="/">
+        <Logo width="20" height="20" fill="currentColor"/>
+
+        <span>
+          yarn
+        </span>
+      </a>
+
+      <button id="mobile-menu-close" aria-label="Close menu" class="bg-transparent border border-[var(--line-strong)] text-[var(--fg-dim)] w-9 h-9 rounded-[10px] cursor-pointer inline-flex items-center justify-center transition-all hover:text-[var(--fg)] hover:border-[var(--fg-dim)]">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M4 4l8 8M12 4l-8 8"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="flex flex-col py-4">
+      {links.map(link => (
+        <a class={`px-7 py-3 text-[15px] no-underline transition-colors ${activePage === link.key ? `text-[var(--fg)] font-medium` : `text-[var(--fg-dim)] hover:text-[var(--fg)]`}`} href={link.href}>
+          {link.label}
+        </a>
+      ))}
+    </div>
+
+    <div class="border-t border-[var(--line)] px-7 py-5 flex items-center gap-3">
+      <a href="https://discord.gg/yarnpkg" aria-label="Discord" class={socialLinkClass}>
+        <SimpleIcon name="discord" size={17} />
+      </a>
+      <a href="https://bsky.app/profile/yarnpkg.dev" aria-label="Bluesky" class={socialLinkClass}>
+        <SimpleIcon name="bluesky" size={16} />
+      </a>
+      <a href="http://github.com/yarnpkg/zpm" aria-label="GitHub" class={socialLinkClass}>
+        <SimpleIcon name="github" size={16} />
+      </a>
+    </div>
+  </div>
+</div>
+
+<style is:global>
+  .hide-on-md-narrow { }
+  .show-on-md-narrow { display: none; }
+  @media (max-width: 960px) {
+    .hide-on-md-narrow { display: none !important; }
+    .show-on-md-narrow { display: inline-flex !important; }
+  }
+
+  .mobile-menu {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;
+    visibility: hidden;
+  }
+  .mobile-menu.open {
+    pointer-events: auto;
+    visibility: visible;
+  }
+
+  .mobile-menu-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+  .mobile-menu.open .mobile-menu-backdrop {
+    opacity: 1;
+  }
+
+  .mobile-menu-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(320px, 85vw);
+    background: var(--bg-0);
+    border-left: 1px solid var(--line);
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .mobile-menu.open .mobile-menu-panel {
+    transform: translateX(0);
+  }
+</style>
+
+<script is:inline>
+(function() {
+  var menu = document.getElementById(`mobile-menu`);
+  var toggle = document.getElementById(`mobile-menu-toggle`);
+  var close = document.getElementById(`mobile-menu-close`);
+  var backdrop = document.getElementById(`mobile-menu-backdrop`);
+
+  function open() {
+    menu.classList.add(`open`);
+    document.body.style.overflow = `hidden`;
+  }
+
+  function shut() {
+    menu.classList.remove(`open`);
+    document.body.style.overflow = ``;
+  }
+
+  toggle.addEventListener(`click`, open);
+  close.addEventListener(`click`, shut);
+  backdrop.addEventListener(`click`, shut);
+})();
+</script>

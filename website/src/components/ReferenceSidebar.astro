@@ -1,0 +1,90 @@
+---
+import DocsSidebar from './DocsSidebar.astro';
+import type { SidebarGroup, SidebarItem } from './sidebar';
+import navigation from '../../config/navigation.json';
+
+type CliEntry = {id: string; data: {binaryName: string; commandSpec: {primaryPath: string[]; category: string | null}}};
+
+interface Props {
+  activePage: string;
+  fields?: string[];
+  cliEntries?: CliEntry[];
+  cliPrefix?: string;
+}
+
+const { activePage, fields, cliEntries, cliPrefix = `cli` } = Astro.props;
+
+function slugify(s: string): string {
+  return s.toLowerCase()
+    .replace(/[^\w\s-]/g, ``)
+    .replace(/\s+/g, `-`)
+    .replace(/-+/g, `-`)
+    .replace(/^-|-$/g, ``);
+}
+
+const refConfig = navigation.sidebars.reference;
+const isProtocolPage = activePage.startsWith(`protocol/`);
+
+const configGroup: SidebarGroup = {
+  title: `Reference`,
+  items: refConfig.links.map(link => ({
+    label: link.label,
+    href: link.href,
+    active: `page` in link ? activePage === link.page : `pagePrefix` in link ? activePage.startsWith(link.pagePrefix!) : false,
+  })),
+};
+
+const groups: SidebarGroup[] = [configGroup];
+
+if (isProtocolPage) {
+  groups.push({
+    title: `Protocols`,
+    items: refConfig.protocols.map(p => ({
+      label: p.label,
+      href: p.href,
+      active: activePage === p.page,
+      mono: true,
+    })),
+  });
+}
+
+if (fields) {
+  groups.push({
+    title: `Fields`,
+    items: fields.map(name => ({
+      label: name,
+      href: `#field-${slugify(name)}`,
+      mono: true,
+    })),
+  });
+}
+
+if (cliEntries) {
+  const byCategory = new Map<string, CliEntry[]>();
+  for (const entry of cliEntries) {
+    const cat = entry.data.commandSpec.category;
+    if (!cat) continue;
+    if (!byCategory.has(cat)) byCategory.set(cat, []);
+    byCategory.get(cat)!.push(entry);
+  }
+
+  for (const items of byCategory.values())
+    items.sort((a, b) => a.data.commandSpec.primaryPath.join(` `).localeCompare(b.data.commandSpec.primaryPath.join(` `)));
+
+  for (const [category, entries] of byCategory) {
+    const items: SidebarItem[] = entries.map(entry => {
+      const slug = entry.id.replace(new RegExp(`^${cliPrefix}/`), ``);
+      return {
+        label: `${entry.data.binaryName} ${entry.data.commandSpec.primaryPath.join(` `)}`,
+        href: `/${cliPrefix}/${slug}/`,
+        active: entry.id === activePage,
+        mono: true,
+      };
+    });
+
+    groups.push({title: category, items});
+  }
+}
+---
+
+<DocsSidebar groups={groups} />

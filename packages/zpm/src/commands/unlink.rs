@@ -24,10 +24,9 @@ pub enum UnlinkTarget {
     },
 }
 
-/// Unlink the current project from a previously linked one
+/// Remove local links from the current project
 ///
-/// This command will remove any resolutions in the project-level manifest that
-/// would have been added via a `yarn link` with similar arguments.
+/// This command removes `portal:` resolutions from the top-level manifest. It is the counterpart to `yarn link`.
 ///
 /// If the `--all` flag is used without any arguments, Yarn will remove all
 /// resolutions that use the `portal:` protocol.
@@ -45,7 +44,7 @@ pub struct Unlink {
     #[cli::option("-A,--all", default = false)]
     all: bool,
 
-    /// The path(s) or pattern(s) to unlink
+    /// Paths, package names, or package glob patterns to unlink
     targets: Vec<UnlinkTarget>,
 }
 

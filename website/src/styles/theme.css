@@ -1,0 +1,235 @@
+/* Shared theme tokens — mirrors Yarn.html */
+html { scroll-behavior: smooth; }
+:root {
+  --accent-h: 280;
+  --accent: oklch(0.78 0.16 var(--accent-h));
+  --accent-soft: oklch(0.78 0.16 var(--accent-h) / 0.14);
+  --accent-line: oklch(0.78 0.16 var(--accent-h) / 0.35);
+
+  --bg-0: #05060f;
+  --bg-1: #0a0e28;
+  --bg-2: #141552;
+  --fg: #e8ecff;
+  --fg-dim: #a8b0d4;
+  --fg-mute: #6872a0;
+  --line: rgba(168, 176, 212, 0.14);
+  --line-strong: rgba(168, 176, 212, 0.28);
+  --card: rgba(12, 16, 44, 0.55);
+  --card-border: rgba(120, 130, 180, 0.18);
+
+  /* Admonition colors (dark) */
+  --adm-note-bg: oklch(0.30 0.09 240 / 0.28);
+  --adm-note-border: oklch(0.65 0.12 240 / 0.45);
+  --adm-note-fg: oklch(0.82 0.10 230);
+  --adm-tip-bg: oklch(0.30 0.10 150 / 0.25);
+  --adm-tip-border: oklch(0.65 0.12 150 / 0.45);
+  --adm-tip-fg: oklch(0.82 0.12 150);
+  --adm-warn-bg: oklch(0.35 0.12 70 / 0.28);
+  --adm-warn-border: oklch(0.70 0.14 70 / 0.5);
+  --adm-warn-fg: oklch(0.85 0.13 75);
+  --adm-danger-bg: oklch(0.30 0.14 22 / 0.28);
+  --adm-danger-border: oklch(0.65 0.18 22 / 0.5);
+  --adm-danger-fg: oklch(0.78 0.15 25);
+
+  /* Syntax highlighting (dark) */
+  --syn-bg: rgba(8, 10, 28, 0.72);
+  --syn-border: rgba(120, 130, 180, 0.18);
+  --syn-fg: #d6daf5;
+  --syn-comment: #6872a0;
+  --syn-keyword: oklch(0.78 0.14 300);
+  --syn-string: oklch(0.80 0.14 140);
+  --syn-number: oklch(0.80 0.14 70);
+  --syn-func: oklch(0.82 0.12 210);
+  --syn-prop: oklch(0.82 0.10 180);
+  --syn-punct: #8890b8;
+  --syn-tag: oklch(0.78 0.14 22);
+  --syn-attr: oklch(0.82 0.12 70);
+
+  /* Shiki css-variables theme → docs tokens */
+  --shiki-token-keyword: var(--syn-keyword);
+  --shiki-token-string: var(--syn-string);
+  --shiki-token-string-expression: var(--syn-string);
+  --shiki-token-constant: var(--syn-number);
+  --shiki-token-function: var(--syn-func);
+  --shiki-token-parameter: var(--syn-prop);
+  --shiki-token-punctuation: var(--syn-punct);
+  --shiki-token-comment: var(--syn-comment);
+  --shiki-token-link: var(--syn-string);
+  --shiki-token-inserted: oklch(0.80 0.14 140);
+  --shiki-token-deleted: oklch(0.78 0.14 22);
+  --shiki-foreground: var(--syn-fg);
+  --shiki-background: transparent;
+
+  /* Terminal */
+  --term-bg: rgba(6, 8, 22, 0.75);
+  --term-border: rgba(120, 130, 180, 0.22);
+  --term-prompt: oklch(0.78 0.14 150);
+  --term-fg: #e8ecff;
+  --term-comment: #8890b8;
+
+  /* Pill variant colors */
+  --pill-type-fg: oklch(0.82 0.10 200);
+  --pill-type-border: oklch(0.50 0.08 200 / 0.35);
+  --pill-type-bg: oklch(0.45 0.09 200 / 0.15);
+  --pill-req-fg: oklch(0.80 0.14 25);
+  --pill-req-border: oklch(0.55 0.15 25 / 0.4);
+  --pill-req-bg: oklch(0.45 0.14 25 / 0.15);
+  --pill-dep-strike: oklch(0.70 0.12 25 / 0.6);
+}
+
+html[data-theme="light"] {
+  --accent: oklch(0.45 0.18 var(--accent-h));
+  --accent-soft: oklch(0.45 0.18 var(--accent-h) / 0.10);
+  --accent-line: oklch(0.45 0.18 var(--accent-h) / 0.30);
+  --bg-0: #eef3ff;
+  --bg-1: #dce7fb;
+  --bg-2: #c5d5f2;
+  --fg: #0c1030;
+  --fg-dim: #252d50;
+  --fg-mute: #515a7a;
+  --line: rgba(12, 16, 48, 0.12);
+  --line-strong: rgba(12, 16, 48, 0.28);
+  --card: rgba(255, 255, 255, 0.72);
+  --card-border: rgba(12, 16, 48, 0.14);
+
+  --adm-note-bg: oklch(0.96 0.04 240 / 0.7);
+  --adm-note-border: oklch(0.60 0.14 240 / 0.6);
+  --adm-note-fg: oklch(0.40 0.14 240);
+  --adm-tip-bg: oklch(0.94 0.06 150 / 0.7);
+  --adm-tip-border: oklch(0.55 0.15 150 / 0.55);
+  --adm-tip-fg: oklch(0.35 0.13 150);
+  --adm-warn-bg: oklch(0.96 0.07 80 / 0.85);
+  --adm-warn-border: oklch(0.65 0.15 70 / 0.6);
+  --adm-warn-fg: oklch(0.42 0.14 60);
+  --adm-danger-bg: oklch(0.95 0.05 25 / 0.8);
+  --adm-danger-border: oklch(0.60 0.18 25 / 0.6);
+  --adm-danger-fg: oklch(0.45 0.18 25);
+
+  --syn-bg: rgba(255, 255, 255, 0.72);
+  --syn-border: rgba(12, 16, 48, 0.10);
+  --syn-fg: #0c1030;
+  --syn-comment: #7a84a8;
+  --syn-keyword: oklch(0.45 0.18 300);
+  --syn-string: oklch(0.45 0.16 150);
+  --syn-number: oklch(0.50 0.15 50);
+  --syn-func: oklch(0.45 0.15 220);
+  --syn-prop: oklch(0.48 0.13 195);
+  --syn-punct: #505878;
+  --syn-tag: oklch(0.50 0.17 20);
+  --syn-attr: oklch(0.48 0.14 60);
+
+  --shiki-token-keyword: var(--syn-keyword);
+  --shiki-token-string: var(--syn-string);
+  --shiki-token-string-expression: var(--syn-string);
+  --shiki-token-constant: var(--syn-number);
+  --shiki-token-function: var(--syn-func);
+  --shiki-token-parameter: var(--syn-prop);
+  --shiki-token-punctuation: var(--syn-punct);
+  --shiki-token-comment: var(--syn-comment);
+  --shiki-token-link: var(--syn-string);
+  --shiki-token-inserted: oklch(0.45 0.16 150);
+  --shiki-token-deleted: oklch(0.50 0.17 20);
+  --shiki-foreground: var(--syn-fg);
+  --shiki-background: transparent;
+
+  --term-bg: rgba(252, 252, 255, 0.75);
+  --term-border: rgba(12, 16, 48, 0.12);
+  --term-prompt: oklch(0.45 0.15 150);
+  --term-fg: #0c1030;
+  --term-comment: #505878;
+
+  --pill-type-fg: oklch(0.40 0.13 200);
+  --pill-type-border: oklch(0.60 0.13 200 / 0.35);
+  --pill-type-bg: oklch(0.85 0.06 200 / 0.4);
+  --pill-req-fg: oklch(0.50 0.18 25);
+  --pill-req-border: oklch(0.60 0.15 25 / 0.4);
+  --pill-req-bg: oklch(0.92 0.06 25 / 0.5);
+}
+
+/* ─── Mermaid diagram ─── */
+.mermaid-diagram {
+  background: var(--syn-bg);
+  border: 1px solid var(--syn-border);
+  border-radius: 10px;
+  padding: 24px;
+  overflow-x: auto;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  justify-content: center;
+}
+.mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+.mermaid-light { display: none; }
+.mermaid-light, .mermaid-dark {
+  flex: auto;
+}
+html[data-theme="light"] .mermaid-dark { display: none; }
+html[data-theme="light"] .mermaid-light { display: block; }
+
+/* Heading anchor (hover reveal) — shared across docs & blog */
+.heading-wrap {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.heading-anchor {
+  opacity: 0;
+  color: var(--fg-mute);
+  text-decoration: none;
+  font-weight: 400;
+  transition: opacity 0.15s, color 0.15s;
+  cursor: pointer;
+  user-select: none;
+  line-height: 1;
+  font-size: 0.85em;
+  border: 0;
+}
+.heading-wrap:hover .heading-anchor,
+.heading-anchor:focus {
+  opacity: 1;
+}
+.heading-anchor:hover { color: var(--accent); }
+
+body {
+  font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  background: var(--bg-0);
+  color: var(--fg);
+  transition: background 0.6s ease, color 0.6s ease;
+}
+
+.mono, code, pre, kbd {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Sky — dimmed for docs reading */
+.sky {
+  background:
+    radial-gradient(ellipse 60% 35% at 78% 18%, oklch(0.42 0.18 290 / 0.45) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 40% at 20% 92%, oklch(0.38 0.14 220 / 0.35) 0%, transparent 55%),
+    radial-gradient(ellipse 55% 45% at 8% 55%, oklch(0.40 0.14 235 / 0.30) 0%, transparent 60%),
+    radial-gradient(ellipse 100% 70% at 50% 30%, oklch(0.28 0.12 270) 0%, transparent 65%),
+    radial-gradient(ellipse 120% 100% at 50% 50%, transparent 40%, oklch(0.10 0.04 265 / 0.55) 100%),
+    linear-gradient(180deg in oklch,
+      oklch(0.12 0.05 265) 0%,
+      oklch(0.18 0.09 270) 22%,
+      oklch(0.22 0.11 275) 48%,
+      oklch(0.16 0.08 272) 78%,
+      oklch(0.09 0.04 265) 100%);
+  transition: background 0.6s ease;
+}
+html[data-theme="light"] .sky {
+  background:
+    radial-gradient(ellipse 50% 35% at 82% 12%, oklch(0.97 0.06 85 / 0.85) 0%, transparent 55%),
+    radial-gradient(ellipse 110% 35% at 50% 98%, oklch(0.92 0.08 65) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 50% at 20% 40%, oklch(0.95 0.04 240 / 0.6) 0%, transparent 60%),
+    radial-gradient(ellipse 140% 100% at 50% 50%, transparent 55%, oklch(0.75 0.06 240 / 0.25) 100%),
+    linear-gradient(180deg in oklch,
+      oklch(0.96 0.03 240) 0%,
+      oklch(0.92 0.05 240) 35%,
+      oklch(0.88 0.06 230) 65%,
+      oklch(0.92 0.06 70) 100%);
+}

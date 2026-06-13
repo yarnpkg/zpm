@@ -1,19 +1,27 @@
-use std::sync::LazyLock;
+use std::{collections::BTreeSet, sync::LazyLock};
 
 use itertools::Itertools;
 use regex::Regex;
 use zpm_formats::{iter_ext::IterExt, Entry};
+use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
 use zpm_semver::Version;
 use zpm_utils::{Path, ToFileString};
 
+use crate::{error::Error, manifest::BinManifest};
+
 pub trait NpmEntryExt<'a> {
-    fn prepare_npm_entries(self, subdir: &Path) -> impl Iterator<Item = Entry<'a>>;
+    fn prepare_npm_entries(self, subdir: &Path) -> Result<Vec<Entry<'a>>, Error>;
 }
 
 impl<'a, T> NpmEntryExt<'a> for T where T: Iterator<Item = Entry<'a>> {
-    fn prepare_npm_entries(self, subdir: &Path) -> impl Iterator<Item = Entry<'a>> {
-        self
+    fn prepare_npm_entries(self, subdir: &Path) -> Result<Vec<Entry<'a>>, Error> {
+        let mut entries
+            = self.collect::<Vec<_>>();
+
+        mark_bin_entries_executable(&mut entries)?;
+
+        Ok(entries
             .into_iter()
 
             // We first sort by file name; we do this first because we
@@ -39,7 +47,32 @@ impl<'a, T> NpmEntryExt<'a> for T where T: Iterator<Item = Entry<'a>> {
             })
 
             .prefix_path(subdir)
+            .collect::<Vec<_>>())
     }
+}
+
+fn mark_bin_entries_executable(entries: &mut [Entry<'_>]) -> Result<(), Error> {
+    let Some(manifest_entry) = entries.iter().find(|entry| entry.name.as_str() == "package.json") else {
+        return Ok(());
+    };
+
+    let manifest
+        = JsonDocument::hydrate_from_slice::<BinManifest>(&manifest_entry.data)?;
+
+    let Some(bin) = manifest.bin else {
+        return Ok(());
+    };
+
+    let bin_paths
+        = bin.paths().cloned().collect::<BTreeSet<_>>();
+
+    for entry in entries {
+        if bin_paths.contains(&entry.name) {
+            entry.mode = 0o755;
+        }
+    }
+
+    Ok(())
 }
 
 static NPM_REGISTRY_URL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -110,6 +143,8 @@ pub fn registry_url_for_package_data(ident: &Ident, version: &Version) -> String
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use zpm_formats::Entry;
     use zpm_utils::Path;
 
@@ -121,14 +156,14 @@ mod tests {
             Entry::new(Path::try_from("b").unwrap()),
             Entry::new(Path::try_from("a/b/c").unwrap()),
             Entry::new(Path::try_from("a/package.json").unwrap()),
-            Entry::new(Path::try_from("package.json").unwrap()),
+            Entry::new_file(Path::try_from("package.json").unwrap(), Cow::Borrowed(br#"{}"#)),
             Entry::new(Path::try_from("a/b/package.json").unwrap()),
         ];
 
         let prepared_entries
             = entries.into_iter()
                 .prepare_npm_entries(&Path::try_from("foo").unwrap())
-                .collect::<Vec<_>>();
+                .unwrap();
 
         let prepared_names = prepared_entries.iter()
             .map(|entry| entry.name.as_str())
@@ -141,5 +176,32 @@ mod tests {
             "foo/a/b/package.json",
             "foo/a/b/c",
         ]);
+    }
+
+    #[test]
+    pub fn should_mark_manifest_bins_executable() {
+        let entries = vec![
+            Entry::new_file(
+                Path::try_from("package.json").unwrap(),
+                Cow::Borrowed(br#"{"bin":"./bin.js"}"#),
+            ),
+            Entry::new_file(Path::try_from("bin.js").unwrap(), Cow::Borrowed(b"")),
+            Entry::new_file(Path::try_from("index.js").unwrap(), Cow::Borrowed(b"")),
+        ];
+
+        let prepared_entries
+            = entries.into_iter()
+                .prepare_npm_entries(&Path::try_from("foo").unwrap())
+                .unwrap();
+
+        let bin_entry = prepared_entries.iter()
+            .find(|entry| entry.name.as_str() == "foo/bin.js")
+            .unwrap();
+        let regular_entry = prepared_entries.iter()
+            .find(|entry| entry.name.as_str() == "foo/index.js")
+            .unwrap();
+
+        assert_eq!(bin_entry.mode, 0o755);
+        assert_eq!(regular_entry.mode, 0o644);
     }
 }

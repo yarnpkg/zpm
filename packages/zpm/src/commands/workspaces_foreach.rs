@@ -57,56 +57,81 @@ pub enum Limit {
 }
 
 
+/// Run a command in multiple workspaces
+///
+/// This command selects workspaces from the project and runs the given command in each of them. Workspaces can be selected explicitly, by dependency
+/// relationship, by change detection, or by include/exclude patterns.
+///
+/// By default commands run sequentially. Use `-p,--parallel` to run them concurrently, and `--topological` to respect workspace dependency order.
+///
 #[cli::command(proxy)]
 #[cli::path("workspaces", "foreach")]
+#[cli::category("Workspace commands")]
 pub struct WorkspacesForeach {
+    /// Run the command in every workspace
     #[cli::option("-A,--all", default = false)]
     all: bool,
 
+    /// Start selection from workspaces matching these patterns
     #[cli::option("--from", default = vec![])]
     from: Vec<WorkspaceGlob>,
 
+    /// Select workspaces changed since a ref, or since the configured base refs when no ref is provided
     #[cli::option("--since")]
     since: Option<Option<String>>,
 
+    /// Include workspace dependencies of the selected workspaces
     #[cli::option("--recursive", default = false)]
     recursive: bool,
 
+    /// Follow dependencies when expanding the workspace selection
     #[cli::option("--follow-dependencies", default = false)]
     follow_dependencies: bool,
 
+    /// Follow dependents when expanding the workspace selection
     #[cli::option("--follow-dependents", default = false)]
     follow_dependents: bool,
 
+    /// Dependency kinds followed by `--follow-dependencies`
     #[cli::option("--followed-dependencies", default = FollowedDependencies::All)]
     followed_dependencies: FollowedDependencies,
 
+    /// Include only workspaces matching these patterns
     #[cli::option("--include", default = vec![])]
     include: Vec<WorkspaceGlob>,
 
+    /// Exclude workspaces matching these patterns
     #[cli::option("--exclude", default = vec![])]
     exclude: Vec<WorkspaceGlob>,
 
+    /// Run commands in parallel
     #[cli::option("-p,--parallel", default = false)]
     is_parallel: bool,
 
+    /// Print output from parallel commands as it is produced
     #[cli::option("-i,--interlaced", default = false)]
     is_interlaced: bool,
 
+    /// Maximum number of parallel jobs, or `unlimited`
     #[cli::option("-j,--jobs", default = FixedLimit {limit: 10}.into())]
     jobs: Limit,
 
+    /// Run workspaces in topological order
     #[cli::option("--topological", default = false)]
     is_topological: bool,
 
+    /// Increase output verbosity; can be repeated
     #[cli::option("-v,--verbose", default = if zpm_utils::is_terminal() {2} else {0}, counter)]
     verbose_level: u8,
 
+    /// Include private workspaces
     #[cli::option("--private", default = true)]
     private: bool,
 
+    /// Command to run in each selected workspace
     command: String,
 
+    /// Arguments to pass to the command
     args: Vec<String>,
 }
 
@@ -509,8 +534,8 @@ impl WorkspacesForeach {
                 = params.binaries_only
                     .unwrap_or(false);
 
-            if let Some(Some(name)) = params.name {
-                return Some((name.clone(), binaries_only));
+            if let Some(name) = params.name {
+                return Some((name, binaries_only));
             }
         }
 

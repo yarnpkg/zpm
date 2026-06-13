@@ -618,6 +618,7 @@ describe(`Commands`, () => {
     }, async ({path, run, source}) => {
       const sharedCachePath = await xfs.mktempPromise();
       const env = {
+        YARN_ENABLE_GLOBAL_CACHE: `false`,
         YARN_CACHE_FOLDER: sharedCachePath,
       };
 

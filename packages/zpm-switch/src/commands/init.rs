@@ -7,11 +7,16 @@ use crate::{cwd::get_final_cwd, errors::Error, manifest::find_closest_package_ma
 
 use super::switch::explicit::ExplicitCommand;
 
-/// Initialize a new Yarn project
+/// Initialize a project with the selected Yarn version
+///
+/// This command resolves the Yarn version that applies to the current directory, or the default Yarn version when none is configured, then forwards
+/// `yarn init` to that binary.
+///
 #[cli::command(proxy)]
 #[cli::path("init")]
 #[derive(Debug)]
 pub struct InitCommand {
+    /// Arguments to forward to `yarn init`
     args: Vec<String>,
 }
 

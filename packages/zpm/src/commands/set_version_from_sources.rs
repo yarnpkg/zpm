@@ -17,26 +17,31 @@ fn get_branch_ref(branch: &str) -> String {
     }
 }
 
-/// Set the version of Yarn to use with the local project from the sources of the ZPM repository
+/// Build Yarn from source and link it to the current project
 ///
-/// This command will clone the ZPM repository, build the bundle and switch to it.
+/// This command clones or updates a ZPM repository, builds a fresh Yarn binary, and links the current project to that binary through Yarn Switch.
 ///
 #[cli::command]
 #[cli::path("set", "version", "from", "sources")]
 #[cli::category("Configuration commands")]
 pub struct SetVersionFromSources {
+    /// Directory where the repository should be cloned and built
     #[cli::option("--path")]
     install_path: Option<String>,
 
+    /// Git repository to clone
     #[cli::option("--repository", default = "git@github.com/yarnpkg/zpm.git".to_string())]
     repository: String,
 
+    /// Branch, ref, or pull request number to build
     #[cli::option("--branch", default = "main".to_string())]
     branch: String,
 
+    /// Build the binary without linking the project to it
     #[cli::option("-n,--dry-run", default = false)]
     dry_run: bool,
 
+    /// Recreate the checkout even if a local clone already exists
     #[cli::option("-f,--force", default = false)]
     force: bool,
 }

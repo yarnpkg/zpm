@@ -12,15 +12,15 @@ use super::YarnCli;
 
 /// Run a command in a workspace
 ///
-/// This command will run a given sub-command on a single workspace.
+/// This command changes into the selected workspace and runs another Yarn command from there.
 #[cli::command(proxy)]
 #[cli::path("workspace")]
 #[cli::category("Workspace commands")]
 pub struct Workspace {
-    /// The workspace to run the command in
+    /// Workspace name to run the command in
     workspace: Ident,
 
-    /// The sub-command to run
+    /// Yarn command and arguments to run in the workspace
     args: Vec<String>,
 }
 

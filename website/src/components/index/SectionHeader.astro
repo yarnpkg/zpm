@@ -1,0 +1,24 @@
+---
+interface Props {
+  label: string;
+  description: string;
+}
+
+const { label, description } = Astro.props;
+---
+
+<div class="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-4 md:gap-[60px] mb-[72px]">
+  <div>
+    <div class="mono text-xs text-[var(--fg-mute)] tracking-[0.1em]">
+      {label}
+    </div>
+
+    <h2 class="text-[clamp(32px,4vw,52px)] font-medium leading-[1.05] tracking-[-0.025em] mt-3 mb-0 text-balance">
+      <slot/>
+    </h2>
+  </div>
+
+  <p class="mt-auto mb-0 text-base text-[var(--fg-dim)] leading-[1.55] max-w-[560px] text-pretty">
+    {description}
+  </p>
+</div>

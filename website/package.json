@@ -1,0 +1,43 @@
+{
+  "devDependencies": {
+    "puppeteer": "^24.42.0"
+  },
+  "name": "@yarnpkg/website",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build && node --experimental-strip-types scripts/generate-og.ts",
+    "preview": "astro preview",
+    "record": "node --experimental-strip-types scripts/record-terminal.ts"
+  },
+  "dependencies": {
+    "@astrojs/react": "^5.0.4",
+    "@astrojs/sitemap": "^3.7.2",
+    "@clipanion/astro": "../scripts/@clipanion-astro.tgz",
+    "@clipanion/tools": "../scripts/@clipanion-tools.tgz",
+    "@iconify-json/octicon": "^1.2.23",
+    "@iconify-json/simple-icons": "^1.2.79",
+    "@monaco-editor/react": "^4.7.0",
+    "@tailwindcss/vite": "^4.2.4",
+    "@tanstack/react-router": "^1.169.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "algoliasearch": "^5.52.0",
+    "astro": "^5.9.3",
+    "mermaid": "^11.0.0",
+    "prettier": "^3.5.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "rehype-raw": "^7.0.0",
+    "rehype-stringify": "^10.0.1",
+    "remark-directive": "^4.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "shiki": "^4.0.2",
+    "tailwindcss": "^4.2.4",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.1.0",
+    "vite": "^8.0.9"
+  }
+}

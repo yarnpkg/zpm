@@ -1,0 +1,46 @@
+---
+interface Props {
+  label: string;
+  title: string;
+  version: string;
+  accent?: boolean;
+  href?: string;
+}
+
+const { label, title, version, accent = false, href } = Astro.props;
+const copyValue = version.replace(/^v/, ``);
+const labelClass = accent
+  ? `bg-[var(--accent-soft)] text-[var(--accent)]`
+  : `bg-[color-mix(in_oklch,var(--fg-dim)_18%,transparent)] text-[var(--fg-dim)]`;
+
+const sharedClass = `inline-flex items-center gap-2 pl-1 pr-2.5 py-1 border border-[var(--line-strong)] rounded-full text-[11.5px] text-[var(--fg-mute)] tracking-[0.02em] bg-transparent cursor-pointer transition-colors hover:border-[var(--fg-dim)]`;
+---
+
+{href ? (
+  <a href={href} title={title} class={`${sharedClass} no-underline`}>
+    <span class={`mono px-2 py-0.5 rounded-full ${labelClass} text-[10.5px] tracking-[0.08em] uppercase pointer-events-none`}>{label}</span>
+    <span class="mono text-[var(--fg)] pointer-events-none">{version}</span>
+  </a>
+) : (
+  <button type="button" title={title} data-copy={copyValue} class={`version-pill ${sharedClass}`}>
+    <span class={`mono px-2 py-0.5 rounded-full ${labelClass} text-[10.5px] tracking-[0.08em] uppercase pointer-events-none`}>{label}</span>
+    <span class="mono text-[var(--fg)] pointer-events-none version-pill-text">{version}</span>
+  </button>
+)}
+
+<script is:inline>
+document.querySelectorAll('.version-pill').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var text = btn.querySelector('.version-pill-text');
+    var original = text.textContent;
+    navigator.clipboard.writeText(btn.dataset.copy).then(function() {
+      text.textContent = 'Copied!';
+      btn.style.borderColor = 'var(--accent-line)';
+      setTimeout(function() {
+        text.textContent = original;
+        btn.style.borderColor = '';
+      }, 1200);
+    });
+  });
+});
+</script>

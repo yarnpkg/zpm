@@ -1,0 +1,20 @@
+---
+interface Props {
+  title: string;
+  links: { label: string; href: string }[];
+}
+
+const { title, links } = Astro.props;
+---
+
+<div>
+  <h4 class="text-xs mono text-[var(--fg-mute)] tracking-[0.1em] m-0 mb-4 font-medium">
+    {title}
+  </h4>
+
+  {links.map(link => (
+    <a class="block text-sm text-[var(--fg-dim)] no-underline py-1 hover:text-[var(--fg)] transition-colors" href={link.href}>
+      {link.label}
+    </a>
+  ))}
+</div>

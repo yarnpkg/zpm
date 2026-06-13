@@ -1,0 +1,21 @@
+[
+  "Yarn's <span class=\"mono\">exec:</span> protocol can run a Node.js script at install time to generate a package on the fly — useful for codegen or platform-specific builds.",
+  "You can declare Node.js itself as a project dependency via <span class=\"mono\">@yarnpkg/node</span>. The version is locked in <span class=\"mono\">yarn.lock</span>, and every contributor gets the exact same binary.",
+  "Scripts with a colon in their name (like <span class=\"mono\">g:tsc</span>) can be called from any workspace — <span class=\"mono\">$INIT_CWD</span> tells you where the call came from.",
+  "Yarn Constraints use a declarative model: you describe the expected state of every <span class=\"mono\">package.json</span>, and Yarn diffs reality against it — no <span class=\"mono\">if</span> checks needed.",
+  "When you use zero-installs, storing archives <em>uncompressed</em> in Git actually saves space: Git's delta algorithm works better, shrinking one test repo from 2.1 GiB to 1.25 GiB.",
+  "The <span class=\"mono\">portal:</span> protocol links to a local package <em>and</em> resolves its own dependencies, while <span class=\"mono\">link:</span> treats the target as an opaque folder with no deps.",
+  "Yarn automatically applies a curated list of known ghost-dependency fixes from the ecosystem so you don't have to add common <span class=\"mono\">packageExtensions</span> yourself.",
+  "Virtual packages solve the peer-dependency problem by creating separate instances of the same package for each unique set of peers — something flat <span class=\"mono\">node_modules</span> can't do.",
+  "Virtual packages use a virtual filesystem layer, not symlinks — avoiding <span class=\"mono\">realpath</span> issues and improving Windows compatibility.",
+  "Yarn's architecture supports multiple linkers simultaneously. A JavaScript package could theoretically depend on a Python package, each resolved by its own linker.",
+  "When using <span class=\"mono\">git:</span> dependencies, Yarn detects whether the repo uses Yarn, pnpm, or npm (via its lock file) and packs it with the right tool automatically.",
+  "The <span class=\"mono\">.pnp.cjs</span> file is fully deterministic — you can commit it to version control without creating unnecessary diffs across machines.",
+  "Yarn maintains an unofficial patch for TypeScript that adds PnP support. It's applied to every downloaded TypeScript version, even if you're using <span class=\"mono\">node-modules</span> linker.",
+  "Task dependencies support mixed parallelism: suffix a dep with <span class=\"mono\">&amp;</span> to run it in parallel, omit it for a sequential barrier — all in one definition.",
+  "The <span class=\"mono\">file:</span> protocol copies the folder into the cache rather than linking it. To pick up local changes, run <span class=\"mono\">YARN_UPDATE_FILE_CACHE=1 yarn install</span>.",
+  "Workspace profiles can extend other profiles, letting you compose complex dev-dependency sets from simple building blocks — but they deliberately only cover devDependencies.",
+  "Yarn can resolve <span class=\"mono\">yarn.lock</span> merge conflicts automatically. When it detects Git conflict markers, it merges both sides and re-resolves.",
+  "The <span class=\"mono\">jsr:</span> protocol locks the exact tarball URL in <span class=\"mono\">yarn.lock</span> — because the JSR registry may regenerate tarballs, each revision gets a new immutable URL.",
+  "You can run a hybrid monorepo: PnP for most workspaces, <span class=\"mono\">node-modules</span> for specific ones that need it — using separate lock files and <span class=\"mono\">pnpIgnorePatterns</span>."
+]

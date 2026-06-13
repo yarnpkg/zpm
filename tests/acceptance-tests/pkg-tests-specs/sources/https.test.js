@@ -20,7 +20,7 @@ describe(`Https tests`, () => {
           `    npmAuthToken: ${validLogins.fooUser.npmAuthToken}`,
         ].join(`\n`));
 
-        await expect(run(`install`)).rejects.toThrow(/RequestError: self(-| )signed certificate/);
+        await expect(run(`install`)).rejects.toThrow(/Network error: error sending request/);
       },
     ),
   );
@@ -137,7 +137,7 @@ describe(`Https tests`, () => {
           `    npmAuthToken: ${validLogins.fooUser.npmAuthToken}`,
         ].join(`\n`));
 
-        await expect(run(`install`)).rejects.toThrow(/RequestError: self(-| )signed certificate/);
+        await expect(run(`install`)).rejects.toThrow(/Network error: error sending request/);
       },
     ),
   );
@@ -159,7 +159,7 @@ describe(`Https tests`, () => {
           `    npmAuthToken: ${validLogins.fooUser.npmAuthToken}`,
         ].join(`\n`));
 
-        await expect(run(`install`)).rejects.toThrow(`ENOENT: no such file or directory`);
+        await expect(run(`install`)).rejects.toThrow(/No such file or directory/);
       },
     ),
   );

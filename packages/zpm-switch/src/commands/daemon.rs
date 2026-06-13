@@ -7,6 +7,10 @@ use crate::ipc::send_daemon_request;
 
 use super::switch::daemon_open::DaemonOpenCommand;
 
+/// Start or open the daemon for the current project
+///
+/// This command ensures the selected Yarn daemon is running for the current project, then opens its authentication URL when one is available.
+///
 #[cli::command]
 #[cli::path("daemon")]
 #[cli::category("Daemon management")]

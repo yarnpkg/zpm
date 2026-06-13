@@ -1,0 +1,30 @@
+---
+import DocsLayout from './DocsLayout.astro';
+import ContentSidebar from '../components/ContentSidebar.astro';
+import ReferenceSidebar from '../components/ReferenceSidebar.astro';
+import PrevNextNav from '../components/PrevNextNav.astro';
+import navigation from '../../config/navigation.json';
+
+const { frontmatter } = Astro.props;
+const breadcrumb = Array.isArray(frontmatter.breadcrumb)
+  ? frontmatter.breadcrumb
+  : [`Docs`, frontmatter.breadcrumb];
+
+const sidebarActivePage = frontmatter.sidebarActivePage || frontmatter.activePage;
+const sidebarKey = frontmatter.sidebar || `getting-started`;
+const sidebarDef = (navigation.sidebars as Record<string, { sections?: string[] }>)[sidebarKey];
+const sections = sidebarDef?.sections;
+---
+
+<DocsLayout title={frontmatter.title} description={frontmatter.description} breadcrumb={breadcrumb} activePage={frontmatter.activePage} mainMaxWidth={frontmatter.mainMaxWidth}>
+  <Fragment slot="sidebar">
+    {sections
+      ? <ContentSidebar sections={sections} activePage={sidebarActivePage} />
+      : <ReferenceSidebar activePage={sidebarActivePage} />
+    }
+  </Fragment>
+
+  <slot />
+
+  <PrevNextNav prev={frontmatter.prev} next={frontmatter.next} />
+</DocsLayout>

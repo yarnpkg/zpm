@@ -1,0 +1,36 @@
+---
+import SlideChrome from './SlideChrome.astro';
+
+interface Props {
+  sectionTag: string;
+  partLabel: string;
+  title: string;
+  subtitle?: string;
+  lede?: string;
+  bottomLeft?: string;
+  bottomRight?: string;
+  label?: string;
+}
+
+const { sectionTag, partLabel, title, subtitle, lede, bottomLeft, bottomRight, label } = Astro.props;
+---
+
+<section class="slide relative w-[1920px] h-[1080px] overflow-hidden text-[var(--fg)] font-['Space_Grotesk',system-ui,sans-serif] bg-transparent! flex flex-col px-[88px] py-[56px]" data-screen-label={label}>
+  <SlideChrome tag={sectionTag} bottomLeft={bottomLeft} bottomRight={bottomRight}>
+    <div class="flex-1 flex flex-col justify-center">
+      <h3 class="reveal reveal-1 font-mono text-[22px] tracking-[0.14em] text-[var(--fg-mute)] uppercase m-0 mb-9 font-normal">
+        {partLabel}
+      </h3>
+
+      <div class="reveal reveal-2 w-24 h-1 bg-[var(--accent)] mb-12"></div>
+
+      <h2 class="slide-title reveal reveal-3 text-[124px] leading-[1.02] tracking-[-0.028em] font-medium m-0 mb-9 text-balance" set:html={title + (subtitle ? `<br/><em>${subtitle}</em>` : ``)} />
+
+      {lede && (
+        <p class="reveal reveal-4 slide-lede text-[28px] leading-[1.45] text-[var(--fg-dim)] text-pretty font-light m-0 mt-6 max-w-[900px]">
+          {lede}
+        </p>
+      )}
+    </div>
+  </SlideChrome>
+</section>

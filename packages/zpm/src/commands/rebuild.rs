@@ -9,19 +9,19 @@ use crate::{
 
 /// Rebuild dependencies
 ///
-/// This command will automatically cause Yarn to forget about previous compilations of the given packages and to run them again.
+/// This command makes Yarn forget previous build results for selected packages and runs the install pipeline again so they can be rebuilt.
 ///
 /// Note that while Yarn forgets the compilation, the previous artifacts aren't erased from the filesystem and may affect the next builds (in good
 /// or bad). To avoid this, you may remove the `.yarn/unplugged` folder, or any other relevant location where packages might have been stored (Yarn
 /// may offer a way to do that automatically in the future).
 ///
-/// By default all packages will be rebuilt, but you can filter the list by specifying the names of the packages you want to clear from memory.
+/// By default all packages are rebuilt. Pass package names to rebuild only specific packages.
 ///
 #[cli::command]
 #[cli::path("rebuild")]
 #[cli::category("Dependency management")]
 pub struct Rebuild {
-    /// The packages to rebuild
+    /// Package names to rebuild
     identifiers: Vec<Ident>,
 }
 

@@ -5,7 +5,10 @@ use zpm_utils::Path;
 
 use crate::{errors::Error, http::fetch};
 
-/// Update the Yarn Switch binary to the latest version
+/// Update the Yarn Switch binary
+///
+/// This command downloads and runs the Yarn Switch installer, replacing the current Switch installation with the latest published version.
+///
 #[cli::command]
 #[cli::path("switch", "update")]
 #[cli::category("Switch commands")]

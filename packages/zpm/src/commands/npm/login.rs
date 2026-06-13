@@ -20,31 +20,32 @@ const WEB_LOGIN_REGISTRIES: &[&str] = &[
     "https://registry.yarnpkg.com",
 ];
 
-/// Login to the npm registry
+/// Store credentials for an npm registry
 ///
-/// This command will ask you for your username, password, and 2FA One-Time-Password (when it applies). It will then modify your local configuration (in your home folder, never in the project itself) to reference the new tokens thus generated.
+/// This command authenticates with a registry and stores the generated token in the home configuration file. It never writes credentials to the
+/// project configuration.
 ///
-/// Adding the `-s,--scope` flag will cause the authentication to be done against whatever registry is configured for the associated scope (see also `npmScopes`).
+/// Use `-s,--scope` to authenticate against the registry configured for a scope.
 ///
-/// Adding the `--publish` flag will cause the authentication to be done against the registry used when publishing the package (see also `publishConfig.registry` and `npmPublishRegistry`).
+/// Use `--publish` to authenticate against the registry used for publishing.
 ///
 #[cli::command]
 #[cli::path("npm", "login")]
 #[cli::category("Npm-related commands")]
 pub struct Login {
-    /// Login to the registry configured for a given scope
+    /// Authenticate with the registry configured for this scope
     #[cli::option("-s,--scope")]
     scope: Option<String>,
 
-    /// Login to the publish registry
+    /// Authenticate with the publish registry
     #[cli::option("--publish", default = false)]
     publish: bool,
 
-    /// Enable web-based login
+    /// Enable or disable web-based login
     #[cli::option("--web-login")]
     web_login: Option<bool>,
 
-    /// Store credentials with always-auth set to true
+    /// Store credentials with `npmAlwaysAuth` enabled
     #[cli::option("--always-auth", default = false)]
     always_auth: bool,
 }

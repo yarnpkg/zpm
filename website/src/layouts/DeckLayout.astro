@@ -1,0 +1,58 @@
+---
+import '../styles/tailwind.css';
+import '../styles/theme.css';
+import '../styles/deck.css';
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{title}</title>
+<meta name="robots" content="noindex, nofollow" />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script is:inline>
+  (function(){var t=localStorage.getItem('yarn-deck-theme')||'dark';document.documentElement.setAttribute('data-theme',t)})();
+</script>
+</head>
+<body class="m-0 p-0 bg-[var(--bg-0)] text-[var(--fg)] font-['Space_Grotesk',system-ui,sans-serif] transition-[background,color] duration-[600ms] ease-in-out">
+
+<div class="sky fixed inset-0 z-0 pointer-events-none"></div>
+
+<div class="deck-root">
+  <button id="deck-theme-toggle" class="deck-theme-toggle fixed top-4.5 right-4.5 z-100 bg-[var(--card)] border border-[var(--line-strong)] text-[var(--fg-dim)] size-[38px] rounded-[10px] cursor-pointer inline-flex items-center justify-center backdrop-blur-[10px] transition-[color,border-color,background,transform] duration-200" aria-label="Toggle theme">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+      <path d="M13 9.5 A5 5 0 1 1 6.5 3 A4 4 0 0 0 13 9.5Z" fill="currentColor"/>
+    </svg>
+  </button>
+
+  <deck-stage>
+    <slot />
+  </deck-stage>
+</div>
+
+<script is:inline src="/deck-stage.js"></script>
+<script is:inline>
+  var themeBtn = document.getElementById('deck-theme-toggle');
+  themeBtn.addEventListener('click', function() {
+    var cur = document.documentElement.getAttribute('data-theme');
+    var next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('yarn-deck-theme', next);
+  });
+</script>
+
+<slot name="scripts" />
+
+</body>
+</html>

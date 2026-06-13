@@ -1,0 +1,36 @@
+---
+import { getCollection, render } from 'astro:content';
+import MarkdownDocsLayout from '../layouts/MarkdownDocsLayout.astro';
+import { getDirForSlug, getGroupLabelForSlug } from '../components/sidebar';
+import navigation from '../../config/navigation.json';
+
+const categoryToSidebar = navigation.categoryToSidebar as Record<string, string>;
+
+export async function getStaticPaths() {
+  const docs = await getCollection(`docs`);
+  return docs.map(doc => ({
+    params: {slug: doc.data.slug},
+    props: {doc},
+  }));
+}
+
+const { doc } = Astro.props;
+const { Content } = await render(doc);
+
+const groupLabel = getGroupLabelForSlug(doc.data.slug);
+const sidebar = categoryToSidebar[doc.data.category ?? ``]
+  ?? getDirForSlug(doc.data.slug)?.split(`/`)[0]
+  ?? `getting-started`;
+
+const frontmatter = {
+  title: doc.data.title,
+  description: doc.data.description,
+  activePage: doc.data.slug,
+  sidebar,
+  breadcrumb: groupLabel ? ['Docs', groupLabel, doc.data.title] : ['Docs', doc.data.title],
+};
+---
+
+<MarkdownDocsLayout frontmatter={frontmatter}>
+  <Content />
+</MarkdownDocsLayout>

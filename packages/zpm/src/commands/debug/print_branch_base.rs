@@ -2,6 +2,7 @@ use clipanion::cli;
 
 use crate::{error::Error, git_utils::fetch_branch_base, project};
 
+/// Print the git branch base used for change detection
 #[cli::command]
 #[cli::path("debug", "print-branch-base")]
 pub struct PrintBranchBase {

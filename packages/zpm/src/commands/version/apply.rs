@@ -6,29 +6,31 @@ use zpm_utils::{AbstractValue, tree};
 
 use crate::{error::Error, project, versioning};
 
-/// This command will apply the deferred version changes and remove their definitions from the repository.
+/// Apply deferred version decisions
 ///
-/// Note that if `--prerelease` is set, the given prerelease identifier (by default `rc.%n`) will be used on all new versions and the version definitions will be kept as-is.
+/// This command applies deferred version changes and removes their definitions from the repository.
+///
+/// If `--prerelease` is set, the given prerelease identifier (by default `rc.%n`) is used for all new versions and the version definitions are kept.
 ///
 /// By default only the current workspace will be bumped, but you can configure this behavior by using one of:
 ///
 /// - `--recursive` to also apply the version bump on its dependencies
 /// - `--all` to apply the version bump on all packages in the repository
 ///
-/// Note that this command will also update the `workspace:` references across all your local workspaces, thus ensuring that they keep referring to the same workspaces even after the version bump.
+/// This command also updates local `workspace:` references so they keep pointing to the same workspaces after the version bump.
 #[cli::command]
 #[cli::path("version", "apply")]
 #[cli::category("Project management")]
 pub struct VersionApply {
-    /// Apply the deferred version changes on all workspaces
+    /// Apply deferred version changes for all workspaces
     #[cli::option("--all", default = false)]
     all: bool,
 
-    /// Print the versions without actually generating the package archive
+    /// Print the version changes without writing them
     #[cli::option("--dry-run", default = false)]
     dry_run: bool,
 
-    /// Add a prerelease identifier to new versions
+    /// Apply versions as prereleases using this identifier pattern
     #[cli::option("--prerelease")]
     prerelease: Option<String>,
 

@@ -3,11 +3,13 @@ use zpm_utils::{DataType, ToHumanString};
 
 use crate::{daemons, errors::Error};
 
+/// Stop all registered Yarn daemons
 #[cli::command]
 #[cli::path("switch", "daemon")]
 #[cli::category("Daemon management")]
 #[derive(Debug)]
 pub struct DaemonKillAllCommand {
+    /// Stop every registered daemon
     #[cli::option("--kill-all")]
     _kill_all: bool,
 }

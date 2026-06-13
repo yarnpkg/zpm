@@ -874,23 +874,27 @@ impl Install {
             if !project_lines.is_empty() {
                 report.push_section("Validating peer dependencies".to_string());
 
+                let mut has_visible_project_warning = false;
+
                 for line in project_lines.iter() {
-                    report.warn(line.clone());
+                    has_visible_project_warning |= report.warn(line.clone());
                 }
 
-                report.warn(format!(
-                    "Some peer dependencies are incorrectly met by your project; \
-                    run {} for details, where {} is the six-letter p-prefixed code.",
-                    DataType::Code.colorize("yarn explain peer-requirements <hash>"),
-                    DataType::Code.colorize("<hash>"),
-                ));
-
-                if has_transitive {
+                if has_visible_project_warning {
                     report.warn(format!(
-                        "Some peer dependencies are incorrectly met by dependencies; \
-                        run {} for details.",
-                        DataType::Code.colorize("yarn explain peer-requirements"),
+                        "Some peer dependencies are incorrectly met by your project; \
+                        run {} for details, where {} is the six-letter p-prefixed code.",
+                        DataType::Code.colorize("yarn explain peer-requirements <hash>"),
+                        DataType::Code.colorize("<hash>"),
                     ));
+
+                    if has_transitive {
+                        report.warn(format!(
+                            "Some peer dependencies are incorrectly met by dependencies; \
+                            run {} for details.",
+                            DataType::Code.colorize("yarn explain peer-requirements"),
+                        ));
+                    }
                 }
 
                 report.pop_section();
@@ -1911,7 +1915,14 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     }
 
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
-        peer_dependencies.entry(name.type_ident())
+        let types_ident
+            = name.type_ident();
+
+        if dependencies.contains_key(&types_ident) {
+            continue;
+        }
+
+        peer_dependencies.entry(types_ident)
             .or_insert(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}.into());
     }
 

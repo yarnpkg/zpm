@@ -8,64 +8,14 @@ use clipanion::cli;
 use crate::{commands::tasks::run_silent_dependencies::TaskRunSilentDependencies, error::Error, project, script::ScriptEnvironment};
 use super::tasks as task_run;
 
-/// Run a dependency binary or local script
-///
-/// This command will run a tool. The exact tool that will be executed will depend on the current state of your workspace:
-///
-/// - If the `scripts` field from your local package.json contains a matching script name, its definition will get executed.
-///
-/// - Otherwise, if a `taskfile` exists in the workspace and contains a task with the matching name, that task will be executed
-///   (including all its dependencies in the correct order).
-///
-/// - Otherwise, if one of the local workspace's dependencies exposes a binary with a matching name, this binary will get executed.
-///
-/// - Otherwise, if the specified name contains a colon character and if one of the workspaces in the project contains exactly one script with a
-///   matching name, then this script will get executed.
-///
-/// Whatever happens, the cwd of the spawned process will be the workspace that declares the script (which makes it possible to call commands
-/// cross-workspaces using the third syntax).
-///
-#[cli::command(default, proxy)]
+/// List scripts from the current workspace
+#[cli::command]
 #[cli::path("run")]
 #[cli::category("Scripting commands")]
-pub struct Run {
-    /// If set, the script or binary used will be the one in the top-level workspace
-    #[cli::option("-T,--top-level", default = false)]
-    top_level: bool,
-
-    // If set, only binaries will be considered
-    #[cli::option("-B,--binaries-only", default = false)]
-    binaries_only: bool,
-
-    /// If set (the default), an error will be returned if the script or binary is not found
-    #[cli::option("--error-if-missing", default = true)]
-    error_if_missing: bool,
-
-    /// The directory in which to run the script or binary
-    #[cli::option("--run-cwd")]
-    run_cwd: Option<Path>,
-
-    /// Forwarded to the underlying Node process when executing a binary
-    #[cli::option("--inspect")]
-    inspect: Option<Option<String>>,
-
-    /// Forwarded to the underlying Node process when executing a binary
-    #[cli::option("--inspect-brk")]
-    inspect_brk: Option<Option<String>>,
-
-    /// Forwarded to the underlying Node process when executing a binary
-    #[cli::option("--inspect-wait")]
-    inspect_wait: Option<Option<String>>,
-
-    /// Forwarded to the underlying Node process when executing a binary
-    #[cli::option("--require")]
-    require: Option<String>,
-
-    /// Name of the script or binary to run
-    name: Option<String>,
-
-    /// Arguments to pass to the script or binary
-    args: Vec<String>,
+pub struct RunList {
+    /// Format the output as an NDJSON stream
+    #[cli::option("--json", default = false)]
+    json: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -74,40 +24,111 @@ struct ScriptsManifest {
     scripts: IndexMap<String, String>,
 }
 
-impl Run {
-    fn list_scripts(&self, project: &project::Project, json: bool) -> Result<(), Error> {
-        let active_workspace = project.active_workspace()?;
-        let manifest_path = active_workspace.manifest_path();
+impl RunList {
+    pub async fn execute(&self) -> Result<ExitStatus, Error> {
+        let mut project
+            = project::Project::new(None).await?;
 
-        let manifest_text = manifest_path
-            .fs_read_text()
-            .unwrap_or_default();
+        project
+            .lazy_install().await?;
 
-        let manifest: ScriptsManifest = JsonDocument::hydrate_from_str(&manifest_text)
-            .unwrap_or_else(|_| ScriptsManifest { scripts: IndexMap::new() });
+        list_scripts(&project, self.json)?;
+        Ok(ExitStatus::from_raw(0))
+    }
+}
 
-        if json {
-            for (name, script) in &manifest.scripts {
-                let entry = serde_json::json!({"name": name, "script": script});
-                println!("{}", serde_json::to_string(&entry).unwrap());
-            }
+/// Run a dependency binary or local script
+///
+/// This command runs a tool selected from the current workspace:
+///
+/// - If the local package.json `scripts` field contains a matching script name, Yarn executes that script.
+///
+/// - Otherwise, if a `taskfile` exists in the workspace and contains a task with the matching name, Yarn runs that task
+///   (including all its dependencies in the correct order).
+///
+/// - Otherwise, if one of the local workspace's dependencies exposes a binary with a matching name, Yarn runs that binary.
+///
+/// - Otherwise, if the specified name contains a colon character and if one of the workspaces in the project contains exactly one script with a
+///   matching name, Yarn runs that script.
+///
+/// Script commands run from the workspace that declares them. Dependency binaries run from the current working directory unless `--run-cwd` is set.
+#[cli::command(default, proxy)]
+#[cli::path("run")]
+#[cli::category("Scripting commands")]
+pub struct Run {
+    /// Resolve scripts and binaries from the top-level workspace
+    #[cli::option("-T,--top-level", default = false)]
+    top_level: bool,
 
-            return Ok(());
-        }
+    /// Only consider dependency binaries, not package scripts or tasks
+    #[cli::option("-B,--binaries-only", default = false)]
+    binaries_only: bool,
 
-        let max_name_len = manifest.scripts.keys()
-            .map(|k| k.len())
-            .max()
-            .unwrap_or(0);
+    /// Return an error when the script, task, or binary cannot be found
+    #[cli::option("--error-if-missing", default = true)]
+    error_if_missing: bool,
 
+    /// Directory from which to run the selected script or binary
+    #[cli::option("--run-cwd")]
+    run_cwd: Option<Path>,
+
+    /// Forward `--inspect` to Node.js when executing a Node binary
+    #[cli::option("--inspect")]
+    inspect: Option<Option<String>>,
+
+    /// Forward `--inspect-brk` to Node.js when executing a Node binary
+    #[cli::option("--inspect-brk")]
+    inspect_brk: Option<Option<String>>,
+
+    /// Forward `--inspect-wait` to Node.js when executing a Node binary
+    #[cli::option("--inspect-wait")]
+    inspect_wait: Option<Option<String>>,
+
+    /// Preload a module through Node.js `--require` when executing a Node binary
+    #[cli::option("--require")]
+    require: Option<String>,
+
+    /// Name of the script or binary to run
+    name: String,
+
+    /// Arguments to pass to the script or binary
+    args: Vec<String>,
+}
+
+fn list_scripts(project: &project::Project, json: bool) -> Result<(), Error> {
+    let active_workspace = project.active_workspace()?;
+    let manifest_path = active_workspace.manifest_path();
+
+    let manifest_text = manifest_path
+        .fs_read_text()
+        .unwrap_or_default();
+
+    let manifest: ScriptsManifest = JsonDocument::hydrate_from_str(&manifest_text)
+        .unwrap_or_else(|_| ScriptsManifest { scripts: IndexMap::new() });
+
+    if json {
         for (name, script) in &manifest.scripts {
-            let padding = " ".repeat(max_name_len.saturating_sub(name.len()));
-            println!("{}{}   '{}'", name, padding, script);
+            let entry = serde_json::json!({"name": name, "script": script});
+            println!("{}", serde_json::to_string(&entry).unwrap());
         }
 
-        Ok(())
+        return Ok(());
     }
 
+    let max_name_len = manifest.scripts.keys()
+        .map(|k| k.len())
+        .max()
+        .unwrap_or(0);
+
+    for (name, script) in &manifest.scripts {
+        let padding = " ".repeat(max_name_len.saturating_sub(name.len()));
+        println!("{}{}   '{}'", name, padding, script);
+    }
+
+    Ok(())
+}
+
+impl Run {
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
         let mut project
             = project::Project::new(None).await?;
@@ -119,16 +140,7 @@ impl Run {
             project.package_cwd = Path::new();
         }
 
-        let (name, json_listing) = match self.name.as_deref() {
-            None if self.args.iter().any(|a| a == "--json") => (None, true),
-            None => (None, false),
-            Some(name) => (Some(name), false),
-        };
-
-        let Some(name) = name else {
-            self.list_scripts(&project, json_listing)?;
-            return Ok(ExitStatus::from_raw(0));
-        };
+        let name = self.name.as_str();
 
         let get_node_args = || {
             let mut node_args = Vec::new();

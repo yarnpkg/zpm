@@ -1,0 +1,78 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PackagePage from '../../components/package/PackagePage';
+import '../../styles/theme.css';
+import '../../styles/package.css';
+import simpleIconData from '@iconify-json/simple-icons/icons.json';
+import octIconData from '@iconify-json/octicon/icons.json';
+
+export function getStaticPaths() {
+  return [{params: {slug: undefined}}];
+}
+
+function extractSimple(name: string) {
+  const icon = (simpleIconData as any).icons[name];
+  if (!icon) throw new Error(`Unknown simple-icon: ${name}`);
+  const dw = (simpleIconData as any).width ?? 24;
+  return { body: icon.body, width: icon.width ?? dw, height: icon.height ?? (simpleIconData as any).height ?? dw };
+}
+
+function extractOct(name: string) {
+  const icon = (octIconData as any).icons[name];
+  if (!icon) throw new Error(`Unknown octicon: ${name}`);
+  const suffix = name.match(/-(\d+)$/)?.[1];
+  const base = suffix ? Number(suffix) : 16;
+  return { body: icon.body, width: icon.width ?? base, height: icon.height ?? base };
+}
+
+const brandIcons = {
+  github: extractSimple(`github`),
+  npm: extractSimple(`npm`),
+  yarn: extractSimple(`yarn`),
+  pnpm: extractSimple(`pnpm`),
+  bun: extractSimple(`bun`),
+};
+
+const octicons = {
+  'package': extractOct(`package-16`),
+  'info': extractOct(`info-16`),
+  'globe': extractOct(`globe-16`),
+  'file-directory': extractOct(`file-directory-16`),
+  'file-directory-fill': extractOct(`file-directory-fill-16`),
+  'file-directory-open-fill': extractOct(`file-directory-open-fill-16`),
+  'versions': extractOct(`versions-16`),
+  'file': extractOct(`file-16`),
+  'file-code': extractOct(`file-code-16`),
+  'copy': extractOct(`copy-16`),
+  'chevron-down': extractOct(`chevron-down-16`),
+  'chevron-right': extractOct(`chevron-right-12`),
+  'shield': extractOct(`shield-16`),
+  'law': extractOct(`law-16`),
+  'repo': extractOct(`repo-16`),
+  'home': extractOct(`home-16`),
+  'diff': extractOct(`diff-16`),
+  'link-external': extractOct(`link-external-16`),
+  'x': extractOct(`x-16`),
+};
+---
+
+<BaseLayout title="Package — Yarn" variant="docs" description="Browse npm package details, versions, dependencies, and files.">
+  <PackagePage client:only="react" brandIcons={brandIcons} octicons={octicons} />
+</BaseLayout>
+
+<script is:inline>
+(function(){
+  function setTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    localStorage.setItem('yarn-theme', t);
+    window.__theme = t;
+    window.dispatchEvent(new CustomEvent('themechange', {detail: t}));
+  }
+  window.__setTheme = setTheme;
+  window.__theme = localStorage.getItem('yarn-theme') || 'dark';
+  var btn = document.getElementById('theme-toggle');
+  if (btn) btn.addEventListener('click', function() {
+    setTheme(window.__theme === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>

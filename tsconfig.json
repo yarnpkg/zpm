@@ -2,12 +2,12 @@
   "extends": "./tsconfig.base.json",
   "exclude": [
     "dist",
-    "documentation",
+    "website",
     "packages/zpm-daemon-ui",
     "tests",
   ],
   "references": [
-    {"path": "documentation/tsconfig.json"},
+    {"path": "website/tsconfig.json"},
     {"path": "packages/zpm-daemon-ui/tsconfig.json"},
     {"path": "tests/acceptance-tests/tsconfig.json"},
   ],

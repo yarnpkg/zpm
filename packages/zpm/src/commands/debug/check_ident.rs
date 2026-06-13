@@ -4,9 +4,14 @@ use zpm_utils::ToFileString;
 
 use crate::error::Error;
 
+/// Parse and print a package ident
+///
+/// This debug command prints the normalized string form and Rust debug representation of an ident.
+///
 #[cli::command(proxy)]
 #[cli::path("debug", "check-ident")]
 pub struct CheckIdent {
+    /// Ident to parse
     ident: Ident,
 }
 

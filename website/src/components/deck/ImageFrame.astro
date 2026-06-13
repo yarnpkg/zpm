@@ -1,0 +1,32 @@
+---
+interface Props {
+  href?: string;
+  alt?: string;
+  placeholder?: string;
+  caption?: string;
+  aspectRatio?: string;
+  style?: string;
+}
+
+const { href, alt = ``, placeholder, caption, aspectRatio, style } = Astro.props;
+---
+
+<div
+  class="slide-image-frame relative border border-[var(--card-border)] rounded-[14px] bg-[var(--card)] overflow-hidden backdrop-blur-[8px]"
+  style={[aspectRatio && `aspect-ratio: ${aspectRatio}`, style].filter(Boolean).join(`; `)}
+>
+  {href ? (
+    <img src={href} alt={alt} class="w-full h-full object-contain" />
+  ) : placeholder ? (
+    <div class="placeholder w-full h-full flex items-center justify-center pb-14 font-mono text-[13px] tracking-[0.12em] text-[var(--fg-mute)] uppercase">
+      {placeholder}
+    </div>
+  ) : (
+    <slot />
+  )}
+  {caption && (
+    <div class="caption absolute bottom-0 left-0 right-0 py-3.5 px-4.5 font-mono text-xs text-[var(--fg-mute)] tracking-[0.06em] border-t border-[var(--line)]">
+      {caption}
+    </div>
+  )}
+</div>

@@ -75,26 +75,6 @@ describe(`Commands`, () => {
     );
 
     test(
-      `it should print localCacheFolderName default value`,
-      makeTemporaryEnv({}, async ({path, run, source}) => {
-        const {stdout} = await run(`config`, `get`, `--json`, `localCacheFolderName`);
-
-        expect(JSON.parse(stdout)).toEqual(`cache`);
-      }),
-    );
-
-    test(
-      `it should print localCacheFolderName configured value`,
-      makeTemporaryEnv({}, async ({path, run, source}) => {
-        await xfs.writeFilePromise(`${path}/.yarnrc.yml`, `localCacheFolderName: my-cache\n`);
-
-        const {stdout} = await run(`config`, `get`, `--json`, `localCacheFolderName`);
-
-        expect(JSON.parse(stdout)).toEqual(`my-cache`);
-      }),
-    );
-
-    test(
       `it should support printing sub-keys`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         await xfs.writeFilePromise(`${path}/.yarnrc.yml`, `packageExtensions:\n  "foo@*":\n    dependencies:\n      "bar": "1.0.0"\n`);

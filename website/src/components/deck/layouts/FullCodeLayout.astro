@@ -1,0 +1,40 @@
+---
+import ContentSlide from '../ContentSlide.astro';
+import CodeBlock from '../CodeBlock.astro';
+import { titleToSectionTag } from '../sectionTag';
+
+interface Props {
+  eyebrow: string;
+  title: string;
+  titleSize?: string;
+  bottomLeft?: string;
+  bottomRight?: string;
+  label?: string;
+  filename?: string;
+  lang?: string;
+  code?: string;
+  compact?: boolean;
+  caption?: string;
+  maxWidth?: string;
+}
+
+const { eyebrow, title, titleSize = `60px`, bottomLeft, bottomRight, label, filename, lang, code, compact = false, caption, maxWidth = `1400px` } = Astro.props;
+
+const sectionTag = titleToSectionTag(title);
+---
+
+<ContentSlide sectionTag={sectionTag} bottomLeft={bottomLeft} bottomRight={bottomRight} autoCounter label={label}>
+  <div class="reveal reveal-1 font-mono text-sm tracking-[0.14em] text-[var(--fg-mute)] uppercase mb-7">
+    {eyebrow}
+  </div>
+
+  <h2 class="slide-title reveal reveal-2 leading-[1.02] tracking-[-0.028em] font-medium m-0 mb-9 text-balance" style={`font-size: ${titleSize}`} set:html={title} />
+
+  <div class="reveal reveal-3" style={`max-width: ${maxWidth}`}>
+    <CodeBlock filename={filename} lang={lang} code={code} compact={compact} />
+  </div>
+
+  {caption && (
+    <p class="slide-body-text reveal reveal-4 text-2xl leading-[1.55] text-[var(--fg-dim)] text-pretty font-light mt-7 text-[22px]" style={`max-width: ${maxWidth}`} set:html={caption} />
+  )}
+</ContentSlide>

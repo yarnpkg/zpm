@@ -3,9 +3,11 @@ use zpm_utils::ToHumanString;
 
 use crate::{error::Error, git_utils::fetch_changed_files, project};
 
+/// Print files changed since a git ref
 #[cli::command]
 #[cli::path("debug", "print-changed-files")]
 pub struct PrintChangedFiles {
+    /// Ref to compare against; defaults to the configured branch base
     #[cli::option("--since")]
     since: Option<String>,
 }

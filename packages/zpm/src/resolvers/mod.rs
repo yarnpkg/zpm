@@ -14,8 +14,10 @@ use crate::{
 
 pub mod builtin;
 pub mod catalog;
+pub mod exec;
 pub mod folder;
 pub mod git;
+pub mod jsr;
 pub mod link;
 pub mod patch;
 pub mod pypi;
@@ -164,6 +166,12 @@ pub fn try_resolve_descriptor_sync(context: InstallContext<'_>, descriptor: Desc
         Range::PypiTag(params) if params.ident.is_some()
             => Ok(SyncResolutionAttempt::Success(pypi::resolve_aliased(&descriptor, dependencies)?)),
 
+        Range::JsrSemver(params) if params.ident.is_some()
+            => Ok(SyncResolutionAttempt::Success(jsr::resolve_aliased(&descriptor, dependencies)?)),
+
+        Range::JsrTag(params) if params.ident.is_some()
+            => Ok(SyncResolutionAttempt::Success(jsr::resolve_aliased(&descriptor, dependencies)?)),
+
         Range::Link(params)
             => Ok(SyncResolutionAttempt::Success(link::resolve_descriptor(&context, &descriptor, params)?)),
 
@@ -220,6 +228,9 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
         Range::Folder(params)
             => folder::resolve_descriptor(&context, &descriptor, params, dependencies).await,
 
+        Range::Exec(params)
+            => exec::resolve_descriptor(&context, &descriptor, params, dependencies).await,
+
         Range::Portal(params)
             => portal::resolve_descriptor(&context, &descriptor, params, dependencies),
 
@@ -241,6 +252,16 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
         Range::PypiTag(params) => match params.ident.is_some() {
             true => pypi::resolve_aliased(&descriptor, dependencies),
             false => pypi::resolve_tag_descriptor(&context, &descriptor, params).await,
+        },
+
+        Range::JsrSemver(params) => match params.ident.is_some() {
+            true => jsr::resolve_aliased(&descriptor, dependencies),
+            false => jsr::resolve_semver_descriptor(&context, &descriptor, params).await,
+        },
+
+        Range::JsrTag(params) => match params.ident.is_some() {
+            true => jsr::resolve_aliased(&descriptor, dependencies),
+            false => jsr::resolve_tag_descriptor(&context, &descriptor, params).await,
         },
 
         Range::WorkspacePath(params)
@@ -276,6 +297,9 @@ pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, depe
 
         Reference::Folder(params)
             => folder::resolve_locator(&context, &locator, params, dependencies).await,
+
+        Reference::Exec(params)
+            => exec::resolve_locator(&context, &locator, params, dependencies).await,
 
         Reference::Git(params)
             => git::resolve_locator(&context, &locator, params).await,

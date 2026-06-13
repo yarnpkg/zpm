@@ -8,13 +8,12 @@ use crate::{
     project::{self, RunInstallOptions},
 };
 
-/// Pins the resolution of a dependency to a specific version
+/// Pin a descriptor to a specific resolution
 ///
-/// This command updates the resolution table so that descriptor is resolved by resolution.
+/// This command updates the current lockfile resolution table so the given descriptor resolves to the given reference.
 ///
-/// Note that by default this command only affect the current resolution table - meaning that this "manual override" will disappear if you remove the
-/// lockfile, or if the package disappear from the table. If you wish to make the enforced resolution persist whatever happens, edit the `resolutions`
-/// field in your top-level manifest.
+/// The override is stored in the lockfile, not the manifest. It disappears if the lockfile entry disappears. To make it persistent, edit the
+/// top-level `resolutions` field instead.
 ///
 /// Note that no attempt is made at validating that `resolution` is a valid resolution entry for `descriptor`.
 ///
@@ -22,10 +21,10 @@ use crate::{
 #[cli::path("set", "resolution")]
 #[cli::category("Dependency management")]
 pub struct SetResolution {
-    /// The descriptor to set the resolution for
+    /// Descriptor whose resolution should be overridden
     descriptor: Descriptor,
 
-    /// The reference to set the resolution for
+    /// Reference to resolve the descriptor to
     reference: Reference,
 }
 

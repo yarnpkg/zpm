@@ -42,6 +42,20 @@ fn format_pypi_tag(ident: &Option<Ident>, tag: &str) -> String {
     }
 }
 
+fn format_jsr_semver(ident: &Option<Ident>, range: &zpm_semver::Range) -> String {
+    match ident {
+        Some(ident) => format!("jsr:{}@{}", ident.to_file_string(), range.to_file_string()),
+        None => format!("jsr:{}", range.to_file_string()),
+    }
+}
+
+fn format_jsr_tag(ident: &Option<Ident>, tag: &str) -> String {
+    match ident {
+        Some(ident) => format!("jsr:{}@{}", ident.to_file_string(), tag),
+        None => format!("jsr:{}", tag),
+    }
+}
+
 fn format_path_range(path: &str) -> String {
     if EXPLICIT_PATH_REGEX.is_match(path) {
         path.to_string()
@@ -123,6 +137,22 @@ pub enum Range {
         tag: EcoString,
     },
 
+    #[pattern(r"jsr:(?:(?<ident>.*)@)?(?<range>.*)")]
+    #[to_file_string(|params| format_jsr_semver(&params.ident, &params.range))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_jsr_semver(&params.ident, &params.range)))]
+    JsrSemver {
+        ident: Option<Ident>,
+        range: zpm_semver::Range,
+    },
+
+    #[pattern(r"jsr:(?:(?<ident>.*)@)?(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
+    #[to_file_string(|params| format_jsr_tag(&params.ident, params.tag.as_str()))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_jsr_tag(&params.ident, params.tag.as_str())))]
+    JsrTag {
+        ident: Option<Ident>,
+        tag: EcoString,
+    },
+
     #[pattern(r"link:(?<path>.*)")]
     #[to_file_string(|params| format!("link:{}", params.path))]
     #[to_print_string(|params| DataType::Range.colorize(&format!("link:{}", params.path)))]
@@ -134,6 +164,13 @@ pub enum Range {
     #[to_file_string(|params| format!("portal:{}", params.path))]
     #[to_print_string(|params| DataType::Range.colorize(&format!("portal:{}", params.path)))]
     Portal {
+        path: String,
+    },
+
+    #[pattern(r"exec:(?<path>.*)")]
+    #[to_file_string(|params| format!("exec:{}", params.path))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("exec:{}", params.path)))]
+    Exec {
         path: String,
     },
 
@@ -257,6 +294,12 @@ impl Range {
             Range::PypiTag(params) if params.ident.is_some()
                 => Some(Descriptor::new(params.ident.clone().unwrap(), PypiTagRange {ident: None, tag: params.tag.clone()}.into())),
 
+            Range::JsrSemver(params) if params.ident.is_some()
+                => Some(Descriptor::new(params.ident.clone().unwrap(), JsrSemverRange {ident: None, range: params.range.clone()}.into())),
+
+            Range::JsrTag(params) if params.ident.is_some()
+                => Some(Descriptor::new(params.ident.clone().unwrap(), JsrTagRange {ident: None, tag: params.tag.clone()}.into())),
+
             Range::Patch(params)
                 => Some(params.inner.0.clone()),
 
@@ -294,6 +337,14 @@ impl Range {
                 Range::PypiTag(PypiTagRange {ident: None, tag: params.tag.clone()})
             },
 
+            Range::JsrSemver(params) => {
+                Range::JsrSemver(JsrSemverRange {ident: None, range: params.range.clone()})
+            },
+
+            Range::JsrTag(params) => {
+                Range::JsrTag(JsrTagRange {ident: None, tag: params.tag.clone()})
+            },
+
             _ => self.clone(),
         }
     }
@@ -305,6 +356,10 @@ impl Range {
             },
 
             Range::RegistrySemver(params) => {
+                Some(params.range.clone())
+            },
+
+            Range::JsrSemver(params) => {
                 Some(params.range.clone())
             },
 
@@ -320,6 +375,16 @@ impl Range {
 
             Range::RegistrySemver(params) => {
                 Registry::Npm(params.ident.clone().unwrap_or_else(|| default_ident.clone()))
+            },
+
+            Range::JsrSemver(params) => {
+                let ident = params.ident.as_ref()
+                    .unwrap_or(default_ident);
+                let registry_ident = ident.scope().map_or_else(
+                    || Ident::new(format!("@jsr/{}", ident.name())),
+                    |scope| Ident::new(format!("@jsr/{}__{}", scope.trim_start_matches('@'), ident.name())),
+                );
+                Registry::Npm(registry_ident)
             },
 
             Range::WorkspaceMagic(_) | Range::WorkspaceSemver(_) => {
@@ -341,6 +406,10 @@ impl Range {
             },
 
             Range::RegistrySemver(params) => {
+                Ok(PeerRange::Semver(SemverPeerRange {range: params.range.clone()}))
+            },
+
+            Range::JsrSemver(params) => {
                 Ok(PeerRange::Semver(SemverPeerRange {range: params.range.clone()}))
             },
 

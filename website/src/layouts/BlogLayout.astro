@@ -1,0 +1,20 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import '../styles/theme.css';
+import '../styles/docs.css';
+import '../styles/blog.css';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<BaseLayout title={title} variant="docs" activePage="blog" description={description}>
+  <slot />
+
+  <script is:inline src="/docs/docs.js"></script>
+  <script is:inline src="/blog/blog.js"></script>
+</BaseLayout>

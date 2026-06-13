@@ -135,23 +135,30 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
 
 /// Add new dependencies to the project
 ///
-/// This command adds a package to the package.json for the nearest workspace. -
+/// This command adds packages to the nearest workspace manifest and then runs an install.
 ///
-/// - If it didn't exist before, the package will by default be added to the regular `dependencies` field, but this behavior can be overriden thanks to the `-D,--dev` flag (which will cause the dependency to be added to the `devDependencies` field instead) and the `-P,--peer` flag (which will do the same but for `peerDependencies`).
+/// - If a package wasn't listed before, it is added to `dependencies` by default. Use `-D,--dev` to add it to `devDependencies`, or `-P,--peer` to
+///   add it to `peerDependencies`.
 ///
-/// - If the package was already listed in your dependencies, it will by default be upgraded whether it's part of your `dependencies` or `devDependencies` (it won't ever update `peerDependencies`, though).
+/// - If a package is already listed in `dependencies` or `devDependencies`, it is upgraded in place. Peer dependencies are only changed when
+///   `-P,--peer` is used.
 ///
-/// - If set, the `--prefer-dev` flag will operate as a more flexible `-D,--dev` in that it will add the package to your `devDependencies` if it isn't already listed in either `dependencies` or `devDependencies`, but it will also happily upgrade your `dependencies` if that's what you already use (whereas `-D,--dev` would throw an exception).
+/// - `--prefer-dev` behaves like a flexible `-D,--dev`: it adds new packages to `devDependencies`, but upgrades an existing `dependencies` entry in
+///   place instead of failing.
 ///
-/// - If set, the `-O,--optional` flag will add the package to the `optionalDependencies` field and, in combination with the `-P,--peer` flag, it will add the package as an optional peer dependency. If the package was already listed in your `dependencies`, it will be upgraded to `optionalDependencies`. If the package was already listed in your `peerDependencies`, in combination with the `-P,--peer` flag, it will be upgraded to an optional peer dependency: `"peerDependenciesMeta": { "<package>": { "optional": true } }`
+/// - `-O,--optional` adds the package to `optionalDependencies`. Combined with `-P,--peer`, it marks the peer as optional through
+///   `peerDependenciesMeta`.
 ///
-/// - If the added package doesn't specify a range at all its `latest` tag will be resolved and the returned version will be used to generate a new semver range (using the `^` modifier by default unless otherwise configured via the `defaultSemverRangePrefix` configuration, or the `~` modifier if `-T,--tilde` is specified, or no modifier at all if `-E,--exact` is specified). Two exceptions to this rule: the first one is that if the package is a workspace then its local version will be used, and the second one is that if you use `-P,--peer` the default range will be `*` and won't be resolved at all.
+/// - If the added package doesn't specify a range, Yarn resolves the `latest` tag and uses the returned version to generate a semver range. The
+///   range uses the `^` modifier by default, unless `defaultSemverRangePrefix`, `-T,--tilde`, or `-E,--exact` selects a different modifier. There
+///   are two exceptions: workspace packages use their local version, and `-P,--peer` defaults to `*` without resolving the range.
 ///
 /// - If the added package specifies a range (such as `^1.0.0`, `latest`, or `rc`), Yarn will add this range as-is in the resulting package.json entry (in particular, tags such as `rc` will be encoded as-is rather than being converted into a semver range).
 ///
 /// If the `--cached` option is used, Yarn will preferably reuse the highest version already used somewhere within the project, even if through a transitive dependency.
 ///
-/// If the `-i,--interactive` option is used (or if the `preferInteractive` settings is toggled on) the command will first try to check whether other workspaces in the project use the specified package and, if so, will offer to reuse them.
+/// If the `-i,--interactive` option is used, or if the `preferInteractive` setting is enabled, Yarn first checks whether other workspaces in the
+/// project already use the specified package and offers to reuse those ranges.
 ///
 /// If the `--mode=<mode>` option is set, Yarn will change which artifacts are generated. The modes currently supported are:
 ///
@@ -164,11 +171,11 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
 #[cli::path("add")]
 #[cli::category("Dependency management")]
 pub struct Add {
-    /// Store dependency tags as-is instead of resolving them
+    /// Store dependency tags as-is instead of resolving them to versions
     #[cli::option("-F,--fixed", default = false)]
     fixed: bool,
 
-    /// Don't use any semver modifier on the resolved range
+    /// Use an exact semver range for resolved versions
     #[cli::option("-E,--exact", default = false)]
     exact: bool,
 
@@ -190,11 +197,11 @@ pub struct Add {
     #[cli::option("-D,--dev", default = false)]
     dev: bool,
 
-    /// Add / upgrade a package to an optional regular / peer dependency
+    /// Add or upgrade a package as an optional dependency or optional peer dependency
     #[cli::option("-O,--optional", default = false)]
     optional: bool,
 
-    /// Add / upgrade a package to a dev dependency
+    /// Prefer `devDependencies` for new packages while preserving existing dependency fields
     #[cli::option("--prefer-dev", default = false)]
     prefer_dev: bool,
 
@@ -204,7 +211,7 @@ pub struct Add {
     #[cli::option("--no-time-gate", default = false)]
     no_time_gate: bool,
 
-    /// Select the artifacts this install will generate
+    /// Select which install artifacts Yarn should generate
     #[cli::option("--mode")]
     mode: Option<InstallMode>,
 
@@ -214,7 +221,7 @@ pub struct Add {
 
     // ---
 
-    /// Packages to add
+    /// Package descriptors to add
     descriptors: Vec<LooseDescriptor>,
 }
 

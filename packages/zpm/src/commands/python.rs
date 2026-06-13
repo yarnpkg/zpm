@@ -76,16 +76,14 @@ fn active_workspace_venv(project: &project::Project) -> Option<zpm_utils::Path> 
 
 /// Run a Python process within the project's environment
 ///
-/// This command mirrors `yarn node`, but for Python. When called from a
-/// workspace that belongs to an island using the `venv` linker, it sets up a
-/// virtualenv-like environment (`VIRTUAL_ENV`, `PYTHONPATH`, and `PATH`) so
-/// Python can resolve packages from `.venv/lib/site-packages`.
+/// This command mirrors `yarn node`, but for Python. When called from a workspace that belongs to an island using the `venv` linker, it sets up a
+/// virtualenv-like environment (`VIRTUAL_ENV`, `PYTHONPATH`, and `PATH`) so Python can resolve packages from `.venv/lib/site-packages`.
 ///
 #[cli::command(proxy)]
 #[cli::path("python")]
 #[cli::category("Scripting commands")]
 pub struct Python {
-    /// The arguments to pass to the Python process
+    /// Arguments to pass to Python
     args: Vec<String>,
 }
 

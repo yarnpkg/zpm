@@ -322,7 +322,10 @@ pub fn populate_build_entry_dependencies(package_build_entries: &BTreeMap<Locato
                     continue;
                 }
 
-                if let Some(dependency_entry_idx) = package_build_entries.get(dependency_locator) {
+                let dependency_physical_locator
+                    = dependency_locator.physical_locator();
+
+                if let Some(dependency_entry_idx) = package_build_entries.get(&dependency_physical_locator) {
                     build_dependencies.insert(*dependency_entry_idx);
                 }
 

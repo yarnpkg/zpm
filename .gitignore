@@ -1,9 +1,9 @@
 .DS_Store
 .idea
 
-/documentation/.astro/*
-!/documentation/.astro/content.d.ts
-!/documentation/.astro/types.d.ts
+/website/.astro/*
+!/website/.astro/content.d.ts
+!/website/.astro/types.d.ts
 
 /artifacts
 /target

@@ -1,0 +1,108 @@
+---
+import { getCollection, render } from 'astro:content';
+import BlogLayout from '../../layouts/BlogLayout.astro';
+import PostMeta from '../../components/PostMeta.astro';
+import PrevNextNav from '../../components/PrevNextNav.astro';
+
+export async function getStaticPaths() {
+  const posts = await getCollection(`blog`);
+  posts.sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+
+  return posts.map((post, idx) => ({
+    params: { slug: post.data.slug },
+    props: {
+      post,
+      older: posts[idx + 1] ?? null,
+      newer: posts[idx - 1] ?? null,
+    },
+  }));
+}
+
+const { post, older, newer } = Astro.props;
+const { Content, headings, remarkPluginFrontmatter } = await render(post);
+
+const tocHeadings = headings
+  .filter(h => h.depth === 2 && h.slug !== `footnote-label`)
+  .map(h => ({ ...h, text: h.text.replace(/#$/, ``).trim() }));
+const showToc = tocHeadings.length >= 4;
+
+const wordCount = (remarkPluginFrontmatter?.wordCount as number) || post.body?.split(/\s+/).length || 0;
+const readingTime = Math.max(1, Math.ceil(wordCount / 250));
+
+const formattedDate = post.data.date.toLocaleDateString(`en-US`, {
+  year: `numeric`,
+  month: `long`,
+  day: `numeric`,
+});
+
+const postDescription = post.body ? post.body.replace(/[#*_\[\]`>]/g, ``).slice(0, 155).trim() + `\u2026` : post.data.title;
+
+const bskyShareUrl = `https://bsky.app/intent/compose?text=${encodeURIComponent(post.data.title)}`;
+---
+
+<BlogLayout title={`${post.data.title} — Yarn Blog`} description={postDescription}>
+  <article class="article-shell">
+
+    <a class="back-link" href="/blog">
+      &larr; Back to blog
+    </a>
+
+    <header class="article-header">
+      {post.data.category && (
+        <div class="article-eyebrow">
+          {post.data.category}
+        </div>
+      )}
+
+      <h1 class="article-title">
+        {post.data.title}
+      </h1>
+
+      <PostMeta
+        author={post.data.author}
+        date={formattedDate}
+        readingTime={readingTime}
+        variant="article"
+      />
+    </header>
+
+    <div class="prose article-prose">
+      <Content />
+    </div>
+
+    {showToc && (
+      <nav class="toc" aria-label="Table of contents">
+        <div class="toc-label">On this page</div>
+        <ol>
+          {tocHeadings.map(h => (
+            <li><a href={`#${h.slug}`}><span>{h.text}</span></a></li>
+          ))}
+        </ol>
+      </nav>
+    )}
+
+    <div class="mt-20 pt-8 border-t border-[var(--line)] flex justify-between items-center gap-4 flex-wrap text-[13px] text-[var(--fg-mute)]">
+      {post.data.category && (
+        <div>
+          Filed under
+          <a class="text-[var(--fg-dim)] no-underline" href="/blog">
+            {post.data.category}
+          </a>
+        </div>
+      )}
+
+      <div class="flex gap-2 items-center">
+        <button class="share-btn" data-share="copy-url">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 9a2 2 0 0 0 3 0l3-3a2 2 0 0 0-3-3L9 4"/><path d="M9 7a2 2 0 0 0-3 0l-3 3a2 2 0 0 0 3 3l1-1"/></svg>
+          Copy link
+        </button>
+
+        <a class="share-btn" href={bskyShareUrl} rel="noopener" target="_blank">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2C2 3 1 5 1 7c0 3 2 5 3 5l3-3 3 3c1 0 3-2 3-5 0-2-1-4-3-5-1 0-3 1-3 3-0-2-2-3-3-3z"/></svg>
+          Share on BlueSky
+        </a>
+      </div>
+    </div>
+
+  </article>
+</BlogLayout>

@@ -66,13 +66,20 @@ impl TryFrom<ImmediateStrategy> for Option<ReleaseStrategy> {
     }
 }
 
+/// Bump the active workspace version
+///
+/// By default this command applies the version bump immediately, unless `preferDeferredVersions` is enabled. Use `-i,--immediate` to force an
+/// immediate bump even when deferred versions are preferred.
+///
 #[cli::command]
 #[cli::path("version")]
 #[cli::category("Project management")]
 pub struct Version {
+    /// Apply the version bump immediately
     #[cli::option("-i,--immediate", default = false)]
     immediate: bool,
 
+    /// Version bump strategy, exact version, or `decline`
     version_bump: ImmediateStrategy,
 }
 

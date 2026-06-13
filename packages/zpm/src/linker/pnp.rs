@@ -138,7 +138,8 @@ struct PnpDependencyTreeRoot {
 #[serde(rename_all = "camelCase")]
 struct PnpState {
     enable_top_level_fallback: bool,
-    fallback_pool: Vec<()>,
+    #[serde_as(as = "Vec<(_, _)>")]
+    fallback_pool: BTreeMap<Ident, PnpReference>,
 
     #[serde_as(as = "Vec<(_, _)>")]
     fallback_exclusion_list: BTreeMap<Ident, BTreeSet<PnpReference>>,
@@ -515,7 +516,19 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
     let mut fallback_exclusion_list: BTreeMap<Ident, BTreeSet<PnpReference>>
         = BTreeMap::new();
 
-    let fallback_pool = vec![];
+    let mut fallback_pool
+        = BTreeMap::new();
+
+    if project.config.settings.pnp_fallback_mode.value != PnpFallbackMode::None {
+        for locator in tree.locator_resolutions.keys() {
+            if let Reference::WorkspaceIdent(_) = locator.physical_locator().reference {
+                continue;
+            }
+
+            fallback_pool.entry(locator.ident.clone())
+                .or_insert_with(|| PnpReference(locator.clone()));
+        }
+    }
 
     if project.config.settings.pnp_fallback_mode.value == PnpFallbackMode::DependenciesOnly {
         for locator in tree.locator_resolutions.keys() {

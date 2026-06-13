@@ -1,0 +1,30 @@
+/* Only rules that Tailwind can't express */
+
+@keyframes searchIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Scrollbar */
+.search-results-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.search-results-scroll::-webkit-scrollbar { width: 8px; }
+.search-results-scroll::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
+
+/* Algolia highlight marks */
+.search-result-row mark {
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
+/* Line-clamp snippet (needs -webkit prefixes) */
+.search-snippet-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

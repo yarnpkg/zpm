@@ -1,0 +1,49 @@
+{
+  "topbar": [
+    { "label": "Install", "key": "install", "href": "/getting-started/" },
+    { "label": "Concepts", "key": "concepts", "href": "/concepts/switch/" },
+    { "label": "Reference", "key": "reference", "href": "/configuration/manifest/" },
+    { "label": "Extra", "key": "extra", "href": "/appendix/workspaces-and-peer-deps/" },
+    { "label": "Benchmarks", "key": "benchmarks", "href": "/benchmarks/" },
+    { "label": "Quiz", "key": "quiz", "href": "/quiz/" },
+    { "label": "Blog", "key": "blog", "href": "/blog" }
+  ],
+  "categoryToSidebar": {
+    "getting-started": "getting-started",
+    "concepts": "concepts",
+    "appendix": "extra",
+    "appendixes": "extra",
+    "contributing": "extra",
+    "advanced": "advanced",
+    "protocols": "reference",
+    "reference": "reference"
+  },
+  "sidebars": {
+    "getting-started": { "sections": ["getting-started"] },
+    "concepts": { "sections": ["concepts"] },
+    "advanced": { "sections": ["advanced"] },
+    "appendix": { "sections": ["appendix"] },
+    "contributing": { "sections": ["contributing"] },
+    "extra": { "sections": ["appendix", "contributing"] },
+    "reference": {
+      "links": [
+        { "label": "Manifest — package.json", "href": "/configuration/manifest/", "page": "manifest" },
+        { "label": "Settings — .yarnrc.yml", "href": "/configuration/yarnrc/", "page": "yarnrc" },
+        { "label": "Yarn CLI", "href": "/cli/install/" },
+        { "label": "Yarn Switch CLI", "href": "/switch/switch/" },
+        { "label": "Protocols", "href": "/protocol/npm/", "pagePrefix": "protocol/" }
+      ],
+      "protocols": [
+        { "label": "exec:", "href": "/protocol/exec/", "page": "protocol/exec" },
+        { "label": "file:", "href": "/protocol/file/", "page": "protocol/file" },
+        { "label": "git:", "href": "/protocol/git/", "page": "protocol/git" },
+        { "label": "jsr:", "href": "/protocol/jsr/", "page": "protocol/jsr" },
+        { "label": "link:", "href": "/protocol/link/", "page": "protocol/link" },
+        { "label": "npm:", "href": "/protocol/npm/", "page": "protocol/npm" },
+        { "label": "patch:", "href": "/protocol/patch/", "page": "protocol/patch" },
+        { "label": "portal:", "href": "/protocol/portal/", "page": "protocol/portal" },
+        { "label": "workspace:", "href": "/protocol/workspace/", "page": "protocol/workspace" }
+      ]
+    }
+  }
+}

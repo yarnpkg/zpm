@@ -9,19 +9,18 @@ use crate::{
     cache::CompositeCache, error::Error, install::InstallState, project::{Project, Workspace}
 };
 
-/// See information related to packages
+/// Inspect packages in the project dependency tree
 ///
-/// This command prints various information related to the specified packages, accepting glob patterns.
+/// This command prints information about packages matching the specified patterns.
 ///
-/// By default, if the locator reference is missing, Yarn will default to print the information about all the matching direct dependencies of the
-/// package for the active workspace. To instead print all versions of the package that are direct dependencies of any of your workspaces, use the
-/// `-A,--all` flag. Adding the `-R,--recursive` flag will also report transitive dependencies.
+/// By default, if the locator reference is missing, Yarn prints information about matching direct dependencies of the package for the active
+/// workspace. To instead print all versions of the package that are direct dependencies of any workspace, use the `-A,--all` flag. Add
+/// `-R,--recursive` to also report transitive dependencies.
 ///
 /// Some fields will be hidden by default in order to keep the output readable, but can be selectively displayed by using additional options
 /// (`--dependents`, `--manifest`, `--virtuals`, ...) described in the option descriptions.
 ///
-/// Note that this command will only print the information directly related to the selected packages - if you wish to know why the package is there
-/// in the first place, use yarn why which will do just that (it also provides a -R,--recursive flag that may be of some help).
+/// This command only prints information directly related to selected packages. To understand why a package is installed, use `yarn why`.
 ///
 #[cli::command]
 #[cli::path("info")]
@@ -29,7 +28,7 @@ use crate::{
 #[cli::usage(r#"
 This command prints various information related to the specified packages, accepting glob patterns.
 
-By default, if the locator reference is missing, Yarn will default to print the information about all the matching direct dependencies of the package for the active workspace. To instead print all versions of the package that are direct dependencies of any of your workspaces, use the `-A,--all` flag. Adding the `-R,--recursive` flag will also report transitive dependencies.
+By default, if the locator reference is missing, Yarn prints information about matching direct dependencies of the package for the active workspace. To instead print all versions of the package that are direct dependencies of any workspace, use the `-A,--all` flag. Add `-R,--recursive` to also report transitive dependencies.
 
 Some fields will be hidden by default in order to keep the output readable, but can be selectively displayed by using additional options (`--dependents`, `--manifest`, `--virtuals`, ...) described in the option descriptions.
 
@@ -44,7 +43,7 @@ pub struct Info {
     #[cli::option("-R,--recursive", default = false)]
     recursive: bool,
 
-    /// An array of requests of extra data provided by plugins
+    /// Extra data sections to include
     #[cli::option("-X,--extra", default = Vec::new())]
     extra: Vec<String>,
 
@@ -72,7 +71,7 @@ pub struct Info {
     #[cli::option("--json", default = false)]
     json: bool,
 
-    /// The patterns to match
+    /// Package patterns to match
     patterns: Vec<ReferenceFilter>,
 }
 

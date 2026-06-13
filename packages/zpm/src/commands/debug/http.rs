@@ -2,9 +2,15 @@ use clipanion::cli;
 
 use crate::{error::Error, project::Project, report::{with_report_result, StreamReport, StreamReportConfig}};
 
+/// Fetch a URL through Yarn's HTTP client
+///
+/// This debug command performs a GET request after preparing the project environment, which makes it useful for testing registry and network
+/// configuration.
+///
 #[cli::command]
 #[cli::path("debug", "http")]
 pub struct Http {
+    /// URL to request
     url: String,
 }
 

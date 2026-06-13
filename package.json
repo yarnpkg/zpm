@@ -8,6 +8,7 @@
   },
   "workspaces": [
     "documentation",
+    "website",
     "packages/*",
     "tests/acceptance-tests",
     "tests/acceptance-tests/pkg-tests-core",
@@ -30,7 +31,7 @@
     "url": "git+https://github.com/yarnpkg/zpm.git"
   },
   "dependencies": {
-    "@yarnpkg/eslint-config": "^3.1.0",
+    "@yarnpkg/eslint-config": "^3.1.1",
     "clipanion": "^4.0.0-rc.4",
     "eslint": "^9.36.0"
   },

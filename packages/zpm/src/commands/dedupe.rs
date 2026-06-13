@@ -28,12 +28,12 @@ impl FromStr for DedupeStrategy {
     }
 }
 
-/// Run a shell command in the package environment
+/// Deduplicate dependencies with overlapping ranges
 ///
 /// Duplicates are defined as descriptors with overlapping ranges being resolved and locked to different locators. They are a natural consequence of
 /// Yarn's deterministic installs, but they can sometimes pile up and unnecessarily increase the size of your project.
 ///
-/// This command dedupes dependencies in the current project using different strategies (only one is implemented at the moment):
+/// This command deduplicates dependencies in the current project using different strategies. Only one strategy is currently implemented:
 ///
 /// - `highest`: Reuses (where possible) the locators with the highest versions. This means that dependencies can only be upgraded, never downgraded.
 /// It's also guaranteed that it never takes more than a single pass to dedupe the entire dependency tree.
@@ -42,8 +42,8 @@ impl FromStr for DedupeStrategy {
 /// can sometimes cause problems when packages don't strictly follow semver recommendations. Because of this, it is recommended to also review the
 /// changes manually.
 ///
-/// If set, the `-c,--check` flag will only report the found duplicates, without persisting the modified dependency tree. If changes are found, the
-/// command will exit with a non-zero exit code, making it suitable for CI purposes.
+/// If `--check` is set, Yarn only reports duplicates and leaves the lockfile unchanged. If duplicates are found, the command exits with a non-zero
+/// exit code, making it suitable for CI.
 ///
 /// If the `--mode=<mode>` option is set, Yarn will change which artifacts are generated. The modes currently supported are:
 ///
@@ -61,23 +61,23 @@ impl FromStr for DedupeStrategy {
 #[cli::path("dedupe")]
 #[cli::category("Scripting commands")]
 pub struct Dedupe {
-    /// Return with a non-zero exit code if duplicates are found instead of fixing them
+    /// Report duplicates without modifying the lockfile
     #[cli::option("--check", default = false)]
     check: bool,
 
-    /// Select the artifacts this install will generate
+    /// Select which install artifacts Yarn should generate after deduping
     #[cli::option("--mode")]
     mode: Option<InstallMode>,
 
-    /// Format the output as a NDJSON stream
+    /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
     json: bool,
 
-    /// The strategy to use when deduping dependencies
+    /// The deduplication strategy to use
     #[cli::option("--strategy", default = DedupeStrategy::Highest)]
     strategy: DedupeStrategy,
 
-    /// An optional list of patterns to dedupe
+    /// Package name patterns to deduplicate
     patterns: Vec<IdentGlob>,
 }
 

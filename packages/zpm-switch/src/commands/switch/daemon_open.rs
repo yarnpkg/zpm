@@ -16,11 +16,17 @@ use crate::{
     yarn_enums::ReleaseLine,
 };
 
+/// Start or print the daemon endpoint for the current project
+///
+/// This command starts the selected Yarn daemon when needed and prints its WebSocket URL. `--open` is intended for machine callers that only need
+/// the endpoint, while `--start` also allows human-readable status output.
+///
 #[cli::command]
 #[cli::path("switch", "daemon")]
 #[cli::category("Daemon management")]
 #[derive(Debug)]
 pub struct DaemonOpenCommand {
+    /// Start the daemon or print an existing daemon endpoint
     #[cli::option("--open,--start")]
     open: bool,
 }
@@ -32,6 +38,11 @@ impl DaemonOpenCommand {
             cli_path: vec!["switch".to_string(), "daemon".to_string()],
             open: false,
         }
+    }
+
+    fn is_machine_open(&self) -> bool {
+        self.cli_environment.argv.iter().any(|arg| arg == "--open")
+            && !self.cli_environment.argv.iter().any(|arg| arg == "--start")
     }
 
     pub async fn execute(&self) -> Result<(), Error> {
@@ -52,8 +63,10 @@ impl DaemonOpenCommand {
                 if self.check_daemon_ready(existing.port, token).await.is_ok() {
                     // The first line must remain the WS URL.
                     println!("{}", build_ws_url(existing.port, token));
-                    println!("Daemon already running for project {}", detected_root.to_file_string());
-                    println!("PID: {}", existing.pid);
+                    if !self.is_machine_open() {
+                        println!("Daemon already running for project {}", detected_root.to_file_string());
+                        println!("PID: {}", existing.pid);
+                    }
                     return Ok(());
                 }
 
@@ -155,8 +168,10 @@ impl DaemonOpenCommand {
         // The first line must remain the WS URL (yarn-bin reads it back to
         // know where to send IPC requests).
         println!("{}", build_ws_url(port, Some(&auth_token)));
-        println!("Started daemon for project {}", detected_root.to_file_string());
-        println!("PID: {}", pid);
+        if !self.is_machine_open() {
+            println!("Started daemon for project {}", detected_root.to_file_string());
+            println!("PID: {}", pid);
+        }
 
         Ok(())
     }
@@ -230,6 +245,8 @@ impl DaemonOpenCommand {
 
 }
 
+/// Send a raw JSON request to the current project daemon
+///
 #[cli::command]
 #[cli::path("switch", "daemon")]
 #[cli::category("Daemon management")]

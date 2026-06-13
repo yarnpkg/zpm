@@ -1,0 +1,17 @@
+---
+import { getCollection } from 'astro:content';
+import DocsSidebar from './DocsSidebar.astro';
+import { buildSidebarGroups } from './sidebar';
+
+interface Props {
+  sections: string[];
+  activePage: string;
+}
+
+const { sections, activePage } = Astro.props;
+
+const allDocs = await getCollection(`docs`);
+const groups = sections.flatMap(section => buildSidebarGroups(allDocs, section, activePage));
+---
+
+<DocsSidebar groups={groups} />

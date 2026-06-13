@@ -2,11 +2,12 @@ use clipanion::{cli, prelude::CommandProvider};
 
 use crate::commands::SwitchExecCli;
 
-/// Print the version of the current Yarn Switch binary
+/// Print the registered Yarn Switch command metadata
 #[cli::command]
 #[cli::path("switch")]
 #[cli::category("Switch commands")]
 pub struct ClipanionCommandsCommand {
+    /// Output command metadata as JSON
     #[cli::option("--clipanion-commands")]
     _clipanion_commands: bool,
 }

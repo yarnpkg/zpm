@@ -138,11 +138,16 @@ async fn proxy_completer_async(ctx: &CompletionContext<'_>) -> Vec<Completion> {
     }).collect()
 }
 
-/// Call the suitable Yarn binary for the current project
+/// Run the Yarn version selected for the current project
+///
+/// Yarn Switch resolves the nearest `packageManager` field, applies any local development link or migration link, installs the selected Yarn binary
+/// if needed, then forwards the command to it.
+///
 #[cli::command(default, proxy)]
 #[cli::category("General commands")]
 #[derive(Debug)]
 pub struct ProxyCommand {
+    /// Yarn command and arguments to forward
     #[cli::positional(completer = proxy_completer)]
     args: Vec<String>,
 }

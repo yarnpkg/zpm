@@ -1,0 +1,19 @@
+---
+import SlideChrome from './SlideChrome.astro';
+
+interface Props {
+  label?: string;
+  bottomLeft?: string;
+  bottomRight?: string;
+}
+
+const { label = `Closing`, bottomLeft, bottomRight } = Astro.props;
+---
+
+<section class="slide relative w-[1920px] h-[1080px] overflow-hidden text-[var(--fg)] font-['Space_Grotesk',system-ui,sans-serif] bg-transparent! flex flex-col px-[88px] py-[56px]" data-screen-label={label}>
+  <SlideChrome tag="// fin" bottomLeft={bottomLeft} bottomRight={bottomRight}>
+    <div class="flex-1 flex flex-col justify-center">
+      <slot />
+    </div>
+  </SlideChrome>
+</section>

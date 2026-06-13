@@ -3,12 +3,15 @@ use zpm_utils::tree;
 
 use crate::{error::Error, linker::nm::hoist::{self, Hoister, WorkTree}, project};
 
+/// Print the node_modules hoisting tree
 #[cli::command]
 #[cli::path("debug", "print-hoisting")]
 pub struct PrintHoisting {
+    /// Print hoister debug logs
     #[cli::option("-v,--verbose", default = false)]
     verbose: bool,
 
+    /// Format the hoisting tree as JSON
     #[cli::option("-j,--json", default = false)]
     json: bool,
 }

@@ -8,7 +8,7 @@ use zpm_parsers::{JsonDocument, RawJsonOwnedValue};
 use zpm_utils::{DataType, IoResultExt, Provider, Sha1, Sha512, ToFileString, ToHumanString, is_ci};
 
 use crate::{
-    error::Error, http::HttpClient, http_npm::{self, AuthorizationMode, GetIdTokenOptions, NpmHttpParams}, npm, pack::{PackOptions, pack_workspace}, project::Project, provenance::attest, script::ScriptEnvironment
+    error::Error, http::HttpClient, http_npm::{self, AuthorizationMode, GetIdTokenOptions, NpmHttpParams}, manifest::ManifestNpmPublishAccess, npm, pack::{PackOptions, pack_workspace}, project::Project, provenance::attest, report::{with_report_result, StreamReport, StreamReportConfig}, script::ScriptEnvironment
 };
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidNpmPublishAccess(s.to_string())))]
@@ -22,41 +22,48 @@ enum NpmPublishAccess {
     Restricted,
 }
 
-/// Print the username associated with the current authentication settings to the standard output.
+/// Publish the active workspace to an npm registry.
 ///
-/// When using `-s,--scope`, the username printed will be the one that matches the authentication settings of the registry associated with the given scope (those settings can be overriden using the `npmRegistries` map, and the registry associated with the scope is configured via the `npmScopes` map).
+/// This command packs the active workspace and uploads it to the registry selected for publishing. The registry is resolved from
+/// `publishConfig.registry` when present, then from `npmPublishRegistry`, then from the regular npm registry configuration.
 ///
-/// When using `--publish`, the registry we'll select will by default be the one used when publishing packages (`publishConfig.registry` or `npmPublishRegistry` if available, otherwise we'll fallback to the regular `npmRegistryServer`).
+/// The published package must have both a `name` and a `version`, and workspaces marked as `private: true` cannot be published.
+///
+/// The publish access is selected in order of precedence: the `--access` option, then `publishConfig.access`, then the
+/// `npmPublishAccess` configuration setting. The supported values are `public` and `restricted`.
+///
+/// By default, attempting to publish a version that already exists on the registry is an error. Use `--tolerate-republish` to check first and skip
+/// the upload when the same version is already known by the registry.
 ///
 #[cli::command]
 #[cli::path("npm", "publish")]
 #[cli::category("Npm-related commands")]
 pub struct Publish {
-    /// The access for the published package (public or restricted)
+    /// Access level for the published package (`public` or `restricted`)
     #[cli::option("-a,--access")]
     access: Option<NpmPublishAccess>,
 
-    /// The tag on the registry that the package should be attached to
+    /// Dist-tag to attach to the published version
     #[cli::option("--tag", default = "latest".to_string())]
     tag: String,
 
-    /// Warn and exit when republishing an already existing version of a package
+    /// Skip the upload if the registry already contains this version
     #[cli::option("--tolerate-republish", default = false)]
     tolerate_republish: bool,
 
-    /// The OTP token to use with the command
+    /// One-time password to use when the registry requires two-factor authentication
     #[cli::option("--otp")]
     otp: Option<String>,
 
-    /// Generate provenance for the package
+    /// Generate and upload a provenance statement for the package
     #[cli::option("--provenance", default = false)]
     provenance: bool,
 
-    /// Show what would be published without actually publishing
+    /// Print what would be published without uploading anything
     #[cli::option("--dry-run", default = false)]
     dry_run: bool,
 
-    /// Output the result in JSON format
+    /// Output the result as JSON
     #[cli::option("--json", default = false)]
     json: bool,
 }
@@ -66,6 +73,19 @@ impl Publish {
         let mut project
             = Project::new(None).await?;
 
+        let report = StreamReport::new(StreamReportConfig {
+            json: self.json,
+            ..StreamReportConfig::from_config(&project.config)
+        });
+
+        with_report_result(report, async {
+            self.execute_with_project(&mut project).await
+        }).await?;
+
+        Ok(())
+    }
+
+    async fn execute_with_project(&self, project: &mut Project) -> Result<(), Error> {
         let published_workspace
             = project.active_workspace()?;
 
@@ -77,7 +97,7 @@ impl Publish {
             = published_workspace.locator();
 
         let pack_result
-            = pack_workspace(&mut project, &published_workspace_locator, &PackOptions {
+            = pack_workspace(project, &published_workspace_locator, &PackOptions {
                 preserve_workspaces: false,
             }).await?;
 
@@ -89,7 +109,18 @@ impl Publish {
         };
 
         let registry_base
-            = http_npm::get_registry(&project.config, ident.scope(), true)?;
+            = match pack_result.pack_manifest.publish_config.registry.as_deref() {
+                Some(registry) => registry.strip_suffix('/').unwrap_or(registry).to_string(),
+                None => http_npm::get_registry(&project.config, ident.scope(), true)?.to_string(),
+            };
+        let manifest_access
+            = pack_result.pack_manifest.publish_config.access.map(NpmPublishAccess::from);
+        let configured_access
+            = project.config.settings.npm_publish_access.value.map(NpmPublishAccess::from);
+        let publish_access
+            = self.access.as_ref()
+                .or(manifest_access.as_ref())
+                .or(configured_access.as_ref());
 
         if self.tolerate_republish {
             let check_url
@@ -99,7 +130,7 @@ impl Publish {
                 = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
                     configuration: &project.config,
                     http_client: &project.http_client,
-                    registry: &registry_base,
+                    registry: registry_base.as_str(),
                     ident: Some(ident),
                     auth_mode: AuthorizationMode::RespectConfiguration,
                     allow_oidc: true,
@@ -107,7 +138,7 @@ impl Publish {
 
             let check_result = http_npm::get(&NpmHttpParams {
                 http_client: &project.http_client,
-                registry: &registry_base,
+                registry: registry_base.as_str(),
                 path: &check_url,
                 authorization: authorization.as_deref(),
                 otp: self.otp.as_ref().map(|s| s.as_str()),
@@ -132,7 +163,7 @@ impl Publish {
                         let output = SkippedPublishOutput {
                             name: ident,
                             version: version,
-                            registry: &registry_base,
+                            registry: registry_base.as_str(),
                             warning: warning.clone(),
                             skipped: true,
                         };
@@ -210,7 +241,7 @@ impl Publish {
         let tarball_path
             = npm::registry_url_for_package_data(&ident, &version);
         let tarball_url
-            = format!("{}{}", project.config.settings.npm_registry_server.value, tarball_path);
+            = format!("{}{}", registry_base, tarball_path);
 
         let version_string
             = version.to_file_string();
@@ -253,7 +284,7 @@ impl Publish {
             id: ident,
             attachments: attachments,
             name: ident,
-            access: self.access.as_ref(),
+            access: publish_access,
             dist_tags: dist_tags,
             versions: versions,
             readme: readme,
@@ -270,7 +301,7 @@ impl Publish {
                 = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
                     configuration: &project.config,
                     http_client: &project.http_client,
-                    registry: &registry_base,
+                    registry: registry_base.as_str(),
                     ident: Some(ident),
                     auth_mode: AuthorizationMode::AlwaysAuthenticate,
                     allow_oidc: true,
@@ -278,7 +309,7 @@ impl Publish {
 
             http_npm::put(&NpmHttpParams {
                 http_client: &project.http_client,
-                registry: &registry_base,
+                registry: registry_base.as_str(),
                 path: &registry_url,
                 authorization: authorization.as_deref(),
                 otp: self.otp.as_ref().map(|s| s.as_str()),
@@ -286,9 +317,9 @@ impl Publish {
         }
 
         let message = if self.dry_run {
-            format!("Package would be published to {} with tag {}", DataType::Url.colorize(registry_base), DataType::Code.colorize(&self.tag))
+            format!("Package would be published to {} with tag {}", DataType::Url.colorize(registry_base.as_str()), DataType::Code.colorize(&self.tag))
         } else {
-            format!("Published package to {} with tag {}", DataType::Url.colorize(registry_base), DataType::Code.colorize(&self.tag))
+            format!("Published package to {} with tag {}", DataType::Url.colorize(registry_base.as_str()), DataType::Code.colorize(&self.tag))
         };
 
         if self.json {
@@ -310,10 +341,10 @@ impl Publish {
             let output = PublishOutput {
                 name: ident,
                 version: version,
-                registry: &registry_base,
+                registry: registry_base.as_str(),
                 tag: &self.tag,
                 files: pack_result.pack_list.iter().map(|p| p.to_file_string()).collect(),
-                access: self.access.as_ref(),
+                access: publish_access,
                 dry_run: self.dry_run,
                 published: !self.dry_run,
                 message: message.clone(),
@@ -326,6 +357,24 @@ impl Publish {
         }
 
         Ok(())
+    }
+}
+
+impl From<zpm_config::NpmPublishAccess> for NpmPublishAccess {
+    fn from(value: zpm_config::NpmPublishAccess) -> Self {
+        match value {
+            zpm_config::NpmPublishAccess::Public => NpmPublishAccess::Public,
+            zpm_config::NpmPublishAccess::Restricted => NpmPublishAccess::Restricted,
+        }
+    }
+}
+
+impl From<ManifestNpmPublishAccess> for NpmPublishAccess {
+    fn from(value: ManifestNpmPublishAccess) -> Self {
+        match value {
+            ManifestNpmPublishAccess::Public => NpmPublishAccess::Public,
+            ManifestNpmPublishAccess::Restricted => NpmPublishAccess::Restricted,
+        }
     }
 }
 

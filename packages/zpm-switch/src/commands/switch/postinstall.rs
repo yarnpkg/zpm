@@ -18,10 +18,15 @@ struct ShellProfile {
     env_line: String,
 }
 
+/// Finish installing Yarn Switch
+///
+/// This command updates shell profile files so the installed Yarn Switch binary is available on `PATH`.
+///
 #[cli::command]
 #[cli::path("switch", "postinstall")]
 #[derive(Debug)]
 pub struct PostinstallCommand {
+    /// Home directory whose shell profile files should be updated
     #[cli::option("-H,--home-dir")]
     home_dir: Option<Path>,
 }

@@ -5,9 +5,14 @@ use zpm_utils::{Path, ToFileString};
 
 use crate::{error::Error};
 
+/// Profile a Yarn command with samply
+///
+/// This debug command runs the current Yarn binary under `samply record` and forwards all provided arguments to Yarn.
+///
 #[cli::command(proxy)]
 #[cli::path("debug", "flamegraph")]
 pub struct Flamegraph {
+    /// Yarn command and arguments to profile
     args: Vec<String>,
 }
 

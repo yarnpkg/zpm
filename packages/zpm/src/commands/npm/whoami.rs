@@ -10,21 +10,21 @@ use crate::{
     project::Project,
 };
 
-/// Print the username associated with the current authentication settings to the standard output.
+/// Print the npm username for the current authentication settings.
 ///
-/// When using `-s,--scope`, the username printed will be the one that matches the authentication settings of the registry associated with the given scope (those settings can be overriden using the `npmRegistries` map, and the registry associated with the scope is configured via the `npmScopes` map).
+/// With `-s,--scope`, Yarn checks the registry and credentials configured for that scope.
 ///
-/// When using `--publish`, the registry we'll select will by default be the one used when publishing packages (`publishConfig.registry` or `npmPublishRegistry` if available, otherwise we'll fallback to the regular `npmRegistryServer`).
+/// With `--publish`, Yarn checks the publish registry configured through `npmPublishRegistry` or the regular npm registry fallback.
 ///
 #[cli::command]
 #[cli::path("npm", "whoami")]
 #[cli::category("Npm-related commands")]
 pub struct Whoami {
-    /// Get the username for a given scope
+    /// Query credentials for the registry configured for this scope
     #[cli::option("-s,--scope")]
     scope: Option<String>,
 
-    /// Get the username for the publish registry
+    /// Query credentials for the publish registry
     #[cli::option("--publish", default = false)]
     publish: bool,
 }

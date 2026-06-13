@@ -3,12 +3,16 @@ use zpm_utils::{DataType, ToHumanString};
 
 use crate::{cwd::get_final_cwd, errors::Error, links::{Link, LinkTarget, set_link}, manifest::find_closest_package_manager};
 
-/// Opt-in to a Yarn migration
+/// Link the project to its migration Yarn version
+///
+/// This command makes Yarn Switch run the version declared by `packageManagerMigration` for the current project.
+///
 #[cli::command]
 #[cli::path("switch", "link")]
 #[cli::category("Local Yarn development")]
 #[derive(Debug)]
 pub struct LinkMigrationCommand {
+    /// Use the project's `packageManagerMigration` version
     #[cli::option("--migration")]
     _migration: bool,
 }

@@ -2,15 +2,21 @@ use clipanion::cli;
 
 use crate::{cwd::get_final_cwd, errors::Error, install::install_package_manager, manifest::{find_closest_package_manager, PackageManagerReference, VersionPackageManagerReference}};
 
-/// Install the current project's Yarn version, or specific Yarn releases
+/// Install Yarn binaries into the Switch cache
+///
+/// With explicit versions, this command installs those Yarn releases into the local Switch cache. Without versions, it installs the Yarn version
+/// selected by the current project.
+///
 #[cli::command]
 #[cli::path("switch", "cache")]
 #[cli::category("Cache management")]
 #[derive(Debug)]
 pub struct CacheInstallCommand {
+    /// Install the requested Yarn versions into the cache
     #[cli::option("-i,--install")]
     _install: bool,
 
+    /// Yarn versions to install; defaults to the current project's configured version
     versions: Vec<zpm_semver::Version>,
 }
 

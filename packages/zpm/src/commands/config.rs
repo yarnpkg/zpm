@@ -4,17 +4,20 @@ use zpm_utils::set_redacted;
 
 use crate::{error::Error, project::Project};
 
-/// List the project's configuration values
+/// List the effective configuration values
+///
+/// This command prints the configuration visible from the current project, including each setting's resolved value and source. Secrets are redacted
+/// by default; use `--no-redacted` only when you need to inspect the stored value.
 #[cli::command]
 #[cli::path("config")]
 #[cli::path("config", "get")]
 #[cli::category("Configuration commands")]
 pub struct Config {
-    /// Format the output as a NDJSON stream
+    /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
     json: bool,
 
-    /// Show secrets instead of redacting them
+    /// Show sensitive values instead of redacting them
     #[cli::option("--no-redacted")]
     no_redacted: Option<bool>,
 }
