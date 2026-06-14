@@ -88,7 +88,10 @@ pub enum Error {
     ChecksumMismatch(Locator),
 
     #[error("The lockfile would have been created by this install, which is explicitly forbidden.")]
-    ImmutableLockfile,
+    ImmutableLockfileCreation,
+
+    #[error("The lockfile would have been modified by this install, which is explicitly forbidden.")]
+    ImmutableLockfileModification,
 
     #[error("Cannot autofix a lockfile when running an immutable install.")]
     ImmutableLockfileAutofix,

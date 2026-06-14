@@ -4843,6 +4843,7 @@ dependencies = [
  "serde_yaml",
  "sha1",
  "sha2",
+ "similar",
  "smallvec",
  "spki",
  "thiserror 2.0.18",

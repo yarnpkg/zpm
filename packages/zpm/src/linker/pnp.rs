@@ -398,13 +398,9 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
             continue;
         }
 
-        if let Some(build_commands) = package_build_info.build_commands {
-            let build_cwd = match is_physically_on_disk {
-                true => {
-                    package_location_rel.clone()
-                },
-
-                false => {
+        if !package_build_info.build_step.is_noop() {
+            let build_cwd = match &package_build_info.build_step {
+                build::BuildStep::Commands(_) if !is_physically_on_disk => {
                     let build_dir_base
                         = Path::temp_dir_pattern("zpm-<>")?;
 
@@ -417,6 +413,10 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
 
                     build_dir.relative_to(&project.project_cwd)
                 },
+
+                _ => {
+                    package_location_rel.clone()
+                },
             };
 
             package_build_entries.insert(
@@ -427,7 +427,7 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
             all_build_entries.push(build::BuildRequest {
                 cwd: build_cwd,
                 locator: locator.clone(),
-                commands: build_commands,
+                build_step: package_build_info.build_step,
                 allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
                 force_rebuild: is_freshly_unplugged,
                 inline_builds: install.inline_builds,

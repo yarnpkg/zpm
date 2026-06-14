@@ -30,6 +30,24 @@ pub enum Command {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BuildSkip {
+    Disabled,
+    Incompatible,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BuildStep {
+    Skip(BuildSkip),
+    Commands(Vec<Command>),
+}
+
+impl BuildStep {
+    pub fn is_noop(&self) -> bool {
+        matches!(self, Self::Commands(commands) if commands.is_empty())
+    }
+}
+
 pub struct ArtifactFinder;
 
 impl DiffController for ArtifactFinder {
@@ -52,14 +70,37 @@ impl DiffController for ArtifactFinder {
 pub struct BuildRequest {
     pub cwd: Path,
     pub locator: Locator,
-    pub commands: Vec<Command>,
+    pub build_step: BuildStep,
     pub allowed_to_fail: bool,
     pub force_rebuild: bool,
     pub inline_builds: bool,
 }
 
 impl BuildRequest {
+    fn persists_build_state(&self) -> bool {
+        matches!(self.build_step, BuildStep::Commands(_) | BuildStep::Skip(BuildSkip::Disabled))
+    }
+
     pub async fn run(self, project: &Project, hash: Hash64) -> Result<ScriptResult, Error> {
+        let commands = match self.build_step {
+            BuildStep::Skip(BuildSkip::Incompatible) => {
+                return Ok(ScriptResult::new_success());
+            },
+
+            BuildStep::Skip(BuildSkip::Disabled) => {
+                crate::report::if_active(|report| {
+                    report.warn(format!(
+                        "{} lists build scripts, but its build has been explicitly disabled through configuration.",
+                        self.locator.to_print_string(),
+                    ));
+                });
+
+                return Ok(ScriptResult::new_success());
+            },
+
+            BuildStep::Commands(commands) => commands,
+        };
+
         let cwd_abs = project.project_cwd
             .with_join(&self.cwd);
 
@@ -104,7 +145,7 @@ impl BuildRequest {
             let mut combined_stdout = Vec::<u8>::new();
             let mut combined_stderr = Vec::<u8>::new();
 
-            for command in self.commands.iter() {
+            for command in commands.iter() {
                 let script_result = match command {
                     Command::Program {name, args} => {
                         script_env.run_exec(name, args).await?
@@ -323,9 +364,11 @@ impl<'a> BuildManager<'a> {
                 emit_build_failure_warning(&request.locator);
             }
         } else {
-            self.build_state_out.entries.entry(request.locator.clone())
-                .or_insert_with(BTreeMap::new)
-                .insert(request.cwd.clone(), hash);
+            if request.persists_build_state() {
+                self.build_state_out.entries.entry(request.locator.clone())
+                    .or_insert_with(BTreeMap::new)
+                    .insert(request.cwd.clone(), hash);
+            }
 
             if let Some(dependents) = self.dependents.get_mut(&idx) {
                 for &dependent_idx in dependents.iter() {
@@ -355,7 +398,7 @@ impl<'a> BuildManager<'a> {
                 let tree_hash
                     = self.get_hash(project, &req.locator);
 
-                if !force_rebuild {
+                if req.persists_build_state() && !force_rebuild {
                     let existing_hash = build_state.entries
                         .get(&req.locator)
                         .and_then(|entries| entries.get(&req.cwd));
