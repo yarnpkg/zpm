@@ -477,9 +477,15 @@ impl Project {
             let diff
                 = render_lockfile_diff(current_content.clone(), contents.into_bytes());
 
+            if let Some(diff) = diff {
+                crate::report::if_active(|report| {
+                    report.add_log_format("Lockfile changes".to_string(), diff);
+                });
+            }
+
             return Err(match current_content {
-                Some(_) => Error::ImmutableLockfileModification { diff },
-                None => Error::ImmutableLockfileCreation { diff },
+                Some(_) => Error::ImmutableLockfileModification,
+                None => Error::ImmutableLockfileCreation,
             });
         } else {
             lockfile_path.fs_change(contents, false)?;

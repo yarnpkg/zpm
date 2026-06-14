@@ -12,13 +12,6 @@ fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
     }
 }
 
-fn format_lockfile_diff(diff: &Option<String>) -> String {
-    match diff {
-        Some(diff) if !diff.is_empty() => format!("\n\nLockfile changes:\n{}", diff),
-        _ => String::new(),
-    }
-}
-
 pub async fn set_timeout<F: Future>(timeout: std::time::Duration, f: F) -> Result<F::Output, Error> {
     let res = tokio::time::timeout(timeout, f).await
         .map_err(|_| Error::TaskTimeout)?;
@@ -94,11 +87,11 @@ pub enum Error {
     #[error("Checksum mismatch for {}", .0.to_print_string())]
     ChecksumMismatch(Locator),
 
-    #[error("The lockfile would have been created by this install, which is explicitly forbidden.{}", format_lockfile_diff(diff))]
-    ImmutableLockfileCreation { diff: Option<String> },
+    #[error("The lockfile would have been created by this install, which is explicitly forbidden.")]
+    ImmutableLockfileCreation,
 
-    #[error("The lockfile would have been modified by this install, which is explicitly forbidden.{}", format_lockfile_diff(diff))]
-    ImmutableLockfileModification { diff: Option<String> },
+    #[error("The lockfile would have been modified by this install, which is explicitly forbidden.")]
+    ImmutableLockfileModification,
 
     #[error("Cannot autofix a lockfile when running an immutable install.")]
     ImmutableLockfileAutofix,

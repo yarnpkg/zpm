@@ -121,7 +121,7 @@ describe(`Commands`, () => {
             FORCE_COLOR: `1`,
           },
         })).rejects.toMatchObject({
-          stdout: expect.stringMatching(/Lockfile changes:[\s\S]*\x1b\[[0-9;]*m[-+]/),
+          stdout: expect.stringMatching(/Lockfile changes[\s\S]*\x1b\[[0-9;]*m[-+]/),
         });
       }),
     );
