@@ -267,6 +267,16 @@
       "description": "The linker to use for node_modules",
       "default": "pnp"
     },
+    "nodeExperimentalPackageMap": {
+      "type": "boolean",
+      "description": "Whether to inject the generated Node.js package map into NODE_OPTIONS for node-modules and pnpm installs",
+      "default": false
+    },
+    "nodePackageMapType": {
+      "type": "crate::NodePackageMapType",
+      "description": "Whether generated package maps should reflect declared dependencies (standard) or the installed node_modules layout (loose)",
+      "default": "standard"
+    },
     "nmHoistingLimits": {
       "type": "crate::NmHoistingLimits",
       "description": "How far the node-modules linker is allowed to hoist a workspace's dependencies (none / workspaces / dependencies)",

@@ -420,6 +420,21 @@
         }
       ]
     },
+    "nodeExperimentalPackageMap": {
+      "_package": "@yarnpkg/plugin-pnp",
+      "title": "Define whether Yarn should enable Node.js package maps for installs that support them.",
+      "description": "If true, Yarn will inject Node.js' experimental `--experimental-package-map` option into `NODE_OPTIONS` when using `nodeLinker: node-modules` or `nodeLinker: pnpm` and a package map has been generated.",
+      "type": "boolean",
+      "default": false
+    },
+    "nodePackageMapType": {
+      "_package": "@yarnpkg/plugin-pnp",
+      "title": "Define how Yarn should generate Node.js package maps.",
+      "description": "Possible values are:\n\n- If `standard` (the default), package maps will reflect the dependency graph and reject undeclared dependencies.\n- If `loose`, package maps will reflect the hoisted node_modules layout and mimic Node.js resolution more closely.\n\nThis setting applies to both `nodeLinker: node-modules` and `nodeLinker: pnpm`.",
+      "type": "string",
+      "enum": ["standard", "loose"],
+      "default": "standard"
+    },
     "pnpmStoreFolder": {
       "_package": "@yarnpkg/plugin-pnpm",
       "title": "Path where the pnpm store will be stored",

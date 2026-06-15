@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use zpm_config::{IslandLinker, NodeLinker};
 use zpm_primitives::Locator;
-use zpm_utils::Path;
+use zpm_utils::{IoResultExt, Path};
 
 use crate::{
     build::BuildRequests,
@@ -13,6 +13,7 @@ use crate::{
 
 pub mod helpers;
 pub mod nm;
+pub mod package_map;
 pub mod pnpm;
 pub mod pnp;
 pub mod venv;
@@ -71,6 +72,12 @@ fn cleanup_inactive_linker_artifacts(project: &Project) -> Result<(), Error> {
                 path.fs_rm()?;
             }
         }
+    }
+
+    if active == NodeLinker::Pnp {
+        project.package_map_path()
+            .fs_rm()
+            .ok_missing()?;
     }
 
     Ok(())

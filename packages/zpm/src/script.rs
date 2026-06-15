@@ -16,6 +16,7 @@ use crate::{
 
 static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
 static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
+static PACKAGE_MAP_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r#"\s*--experimental-package-map(?:=|\s+)(?:"[^"]*"|'[^']*'|\S+)\s*"#).unwrap());
 static JS_EXTENSION: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
 type TrustPromptResultCache = BTreeMap<Path, bool>;
 
@@ -42,6 +43,14 @@ fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, modul
     format!(
         "import importlib, sys\nsys.path.insert(0, {package_path})\nmodule = importlib.import_module({module})\nentry = module\nfor part in {object}.split('.'):\n    entry = getattr(entry, part)\nsys.argv[0] = {binary_name}\nsys.exit(entry())"
     )
+}
+
+fn quote_path_if_needed(path: &str) -> String {
+    if path.chars().any(char::is_whitespace) {
+        serde_json::to_string(path).expect("expected valid path")
+    } else {
+        path.to_string()
+    }
 }
 
 fn make_executable_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &[String]) -> Result<(), Error> {
@@ -547,6 +556,14 @@ impl ScriptEnvironment {
             self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_file_string()));
         }
 
+        if project.config.settings.node_experimental_package_map.value
+            && project.config.settings.node_linker.value != zpm_config::NodeLinker::Pnp
+        {
+            if let Some(package_map_path) = project.package_map_path().if_exists() {
+                self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-package-map={}", quote_path_if_needed(&package_map_path.to_file_string())));
+            }
+        }
+
         self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
         self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
         self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_file_string()));
@@ -566,6 +583,7 @@ impl ScriptEnvironment {
 
         let updated = CJS_LOADER_MATCHER.replace_all(&current, " ");
         let updated = ESM_LOADER_MATCHER.replace_all(&updated, " ");
+        let updated = PACKAGE_MAP_MATCHER.replace_all(&updated, " ");
         let updated = updated.trim();
 
         if current != updated {

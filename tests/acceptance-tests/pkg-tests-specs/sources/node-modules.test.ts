@@ -2134,6 +2134,7 @@ describe(`Node Modules`, () => {
         await run(`install`);
 
         await expect(xfs.readdirPromise(ppath.join(path, Filename.nodeModules))).resolves.toEqual([
+          `.package-map.json`,
           `native`,
           `native-foo-x64`,
           `native-foo-x86`,

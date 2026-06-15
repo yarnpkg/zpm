@@ -33,6 +33,7 @@ pub const MANIFEST_NAME: &str = "package.json";
 pub const PNP_CJS_NAME: &str = ".pnp.cjs";
 pub const PNP_ESM_NAME: &str = ".pnp.loader.mjs";
 pub const PNP_DATA_NAME: &str = ".pnp.data.json";
+pub const PACKAGE_MAP_NAME: &str = ".package-map.json";
 const LOCKFILE_DIFF_LINE_LIMIT: usize = 100;
 const LOCKFILE_DIFF_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -285,6 +286,10 @@ impl Project {
 
     pub fn nm_path(&self) -> Path {
         self.project_cwd.with_join_str("node_modules")
+    }
+
+    pub fn package_map_path(&self) -> Path {
+        self.nm_path().with_join_str(PACKAGE_MAP_NAME)
     }
 
     pub fn ignore_path(&self) -> Path {

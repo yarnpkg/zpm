@@ -5,7 +5,7 @@ use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
 use zpm_utils::{FromFileString, IoResultExt, Path, ToHumanString};
 
 use crate::{
-    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}}, project::Project
+    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{NodeModulesPackageMapBuilder, persist_package_map}}, project::Project
 };
 
 pub mod hoist;
@@ -187,11 +187,15 @@ fn generate_workspace_node_modules(
     install: &Install,
     work_tree: &WorkTree,
     workspace_node_idx: usize,
+    package_map_builder: Option<&mut NodeModulesPackageMapBuilder>,
     packages_by_location: &mut BTreeMap<Path, zpm_primitives::Locator>,
     canonical_build_locations: &mut BTreeMap<Locator, Path>,
     force_rebuild_locators: &mut BTreeSet<Locator>,
     cas_extractions: &mut Vec<(Path, Locator)>,
 ) -> Result<(), Error> {
+    let mut package_map_builder
+        = package_map_builder;
+
     let hardlinks_mode = matches!(
         project.config.settings.nm_mode.value,
         zpm_config::NmMode::HardlinksLocal | zpm_config::NmMode::HardlinksGlobal,
@@ -212,6 +216,14 @@ fn generate_workspace_node_modules(
     let workspace_dir
         = project.project_cwd
             .with_join(&workspace.rel_path);
+
+    if let Some(package_map_builder) = package_map_builder.as_deref_mut() {
+        package_map_builder.register_package(
+            workspace_dir.clone(),
+            workspace_dir.clone(),
+            &workspace_node.locator,
+        );
+    }
 
     let workspace_abs_path
         = workspace_dir
@@ -315,6 +327,14 @@ fn generate_workspace_node_modules(
                     let child_abs_path
                         = workspace_abs_path.with_join(&child_rel_path);
 
+                    if let Some(package_map_builder) = package_map_builder.as_deref_mut() {
+                        package_map_builder.register_package(
+                            child_abs_path.clone(),
+                            package_directory.clone(),
+                            &child_node.locator,
+                        );
+                    }
+
                     let target_path
                         = package_directory.relative_to(&child_abs_path.dirname().unwrap());
 
@@ -328,6 +348,14 @@ fn generate_workspace_node_modules(
                 },
 
                 Some(PackageData::Zip {archive_path, package_directory, ..}) => {
+                    if let Some(package_map_builder) = package_map_builder.as_deref_mut() {
+                        package_map_builder.register_package(
+                            abs_path.clone(),
+                            abs_path.clone(),
+                            &child_node.locator,
+                        );
+                    }
+
                     // SyncTree re-extracts user-deleted destinations
                     // automatically; we just need to flag for rebuild
                     // so the build cache doesn't short-circuit.
@@ -372,6 +400,14 @@ fn generate_workspace_node_modules(
                     Reference::Link(params) if params.path.starts_with('/') => {
                         let target_path
                             = Path::from_file_string(&params.path)?;
+
+                        if let Some(package_map_builder) = package_map_builder.as_deref_mut() {
+                            package_map_builder.register_package(
+                                abs_path.clone(),
+                                target_path.clone(),
+                                &child_node.locator,
+                            );
+                        }
 
                         workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
                             target_path,
@@ -513,6 +549,7 @@ pub async fn link_island_nm(
             install,
             &work_tree,
             0,
+            None,
             &mut packages_by_location,
             &mut canonical_build_locations,
             &mut force_rebuild_locators,
@@ -772,6 +809,9 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
 
     check_external_portal_conflicts(project, install, &work_tree)?;
 
+    let mut package_map_builder
+        = NodeModulesPackageMapBuilder::new(project, install);
+
     let mut project_queue
         = vec![0usize];
 
@@ -781,6 +821,7 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
             install,
             &work_tree,
             workspace_node_idx,
+            Some(&mut package_map_builder),
             &mut packages_by_location,
             &mut canonical_build_locations,
             &mut force_rebuild_locators,
@@ -791,6 +832,8 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
     }
 
     run_cas_extractions(project, install, &cas_extractions)?;
+
+    persist_package_map(project, &package_map_builder.build()?)?;
 
     let dependencies_meta
         = linker::helpers::TopLevelConfiguration::from_project(project);
