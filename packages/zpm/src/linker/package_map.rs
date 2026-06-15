@@ -267,9 +267,16 @@ fn get_package_dependency_names(project: &Project, install: &Install, locator: &
     let tree
         = &install.install_state.resolution_tree;
 
-    resolution_dependency_names(tree, locator)
+    let mut dependency_names = resolution_dependency_names(tree, locator)
         .or_else(|| workspace_link_dependency_names(project, tree, locator))
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    // Add implicit self-dependency for non-workspace packages when there's no explicit self-dependency
+    if !locator.reference.is_workspace_reference() && !dependency_names.contains(locator.ident.as_str()) {
+        dependency_names.insert(locator.ident.as_str().to_string());
+    }
+
+    dependency_names
 }
 
 fn resolution_dependency_names(tree: &ResolutionTree, locator: &Locator) -> Option<BTreeSet<String>> {
