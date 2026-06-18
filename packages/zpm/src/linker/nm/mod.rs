@@ -5,7 +5,7 @@ use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
 use zpm_utils::{FromFileString, IoResultExt, Path, ToHumanString};
 
 use crate::{
-    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{NodeModulesPackageMapBuilder, persist_package_map}}, project::Project
+    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{NodeModulesPackageMapBuilder, persist_package_map, persist_package_map_at}}, project::{Project, PACKAGE_MAP_NAME}
 };
 
 pub mod hoist;
@@ -528,10 +528,16 @@ pub async fn link_island_nm(
         = BTreeSet::new();
     let mut cas_extractions
         = Vec::new();
+    let mut package_maps
+        = Vec::new();
 
     for workspace_ident in &island.workspace_idents {
         let workspace = project.workspace_by_ident(workspace_ident)?;
         let workspace_locator = workspace.locator();
+        let package_map_base_path
+            = workspace.path.with_join_str("node_modules");
+        let mut package_map_builder
+            = NodeModulesPackageMapBuilder::new_at(project, install, package_map_base_path.clone());
 
         let mut work_tree = WorkTree::new_for_island_workspace(
             project,
@@ -549,15 +555,24 @@ pub async fn link_island_nm(
             install,
             &work_tree,
             0,
-            None,
+            Some(&mut package_map_builder),
             &mut packages_by_location,
             &mut canonical_build_locations,
             &mut force_rebuild_locators,
             &mut cas_extractions,
         )?;
+
+        package_maps.push((
+            package_map_base_path.with_join_str(PACKAGE_MAP_NAME),
+            package_map_builder.build()?,
+        ));
     }
 
     run_cas_extractions(project, install, &cas_extractions)?;
+
+    for (package_map_path, package_map) in package_maps {
+        persist_package_map_at(&package_map_path, &package_map)?;
+    }
 
     let dependencies_meta
         = linker::helpers::TopLevelConfiguration::from_project(project);

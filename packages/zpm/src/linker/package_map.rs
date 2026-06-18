@@ -49,10 +49,14 @@ struct PnpmPackageMapNode {
 
 impl<'a> NodeModulesPackageMapBuilder<'a> {
     pub fn new(project: &'a Project, install: &'a Install) -> Self {
+        Self::new_at(project, install, project.nm_path())
+    }
+
+    pub fn new_at(project: &'a Project, install: &'a Install, base_path: Path) -> Self {
         Self {
             project,
             install,
-            base_path: project.nm_path(),
+            base_path,
             package_map_nodes: BTreeMap::new(),
             package_locations_by_node_modules_path: BTreeMap::new(),
         }
@@ -233,9 +237,10 @@ impl PnpmPackageMapBuilder {
 }
 
 pub fn persist_package_map(project: &Project, package_map: &PackageMap) -> Result<(), Error> {
-    let package_map_path
-        = project.package_map_path();
+    persist_package_map_at(&project.package_map_path(), package_map)
+}
 
+pub fn persist_package_map_at(package_map_path: &Path, package_map: &PackageMap) -> Result<(), Error> {
     if let Some(parent) = package_map_path.dirname() {
         parent.fs_create_dir_all()?;
     }

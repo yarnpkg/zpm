@@ -1576,6 +1576,7 @@ describe(`Features`, () => {
           // workspace-a should have a node_modules directory
           const nmPath = `${path}/packages/workspace-a/node_modules` as PortablePath;
           expect(await xfs.existsPromise(nmPath)).toBe(true);
+          expect(await xfs.existsPromise(`${nmPath}/.package-map.json` as PortablePath)).toBe(true);
 
           // no-deps should be resolvable via node_modules
           await expect(
