@@ -384,3 +384,43 @@ describePackageMaps(`Package maps`, () => {
     ),
   );
 });
+
+describe(`Package map generation`, () => {
+  it(`should include workspace self-reference symlinks in loose node-modules maps`,
+    makeTemporaryEnv(
+      {
+        private: true,
+        workspaces: [`workspace`],
+        dependencies: {
+          [`various-requires`]: `1.0.0`,
+        },
+      },
+      {
+        nodeLinker: `node-modules`,
+        nodeExperimentalPackageMap: true,
+        nodePackageMapType: `loose`,
+      },
+      async ({path, run}) => {
+        await writeJson(ppath.join(path, `workspace/package.json` as PortablePath), {
+          name: `workspace`,
+          version: `1.0.0`,
+        });
+        await writeFile(ppath.join(path, `workspace/index.js` as PortablePath), ``);
+
+        await run(`install`);
+
+        await expect(xfs.existsPromise(ppath.join(path, `node_modules/workspace` as PortablePath))).resolves.toEqual(true);
+
+        const packageMap = await xfs.readJsonPromise(getPackageMapPath(path));
+
+        expect(packageMap.packages).toHaveProperty(`workspace`);
+        expect(packageMap.packages[`workspace`]).toMatchObject({
+          url: `../workspace`,
+        });
+        expect(packageMap.packages[`various-requires`].dependencies).toMatchObject({
+          workspace: `workspace`,
+        });
+      },
+    ),
+  );
+});

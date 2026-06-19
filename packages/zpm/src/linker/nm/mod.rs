@@ -86,6 +86,7 @@ fn register_workspace_symlinks_at(
     project: &Project,
     install: &Install,
     workspace_nm_tree: &mut SyncTree,
+    mut package_map_builder: Option<&mut NodeModulesPackageMapBuilder>,
     host_node: &hoist::WorkNode,
     host_abs_path: &Path,
     candidate_workspaces: impl IntoIterator<Item = (Ident, Path)>,
@@ -147,9 +148,20 @@ fn register_workspace_symlinks_at(
             = workspace_dir
                 .relative_to(&host_abs_path.with_join(&symlink_path).dirname().unwrap_or_default());
 
+        let symlink_location
+            = host_abs_path.with_join(&symlink_path);
+
         workspace_nm_tree.register_entry(symlink_path, SyncItem::Symlink {
             target_path,
         })?;
+
+        if let Some(package_map_builder) = package_map_builder.as_deref_mut() {
+            package_map_builder.register_package(
+                symlink_location,
+                workspace_dir,
+                &target_locator,
+            );
+        }
     }
 
     Ok(())
@@ -267,6 +279,7 @@ fn generate_workspace_node_modules(
             project,
             install,
             &mut workspace_nm_tree,
+            package_map_builder.as_deref_mut(),
             &work_tree.nodes[workspace_node_idx],
             &workspace_abs_path,
             candidate_workspaces,
