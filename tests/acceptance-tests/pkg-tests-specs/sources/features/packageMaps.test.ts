@@ -414,7 +414,7 @@ describe(`Package map generation`, () => {
         const packageMap = await xfs.readJsonPromise(getPackageMapPath(path));
 
         expect(packageMap.packages).toHaveProperty(`workspace`);
-        expect(packageMap.packages[`workspace`]).toMatchObject({
+        expect(packageMap.packages.workspace).toMatchObject({
           url: `../workspace`,
         });
         expect(packageMap.packages[`various-requires`].dependencies).toMatchObject({
