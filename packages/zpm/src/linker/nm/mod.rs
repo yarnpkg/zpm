@@ -5,7 +5,7 @@ use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
 use zpm_utils::{FromFileString, IoResultExt, Path, ToHumanString};
 
 use crate::{
-    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{NodeModulesPackageMapBuilder, persist_package_map, persist_package_map_at}}, project::{Project, PACKAGE_MAP_NAME}
+    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{NodeModulesPackageMapBuilder, persist_package_map, persist_package_map_at}}, project::Project
 };
 
 pub mod hoist;
@@ -563,7 +563,7 @@ pub async fn link_island_nm(
         )?;
 
         package_maps.push((
-            package_map_base_path.with_join_str(PACKAGE_MAP_NAME),
+            project.package_map_path(Some(workspace)),
             package_map_builder.build()?,
         ));
     }

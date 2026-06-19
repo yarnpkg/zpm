@@ -237,7 +237,7 @@ impl PnpmPackageMapBuilder {
 }
 
 pub fn persist_package_map(project: &Project, package_map: &PackageMap) -> Result<(), Error> {
-    persist_package_map_at(&project.package_map_path(), package_map)
+    persist_package_map_at(&project.package_map_path(None), package_map)
 }
 
 pub fn persist_package_map_at(package_map_path: &Path, package_map: &PackageMap) -> Result<(), Error> {

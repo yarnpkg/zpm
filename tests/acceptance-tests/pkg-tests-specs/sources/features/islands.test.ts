@@ -1590,6 +1590,54 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should inject island package maps into script environments`,
+      makeTemporaryMonorepoEnv(
+        {
+          workspaces: [`packages/*`],
+        },
+        {
+          [`packages/workspace-a`]: {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            dependencies: {
+              [`no-deps`]: `1.0.0`,
+            },
+          },
+        },
+        {
+          nodeLinker: `pnp`,
+          nodeExperimentalPackageMap: true,
+        },
+        async ({path, run}) => {
+          await yarn.writeConfiguration(path, {
+            unstableIslands: {
+              main: {
+                workspaces: [`workspace-a`],
+                linker: `node-modules`,
+              },
+            },
+          });
+
+          await run(`install`);
+
+          const islandPackageMapPath = `${path}/packages/workspace-a/node_modules/.package-map.json` as PortablePath;
+          const {stdout: islandNodeOptions} = await run(`exec`, `bash`, `-c`, `printf %s "$NODE_OPTIONS"`, {
+            cwd: `${path}/packages/workspace-a` as PortablePath,
+          });
+
+          expect(islandNodeOptions).toContain(`--experimental-package-map=`);
+          expect(islandNodeOptions).toContain(npath.fromPortablePath(islandPackageMapPath));
+
+          const {stdout: rootNodeOptions} = await run(`exec`, `bash`, `-c`, `printf %s "$NODE_OPTIONS"`, {
+            cwd: path,
+          });
+
+          expect(rootNodeOptions).not.toContain(`--experimental-package-map=`);
+        },
+      ),
+    );
+
+    test(
       `it should allow mixed PnP and node-modules island resolution`,
       makeTemporaryMonorepoEnv(
         {

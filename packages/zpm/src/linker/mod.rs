@@ -75,7 +75,7 @@ fn cleanup_inactive_linker_artifacts(project: &Project) -> Result<(), Error> {
     }
 
     if active == NodeLinker::Pnp {
-        project.package_map_path()
+        project.package_map_path(None)
             .fs_rm()
             .ok_missing()?;
     }

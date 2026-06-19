@@ -556,13 +556,7 @@ impl ScriptEnvironment {
             self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_file_string()));
         }
 
-        if project.config.settings.node_experimental_package_map.value
-            && project.config.settings.node_linker.value != zpm_config::NodeLinker::Pnp
-        {
-            if let Some(package_map_path) = project.package_map_path().if_exists() {
-                self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-package-map={}", quote_path_if_needed(&package_map_path.to_file_string())));
-            }
-        }
+        self.refresh_package_map(project);
 
         self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
         self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
@@ -589,6 +583,55 @@ impl ScriptEnvironment {
         if current != updated {
             // When set to an empty string, some tools consider it as explicitly
             // set to the empty value, and do not set their own value.
+            if updated.is_empty() {
+                self.env.insert("NODE_OPTIONS".to_string(), None);
+            } else {
+                self.env.insert("NODE_OPTIONS".to_string(), Some(updated.to_string()));
+            }
+        }
+    }
+
+    fn refresh_package_map(&mut self, project: &Project) {
+        self.remove_package_map();
+
+        if !project.config.settings.node_experimental_package_map.value {
+            return;
+        }
+
+        let cwd_rel_path = if self.cwd.is_absolute() {
+            self.cwd.forward_relative_to(&project.project_cwd)
+        } else {
+            Some(self.cwd.clone())
+        };
+
+        let package_map_workspace = cwd_rel_path
+            .as_ref()
+            .and_then(|cwd_rel_path| project.try_island_by_rel_path(cwd_rel_path, zpm_config::IslandLinker::NodeModules));
+
+        if package_map_workspace.is_none()
+            && project.config.settings.node_linker.value == zpm_config::NodeLinker::Pnp
+        {
+            return;
+        }
+
+        if let Some(package_map_path) = project.package_map_path(package_map_workspace).if_exists() {
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-package-map={}", quote_path_if_needed(&package_map_path.to_file_string())));
+        }
+    }
+
+    fn remove_package_map(&mut self) {
+        let current = self.env.get("NODE_OPTIONS")
+            .and_then(|opt| opt.clone())
+            .or_else(|| std::env::var("NODE_OPTIONS").ok());
+
+        let Some(current) = current else {
+            return;
+        };
+
+        let updated = PACKAGE_MAP_MATCHER.replace_all(&current, " ");
+        let updated = updated.trim();
+
+        if current != updated {
             if updated.is_empty() {
                 self.env.insert("NODE_OPTIONS".to_string(), None);
             } else {
@@ -742,6 +785,7 @@ impl ScriptEnvironment {
             .with_join(package_cwd_rel);
 
         self.attach_package_variables(project, locator)?;
+        self.refresh_package_map(project);
 
         let binaries
             = project.package_visible_binaries(locator)?;

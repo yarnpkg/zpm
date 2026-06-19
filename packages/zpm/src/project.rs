@@ -2,7 +2,7 @@ use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::{Arc,
 
 use colored::Colorize;
 use globset::{GlobBuilder, GlobSetBuilder};
-use zpm_config::{Configuration, ConfigurationContext, Source};
+use zpm_config::{Configuration, ConfigurationContext, IslandLinker, Source};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
@@ -288,8 +288,11 @@ impl Project {
         self.project_cwd.with_join_str("node_modules")
     }
 
-    pub fn package_map_path(&self) -> Path {
-        self.nm_path().with_join_str(PACKAGE_MAP_NAME)
+    pub fn package_map_path(&self, workspace: Option<&Workspace>) -> Path {
+        workspace
+            .map(|workspace| workspace.path.with_join_str("node_modules"))
+            .unwrap_or_else(|| self.nm_path())
+            .with_join_str(PACKAGE_MAP_NAME)
     }
 
     pub fn ignore_path(&self) -> Path {
@@ -726,6 +729,29 @@ impl Project {
                 .find(|w| w.rel_path.contains(rel_path));
 
         Ok(workspace)
+    }
+
+    pub fn try_closest_workspace_by_rel_path(&self, rel_path: &Path) -> Option<&Workspace> {
+        for candidate_path in rel_path.iter_path().rev() {
+            if let Some(workspace) = self.try_workspace_by_rel_path(&candidate_path).ok().flatten() {
+                return Some(workspace);
+            }
+        }
+
+        None
+    }
+
+    pub fn try_island_by_rel_path(&self, rel_path: &Path, linker: IslandLinker) -> Option<&Workspace> {
+        let workspace
+            = self.try_closest_workspace_by_rel_path(rel_path)?;
+
+        self.config.settings.unstable_islands
+            .values()
+            .any(|island| {
+                island.linker.value == linker
+                    && island.workspaces.iter().any(|glob| glob.value.check(&workspace.name))
+            })
+            .then_some(workspace)
     }
 
     pub fn package_location(&self, locator: &Locator) -> Result<&Path, Error> {
