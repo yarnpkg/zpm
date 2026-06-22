@@ -218,10 +218,19 @@ pub struct ReportCounters {
 #[derive(Debug)]
 pub enum ReportMessage {
     Line(Severity, String),
-    LogFile(Path),
+    LogExtra(LogExtra),
     PushSection(String),
     PopSection,
     Prompt(PromptType),
+}
+
+#[derive(Debug)]
+pub enum LogExtra {
+    File(Path),
+    Format {
+        title: String,
+        text: String,
+    },
 }
 
 fn strip_ansi_codes(input: &str) -> String {
@@ -309,7 +318,7 @@ struct Reporter {
 
     last_message_type: Option<LastMessageType>,
     buffered_lines: Option<Vec<String>>,
-    log_paths: Vec<Path>,
+    log_extras: Vec<LogExtra>,
     sections: Vec<SectionState>,
     spinner_idx: Option<usize>,
     prompt_tx: mpsc::Sender<String>,
@@ -327,7 +336,7 @@ impl Reporter {
             counters,
             last_message_type: None,
             buffered_lines,
-            log_paths: Vec::new(),
+            log_extras: Vec::new(),
             sections: Vec::new(),
             spinner_idx: None,
             prompt_tx,
@@ -410,8 +419,8 @@ impl Reporter {
                 self.on_line(writer, severity, &message);
             },
 
-            ReportMessage::LogFile(log_path) => {
-                self.log_paths.push(log_path);
+            ReportMessage::LogExtra(log_extra) => {
+                self.log_extras.push(log_extra);
             },
 
             ReportMessage::PushSection(name) => {
@@ -435,16 +444,24 @@ impl Reporter {
     }
 
     fn on_end<T: Write>(&mut self, writer: &mut T) {
-        let log_paths = std::mem::take(&mut self.log_paths);
+        let log_extras = std::mem::take(&mut self.log_extras);
 
-        for log_path in &log_paths {
-            let log_content = log_path.fs_read_text().unwrap();
+        for log_extra in &log_extras {
+            let (title, log_content) = match log_extra {
+                LogExtra::File(log_path) => {
+                    (log_path.to_print_string(), log_path.fs_read_text().unwrap())
+                },
+
+                LogExtra::Format {title, text} => {
+                    (title.clone(), text.clone())
+                },
+            };
 
             if self.config.json {
-                self.write_line(writer, &log_path.to_print_string(), Severity::Info);
+                self.write_line(writer, &title, Severity::Info);
                 self.write_line(writer, &log_content, Severity::Info);
             } else {
-                writeln!(writer, "\n{}\n", log_path.to_print_string()).unwrap();
+                writeln!(writer, "\n{}\n", title.bold().underline()).unwrap();
                 writeln!(writer, "{}", log_content).unwrap();
             }
         }
@@ -776,7 +793,14 @@ impl StreamReport {
     }
 
     pub fn add_log_file(&self, log_path: Path) {
-        self.report(ReportMessage::LogFile(log_path));
+        self.report(ReportMessage::LogExtra(LogExtra::File(log_path)));
+    }
+
+    pub fn add_log_format(&self, title: String, text: String) {
+        self.report(ReportMessage::LogExtra(LogExtra::Format {
+            title,
+            text,
+        }));
     }
 
     pub fn error(&self, error: Error) -> bool {
@@ -787,7 +811,7 @@ impl StreamReport {
         }
 
         if let Error::ChildProcessFailedWithLog(_, log_path) = error {
-            self.report(ReportMessage::LogFile(log_path));
+            self.add_log_file(log_path);
         }
 
         emitted

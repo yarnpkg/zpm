@@ -82,7 +82,7 @@ function yamlComment(s: string): string {
 
 function exampleToYaml(name: string, example: any): string {
   const description = example?.description || `Example`;
-  const value = example !== null && typeof example === `object` && Object.prototype.hasOwnProperty.call(example, `value`)
+  const value = example !== null && typeof example === `object` && Object.hasOwn(example, `value`)
     ? example.value
     : example;
 
@@ -103,16 +103,19 @@ function propertyToMarkdown(name: string, prop: Record<string, any>): string {
   if (prop.title)
     lines.push(``, `**${prop.title}**`);
 
+
   if (prop.description)
     lines.push(``, prop.description);
 
-  if (Array.isArray(prop._examples) && prop._examples.length > 0)
+
+  if (Array.isArray(prop._examples) && prop._examples.length > 0) {
     lines.push(
       ``,
       `\`\`\`yaml`,
       prop._examples.map((example: any) => exampleToYaml(name, example)).join(`\n\n`),
       `\`\`\``,
     );
+  }
 
   return lines.join(`\n`);
 }
@@ -121,12 +124,13 @@ function isHidden(prop: Record<string, any>): boolean {
   return prop._hidden === true;
 }
 
-function flattenToMarkdown(properties: Record<string, any>, prefix = ``): string[] {
-  const sections: string[] = [];
+function flattenToMarkdown(properties: Record<string, any>, prefix = ``): Array<string> {
+  const sections: Array<string> = [];
 
   for (const [key, prop] of Object.entries(properties)) {
     if (isHidden(prop as Record<string, any>))
       continue;
+
 
     const name = prefix + key;
     sections.push(propertyToMarkdown(name, prop as Record<string, any>));
@@ -134,10 +138,12 @@ function flattenToMarkdown(properties: Record<string, any>, prefix = ``): string
     if ((prop as any).properties)
       sections.push(...flattenToMarkdown((prop as any).properties, `${name}.`));
 
+
     if ((prop as any).patternProperties) {
-      for (const patternProp of Object.values((prop as any).patternProperties) as any[]) {
-        if (patternProp.properties)
+      for (const patternProp of Object.values((prop as any).patternProperties) as Array<any>) {
+        if (patternProp.properties) {
           sections.push(...flattenToMarkdown(patternProp.properties, `${name}[name].`));
+        }
       }
     }
   }
@@ -145,16 +151,17 @@ function flattenToMarkdown(properties: Record<string, any>, prefix = ``): string
   return sections;
 }
 
-export function schemaFieldNames(schema: Record<string, any>): string[] {
+export function schemaFieldNames(schema: Record<string, any>): Array<string> {
   return flattenFieldNames(schema.properties);
 }
 
-function flattenFieldNames(properties: Record<string, any>, prefix = ``): string[] {
-  const names: string[] = [];
+function flattenFieldNames(properties: Record<string, any>, prefix = ``): Array<string> {
+  const names: Array<string> = [];
 
   for (const [key, prop] of Object.entries(properties)) {
     if (isHidden(prop as Record<string, any>))
       continue;
+
 
     const name = prefix + key;
     names.push(name);
@@ -162,10 +169,12 @@ function flattenFieldNames(properties: Record<string, any>, prefix = ``): string
     if ((prop as any).properties)
       names.push(...flattenFieldNames((prop as any).properties, `${name}.`));
 
+
     if ((prop as any).patternProperties) {
-      for (const patternProp of Object.values((prop as any).patternProperties) as any[]) {
-        if (patternProp.properties)
+      for (const patternProp of Object.values((prop as any).patternProperties) as Array<any>) {
+        if (patternProp.properties) {
           names.push(...flattenFieldNames(patternProp.properties, `${name}[name].`));
+        }
       }
     }
   }
@@ -174,7 +183,7 @@ function flattenFieldNames(properties: Record<string, any>, prefix = ``): string
 }
 
 export function schemaToMarkdown(schema: Record<string, any>): string {
-  const parts: string[] = [];
+  const parts: Array<string> = [];
 
   if (schema.description)
     parts.push(schema.description);

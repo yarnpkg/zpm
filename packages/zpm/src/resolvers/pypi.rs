@@ -8,7 +8,7 @@ use zpm_utils::{FromFileString, ToFileString, UrlEncoded};
 use crate::{
     error::Error,
     install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
-    pypi::{PypiDistribution, pypi_registry_base, encode_path_segment, select_best_wheel},
+    pypi::{PypiDistribution, get_registry, encode_path_segment, select_best_wheel},
     resolvers::Resolution,
 };
 
@@ -223,16 +223,22 @@ where
 }
 
 async fn fetch_project_metadata(context: &InstallContext<'_>, package_ident: &Ident) -> Result<PypiProjectMetadata, Error> {
+    let project
+        = context.project
+            .expect("The project is required for resolving PyPI packages");
     let base
-        = pypi_registry_base();
+        = get_registry(&project.config, package_ident);
     let url
         = format!("{}/pypi/{}/json", base, encode_path_segment(package_ident.as_str()));
     fetch_json(context, &url).await
 }
 
 async fn fetch_version_metadata(context: &InstallContext<'_>, package_ident: &Ident, version: &zpm_primitives::PypiVersion) -> Result<PypiVersionMetadata, Error> {
+    let project
+        = context.project
+            .expect("The project is required for resolving PyPI packages");
     let base
-        = pypi_registry_base();
+        = get_registry(&project.config, package_ident);
     let url
         = format!(
             "{}/pypi/{}/{}/json",

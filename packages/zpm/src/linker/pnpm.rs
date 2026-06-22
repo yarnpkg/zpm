@@ -8,7 +8,7 @@ use crate::{
     error::Error,
     fetchers::PackageData,
     install::Install,
-    linker::{self, LinkResult},
+    linker::{self, LinkResult, package_map::{PnpmPackageMapBuilder, persist_package_map}},
     project::Project,
     tree_resolver::ResolutionTree,
 };
@@ -64,6 +64,8 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         = BTreeMap::new();
     let mut locations_by_package
         = BTreeMap::new();
+    let mut package_map_builder
+        = PnpmPackageMapBuilder::new(project);
 
     let mut all_build_entries
         = Vec::new();
@@ -115,6 +117,8 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             package_location_rel.clone(),
         );
 
+        package_map_builder.register_package(locator, package_location_abs.clone());
+
         // We don't create node_modules directories and we don't build
         // local packages that are not fully contained within the project
         if matches!(physical_package_data, PackageData::Local {package_directory, ..} if !project.project_cwd.contains(package_directory)) {
@@ -131,7 +135,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             physical_package_data,
         );
 
-        if let Some(build_commands) = package_build_info.build_commands {
+        if !package_build_info.build_step.is_noop() {
             // Virtualized locators share their build with the physical
             // counterpart — only the physical entry should drive a build.
             if !locator.reference.is_virtual_reference() {
@@ -143,7 +147,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 all_build_entries.push(build::BuildRequest {
                     cwd: package_location_rel,
                     locator: locator.clone(),
-                    commands: build_commands,
+                    build_step: package_build_info.build_step,
                     allowed_to_fail: install.install_state.resolution_tree.optional_builds.contains(locator),
                     force_rebuild: false, // TODO: track this properly for pnpm
                     inline_builds: install.inline_builds,
@@ -258,11 +262,20 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         let is_local
             = matches!(physical_package_data, PackageData::Local {..});
 
+        let mut has_explicit_self_dependency
+            = false;
+
         for (dep_name, descriptor) in &resolution.dependencies {
+            if dep_name == &locator.ident {
+                has_explicit_self_dependency = true;
+            }
+
             let dep_locator
                 = tree.descriptor_to_locator
                     .get(descriptor)
                     .expect("Failed to find dependency resolution");
+
+            package_map_builder.register_dependency(locator, dep_name, dep_locator)?;
 
             if !is_local && !locator.reference.is_workspace_reference() {
                 if let Some(hoisted_locator) = hoisted_packages.get(dep_name) {
@@ -310,7 +323,13 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 .fs_create_parent()?
                 .fs_symlink(&symlink_target)?;
         }
+
+        if !has_explicit_self_dependency && !locator.reference.is_workspace_reference() {
+            package_map_builder.register_dependency(locator, &locator.ident, locator)?;
+        }
     }
+
+    persist_package_map(project, &package_map_builder.build()?)?;
 
     let package_build_dependencies = linker::helpers::populate_build_entry_dependencies(
         &package_build_entries,

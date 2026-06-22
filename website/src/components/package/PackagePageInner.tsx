@@ -1,25 +1,24 @@
 import {useState, useEffect, useCallback, useMemo, useContext} from 'react';
 
-import {PackageCtx, IconCtx}       from './contexts';
-import {LeftRail}                  from './LeftRail';
-import {VersionSelector}           from './VersionSelector';
-import {TabBar}                    from './TabBar';
-import {StatGrid}                  from './StatGrid';
-import {InstallCard}               from './InstallCard';
-import {ReadmePanel}               from './ReadmePanel';
-import {VersionsTimeline}          from './VersionsTimeline';
-import {FilesExplorer}             from './FilesExplorer';
-import {AuditPanel}                from './AuditPanel';
-import {DownloadsCard}             from './DownloadsCard';
-import {VersionsCard}              from './VersionsCard';
-import {DependenciesCard}          from './DependenciesCard';
-import {MaintainersCard}           from './MaintainersCard';
-import {KeywordsCard}              from './KeywordsCard';
-import {OctIcon}                   from './icons';
-import {parseSplat, packagePath, getLicense, getRepoUrl} from './utils';
-import {usePackageNavigate, splatRoute} from './router';
-
+import {AuditPanel}                                            from './AuditPanel';
+import {DependenciesCard}                                      from './DependenciesCard';
+import {DownloadsCard}                                         from './DownloadsCard';
+import {FilesExplorer}                                         from './FilesExplorer';
+import {InstallCard}                                           from './InstallCard';
+import {KeywordsCard}                                          from './KeywordsCard';
+import {LeftRail}                                              from './LeftRail';
+import {MaintainersCard}                                       from './MaintainersCard';
+import {ReadmePanel}                                           from './ReadmePanel';
+import {StatGrid}                                              from './StatGrid';
+import {TabBar}                                                from './TabBar';
+import {VersionSelector}                                       from './VersionSelector';
+import {VersionsCard}                                          from './VersionsCard';
+import {VersionsTimeline}                                      from './VersionsTimeline';
+import {PackageCtx, IconCtx}                                   from './contexts';
+import {OctIcon}                                               from './icons';
+import {usePackageNavigate, splatRoute}                        from './router';
 import type {RegistryData, FileEntry, DownloadDay, Tab, PmTab} from './types';
+import {parseSplat, packagePath, getLicense, getRepoUrl}       from './utils';
 
 function LoadingSpinner() {
   return (
@@ -66,7 +65,8 @@ export function PackagePageInner() {
 
   useEffect(() => {
     if (!name) {
-      setLoading(false); return;
+      setLoading(false);
+      return () => {};
     }
 
     const abortCtrl = new AbortController();
@@ -80,18 +80,26 @@ export function PackagePageInner() {
       })
       .then((data: RegistryData) => {
         setRegistry(data);
-        if (data.readme) setReadme(data.readme);
+        if (data.readme)
+          setReadme(data.readme);
+
         document.title = `${data.name} — Yarn`;
       })
       .catch(err => {
-        if (err.name !== `AbortError`) setError(err.message);
+        if (err.name !== `AbortError`) {
+          setError(err.message);
+        }
       })
       .finally(() => setLoading(false));
-    return () => abortCtrl.abort();
+    return () => {
+      abortCtrl.abort();
+    };
   }, [name]);
 
   useEffect(() => {
-    if (!selectedVersion || !name) return;
+    if (!selectedVersion || !name)
+      return undefined;
+
 
     const abortCtrl = new AbortController();
     setFiles(null);
@@ -99,10 +107,14 @@ export function PackagePageInner() {
     fetch(`https://data.jsdelivr.com/v1/package/npm/${name}@${selectedVersion}/flat`, {signal: abortCtrl.signal})
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.files) setFiles(data.files);
+        if (data?.files) {
+          setFiles(data.files);
+        }
       })
       .catch(err => {
-        if (err.name !== `AbortError`) setFiles(null);
+        if (err.name !== `AbortError`) {
+          setFiles(null);
+        }
       });
 
     fetch(`https://cdn.jsdelivr.net/npm/${name}@${selectedVersion}/README.md`, {signal: abortCtrl.signal})
@@ -112,11 +124,15 @@ export function PackagePageInner() {
       })
       .then(text => setReadme(text))
       .catch(err => {
-        if (err.name === `AbortError`) return;
+        if (err.name === `AbortError`)
+          return;
+
         fetch(`https://cdn.jsdelivr.net/npm/${name}@${selectedVersion}/readme.md`, {signal: abortCtrl.signal})
           .then(r => r.ok ? r.text() : ``)
           .then(text => {
-            if (text) setReadme(text);
+            if (text) {
+              setReadme(text);
+            }
           })
           .catch(() => {});
       });
@@ -125,15 +141,21 @@ export function PackagePageInner() {
   }, [name, selectedVersion]);
 
   useEffect(() => {
-    if (!name) return;
+    if (!name)
+      return undefined;
+
     const abortCtrl = new AbortController();
     fetch(`https://api.npmjs.org/downloads/range/last-month/${name}`, {signal: abortCtrl.signal})
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.downloads) setDownloads(data.downloads);
+        if (data?.downloads) {
+          setDownloads(data.downloads);
+        }
       })
       .catch(err => {
-        if (err.name !== `AbortError`) setDownloads(null);
+        if (err.name !== `AbortError`) {
+          setDownloads(null);
+        }
       });
     return () => abortCtrl.abort();
   }, [name]);

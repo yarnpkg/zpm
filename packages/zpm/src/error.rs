@@ -88,7 +88,10 @@ pub enum Error {
     ChecksumMismatch(Locator),
 
     #[error("The lockfile would have been created by this install, which is explicitly forbidden.")]
-    ImmutableLockfile,
+    ImmutableLockfileCreation,
+
+    #[error("The lockfile would have been modified by this install, which is explicitly forbidden.")]
+    ImmutableLockfileModification,
 
     #[error("Cannot autofix a lockfile when running an immutable install.")]
     ImmutableLockfileAutofix,
@@ -291,6 +294,9 @@ pub enum Error {
 
     #[error("Lockfile generation error: {0}")]
     LockfileGenerationError(zpm_parsers::Error),
+
+    #[error("Package map generation error: {0}")]
+    PackageMapGenerationError(String),
 
     #[error("Incompatible options: {}", .0.join(", "))]
     IncompatibleOptions(Vec<String>),

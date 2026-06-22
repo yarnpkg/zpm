@@ -1,5 +1,5 @@
 import {createRouter, createRoute, createRootRoute, useRouter} from '@tanstack/react-router';
-import {useCallback}                                          from 'react';
+import {useCallback}                                           from 'react';
 
 const rootRoute = createRootRoute();
 

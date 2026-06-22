@@ -1,5 +1,5 @@
 import type {FileEntry, VersionManifest} from './types';
-import {formatBytes, formatDate} from './utils';
+import {formatBytes, formatDate}         from './utils';
 
 function StatCell({label, value, unit}: {label: string, value: string, unit?: string}) {
   const parts = value.match(/^([\d.,]+)\s*(.*)$/);
@@ -27,7 +27,6 @@ export function StatGrid({versionData, time, version, files}: {
 }) {
   const unpackedSize = versionData?.dist?.unpackedSize;
   const totalSize = files ? files.reduce((s, f) => s + f.size, 0) : unpackedSize;
-  const fileCount = files?.length ?? versionData?.dist?.fileCount;
   const depCount = versionData?.dependencies ? Object.keys(versionData.dependencies).length : 0;
   const pubDate = time[version];
 

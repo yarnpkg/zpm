@@ -1,5 +1,5 @@
 import {useIcons} from './contexts';
-import {OctIcon} from './icons';
+import {OctIcon}  from './icons';
 
 export function AuditPanel() {
   const {oct} = useIcons();

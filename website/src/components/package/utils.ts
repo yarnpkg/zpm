@@ -55,7 +55,9 @@ export function packagePath(name: string, version?: string, tab?: Tab, filePath?
   let p = `/package/${name}`;
   if (version) {
     p += `/${version}`;
-    if (compareVersion) p += `..${compareVersion}`;
+    if (compareVersion) {
+      p += `..${compareVersion}`;
+    }
   }
   if (tab && tab !== `readme`) {
     if (tab === `files` && filePath) {
@@ -315,10 +317,16 @@ function parseVersion(v: string): {major: number, minor: number, patch: number, 
 
 export function isNoisyPrerelease(v: string): boolean {
   const pre = v.replace(/^\d+\.\d+\.\d+[-.]?/, ``);
-  if (!pre) return false;
+  if (!pre)
+    return false;
+
   for (const seg of pre.split(/[.-]/)) {
-    if (/[a-f0-9]{6,}/i.test(seg) && /[a-f]/i.test(seg) && /\d/.test(seg)) return true;
-    if (/^\d{8}$/.test(seg)) return true;
+    if (/[a-f0-9]{6,}/i.test(seg) && /[a-f]/i.test(seg) && /\d/.test(seg))
+      return true;
+
+    if (/^\d{8}$/.test(seg)) {
+      return true;
+    }
   }
   return false;
 }

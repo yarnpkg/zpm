@@ -108,17 +108,6 @@
     btn.setAttribute(`aria-label`, `Copy code`);
     btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3" width="7" height="7" rx="1"/><path d="M2 8V2h6" opacity="0.6"/></svg>`;
     btn.addEventListener(`click`, () => {
-      // Strip '$ ' prompt + '# ' from terminal, else raw text
-      const text = Array.from(el.querySelectorAll(`.term-line, pre code, pre`))
-        .map(line => {
-          if (line.classList && line.classList.contains(`term-line`)) {
-            if (line.classList.contains(`no-prompt`) || line.classList.contains(`out`)) return line.textContent;
-            if (line.classList.contains(`comment`)) return `# ${line.textContent}`;
-            return `$ ${line.textContent}`;
-          }
-          return line.textContent;
-        })
-        .join(`\n`) || el.textContent;
       const toCopy = el.classList.contains(`terminal`)
         ? Array.from(el.querySelectorAll(`.term-line`))
           .filter(l => !l.classList.contains(`out`) && !l.classList.contains(`comment`))
@@ -154,5 +143,4 @@
     window.addEventListener(`scroll`, onScroll, {passive: true});
     onScroll();
   }
-
 })();

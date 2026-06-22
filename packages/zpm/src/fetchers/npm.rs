@@ -59,7 +59,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .expect("The project is required for resolving a workspace package");
 
     let registry_base
-        = http_npm::get_registry(&project.config, params.ident.scope(), false)?;
+        = http_npm::get_registry_for_ident(&project.config, Some(&params.ident), false)?;
 
     // When a custom archive URL is provided, use it directly; otherwise build from registry + path
     let (fetch_registry, fetch_path) = match &params.url {

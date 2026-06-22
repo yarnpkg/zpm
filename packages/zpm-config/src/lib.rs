@@ -766,6 +766,85 @@ macro_rules! merge_optional_settings {
 
 include!(concat!(env!("OUT_DIR"), "/schema.rs"));
 
+impl PackageRule {
+    fn has_filter(&self) -> bool {
+        self.ecosystem_filter.value.is_some()
+            || self.package_filter.value.is_some()
+    }
+}
+
+impl SourceRule {
+    fn has_filter(&self) -> bool {
+        self.ecosystem_filter.value.is_some()
+            || self.registry_filter.value.is_some()
+    }
+}
+
+impl Settings {
+    pub fn disable_age_gate(&mut self) {
+        self.npm_minimal_age_gate.force(std::time::Duration::ZERO, Source::Cli);
+
+        for rule in &mut self.source_rules {
+            rule.npm_minimal_age_gate.value = None;
+        }
+        for rule in &mut self.package_rules {
+            rule.npm_minimal_age_gate.value = None;
+        }
+    }
+
+    fn validate(&self) -> Result<(), ConfigurationError> {
+        for (index, rule) in self.package_rules.iter().enumerate() {
+            if !rule.has_filter() {
+                return Err(ConfigurationError::ValidationError(format!(
+                    "packageRules[{index}] must define at least one filter"
+                )));
+            }
+        }
+
+        for (index, rule) in self.source_rules.iter().enumerate() {
+            if !rule.has_filter() {
+                return Err(ConfigurationError::ValidationError(format!(
+                    "sourceRules[{index}] must define at least one filter"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn partial_option_present<T>(value: &Partial<Option<T>>) -> bool {
+    matches!(value, Partial::Value(Some(_)))
+}
+
+fn validate_intermediate_settings(settings: &intermediate::Settings) -> Result<(), ConfigurationError> {
+    if let Partial::Value(package_rules) = &settings.package_rules {
+        for (index, rule) in package_rules.iter().enumerate() {
+            if !partial_option_present(&rule.ecosystem_filter)
+                && !partial_option_present(&rule.package_filter)
+            {
+                return Err(ConfigurationError::ValidationError(format!(
+                    "packageRules[{index}] must define at least one filter"
+                )));
+            }
+        }
+    }
+
+    if let Partial::Value(source_rules) = &settings.source_rules {
+        for (index, rule) in source_rules.iter().enumerate() {
+            if !partial_option_present(&rule.ecosystem_filter)
+                && !partial_option_present(&rule.registry_filter)
+            {
+                return Err(ConfigurationError::ValidationError(format!(
+                    "sourceRules[{index}] must define at least one filter"
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 impl SupportedArchitectures {
     pub fn to_systems(&self) -> Vec<System> {
         let mut systems
@@ -855,6 +934,9 @@ pub enum ConfigurationError {
 
     #[error("Invalid environment file line: {0}")]
     InvalidEnvironmentFileLine(String),
+
+    #[error("Invalid configuration: {0}")]
+    ValidationError(String),
 }
 
 impl From<std::io::Error> for ConfigurationError {
@@ -1097,7 +1179,11 @@ impl Configuration {
     }
 
     pub fn validate(text: &str) -> Result<(), ConfigurationError> {
-        serde_yaml::from_str::<intermediate::Settings>(text)?;
+        let project
+            = serde_yaml::from_str::<intermediate::Settings>(text)?;
+
+        validate_intermediate_settings(&project)?;
+
         Ok(())
     }
 
@@ -1226,6 +1312,8 @@ impl Configuration {
             .or_default()
             .extend(std::mem::take(&mut settings.catalog));
 
+        settings.validate()?;
+
         apply_hardened_mode(&mut settings);
 
         Ok(Configuration {
@@ -1310,6 +1398,7 @@ merge_optional_settings!(zpm_utils::Os);
 merge_optional_settings!(zpm_utils::Secret<String>);
 
 merge_settings!(crate::types::NodeLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::NodePackageMapType, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::IslandLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::NmHoistingLimits, |s: &str| FromFileString::from_file_string(s).unwrap());
@@ -1317,7 +1406,9 @@ merge_settings!(crate::types::NmMode, |s: &str| FromFileString::from_file_string
 merge_settings!(crate::types::WinLinkType, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::LogLevel, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::NpmPublishAccess, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::EcosystemFilter, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_optional_settings!(crate::types::NodeLinker);
+merge_optional_settings!(crate::types::NodePackageMapType);
 merge_optional_settings!(crate::types::IslandLinker);
 merge_optional_settings!(crate::types::PnpFallbackMode);
 merge_optional_settings!(crate::types::NmHoistingLimits);
@@ -1325,4 +1416,5 @@ merge_optional_settings!(crate::types::NmMode);
 merge_optional_settings!(crate::types::WinLinkType);
 merge_optional_settings!(crate::types::LogLevel);
 merge_optional_settings!(crate::types::NpmPublishAccess);
+merge_optional_settings!(crate::types::EcosystemFilter);
 merge_optional_settings!(Path);

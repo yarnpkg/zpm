@@ -1,7 +1,7 @@
-import {useState, useEffect, useRef} from 'react';
+import {useState, useEffect, useRef}                                    from 'react';
 
-import {useIcons} from './contexts';
-import {OctIcon} from './icons';
+import {useIcons}                                                       from './contexts';
+import {OctIcon}                                                        from './icons';
 import {formatDateShort, timeAgo, compareSemverDesc, isNoisyPrerelease} from './utils';
 
 export function VersionSelector({
@@ -18,9 +18,13 @@ export function VersionSelector({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open)
+      return undefined;
+
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
     };
     document.addEventListener(`mousedown`, handler);
     return () => document.removeEventListener(`mousedown`, handler);

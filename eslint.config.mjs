@@ -1,6 +1,17 @@
 import reactEslintConfig from '@yarnpkg/eslint-config/react';
 import eslintConfig      from '@yarnpkg/eslint-config';
 
+const browserGlobals = {
+  customElements: `readonly`,
+  document: `readonly`,
+  HTMLElement: `readonly`,
+  history: `readonly`,
+  localStorage: `readonly`,
+  location: `readonly`,
+  requestAnimationFrame: `readonly`,
+  window: `readonly`,
+};
+
 // eslint-disable-next-line arca/no-default-export
 export default [
   {
@@ -24,6 +35,44 @@ export default [
     ],
     rules: {
       [`arca/no-default-export`]: `off`,
+    },
+  },
+  {
+    files: [
+      `website/astro.config.mjs`,
+      `website/plugins/**/*.mjs`,
+    ],
+    rules: {
+      [`arca/no-default-export`]: `off`,
+    },
+  },
+  {
+    files: [
+      `website/public/**/*.js`,
+    ],
+    languageOptions: {
+      globals: {
+        ...browserGlobals,
+        LEVELS: `readonly`,
+        QUESTIONS: `readonly`,
+      },
+    },
+  },
+  {
+    files: [
+      `website/plugins/remark-mermaid.mjs`,
+    ],
+    languageOptions: {
+      globals: browserGlobals,
+    },
+  },
+  {
+    files: [
+      `website/scripts/record-terminal.ts`,
+      `website/src/components/package/utils.ts`,
+    ],
+    rules: {
+      [`no-control-regex`]: `off`,
     },
   },
   {

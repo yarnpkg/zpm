@@ -17,6 +17,16 @@ pub enum NodeLinker {
 
 #[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodePackageMapType {
+    #[literal("standard")]
+    Standard,
+
+    #[literal("loose")]
+    Loose,
+}
+
+#[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IslandLinker {
     #[literal("node-modules")]
     NodeModules,
@@ -111,4 +121,14 @@ pub enum NpmPublishAccess {
 
     #[literal("restricted")]
     Restricted,
+}
+
+#[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EcosystemFilter {
+    #[literal("npm")]
+    Npm,
+
+    #[literal("pypi")]
+    Pypi,
 }

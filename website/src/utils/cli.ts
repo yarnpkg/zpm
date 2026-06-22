@@ -1,25 +1,10 @@
-import type {BaseData} from '@clipanion/astro';
+import type {BaseData}  from '@clipanion/astro';
+import type {Component} from '@clipanion/tools';
 
-type DataEntry = {id: string; data: BaseData; filePath?: string};
+type DataEntry = {id: string, data: BaseData, filePath?: string};
 
-type OptionComponent = {
-  type: `option`;
-  primaryName: string;
-  aliases: string[];
-  documentation: {description: string; details: string | null} | null;
-  isHidden: boolean;
-  allowBinding: boolean;
-  allowBoolean: boolean;
-};
-
-type PositionalComponent = {
-  type: `positional`;
-  positionalType: `keyword` | `dynamic`;
-  name?: string;
-  expected?: string;
-  documentation?: {description: string; details: string | null} | null;
-  extra_len?: number | null;
-};
+type OptionComponent = Extract<Component, {type: `option`}>;
+type PositionalComponent = Extract<Component, {type: `positional`}>;
 
 function escapeDirective(s: string): string {
   return s.replace(/\\/g, `\\\\`).replace(/\[/g, `\\[`).replace(/\]/g, `\\]`);
@@ -58,7 +43,7 @@ function buildUsageLine(entry: DataEntry): string {
 
 export function cliBody(entry: DataEntry): string {
   const {commandSpec} = entry.data;
-  const lines: string[] = [];
+  const lines: Array<string> = [];
 
   lines.push(`\`\`\`terminal`);
   lines.push(buildUsageLine(entry));
@@ -71,7 +56,7 @@ export function cliBody(entry: DataEntry): string {
 
   const options = commandSpec.components.filter(
     (c): c is OptionComponent => c.type === `option` && !(c as OptionComponent).isHidden,
-  ) as OptionComponent[];
+  ) as Array<OptionComponent>;
 
   if (options.length > 0) {
     for (const option of options) {
@@ -82,8 +67,9 @@ export function cliBody(entry: DataEntry): string {
       lines.push(``);
       lines.push(`### \`${names}\` ${pills}`);
 
-      if (option.documentation?.description)
+      if (option.documentation?.description) {
         lines.push(``, option.documentation.description);
+      }
     }
   }
 

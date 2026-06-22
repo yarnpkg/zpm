@@ -1,9 +1,10 @@
-import {fileURLToPath}                from 'url';
-import path                           from 'path';
-import {glob}                         from 'astro/loaders';
-import {clipanionLoaders}             from '@clipanion/astro';
-import {defineCollection, z}          from 'astro:content';
-import {cliBody}                      from './utils/cli';
+import {clipanionLoaders}    from '@clipanion/astro';
+import {glob}                from 'astro/loaders';
+import {defineCollection, z} from 'astro:content';
+import path                  from 'path';
+import {fileURLToPath}       from 'url';
+
+import {cliBody}             from './utils/cli';
 
 const docs = defineCollection({
   loader: glob({pattern: `**/*.{md,mdx}`, base: `./src/docs`}),

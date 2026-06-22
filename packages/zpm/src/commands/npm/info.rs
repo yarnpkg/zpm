@@ -9,7 +9,7 @@ use zpm_utils::FromFileString;
 
 use crate::{
     error::Error,
-    http_npm::{self, AuthorizationMode, GetAuthorizationOptions, GetPackageMetadataParams, get_authorization, get_registry},
+    http_npm::{self, AuthorizationMode, GetAuthorizationOptions, GetPackageMetadataParams, get_authorization, get_registry_for_ident},
     project::Project,
 };
 
@@ -46,7 +46,7 @@ impl Info {
         let (ident, selector) = parse_package_arg(&self.package)?;
 
         let registry_base
-            = get_registry(&project.config, ident.scope(), false)?
+            = get_registry_for_ident(&project.config, Some(&ident), false)?
                 .to_string();
 
         let authorization

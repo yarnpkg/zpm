@@ -231,7 +231,7 @@ impl Add {
             = project::Project::new(None).await?;
 
         if self.no_time_gate {
-            project.config.settings.npm_minimal_age_gate.force(std::time::Duration::ZERO, zpm_config::Source::Cli);
+            project.config.settings.disable_age_gate();
         }
 
         let range_kind = if self.fixed {
@@ -361,7 +361,7 @@ impl Add {
             = project::Project::new(None).await?;
 
         if self.no_time_gate {
-            project.config.settings.npm_minimal_age_gate.force(std::time::Duration::ZERO, zpm_config::Source::Cli);
+            project.config.settings.disable_age_gate();
         }
 
         let enforced_resolutions

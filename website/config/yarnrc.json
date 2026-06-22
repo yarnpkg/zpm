@@ -420,6 +420,21 @@
         }
       ]
     },
+    "nodeExperimentalPackageMap": {
+      "_package": "@yarnpkg/plugin-pnp",
+      "title": "Define whether Yarn should enable Node.js package maps for installs that support them.",
+      "description": "If true, Yarn will inject Node.js' experimental `--experimental-package-map` option into `NODE_OPTIONS` when using `nodeLinker: node-modules` or `nodeLinker: pnpm` and a package map has been generated.",
+      "type": "boolean",
+      "default": false
+    },
+    "nodePackageMapType": {
+      "_package": "@yarnpkg/plugin-pnp",
+      "title": "Define how Yarn should generate Node.js package maps.",
+      "description": "Possible values are:\n\n- If `standard` (the default), package maps will reflect the dependency graph and reject undeclared dependencies.\n- If `loose`, package maps will reflect the hoisted node_modules layout and mimic Node.js resolution more closely.\n\nThis setting applies to both `nodeLinker: node-modules` and `nodeLinker: pnpm`.",
+      "type": "string",
+      "enum": ["standard", "loose"],
+      "default": "standard"
+    },
     "pnpmStoreFolder": {
       "_package": "@yarnpkg/plugin-pnpm",
       "title": "Path where the pnpm store will be stored",
@@ -539,6 +554,7 @@
     "npmRegistries": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Per-registry configurations.",
+      "description": "Legacy-compatible per-registry npm authentication settings. New configurations may prefer `sourceRules` for registry and ecosystem policy.",
       "type": "object",
       "patternProperties": {
         "^(?:^[a-zA-Z][a-zA-Z0-9+-.]*:)?[^\\s]*$": {
@@ -584,14 +600,29 @@
     "npmRegistryServer": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Define the registry to use when fetching packages.",
-      "description": "Should you want to define different registries for different scopes, see `npmScopes`. To define the authentication scheme for your servers, see `npmAuthToken`. The url must use HTTPS by default, but this can be changed by adding it to the `unsafeHttpWhitelist`.",
+      "description": "Should you want to define different registries for different packages, see `packageRules`. To define the authentication scheme for your servers, see `npmAuthToken`. The url must use HTTPS by default, but this can be changed by adding it to the `unsafeHttpWhitelist`.",
       "type": "string",
       "format": "uri",
       "default": "https://registry.npmjs.org"
     },
+    "pypiRegistryServer": {
+      "_package": "@yarnpkg/core",
+      "title": "Define the PyPI registry to use when fetching Python packages.",
+      "description": "Used by the `pypi:` protocol. Can be overridden for specific packages using `packageRules`.",
+      "type": "string",
+      "format": "uri",
+      "default": "https://pypi.org",
+      "_examples": [
+        {
+          "description": "Use an internal PyPI-compatible registry.",
+          "value": "https://pypi.example.org"
+        }
+      ]
+    },
     "npmScopes": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Per-scope registry configurations.",
+      "description": "Legacy-compatible per-scope npm registry and authentication settings. New configurations may prefer `packageRules`.",
       "type": "object",
       "patternProperties": {
         "^\\S+$": {
@@ -641,6 +672,132 @@
               "npmRegistryServer": "https://registry.npmjs.org"
             }
           }
+        }
+      ]
+    },
+    "packageRules": {
+      "_package": "@yarnpkg/core",
+      "title": "Package-specific configuration rules.",
+      "description": "Rules are applied in order, and later matching rules override earlier ones. Each rule must define at least one of `ecosystemFilter` or `packageFilter`.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ecosystemFilter": {
+            "type": "string",
+            "enum": ["npm", "pypi"],
+            "_hidden": true
+          },
+          "packageFilter": {
+            "type": "string",
+            "_hidden": true
+          },
+          "npmRegistryServer": {
+            "$ref": "#/properties/npmRegistryServer",
+            "_hidden": true
+          },
+          "npmPublishRegistry": {
+            "$ref": "#/properties/npmPublishRegistry",
+            "_hidden": true
+          },
+          "pypiRegistryServer": {
+            "$ref": "#/properties/pypiRegistryServer",
+            "_hidden": true
+          },
+          "npmMinimalAgeGate": {
+            "$ref": "#/properties/npmMinimalAgeGate",
+            "_hidden": true
+          },
+          "npmAlwaysAuth": {
+            "$ref": "#/properties/npmAlwaysAuth",
+            "_hidden": true
+          },
+          "npmAuthIdent": {
+            "$ref": "#/properties/npmAuthIdent",
+            "_hidden": true
+          },
+          "npmAuthToken": {
+            "$ref": "#/properties/npmAuthToken",
+            "_hidden": true
+          }
+        }
+      },
+      "_examples": [
+        {
+          "description": "Route one npm scope to a private registry.",
+          "value": [{
+            "ecosystemFilter": "npm",
+            "packageFilter": "@my-scope/*",
+            "npmRegistryServer": "https://registry.example.org"
+          }]
+        },
+        {
+          "description": "Disable the npm minimum age gate for one package.",
+          "value": [{
+            "packageFilter": "specific-package",
+            "npmMinimalAgeGate": "0"
+          }]
+        },
+        {
+          "description": "Use a private PyPI-compatible registry.",
+          "value": [{
+            "ecosystemFilter": "pypi",
+            "pypiRegistryServer": "https://pypi.example.org"
+          }]
+        }
+      ]
+    },
+    "sourceRules": {
+      "_package": "@yarnpkg/core",
+      "title": "Source-specific configuration rules.",
+      "description": "Rules are applied in order, and later matching rules override earlier ones. Each rule must define at least one of `ecosystemFilter` or `registryFilter`.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ecosystemFilter": {
+            "type": "string",
+            "enum": ["npm", "pypi"],
+            "_hidden": true
+          },
+          "registryFilter": {
+            "type": "string",
+            "format": "uri",
+            "_hidden": true
+          },
+          "npmMinimalAgeGate": {
+            "$ref": "#/properties/npmMinimalAgeGate",
+            "_hidden": true
+          },
+          "npmAlwaysAuth": {
+            "$ref": "#/properties/npmAlwaysAuth",
+            "_hidden": true
+          },
+          "npmAuthIdent": {
+            "$ref": "#/properties/npmAuthIdent",
+            "_hidden": true
+          },
+          "npmAuthToken": {
+            "$ref": "#/properties/npmAuthToken",
+            "_hidden": true
+          }
+        }
+      },
+      "_examples": [
+        {
+          "description": "Configure authentication for one npm registry.",
+          "value": [{
+            "ecosystemFilter": "npm",
+            "registryFilter": "https://registry.example.org",
+            "npmAuthToken": "${NPM_TOKEN}"
+          }]
+        },
+        {
+          "description": "Use a different npm age gate for all npm sources.",
+          "value": [{
+            "ecosystemFilter": "npm",
+            "npmMinimalAgeGate": "6h"
+          }]
         }
       ]
     },

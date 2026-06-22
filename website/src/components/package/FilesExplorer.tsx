@@ -1,8 +1,8 @@
-import {useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense} from 'react';
+import {useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense}                                                                          from 'react';
 
-import type {FileEntry, Tab, TreeNode} from './types';
-import {useIcons} from './contexts';
-import {OctIcon} from './icons';
+import {useIcons}                                                                                                                                   from './contexts';
+import {OctIcon}                                                                                                                                    from './icons';
+import type {FileEntry, Tab, TreeNode}                                                                                                              from './types';
 import {formatBytes, timeAgo, langFromPath, setupMonacoTheme, buildFileTree, formatWithPrettier, canPrettify, compareSemverDesc, isNoisyPrerelease} from './utils';
 
 const MonacoEditor = lazy(() => import(`@monaco-editor/react`).then(m => ({default: m.default})));
@@ -131,40 +131,56 @@ export function FilesExplorer({
   useEffect(() => {
     if (!compareVersion || !name) {
       setCompareFiles(null);
-      return;
+      return undefined;
     }
     const abortCtrl = new AbortController();
     fetch(`https://data.jsdelivr.com/v1/package/npm/${name}@${compareVersion}/flat`, {signal: abortCtrl.signal})
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.files) setCompareFiles(data.files);
+        if (data?.files) {
+          setCompareFiles(data.files);
+        }
       })
       .catch(err => {
-        if (err.name !== `AbortError`) setCompareFiles(null);
+        if (err.name !== `AbortError`) {
+          setCompareFiles(null);
+        }
       });
     return () => abortCtrl.abort();
   }, [compareVersion, name]);
 
   const changeMap = useMemo(() => {
-    if (!compareVersion || !files || !compareFiles) return null;
+    if (!compareVersion || !files || !compareFiles)
+      return null;
+
     const map = new Map<string, string>();
     const oldByPath = new Map(compareFiles.map(f => [f.name.replace(/^\//, ``), f.hash]));
     const newByPath = new Map(files.map(f => [f.name.replace(/^\//, ``), f.hash]));
 
     for (const [path, hash] of newByPath) {
       const oldHash = oldByPath.get(path);
-      if (!oldHash) map.set(path, `added`);
-      else if (oldHash !== hash) map.set(path, `modified`);
+      if (!oldHash) {
+        map.set(path, `added`);
+      } else if (oldHash !== hash) {
+        map.set(path, `modified`);
+      }
     }
-    for (const [path] of oldByPath)
-      if (!newByPath.has(path)) map.set(path, `removed`);
+    for (const [path] of oldByPath) {
+      if (!newByPath.has(path)) {
+        map.set(path, `removed`);
+      }
+    }
 
     return map;
   }, [compareVersion, files, compareFiles]);
 
   const displayFiles = useMemo(() => {
-    if (!files) return null;
-    if (!changeMap) return files;
+    if (!files)
+      return null;
+
+    if (!changeMap)
+      return files;
+
     const removedFiles: Array<FileEntry> = compareFiles
       ? compareFiles.filter(f => changeMap.get(f.name.replace(/^\//, ``)) === `removed`)
       : [];
@@ -178,14 +194,14 @@ export function FilesExplorer({
     if (!selectedFile || !name || !version) {
       setFileContent(null);
       setFileError(null);
-      return;
+      return undefined;
     }
     const changeType = changeMap?.get(selectedFile);
     if (changeType === `removed`) {
       setFileContent(``);
       setFileLoading(false);
       setFileError(null);
-      return;
+      return undefined;
     }
     const abortCtrl = new AbortController();
     setFileLoading(true);
@@ -210,12 +226,12 @@ export function FilesExplorer({
   useEffect(() => {
     if (!compareVersion || !selectedFile || !name) {
       setOrigContent(null);
-      return;
+      return undefined;
     }
     const changeType = changeMap?.get(selectedFile);
     if (changeType === `added`) {
       setOrigContent(``);
-      return;
+      return undefined;
     }
     const abortCtrl = new AbortController();
     setOrigLoading(true);
@@ -227,7 +243,9 @@ export function FilesExplorer({
       })
       .then(text => setOrigContent(text))
       .catch(err => {
-        if (err.name !== `AbortError`) setOrigContent(``);
+        if (err.name !== `AbortError`) {
+          setOrigContent(``);
+        }
       })
       .finally(() => setOrigLoading(false));
     return () => abortCtrl.abort();
@@ -236,25 +254,45 @@ export function FilesExplorer({
   useEffect(() => {
     if (!prettify || fileContent == null || !selectedFile) {
       setFormattedContent(null);
-      return;
+      return undefined;
     }
     let cancelled = false;
     formatWithPrettier(fileContent, selectedFile)
-      .then(result => { if (!cancelled) setFormattedContent(result); })
-      .catch(() => { if (!cancelled) setFormattedContent(null); });
-    return () => { cancelled = true; };
+      .then(result => {
+        if (!cancelled) {
+          setFormattedContent(result);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFormattedContent(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [prettify, fileContent, selectedFile]);
 
   useEffect(() => {
     if (!prettify || origContent == null || !selectedFile) {
       setFormattedOrig(null);
-      return;
+      return undefined;
     }
     let cancelled = false;
     formatWithPrettier(origContent, selectedFile)
-      .then(result => { if (!cancelled) setFormattedOrig(result); })
-      .catch(() => { if (!cancelled) setFormattedOrig(null); });
-    return () => { cancelled = true; };
+      .then(result => {
+        if (!cancelled) {
+          setFormattedOrig(result);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFormattedOrig(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [prettify, origContent, selectedFile]);
 
   const prevVersionRef = useRef(version);
@@ -386,8 +424,11 @@ export function FilesExplorer({
                         className={`fver-compare-btn${isCompareTarget ? ` active` : ``}`}
                         onClick={e => {
                           e.stopPropagation();
-                          if (isCompareTarget) exitCompare();
-                          else onCompareChange(v);
+                          if (isCompareTarget) {
+                            exitCompare();
+                          } else {
+                            onCompareChange(v);
+                          }
                         }}
                       >
                         {isCompareTarget ? `Comparing` : `Compare?`}

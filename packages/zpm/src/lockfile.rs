@@ -561,7 +561,7 @@ pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
             };
 
             let registry_base
-                = http_npm::get_registry(&config, ident.scope(), false)?;
+                = http_npm::get_registry_for_ident(&config, Some(&ident), false)?;
 
             // Store the tarball URL only if it's non-conventional (can't be computed from registry + path)
             let url = if npm::is_conventional_tarball_url(&registry_base, &ident, &version, resolved_field.clone()) {

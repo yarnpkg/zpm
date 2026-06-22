@@ -1,10 +1,9 @@
-import {RouterProvider}    from '@tanstack/react-router';
-import {useMemo}           from 'react';
+import {RouterProvider}            from '@tanstack/react-router';
+import {useMemo}                   from 'react';
 
-import {PackageCtx}        from './contexts';
-import {PackagePageInner}  from './PackagePageInner';
-import {splatRoute, getRouter} from './router';
-
+import {PackagePageInner}          from './PackagePageInner';
+import {PackageCtx}                from './contexts';
+import {splatRoute, getRouter}     from './router';
 import type {BrandIcons, Octicons} from './types';
 
 splatRoute.update({component: PackagePageInner});

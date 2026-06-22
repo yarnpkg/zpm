@@ -20,7 +20,11 @@ The range part uses Python package version specifiers. Yarn resolves it against 
 
 ## Registry
 
-By default Yarn queries `https://pypi.org`. Tests and private deployments may override this endpoint with the `ZPM_PYPI_REGISTRY` environment variable.
+By default Yarn queries `https://pypi.org`. You can override this endpoint with the `pypiRegistryServer` setting, or for specific packages with `packageRules`.
+
+```yaml
+pypiRegistryServer: https://pypi.example.org
+```
 
 ## Package names
 

@@ -1,5 +1,5 @@
+import octIconData                                          from '@iconify-json/octicon/icons.json';
 import {liteClient as algoliasearch}                        from 'algoliasearch/lite';
-import octIconData                                           from '@iconify-json/octicon/icons.json';
 import {useState, useEffect, useRef, useCallback, type JSX} from 'react';
 
 const docsClient = algoliasearch(`STXW7VT1S5`, `ecdfaea128fd901572b14543a2116eee`);
@@ -11,7 +11,7 @@ function octicon(name: string, size: number, className?: string) {
   const w = icon.width ?? 16;
   const h = icon.height ?? 16;
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${w} ${h}`} fill="currentColor" aria-hidden="true" className={className}
+    <svg width={size} height={size} viewBox={`0 0 ${w} ${h}`} fill={`currentColor`} aria-hidden={`true`} className={className}
       dangerouslySetInnerHTML={{__html: icon.body}}/>
   );
 }
@@ -50,7 +50,7 @@ function ClockIcon() {
 
 function FlameIcon({color}: {color: string}) {
   return (
-    <span style={{color}} className="shrink-0 inline-flex">
+    <span style={{color}} className={`shrink-0 inline-flex`}>
       {octicon(`flame-16`, 10)}
     </span>
   );
@@ -98,7 +98,9 @@ const RECENTS_KEY = `yarn-search-recents`;
 function getRecents(): Array<{term: string, kind: string}> {
   try {
     const raw = localStorage.getItem(RECENTS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      return JSON.parse(raw);
+    }
   } catch {}
   return [];
 }
@@ -106,7 +108,9 @@ function getRecents(): Array<{term: string, kind: string}> {
 function addRecent(term: string, kind: string) {
   const recents = getRecents().filter(r => r.term !== term);
   recents.unshift({term, kind});
-  if (recents.length > 5) recents.length = 5;
+  if (recents.length > 5)
+    recents.length = 5;
+
   try {
     localStorage.setItem(RECENTS_KEY, JSON.stringify(recents));
   } catch {}
@@ -132,7 +136,7 @@ function getFlameColor(downloadsRaw?: number): string | null {
 function looksLikePackage(q: string): boolean {
   const t = q.trim();
   if (!t) return false;
-  return /^@?[a-z0-9][\w.\-]*(?:\/[a-z0-9][\w.\-]*)?$/i.test(t);
+  return /^@?[a-z0-9][\w.-]*(?:\/[a-z0-9][\w.-]*)?$/i.test(t);
 }
 
 interface ResultGroup {
@@ -153,14 +157,28 @@ function groupResults(results: Array<SearchItem>, scope: Scope, query: string): 
     if (looksLikePackage(query)) {
       const hotPkgs = pkgs.filter(r => getFlameColor(r.downloadsRaw) != null).slice(0, 2);
       const restPkgs = pkgs.filter(r => !hotPkgs.includes(r));
-      if (hotPkgs.length) groups.push({kind: `pkg`, label: `Popular packages`, items: hotPkgs});
-      if (docs.length) groups.push({kind: `docs`, label: KIND_LABELS.docs, items: docs});
-      if (cli.length) groups.push({kind: `cli`, label: KIND_LABELS.cli, items: cli});
-      if (restPkgs.length) groups.push({kind: `pkg`, label: KIND_LABELS.pkg, items: restPkgs});
+      if (hotPkgs.length)
+        groups.push({kind: `pkg`, label: `Popular packages`, items: hotPkgs});
+
+      if (docs.length)
+        groups.push({kind: `docs`, label: KIND_LABELS.docs, items: docs});
+
+      if (cli.length)
+        groups.push({kind: `cli`, label: KIND_LABELS.cli, items: cli});
+
+      if (restPkgs.length) {
+        groups.push({kind: `pkg`, label: KIND_LABELS.pkg, items: restPkgs});
+      }
     } else {
-      if (docs.length) groups.push({kind: `docs`, label: KIND_LABELS.docs, items: docs});
-      if (pkgs.length) groups.push({kind: `pkg`, label: KIND_LABELS.pkg, items: pkgs});
-      if (cli.length) groups.push({kind: `cli`, label: KIND_LABELS.cli, items: cli});
+      if (docs.length)
+        groups.push({kind: `docs`, label: KIND_LABELS.docs, items: docs});
+
+      if (pkgs.length)
+        groups.push({kind: `pkg`, label: KIND_LABELS.pkg, items: pkgs});
+
+      if (cli.length) {
+        groups.push({kind: `cli`, label: KIND_LABELS.cli, items: cli});
+      }
     }
   } else if (filtered.length) {
     groups.push({kind: scope as ResultKind, label: KIND_LABELS[scope as ResultKind], items: filtered});
@@ -177,7 +195,7 @@ function flattenGroups(groups: Array<ResultGroup>): Array<SearchItem> {
 
 function Kbd({children}: {children: React.ReactNode}) {
   return (
-    <kbd className="mono text-[10px] text-[var(--fg-dim)] bg-[color-mix(in_oklch,var(--fg)_5%,transparent)] border border-[var(--line-strong)] border-b-2 px-1.5 py-0.5 rounded-[4px] min-w-[18px] text-center">
+    <kbd className={`mono text-[10px] text-[var(--fg-dim)] bg-[color-mix(in_oklch,var(--fg)_5%,transparent)] border border-[var(--line-strong)] border-b-2 px-1.5 py-0.5 rounded-[4px] min-w-[18px] text-center`}>
       {children}
     </kbd>
   );
@@ -186,7 +204,7 @@ function Kbd({children}: {children: React.ReactNode}) {
 function ScopeChip({scope, active, count, onClick}: {scope: Scope, active: boolean, count: number, onClick: () => void}) {
   return (
     <button
-      role="tab"
+      role={`tab`}
       aria-selected={active}
       onClick={onClick}
       className={`font-sans text-xs bg-transparent border rounded-full px-2.5 py-1 cursor-pointer inline-flex items-center gap-1.5 transition-colors ${
@@ -207,7 +225,7 @@ function ScopeChip({scope, active, count, onClick}: {scope: Scope, active: boole
 
 function ResultGlyph({kind}: {kind: ResultKind}) {
   return (
-    <span className="w-8 h-8 border border-[var(--line-strong)] rounded-lg inline-flex items-center justify-center text-[var(--fg-dim)] bg-[color-mix(in_oklch,var(--fg)_3%,transparent)] shrink-0 group-hover:text-[var(--accent)] group-hover:border-[var(--accent-line)] group-hover:bg-[var(--accent-soft)] group-[.active]:text-[var(--accent)] group-[.active]:border-[var(--accent-line)] group-[.active]:bg-[var(--accent-soft)]">
+    <span className={`w-8 h-8 border border-[var(--line-strong)] rounded-lg inline-flex items-center justify-center text-[var(--fg-dim)] bg-[color-mix(in_oklch,var(--fg)_3%,transparent)] shrink-0 group-hover:text-[var(--accent)] group-hover:border-[var(--accent-line)] group-hover:bg-[var(--accent-soft)] group-[.active]:text-[var(--accent)] group-[.active]:border-[var(--accent-line)] group-[.active]:bg-[var(--accent-soft)]`}>
       {KIND_GLYPHS[kind]}
     </span>
   );
@@ -215,9 +233,9 @@ function ResultGlyph({kind}: {kind: ResultKind}) {
 
 function Crumbs({crumbs, separator = `›`}: {crumbs: Array<string>, separator?: string}) {
   return (
-    <span className="mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.02em] whitespace-nowrap overflow-hidden text-ellipsis">
+    <span className={`mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.02em] whitespace-nowrap overflow-hidden text-ellipsis`}>
       {crumbs.map((c, i) => (
-        <span key={i}>{i > 0 && <span className="opacity-40 px-1">{separator}</span>}{c}</span>
+        <span key={i}>{i > 0 && <span className={`opacity-40 px-1`}>{separator}</span>}{c}</span>
       ))}
     </span>
   );
@@ -225,10 +243,10 @@ function Crumbs({crumbs, separator = `›`}: {crumbs: Array<string>, separator?:
 
 function GroupHeader({label, count}: {label: string, count: number}) {
   return (
-    <div className="flex items-center gap-2.5 px-5 pt-3.5 pb-1.5 mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.12em] uppercase">
+    <div className={`flex items-center gap-2.5 px-5 pt-3.5 pb-1.5 mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.12em] uppercase`}>
       <span>{label}</span>
-      <span className="flex-1 h-px bg-[var(--line)]"/>
-      <span className="tabular-nums tracking-[0.04em]">{count}</span>
+      <span className={`flex-1 h-px bg-[var(--line)]`}/>
+      <span className={`tabular-nums tracking-[0.04em]`}>{count}</span>
     </div>
   );
 }
@@ -241,21 +259,23 @@ function DocResultRow({item, isActive, onMouseEnter, onClick}: {item: SearchItem
       } hover:bg-[color-mix(in_oklch,var(--fg)_5%,transparent)] hover:border-l-[var(--accent)]`}
       href={item.href}
       onMouseEnter={onMouseEnter}
-      onClick={e => { e.preventDefault(); onClick(); }}
-      role="option"
+      onClick={e => {
+        e.preventDefault(); onClick();
+      }}
+      role={`option`}
       aria-selected={isActive}
     >
       <ResultGlyph kind={item.kind}/>
 
-      <span className="min-w-0">
-        <span className="text-sm text-[var(--fg)] font-medium truncate block" dangerouslySetInnerHTML={{__html: item.titleHtml}}/>
+      <span className={`min-w-0`}>
+        <span className={`text-sm text-[var(--fg)] font-medium truncate block`} dangerouslySetInnerHTML={{__html: item.titleHtml}}/>
 
         {item.snippetHtml && (
-          <span className="search-snippet-clamp text-[12.5px] text-[var(--fg-dim)] mt-0.5 leading-[1.45]" dangerouslySetInnerHTML={{__html: item.snippetHtml}}/>
+          <span className={`search-snippet-clamp text-[12.5px] text-[var(--fg-dim)] mt-0.5 leading-[1.45]`} dangerouslySetInnerHTML={{__html: item.snippetHtml}}/>
         )}
       </span>
 
-      <span className="flex flex-col items-end gap-1.5 mono text-[10.5px] text-[var(--fg-mute)] whitespace-nowrap shrink-0">
+      <span className={`flex flex-col items-end gap-1.5 mono text-[10.5px] text-[var(--fg-mute)] whitespace-nowrap shrink-0`}>
         {item.crumbs && item.crumbs.length > 0 && <Crumbs crumbs={item.crumbs}/>}
         <span className={`inline-flex items-center gap-1.5 mono text-[10px] text-[var(--accent)] transition-opacity duration-150 ${isActive ? `opacity-100` : `opacity-0 group-hover:opacity-100`}`}>
           <Kbd>↵</Kbd> open
@@ -275,36 +295,38 @@ function PkgResultRow({item, isActive, onMouseEnter, onClick}: {item: SearchItem
       } hover:bg-[color-mix(in_oklch,var(--fg)_5%,transparent)] hover:border-l-[var(--accent)]`}
       href={item.href}
       onMouseEnter={onMouseEnter}
-      onClick={e => { e.preventDefault(); onClick(); }}
-      role="option"
+      onClick={e => {
+        e.preventDefault(); onClick();
+      }}
+      role={`option`}
       aria-selected={isActive}
     >
-      <ResultGlyph kind="pkg"/>
+      <ResultGlyph kind={`pkg`}/>
 
-      <span className="min-w-0">
-        <div className="flex items-baseline gap-2">
-          <span className="text-sm text-[var(--fg)] font-medium mono truncate" dangerouslySetInnerHTML={{__html: item.titleHtml}}/>
+      <span className={`min-w-0`}>
+        <div className={`flex items-baseline gap-2`}>
+          <span className={`text-sm text-[var(--fg)] font-medium mono truncate`} dangerouslySetInnerHTML={{__html: item.titleHtml}}/>
 
           {item.downloads && flameColor && (
-            <span className="mono text-[10.5px] tabular-nums inline-flex items-center gap-1">
+            <span className={`mono text-[10.5px] tabular-nums inline-flex items-center gap-1`}>
               <FlameIcon color={flameColor}/>
               {item.downloads}
             </span>
           )}
         </div>
 
-        <span className="search-snippet-clamp text-[12.5px] text-[var(--fg-dim)] mt-0.5 leading-[1.45]" dangerouslySetInnerHTML={{__html: item.snippetHtml || ``}}/>
+        <span className={`search-snippet-clamp text-[12.5px] text-[var(--fg-dim)] mt-0.5 leading-[1.45]`} dangerouslySetInnerHTML={{__html: item.snippetHtml || ``}}/>
 
-        <span className="mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.02em] mt-0.5 block">
+        <span className={`mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.02em] mt-0.5 block`}>
           <span>{item.author}</span>
-          <span className="opacity-40 px-1">·</span>
+          <span className={`opacity-40 px-1`}>·</span>
           <span>{item.license}</span>
         </span>
       </span>
 
-      <span className="flex flex-col items-end gap-1.5 mono text-[10.5px] text-[var(--fg-mute)] whitespace-nowrap shrink-0">
+      <span className={`flex flex-col items-end gap-1.5 mono text-[10.5px] text-[var(--fg-mute)] whitespace-nowrap shrink-0`}>
         {item.version && (
-          <span className="bg-[color-mix(in_oklch,var(--fg)_5%,transparent)] border border-[var(--line)] px-[7px] py-0.5 rounded-full text-[var(--fg-dim)]">
+          <span className={`bg-[color-mix(in_oklch,var(--fg)_5%,transparent)] border border-[var(--line)] px-[7px] py-0.5 rounded-full text-[var(--fg-dim)]`}>
             {item.version}
           </span>
         )}
@@ -348,36 +370,36 @@ function EmptyState({onSelect}: {onSelect: (term: string) => void}) {
   const recents = getRecents();
 
   return (
-    <div className="py-2 pb-4">
+    <div className={`py-2 pb-4`}>
       {recents.length > 0 && (
-        <div className="px-5 py-1.5 pb-2.5">
-          <div className="mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.12em] uppercase mb-2">Recent</div>
+        <div className={`px-5 py-1.5 pb-2.5`}>
+          <div className={`mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.12em] uppercase mb-2`}>Recent</div>
           {recents.map((r, i) => (
             <div
               key={i}
               onClick={() => onSelect(r.term)}
-              className="flex items-center gap-2.5 py-2 px-1 rounded-lg cursor-pointer text-[var(--fg-dim)] text-[13.5px] transition-colors hover:text-[var(--fg)] hover:bg-[color-mix(in_oklch,var(--fg)_4%,transparent)] hover:pl-2"
+              className={`flex items-center gap-2.5 py-2 px-1 rounded-lg cursor-pointer text-[var(--fg-dim)] text-[13.5px] transition-colors hover:text-[var(--fg)] hover:bg-[color-mix(in_oklch,var(--fg)_4%,transparent)] hover:pl-2`}
             >
-              <span className="text-[var(--fg-mute)] shrink-0"><ClockIcon/></span>
-              <span className="flex-1">{r.term}</span>
-              <span className="mono text-[10px] text-[var(--fg-mute)] tracking-[0.04em] uppercase">{r.kind}</span>
+              <span className={`text-[var(--fg-mute)] shrink-0`}><ClockIcon/></span>
+              <span className={`flex-1`}>{r.term}</span>
+              <span className={`mono text-[10px] text-[var(--fg-mute)] tracking-[0.04em] uppercase`}>{r.kind}</span>
             </div>
           ))}
         </div>
       )}
 
-      <div className="px-5 py-1.5 pb-2.5">
-        <div className="mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.12em] uppercase mb-2">Suggested</div>
+      <div className={`px-5 py-1.5 pb-2.5`}>
+        <div className={`mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.12em] uppercase mb-2`}>Suggested</div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className={`grid grid-cols-2 gap-2`}>
           {SUGGESTED.map((term, i) => (
             <div
               key={i}
               onClick={() => onSelect(term)}
-              className="border border-[var(--line)] rounded-[10px] px-3 py-2.5 bg-[color-mix(in_oklch,var(--fg)_2%,transparent)] cursor-pointer flex items-center gap-2.5 transition-colors hover:border-[var(--accent-line)] hover:bg-[var(--accent-soft)] group"
+              className={`border border-[var(--line)] rounded-[10px] px-3 py-2.5 bg-[color-mix(in_oklch,var(--fg)_2%,transparent)] cursor-pointer flex items-center gap-2.5 transition-colors hover:border-[var(--accent-line)] hover:bg-[var(--accent-soft)] group`}
             >
-              <span className="mono text-[10px] text-[var(--fg-mute)] tracking-[0.08em]">{String(i + 1).padStart(2, `0`)}</span>
-              <span className="text-[13px] text-[var(--fg)] flex-1 group-hover:text-[var(--accent)]">{term}</span>
+              <span className={`mono text-[10px] text-[var(--fg-mute)] tracking-[0.08em]`}>{String(i + 1).padStart(2, `0`)}</span>
+              <span className={`text-[13px] text-[var(--fg)] flex-1 group-hover:text-[var(--accent)]`}>{term}</span>
             </div>
           ))}
         </div>
@@ -388,15 +410,15 @@ function EmptyState({onSelect}: {onSelect: (term: string) => void}) {
 
 function NoResults({query}: {query: string}) {
   return (
-    <div className="py-15 px-5 text-center">
-      <div className="w-11 h-11 border border-[var(--line-strong)] rounded-full inline-flex items-center justify-center text-[var(--fg-mute)] mb-3.5">
+    <div className={`py-15 px-5 text-center`}>
+      <div className={`w-11 h-11 border border-[var(--line-strong)] rounded-full inline-flex items-center justify-center text-[var(--fg-mute)] mb-3.5`}>
         <NoResultsIcon/>
       </div>
 
-      <div className="text-[var(--fg)] text-[15px] mb-1.5">No matches</div>
+      <div className={`text-[var(--fg)] text-[15px] mb-1.5`}>No matches</div>
 
-      <div className="text-[var(--fg-mute)] text-[13px]">
-        Nothing for <span className="text-[var(--fg-dim)] mono">"{query}"</span> in this scope.
+      <div className={`text-[var(--fg-mute)] text-[13px]`}>
+        Nothing for <span className={`text-[var(--fg-dim)] mono`}>"{query}"</span> in this scope.
       </div>
     </div>
   );
@@ -404,16 +426,16 @@ function NoResults({query}: {query: string}) {
 
 function Footer() {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-2.5 border-t border-[var(--line)] bg-[color-mix(in_oklch,var(--bg-0)_30%,transparent)] text-[11.5px] text-[var(--fg-mute)]">
-      <div className="flex gap-3.5 items-center flex-wrap">
-        <span className="inline-flex items-center gap-1.5"><Kbd>↵</Kbd> open</span>
-        <span className="inline-flex items-center gap-1.5"><Kbd>↑</Kbd><Kbd>↓</Kbd> navigate</span>
-        <span className="inline-flex items-center gap-1.5"><Kbd>tab</Kbd> filter</span>
-        <span className="inline-flex items-center gap-1.5"><Kbd>esc</Kbd> close</span>
+    <div className={`flex items-center justify-between gap-4 px-4 py-2.5 border-t border-[var(--line)] bg-[color-mix(in_oklch,var(--bg-0)_30%,transparent)] text-[11.5px] text-[var(--fg-mute)]`}>
+      <div className={`flex gap-3.5 items-center flex-wrap`}>
+        <span className={`inline-flex items-center gap-1.5`}><Kbd>↵</Kbd> open</span>
+        <span className={`inline-flex items-center gap-1.5`}><Kbd>↑</Kbd><Kbd>↓</Kbd> navigate</span>
+        <span className={`inline-flex items-center gap-1.5`}><Kbd>tab</Kbd> filter</span>
+        <span className={`inline-flex items-center gap-1.5`}><Kbd>esc</Kbd> close</span>
       </div>
 
-      <span className="inline-flex items-center gap-1.5 mono">
-        <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] shadow-[0_0_8px_var(--accent)]"/>
+      <span className={`inline-flex items-center gap-1.5 mono`}>
+        <span className={`w-1.5 h-1.5 rounded-full bg-[var(--accent)] shadow-[0_0_8px_var(--accent)]`}/>
         search by Algolia
       </span>
     </div>
@@ -452,8 +474,11 @@ export default function SearchModal() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === `k`) {
         e.preventDefault();
-        if (open) closeModal();
-        else openModal();
+        if (open) {
+          closeModal();
+        } else {
+          openModal();
+        }
       }
     };
     document.addEventListener(`keydown`, handleKeyDown);
@@ -463,7 +488,9 @@ export default function SearchModal() {
   // Wire nav search trigger
   useEffect(() => {
     const trigger = document.querySelector<HTMLElement>(`nav [role="search"]`);
-    if (!trigger) return;
+    if (!trigger)
+      return undefined;
+
 
     const handleClick = (e: Event) => {
       e.preventDefault();
@@ -499,8 +526,8 @@ export default function SearchModal() {
       const [docsResponse, pkgResponse] = await Promise.all([
         docsClient.search([{
           indexName: `yarnpkg_next`,
-          query: q,
           params: {
+            query: q,
             hitsPerPage: 15,
             attributesToHighlight: [`hierarchy.lvl0`, `hierarchy.lvl1`, `hierarchy.lvl2`, `hierarchy.lvl3`, `hierarchy.lvl4`, `hierarchy.lvl5`, `hierarchy.lvl6`, `content`],
             attributesToSnippet: [`content:30`],
@@ -508,8 +535,8 @@ export default function SearchModal() {
         }]),
         pkgClient.search([{
           indexName: `npm-search`,
-          query: q,
           params: {
+            query: q,
             hitsPerPage: 10,
             attributesToRetrieve: [`name`, `version`, `description`, `owner`, `humanDownloadsLast30Days`, `downloadsLast30Days`, `license`],
             attributesToHighlight: [`name`, `description`],
@@ -564,14 +591,18 @@ export default function SearchModal() {
 
   // Debounced search
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (debounceRef.current)
+      clearTimeout(debounceRef.current);
+
     if (!query.trim()) {
       setResults([]);
-      return;
+      return undefined;
     }
     debounceRef.current = setTimeout(() => search(query), 200);
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
     };
   }, [query, search]);
 
@@ -627,33 +658,39 @@ export default function SearchModal() {
 
   return (
     <div
-      className="fixed inset-0 z-200 flex items-start justify-center pt-[10vh] px-5 pb-5 bg-[color-mix(in_oklch,var(--bg-0)_65%,transparent)] backdrop-blur-[12px] backdrop-saturate-[140%]"
-      onClick={e => { if (e.target === e.currentTarget) closeModal(); }}
+      className={`fixed inset-0 z-200 flex items-start justify-center pt-[10vh] px-5 pb-5 bg-[color-mix(in_oklch,var(--bg-0)_65%,transparent)] backdrop-blur-[12px] backdrop-saturate-[140%]`}
+      onClick={e => {
+        if (e.target === e.currentTarget) {
+          closeModal();
+        }
+      }}
     >
       <div
-        className="w-[min(720px,100%)] bg-[color-mix(in_oklch,var(--bg-1)_80%,transparent)] border border-[var(--line-strong)] rounded-2xl shadow-[0_30px_80px_-20px_rgba(0,0,0,0.55),0_0_0_1px_color-mix(in_oklch,var(--accent)_14%,transparent),0_0_60px_-12px_color-mix(in_oklch,var(--accent)_30%,transparent)] backdrop-blur-[20px] backdrop-saturate-[160%] overflow-hidden flex flex-col max-h-[78vh] animate-[searchIn_0.18s_cubic-bezier(0.22,1,0.36,1)]"
-        role="combobox"
-        aria-expanded="true"
+        className={`w-[min(720px,100%)] bg-[color-mix(in_oklch,var(--bg-1)_80%,transparent)] border border-[var(--line-strong)] rounded-2xl shadow-[0_30px_80px_-20px_rgba(0,0,0,0.55),0_0_0_1px_color-mix(in_oklch,var(--accent)_14%,transparent),0_0_60px_-12px_color-mix(in_oklch,var(--accent)_30%,transparent)] backdrop-blur-[20px] backdrop-saturate-[160%] overflow-hidden flex flex-col max-h-[78vh] animate-[searchIn_0.18s_cubic-bezier(0.22,1,0.36,1)]`}
+        role={`combobox`}
+        aria-expanded={`true`}
         onKeyDown={handleKeyDown}
       >
         {/* Header */}
-        <div className="flex items-center gap-3.5 py-3.5 pl-5 pr-4 border-b border-[var(--line)]">
-          <SearchIcon className="text-[var(--fg-mute)] shrink-0"/>
+        <div className={`flex items-center gap-3.5 py-3.5 pl-5 pr-4 border-b border-[var(--line)]`}>
+          <SearchIcon className={`text-[var(--fg-mute)] shrink-0`}/>
 
           <input
             ref={inputRef}
-            type="search"
-            placeholder="Search docs, packages, commands…"
-            autoComplete="off"
+            type={`search`}
+            placeholder={`Search docs, packages, commands…`}
+            autoComplete={`off`}
             spellCheck={false}
             value={query}
             onChange={e => setQuery(e.target.value)}
-            className="flex-1 bg-transparent border-0 outline-0 text-[var(--fg)] font-sans text-[17px] tracking-[-0.005em] py-1 min-w-0 placeholder:text-[var(--fg-mute)]"
+            className={`flex-1 bg-transparent border-0 outline-0 text-[var(--fg)] font-sans text-[17px] tracking-[-0.005em] py-1 min-w-0 placeholder:text-[var(--fg-mute)]`}
           />
           {query && (
             <button
-              onClick={() => { setQuery(``); setResults([]); inputRef.current?.focus(); }}
-              className="bg-transparent border-0 text-[var(--fg-mute)] cursor-pointer w-[22px] h-[22px] rounded-[6px] inline-flex items-center justify-center p-0 transition-colors hover:text-[var(--fg)] hover:bg-[color-mix(in_oklch,var(--fg)_6%,transparent)]"
+              onClick={() => {
+                setQuery(``); setResults([]); inputRef.current?.focus();
+              }}
+              className={`bg-transparent border-0 text-[var(--fg-mute)] cursor-pointer w-[22px] h-[22px] rounded-[6px] inline-flex items-center justify-center p-0 transition-colors hover:text-[var(--fg)] hover:bg-[color-mix(in_oklch,var(--fg)_6%,transparent)]`}
             >
               <CloseIcon/>
             </button>
@@ -661,15 +698,15 @@ export default function SearchModal() {
 
           <button
             onClick={closeModal}
-            className="mono text-[10.5px] text-[var(--fg-mute)] border border-[var(--line-strong)] bg-[color-mix(in_oklch,var(--fg)_4%,transparent)] px-[7px] py-[3px] rounded-[5px] tracking-[0.04em] cursor-pointer transition-colors hover:text-[var(--fg)] hover:border-[var(--fg-mute)]"
+            className={`mono text-[10.5px] text-[var(--fg-mute)] border border-[var(--line-strong)] bg-[color-mix(in_oklch,var(--fg)_4%,transparent)] px-[7px] py-[3px] rounded-[5px] tracking-[0.04em] cursor-pointer transition-colors hover:text-[var(--fg)] hover:border-[var(--fg-mute)]`}
           >
             esc
           </button>
         </div>
 
         {/* Scope chips */}
-        <div className="flex gap-1 px-3.5 py-2.5 border-b border-[var(--line)] items-center" role="tablist">
-          <span className="mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.1em] uppercase mr-2">scope</span>
+        <div className={`flex gap-1 px-3.5 py-2.5 border-b border-[var(--line)] items-center`} role={`tablist`}>
+          <span className={`mono text-[10.5px] text-[var(--fg-mute)] tracking-[0.1em] uppercase mr-2`}>scope</span>
 
           {SCOPES.map(s => (
             <ScopeChip
@@ -677,17 +714,19 @@ export default function SearchModal() {
               scope={s.key}
               active={scope === s.key}
               count={counts[s.key]}
-              onClick={() => { setScope(s.key); setActiveIdx(0); }}
+              onClick={() => {
+                setScope(s.key); setActiveIdx(0);
+              }}
             />
           ))}
         </div>
 
         {/* Results */}
-        <div className="flex-1 overflow-y-auto py-2 pb-1 search-results-scroll" ref={resultsRef} role="listbox">
+        <div className={`flex-1 overflow-y-auto py-2 pb-1 search-results-scroll`} ref={resultsRef} role={`listbox`}>
           {query.trim() === `` ? (
             <EmptyState onSelect={handleSelect}/>
           ) : loading && results.length === 0 ? (
-            <div className="py-10 px-5 text-center text-[var(--fg-mute)] text-[13px]">
+            <div className={`py-10 px-5 text-center text-[var(--fg-mute)] text-[13px]`}>
               Searching…
             </div>
           ) : flatItems.length === 0 ? (

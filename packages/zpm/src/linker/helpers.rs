@@ -343,7 +343,7 @@ pub fn populate_build_entry_dependencies(package_build_entries: &BTreeMap<Locato
 }
 pub struct PackageBuildInfo {
     pub must_extract: bool,
-    pub build_commands: Option<Vec<build::Command>>,
+    pub build_step: build::BuildStep,
 }
 
 pub fn get_package_internal_info(project: &Project, install: &Install, dependencies_meta: &Vec<(VersionFilter, PackageMeta)>, locator: &Locator, resolution: &Resolution, physical_package_data: &PackageData) -> PackageBuildInfo {
@@ -375,9 +375,10 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     // .pnp.cjs file to change depending on the system.
     let has_build_commands = package_flags.build_commands.len() > 0;
     let scripts_allowed_by_meta = package_meta.built.unwrap_or(project.config.settings.enable_scripts.value);
+    let scripts_can_run
+        = locator.reference.is_workspace_reference() || scripts_allowed_by_meta;
     let should_build_if_compatible
-        = has_build_commands
-            && (locator.reference.is_workspace_reference() || scripts_allowed_by_meta);
+        = has_build_commands && scripts_can_run;
 
     // Optional dependencies baked by zip archives are always extracted,
     // as we have no way to know whether they would be extracted if we
@@ -399,14 +400,18 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     let is_compatible = resolution.requirements
         .validate_system(&System::from_current());
 
-    let must_build
-        = should_build_if_compatible && is_compatible;
-
-    let build_commands
-        = must_build.then_some(package_flags.build_commands.clone());
+    let build_step = if !has_build_commands {
+        build::BuildStep::Commands(Vec::new())
+    } else if !is_compatible {
+        build::BuildStep::Skip(build::BuildSkip::Incompatible)
+    } else if !scripts_can_run {
+        build::BuildStep::Skip(build::BuildSkip::Disabled)
+    } else {
+        build::BuildStep::Commands(package_flags.build_commands.clone())
+    };
 
     PackageBuildInfo {
         must_extract,
-        build_commands,
+        build_step,
     }
 }
