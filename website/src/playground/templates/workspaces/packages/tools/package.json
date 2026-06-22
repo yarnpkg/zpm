@@ -1,0 +1,7 @@
+{
+  "name": "@demo/tools",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

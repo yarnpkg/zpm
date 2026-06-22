@@ -5,24 +5,9 @@ import {PlaygroundTerminal} from './PlaygroundTerminal';
 
 import type {IconData} from '../package/types';
 import type {PlaygroundFile} from './PlaygroundTerminal';
+import type {PlaygroundEntry, PlaygroundTemplate} from '../../playground/types';
 
 const MonacoEditor = lazy(() => import(`@monaco-editor/react`).then(m => ({default: m.default})));
-
-type PlaygroundEntry = {
-  content?: string;
-  depth: number;
-  kind: `file` | `folder` | `terminal`;
-  language?: string;
-  name: string;
-  path: string;
-};
-
-type PresetId = `simple` | `workspaces` | `node-modules`;
-
-type PlaygroundPreset = {
-  entries: Array<PlaygroundEntry>;
-  label: string;
-};
 
 type TreeOcticons = {
   file: IconData;
@@ -31,258 +16,7 @@ type TreeOcticons = {
 };
 
 const TERMINAL_ENTRY: PlaygroundEntry = {depth: 0, name: `terminal`, path: `terminal`, kind: `terminal`};
-
-const SIMPLE_PROJECT: Array<PlaygroundEntry> = [
-  {
-    depth: 0,
-    name: `package.json`,
-    path: `package.json`,
-    kind: `file`,
-    language: `json`,
-    content: `{
-  "name": "simple-project",
-  "packageManager": "yarn@6.0.0-git.20260507",
-  "private": true,
-  "scripts": {
-    "start": "tsx src/index.ts"
-  },
-  "dependencies": {
-    "lodash": "^4.17.21"
-  },
-  "devDependencies": {
-    "tsx": "^5.0.0",
-    "typescript": "^5.9.3"
-  }
-}
-`,
-  },
-  {
-    depth: 0,
-    name: `.yarnrc.yml`,
-    path: `.yarnrc.yml`,
-    kind: `file`,
-    language: `yaml`,
-    content: `nodeLinker: pnp
-enableGlobalCache: true
-`,
-  },
-  {depth: 0, name: `src`, path: `src`, kind: `folder`},
-  {
-    depth: 1,
-    name: `index.ts`,
-    path: `src/index.ts`,
-    kind: `file`,
-    language: `typescript`,
-    content: `import lodash from 'lodash';
-
-const words = ['yarn', 'playground', 'wasm'];
-
-console.log(lodash.startCase(words.join(' ')));
-`,
-  },
-];
-
-const WORKSPACES: Array<PlaygroundEntry> = [
-  {
-    depth: 0,
-    name: `package.json`,
-    path: `package.json`,
-    kind: `file`,
-    language: `json`,
-    content: `{
-  "name": "yarn-playground",
-  "packageManager": "yarn@6.0.0-git.20260507",
-  "private": true,
-  "scripts": {
-    "start": "tsx src/index.ts",
-    "check": "yarn constraints"
-  },
-  "workspaces": [
-    "packages/*"
-  ],
-  "dependencies": {
-    "@yarnpkg/core": "workspace:*",
-    "react": "^19.2.5"
-  },
-  "devDependencies": {
-    "tsx": "^5.0.0",
-    "typescript": "^5.9.3"
-  }
-}
-`,
-  },
-  {
-    depth: 0,
-    name: `.yarnrc.yml`,
-    path: `.yarnrc.yml`,
-    kind: `file`,
-    language: `yaml`,
-    content: `nodeLinker: pnp
-enableGlobalCache: true
-enableImmutableInstalls: true
-
-packageExtensions:
-  "demo-plugin@*":
-    peerDependencies:
-      "@yarnpkg/core": "*"
-`,
-  },
-  {depth: 0, name: `src`, path: `src`, kind: `folder`},
-  {
-    depth: 1,
-    name: `index.ts`,
-    path: `src/index.ts`,
-    kind: `file`,
-    language: `typescript`,
-    content: `import {createWorkspace} from './workspace';
-
-const workspace = createWorkspace({
-  cwd: '/workspace',
-  packageManager: process.env.npm_config_user_agent ?? 'yarn',
-});
-
-await workspace.install();
-console.log(await workspace.explain('react'));
-`,
-  },
-  {
-    depth: 1,
-    name: `workspace.ts`,
-    path: `src/workspace.ts`,
-    kind: `file`,
-    language: `typescript`,
-    content: `type WorkspaceOptions = {
-  cwd: string;
-  packageManager: string;
-};
-
-export function createWorkspace(options: WorkspaceOptions) {
-  return {
-    async install() {
-      return {
-        cwd: options.cwd,
-        resolved: 42,
-        linked: true,
-      };
-    },
-
-    async explain(ident: string) {
-      return \`\${ident} is provided by workspace:demo\`;
-    },
-  };
-}
-`,
-  },
-  {depth: 0, name: `packages`, path: `packages`, kind: `folder`},
-  {depth: 1, name: `app`, path: `packages/app`, kind: `folder`},
-  {
-    depth: 2,
-    name: `package.json`,
-    path: `packages/app/package.json`,
-    kind: `file`,
-    language: `json`,
-    content: `{
-  "name": "@demo/app",
-  "private": true,
-  "dependencies": {
-    "@demo/tools": "workspace:*",
-    "react": "^19.2.5"
-  }
-}
-`,
-  },
-  {depth: 1, name: `tools`, path: `packages/tools`, kind: `folder`},
-  {
-    depth: 2,
-    name: `package.json`,
-    path: `packages/tools/package.json`,
-    kind: `file`,
-    language: `json`,
-    content: `{
-  "name": "@demo/tools",
-  "private": true,
-  "exports": {
-    ".": "./src/index.ts"
-  }
-}
-`,
-  },
-];
-
-const NODE_MODULES_LINKER: Array<PlaygroundEntry> = [
-  {
-    depth: 0,
-    name: `package.json`,
-    path: `package.json`,
-    kind: `file`,
-    language: `json`,
-    content: `{
-  "name": "node-modules-linker",
-  "packageManager": "yarn@6.0.0-git.20260507",
-  "private": true,
-  "scripts": {
-    "test": "vitest run"
-  },
-  "dependencies": {
-    "express": "^5.2.1"
-  },
-  "devDependencies": {
-    "vitest": "^4.0.0"
-  }
-}
-`,
-  },
-  {
-    depth: 0,
-    name: `.yarnrc.yml`,
-    path: `.yarnrc.yml`,
-    kind: `file`,
-    language: `yaml`,
-    content: `nodeLinker: node-modules
-nmMode: hardlinks-global
-enableGlobalCache: true
-`,
-  },
-  {depth: 0, name: `src`, path: `src`, kind: `folder`},
-  {
-    depth: 1,
-    name: `server.ts`,
-    path: `src/server.ts`,
-    kind: `file`,
-    language: `typescript`,
-    content: `import express from 'express';
-
-const app = express();
-
-app.get('/', (_req, res) => {
-  res.send('Hello from Yarn with node_modules');
-});
-
-app.listen(3000);
-`,
-  },
-  {depth: 0, name: `node_modules`, path: `node_modules`, kind: `folder`},
-  {depth: 1, name: `.yarn-state.yml`, path: `node_modules/.yarn-state.yml`, kind: `file`, language: `yaml`, content: `# Generated by Yarn
-__metadata:
-  version: 6
-  nmMode: hardlinks-global
-`},
-];
-
-const PRESETS: Record<PresetId, PlaygroundPreset> = {
-  simple: {
-    label: `Simple project`,
-    entries: SIMPLE_PROJECT,
-  },
-  workspaces: {
-    label: `Workspaces`,
-    entries: WORKSPACES,
-  },
-  'node-modules': {
-    label: `Node modules linker`,
-    entries: NODE_MODULES_LINKER,
-  },
-};
+const EMPTY_TEMPLATE: PlaygroundTemplate = {description: ``, entries: [], id: ``, label: `No templates`};
 
 const selectClassName = `h-[38px] w-full rounded-lg border border-[var(--line-strong)] bg-[color-mix(in_oklch,var(--fg)_6%,transparent)] px-3 font-mono text-xs font-medium text-[var(--fg)] outline-none focus:border-[var(--accent-line)] focus:shadow-[0_0_0_3px_var(--accent-soft)]`;
 const treeItemClassName = `flex min-h-[30px] w-full items-center gap-2 whitespace-nowrap rounded-[7px] border-0 bg-transparent py-0 pr-2 text-left font-[inherit] text-[13px] leading-none text-[var(--fg-dim)] disabled:cursor-default enabled:cursor-pointer enabled:hover:bg-[color-mix(in_oklch,var(--fg)_7%,transparent)] enabled:hover:text-[var(--fg)]`;
@@ -348,22 +82,29 @@ function setupPlaygroundMonacoTheme(monaco: any) {
   });
 }
 
-export function PlaygroundWorkspace({version, octicons}: {version: string, octicons: TreeOcticons}) {
-  const [presetId, setPresetId] = useState<PresetId>(`simple`);
+export function PlaygroundWorkspace({version, octicons, templates}: {version: string, octicons: TreeOcticons, templates: Array<PlaygroundTemplate>}) {
+  const [presetId, setPresetId] = useState(() => templates[0]?.id ?? ``);
   const [selectedPath, setSelectedPath] = useState(`terminal`);
   const [openFilePaths, setOpenFilePaths] = useState<Array<string>>([]);
   const [lastFilePath, setLastFilePath] = useState<string | null>(null);
   const [monacoReady, setMonacoReady] = useState(false);
   const [isDark, setIsDark] = useState(() => typeof document !== `undefined` && document.documentElement.getAttribute(`data-theme`) !== `light`);
 
-  const preset = PRESETS[presetId];
+  const preset = templates.find(template => template.id === presetId) ?? templates[0] ?? EMPTY_TEMPLATE;
   const entries = preset.entries;
+
+  useEffect(() => {
+    if (templates.some(template => template.id === presetId))
+      return;
+
+    setPresetId(templates[0]?.id ?? ``);
+  }, [presetId, templates]);
 
   const selectedEntry = useMemo(() => {
     if (selectedPath === `terminal`)
       return TERMINAL_ENTRY;
 
-    return entries.find(file => file.path === selectedPath) ?? entries[0];
+    return entries.find(file => file.path === selectedPath) ?? TERMINAL_ENTRY;
   }, [entries, selectedPath]);
 
   useEffect(() => {
@@ -405,7 +146,7 @@ export function PlaygroundWorkspace({version, octicons}: {version: string, octic
     setSelectedPath(entry.path);
   }, []);
 
-  const handlePresetChange = useCallback((presetId: PresetId) => {
+  const handlePresetChange = useCallback((presetId: string) => {
     setPresetId(presetId);
     setOpenFilePaths([]);
     setLastFilePath(null);
@@ -442,14 +183,19 @@ export function PlaygroundWorkspace({version, octicons}: {version: string, octic
             className={selectClassName}
             aria-label="Playground preset"
             value={presetId}
-            onChange={event => handlePresetChange(event.currentTarget.value as PresetId)}
+            onChange={event => handlePresetChange(event.currentTarget.value)}
           >
-            {Object.entries(PRESETS).map(([id, preset]) => (
-              <option key={id} value={id}>
-                {preset.label}
+            {templates.map(template => (
+              <option key={template.id} value={template.id}>
+                {template.label}
               </option>
             ))}
           </select>
+          {preset.description && (
+            <p className="m-0 mt-2 text-[12px] leading-[1.4] text-[var(--fg-mute)]">
+              {preset.description}
+            </p>
+          )}
         </div>
 
         <div className="mb-2 block font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--fg-mute)]">

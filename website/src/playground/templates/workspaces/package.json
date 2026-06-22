@@ -1,0 +1,20 @@
+{
+  "name": "yarn-playground",
+  "packageManager": "yarn@{{YARN_VERSION}}",
+  "private": true,
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "check": "yarn constraints"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "dependencies": {
+    "@yarnpkg/core": "workspace:*",
+    "react": "^19.2.5"
+  },
+  "devDependencies": {
+    "tsx": "^5.0.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "label": "Node modules linker",
+  "description": "A project configured to use the node-modules linker.",
+  "order": 30
+}

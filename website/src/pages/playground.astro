@@ -5,10 +5,12 @@ import octIconData from '@iconify-json/octicon/icons.json';
 
 import BaseLayout from '../layouts/BaseLayout.astro';
 import {PlaygroundWorkspace} from '../components/playground/PlaygroundWorkspace';
+import {loadPlaygroundTemplates} from '../playground/loadTemplates';
 import '../styles/theme.css';
 
 const rootPackage = JSON.parse(await readFile(new URL(`../../../package.json`, import.meta.url), `utf8`));
 const yarnVersion = rootPackage.packageManager.replace(/^yarn@/, ``);
+const templates = await loadPlaygroundTemplates({yarnVersion});
 
 function extractOct(name: string) {
   const icon = (octIconData as any).icons[name];
@@ -85,7 +87,7 @@ const shareIcon = extractOct(`share-16`);
         </button>
       </div>
 
-      <PlaygroundWorkspace client:load version={yarnVersion} octicons={treeOcticons} />
+      <PlaygroundWorkspace client:load version={yarnVersion} octicons={treeOcticons} templates={templates} />
 
       <div class="border-t border-[var(--line)] bg-black/90 px-[18px] py-[13px] text-center text-[13px] leading-[1.4] text-[var(--fg-dim)]">
         This playground runs Yarn {yarnVersion} compiled to WASM, thanks to the incredible work of the BrowserPod folks.
