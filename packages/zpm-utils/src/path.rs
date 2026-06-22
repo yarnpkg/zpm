@@ -341,6 +341,22 @@ impl Path {
         }
     }
 
+    pub fn without_trailing_separators(&self) -> Path {
+        if self.is_root() {
+            return self.clone();
+        }
+
+        let trimmed = self.path.trim_end_matches('/');
+
+        if trimmed.len() == self.path.len() {
+            self.clone()
+        } else {
+            Path {
+                path: trimmed.to_string(),
+            }
+        }
+    }
+
     pub fn extname<'a>(&'a self) -> Option<&'a str> {
         self.basename().and_then(|basename| {
             if let Some(mut last_dot) = basename.rfind('.') {
@@ -1151,6 +1167,28 @@ impl ToFileString for Path {
 impl ToHumanString for Path {
     fn to_print_string(&self) -> String {
         DataType::Path.colorize(&self.to_home_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::Path;
+
+    #[test]
+    fn normalizes_repeated_trailing_separators() {
+        assert_eq!(Path::from_str("foo//").unwrap().as_str(), "foo/");
+        assert_eq!(Path::from_str("/foo///").unwrap().as_str(), "/foo/");
+        assert_eq!(Path::from_str("///").unwrap().as_str(), "/");
+    }
+
+    #[test]
+    fn removes_trailing_separators() {
+        assert_eq!(Path::from_str("foo/").unwrap().without_trailing_separators().as_str(), "foo");
+        assert_eq!(Path::from_str("/foo/").unwrap().without_trailing_separators().as_str(), "/foo");
+        assert_eq!(Path::from_str("/").unwrap().without_trailing_separators().as_str(), "/");
+        assert_eq!(Path::new().without_trailing_separators().as_str(), "");
     }
 }
 

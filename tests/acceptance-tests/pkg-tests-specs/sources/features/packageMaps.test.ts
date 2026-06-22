@@ -386,6 +386,40 @@ describePackageMaps(`Package maps`, () => {
 });
 
 describe(`Package map generation`, () => {
+  it(`should use workspace dependency names for workspace link locators in standard node-modules maps`,
+    makeTemporaryEnv(
+      {
+        private: true,
+        workspaces: [`workspace`],
+        dependencies: {
+          workspace: `workspace:*`,
+        },
+      },
+      {
+        nodeLinker: `node-modules`,
+        nodeExperimentalPackageMap: true,
+      },
+      async ({path, run}) => {
+        await writeJson(ppath.join(path, `workspace/package.json` as PortablePath), {
+          name: `workspace`,
+          version: `1.0.0`,
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        });
+        await writeFile(ppath.join(path, `workspace/index.js` as PortablePath), ``);
+
+        await run(`install`);
+
+        const packageMap = await xfs.readJsonPromise(getPackageMapPath(path));
+
+        expect(packageMap.packages[`workspace`].dependencies).toMatchObject({
+          [`no-deps`]: `no-deps`,
+        });
+      },
+    ),
+  );
+
   it(`should include workspace self-reference symlinks in loose node-modules maps`,
     makeTemporaryEnv(
       {

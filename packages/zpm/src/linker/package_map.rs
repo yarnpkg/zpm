@@ -3,7 +3,7 @@ use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 use serde::Serialize;
 use zpm_config::NodePackageMapType;
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Ident, Locator, Reference};
+use zpm_primitives::{Ident, Locator};
 use zpm_utils::{Path, ToFileString, ToHumanString};
 
 use crate::{error::Error, install::Install, project::Project, tree_resolver::ResolutionTree};
@@ -64,12 +64,14 @@ impl<'a> NodeModulesPackageMapBuilder<'a> {
 
     pub fn register_package(&mut self, location: Path, package_path: Path, locator: &Locator) {
         let normalized_location
-            = strip_trailing_separators(location);
+            = location.without_trailing_separators();
+        let normalized_package_path
+            = package_path.without_trailing_separators();
 
         let package_map_node = PackageMapNode {
             id: get_package_id(&self.base_path, &normalized_location),
-            package_path: strip_trailing_separators(package_path),
-            dependency_names: Some(get_package_dependency_names(self.project, self.install, locator)),
+            package_path: normalized_package_path.clone(),
+            dependency_names: Some(get_package_dependency_names(self.project, self.install, locator, &normalized_package_path)),
         };
 
         self.package_map_nodes.insert(normalized_location.clone(), package_map_node);
@@ -168,7 +170,7 @@ impl PnpmPackageMapBuilder {
         self.package_map_nodes_by_locator
             .entry(locator.clone())
             .or_insert_with(|| PnpmPackageMapNode {
-                package_location: strip_trailing_separators(package_location),
+                package_location: package_location.without_trailing_separators(),
                 dependencies: BTreeMap::new(),
             });
     }
@@ -268,12 +270,12 @@ fn package_map_error(message: impl Into<String>) -> Error {
     Error::PackageMapGenerationError(message.into())
 }
 
-fn get_package_dependency_names(project: &Project, install: &Install, locator: &Locator) -> BTreeSet<String> {
+fn get_package_dependency_names(project: &Project, install: &Install, locator: &Locator, package_path: &Path) -> BTreeSet<String> {
     let tree
         = &install.install_state.resolution_tree;
 
     let mut dependency_names = resolution_dependency_names(tree, locator)
-        .or_else(|| workspace_link_dependency_names(project, tree, locator))
+        .or_else(|| workspace_package_dependency_names(project, tree, package_path))
         .unwrap_or_default();
 
     // Add implicit self-dependency for non-workspace packages when there's no explicit self-dependency
@@ -295,17 +297,9 @@ fn resolution_dependency_names(tree: &ResolutionTree, locator: &Locator) -> Opti
         })
 }
 
-fn workspace_link_dependency_names(project: &Project, tree: &ResolutionTree, locator: &Locator) -> Option<BTreeSet<String>> {
-    let Reference::Link(params) = &locator.reference else {
-        return None;
-    };
-
-    let link_path
-        = Path::from_str(&params.path).ok()?;
-
-    let workspace = project.workspaces
-        .iter()
-        .find(|workspace| workspace.path == link_path)?;
+fn workspace_package_dependency_names(project: &Project, tree: &ResolutionTree, package_path: &Path) -> Option<BTreeSet<String>> {
+    let package_rel_path = package_path.forward_relative_to(&project.project_cwd)?;
+    let workspace = project.try_closest_workspace_by_rel_path(&package_rel_path)?;
 
     resolution_dependency_names(tree, &workspace.locator())
 }
@@ -331,14 +325,6 @@ fn get_package_name(location: &Path) -> Option<(Path, String)> {
         = segments.get(node_modules_index + 2)?;
 
     Some((node_modules_path, format!("{scope_or_name}/{name}")))
-}
-
-fn strip_trailing_separators(mut path: Path) -> Path {
-    while !path.is_root() && path.as_str().ends_with('/') {
-        path = Path::from_str(path.as_str().trim_end_matches('/')).expect("valid normalized path");
-    }
-
-    path
 }
 
 fn get_relative_url(from: &Path, to: &Path) -> String {
