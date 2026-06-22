@@ -413,7 +413,7 @@ describe(`Package map generation`, () => {
 
         const packageMap = await xfs.readJsonPromise(getPackageMapPath(path));
 
-        expect(packageMap.packages[`workspace`].dependencies).toMatchObject({
+        expect(packageMap.packages.workspace.dependencies).toMatchObject({
           [`no-deps`]: `no-deps`,
         });
       },
