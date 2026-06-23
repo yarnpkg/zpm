@@ -11,7 +11,42 @@ const otelEnv = async () => {
   };
 };
 
-const getAttributes = (attributes: Array<any> = []) => {
+type OtelAttribute = {
+  key: string;
+  value: Record<string, any>;
+};
+
+type OtelEvent = {
+  name: string;
+  attributes?: Array<OtelAttribute>;
+};
+
+type OtelSpan = {
+  name: string;
+  attributes?: Array<OtelAttribute>;
+  events?: Array<OtelEvent>;
+};
+
+type OtelScopeSpan = {
+  spans: Array<OtelSpan>;
+};
+
+type OtelResourceSpan = {
+  resource: {
+    attributes?: Array<OtelAttribute>;
+  };
+  scopeSpans: Array<OtelScopeSpan>;
+};
+
+type OtelExport = {
+  resourceSpans: Array<OtelResourceSpan>;
+};
+
+const isOtelExport = (body: unknown): body is OtelExport => {
+  return typeof body === `object` && body !== null && Array.isArray((body as OtelExport).resourceSpans);
+};
+
+const getAttributes = (attributes: Array<OtelAttribute> = []) => {
   return Object.fromEntries(attributes.map(attribute => {
     const value = attribute.value;
 
@@ -33,10 +68,12 @@ const getAttributes = (attributes: Array<any> = []) => {
 
 const getOtelPayload = (recording: Array<any>) => {
   const resources = recording.flatMap(request => {
-    if (request.type !== RequestType.OtelTraces || typeof request.body !== `object` || request.body === null)
+    const body: unknown = request.body;
+
+    if (request.type !== RequestType.OtelTraces || !isOtelExport(body))
       return [];
 
-    return request.body.resourceSpans.map(resourceSpan => ({
+    return body.resourceSpans.map(resourceSpan => ({
       attributes: getAttributes(resourceSpan.resource.attributes),
     }));
   });
@@ -44,10 +81,12 @@ const getOtelPayload = (recording: Array<any>) => {
   return {
     resources: [...new Map(resources.map(resource => [JSON.stringify(resource), resource])).values()],
     spans: recording.flatMap(request => {
-      if (request.type !== RequestType.OtelTraces || typeof request.body !== `object` || request.body === null)
+      const body: unknown = request.body;
+
+      if (request.type !== RequestType.OtelTraces || !isOtelExport(body))
         return [];
 
-      return request.body.resourceSpans.flatMap(resourceSpan => {
+      return body.resourceSpans.flatMap(resourceSpan => {
         return resourceSpan.scopeSpans.flatMap(scopeSpan => {
           return scopeSpan.spans.map(span => ({
             name: span.name,
@@ -66,8 +105,9 @@ const getOtelPayload = (recording: Array<any>) => {
 const expectToContainExactly = (actual: Array<any>, expected: Array<any>) => {
   expect(actual).toHaveLength(expected.length);
 
-  for (const item of expected)
+  for (const item of expected) {
     expect(actual).toContainEqual(item);
+  }
 };
 
 const getSectionSpan = (payload: ReturnType<typeof getOtelPayload>, sectionName: string) => {
