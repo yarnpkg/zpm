@@ -508,7 +508,17 @@ impl Reporter {
     }
 
     fn format_prompt(&self, prompt: &str) -> String {
-        format!("{} {}", "?".color(Color::TrueColor {r: 47, g: 186, b: 135}), prompt.bold())
+        prompt
+            .split('\n')
+            .enumerate()
+            .map(|(idx, line)| {
+                if idx == 0 {
+                    format!("{} {}", "?".color(Color::TrueColor {r: 47, g: 186, b: 135}), line.bold())
+                } else {
+                    format!("  {}", line.bold())
+                }
+            })
+            .join("\n")
     }
 
     fn on_prompt<T: Write>(&mut self, writer: &mut T, prompt: PromptType) {
@@ -530,6 +540,8 @@ impl Reporter {
                     .interact()
                     .unwrap();
 
+                writeln!(writer, "").unwrap();
+
                 self.prompt_tx.send(confirmed.to_string()).unwrap();
             },
 
@@ -542,6 +554,8 @@ impl Reporter {
                     .interact_text()
                     .unwrap();
 
+                writeln!(writer, "").unwrap();
+
                 self.prompt_tx.send(input).unwrap();
             },
 
@@ -553,6 +567,8 @@ impl Reporter {
                     .with_prompt(label)
                     .interact()
                     .unwrap();
+
+                writeln!(writer, "").unwrap();
 
                 self.prompt_tx.send(password).unwrap();
             },
@@ -930,5 +946,34 @@ impl StreamReport {
     pub fn close(self) {
         self.break_request_tx.send(true).unwrap();
         self.handle.join().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::{Arc, mpsc}};
+
+    use super::*;
+
+    fn make_reporter() -> Reporter {
+        let (prompt_tx, _prompt_rx)
+            = mpsc::channel();
+
+        Reporter::new(
+            StreamReportConfig::default(),
+            Arc::new(ReportCounters::default()),
+            prompt_tx,
+        )
+    }
+
+    #[test]
+    fn format_prompt_aligns_multiline_prompts() {
+        let reporter
+            = make_reporter();
+
+        assert_eq!(
+            strip_ansi_codes(&reporter.format_prompt("Would you like to trust this project?\nProject: /path/to/project")),
+            "? Would you like to trust this project?\n  Project: /path/to/project",
+        );
     }
 }

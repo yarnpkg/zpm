@@ -42,6 +42,7 @@ pub mod script;
 pub mod scratchpad;
 pub mod tasks;
 pub mod tree_resolver;
+pub mod trust;
 pub mod versioning;
 pub mod workspace_glob;
 pub mod workspace_graph;
