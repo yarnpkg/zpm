@@ -1,8 +1,8 @@
-use std::{cmp::Ordering, str::FromStr};
+use std::{cmp::Ordering, collections::BTreeSet, str::FromStr};
 
 use rkyv::Archive;
 use zpm_semver::VersionRc;
-use zpm_utils::{DataType, EcoVec, FromFileString, ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
+use zpm_utils::{DataType, EcoVec, FromFileString, QueryString, QueryStringValue, ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
 
 #[derive(thiserror::Error, Clone, Debug, PartialEq, Eq)]
 pub enum PypiError {
@@ -14,6 +14,15 @@ pub enum PypiError {
 
     #[error("Cannot project PEP 440 version to semver: {0}")]
     InvalidSemverProjection(String),
+
+    #[error("Invalid PyPI extra: {0}")]
+    InvalidExtra(String),
+
+    #[error("Invalid PyPI range parameter: {0}")]
+    InvalidRangeParameter(String),
+
+    #[error("Invalid PyPI range parameters: {0}")]
+    InvalidRangeParameters(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -230,3 +239,174 @@ impl ToHumanString for PypiSpecifierSet {
 
 impl_file_string_from_str!(PypiSpecifierSet);
 impl_file_string_serialization!(PypiSpecifierSet);
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash))]
+pub struct PypiExtras {
+    raw: Vec<String>,
+}
+
+impl PypiExtras {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    pub fn from_iter<I, S>(extras: I) -> Result<Self, PypiError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut unique = BTreeSet::new();
+
+        for extra in extras {
+            let extra = extra.as_ref().trim();
+
+            if !is_valid_extra(extra) {
+                return Err(PypiError::InvalidExtra(extra.to_string()));
+            }
+
+            unique.insert(extra.to_ascii_lowercase());
+        }
+
+        Ok(Self {
+            raw: unique.into_iter().collect(),
+        })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.raw.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.raw.iter().map(|extra| extra.as_str())
+    }
+
+    pub fn contains(&self, extra: &str) -> bool {
+        let extra = extra.to_ascii_lowercase();
+        self.raw.iter().any(|candidate| candidate == &extra)
+    }
+}
+
+fn is_valid_extra(extra: &str) -> bool {
+    let mut chars = extra.chars();
+
+    let Some(first) = chars.next() else {
+        return false;
+    };
+
+    if !first.is_ascii_alphanumeric() {
+        return false;
+    }
+
+    let mut previous = first;
+
+    for ch in chars {
+        if !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_' && ch != '.' {
+            return false;
+        }
+
+        previous = ch;
+    }
+
+    previous.is_ascii_alphanumeric()
+}
+
+impl FromFileString for PypiExtras {
+    type Error = PypiError;
+
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
+        Self::from_iter(src.split(','))
+    }
+}
+
+impl ToFileString for PypiExtras {
+    fn to_file_string(&self) -> String {
+        self.raw.join(",")
+    }
+}
+
+impl ToHumanString for PypiExtras {
+    fn to_print_string(&self) -> String {
+        DataType::Range.colorize(&self.to_file_string())
+    }
+}
+
+impl_file_string_from_str!(PypiExtras);
+impl_file_string_serialization!(PypiExtras);
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash))]
+pub struct PypiRangeParameters {
+    pub extras: Option<PypiExtras>,
+}
+
+impl PypiRangeParameters {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    pub fn from_extras(extras: PypiExtras) -> Self {
+        Self {
+            extras: (!extras.is_empty()).then_some(extras),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.extras.as_ref().map(|extras| extras.is_empty()).unwrap_or(true)
+    }
+}
+
+impl FromFileString for PypiRangeParameters {
+    type Error = PypiError;
+
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
+        let query_string
+            = QueryString::from_file_string(src)
+                .map_err(|err| PypiError::InvalidRangeParameters(err.to_string()))?;
+
+        let mut parameters
+            = Self::empty();
+
+        for (key, value) in query_string.fields {
+            match (key.as_str(), value) {
+                ("extras", QueryStringValue::String(value)) => {
+                    parameters.extras = Some(PypiExtras::from_file_string(&value)?);
+                },
+
+                ("extras", QueryStringValue::True) => {
+                    return Err(PypiError::InvalidRangeParameter(key));
+                },
+
+                _ => {
+                    return Err(PypiError::InvalidRangeParameter(key));
+                },
+            }
+        }
+
+        Ok(parameters)
+    }
+}
+
+impl ToFileString for PypiRangeParameters {
+    fn to_file_string(&self) -> String {
+        let mut parameters
+            = Vec::new();
+
+        if let Some(extras) = &self.extras {
+            if !extras.is_empty() {
+                parameters.push(format!("extras={}", extras.to_file_string()));
+            }
+        }
+
+        parameters.join("&")
+    }
+}
+
+impl ToHumanString for PypiRangeParameters {
+    fn to_print_string(&self) -> String {
+        DataType::Range.colorize(&self.to_file_string())
+    }
+}
+
+impl_file_string_from_str!(PypiRangeParameters);
+impl_file_string_serialization!(PypiRangeParameters);

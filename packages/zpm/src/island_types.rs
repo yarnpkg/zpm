@@ -14,6 +14,14 @@ use zpm_utils::ToFileString;
 pub enum IslandPackage {
     Root,
     Named(Ident),
+    ExtraProxy {
+        ident: Ident,
+        extra: String,
+    },
+    ExtraFeature {
+        ident: Ident,
+        extra: String,
+    },
 }
 
 impl fmt::Display for IslandPackage {
@@ -21,7 +29,24 @@ impl fmt::Display for IslandPackage {
         match self {
             IslandPackage::Root => write!(f, "<root>"),
             IslandPackage::Named(ident) => write!(f, "{}", ident),
+            IslandPackage::ExtraProxy { ident, extra } |
+            IslandPackage::ExtraFeature { ident, extra } => write!(f, "{}[{}]", ident, extra),
         }
+    }
+}
+
+impl IslandPackage {
+    pub fn ident(&self) -> Option<&Ident> {
+        match self {
+            IslandPackage::Root => None,
+            IslandPackage::Named(ident)
+            | IslandPackage::ExtraProxy { ident, .. }
+            | IslandPackage::ExtraFeature { ident, .. } => Some(ident),
+        }
+    }
+
+    pub fn is_proxy(&self) -> bool {
+        matches!(self, IslandPackage::ExtraProxy { .. } | IslandPackage::ExtraFeature { .. })
     }
 }
 

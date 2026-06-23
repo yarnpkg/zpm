@@ -116,6 +116,212 @@ describe(`Protocols`, () => {
     );
 
     test(
+      `it should only include extra requirements when requested`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`pypi-extra-provider`]: `pypi:1.0.0`,
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
+          });
+
+          await run(`install`);
+
+          let cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+
+          expect(cacheEntries.some(entry => entry.includes(`pypi-extra-provider-pypi-1.0.0`))).toEqual(true);
+          expect(cacheEntries.some(entry => entry.includes(`pypi-no-deps`))).toEqual(false);
+
+          await xfs.removePromise(ppath.join(path, `.yarn/cache`));
+          await xfs.removePromise(ppath.join(path, `yarn.lock` as any));
+
+          await xfs.writeJsonPromise(ppath.join(path, `package.json` as any), {
+            dependencies: {
+              [`pypi-extra-provider`]: `pypi:1.0.0#extras=feature`,
+            },
+          });
+
+          await run(`install`);
+
+          cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+
+          expect(cacheEntries.some(entry => entry.includes(`pypi-extra-provider-pypi-1.0.0`))).toEqual(true);
+          expect(cacheEntries.some(entry => entry.includes(`pypi-no-deps-pypi-1.1.0`))).toEqual(true);
+        },
+      ),
+    );
+
+    test(
+      `it should resolve extras requested by PyPI dependencies`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`pypi-extra-forwarder`]: `pypi:1.0.0`,
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
+          });
+
+          await run(`install`);
+
+          const cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+
+          expect(cacheEntries.some(entry => entry.includes(`pypi-extra-forwarder-pypi-1.0.0`))).toEqual(true);
+          expect(cacheEntries.some(entry => entry.includes(`pypi-extra-provider-pypi-1.0.0`))).toEqual(true);
+          expect(cacheEntries.some(entry => entry.includes(`pypi-no-deps-pypi-1.1.0`))).toEqual(true);
+        },
+      ),
+    );
+
+    test(
+      `it should let extra requirements override base requirements for the same dependency`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`pypi-extra-overrides-base`]: `pypi:1.0.0`,
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
+          });
+
+          await run(`install`);
+
+          let cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+
+          expect(cacheEntries.some(entry => entry.includes(`pypi-extra-overrides-base-pypi-1.0.0`))).toEqual(true);
+          expect(cacheEntries.some(entry => entry.includes(`pypi-no-deps-pypi-1.0.0`))).toEqual(true);
+          expect(cacheEntries.some(entry => entry.includes(`pypi-no-deps-pypi-1.1.0`))).toEqual(false);
+
+          await xfs.removePromise(ppath.join(path, `.yarn/cache`));
+          await xfs.removePromise(ppath.join(path, `yarn.lock` as any));
+
+          await xfs.writeJsonPromise(ppath.join(path, `package.json` as any), {
+            dependencies: {
+              [`pypi-extra-overrides-base`]: `pypi:1.0.0#extras=feature`,
+            },
+          });
+
+          await run(`install`);
+
+          cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+
+          expect(cacheEntries.some(entry => entry.includes(`pypi-extra-overrides-base-pypi-1.0.0`))).toEqual(true);
+          expect(cacheEntries.some(entry => entry.includes(`pypi-no-deps-pypi-1.0.0`))).toEqual(false);
+          expect(cacheEntries.some(entry => entry.includes(`pypi-no-deps-pypi-1.1.0`))).toEqual(true);
+        },
+      ),
+    );
+
+    test(
+      `it should union multiple requested PyPI extras from range parameters`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`pypi-extra-provider`]: `pypi:1.0.0#extras=feature%2Ctools`,
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
+          });
+
+          await run(`install`);
+
+          const cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+
+          expect(cacheEntries.some(entry => entry.includes(`pypi-extra-provider-pypi-1.0.0`))).toEqual(true);
+          expect(cacheEntries.some(entry => entry.includes(`pypi-no-deps-pypi-1.1.0`))).toEqual(true);
+          expect(cacheEntries.some(entry => entry.includes(`pypi-entry-points-pypi-1.0.0`))).toEqual(true);
+        },
+      ),
+    );
+
+    test(
+      `it should resolve PyPI extras through venv islands`,
+      makeTemporaryMonorepoEnv(
+        {
+          workspaces: [`packages/*`],
+        },
+        {
+          [`packages/island-ws`]: {
+            name: `island-ws`,
+            version: `1.0.0`,
+            dependencies: {
+              [`pypi-extra-forwarder`]: `pypi:1.0.0`,
+            },
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
+            unstableIslands: {
+              main: {
+                workspaces: [`island-ws`],
+                linker: `venv`,
+              },
+            },
+          });
+
+          await run(`install`);
+
+          await expect(xfs.existsPromise(ppath.join(path, `packages/island-ws/.venv/lib/site-packages/pypi-no-deps/pypi_no_deps/__init__.py` as any))).resolves.toEqual(true);
+        },
+      ),
+    );
+
+    test(
+      `it should let extra requirements override base requirements through venv islands`,
+      makeTemporaryMonorepoEnv(
+        {
+          workspaces: [`packages/*`],
+        },
+        {
+          [`packages/island-ws`]: {
+            name: `island-ws`,
+            version: `1.0.0`,
+            dependencies: {
+              [`pypi-extra-overrides-base`]: `pypi:1.0.0#extras=feature`,
+            },
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
+            unstableIslands: {
+              main: {
+                workspaces: [`island-ws`],
+                linker: `venv`,
+              },
+            },
+          });
+
+          await run(`install`);
+
+          await expect(xfs.readFilePromise(ppath.join(path, `packages/island-ws/.venv/lib/site-packages/pypi-no-deps/pypi_no_deps/__init__.py` as any), `utf8`)).resolves.toContain(`VALUE = '1.1.0'`);
+        },
+      ),
+    );
+
+    test(
       `it should support running install twice with a comma-separated PyPI range`,
       makeTemporaryEnv(
         {
