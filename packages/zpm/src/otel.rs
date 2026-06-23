@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use opentelemetry::trace::TracerProvider as _;
+use opentelemetry::{KeyValue, trace::TracerProvider as _};
 use opentelemetry_otlp::{Protocol, WithExportConfig};
 use opentelemetry_sdk::{Resource, trace::SdkTracerProvider};
 use tracing_subscriber::{Layer, Registry, filter::filter_fn, layer::SubscriberExt, util::SubscriberInitExt};
@@ -38,7 +38,8 @@ pub fn init() -> Option<OtelGuard> {
 
     let provider = SdkTracerProvider::builder()
         .with_resource(Resource::builder()
-            .with_service_name("yarn")
+            .with_service_name("yarnpkg")
+            .with_attribute(KeyValue::new("service.version", zpm_switch::get_bin_version()))
             .build())
         .with_simple_exporter(exporter)
         .build();

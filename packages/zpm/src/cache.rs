@@ -148,7 +148,7 @@ impl CompositeCache {
                 locator = %key.to_file_string(),
                 extension = %ext,
                 size_bytes = data.len(),
-                "package downloaded",
+                "yarn.cache.package_download",
             );
 
             crate::report::if_active_async(|report| {

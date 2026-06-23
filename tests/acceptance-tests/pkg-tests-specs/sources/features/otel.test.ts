@@ -31,12 +31,18 @@ const getAttributes = (attributes: Array<any> = []) => {
   }));
 };
 
-const compareTimestamps = (a: string, b: string) => {
-  return Number(BigInt(a) - BigInt(b));
-};
-
 const getOtelPayload = (recording: Array<any>) => {
+  const resources = recording.flatMap(request => {
+    if (request.type !== RequestType.OtelTraces || typeof request.body !== `object` || request.body === null)
+      return [];
+
+    return request.body.resourceSpans.map(resourceSpan => ({
+      attributes: getAttributes(resourceSpan.resource.attributes),
+    }));
+  });
+
   return {
+    resources: [...new Map(resources.map(resource => [JSON.stringify(resource), resource])).values()],
     spans: recording.flatMap(request => {
       if (request.type !== RequestType.OtelTraces || typeof request.body !== `object` || request.body === null)
         return [];
@@ -45,22 +51,34 @@ const getOtelPayload = (recording: Array<any>) => {
         return resourceSpan.scopeSpans.flatMap(scopeSpan => {
           return scopeSpan.spans.map(span => ({
             name: span.name,
-            startTimeUnixNano: span.startTimeUnixNano,
             attributes: getAttributes(span.attributes),
             events: (span.events ?? []).map(event => ({
               name: event.name,
-              timeUnixNano: event.timeUnixNano,
               attributes: getAttributes(event.attributes),
-            })).sort((a, b) => {
-              return compareTimestamps(a.timeUnixNano, b.timeUnixNano);
-            }),
+            })),
           }));
         });
       });
-    }).sort((a, b) => {
-      return compareTimestamps(a.startTimeUnixNano, b.startTimeUnixNano);
     }),
   };
+};
+
+const expectToContainExactly = (actual: Array<any>, expected: Array<any>) => {
+  expect(actual).toHaveLength(expected.length);
+
+  for (const item of expected)
+    expect(actual).toContainEqual(item);
+};
+
+const getSectionSpan = (payload: ReturnType<typeof getOtelPayload>, sectionName: string) => {
+  const span = payload.spans.find(span => {
+    return span.name === `yarn.report.section` && span.attributes[`section.name`] === sectionName;
+  });
+
+  if (typeof span === `undefined`)
+    throw new Error(`Expected to find ${sectionName} section span`);
+
+  return span;
 };
 
 describe(`Features`, () => {
@@ -82,65 +100,63 @@ describe(`Features`, () => {
 
         const coldPayload = getOtelPayload(coldRecording);
 
-        expect(coldPayload).toEqual({
-          spans: [
-            expect.objectContaining({
-              events: [],
-              name: `yarn.report.section`,
-              attributes: expect.objectContaining({
-                [`section.name`]: `Project validation`,
-              }),
+        expectToContainExactly(coldPayload.resources, [
+          expect.objectContaining({
+            attributes: expect.objectContaining({
+              [`service.name`]: `yarnpkg`,
+              [`service.version`]: expect.any(String),
             }),
-            expect.objectContaining({
-              events: [
-                expect.objectContaining({
-                  name: `package downloaded`,
-                  attributes: expect.objectContaining({
-                    extension: `.zip`,
-                    locator: `no-deps@npm:1.0.0`,
-                  }),
-                }),
-              ],
-              name: `yarn.report.section`,
-              attributes: expect.objectContaining({
-                [`section.name`]: `Installing packages`,
-              }),
+          }),
+        ]);
+
+        expectToContainExactly(coldPayload.spans, [
+          expect.objectContaining({
+            name: `yarn.report.section`,
+            attributes: expect.objectContaining({
+              [`section.name`]: `Project validation`,
             }),
-            expect.objectContaining({
-              events: [
-                expect.objectContaining({
-                  name: `package added to project`,
-                }),
-              ],
-              name: `yarn.resolver.package`,
-              attributes: expect.objectContaining({
-                ident: `no-deps`,
-                locator: `no-deps@npm:1.0.0`,
-                reference: `npm:1.0.0`,
-              }),
+            events: [],
+          }),
+          expect.objectContaining({
+            name: `yarn.report.section`,
+            attributes: expect.objectContaining({
+              [`section.name`]: `Installing packages`,
             }),
-            expect.objectContaining({
-              events: [
-                expect.objectContaining({
-                  name: `package added to project`,
-                }),
-              ],
-              name: `yarn.resolver.package`,
-              attributes: expect.objectContaining({
-                ident: `root-workspace`,
-                locator: `root-workspace@workspace:root-workspace`,
-                reference: `workspace:root-workspace`,
-              }),
+          }),
+          expect.objectContaining({
+            name: `yarn.report.section`,
+            attributes: expect.objectContaining({
+              [`section.name`]: `Linking the project`,
             }),
-            expect.objectContaining({
-              events: [],
-              name: `yarn.report.section`,
-              attributes: expect.objectContaining({
-                [`section.name`]: `Linking the project`,
-              }),
+            events: [],
+          }),
+        ]);
+
+        expectToContainExactly(getSectionSpan(coldPayload, `Installing packages`).events, [
+          expect.objectContaining({
+            name: `yarn.cache.package_download`,
+            attributes: expect.objectContaining({
+              extension: `.zip`,
+              locator: `no-deps@npm:1.0.0`,
             }),
-          ],
-        });
+          }),
+          expect.objectContaining({
+            name: `yarn.resolver.package_add`,
+            attributes: expect.objectContaining({
+              ident: `no-deps`,
+              locator: `no-deps@npm:1.0.0`,
+              reference: `npm:1.0.0`,
+            }),
+          }),
+          expect.objectContaining({
+            name: `yarn.resolver.package_add`,
+            attributes: expect.objectContaining({
+              ident: `root-workspace`,
+              locator: `root-workspace@workspace:root-workspace`,
+              reference: `workspace:root-workspace`,
+            }),
+          }),
+        ]);
 
         const hotRecording = await startRegistryRecording(async () => {
           await run(`install`, {env});
@@ -148,57 +164,56 @@ describe(`Features`, () => {
 
         const hotPayload = getOtelPayload(hotRecording);
 
-        expect(hotPayload).toEqual({
-          spans: [
-            expect.objectContaining({
-              events: [],
-              name: `yarn.report.section`,
-              attributes: expect.objectContaining({
-                [`section.name`]: `Project validation`,
-              }),
+        expectToContainExactly(hotPayload.resources, [
+          expect.objectContaining({
+            attributes: expect.objectContaining({
+              [`service.name`]: `yarnpkg`,
+              [`service.version`]: expect.any(String),
             }),
-            expect.objectContaining({
-              events: [],
-              name: `yarn.report.section`,
-              attributes: expect.objectContaining({
-                [`section.name`]: `Installing packages`,
-              }),
+          }),
+        ]);
+
+        expectToContainExactly(hotPayload.spans, [
+          expect.objectContaining({
+            name: `yarn.report.section`,
+            attributes: expect.objectContaining({
+              [`section.name`]: `Project validation`,
             }),
-            expect.objectContaining({
-              events: [
-                expect.objectContaining({
-                  name: `package added to project`,
-                }),
-              ],
-              name: `yarn.resolver.package`,
-              attributes: expect.objectContaining({
-                ident: `root-workspace`,
-                locator: `root-workspace@workspace:root-workspace`,
-                reference: `workspace:root-workspace`,
-              }),
+            events: [],
+          }),
+          expect.objectContaining({
+            name: `yarn.report.section`,
+            attributes: expect.objectContaining({
+              [`section.name`]: `Installing packages`,
             }),
-            expect.objectContaining({
-              events: [
-                expect.objectContaining({
-                  name: `package added to project`,
-                }),
-              ],
-              name: `yarn.resolver.package`,
-              attributes: expect.objectContaining({
-                ident: `no-deps`,
-                locator: `no-deps@npm:1.0.0`,
-                reference: `npm:1.0.0`,
-              }),
+          }),
+          expect.objectContaining({
+            name: `yarn.report.section`,
+            attributes: expect.objectContaining({
+              [`section.name`]: `Linking the project`,
             }),
-            expect.objectContaining({
-              events: [],
-              name: `yarn.report.section`,
-              attributes: expect.objectContaining({
-                [`section.name`]: `Linking the project`,
-              }),
+            events: [],
+          }),
+        ]);
+
+        expectToContainExactly(getSectionSpan(hotPayload, `Installing packages`).events, [
+          expect.objectContaining({
+            name: `yarn.resolver.package_add`,
+            attributes: expect.objectContaining({
+              ident: `no-deps`,
+              locator: `no-deps@npm:1.0.0`,
+              reference: `npm:1.0.0`,
             }),
-          ],
-        });
+          }),
+          expect.objectContaining({
+            name: `yarn.resolver.package_add`,
+            attributes: expect.objectContaining({
+              ident: `root-workspace`,
+              locator: `root-workspace@workspace:root-workspace`,
+              reference: `workspace:root-workspace`,
+            }),
+          }),
+        ]);
       }),
     );
   });

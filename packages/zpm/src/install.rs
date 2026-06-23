@@ -1235,43 +1235,43 @@ impl<'a> InstallManager<'a> {
                 greedy_future.await;
             }
 
+            // Collect errors from both maps
+            let mut errors
+                = maps.resolution_map.collect_errors();
+
+            errors.extend(maps.fetch_map.collect_errors());
+
+            if !errors.is_empty() {
+                return Err(Error::SilentError);
+            }
+
+            let resolution_map
+                = Arc::try_unwrap(maps.resolution_map)
+                    .unwrap_or_else(|_| panic!("resolution_map should have no other references"));
+
+            let fetch_map
+                = Arc::try_unwrap(maps.fetch_map)
+                    .unwrap_or_else(|_| panic!("fetch_map should have no other references"));
+
+            for (descriptor, result) in resolution_map.into_results() {
+                let Ok(ResolutionResult { resolution, original_resolution, package_data }) = result else {
+                    unreachable!("Already handled above")
+                };
+
+                self.record_descriptor(descriptor, resolution.locator.clone());
+                self.record_resolution(resolution, original_resolution, package_data)?;
+            }
+
+            for (locator, result) in fetch_map.into_results() {
+                let Ok(FetchResult {package_data, ..}) = result else {
+                    unreachable!("Already handled above");
+                };
+
+                self.record_fetch(locator, package_data)?;
+            }
+
             Ok::<(), Error>(())
         }).await?;
-
-        // Collect errors from both maps
-        let mut errors
-            = maps.resolution_map.collect_errors();
-
-        errors.extend(maps.fetch_map.collect_errors());
-
-        if !errors.is_empty() {
-            return Err(Error::SilentError);
-        }
-
-        let resolution_map
-            = Arc::try_unwrap(maps.resolution_map)
-                .unwrap_or_else(|_| panic!("resolution_map should have no other references"));
-
-        let fetch_map
-            = Arc::try_unwrap(maps.fetch_map)
-                .unwrap_or_else(|_| panic!("fetch_map should have no other references"));
-
-        for (descriptor, result) in resolution_map.into_results() {
-            let Ok(ResolutionResult { resolution, original_resolution, package_data }) = result else {
-                unreachable!("Already handled above")
-            };
-
-            self.record_descriptor(descriptor, resolution.locator.clone());
-            self.record_resolution(resolution, original_resolution, package_data)?;
-        }
-
-        for (locator, result) in fetch_map.into_results() {
-            let Ok(FetchResult {package_data, ..}) = result else {
-                unreachable!("Already handled above");
-            };
-
-            self.record_fetch(locator, package_data)?;
-        }
 
         let check_checksums = self.context.check_checksums;
 
@@ -1486,22 +1486,14 @@ impl<'a> InstallManager<'a> {
         self.result.install_state.normalized_resolutions.insert(locator.clone(), resolution.clone());
 
         if is_new_package {
-            let span
-                = tracing::info_span!(
+            tracing::event!(
                 target: "yarn::resolver",
-                "yarn.resolver.package",
+                tracing::Level::INFO,
                 locator = %locator.to_file_string(),
                 ident = %locator.ident.to_file_string(),
                 reference = %locator.reference.to_file_string(),
+                "yarn.resolver.package_add",
             );
-
-            span.in_scope(|| {
-                tracing::event!(
-                    target: "yarn::resolver",
-                    tracing::Level::INFO,
-                    "package added to project",
-                );
-            });
         }
 
         self.result.lockfile.entries.insert(locator.clone(), LockfileEntry {
