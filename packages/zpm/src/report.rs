@@ -1,9 +1,10 @@
-use std::{cell::RefCell, future::Future, io::{self, Write}, sync::{Arc, LazyLock, atomic::AtomicU32, mpsc}, thread::JoinHandle, time::{Duration, SystemTime}};
+use std::{cell::RefCell, future::Future, io::{self, Write}, sync::{Arc, LazyLock, Mutex as StdMutex, atomic::AtomicU32, mpsc}, thread::JoinHandle, time::{Duration, SystemTime}};
 
 use colored::{Color, Colorize};
 use dialoguer::{Confirm, Input, Password};
 use itertools::Itertools;
 use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
+use tracing::Instrument;
 use zpm_config::{Configuration, LogFilter, LogLevel};
 use zpm_primitives::{Descriptor, Locator};
 use zpm_switch::get_bin_version;
@@ -64,18 +65,27 @@ pub async fn info_banner(message: impl AsRef<str>) {
 }
 
 pub async fn async_section<F: Future>(name: &str, f: F) -> F::Output {
-    current_report().await.as_ref().map(|r| {
-        r.push_section(name.to_string());
-    });
+    let span
+        = StreamReport::section_span(name);
+    let report_span
+        = span.clone();
+    let section_name
+        = name.to_string();
 
-    let res
-        = f.await;
+    async move {
+        current_report().await.as_ref().map(|r| {
+            r.push_section_with_span(section_name.clone(), report_span.clone());
+        });
 
-    current_report().await.as_ref().map(|r| {
-        r.pop_section();
-    });
+        let res
+            = f.await;
 
-    res
+        current_report().await.as_ref().map(|r| {
+            r.pop_section();
+        });
+
+        res
+    }.instrument(span).await
 }
 
 pub async fn error_handler<T, F: Future<Output = Result<(), Error>>>(f: F) -> () {
@@ -698,6 +708,7 @@ pub struct StreamReport {
     break_request_tx: mpsc::Sender<bool>,
     msg_queue_tx: mpsc::Sender<ReportMessage>,
     prompt_rx: Mutex<mpsc::Receiver<String>>,
+    section_spans: StdMutex<Vec<tracing::Span>>,
 }
 
 impl StreamReport {
@@ -781,6 +792,7 @@ impl StreamReport {
             break_request_tx,
             msg_queue_tx,
             prompt_rx: Mutex::new(prompt_rx),
+            section_spans: StdMutex::new(Vec::new()),
         }
     }
 
@@ -818,10 +830,46 @@ impl StreamReport {
     }
 
     pub fn push_section(&self, name: String) {
-        self.report(ReportMessage::PushSection(name));
+        let span
+            = Self::section_span(&name);
+
+        self.push_section_with_span(name, span);
+    }
+
+    fn section_span(name: &str) -> tracing::Span {
+        tracing::info_span!(
+            target: "yarn::report",
+            "yarn.report.section",
+            section.name = %name,
+        )
+    }
+
+    fn push_section_with_span(&self, name: String, span: tracing::Span) {
+        span.in_scope(|| {
+            self.report(ReportMessage::PushSection(name));
+        });
+
+        self.section_spans
+            .lock()
+            .unwrap()
+            .push(span);
     }
 
     pub fn pop_section(&self) {
+        let span
+            = self.section_spans
+                .lock()
+                .unwrap()
+                .pop();
+
+        if let Some(span) = span {
+            span.in_scope(|| {
+                self.report(ReportMessage::PopSection);
+            });
+
+            return;
+        }
+
         self.report(ReportMessage::PopSection);
     }
 

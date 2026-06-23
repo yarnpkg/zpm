@@ -178,6 +178,7 @@ export enum RequestType {
   BulkAdvisories = `bulkAdvisories`,
   NodeDistIndex = `nodeDistIndex`,
   NodeDistTarball = `nodeDistTarball`,
+  OtelTraces = `otelTraces`,
   YarnSwitchInfo = `yarnSwitchInfo`,
   YarnSwitchTarball = `yarnSwitchTarball`,
 }
@@ -229,6 +230,9 @@ export type Request = {
 } | {
   type: RequestType.NodeDistTarball;
   name: string;
+} | {
+  type: RequestType.OtelTraces;
+  body?: unknown;
 } | {
   type: RequestType.YarnSwitchInfo;
   platform: string;
@@ -958,6 +962,30 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       stream.pipeline(tar, gzip, response, () => {});
     },
 
+    async [RequestType.OtelTraces](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.OtelTraces)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const chunks: Array<Buffer> = [];
+
+      request.on(`data`, chunk => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+
+      request.on(`end`, () => {
+        const body = Buffer.concat(chunks).toString();
+
+        try {
+          parsedRequest.body = JSON.parse(body);
+        } catch {
+          parsedRequest.body = body;
+        }
+
+        response.writeHead(200, {[`Content-Type`]: `application/json`});
+        response.end(`{}`);
+      });
+    },
+
     async [RequestType.YarnSwitchInfo](parsedRequest, request, response) {
       if (parsedRequest.type !== RequestType.YarnSwitchInfo)
         throw new Error(`Assertion failed: Invalid request type`);
@@ -1056,6 +1084,10 @@ exit 0
       return {
         type: RequestType.NodeDistTarball,
         name: match[2]!,
+      };
+    } else if (url === `/v1/traces`) {
+      return {
+        type: RequestType.OtelTraces,
       };
     } else if ((match = url.match(/^\/@yarnpkg\/yarn-([^/]+)\/-\/yarn-\1-([^/]+)\.tgz$/))) {
       // Yarn Switch tarball: /@yarnpkg/yarn-{platform}/-/yarn-{platform}-{version}.tgz

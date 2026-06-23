@@ -1478,9 +1478,33 @@ impl<'a> InstallManager<'a> {
     }
 
     fn record_resolution(&mut self, resolution: Resolution, original_resolution: Resolution, package_data: Option<PackageData>) -> Result<(), Error> {
-        self.result.install_state.normalized_resolutions.insert(resolution.locator.clone(), resolution.clone());
+        let locator
+            = resolution.locator.clone();
+        let is_new_package
+            = !self.result.install_state.normalized_resolutions.contains_key(&locator);
 
-        self.result.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
+        self.result.install_state.normalized_resolutions.insert(locator.clone(), resolution.clone());
+
+        if is_new_package {
+            let span
+                = tracing::info_span!(
+                target: "yarn::resolver",
+                "yarn.resolver.package",
+                locator = %locator.to_file_string(),
+                ident = %locator.ident.to_file_string(),
+                reference = %locator.reference.to_file_string(),
+            );
+
+            span.in_scope(|| {
+                tracing::event!(
+                    target: "yarn::resolver",
+                    tracing::Level::INFO,
+                    "package added to project",
+                );
+            });
+        }
+
+        self.result.lockfile.entries.insert(locator.clone(), LockfileEntry {
             checksum: None,
             resolution: original_resolution,
         });
@@ -1489,15 +1513,15 @@ impl<'a> InstallManager<'a> {
             let systems
                 = self.context.systems.unwrap();
 
-            self.result.install_state.conditional_locators.insert(resolution.locator.clone());
+            self.result.install_state.conditional_locators.insert(locator.clone());
 
             if !resolution.requirements.validate_any(systems) {
-                self.result.install_state.disabled_locators.insert(resolution.locator.clone());
+                self.result.install_state.disabled_locators.insert(locator.clone());
             }
         }
 
         if let Some(package_data) = package_data {
-            self.record_fetch(resolution.locator, package_data)?;
+            self.record_fetch(locator, package_data)?;
         }
 
         Ok(())

@@ -28,6 +28,7 @@ pub mod lockfile;
 pub mod manifest;
 pub mod misc;
 pub mod npm;
+pub mod otel;
 pub mod peer_requirements;
 pub mod pack;
 pub mod patch;

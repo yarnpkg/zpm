@@ -5,6 +5,7 @@ use std::process::ExitCode;
 #[tokio::main]
 async fn main() -> ExitCode {
     env_logger::init();
+    let otel_guard = zpm::otel::init();
 
     if std::env::var_os("NO_COLOR").is_some() {
         colored::control::set_override(false);
@@ -12,5 +13,11 @@ async fn main() -> ExitCode {
         colored::control::set_override(force_color != "0");
     }
 
-    zpm::commands::run_default(None).await
+    let exit_code = zpm::commands::run_default(None).await;
+
+    if let Some(otel_guard) = otel_guard {
+        otel_guard.shutdown();
+    }
+
+    exit_code
 }
