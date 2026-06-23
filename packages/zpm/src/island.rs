@@ -425,7 +425,16 @@ fn convert_solution(
     for (ident, _, extra_resolution) in extra_resolutions {
         if let Some(base_locator) = ident_to_locator.get(&ident) {
             if let Some(base_resolution) = normalized_resolutions.get_mut(base_locator) {
-                base_resolution.dependencies.extend(extra_resolution.dependencies);
+                for (dep_ident, extra_descriptor) in extra_resolution.dependencies {
+                    match base_resolution.dependencies.get_mut(&dep_ident) {
+                        Some(base_descriptor) => {
+                            crate::resolvers::pypi::merge_dependency_descriptor(base_descriptor, extra_descriptor)?;
+                        },
+                        None => {
+                            base_resolution.dependencies.insert(dep_ident, extra_descriptor);
+                        },
+                    }
+                }
             }
         }
     }

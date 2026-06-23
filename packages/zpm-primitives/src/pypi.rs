@@ -171,6 +171,18 @@ impl PypiSpecifierSet {
         &self.raw
     }
 
+    pub fn intersection(&self, other: &Self) -> Result<Self, PypiError> {
+        if self.is_any() {
+            return Ok(other.clone());
+        }
+
+        if other.is_any() {
+            return Ok(self.clone());
+        }
+
+        Self::from_file_string(&format!("{},{}", self.raw, other.raw))
+    }
+
     pub fn contains(&self, version: &PypiVersion) -> Result<bool, PypiError> {
         if self.is_any() {
             return Ok(true);
@@ -265,7 +277,7 @@ impl PypiExtras {
                 return Err(PypiError::InvalidExtra(extra.to_string()));
             }
 
-            unique.insert(extra.to_ascii_lowercase());
+            unique.insert(normalize_pypi_extra(extra));
         }
 
         Ok(Self {
@@ -282,9 +294,34 @@ impl PypiExtras {
     }
 
     pub fn contains(&self, extra: &str) -> bool {
-        let extra = extra.to_ascii_lowercase();
+        let extra = normalize_pypi_extra(extra);
         self.raw.iter().any(|candidate| candidate == &extra)
     }
+
+    pub fn union(&self, other: &Self) -> Result<Self, PypiError> {
+        Self::from_iter(self.iter().chain(other.iter()))
+    }
+}
+
+pub fn normalize_pypi_extra(extra: &str) -> String {
+    let mut normalized
+        = String::with_capacity(extra.len());
+    let mut previous_was_separator
+        = false;
+
+    for ch in extra.chars() {
+        if ch == '-' || ch == '_' || ch == '.' {
+            if !previous_was_separator {
+                normalized.push('-');
+                previous_was_separator = true;
+            }
+        } else {
+            normalized.push(ch.to_ascii_lowercase());
+            previous_was_separator = false;
+        }
+    }
+
+    normalized
 }
 
 fn is_valid_extra(extra: &str) -> bool {
@@ -353,6 +390,19 @@ impl PypiRangeParameters {
 
     pub fn is_empty(&self) -> bool {
         self.extras.as_ref().map(|extras| extras.is_empty()).unwrap_or(true)
+    }
+
+    pub fn merge(&self, other: &Self) -> Result<Self, PypiError> {
+        let extras = match (&self.extras, &other.extras) {
+            (Some(left), Some(right)) => Some(left.union(right)?),
+            (Some(left), None) => Some(left.clone()),
+            (None, Some(right)) => Some(right.clone()),
+            (None, None) => None,
+        };
+
+        Ok(Self {
+            extras,
+        })
     }
 }
 

@@ -1,10 +1,10 @@
 use std::cell::{Cell, RefCell};
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 
 use pubgrub::{DependencyProvider, Dependencies, PackageResolutionStatistics, VersionSet};
-use zpm_primitives::{Descriptor, Ident, Locator, PypiExtras, PypiRegistryReference, PypiSpecifierRange, PypiTagRange, Range, Reference, Registry, RegistryReference};
+use zpm_primitives::{Descriptor, Ident, Locator, PypiRegistryReference, PypiSpecifierRange, PypiTagRange, Range, Reference, Registry, RegistryReference};
 
 use crate::error::Error;
 use crate::install::InstallContext;
@@ -74,11 +74,6 @@ pub struct IslandDependencyProvider<'a> {
     /// proxies only: their dependencies are merged back into the base package
     /// resolution after PubGrub completes.
     pub extra_resolution_cache: RefCell<BTreeMap<(Locator, String), Resolution>>,
-    /// Extras requested for each concrete PyPI locator. When a locator is
-    /// selected with extras, its base dependency set must be resolved with
-    /// those extras folded in so extra requirements can replace base entries
-    /// for the same dependency before PubGrub evaluates constraints.
-    active_extras_by_locator: RefCell<BTreeMap<Locator, BTreeSet<String>>>,
     /// Monotonic counter for discovery order (breadth-first priority).
     discovery_counter: Cell<usize>,
     /// Maps package ident → discovery index (first time seen in prioritize).
@@ -105,7 +100,6 @@ impl<'a> IslandDependencyProvider<'a> {
             workspace_deps,
             resolution_cache: RefCell::new(BTreeMap::new()),
             extra_resolution_cache: RefCell::new(BTreeMap::new()),
-            active_extras_by_locator: RefCell::new(BTreeMap::new()),
             discovery_counter: Cell::new(0),
             discovery_order: RefCell::new(BTreeMap::new()),
         }
@@ -121,28 +115,6 @@ impl<'a> IslandDependencyProvider<'a> {
 
         // Reverse so newest versions come first (BTreeMap yields ascending order)
         Ok(versions.into_iter().rev().map(IslandVersion).collect())
-    }
-
-    fn register_active_extra(&self, locator: &Locator, extra: &str) {
-        let mut active_extras_by_locator = self.active_extras_by_locator.borrow_mut();
-        let extras = active_extras_by_locator.entry(locator.clone()).or_default();
-
-        if extras.insert(extra.to_string()) {
-            self.resolution_cache.borrow_mut().remove(locator);
-        }
-    }
-
-    fn active_extras_for(&self, locator: &Locator) -> Result<Option<PypiExtras>, IslandResolutionError> {
-        let active_extras_by_locator = self.active_extras_by_locator.borrow();
-        let Some(extras) = active_extras_by_locator.get(locator) else {
-            return Ok(None);
-        };
-
-        let extras
-            = PypiExtras::from_iter(extras)
-                .map_err(|err| IslandResolutionError::from(Error::InvalidRange(err.to_string())))?;
-
-        Ok((!extras.is_empty()).then_some(extras))
     }
 
     /// Convert a map of dependency descriptors into IslandVersionSets for pubgrub.
@@ -180,14 +152,8 @@ impl<'a> IslandDependencyProvider<'a> {
             for ((ident, _, extras), result) in non_semver.into_iter().zip(results) {
                 let locator = result.resolution.locator.clone();
 
-                if extras.is_empty() {
-                    self.resolution_cache.borrow_mut()
-                        .insert(locator.clone(), result.resolution);
-                } else {
-                    for extra in &extras {
-                        self.register_active_extra(&locator, extra);
-                    }
-                }
+                self.resolution_cache.borrow_mut()
+                    .insert(locator.clone(), result.resolution);
 
                 insert_dependency_packages(
                     &mut deps,
@@ -210,8 +176,6 @@ impl<'a> IslandDependencyProvider<'a> {
     /// Also caches the full Resolution for later use in convert_solution.
     fn fetch_dependencies(&self, version: &IslandVersion) -> Result<BTreeMap<IslandPackage, IslandVersionSet>, IslandResolutionError> {
         let locator = &version.0;
-        let active_extras
-            = self.active_extras_for(locator)?;
 
         // Check resolution cache first — covers non-semver packages resolved
         // lazily in choose_version or resolution_to_deps.
@@ -244,14 +208,9 @@ impl<'a> IslandDependencyProvider<'a> {
             },
 
             Reference::PypiRegistry(params) => {
-                match active_extras.as_ref() {
-                    Some(active_extras) => self.handle.block_on(
-                        crate::resolvers::pypi::resolve_locator_with_extras(self.ctx, locator, params, active_extras)
-                    ).map_err(IslandResolutionError::from)?,
-                    None => self.handle.block_on(
-                        crate::resolvers::pypi::resolve_locator(self.ctx, locator, params)
-                    ).map_err(IslandResolutionError::from)?,
-                }
+                self.handle.block_on(
+                    crate::resolvers::pypi::resolve_locator(self.ctx, locator, params)
+                ).map_err(IslandResolutionError::from)?
             },
 
             Reference::PypiShorthand(params) => {
@@ -261,14 +220,9 @@ impl<'a> IslandDependencyProvider<'a> {
                     url: params.url.clone(),
                 };
 
-                match active_extras.as_ref() {
-                    Some(active_extras) => self.handle.block_on(
-                        crate::resolvers::pypi::resolve_locator_with_extras(self.ctx, locator, &params, active_extras)
-                    ).map_err(IslandResolutionError::from)?,
-                    None => self.handle.block_on(
-                        crate::resolvers::pypi::resolve_locator(self.ctx, locator, &params)
-                    ).map_err(IslandResolutionError::from)?,
-                }
+                self.handle.block_on(
+                    crate::resolvers::pypi::resolve_locator(self.ctx, locator, &params)
+                ).map_err(IslandResolutionError::from)?
             },
 
             _ => return Ok(BTreeMap::new()),
@@ -506,8 +460,6 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
             IslandPackage::Named(ident) => ident,
 
             IslandPackage::ExtraProxy { ident, extra } => {
-                self.register_active_extra(&version.0, extra);
-
                 let deps = BTreeMap::from([
                     (
                         IslandPackage::Named(ident.clone()),

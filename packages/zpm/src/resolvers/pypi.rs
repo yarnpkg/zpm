@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{de::DeserializeOwned, Deserialize};
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Descriptor, Ident, Locator, PypiExtras, PypiRangeParameters, PypiRegistryReference, PypiSpecifierRange, PypiTagRange, Reference, Range};
+use zpm_primitives::{Descriptor, Ident, Locator, PypiExtras, PypiRangeParameters, PypiRegistryReference, PypiSpecifierRange, PypiTagRange, Reference, Range, normalize_pypi_extra};
 use zpm_utils::{FromFileString, ToFileString, UrlEncoded};
 
 use crate::{
@@ -66,15 +66,45 @@ fn specifier_from_pep508(spec: Option<&pep_508::Spec<'_>>) -> Option<zpm_primiti
     zpm_primitives::PypiSpecifierSet::from_file_string(&specifier).ok()
 }
 
-fn marker_value<'a>(variable: &'a pep_508::Variable<'a>, extra: &'a str) -> Option<&'a str> {
+#[derive(Clone, Copy, Debug)]
+enum MarkerValue<'a> {
+    Extra(&'a str),
+    String(&'a str),
+}
+
+impl MarkerValue<'_> {
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Extra(value) | Self::String(value) => value,
+        }
+    }
+}
+
+fn marker_value<'a>(variable: &'a pep_508::Variable<'a>, extra: &'a str) -> Option<MarkerValue<'a>> {
     match variable {
-        pep_508::Variable::Extra => Some(extra),
-        pep_508::Variable::String(value) => Some(value),
+        pep_508::Variable::Extra => Some(MarkerValue::Extra(extra)),
+        pep_508::Variable::String(value) => Some(MarkerValue::String(value)),
         _ => None,
     }
 }
 
-fn eval_marker_operator(lhs: &str, operator: pep_508::Operator, rhs: &str) -> Option<bool> {
+fn eval_marker_operator(lhs: MarkerValue<'_>, operator: pep_508::Operator, rhs: MarkerValue<'_>) -> Option<bool> {
+    let needs_extra_normalization
+        = matches!(lhs, MarkerValue::Extra(_)) || matches!(rhs, MarkerValue::Extra(_));
+
+    let normalized_lhs;
+    let normalized_rhs;
+
+    let (lhs, rhs)
+        = if needs_extra_normalization {
+            normalized_lhs = normalize_pypi_extra(lhs.as_str());
+            normalized_rhs = normalize_pypi_extra(rhs.as_str());
+
+            (normalized_lhs.as_str(), normalized_rhs.as_str())
+        } else {
+            (lhs.as_str(), rhs.as_str())
+        };
+
     match operator {
         pep_508::Operator::Comparator(pep_508::Comparator::Eq) => Some(lhs == rhs),
         pep_508::Operator::Comparator(pep_508::Comparator::Ne) => Some(lhs != rhs),
@@ -145,10 +175,62 @@ fn parse_requires_dist_entry(requirement: &str, include_base: IncludeBaseDepende
     Some((ident, descriptor))
 }
 
-fn parse_requires_dist(requirements: &[String], include_base: IncludeBaseDependencies, active_extras: &PypiExtras) -> BTreeMap<Ident, Descriptor> {
-    requirements.iter()
+pub fn merge_dependency_descriptor(existing: &mut Descriptor, incoming: Descriptor) -> Result<(), Error> {
+    if existing == &incoming {
+        return Ok(());
+    }
+
+    if existing.ident != incoming.ident || existing.parent != incoming.parent {
+        return Err(Error::InvalidResolution(format!(
+            "Cannot merge PyPI dependency descriptors {} and {}",
+            existing.to_file_string(),
+            incoming.to_file_string(),
+        )));
+    }
+
+    let existing_file_string
+        = existing.to_file_string();
+    let incoming_file_string
+        = incoming.to_file_string();
+
+    match (&mut existing.range, incoming.range) {
+        (Range::PypiSpecifier(existing), Range::PypiSpecifier(incoming)) => {
+            existing.specifier = existing.specifier.intersection(&incoming.specifier)
+                .map_err(|err| Error::InvalidRange(err.to_string()))?;
+            existing.parameters = match (&existing.parameters, &incoming.parameters) {
+                (Some(existing_parameters), Some(incoming_parameters)) => Some(existing_parameters.merge(incoming_parameters)
+                    .map_err(|err| Error::InvalidRange(err.to_string()))?),
+                (Some(existing_parameters), None) => Some(existing_parameters.clone()),
+                (None, Some(incoming_parameters)) => Some(incoming_parameters.clone()),
+                (None, None) => None,
+            };
+
+            Ok(())
+        },
+
+        _ => Err(Error::InvalidResolution(format!(
+            "Cannot merge PyPI dependency descriptors {} and {}",
+            existing_file_string,
+            incoming_file_string,
+        ))),
+    }
+}
+
+fn parse_requires_dist(requirements: &[String], include_base: IncludeBaseDependencies, active_extras: &PypiExtras) -> Result<BTreeMap<Ident, Descriptor>, Error> {
+    let mut dependencies = BTreeMap::new();
+
+    for (ident, descriptor) in requirements.iter()
         .filter_map(|requirement| parse_requires_dist_entry(requirement, include_base, active_extras))
-        .collect()
+    {
+        match dependencies.get_mut(&ident) {
+            Some(existing) => merge_dependency_descriptor(existing, descriptor)?,
+            None => {
+                dependencies.insert(ident, descriptor);
+            },
+        }
+    }
+
+    Ok(dependencies)
 }
 
 fn project_pep440_to_semver(version: &zpm_primitives::PypiVersion) -> Result<zpm_semver::Version, Error> {
@@ -161,7 +243,7 @@ fn project_pep440_to_semver(version: &zpm_primitives::PypiVersion) -> Result<zpm
 fn build_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String], include_base: IncludeBaseDependencies, active_extras: &PypiExtras) -> Result<ResolutionResult, Error> {
     let mut resolution
         = Resolution::new_empty(locator, project_pep440_to_semver(version)?);
-    resolution.dependencies = parse_requires_dist(requires_dist, include_base, active_extras);
+    resolution.dependencies = parse_requires_dist(requires_dist, include_base, active_extras)?;
     resolution.into_resolution_result(context)
 }
 
