@@ -28,6 +28,8 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-apple-darwin
             os: macos-latest
+          - target: wasm32-browserpod-linux-musl
+            os: ubuntu-latest
 
     name: "Building ${{matrix.target}}"
     runs-on: ${{matrix.os}}
@@ -59,12 +61,22 @@ jobs:
           genisoimage -R -o yarn.iso {yarn,yarn-bin}
 
       - name: Upload artifacts
+        if: matrix.target != 'wasm32-browserpod-linux-musl'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: yarn-${{matrix.target}}
           path: |
             target/${{matrix.target}}/release-lto-nodebug/yarn-bin
             target/${{matrix.target}}/release-lto-nodebug/yarn
+            target/${{matrix.target}}/release-lto-nodebug/LICENSE.md
+
+      - name: Upload Browserpod artifacts
+        if: matrix.target == 'wasm32-browserpod-linux-musl'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: yarn-${{matrix.target}}
+          path: |
+            target/${{matrix.target}}/release-lto-nodebug/yarn-bin.wasm
             target/${{matrix.target}}/release-lto-nodebug/LICENSE.md
 
       - name: Upload iso image

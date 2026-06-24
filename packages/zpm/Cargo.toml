@@ -29,7 +29,7 @@ version-ranges = { workspace = true }
 rayon = { workspace = true }
 rkyv = { workspace = true, features = ["bytecheck"] }
 pep-508 = { workspace = true }
-reqwest = { workspace = true, default-features = false, features = ["gzip", "http2", "hickory-dns", "rustls-tls"] }
+reqwest = { workspace = true, default-features = false, features = ["gzip", "http2", "hickory-dns"] }
 regex = { workspace = true }
 rust-ini = { workspace = true }
 serde_with = { workspace = true }
@@ -74,6 +74,12 @@ async-trait = "0.1.89"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(all(target_arch = "wasm64", target_vendor = "browserpod"))'.dependencies]
+reqwest = { workspace = true, default-features = false, features = ["default-tls"] }
+
+[target.'cfg(not(all(target_arch = "wasm64", target_vendor = "browserpod")))'.dependencies]
+reqwest = { workspace = true, default-features = false, features = ["rustls-tls"] }
 
 [build-dependencies]
 flate2 = { workspace = true }

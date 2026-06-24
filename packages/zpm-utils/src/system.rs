@@ -24,6 +24,9 @@ const ARCH: Cpu = Cpu::Aarch64;
 #[cfg(target_arch = "x86")]
 const ARCH: Cpu = Cpu::I386;
 
+#[cfg(target_arch = "wasm64")]
+const ARCH: Cpu = Cpu::Wasm64;
+
 #[cfg(target_os = "linux")]
 const OS: Os = Os::Linux;
 
@@ -160,6 +163,9 @@ pub enum Cpu {
 
     #[literal("arm64")]
     Aarch64,
+
+    #[literal("wasm64")]
+    Wasm64,
 
     #[fallback]
     Other(String),
