@@ -79,7 +79,13 @@ runs:
       shell: bash
       run: |
         if [[ "${{inputs.target}}" == "wasm32-browserpod-linux-musl" ]]; then
+          browserpod_sysroot=$(rustc "+browserpod-${{inputs.browserpod-version}}" --print sysroot)
+          browserpod_libc_manifest="$browserpod_sysroot/lib/browserpod-libc/Cargo.toml"
+          browserpod_libc_version=$(awk -F '"' '/^version = / { print $2; exit }' "$browserpod_libc_manifest")
+
+          cargo "+browserpod-${{inputs.browserpod-version}}" update -p libc --precise "$browserpod_libc_version"
           cargo "+browserpod-${{inputs.browserpod-version}}" build --verbose --bin yarn-bin --profile=${{inputs.profile}} --target=${{inputs.target}}
+
           cp target/${{inputs.target}}/${{inputs.profile}}/yarn-bin target/${{inputs.target}}/${{inputs.profile}}/yarn-bin.wasm
         elif [[ "${{inputs.target}}" == *-apple-darwin ]]; then
           cargo build --verbose --profile=${{inputs.profile}} --target=${{inputs.target}}
