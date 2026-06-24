@@ -3,32 +3,21 @@ use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
-use zpm_utils::{DataType, FromFileString, Hash64, Path, ToFileString, shell_escape, to_shell_line};
+use zpm_utils::{FromFileString, Hash64, Path, ToFileString, shell_escape, to_shell_line};
 use itertools::Itertools;
 use regex::Regex;
-use tokio::{process::Command, sync::Mutex};
+use tokio::process::Command;
 
 use crate::{
     error::Error,
     project::Project,
-    report::{current_report, PromptType},
+    trust::{ensure_project_trusted, ProjectTrustReason},
 };
 
 static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
 static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
 static PACKAGE_MAP_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r#"\s*--experimental-package-map(?:=|\s+)(?:"[^"]*"|'[^']*'|\S+)\s*"#).unwrap());
 static JS_EXTENSION: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
-type TrustPromptResultCache = BTreeMap<Path, bool>;
-
-static TRUST_PROMPT_RESULTS: LazyLock<Mutex<TrustPromptResultCache>> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
-
-fn get_cached_trust_prompt_result(cache: &TrustPromptResultCache, project_cwd: &Path) -> Option<bool> {
-    cache.get(project_cwd).copied()
-}
-
-fn set_cached_trust_prompt_result(cache: &mut TrustPromptResultCache, project_cwd: &Path, trusted: bool) {
-    cache.insert(project_cwd.clone(), trusted);
-}
 
 fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, module: &str, object: &str) -> String {
     let binary_name
@@ -153,12 +142,6 @@ fn get_self_path() -> Result<Path, Error> {
         .unwrap_or_else(|| Path::current_exe())?;
 
     Ok(self_path)
-}
-
-fn get_switch_path() -> Option<Path> {
-    std::env::var(zpm_switch::YARNSW_PATH_ENV)
-        .ok()
-        .and_then(|path| Path::from_file_string(&path).ok())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -645,62 +628,6 @@ impl ScriptEnvironment {
         self
     }
 
-    async fn check_project_trust(switch_path: &Path, project_cwd: &Path) -> Result<Option<bool>, Error> {
-        let status
-            = Command::new(switch_path.to_file_string())
-                .args(["switch", "trust", "--check", project_cwd.as_str()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await?;
-
-        match status.code() {
-            Some(0) => Ok(Some(true)),
-            Some(2) => Ok(Some(false)),
-            Some(3) => Ok(None),
-            _ => Err(Error::ChildProcessFailed("yarn switch trust --check".to_string())),
-        }
-    }
-
-    async fn set_project_trust(switch_path: &Path, project_cwd: &Path, trusted: bool) -> Result<(), Error> {
-        let trusted_arg
-            = trusted.to_string();
-
-        let status
-            = Command::new(switch_path.to_file_string())
-                .args(["switch", "trust", "--set", &trusted_arg, project_cwd.as_str()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await?;
-
-        if status.success() {
-            Ok(())
-        } else {
-            Err(Error::ChildProcessFailed("yarn switch trust --set".to_string()))
-        }
-    }
-
-    async fn prompt_project_trust(project_cwd: &Path) -> Result<bool, Error> {
-        if !zpm_utils::is_terminal() {
-            return Err(Error::ProjectTrustRequired(project_cwd.clone()));
-        }
-
-        let report_guard
-            = current_report().await;
-
-        let report
-            = report_guard.as_ref()
-                .ok_or_else(|| Error::ProjectTrustRequired(project_cwd.clone()))?;
-
-        let answer = report.prompt(PromptType::Confirm(format!(
-            "Yarn needs to run potentially dangerous commands in {}. Do you trust this project?",
-            DataType::Path.colorize(&project_cwd.to_home_string()),
-        ))).await;
-
-        Ok(answer == "true")
-    }
-
     async fn ensure_trusted(&self) -> Result<(), Error> {
         if !self.trust_check_enabled {
             return Ok(());
@@ -710,37 +637,7 @@ impl ScriptEnvironment {
             return Ok(());
         };
 
-        let Some(switch_path) = get_switch_path() else {
-            return Ok(());
-        };
-
-        match Self::check_project_trust(&switch_path, project_cwd).await? {
-            Some(true) => return Ok(()),
-            Some(false) => return Err(Error::ProjectNotTrusted(project_cwd.clone())),
-            None => (),
-        }
-
-        let mut prompt_results
-            = TRUST_PROMPT_RESULTS.lock().await;
-
-        let trusted = match get_cached_trust_prompt_result(&prompt_results, project_cwd) {
-            Some(trusted) => trusted,
-            None => {
-                let trusted
-                    = Self::prompt_project_trust(project_cwd).await?;
-
-                Self::set_project_trust(&switch_path, project_cwd, trusted).await?;
-
-                set_cached_trust_prompt_result(&mut prompt_results, project_cwd, trusted);
-
-                trusted
-            },
-        };
-
-        match trusted {
-            true => Ok(()),
-            false => Err(Error::ProjectNotTrusted(project_cwd.clone())),
-        }
+        ensure_project_trusted(project_cwd, ProjectTrustReason::InstallScripts).await
     }
 
     pub fn with_standard_binaries(mut self) -> Self {
@@ -1057,25 +954,5 @@ impl ScriptEnvironment {
                 .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 
         Ok(status)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn trust_prompt_result_cache_is_scoped_by_project_cwd() {
-        let first_project
-            = Path::from_file_string("/tmp/first-project").unwrap();
-        let second_project
-            = Path::from_file_string("/tmp/second-project").unwrap();
-        let mut cache
-            = TrustPromptResultCache::new();
-
-        set_cached_trust_prompt_result(&mut cache, &first_project, true);
-
-        assert_eq!(get_cached_trust_prompt_result(&cache, &first_project), Some(true));
-        assert_eq!(get_cached_trust_prompt_result(&cache, &second_project), None);
     }
 }

@@ -1,3 +1,5 @@
+import {Filename, ppath, xfs} from '@yarnpkg/fslib';
+
 describe(`Commands`, () => {
   describe(`switch trust`, () => {
     test(
@@ -95,6 +97,61 @@ describe(`Commands`, () => {
           env: {CI: `1`},
         })).rejects.toMatchObject({
           code: 2,
+        });
+      }),
+    );
+
+    test(
+      `it should require trust before interpolating project configuration through Yarn Switch`,
+      makeTemporaryEnv({}, async ({path, runSwitch}) => {
+        await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
+          initScope: `\${CONFIG_INIT_SCOPE}`,
+        });
+
+        await expect(runSwitch(`config`, `get`, `initScope`, {
+          env: {CONFIG_INIT_SCOPE: `acme`},
+        })).rejects.toMatchObject({
+          code: 1,
+          stdout: expect.stringContaining(`must be trusted before Yarn can interpolate project configuration`),
+        });
+
+        await runSwitch(`switch`, `trust`, `--set`, `true`, path);
+
+        await expect(runSwitch(`config`, `get`, `initScope`, {
+          env: {CONFIG_INIT_SCOPE: `acme`},
+        })).resolves.toMatchObject({
+          code: 0,
+          stdout: `acme\n`,
+        });
+      }),
+    );
+
+    test(
+      `it shouldn't require trust when project configuration values don't change during interpolation`,
+      makeTemporaryEnv({}, async ({path, runSwitch}) => {
+        await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
+          initScope: `$`,
+        });
+
+        await expect(runSwitch(`config`, `get`, `initScope`)).resolves.toMatchObject({
+          code: 0,
+          stdout: `$\n`,
+        });
+      }),
+    );
+
+    test(
+      `it shouldn't require trust for interpolating user configuration through Yarn Switch`,
+      makeTemporaryEnv({}, async ({path, runSwitch}) => {
+        await xfs.writeJsonPromise(ppath.join(ppath.dirname(path), Filename.rc), {
+          initScope: `\${CONFIG_INIT_SCOPE}`,
+        });
+
+        await expect(runSwitch(`config`, `get`, `initScope`, {
+          env: {CONFIG_INIT_SCOPE: `acme`},
+        })).resolves.toMatchObject({
+          code: 0,
+          stdout: `acme\n`,
         });
       }),
     );

@@ -6,7 +6,7 @@ use itertools::Itertools;
 use zpm_formats::{zip::ToZip, Entry};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::Locator;
-use zpm_utils::{Hash64, IoResultExt, Path, PathError};
+use zpm_utils::{Hash64, IoResultExt, Path, PathError, ToFileString};
 use futures::Future;
 
 use crate::error::Error;
@@ -129,7 +129,7 @@ impl CompositeCache {
         Ok(false)
     }
 
-    async fn load<R, F>(func: F) -> Result<Vec<u8>, Error>
+    async fn load<R, F>(key: Locator, ext: &str, func: F) -> Result<Vec<u8>, Error>
     where
         R: Future<Output = Result<Vec<u8>, Error>>,
         F: FnOnce() -> R,
@@ -142,6 +142,15 @@ impl CompositeCache {
             = func().await;
 
         if let Ok(data) = res.as_ref() {
+            tracing::event!(
+                target: "yarn::cache",
+                tracing::Level::INFO,
+                locator = %key.to_file_string(),
+                extension = %ext,
+                size_bytes = data.len(),
+                "yarn.cache.package_download",
+            );
+
             crate::report::if_active_async(|report| {
                 report.counters.fetch_size.fetch_add(data.len() as u32, std::sync::atomic::Ordering::Relaxed);
             }).await;
@@ -158,15 +167,15 @@ impl CompositeCache {
         if let Some(ref cache) = self.local_cache {
             return cache.ensure_blob(key.clone(), ext, || async {
                 if let Some(ref cache) = self.global_cache {
-                    Ok(cache.upsert_blob(key, ext, || Self::load(func)).await?.data)
+                    Ok(cache.upsert_blob(key.clone(), ext, || Self::load(key, ext, func)).await?.data)
                 } else {
-                    Self::load(func).await
+                    Self::load(key, ext, func).await
                 }
             }).await;
         }
 
         if let Some(ref cache) = self.global_cache {
-            return cache.ensure_blob(key, ext, || Self::load(func)).await;
+            return cache.ensure_blob(key.clone(), ext, || Self::load(key, ext, func)).await;
         }
 
         panic!("Expected at least one cache to be set");
@@ -182,15 +191,15 @@ impl CompositeCache {
         if let Some(ref cache) = self.local_cache {
             return cache.refetch_blob(key.clone(), ext, || async {
                 if let Some(ref cache) = self.global_cache {
-                    Ok(cache.refetch_blob_data(key, ext, || Self::load(func)).await?.data)
+                    Ok(cache.refetch_blob_data(key.clone(), ext, || Self::load(key, ext, func)).await?.data)
                 } else {
-                    Self::load(func).await
+                    Self::load(key, ext, func).await
                 }
             }).await;
         }
 
         if let Some(ref cache) = self.global_cache {
-            return cache.refetch_blob(key, ext, || Self::load(func)).await;
+            return cache.refetch_blob(key.clone(), ext, || Self::load(key, ext, func)).await;
         }
 
         panic!("Expected at least one cache to be set");
@@ -204,15 +213,15 @@ impl CompositeCache {
         if let Some(ref cache) = self.local_cache {
             return cache.upsert_blob(key.clone(), ext, || async {
                 if let Some(ref cache) = self.global_cache {
-                    Ok(cache.upsert_blob(key, ext, || Self::load(func)).await?.data)
+                    Ok(cache.upsert_blob(key.clone(), ext, || Self::load(key, ext, func)).await?.data)
                 } else {
-                    Self::load(func).await
+                    Self::load(key, ext, func).await
                 }
             }).await;
         }
 
         if let Some(ref cache) = self.global_cache {
-            return cache.upsert_blob(key, ext, || Self::load(func)).await;
+            return cache.upsert_blob(key.clone(), ext, || Self::load(key, ext, func)).await;
         }
 
         panic!("Expected at least one cache to be set");
@@ -226,15 +235,15 @@ impl CompositeCache {
         if let Some(ref cache) = self.local_cache {
             return cache.refetch_blob_data(key.clone(), ext, || async {
                 if let Some(ref cache) = self.global_cache {
-                    Ok(cache.refetch_blob_data(key, ext, || Self::load(func)).await?.data)
+                    Ok(cache.refetch_blob_data(key.clone(), ext, || Self::load(key, ext, func)).await?.data)
                 } else {
-                    Self::load(func).await
+                    Self::load(key, ext, func).await
                 }
             }).await;
         }
 
         if let Some(ref cache) = self.global_cache {
-            return cache.refetch_blob_data(key, ext, || Self::load(func)).await;
+            return cache.refetch_blob_data(key.clone(), ext, || Self::load(key, ext, func)).await;
         }
 
         panic!("Expected at least one cache to be set");

@@ -3,10 +3,10 @@ use std::{collections::BTreeMap, fmt::{self, Debug, Display}, hash::Hash, marker
 use rkyv::Archive;
 use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
-use zpm_config::{Configuration, ConfigurationContext};
+use zpm_config::Configuration;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, RegistryReference, RegistrySemverRange};
-use zpm_utils::{FromFileString, Hash64, LastModifiedAt, Path, ToFileString, UrlEncoded};
+use zpm_utils::{FromFileString, Hash64, Path, ToFileString, UrlEncoded};
 
 use crate::{
     error::Error, http_npm, npm, primitives_exts::RangeExt, resolvers::Resolution
@@ -413,24 +413,7 @@ struct PnpmListDependency {
 /// 2. Recursively walk the tree to collect all packages with their resolved URLs
 /// 3. For each package, read its package.json to get the original dependency ranges
 /// 4. Build descriptor -> locator mappings
-pub fn from_pnpm_node_modules(project_cwd: &Path) -> Result<Lockfile, Error> {
-    let user_cwd
-        = Path::home_dir()?;
-
-    let configuration_context = ConfigurationContext {
-        env: std::env::vars().collect(),
-        user_cwd: user_cwd.clone(),
-        project_cwd: Some(project_cwd.clone()),
-        package_cwd: None,
-    };
-
-    let mut last_modified_at
-        = LastModifiedAt::new();
-
-    let config
-        = Configuration::load(&configuration_context, &mut last_modified_at)
-            .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
-
+pub fn from_pnpm_node_modules(project_cwd: &Path, config: &Configuration) -> Result<Lockfile, Error> {
     let pnpm_dir
         = project_cwd
             .with_join_str("node_modules/.pnpm");
