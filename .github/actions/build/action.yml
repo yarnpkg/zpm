@@ -35,6 +35,9 @@ runs:
       if: ${{ inputs.target == 'wasm32-browserpod-linux-musl' }}
       shell: bash
       run: |
+        sudo apt-get update
+        sudo apt-get install -y llvm
+
         browserpod_version='${{inputs.browserpod-version}}'
         browserpod_toolchain="browserpod-$browserpod_version"
         browserpod_base_url="https://rt.browserpod.io/$browserpod_version/rust"
