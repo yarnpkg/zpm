@@ -11,7 +11,7 @@ path = "src/main.rs"
 base64 = { workspace = true }
 clipanion = { workspace = true, features = ["serde"] }
 regex = { workspace = true }
-reqwest = { workspace = true, default-features = false, features = ["hickory-dns", "rustls-tls"] }
+reqwest = { workspace = true, default-features = false, features = ["hickory-dns"] }
 rkyv = { workspace = true, features = ["bytecheck"] }
 serde_json = { workspace = true }
 serde_plain = { workspace = true }
@@ -34,6 +34,12 @@ chrono = { workspace = true, features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(all(target_arch = "wasm64", target_vendor = "browserpod"))'.dependencies]
+reqwest = { workspace = true, default-features = false, features = ["default-tls"] }
+
+[target.'cfg(not(all(target_arch = "wasm64", target_vendor = "browserpod")))'.dependencies]
+reqwest = { workspace = true, default-features = false, features = ["rustls-tls"] }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

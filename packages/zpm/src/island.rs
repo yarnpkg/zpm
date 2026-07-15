@@ -162,7 +162,7 @@ pub async fn resolve_island(
 
     let workspace_deps_for_provider = workspace_deps.clone();
 
-    let (solution, resolution_cache) = tokio::task::spawn_blocking(move || {
+    let (solution, resolution_cache, extra_resolution_cache) = tokio::task::spawn_blocking(move || {
         let provider = IslandDependencyProvider::new(
             island_id.clone(),
             locked_versions,
@@ -193,15 +193,16 @@ pub async fn resolve_island(
 
         // Extract cached resolutions before provider is dropped
         let cache = provider.resolution_cache.into_inner();
+        let extra_cache = provider.extra_resolution_cache.into_inner();
 
-        result.map(|solution| (solution, cache))
+        result.map(|solution| (solution, cache, extra_cache))
     }).await.map_err(|e| Error::IslandResolutionFailed {
         island_id: island.id.clone(),
         message: format!("Join error: {}", e),
     })??;
 
     // Phase 5: Convert pubgrub solution to descriptor_to_locator + resolutions
-    convert_solution(&island.id, solution, &resolution_cache, &workspace_deps)
+    convert_solution(&island.id, solution, &resolution_cache, &extra_resolution_cache, &workspace_deps)
 }
 
 #[allow(dead_code)]
@@ -318,17 +319,29 @@ fn convert_solution(
     island_id: &str,
     solution: pubgrub::SelectedDependencies<IslandDependencyProvider<'_>>,
     resolution_cache: &BTreeMap<Locator, Resolution>,
+    extra_resolution_cache: &BTreeMap<(Locator, String), Resolution>,
     workspace_deps: &BTreeMap<Ident, BTreeMap<Ident, Descriptor>>,
 ) -> Result<IslandResolutionResult, Error> {
     let mut descriptor_to_locator = BTreeMap::new();
     let mut normalized_resolutions = BTreeMap::new();
     let mut ident_to_locator = BTreeMap::new();
+    let mut extra_resolutions = Vec::new();
 
     for (package, island_version) in &solution {
         // Skip the virtual root
         let ident = match package {
             IslandPackage::Root => continue,
             IslandPackage::Named(ident) => ident,
+            IslandPackage::ExtraProxy { .. } => continue,
+            IslandPackage::ExtraFeature { ident, extra } => {
+                let raw_locator = island_version.0.clone();
+
+                if let Some(resolution) = extra_resolution_cache.get(&(raw_locator.clone(), extra.clone())) {
+                    extra_resolutions.push((ident.clone(), raw_locator, resolution.clone()));
+                }
+
+                continue;
+            }
         };
 
         // Workspace packages: include them with their dependencies so the
@@ -407,6 +420,23 @@ fn convert_solution(
         ident_to_locator.insert(ident.clone(), locator.clone());
         descriptor_to_locator.insert(descriptor, locator.clone());
         normalized_resolutions.insert(locator, resolution);
+    }
+
+    for (ident, _, extra_resolution) in extra_resolutions {
+        if let Some(base_locator) = ident_to_locator.get(&ident) {
+            if let Some(base_resolution) = normalized_resolutions.get_mut(base_locator) {
+                for (dep_ident, extra_descriptor) in extra_resolution.dependencies {
+                    match base_resolution.dependencies.get_mut(&dep_ident) {
+                        Some(base_descriptor) => {
+                            crate::resolvers::pypi::merge_dependency_descriptor(base_descriptor, extra_descriptor)?;
+                        },
+                        None => {
+                            base_resolution.dependencies.insert(dep_ident, extra_descriptor);
+                        },
+                    }
+                }
+            }
+        }
     }
 
     // Second pass: add descriptor-to-locator mappings for transitive

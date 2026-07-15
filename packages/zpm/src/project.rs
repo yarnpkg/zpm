@@ -27,6 +27,7 @@ use crate::{
     report::{StreamReport, StreamReportConfig, async_section, current_report, with_report_result},
     script::{Binary, ScriptEnvironment},
     tasks::TASK_FILE_NAME,
+    trust::{ensure_project_trusted, ProjectTrustReason},
 };
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
@@ -205,6 +206,10 @@ impl Project {
             = Configuration::load(&configuration_context, &mut last_modified_at)
                 .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
 
+        if config.requires_trust {
+            ensure_project_trusted(&project_cwd, ProjectTrustReason::ConfigurationInterpolation).await?;
+        }
+
         if config.settings.enable_migration_mode.value {
             config.settings.enable_global_cache.value = true;
             config.settings.enable_global_cache.source = config.settings.enable_migration_mode.source;
@@ -357,14 +362,14 @@ impl Project {
             = self.lockfile_path();
 
         let mut lockfile
-            = Project::lockfile_from(&lockfile_path)?;
+            = Project::lockfile_from(&lockfile_path, &self.config)?;
 
         if self.config.settings.enable_migration_mode.value {
             let source_lockfile_path
                 = self.project_cwd.with_join_str(LOCKFILE_NAME);
 
             let source_lockfile
-                = Project::lockfile_from(&source_lockfile_path)?;
+                = Project::lockfile_from(&source_lockfile_path, &self.config)?;
 
             lockfile.resolutions.extend(source_lockfile.resolutions.into_iter());
         }
@@ -372,7 +377,7 @@ impl Project {
         Ok(lockfile)
     }
 
-    fn lockfile_from(lockfile_path: &Path) -> Result<Lockfile, Error> {
+    fn lockfile_from(lockfile_path: &Path, config: &Configuration) -> Result<Lockfile, Error> {
         if !lockfile_path.fs_exists() {
             // Check for pnpm node_modules in the same directory
             if let Some(project_cwd) = lockfile_path.dirname() {
@@ -380,7 +385,7 @@ impl Project {
                     = project_cwd.with_join_str("node_modules/.pnpm");
 
                 if pnpm_dir.fs_exists() {
-                    return from_pnpm_node_modules(&project_cwd);
+                    return from_pnpm_node_modules(&project_cwd, config);
                 }
             }
 

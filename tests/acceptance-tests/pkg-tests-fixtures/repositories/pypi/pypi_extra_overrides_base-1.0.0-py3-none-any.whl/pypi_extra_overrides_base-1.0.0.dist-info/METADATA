@@ -1,0 +1,4 @@
+Metadata-Version: 2.1
+Name: pypi_extra_overrides_base
+Version: 1.0.0
+Summary: fixture wheel for integration tests

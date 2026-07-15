@@ -4,6 +4,8 @@ use std::io::{self, Read};
 use std::path::Path;
 
 fn main() {
+    println!("cargo::rustc-check-cfg=cfg(target_vendor, values(\"browserpod\"))");
+
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("ui_assets.rs");
 
