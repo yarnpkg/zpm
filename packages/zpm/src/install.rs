@@ -777,12 +777,14 @@ impl InstallOpResult {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
 #[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
 #[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
 pub struct InstallState {
     pub last_installed_at: u128,
+    pub installed_workspaces: Option<BTreeSet<Ident>>,
+    pub install_config_hash: Option<Hash64>,
     pub content_flags: BTreeMap<Locator, ContentFlags>,
     pub resolution_tree: ResolutionTree,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
@@ -809,6 +811,29 @@ pub struct InstallState {
     pub nm_mode: Option<String>,
 }
 
+impl Default for InstallState {
+    fn default() -> Self {
+        Self {
+            last_installed_at: 0,
+            installed_workspaces: Some(BTreeSet::new()),
+            install_config_hash: None,
+            content_flags: BTreeMap::new(),
+            resolution_tree: ResolutionTree::default(),
+            descriptor_to_locator: BTreeMap::new(),
+            normalized_resolutions: BTreeMap::new(),
+            packages_by_location: BTreeMap::new(),
+            locations_by_package: BTreeMap::new(),
+            optional_packages: BTreeSet::new(),
+            disabled_locators: BTreeSet::new(),
+            conditional_locators: BTreeSet::new(),
+            island_descriptor_to_locator: BTreeMap::new(),
+            island_normalized_resolutions: BTreeMap::new(),
+            cache_checksums: BTreeMap::new(),
+            nm_mode: None,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Install {
     pub lockfile: Lockfile,
@@ -816,6 +841,7 @@ pub struct Install {
     pub package_data: BTreeMap<Locator, PackageData>,
     pub install_state: InstallState,
     pub roots: BTreeSet<Descriptor>,
+    pub installed_workspaces: Option<BTreeSet<Ident>>,
     pub resolved_islands: Vec<crate::island::ResolvedIsland>,
     pub skip_build: bool,
     pub skip_link_step: bool,
@@ -977,8 +1003,6 @@ impl Install {
             self.lockfile.workspaces
                 = compute_workspace_hashes(&graph, &workspace_locators);
 
-            project.attach_install_state(self.install_state)?;
-
             if !self.skip_lockfile_update {
                 project.write_lockfile(&self.lockfile)?;
             }
@@ -1012,6 +1036,12 @@ impl Install {
 
             self.install_state.packages_by_location
                 = link_result.packages_by_location;
+
+            self.install_state.installed_workspaces
+                = self.installed_workspaces.clone();
+
+            self.install_state.install_config_hash
+                = Some(project.install_config_hash());
 
             project.attach_install_state(self.install_state)?;
 
@@ -1096,6 +1126,11 @@ impl<'a> InstallManager<'a> {
 
     pub fn with_roots(mut self, roots: BTreeSet<Descriptor>) -> Self {
         self.result.roots = roots;
+        self
+    }
+
+    pub fn with_installed_workspaces(mut self, installed_workspaces: Option<BTreeSet<Ident>>) -> Self {
+        self.result.installed_workspaces = installed_workspaces;
         self
     }
 
@@ -1538,7 +1573,7 @@ fn dep_locators<'a>(
         .collect()
 }
 
-fn compute_workspace_hashes(
+pub(crate) fn compute_workspace_hashes(
     graph: &BTreeMap<Locator, BTreeSet<Locator>>,
     workspace_locators: &[(Ident, Locator)],
 ) -> BTreeMap<Ident, Hash64> {
