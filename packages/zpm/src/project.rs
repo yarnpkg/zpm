@@ -1151,17 +1151,22 @@ impl Project {
         if cache_exists {
             if let Some(install_state) = &self.install_state {
                 if !self.last_modified_at.has_changed_since(install_state.last_installed_at) {
-                    match &required_workspaces {
-                        None => return Ok(()),
-                        Some(required_workspaces) => {
-                            match &install_state.installed_workspaces {
-                                None => return Ok(()),
-                                Some(installed_workspaces) if required_workspaces.is_subset(installed_workspaces) => {
-                                    return Ok(());
-                                },
-                                Some(_) => {},
-                            }
-                        },
+                    if install_state.install_config_hash.as_ref() == Some(&self.install_config_hash()) {
+                        match &required_workspaces {
+                            None => return Ok(()),
+                            Some(required_workspaces) => {
+                                match &install_state.installed_workspaces {
+                                    None => return Ok(()),
+                                    Some(installed_workspaces) => {
+                                        if self.config.settings.lazy_install_mode.value == zpm_config::LazyInstallMode::All {
+                                            // When mode is All, only skip if all workspaces were installed
+                                        } else if required_workspaces.is_subset(installed_workspaces) {
+                                            return Ok(());
+                                        }
+                                    },
+                                }
+                            },
+                        }
                     }
                 }
             }
