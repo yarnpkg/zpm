@@ -11,7 +11,7 @@ fn to_portable_path(value: &str) -> String {
     let value = value.replace('\\', "/");
 
     if let Some(value) = value.strip_prefix("//?/UNC/") {
-        format!("/unc/{}", value)
+        format!("/unc/?/UNC/{}", value)
     } else if value.starts_with("//?/")
         && value.as_bytes().get(5) == Some(&b':')
         && value.as_bytes().get(4).map_or(false, u8::is_ascii_alphabetic)
@@ -38,6 +38,10 @@ fn from_portable_path(value: &str) -> String {
         value[1..].replace('/', "\\")
     } else if let Some(value) = value.strip_prefix("/unc/.dot/") {
         format!("\\\\.\\{}", value.replace('/', "\\"))
+    } else if let Some(value) = value.strip_prefix("/unc/?/UNC/") {
+        format!("\\\\?\\UNC\\{}", value.replace('/', "\\"))
+    } else if let Some(value) = value.strip_prefix("/unc/?/") {
+        format!("\\\\?\\{}", value.replace('/', "\\"))
     } else if let Some(value) = value.strip_prefix("/unc/") {
         format!("\\\\{}", value.replace('/', "\\"))
     } else {
@@ -1452,12 +1456,13 @@ mod tests {
         assert_eq!(to_portable_path(r"\\server\share\project"), "/unc/server/share/project");
         assert_eq!(to_portable_path(r"\\.\pipe\yarn"), "/unc/.dot/pipe/yarn");
         assert_eq!(to_portable_path(r"\\?\C:\work\project"), "/C:/work/project");
-        assert_eq!(to_portable_path(r"\\?\UNC\server\share\project"), "/unc/server/share/project");
+        assert_eq!(to_portable_path(r"\\?\UNC\server\share\project"), "/unc/?/UNC/server/share/project");
 
         assert_eq!(from_portable_path("/C:/work/project"), r"C:\work\project");
         assert_eq!(from_portable_path("/unc/server/share/project"), r"\\server\share\project");
         assert_eq!(from_portable_path("/unc/.dot/pipe/yarn"), r"\\.\pipe\yarn");
         assert_eq!(from_portable_path("/unc/?/C:/work/project"), r"\\?\C:\work\project");
+        assert_eq!(from_portable_path("/unc/?/UNC/server/share/project"), r"\\?\UNC\server\share\project");
     }
 
     #[test]
