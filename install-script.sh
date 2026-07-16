@@ -77,6 +77,9 @@ case $platform in
 'MINGW64_NT'*' x86_64' | 'MSYS_NT'*' x86_64' | 'CYGWIN_NT'*' x86_64')
   target=x86_64-pc-windows-msvc
   ;;
+'MINGW64_NT'*' ARM64' | 'MINGW64_NT'*' aarch64' | 'MSYS_NT'*' ARM64' | 'MSYS_NT'*' aarch64' | 'CYGWIN_NT'*' ARM64' | 'CYGWIN_NT'*' aarch64')
+  target=x86_64-pc-windows-msvc
+  ;;
 'Linux aarch64' | 'Linux arm64')
   target=aarch64-unknown-linux-musl
   ;;
