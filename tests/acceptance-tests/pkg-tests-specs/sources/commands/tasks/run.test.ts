@@ -2270,6 +2270,7 @@ describe(`Commands`, () => {
           // When a subtask fails, the parent should fail with the subtask's exit code
           await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
             `failing-subtask:`,
+            `  sleep 1`,
             `  exit 55`,
             ``,
             `parent:`,
