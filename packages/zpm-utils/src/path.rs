@@ -190,11 +190,19 @@ pub struct ExplicitPath {
     pub raw_path: RawPath,
 }
 
+fn is_explicit_path_parameter(s: &str) -> bool {
+    is_explicit_path_parameter_for_platform(s, cfg!(windows))
+}
+
+fn is_explicit_path_parameter_for_platform(s: &str, windows: bool) -> bool {
+    s.contains('/') || (windows && s.contains('\\'))
+}
+
 impl FromFileString for ExplicitPath {
     type Error = PathError;
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        if !s.contains('/') {
+        if !is_explicit_path_parameter(s) {
             return Err(PathError::InvalidExplicitPathParameter(s.to_string()));
         }
 
@@ -1448,7 +1456,7 @@ impl ToHumanString for Path {
 mod tests {
     use std::str::FromStr;
 
-    use super::{Path, from_portable_path, to_portable_path};
+    use super::{Path, from_portable_path, is_explicit_path_parameter_for_platform, to_portable_path};
 
     #[test]
     fn converts_windows_paths() {
@@ -1463,6 +1471,13 @@ mod tests {
         assert_eq!(from_portable_path("/unc/.dot/pipe/yarn"), r"\\.\pipe\yarn");
         assert_eq!(from_portable_path("/unc/?/C:/work/project"), r"\\?\C:\work\project");
         assert_eq!(from_portable_path("/unc/?/UNC/server/share/project"), r"\\?\UNC\server\share\project");
+    }
+
+    #[test]
+    fn classifies_backslash_paths_as_explicit_only_on_windows() {
+        assert!(is_explicit_path_parameter_for_platform("./workspace", false));
+        assert!(is_explicit_path_parameter_for_platform(r"D:\a\zpm\zpm\tests\acceptance-tests", true));
+        assert!(!is_explicit_path_parameter_for_platform(r"foo\bar", false));
     }
 
     #[test]

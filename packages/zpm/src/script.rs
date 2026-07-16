@@ -42,6 +42,16 @@ fn quote_path_if_needed(path: &str) -> String {
     }
 }
 
+fn node_esm_loader_path(path: &Path) -> String {
+    if cfg!(windows) {
+        url::Url::from_file_path(path.to_path_buf())
+            .expect("expected valid file URL")
+            .to_string()
+    } else {
+        path.to_native_string()
+    }
+}
+
 fn make_executable_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &[String]) -> Result<(), Error> {
     if cfg!(windows) {
         let escaped_args = args
@@ -536,7 +546,7 @@ impl ScriptEnvironment {
         }
 
         if let Some(pnp_loader_path) = project.pnp_loader_path().if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_native_string()));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", node_esm_loader_path(&pnp_loader_path)));
         }
 
         self.refresh_package_map(project);
