@@ -58,6 +58,11 @@ pub async fn detect_git_operation(p: &Path) -> Result<Option<GitOperation>, Erro
 static DIFF_PATH_NORMALIZER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^/?(.*)/?$").unwrap());
 
 pub async fn diff_folders(original: &Path, user: &Path) -> Result<String, Error> {
+    let original_native
+        = original.to_native_string();
+    let user_native
+        = user.to_native_string();
+
     let diff_command = ScriptEnvironment::new()?
         // These variables aim to ignore the global git config so we get predictable output
         // https://git-scm.com/docs/git#Documentation/git.txt-codeGITCONFIGNOSYSTEMcode
@@ -76,8 +81,8 @@ pub async fn diff_folders(original: &Path, user: &Path) -> Result<String, Error>
             "--no-index",
             "--no-renames",
             "--text",
-            original.as_str(),
-            user.as_str()
+            &original_native,
+            &user_native
         ])
 
         .await?
@@ -99,13 +104,22 @@ pub async fn diff_folders(original: &Path, user: &Path) -> Result<String, Error>
     let user_path_normalized
         = DIFF_PATH_NORMALIZER.replace(user.as_str(), "/$1/").to_string();
 
+    let original_native_normalized
+        = DIFF_PATH_NORMALIZER.replace(&original_native.replace('\\', "/"), "/$1/").to_string();
+    let user_native_normalized
+        = DIFF_PATH_NORMALIZER.replace(&user_native.replace('\\', "/"), "/$1/").to_string();
+
     let original_path_escaped
         = regex::escape(&original_path_normalized);
     let user_path_escaped
         = regex::escape(&user_path_normalized);
+    let original_native_escaped
+        = regex::escape(&original_native_normalized);
+    let user_native_escaped
+        = regex::escape(&user_native_normalized);
 
     let regex
-        = Regex::new(format!("(a|b)({}|{})", original_path_escaped, user_path_escaped).as_str()).unwrap();
+        = Regex::new(format!("(a|b)({}|{}|{}|{})", original_path_escaped, user_path_escaped, original_native_escaped, user_native_escaped).as_str()).unwrap();
 
     let diff
         = regex.replace_all(&diff, "$1/").to_string();
@@ -347,16 +361,24 @@ async fn download_into(source: &GitSource, commit: &str, download_dir: &Path, ht
 }
 
 async fn git_clone_into(source: &GitSource, commit: &str, clone_dir: &Path, config: &HttpConfig, approved_repos: &[Setting<String>]) -> Result<(), Error> {
-    repeat_until_ok(source.to_urls(), |clone_url| async move {
-        validate_repo_url(&clone_url, config, approved_repos)?;
+    let clone_dir_native
+        = clone_dir.to_native_string();
 
-        ScriptEnvironment::new()?
-            .with_env(make_git_env())
-            .run_exec("git", &["clone", "-c", "core.autocrlf=false", &clone_url, clone_dir.as_str()])
-            .await?
-            .ok()?;
+    repeat_until_ok(source.to_urls(), |clone_url| {
+        let clone_dir_native
+            = clone_dir_native.clone();
 
-        Ok::<(), Error>(())
+        async move {
+            validate_repo_url(&clone_url, config, approved_repos)?;
+
+            ScriptEnvironment::new()?
+                .with_env(make_git_env())
+                .run_exec("git", &["clone", "-c", "core.autocrlf=false", &clone_url, &clone_dir_native])
+                .await?
+                .ok()?;
+
+            Ok::<(), Error>(())
+        }
     }).await?;
 
     ScriptEnvironment::new()?
