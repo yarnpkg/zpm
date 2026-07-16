@@ -503,6 +503,25 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
     Ok(bytes)
 }
 
+/// Fetch a response without retaining its body in the process-wide HTTP
+/// cache. Package archives are already deduplicated by the install fetch map
+/// and can be released as soon as they have been converted into cache zips.
+pub async fn get_uncached(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
+    let url
+        = format!("{}{}", params.registry, params.path);
+
+    let response = params.http_client.get(&url)?
+        .header("authorization", params.authorization)
+        .enable_status_check(false)
+        .send().await?;
+
+    if params.authorization.is_some() {
+        handle_invalid_authentication_error(params, &response).await?;
+    }
+
+    Ok(response.error_for_status()?.bytes().await?)
+}
+
 const CACHED_VERSION_FIELDS: &[&str] = &[
     "bin",
     "cpu",

@@ -425,7 +425,7 @@ impl DiskCache {
         let data
             = self.fetch_and_store_blob::<R, F>(key_path_buf, func).await?;
 
-        Ok(tokio::task::spawn(async move {
+        Ok(tokio::task::spawn_blocking(move || {
             let checksum
                 = Hash64::from_data(&data);
 
@@ -447,26 +447,23 @@ impl DiskCache {
         let data
             = func().await?;
 
-        let atomic_path
-            = Path::try_from(key_path.clone())?;
+        tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
+            let atomic_path
+                = Path::try_from(key_path.clone())?;
 
-        let write_result
-            = atomic_path
-                .fs_write_atomic(|tmp_path| -> Result<(), PathError> {
-                    tmp_path.fs_write(&data)?;
-                    Ok(())
-                })
-                .ok_exists();
+            let write_result
+                = atomic_path
+                    .fs_write_atomic(|tmp_path| -> Result<(), PathError> {
+                        tmp_path.fs_write(&data)?;
+                        Ok(())
+                    })
+                    .ok_exists();
 
-        match write_result? {
-            Some(_) => {
-                Ok(data)
-            },
-
-            None => {
-                Ok(tokio::fs::read(key_path).await?)
-            },
-        }
+            match write_result? {
+                Some(_) => Ok(data),
+                None => Ok(std::fs::read(key_path)?),
+            }
+        }).await?
     }
 
     pub async fn clean(&self) -> Result<usize, Error> {

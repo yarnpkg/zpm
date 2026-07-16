@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::{Arc, LazyLock, Mutex}};
+use std::{collections::{BTreeMap, BTreeSet, HashMap, HashSet}, sync::{Arc, LazyLock, Mutex}};
 
 use chrono::{DateTime, Utc};
 use colored::Colorize;
@@ -208,20 +208,25 @@ impl IntoResolutionResult for FetchResult {
 struct InstallMaps {
     resolution_map: Arc<WaitMap<Descriptor, ResolutionResult>>,
     fetch_map: Arc<WaitMap<Locator, FetchResult>>,
+    resolution_tx: tokio::sync::mpsc::UnboundedSender<ResolutionEvent>,
 }
 
-/// Resolve a single descriptor: runs `get_or_init` for the resolution + starts
-/// the fetch, then returns child descriptors to be resolved next.
-///
-/// The resolution logic is split: `get_or_init` runs only the core resolution +
-/// starts the fetch. Children are returned (not recursed into) so the caller
-/// can drive them iteratively, avoiding stack overflow on deep dependency trees.
+/// The work unlocked by resolving a descriptor. Child resolutions and the
+/// package fetch can be scheduled independently.
+struct ResolutionEvent {
+    children: Vec<Descriptor>,
+    locator: Locator,
+    is_mock_request: bool,
+}
+
+/// Resolve a single descriptor. The initializer emits a [`ResolutionEvent`]
+/// so its children and fetch can be scheduled independently.
 async fn resolve_one<'a>(
     descriptor: Descriptor,
     ctx: &'a InstallContext<'a>,
     lockfile: &'a Lockfile,
     maps: &'a InstallMaps,
-) -> Vec<Descriptor> {
+) {
     let cell
         = maps.resolution_map.entry(descriptor.clone());
 
@@ -229,53 +234,76 @@ async fn resolve_one<'a>(
         resolve_descriptor_impl(descriptor.clone(), ctx, lockfile, maps)
     }).await;
 
-    let Ok(result) = result else {
-        return vec![];
-    };
-
-    let children
-        = result.resolution.dependencies
-            .values()
-            .chain(result.resolution.variants.iter())
-            .cloned()
-            .collect();
-
-    children
+    // Errors are collected from the WaitMap after both worklists drain.
+    let _ = result;
 }
 
 /// Iteratively resolve all descriptors starting from the given roots.
-/// Uses `FuturesUnordered` to process descriptors concurrently without
-/// recursive async calls (which would overflow the stack on deep trees).
+/// Resolution and fetch use separate worklists so downloading and packing a
+/// parent archive never delays discovery of its child dependencies.
 async fn resolve_all<'a>(
     roots: impl IntoIterator<Item = Descriptor>,
     ctx: &'a InstallContext<'a>,
     lockfile: &'a Lockfile,
     maps: &'a InstallMaps,
+    mut resolution_rx: tokio::sync::mpsc::UnboundedReceiver<ResolutionEvent>,
 ) {
-    let mut in_flight
+    let mut resolving
         = FuturesUnordered::new();
+    let mut fetching
+        = FuturesUnordered::new();
+    let mut scheduled
+        = HashSet::new();
 
     for descriptor in roots {
-        in_flight.push(resolve_one(descriptor, ctx, lockfile, maps));
+        if scheduled.insert(descriptor.clone()) {
+            resolving.push(resolve_one(descriptor, ctx, lockfile, maps));
+        }
     }
 
-    while let Some(children) = in_flight.next().await {
-        for child in children {
-            // Only schedule children whose resolution hasn't been started yet.
-            // This prevents infinite loops on cyclic dependency graphs.
-            let cell
-                = maps.resolution_map.entry(child.clone());
+    enum Completed {
+        Resolution,
+        Fetch,
+        ResolutionEvent(ResolutionEvent),
+    }
 
-            if !cell.initialized() {
-                in_flight.push(resolve_one(child, ctx, lockfile, maps));
+    while !resolving.is_empty() || !fetching.is_empty() || !resolution_rx.is_empty() {
+        let completed = tokio::select! {
+            result = resolving.next(), if !resolving.is_empty() => {
+                result.expect("resolution worklist cannot be empty");
+                Completed::Resolution
+            },
+            result = fetching.next(), if !fetching.is_empty() => {
+                result.expect("fetch worklist cannot be empty");
+                Completed::Fetch
+            },
+            event = resolution_rx.recv() => {
+                Completed::ResolutionEvent(event.expect("resolution sender cannot close during resolution"))
+            },
+        };
+
+        if let Completed::ResolutionEvent(event) = completed {
+            fetching.push(ensure_fetched(
+                event.locator,
+                event.is_mock_request,
+                ctx,
+                maps,
+            ));
+
+            for child in event.children {
+                // Deduplicate at queue insertion time. Checking the OnceCell
+                // isn't sufficient because queued futures may not be polled yet.
+                if scheduled.insert(child.clone()) {
+                    resolving.push(resolve_one(child, ctx, lockfile, maps));
+                }
             }
         }
     }
 }
 
 /// The actual resolution logic for a single descriptor.
-/// Returns the resolution result; does NOT recurse into children (that happens
-/// in `resolve_one` after the OnceCell init completes, via the `resolve_all` worklist).
+/// Returns the resolution result and emits its children to the iterative
+/// `resolve_all` worklist instead of recursing into them.
 ///
 /// Returns a `BoxFuture` to support recursive calls for inner descriptors
 /// (e.g. alias->inner, patch->inner) without causing infinite future sizes.
@@ -302,7 +330,7 @@ fn resolve_descriptor_impl<'a>(
                             verify_resolution_consistency(&descriptor, &result.resolution.locator)
                         }).await.map_err(Arc::new)?;
                     }
-                    start_fetch(&result, ctx, maps).await;
+                    enqueue_resolution(&result, ctx, maps);
                     return Ok(result);
                 },
 
@@ -328,7 +356,7 @@ fn resolve_descriptor_impl<'a>(
                         ).await.map_err(|_| Error::TaskTimeout)?
                     }).await.map_err(Arc::new)?;
 
-                    start_fetch(&result, ctx, maps).await;
+                    enqueue_resolution(&result, ctx, maps);
                     return Ok(result);
                 },
             }
@@ -418,18 +446,18 @@ fn resolve_descriptor_impl<'a>(
             ).await.map_err(|_| Error::TaskTimeout)?
         }).await.map_err(Arc::new)?;
 
-        // Phase 4: Start fetch (children are handled by resolve_all worklist after init completes)
-        start_fetch(&result, ctx, maps).await;
+        enqueue_resolution(&result, ctx, maps);
 
         Ok(result)
     }.boxed()
 }
 
-/// Start a fetch for the resolved locator.
-async fn start_fetch<'a>(
+/// Emit the child resolutions and fetch unlocked by a successful resolution.
+/// The scheduler runs them independently so both pipelines can overlap.
+fn enqueue_resolution(
     result: &ResolutionResult,
-    ctx: &'a InstallContext<'a>,
-    maps: &'a InstallMaps,
+    ctx: &InstallContext<'_>,
+    maps: &InstallMaps,
 ) {
     let systems
         = ctx.systems.unwrap();
@@ -448,7 +476,16 @@ async fn start_fetch<'a>(
         }
     }
 
-    ensure_fetched(locator, is_mock_request, ctx, maps).await;
+    let children
+        = result.resolution.dependencies
+            .values()
+            .chain(result.resolution.variants.iter())
+            .cloned()
+            .collect();
+
+    maps.resolution_tx
+        .send(ResolutionEvent {children, locator, is_mock_request})
+        .expect("resolution receiver cannot close during resolution");
 }
 
 /// Ensure a locator is fetched. Uses the fetch WaitMap for deduplication.
@@ -1150,9 +1187,13 @@ impl<'a> InstallManager<'a> {
     }
 
     pub async fn resolve_and_fetch(mut self) -> Result<Install, Error> {
+        let (resolution_tx, resolution_rx)
+            = tokio::sync::mpsc::unbounded_channel();
+
         let maps = InstallMaps {
             resolution_map: Arc::new(WaitMap::new()),
             fetch_map: Arc::new(WaitMap::new()),
+            resolution_tx,
         };
 
         let lockfile
@@ -1216,7 +1257,7 @@ impl<'a> InstallManager<'a> {
         let roots = self.result.roots.clone();
 
         async_section("Installing packages", async {
-            let greedy_future = resolve_all(roots, &self.context, &lockfile, &maps);
+            let greedy_future = resolve_all(roots, &self.context, &lockfile, &maps, resolution_rx);
 
             if let Some(ref islands) = resolved_islands {
                 // Store resolved islands for use during linking
