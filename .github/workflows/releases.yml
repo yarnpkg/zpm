@@ -89,11 +89,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path `
-            target/${{matrix.target}}/release-lto-nodebug/yarn-bin${{matrix.ext}}, `
-            target/${{matrix.target}}/release-lto-nodebug/yarn${{matrix.ext}}, `
-            target/${{matrix.target}}/release-lto-nodebug/LICENSE.md `
-            -DestinationPath yarn-${{matrix.target}}.zip
+          $tmpDir = New-Item -ItemType Directory -Path "tmp-archive-${{matrix.target}}"
+          Copy-Item -Path "target/${{matrix.target}}/release-lto-nodebug/yarn-bin${{matrix.ext}}" -Destination $tmpDir
+          Copy-Item -Path "target/${{matrix.target}}/release-lto-nodebug/yarn${{matrix.ext}}" -Destination $tmpDir
+          Copy-Item -Path "target/${{matrix.target}}/release-lto-nodebug/LICENSE.md" -Destination $tmpDir
+          Compress-Archive -Path "$tmpDir/*" -DestinationPath "yarn-${{matrix.target}}.zip"
+          Remove-Item -Recurse -Force $tmpDir
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
