@@ -333,14 +333,20 @@ impl<'a> SyncTree<'a> {
 
                 let is_symlink_up_to_date
                     = match (self.link_type, symlink_target) {
-                        (LinkType::Junction, Some(actual_target)) if actual_target.is_absolute() => {
+                        (LinkType::Junction, Some(actual_target)) => {
                             let expected_target = if target_path.is_absolute() {
                                 target_path.clone()
                             } else {
                                 path.dirname().unwrap_or_default().with_join(target_path)
                             };
 
-                            match (actual_target.fs_canonicalize(), expected_target.fs_canonicalize()) {
+                            let actual_full = if actual_target.is_absolute() {
+                                actual_target
+                            } else {
+                                path.dirname().unwrap_or_default().with_join(&actual_target)
+                            };
+
+                            match (actual_full.fs_canonicalize(), expected_target.fs_canonicalize()) {
                                 (Ok(actual_canonical), Ok(expected_canonical)) => actual_canonical == expected_canonical,
                                 _ => false,
                             }
