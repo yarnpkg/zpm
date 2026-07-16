@@ -81,6 +81,7 @@ The `@yarnpkg/node` package automatically downloads the correct binary for your 
 
 - Linux (x64, arm64)
 - macOS (x64, arm64)
+- Windows (x64, arm64)
 
 When working in a team with mixed platforms, Yarn will store metadata about all required platform variants in the lockfile, but each developer will only downloads the binary they need for their platform (configurable through `supportedArchitectures`).
 

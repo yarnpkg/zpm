@@ -11,11 +11,56 @@ use crate::{
     error::Error, fetchers::PackageData, install::{FetchResult, InstallContext, IntoResolutionResult, ResolutionResult}, manifest::bin::BinField, npm::NpmEntryExt, resolvers::Resolution
 };
 
-static PLATFORM_VARIANTS: &[(System, &str, &str)] = &[
-    (System::new(Some(Cpu::X86_64), Some(Os::Linux), None), "linux-x64", "bin/node"),
-    (System::new(Some(Cpu::Aarch64), Some(Os::Linux), None), "linux-arm64", "bin/node"),
-    (System::new(Some(Cpu::X86_64), Some(Os::MacOS), None), "darwin-x64", "bin/node"),
-    (System::new(Some(Cpu::Aarch64), Some(Os::MacOS), None), "darwin-arm64", "bin/node"),
+#[derive(Clone, Copy)]
+enum NodeArchive {
+    Tgz,
+    Zip,
+}
+
+struct PlatformVariant {
+    system: System,
+    file_name: &'static str,
+    bin_file: &'static str,
+    archive: NodeArchive,
+}
+
+static PLATFORM_VARIANTS: &[PlatformVariant] = &[
+    PlatformVariant {
+        system: System::new(Some(Cpu::X86_64), Some(Os::Linux), None),
+        file_name: "linux-x64",
+        bin_file: "bin/node",
+        archive: NodeArchive::Tgz,
+    },
+    PlatformVariant {
+        system: System::new(Some(Cpu::Aarch64), Some(Os::Linux), None),
+        file_name: "linux-arm64",
+        bin_file: "bin/node",
+        archive: NodeArchive::Tgz,
+    },
+    PlatformVariant {
+        system: System::new(Some(Cpu::X86_64), Some(Os::MacOS), None),
+        file_name: "darwin-x64",
+        bin_file: "bin/node",
+        archive: NodeArchive::Tgz,
+    },
+    PlatformVariant {
+        system: System::new(Some(Cpu::Aarch64), Some(Os::MacOS), None),
+        file_name: "darwin-arm64",
+        bin_file: "bin/node",
+        archive: NodeArchive::Tgz,
+    },
+    PlatformVariant {
+        system: System::new(Some(Cpu::X86_64), Some(Os::Windows), None),
+        file_name: "win-x64",
+        bin_file: "node.exe",
+        archive: NodeArchive::Zip,
+    },
+    PlatformVariant {
+        system: System::new(Some(Cpu::Aarch64), Some(Os::Windows), None),
+        file_name: "win-arm64",
+        bin_file: "node.exe",
+        archive: NodeArchive::Zip,
+    },
 ];
 
 pub async fn resolve_nodejs_version(context: &InstallContext<'_>, range: &zpm_semver::Range) -> Result<Option<zpm_semver::Version>, Error> {
@@ -71,9 +116,9 @@ pub async fn resolve_nodejs_locator(context: &InstallContext<'_>, locator: &Loca
 }
 
 fn build_nodejs_parent_resolution(context: &InstallContext<'_>, locator: Locator, version: zpm_semver::Version) -> Result<ResolutionResult, Error> {
-    let variants = PLATFORM_VARIANTS.iter().map(|(_, file_name, _)| {
+    let variants = PLATFORM_VARIANTS.iter().map(|variant| {
         let name
-            = format!("@yarnpkg/node-{}", file_name);
+            = format!("@yarnpkg/node-{}", variant.file_name);
         let range
             = zpm_semver::Range::exact(version.clone());
 
@@ -94,9 +139,9 @@ fn build_nodejs_parent_resolution(context: &InstallContext<'_>, locator: Locator
 }
 
 pub async fn resolve_nodejs_variant_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, range: &zpm_semver::Range) -> Result<ResolutionResult, Error> {
-    let (system, _, _)
+    let variant
         = PLATFORM_VARIANTS.iter()
-            .find(|(_, file_name, _)| descriptor.ident.as_str() == &format!("@yarnpkg/node-{}", file_name))
+            .find(|variant| descriptor.ident.as_str() == &format!("@yarnpkg/node-{}", variant.file_name))
             .ok_or(Error::Unsupported)?;
 
     let version
@@ -110,29 +155,29 @@ pub async fn resolve_nodejs_variant_descriptor(context: &InstallContext<'_>, des
     let mut resolution
         = Resolution::new_empty(locator, version);
 
-    resolution.requirements = system.to_requirements();
+    resolution.requirements = variant.system.to_requirements();
 
     resolution.into_resolution_result(context)
 }
 
 pub async fn resolve_nodejs_variant_locator(context: &InstallContext<'_>, locator: &Locator, version: &zpm_semver::Version) -> Result<ResolutionResult, Error> {
-    let (system, _, _)
+    let variant
         = PLATFORM_VARIANTS.iter()
-            .find(|(_, file_name, _)| locator.ident.as_str() == &format!("@yarnpkg/node-{}", file_name))
+            .find(|variant| locator.ident.as_str() == &format!("@yarnpkg/node-{}", variant.file_name))
             .ok_or(Error::Unsupported)?;
 
     let mut resolution
         = Resolution::new_empty(locator.clone(), version.clone());
 
-    resolution.requirements = system.to_requirements();
+    resolution.requirements = variant.system.to_requirements();
 
     resolution.into_resolution_result(context)
 }
 
 pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Locator, version: &zpm_semver::Version, is_mock_request: bool) -> Result<FetchResult, Error> {
-    let (system, file_name, bin_file)
+    let variant
         = PLATFORM_VARIANTS.iter()
-            .find(|(_, file_name, _)| locator.ident.as_str() == &format!("@yarnpkg/node-{}", file_name))
+            .find(|variant| locator.ident.as_str() == &format!("@yarnpkg/node-{}", variant.file_name))
             .ok_or(Error::Unsupported)?;
 
     if is_mock_request {
@@ -151,8 +196,12 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
     let version_str
         = version.to_file_string();
 
-    let url
-        = format!("{}/v{}/node-v{}-{}.tar.gz", project.config.settings.node_dist_url.value, version_str, version_str, file_name);
+    let url = match variant.archive {
+        NodeArchive::Tgz
+            => format!("{}/v{}/node-v{}-{}.tar.gz", project.config.settings.node_dist_url.value, version_str, version_str, variant.file_name),
+        NodeArchive::Zip
+            => format!("{}/v{}/node-v{}-{}.zip", project.config.settings.node_dist_url.value, version_str, version_str, variant.file_name),
+    };
 
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching npm packages");
@@ -166,11 +215,13 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
     let locator_ident
         = locator.ident.clone();
     let bin_file
-        = bin_file.to_string();
+        = variant.bin_file.to_string();
     let system_os
-        = system.os.clone();
+        = variant.system.os.clone();
     let system_arch
-        = system.arch.clone();
+        = variant.system.arch.clone();
+    let archive
+        = variant.archive;
 
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async move {
         let bytes
@@ -180,9 +231,6 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
                 .bytes().await?;
 
         let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
-            let tar_data
-                = zpm_formats::tar::unpack_tgz(&bytes)?;
-
             #[derive(Serialize)]
             #[serde(rename_all = "camelCase")]
             struct GeneratedManifest<'a> {
@@ -209,15 +257,34 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
             let serialized_manifest
                 = JsonDocument::to_string(&manifest)?;
 
-            let entries
-                = zpm_formats::tar::entries_from_tar(&tar_data)?
-                    .into_iter()
-                    .strip_first_segment()
-                    .filter(|entry| entry.name.as_str() == bin_file.as_str())
-                    .chain(once(Entry::new_file(Path::from_str("package.json").unwrap(), Cow::Owned(serialized_manifest.into_bytes()))))
-                    .prepare_npm_entries(&package_subdir_for_entries)?;
+            match archive {
+                NodeArchive::Tgz => {
+                    let tar_data
+                        = zpm_formats::tar::unpack_tgz(&bytes)?;
 
-            Ok(cache_packer.pack(entries)?)
+                    let entries
+                        = zpm_formats::tar::entries_from_tar(&tar_data)?
+                            .into_iter()
+                            .strip_first_segment()
+                            .filter(|entry| entry.name.as_str() == bin_file.as_str())
+                            .chain(once(Entry::new_file(Path::from_str("package.json").unwrap(), Cow::Owned(serialized_manifest.into_bytes()))))
+                            .prepare_npm_entries(&package_subdir_for_entries)?;
+
+                    Ok(cache_packer.pack(entries)?)
+                },
+
+                NodeArchive::Zip => {
+                    let entries
+                        = zpm_formats::zip::entries_from_zip(&bytes)?
+                            .into_iter()
+                            .strip_first_segment()
+                            .filter(|entry| entry.name.as_str() == bin_file.as_str())
+                            .chain(once(Entry::new_file(Path::from_str("package.json").unwrap(), Cow::Owned(serialized_manifest.into_bytes()))))
+                            .prepare_npm_entries(&package_subdir_for_entries)?;
+
+                    Ok(cache_packer.pack(entries)?)
+                },
+            }
         }).await??;
 
         Ok(archive)
