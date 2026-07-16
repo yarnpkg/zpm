@@ -79,7 +79,7 @@ impl Link {
             }
 
             let target_workspace
-                = Workspace::from_root_path(&destination_path)?;
+                = Workspace::from_root_path(&canonical_destination)?;
 
             if self.all {
                 let child_workspaces
@@ -87,7 +87,7 @@ impl Link {
 
                 if let Some(name) = &target_workspace.manifest.name {
                     if self.private || !target_workspace.manifest.private.unwrap_or(false) {
-                        self.add_resolution(&mut document, name, &destination_path, root_path)?;
+                        self.add_resolution(&mut document, name, &canonical_destination, root_path)?;
                     }
                 }
 
@@ -105,9 +105,9 @@ impl Link {
             } else {
                 let name
                     = target_workspace.manifest.name.as_ref()
-                        .ok_or_else(|| Error::LinkedPackageMissingName(destination_path.clone()))?;
+                        .ok_or_else(|| Error::LinkedPackageMissingName(canonical_destination.clone()))?;
 
-                self.add_resolution(&mut document, name, &destination_path, root_path)?;
+                self.add_resolution(&mut document, name, &canonical_destination, root_path)?;
             }
         }
 
@@ -118,7 +118,7 @@ impl Link {
 
     fn add_resolution(&self, document: &mut JsonDocument, name: &Ident, workspace_path: &Path, root_path: &Path) -> Result<(), Error> {
         let portal_path = if self.relative {
-            workspace_path.relative_to(root_path)
+            workspace_path.relative_to_if_same_root(root_path)
         } else {
             workspace_path.clone()
         };
