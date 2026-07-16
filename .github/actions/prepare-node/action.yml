@@ -45,4 +45,7 @@ runs:
     - name: Install dependencies
       shell: bash
       run: |
+        if [[ -n "${{inputs.switch}}" ]]; then
+          export YARN_ENABLE_IMMUTABLE_INSTALLS=0
+        fi
         yarn install
