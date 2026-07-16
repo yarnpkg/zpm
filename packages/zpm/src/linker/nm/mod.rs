@@ -146,7 +146,7 @@ fn register_workspace_symlinks_at(
 
         let target_path
             = workspace_dir
-                .relative_to(&host_abs_path.with_join(&symlink_path).dirname().unwrap_or_default());
+                .relative_to_if_same_root(&host_abs_path.with_join(&symlink_path).dirname().unwrap_or_default());
 
         let symlink_location
             = host_abs_path.with_join(&symlink_path);
@@ -354,7 +354,7 @@ fn generate_workspace_node_modules(
                     }
 
                     let target_path
-                        = package_directory.relative_to(&child_abs_path.dirname().unwrap());
+                        = package_directory.relative_to_if_same_root(&child_abs_path.dirname().unwrap());
 
                     workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
                         target_path: target_path.clone(),

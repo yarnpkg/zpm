@@ -49,6 +49,28 @@ fn from_portable_path(value: &str) -> String {
     }
 }
 
+#[cfg(any(windows, test))]
+fn windows_path_root(value: &str) -> Option<String> {
+    if value.as_bytes().get(2) == Some(&b':')
+        && value.as_bytes().get(1).map_or(false, u8::is_ascii_alphabetic)
+        && value.starts_with('/')
+    {
+        return Some(value[..3].to_ascii_lowercase());
+    }
+
+    let unc_path
+        = value.strip_prefix("/unc/")?;
+
+    let mut parts
+        = unc_path.split('/');
+
+    Some(format!(
+        "/unc/{}/{}",
+        parts.next()?.to_ascii_lowercase(),
+        parts.next()?.to_ascii_lowercase(),
+    ))
+}
+
 #[cfg(windows)]
 fn fs_set_mode_0600(path: &std::path::Path) -> Result<(), std::io::Error> {
     use std::{ffi::OsStr, iter, mem, os::windows::ffi::OsStrExt, ptr::{null, null_mut}};
@@ -1405,6 +1427,17 @@ impl Path {
         }
     }
 
+    pub fn relative_to_if_same_root(&self, other: &Path) -> Path {
+        #[cfg(any(windows, test))]
+        if let (Some(self_root), Some(other_root)) = (windows_path_root(&self.path), windows_path_root(&other.path)) {
+            if self_root != other_root {
+                return self.clone();
+            }
+        }
+
+        self.relative_to(other)
+    }
+
     fn normalize(&mut self) {
         self.path = resolve_path(&self.path);
     }
@@ -1505,6 +1538,19 @@ mod tests {
         assert!(is_explicit_path_parameter_for_platform("./workspace", false));
         assert!(is_explicit_path_parameter_for_platform(r"D:\a\zpm\zpm\tests\acceptance-tests", true));
         assert!(!is_explicit_path_parameter_for_platform(r"foo\bar", false));
+    }
+
+    #[test]
+    fn keeps_windows_link_targets_absolute_across_roots() {
+        assert_eq!(
+            Path::from_str("/D:/fixtures/no-deps").unwrap().relative_to_if_same_root(&Path::from_str("/C:/project/node_modules").unwrap()),
+            Path::from_str("/D:/fixtures/no-deps").unwrap(),
+        );
+
+        assert_eq!(
+            Path::from_str("/C:/project/.store/no-deps").unwrap().relative_to_if_same_root(&Path::from_str("/C:/project/node_modules").unwrap()),
+            Path::from_str("../.store/no-deps").unwrap(),
+        );
     }
 
     #[test]

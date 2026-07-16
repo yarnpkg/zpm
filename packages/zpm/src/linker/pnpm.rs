@@ -204,7 +204,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 .expect("Failed to get directory name");
 
         let symlink_target = package_abs_path
-            .relative_to(&link_abs_dirname);
+            .relative_to_if_same_root(&link_abs_dirname);
 
         let link_path = link_abs_path
             .fs_rm()
@@ -250,7 +250,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
 
         let symlink_target
             = package_abs_path
-                .relative_to(&link_abs_dirname);
+                .relative_to_if_same_root(&link_abs_dirname);
 
         let link_path = link_abs_path
             .fs_rm()
@@ -323,7 +323,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             // ../.pnpm/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
             let symlink_target
                 = dep_abs_path
-                    .relative_to(&link_abs_dirname);
+                    .relative_to_if_same_root(&link_abs_dirname);
 
             let link_path = link_abs_path
                 .fs_rm()
