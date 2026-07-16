@@ -723,6 +723,11 @@ impl Path {
     }
 
     pub fn fs_is_real_dir(&self) -> bool {
+        #[cfg(windows)]
+        if junction::exists(self.to_path_buf()).unwrap_or(false) {
+            return false;
+        }
+
         self.fs_symlink_metadata().map(|m| m.is_dir()).unwrap_or(false)
     }
 
@@ -1153,6 +1158,12 @@ impl Path {
     }
 
     pub fn fs_rm(&self) -> Result<&Self, PathError> {
+        #[cfg(windows)]
+        if junction::exists(self.to_path_buf()).unwrap_or(false) {
+            junction::delete(self.to_path_buf())?;
+            return Ok(self);
+        }
+
         match self.fs_is_real_dir() {
             true => std::fs::remove_dir_all(self.to_path_buf()),
             false => std::fs::remove_file(self.to_path_buf()),
@@ -1205,6 +1216,11 @@ impl Path {
     }
 
     pub fn fs_read_link(&self) -> Result<Path, PathError> {
+        #[cfg(windows)]
+        if junction::exists(self.to_path_buf()).unwrap_or(false) {
+            return Ok(Path::try_from(junction::get_target(self.to_path_buf())?)?);
+        }
+
         Ok(Path::try_from(std::fs::read_link(&self.to_path_buf())?)?)
     }
 
