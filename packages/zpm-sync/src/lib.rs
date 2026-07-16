@@ -340,7 +340,10 @@ impl<'a> SyncTree<'a> {
                                 path.dirname().unwrap_or_default().with_join(target_path)
                             };
 
-                            actual_target.fs_canonicalize()? == expected_target.fs_canonicalize()?
+                            match (actual_target.fs_canonicalize(), expected_target.fs_canonicalize()) {
+                                (Ok(actual_canonical), Ok(expected_canonical)) => actual_canonical == expected_canonical,
+                                _ => false,
+                            }
                         },
                         (_, Some(actual_target)) => actual_target == *target_path,
                         (_, None) => false,
