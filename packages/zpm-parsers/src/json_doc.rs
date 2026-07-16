@@ -619,13 +619,13 @@ impl<'a> Scanner<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while self.offset < self.input.len() && (self.input[self.offset] == b' ' || self.input[self.offset] == b'\t' || self.input[self.offset] == b'\n') {
+        while self.offset < self.input.len() && matches!(self.input[self.offset], b' ' | b'\t' | b'\n' | b'\r') {
             self.offset += 1;
         }
     }
 
     fn rskip_whitespace(&mut self) {
-        while self.offset > 0 && (self.input[self.offset - 1] == b' ' || self.input[self.offset - 1] == b'\t' || self.input[self.offset - 1] == b'\n') {
+        while self.offset > 0 && matches!(self.input[self.offset - 1], b' ' | b'\t' | b'\n' | b'\r') {
             self.offset -= 1;
         }
     }
@@ -935,6 +935,8 @@ mod tests {
     // Edge cases with whitespace
     #[case(b"{ \"spaced\": \"value\" }", vec!["spaced"], Value::String("updated".to_string()), b"{ \"spaced\": \"updated\" }")]
     #[case(b"{\n\n  \"key\": \"value\"\n\n}", vec!["key"], Value::String("new_value".to_string()), b"{\n\n  \"key\": \"new_value\"\n\n}")]
+    #[case(b"{\r\n  \"key\": \"value\"\r\n}", vec!["key"], Value::String("new_value".to_string()), b"{\r\n  \"key\": \"new_value\"\r\n}")]
+    #[case(b"{\r\n  \"key\": \"value\"\r\n}", vec!["another"], Value::String("new_value".to_string()), b"{\r\n  \"another\": \"new_value\",\r\n  \"key\": \"value\"\r\n}")]
     #[case(b"{\"key\":\"no_spaces\"}", vec!["key"], Value::String("with_spaces".to_string()), b"{\"key\":\"with_spaces\"}")]
 
     // Escaped characters
