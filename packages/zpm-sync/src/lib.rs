@@ -333,11 +333,17 @@ impl<'a> SyncTree<'a> {
 
                 let is_symlink_up_to_date
                     = match (self.link_type, symlink_target) {
-                        (LinkType::Junction, Some(actual_target)) if actual_target.is_absolute() => {
+                        (LinkType::Junction, Some(actual_target)) => {
                             let expected_target = if target_path.is_absolute() {
                                 target_path.clone()
                             } else {
                                 path.dirname().unwrap_or_default().with_join(target_path)
+                            };
+
+                            let actual_target = if actual_target.is_absolute() {
+                                actual_target
+                            } else {
+                                path.dirname().unwrap_or_default().with_join(&actual_target)
                             };
 
                             match (actual_target.fs_canonicalize(), expected_target.fs_canonicalize()) {
@@ -526,5 +532,55 @@ impl<'a> From<SyncItem<'a>> for SyncNode<'a> {
                 target_path,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{str::FromStr, time::{SystemTime, UNIX_EPOCH}};
+
+    use super::*;
+
+    #[test]
+    fn junction_mode_accepts_equivalent_relative_targets() -> Result<(), Box<dyn std::error::Error>> {
+        let nonce
+            = SystemTime::now()
+                .duration_since(UNIX_EPOCH)?
+                .as_nanos();
+
+        let root
+            = Path::try_from(std::env::temp_dir().join(format!("zpm-sync-{nonce}")))?;
+
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            root.fs_create_dir_all()?;
+            root.with_join_str("links").fs_create_dir_all()?;
+            root.with_join_str("store/pkg").fs_create_dir_all()?;
+
+            let link_path
+                = root.with_join_str("links/pkg");
+
+            link_path.fs_symlink(&Path::from_str("../links/../store/pkg")?)?;
+
+            let check
+                = SyncTree::new()
+                    .with_link_type(LinkType::Junction)
+                    .check(&link_path, &SyncNode::Symlink {
+                        target_path: Path::from_str("../store/pkg")?,
+                    })?;
+
+            assert!(!check.must_remove);
+            assert!(!check.must_create);
+
+            Ok(())
+        })();
+
+        let cleanup_result
+            = root.fs_rm();
+
+        if result.is_ok() {
+            cleanup_result?;
+        }
+
+        result
     }
 }
