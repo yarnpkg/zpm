@@ -6,6 +6,19 @@ use crate::{diff_data, impl_file_string_from_str, impl_file_string_serialization
 
 static ATOMIC_WRITE_NONCE: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(windows)]
+fn normalize_windows_path(value: &str) -> String {
+    let value = value.replace('\\', "/");
+
+    if let Some(value) = value.strip_prefix("//?/UNC/") {
+        format!("//{}", value)
+    } else if let Some(value) = value.strip_prefix("//?/") {
+        value.to_string()
+    } else {
+        value
+    }
+}
+
 #[derive(Debug)]
 pub struct SyncEntry {
     pub rel_path: Path,
@@ -1221,7 +1234,7 @@ impl TryFrom<&std::ffi::OsStr> for Path {
                 .ok_or(PathError::InvalidUtf8Path)?;
 
         #[cfg(windows)]
-        let value = value.replace('\\', "/");
+        let value = normalize_windows_path(value);
 
         Ok(Path::from_str(&value)?)
     }
@@ -1248,7 +1261,7 @@ impl FromFileString for Path {
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
         #[cfg(windows)]
-        let s = s.replace('\\', "/");
+        let s = normalize_windows_path(s);
 
         Ok(Path {path: resolve_path(&s)})
     }
