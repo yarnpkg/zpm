@@ -266,6 +266,10 @@ describe(`Features`, () => {
     test(
       `it should treat transitive workspace dependencies as covered by focused installs`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
+        await yarn.writeConfiguration(path, {
+          lazyInstallMode: `focused`,
+        });
+
         await xfs.writeJsonPromise(ppath.join(path, Filename.manifest), {
           private: true,
           workspaces: [`packages/*`],
@@ -307,6 +311,10 @@ describe(`Features`, () => {
     test(
       `it should include optional workspace dependencies in focused install coverage`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
+        await yarn.writeConfiguration(path, {
+          lazyInstallMode: `focused`,
+        });
+
         await xfs.writeJsonPromise(ppath.join(path, Filename.manifest), {
           private: true,
           workspaces: [`packages/*`],
