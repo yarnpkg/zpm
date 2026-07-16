@@ -542,7 +542,77 @@ impl Path {
             self.fs_set_permissions(std::fs::Permissions::from_mode(mode))?;
         }
 
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            // On Windows, apply ACLs for mode 0o600 (owner-only read/write)
+            if mode == 0o600 {
+                use std::ffi::OsStr;
+                use std::os::windows::ffi::OsStrExt;
+                use windows_sys::Win32::Security::Authorization::{
+                    SetNamedSecurityInfoW, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                    PROTECTED_DACL_SECURITY_INFORMATION,
+                };
+                use windows_sys::Win32::Security::{
+                    ConvertStringSecurityDescriptorToSecurityDescriptorW,
+                    PSECURITY_DESCRIPTOR, SDDL_REVISION_1,
+                };
+                use windows_sys::Win32::System::Memory::LocalFree;
+                use windows_sys::core::PWSTR;
+
+                // SDDL string for owner-only full access, protected from inheritance
+                // D:P(A;;FA;;;OW) means:
+                // D: - DACL
+                // P - Protected (don't inherit from parent)
+                // A - Allow ACE
+                // ;; - No object/inherited object type
+                // FA - FILE_ALL_ACCESS
+                // ;;; - No flags/object/inherited object
+                // OW - Owner Rights SID
+                let sddl = "D:P(A;;FA;;;OW)\0";
+                let sddl_wide: Vec<u16> = OsStr::new(sddl).encode_wide().collect();
+
+                unsafe {
+                    let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+                    let result = ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                        sddl_wide.as_ptr(),
+                        SDDL_REVISION_1,
+                        &mut sd,
+                        std::ptr::null_mut(),
+                    );
+
+                    if result == 0 {
+                        return Err(std::io::Error::last_os_error().into());
+                    }
+
+                    // Convert path to wide string
+                    let path_wide: Vec<u16> = OsStr::new(&self.path)
+                        .encode_wide()
+                        .chain(std::iter::once(0))
+                        .collect();
+
+                    // Apply the security descriptor to the file
+                    let set_result = SetNamedSecurityInfoW(
+                        path_wide.as_ptr() as PWSTR,
+                        SE_FILE_OBJECT,
+                        DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    );
+
+                    // Free the security descriptor
+                    LocalFree(sd as isize);
+
+                    if set_result != 0 {
+                        return Err(std::io::Error::from_raw_os_error(set_result as i32).into());
+                    }
+                }
+            }
+            // For other modes on Windows, we currently don't have an implementation
+        }
+
+        #[cfg(not(any(unix, windows)))]
         let _ = mode;
 
         Ok(self)
