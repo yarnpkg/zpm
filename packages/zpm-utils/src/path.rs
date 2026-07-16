@@ -45,6 +45,117 @@ fn from_portable_path(value: &str) -> String {
     }
 }
 
+#[cfg(windows)]
+fn fs_set_mode_0600(path: &std::path::Path) -> Result<(), std::io::Error> {
+    use std::{ffi::OsStr, iter, mem, os::windows::ffi::OsStrExt, ptr::{null, null_mut}};
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, ERROR_SUCCESS, GENERIC_ALL, HANDLE, LocalFree},
+        Security::{
+            Authorization::{
+                EXPLICIT_ACCESS_W, GRANT_ACCESS, NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT,
+                SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
+                TRUSTEE_W,
+            },
+            DACL_SECURITY_INFORMATION, GetTokenInformation, NO_INHERITANCE,
+            PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER, TokenUser,
+        },
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+
+    struct OwnedHandle(HANDLE);
+
+    impl Drop for OwnedHandle {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+
+    struct OwnedAcl(*mut windows_sys::Win32::Security::ACL);
+
+    impl Drop for OwnedAcl {
+        fn drop(&mut self) {
+            unsafe {
+                LocalFree(self.0.cast());
+            }
+        }
+    }
+
+    fn win32_error(code: u32) -> std::io::Error {
+        std::io::Error::from_raw_os_error(code as i32)
+    }
+
+    unsafe {
+        let mut token = null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let token = OwnedHandle(token);
+
+        let mut token_user_len = 0;
+        GetTokenInformation(token.0, TokenUser, null_mut(), 0, &mut token_user_len);
+        if token_user_len == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let token_user_unit_size
+            = mem::size_of::<usize>();
+        let token_user_units
+            = (token_user_len as usize + token_user_unit_size - 1) / token_user_unit_size;
+        let mut token_user_data = vec![0usize; token_user_units];
+        if GetTokenInformation(token.0, TokenUser, token_user_data.as_mut_ptr().cast(), token_user_len, &mut token_user_len) == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let token_user
+            = &*(token_user_data.as_ptr().cast::<TOKEN_USER>());
+        let user_sid
+            = token_user.User.Sid;
+
+        let explicit_access = EXPLICIT_ACCESS_W {
+            grfAccessPermissions: GENERIC_ALL,
+            grfAccessMode: GRANT_ACCESS,
+            grfInheritance: NO_INHERITANCE,
+            Trustee: TRUSTEE_W {
+                pMultipleTrustee: null_mut(),
+                MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_USER,
+                ptstrName: user_sid.cast(),
+            },
+        };
+
+        let mut acl = null_mut();
+        let result
+            = SetEntriesInAclW(1, &explicit_access, null(), &mut acl);
+        if result != ERROR_SUCCESS {
+            return Err(win32_error(result));
+        }
+        let acl = OwnedAcl(acl);
+
+        let wide_path = OsStr::new(path)
+            .encode_wide()
+            .chain(iter::once(0))
+            .collect::<Vec<_>>();
+
+        let result = SetNamedSecurityInfoW(
+            wide_path.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            acl.0,
+            null_mut(),
+        );
+        if result != ERROR_SUCCESS {
+            return Err(win32_error(result));
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct SyncEntry {
     pub rel_path: Path,
@@ -542,8 +653,17 @@ impl Path {
             self.fs_set_permissions(std::fs::Permissions::from_mode(mode))?;
         }
 
-        #[cfg(not(unix))]
-        let _ = mode;
+        #[cfg(windows)]
+        {
+            if mode == 0o600 {
+                fs_set_mode_0600(&self.to_path_buf())?;
+            }
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = mode;
+        }
 
         Ok(self)
     }
