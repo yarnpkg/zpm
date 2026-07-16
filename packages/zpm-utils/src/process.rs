@@ -118,8 +118,8 @@ fn windows_executable_candidates(path: PathBuf, pathexts: &[String]) -> Vec<Path
     if has_windows_executable_extension(&path, pathexts) {
         vec![path]
     } else {
-        std::iter::once(path.clone())
-            .chain(pathexts.iter().map(move |ext| path.with_extension(&ext[1..])))
+        pathexts.iter()
+            .map(move |ext| path.with_extension(&ext[1..]))
             .collect()
     }
 }
@@ -178,6 +178,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
+        std::fs::write(root.join("node-gyp"), "#!/bin/sh\n").unwrap();
         let shim = root.join("node-gyp.cmd");
         std::fs::write(&shim, "@echo off\n").unwrap();
 
