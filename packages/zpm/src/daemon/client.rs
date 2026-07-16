@@ -493,7 +493,7 @@ async fn start_daemon(project_root: &Path) -> Result<String, Error> {
                 let current_dir
                     = current_exe.dirname().ok_or(())?;
                 let sibling_switch
-                    = current_dir.with_join_str("yarn");
+                    = current_dir.with_join_str(&format!("yarn{}", std::env::consts::EXE_SUFFIX));
 
                 if sibling_switch.fs_exists() {
                     Ok(sibling_switch.to_native_string())
