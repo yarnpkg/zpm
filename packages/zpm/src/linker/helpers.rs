@@ -69,8 +69,7 @@ pub fn fs_remove_nm(nm_path: Path) -> Result<(), Error> {
                     continue;
                 }
 
-                path.fs_rm()
-                    .unwrap();
+                path.fs_rm()?;
             }
 
             if !has_dot_entries {

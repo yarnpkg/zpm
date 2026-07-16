@@ -45,7 +45,7 @@ fn from_portable_path(value: &str) -> String {
     } else if let Some(value) = value.strip_prefix("/unc/") {
         format!("\\\\{}", value.replace('/', "\\"))
     } else {
-        value.to_string()
+        value.replace('/', "\\")
     }
 }
 
@@ -1164,6 +1164,16 @@ impl Path {
             return Ok(self);
         }
 
+        #[cfg(windows)]
+        if self.fs_is_symlink() {
+            match self.fs_metadata() {
+                Ok(metadata) if metadata.is_dir() => std::fs::remove_dir(self.to_path_buf())?,
+                _ => std::fs::remove_file(self.to_path_buf())?,
+            }
+
+            return Ok(self);
+        }
+
         match self.fs_is_real_dir() {
             true => std::fs::remove_dir_all(self.to_path_buf()),
             false => std::fs::remove_file(self.to_path_buf()),
@@ -1487,6 +1497,7 @@ mod tests {
         assert_eq!(from_portable_path("/unc/.dot/pipe/yarn"), r"\\.\pipe\yarn");
         assert_eq!(from_portable_path("/unc/?/C:/work/project"), r"\\?\C:\work\project");
         assert_eq!(from_portable_path("/unc/?/UNC/server/share/project"), r"\\?\UNC\server\share\project");
+        assert_eq!(from_portable_path(".pnpm/no-deps/node_modules/no-deps"), r".pnpm\no-deps\node_modules\no-deps");
     }
 
     #[test]

@@ -1,6 +1,4 @@
 use clipanion::cli;
-use zpm_utils::ToFileString;
-
 use crate::{error::Error, project};
 
 /// List binaries available to the current workspace
@@ -48,7 +46,7 @@ impl Bin {
             },
         };
 
-        println!("{}", path.to_file_string());
+        println!("{}", path.to_native_string());
 
         Ok(())
     }
