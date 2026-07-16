@@ -320,7 +320,7 @@ impl<'a> SyncTree<'a> {
 
             SyncNode::Symlink {target_path} => {
                 let symlink_target
-                    = metadata.is_symlink()
+                    = (metadata.is_symlink() || (self.link_type == LinkType::Junction && metadata.is_dir()))
                         .then(|| path.fs_read_link())
                         .transpose()?;
 
