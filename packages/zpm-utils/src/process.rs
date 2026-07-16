@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::process::{Command, ExitStatus};
 use shlex::{try_quote, QuoteError};
 
 /// RAII guard to ignore SIGINT and SIGTERM while waiting for a child process.
@@ -80,4 +80,80 @@ pub fn to_shell_line(cmd: &Command) -> Result<String, QuoteError> {
 
     // Glue it together
     Ok(format!("({})", parts.join(" ")))
+}
+
+pub fn exit_status_from_code(code: i32) -> ExitStatus {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        ExitStatus::from_raw(code << 8)
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::ExitStatusExt;
+        ExitStatus::from_raw(code as u32)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    panic!("synthetic exit statuses are not supported on this platform")
+}
+
+pub fn is_process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::{Foundation::{CloseHandle, STILL_ACTIVE}, System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION}};
+
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+
+            let mut exit_code = 0;
+            let result = GetExitCodeProcess(handle, &mut exit_code);
+            let _ = CloseHandle(handle);
+            result != 0 && exit_code == STILL_ACTIVE as u32
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
+pub fn terminate_process(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as i32, libc::SIGTERM) == 0 }
+    }
+
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::{Foundation::CloseHandle, System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE}};
+
+        unsafe {
+            let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+
+            let result = TerminateProcess(handle, 1) != 0;
+            let _ = CloseHandle(handle);
+            result
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+        false
+    }
 }

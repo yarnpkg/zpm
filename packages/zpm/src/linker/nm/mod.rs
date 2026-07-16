@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zpm_primitives::{VersionFilter, Ident, Locator, Reference};
-use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
+use zpm_sync::{LinkType, SyncItem, SyncTemplate, SyncTree};
 use zpm_utils::{FromFileString, IoResultExt, Path, ToHumanString};
 
 use crate::{
@@ -241,8 +241,13 @@ fn generate_workspace_node_modules(
         = workspace_dir
             .with_join_str("node_modules");
 
+    let link_type = match project.config.settings.win_link_type.value {
+        zpm_config::WinLinkType::Symlinks => LinkType::Symlink,
+        zpm_config::WinLinkType::Junctions => LinkType::Junction,
+    };
     let mut workspace_nm_tree
-        = SyncTree::new();
+        = SyncTree::new()
+            .with_link_type(link_type);
 
     workspace_nm_tree.dry_run = false;
 

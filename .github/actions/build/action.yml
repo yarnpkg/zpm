@@ -26,7 +26,7 @@ runs:
   using: composite
   steps:
     - name: Install cross
-      if: ${{ !endsWith(inputs.target, '-apple-darwin') && inputs.target != 'wasm32-browserpod-linux-musl' }}
+      if: ${{ !endsWith(inputs.target, '-apple-darwin') && !contains(inputs.target, '-windows-') && inputs.target != 'wasm32-browserpod-linux-musl' }}
       uses: taiki-e/install-action@a27ef18d36cfa66b0af3a360104621793b41c036 # v2.54.3
       with:
         tool: cross
@@ -90,7 +90,7 @@ runs:
           cargo "+browserpod-${{inputs.browserpod-version}}" build --verbose --bin yarn-bin --profile=${{inputs.profile}} --target=${{inputs.target}}
 
           cp target/${{inputs.target}}/${{inputs.profile}}/yarn-bin target/${{inputs.target}}/${{inputs.profile}}/yarn-bin.wasm
-        elif [[ "${{inputs.target}}" == *-apple-darwin ]]; then
+        elif [[ "${{inputs.target}}" == *-apple-darwin || "${{inputs.target}}" == *-windows-* ]]; then
           cargo build --verbose --profile=${{inputs.profile}} --target=${{inputs.target}}
         else
           cross build --verbose --profile=${{inputs.profile}} --target=${{inputs.target}}

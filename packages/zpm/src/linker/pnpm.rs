@@ -18,6 +18,15 @@ fn matches_patterns(ident: &Ident, patterns: &[IdentGlob]) -> bool {
     patterns.iter().any(|pattern| pattern.check(ident))
 }
 
+fn create_link(project: &Project, link_path: &Path, target_path: &Path) -> Result<(), Error> {
+    match project.config.settings.win_link_type.value {
+        zpm_config::WinLinkType::Symlinks => link_path.fs_symlink(target_path)?,
+        zpm_config::WinLinkType::Junctions => link_path.fs_junction(target_path)?,
+    };
+
+    Ok(())
+}
+
 /// Collect all packages that should be hoisted based on patterns.
 /// Returns a map from ident to the locator that should be hoisted (picks the first one found for conflicts).
 fn collect_hoistable_packages<'a>(tree: &'a ResolutionTree, patterns: &[IdentGlob], locations_by_package: &BTreeMap<Locator, Path>) -> BTreeMap<Ident, &'a Locator> {
@@ -197,12 +206,12 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         let symlink_target = package_abs_path
             .relative_to(&link_abs_dirname);
 
-        link_abs_path
+        let link_path = link_abs_path
             .fs_rm_file()
             .ok_missing()?
             .unwrap_or(&link_abs_path)
-            .fs_create_parent()?
-            .fs_symlink(&symlink_target)?;
+            .fs_create_parent()?;
+        create_link(project, link_path, &symlink_target)?;
     }
 
     // Track which packages are direct dependencies of workspaces
@@ -243,12 +252,12 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             = package_abs_path
                 .relative_to(&link_abs_dirname);
 
-        link_abs_path
+        let link_path = link_abs_path
             .fs_rm_file()
             .ok_missing()?
             .unwrap_or(&link_abs_path)
-            .fs_create_parent()?
-            .fs_symlink(&symlink_target)?;
+            .fs_create_parent()?;
+        create_link(project, link_path, &symlink_target)?;
     }
 
     // Second pass: create symlinks in node_modules directories
@@ -316,12 +325,12 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 = dep_abs_path
                     .relative_to(&link_abs_dirname);
 
-            link_abs_path
+            let link_path = link_abs_path
                 .fs_rm_file()
                 .ok_missing()?
                 .unwrap_or(&link_abs_path)
-                .fs_create_parent()?
-                .fs_symlink(&symlink_target)?;
+                .fs_create_parent()?;
+            create_link(project, link_path, &symlink_target)?;
         }
 
         if !has_explicit_self_dependency && !locator.reference.is_workspace_reference() {

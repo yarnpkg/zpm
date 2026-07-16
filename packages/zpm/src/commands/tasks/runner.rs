@@ -1,9 +1,9 @@
-use std::{collections::HashSet, io::Write, os::unix::process::ExitStatusExt, process::ExitStatus, sync::Arc};
+use std::{collections::HashSet, io::Write, process::ExitStatus, sync::Arc};
 
 /// Create an ExitStatus from a logical exit code.
 /// On Unix, `from_raw` expects a wait status where the exit code is in bits 8-15.
 pub fn exit_status_from_code(code: i32) -> ExitStatus {
-    ExitStatus::from_raw(code << 8)
+    zpm_utils::exit_status_from_code(code)
 }
 
 use async_trait::async_trait;

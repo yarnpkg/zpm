@@ -135,8 +135,11 @@ impl DaemonOpenCommand {
             binary.env("USERPROFILE", userprofile);
         }
 
-        use std::os::unix::process::CommandExt;
-        binary.process_group(0);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            binary.process_group(0);
+        }
 
         let mut child
             = binary

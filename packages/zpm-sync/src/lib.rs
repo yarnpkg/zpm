@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::BTreeMap, os::unix::fs::PermissionsExt, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
 use itertools::Itertools;
 use serde::Deserialize;
@@ -72,7 +72,15 @@ pub struct SyncCheck {
 
 pub struct SyncTree<'a> {
     pub dry_run: bool,
+    link_type: LinkType,
     nodes: Vec<SyncNode<'a>>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum LinkType {
+    #[default]
+    Symlink,
+    Junction,
 }
 
 pub enum FileOp {
@@ -111,11 +119,17 @@ impl<'a> SyncTree<'a> {
     pub fn new() -> Self {
         Self {
             dry_run: true,
+            link_type: LinkType::Symlink,
             nodes: vec![SyncNode::Folder {
                 template: None,
                 children: BTreeMap::new(),
             }],
         }
+    }
+
+    pub fn with_link_type(mut self, link_type: LinkType) -> Self {
+        self.link_type = link_type;
+        self
     }
 
     pub fn root_entries(&self) -> Result<impl Iterator<Item = &String>, SyncError> {
@@ -289,12 +303,12 @@ impl<'a> SyncTree<'a> {
             },
 
             SyncNode::File {data, is_exec} => {
-                let expected_x
-                    = if *is_exec {0o111} else {0o000};
+                let is_exec_up_to_date
+                    = cfg!(windows) || path.fs_is_executable()? == *is_exec;
 
                 let is_file_up_to_date
                     = metadata.is_file()
-                        && (metadata.permissions().mode() & 0o111) == expected_x
+                        && is_exec_up_to_date
                         && metadata.len() == data.len() as u64
                         && data == &path.fs_read_with_size(metadata.len())?;
 
@@ -311,7 +325,19 @@ impl<'a> SyncTree<'a> {
                         .transpose()?;
 
                 let is_symlink_up_to_date
-                    = symlink_target.as_ref() == Some(target_path);
+                    = match (self.link_type, symlink_target) {
+                        (LinkType::Junction, Some(actual_target)) if actual_target.is_absolute() => {
+                            let expected_target = if target_path.is_absolute() {
+                                target_path.clone()
+                            } else {
+                                path.dirname().unwrap_or_default().with_join(target_path)
+                            };
+
+                            actual_target.fs_canonicalize()? == expected_target.fs_canonicalize()?
+                        },
+                        (_, Some(actual_target)) => actual_target == *target_path,
+                        (_, None) => false,
+                    };
 
                 Ok(SyncCheck {
                     must_remove: !is_symlink_up_to_date,
@@ -368,7 +394,8 @@ impl<'a> SyncTree<'a> {
                                     .collect_vec();
 
                             let mut template_tree
-                                = SyncTree::from_entries(&zip_entries)?;
+                                = SyncTree::from_entries(&zip_entries)?
+                                    .with_link_type(self.link_type);
 
                             template_tree.dry_run = self.dry_run;
 
@@ -425,7 +452,7 @@ impl<'a> SyncTree<'a> {
                         path.fs_write(data)?;
 
                         if *is_exec {
-                            path.fs_set_permissions(std::fs::Permissions::from_mode(0o755))?;
+                            path.fs_set_mode(0o755)?;
                         }
                     }
                 }
@@ -438,7 +465,10 @@ impl<'a> SyncTree<'a> {
                     if self.dry_run {
                         file_ops.push(FileOp::CreateSymlink(path.clone(), target_path.clone()));
                     } else {
-                        path.fs_symlink(target_path)?;
+                        match self.link_type {
+                            LinkType::Symlink => path.fs_symlink(target_path)?,
+                            LinkType::Junction => path.fs_junction(target_path)?,
+                        };
                     }
                 }
 

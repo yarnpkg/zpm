@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}, sync::atomic::{AtomicU64, Ordering}, time::SystemTime};
+use std::{collections::BTreeMap, io::{Read, Write}, str::{FromStr, Split}, sync::atomic::{AtomicU64, Ordering}, time::SystemTime};
 
 use rkyv::Archive;
 
@@ -151,7 +151,14 @@ impl Path {
     }
 
     pub fn home_dir() -> Result<Option<Path>, PathError> {
-        Ok(std::env::var("HOME")
+        #[cfg(windows)]
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"));
+
+        #[cfg(not(windows))]
+        let home = std::env::var("HOME");
+
+        Ok(home
             .ok()
             .map(|s| Path::try_from(s))
             .transpose()?)
@@ -306,6 +313,9 @@ impl Path {
             = &self.path[..slice_len];
 
         if let Some(last_slash) = slice.rfind('/') {
+            if last_slash == 2 && slice.as_bytes().get(1) == Some(&b':') {
+                return Some(Path::from_str(&slice[..=last_slash]).unwrap());
+            }
             if last_slash > 0 {
                 return Some(Path::from_str(&slice[..last_slash]).unwrap());
             } else {
@@ -389,10 +399,11 @@ impl Path {
 
     pub fn is_root(&self) -> bool {
         self.path == "/"
+            || (self.path.len() == 3 && self.path.as_bytes().get(1) == Some(&b':') && self.path.ends_with('/'))
     }
 
     pub fn is_absolute(&self) -> bool {
-        self.path.starts_with('/')
+        std::path::Path::new(&self.path).is_absolute()
     }
 
     pub fn is_relative(&self) -> bool {
@@ -468,6 +479,37 @@ impl Path {
     pub fn fs_set_permissions(&self, permissions: std::fs::Permissions) -> Result<&Self, PathError> {
         std::fs::set_permissions(&self.path, permissions)?;
         Ok(self)
+    }
+
+    pub fn fs_set_mode(&self, mode: u32) -> Result<&Self, PathError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            self.fs_set_permissions(std::fs::Permissions::from_mode(mode))?;
+        }
+
+        #[cfg(not(unix))]
+        let _ = mode;
+
+        Ok(self)
+    }
+
+    pub fn fs_is_executable(&self) -> Result<bool, PathError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            return Ok(self.fs_metadata()?.permissions().mode() & 0o111 != 0);
+        }
+
+        #[cfg(windows)]
+        {
+            Ok(false)
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            Ok(false)
+        }
     }
 
     pub fn fs_symlink_metadata(&self) -> Result<std::fs::Metadata, PathError> {
@@ -766,6 +808,9 @@ impl Path {
     }
 
     pub fn fs_expect<T: AsRef<[u8]>>(&self, expected_data: T, is_exec: bool) -> Result<&Self, PathError> {
+        #[cfg(windows)]
+        let _ = is_exec;
+
         let current_content
             = self.fs_read()
                 .ok_missing()?;
@@ -809,6 +854,9 @@ impl Path {
     }
 
     pub fn fs_change<T: AsRef<[u8]>>(&self, data: T, is_exec: bool) -> Result<&Self, PathError> {
+        #[cfg(windows)]
+        let _ = is_exec;
+
         let path_buf = self.to_path_buf();
 
         let update_content = self.fs_read()
@@ -928,7 +976,45 @@ impl Path {
     }
 
     pub fn fs_symlink(&self, target: &Path) -> Result<&Self, PathError> {
+        #[cfg(unix)]
         std::os::unix::fs::symlink(&target.path, &self.path)?;
+
+        #[cfg(windows)]
+        {
+            let resolved_target = if target.is_absolute() {
+                target.clone()
+            } else {
+                self.dirname().unwrap_or_default().with_join(target)
+            };
+
+            if resolved_target.fs_is_dir() {
+                std::os::windows::fs::symlink_dir(target.to_path_buf(), self.to_path_buf())?;
+            } else {
+                std::os::windows::fs::symlink_file(target.to_path_buf(), self.to_path_buf())?;
+            }
+        }
+
+        Ok(self)
+    }
+
+    pub fn fs_junction(&self, target: &Path) -> Result<&Self, PathError> {
+        #[cfg(windows)]
+        {
+            let resolved_target = if target.is_absolute() {
+                target.clone()
+            } else {
+                self.dirname().unwrap_or_default().with_join(target)
+            };
+            if resolved_target.fs_is_dir() {
+                junction::create(resolved_target.to_path_buf(), self.to_path_buf())?;
+            } else {
+                self.fs_symlink(target)?;
+            }
+        }
+
+        #[cfg(not(windows))]
+        self.fs_symlink(target)?;
+
         Ok(self)
     }
 
@@ -1130,7 +1216,14 @@ impl TryFrom<&std::ffi::OsStr> for Path {
     type Error = PathError;
 
     fn try_from(value: &std::ffi::OsStr) -> Result<Self, Self::Error> {
-        Ok(Path::from_str(std::str::from_utf8(value.as_bytes())?)?)
+        let value
+            = value.to_str()
+                .ok_or(PathError::InvalidUtf8Path)?;
+
+        #[cfg(windows)]
+        let value = value.replace('\\', "/");
+
+        Ok(Path::from_str(&value)?)
     }
 }
 
@@ -1154,7 +1247,10 @@ impl FromFileString for Path {
     type Error = PathError;
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        Ok(Path {path: resolve_path(s)})
+        #[cfg(windows)]
+        let s = s.replace('\\', "/");
+
+        Ok(Path {path: resolve_path(&s)})
     }
 }
 

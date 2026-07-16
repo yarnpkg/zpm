@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::{Arc, LazyLock}};
+use std::{collections::BTreeMap, ffi::OsStr, io::Read, process::{ExitStatus, Output}, sync::{Arc, LazyLock}};
 
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
-use zpm_utils::{FromFileString, Hash64, Path, ToFileString, shell_escape, to_shell_line};
+use zpm_utils::{FromFileString, Hash64, Path, ToFileString, exit_status_from_code, shell_escape, to_shell_line};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -59,24 +59,24 @@ fn make_executable_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &[Stri
         bin_dir
             .with_join_str(format!("{}.cmd", name))
             .fs_write_text(&cmd_script)?;
-    } else {
-        let escaped_args = args
-            .iter()
-            .map(|arg| format!("'{}'", arg.replace("'", "'\"'\"'")))
-            .collect_vec()
-            .join(" ");
-
-        let sh_script = format!(
-            "#!/bin/sh\nexec \"{}\" {} \"$@\"\n",
-            argv0,
-            escaped_args,
-        );
-
-        bin_dir
-            .with_join_str(name)
-            .fs_write_text(&sh_script)?
-            .fs_set_permissions(Permissions::from_mode(0o755))?;
     }
+
+    let escaped_args = args
+        .iter()
+        .map(|arg| format!("'{}'", arg.replace("'", "'\"'\"'")))
+        .collect_vec()
+        .join(" ");
+
+    let sh_script = format!(
+        "#!/bin/sh\nexec \"{}\" {} \"$@\"\n",
+        argv0,
+        escaped_args,
+    );
+
+    bin_dir
+        .with_join_str(name)
+        .fs_write_text(&sh_script)?
+        .fs_set_mode(0o755)?;
 
     Ok(())
 }
@@ -295,7 +295,7 @@ pub enum ScriptResult {
 impl ScriptResult {
     pub fn new_success() -> Self {
         Self::Success(Output {
-            status: ExitStatus::from_raw(0),
+            status: exit_status_from_code(0),
             stdout: Vec::new(),
             stderr: Vec::new(),
         })
@@ -753,9 +753,10 @@ impl ScriptEnvironment {
             .unwrap_or_else(|| std::env::var("PATH").ok())
             .unwrap_or_default();
 
+        let path_separator = if cfg!(windows) {';'} else {':'};
         let next_env_path = match env_path.is_empty() {
             true => bin_dir.to_file_string(),
-            false => format!("{}:{}", bin_dir.to_file_string(), env_path),
+            false => format!("{}{}{}", bin_dir.to_file_string(), path_separator, env_path),
         };
 
         cmd.env("PATH", next_env_path);

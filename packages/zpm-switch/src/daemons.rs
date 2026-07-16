@@ -49,18 +49,9 @@ pub fn register_daemon(entry: &DaemonEntry) -> Result<(), Error> {
         = JsonDocument::to_string(entry)?;
 
     daemon_path.fs_write_atomic(move |tmp_path| {
-        use std::os::unix::fs::OpenOptionsExt;
-        use std::io::Write;
-
-        let mut file
-            = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(tmp_path.to_path_buf())?;
-
-        file.write_all(data.as_bytes())?;
+        tmp_path
+            .fs_write(data.as_bytes())?
+            .fs_set_mode(0o600)?;
 
         Ok::<(), zpm_utils::PathError>(())
     })?;
@@ -121,64 +112,11 @@ pub fn list_daemons() -> Result<BTreeSet<DaemonEntry>, Error> {
 }
 
 pub fn is_process_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        unsafe { libc::kill(pid as i32, 0) == 0 }
-    }
-
-    #[cfg(windows)]
-    {
-        use std::ptr::null_mut;
-        unsafe {
-            let handle = winapi::um::processthreadsapi::OpenProcess(
-                winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION,
-                0,
-                pid,
-            );
-            if handle.is_null() {
-                false
-            } else {
-                winapi::um::handleapi::CloseHandle(handle);
-                true
-            }
-        }
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        true
-    }
+    zpm_utils::is_process_alive(pid)
 }
 
 pub fn kill_process(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        unsafe { libc::kill(pid as i32, libc::SIGTERM) == 0 }
-    }
-
-    #[cfg(windows)]
-    {
-        use std::ptr::null_mut;
-        unsafe {
-            let handle = winapi::um::processthreadsapi::OpenProcess(
-                winapi::um::winnt::PROCESS_TERMINATE,
-                0,
-                pid,
-            );
-            if handle.is_null() {
-                false
-            } else {
-                let result = winapi::um::processthreadsapi::TerminateProcess(handle, 1) != 0;
-                winapi::um::handleapi::CloseHandle(handle);
-                result
-            }
-        }
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        false
-    }
+    zpm_utils::terminate_process(pid)
 }
 
 /// Kill a daemon process and all its children (process group).

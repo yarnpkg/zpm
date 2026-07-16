@@ -1,4 +1,4 @@
-use std::{borrow::Cow, os::unix::fs::PermissionsExt};
+use std::borrow::Cow;
 
 use libdeflater::{CompressionLvl, Compressor};
 use zpm_utils::{FromFileString, impl_file_string_from_str, Path, ToFileString, ToHumanString};
@@ -190,9 +190,7 @@ pub fn entries_from_folder<'a>(path: &Path) -> Result<Vec<Entry<'a>>, Error> {
 
             let rel_path = entry_path.relative_to(&base);
             let data = entry_path.fs_read()?;
-            let metadata = entry_path.fs_metadata()?;
-
-            let is_exec = metadata.permissions().mode() & 0o111 != 0;
+            let is_exec = entry_path.fs_is_executable()?;
             let mode = if is_exec { 0o755 } else { 0o644 };
 
             entries.push(Entry {
@@ -216,9 +214,7 @@ pub fn entries_from_files<'a>(base: &Path, files: &[Path]) -> Result<Vec<Entry<'
             .with_join(rel_path);
 
         let data = abs_path.fs_read()?;
-        let metadata = abs_path.fs_metadata()?;
-
-        let is_exec = metadata.permissions().mode() & 0o111 != 0;
+        let is_exec = abs_path.fs_is_executable()?;
         let mode = if is_exec { 0o755 } else { 0o644 };
 
         entries.push(Entry {
