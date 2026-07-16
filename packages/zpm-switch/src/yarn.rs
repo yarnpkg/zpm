@@ -216,6 +216,14 @@ mod tests {
         assert_eq!(meta.args, vec_of(&["install"]));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn native_windows_paths_are_explicit_path_args() {
+        let meta = extract_bin_meta(Some(vec_of(&[r"D:\a\zpm\zpm\tests\acceptance-tests", "jest"])));
+        assert!(meta.cwd.is_some());
+        assert_eq!(meta.args, vec_of(&["jest"]));
+    }
+
     #[test]
     fn missing_cwd_arg_does_not_get_set() {
         // No `--cwd` at all — cwd should remain unset and args
