@@ -165,8 +165,27 @@ pub fn kill_daemon_gracefully(pid: u32) -> bool {
 
     #[cfg(windows)]
     {
-        // On Windows, just use TerminateProcess (no graceful shutdown)
-        kill_process(pid)
+        // Windows has no SIGTERM equivalent for arbitrary processes. taskkill
+        // terminates the full process tree, including daemon task children.
+        let result
+            = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status();
+
+        if !result.is_ok_and(|status| status.success()) {
+            return false;
+        }
+
+        // Don't unregister the daemon until its process has actually exited.
+        for _ in 0..10 {
+            if !is_process_alive(pid) {
+                return true;
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        !is_process_alive(pid)
     }
 
     #[cfg(not(any(unix, windows)))]
