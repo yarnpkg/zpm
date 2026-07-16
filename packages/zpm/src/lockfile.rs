@@ -433,7 +433,7 @@ pub fn from_pnpm_node_modules(project_cwd: &Path, config: &Configuration) -> Res
 
     let output = std::process::Command::new("pnpm")
         .args(["list", "-r", "--json", depth_flag])
-        .current_dir(project_cwd.as_str())
+        .current_dir(project_cwd.to_path_buf())
         .output()
         .map_err(|_| Error::PnpmNodeModulesReadError)?;
 

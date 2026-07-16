@@ -6,16 +6,42 @@ use crate::{diff_data, impl_file_string_from_str, impl_file_string_serialization
 
 static ATOMIC_WRITE_NONCE: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(windows)]
-fn normalize_windows_path(value: &str) -> String {
+#[cfg(any(windows, test))]
+fn to_portable_path(value: &str) -> String {
     let value = value.replace('\\', "/");
 
     if let Some(value) = value.strip_prefix("//?/UNC/") {
-        format!("//{}", value)
-    } else if let Some(value) = value.strip_prefix("//?/") {
-        value.to_string()
+        format!("/unc/{}", value)
+    } else if value.starts_with("//?/")
+        && value.as_bytes().get(5) == Some(&b':')
+        && value.as_bytes().get(4).map_or(false, u8::is_ascii_alphabetic)
+    {
+        value[3..].to_string()
+    } else if value.as_bytes().get(1) == Some(&b':')
+        && value.as_bytes().first().map_or(false, u8::is_ascii_alphabetic)
+    {
+        format!("/{}", value)
+    } else if let Some(value) = value.strip_prefix("//./") {
+        format!("/unc/.dot/{}", value)
+    } else if let Some(value) = value.strip_prefix("//") {
+        format!("/unc/{}", value)
     } else {
         value
+    }
+}
+
+#[cfg(any(windows, test))]
+fn from_portable_path(value: &str) -> String {
+    if value.as_bytes().get(2) == Some(&b':')
+        && value.as_bytes().get(1).map_or(false, u8::is_ascii_alphabetic)
+    {
+        value[1..].replace('/', "\\")
+    } else if let Some(value) = value.strip_prefix("/unc/.dot/") {
+        format!("\\\\.\\{}", value.replace('/', "\\"))
+    } else if let Some(value) = value.strip_prefix("/unc/") {
+        format!("\\\\{}", value.replace('/', "\\"))
+    } else {
+        value.to_string()
     }
 }
 
@@ -311,6 +337,10 @@ impl Path {
     }
 
     pub fn dirname<'a>(&'a self) -> Option<Path> {
+        if self.is_root() {
+            return None;
+        }
+
         let mut slice_len
             = self.path.len();
 
@@ -326,7 +356,7 @@ impl Path {
             = &self.path[..slice_len];
 
         if let Some(last_slash) = slice.rfind('/') {
-            if last_slash == 2 && slice.as_bytes().get(1) == Some(&b':') {
+            if cfg!(windows) && last_slash == 3 && slice.as_bytes().get(2) == Some(&b':') {
                 return Some(Path::from_str(&slice[..=last_slash]).unwrap());
             }
             if last_slash > 0 {
@@ -407,16 +437,27 @@ impl Path {
     }
 
     pub fn to_path_buf(&self) -> std::path::PathBuf {
+        #[cfg(windows)]
+        return std::path::PathBuf::from(from_portable_path(&self.path));
+
+        #[cfg(not(windows))]
         std::path::PathBuf::from(&self.path)
+    }
+
+    pub fn to_native_string(&self) -> String {
+        self.to_path_buf().to_string_lossy().into_owned()
     }
 
     pub fn is_root(&self) -> bool {
         self.path == "/"
-            || (self.path.len() == 3 && self.path.as_bytes().get(1) == Some(&b':') && self.path.ends_with('/'))
+            || (cfg!(windows) && self.path.len() == 4 && self.path.as_bytes().get(2) == Some(&b':') && self.path.ends_with('/'))
+            || (cfg!(windows) && self.path.strip_prefix("/unc/")
+                .map(|path| path.trim_end_matches('/').split('/').count() == 2)
+                .unwrap_or(false))
     }
 
     pub fn is_absolute(&self) -> bool {
-        std::path::Path::new(&self.path).is_absolute()
+        self.path.starts_with('/')
     }
 
     pub fn is_relative(&self) -> bool {
@@ -449,7 +490,7 @@ impl Path {
     }
 
     pub fn sys_set_current_dir(&self) -> Result<(), PathError> {
-        std::env::set_current_dir(&self.path)?;
+        std::env::set_current_dir(self.to_path_buf())?;
         Ok(())
     }
 
@@ -463,12 +504,12 @@ impl Path {
     pub unsafe fn sys_set_current_dir_with_pwd(&self) -> Result<(), PathError> {
         self.sys_set_current_dir()?;
         // SAFETY: caller contract guarantees single-threaded startup.
-        unsafe { std::env::set_var("PWD", self.as_str()); }
+        unsafe { std::env::set_var("PWD", self.to_path_buf()); }
         Ok(())
     }
 
     pub fn fs_canonicalize(&self) -> Result<Path, PathError> {
-        Ok(Path::try_from(std::fs::canonicalize(&self.path)?)?)
+        Ok(Path::try_from(std::fs::canonicalize(self.to_path_buf())?)?)
     }
 
     pub fn fs_create_parent(&self) -> Result<&Self, PathError> {
@@ -480,17 +521,17 @@ impl Path {
     }
 
     pub fn fs_create_dir_all(&self) -> Result<&Self, PathError> {
-        std::fs::create_dir_all(&self.path)?;
+        std::fs::create_dir_all(self.to_path_buf())?;
         Ok(self)
     }
 
     pub fn fs_create_dir(&self) -> Result<&Self, PathError> {
-        std::fs::create_dir(&self.path)?;
+        std::fs::create_dir(self.to_path_buf())?;
         Ok(self)
     }
 
     pub fn fs_set_permissions(&self, permissions: std::fs::Permissions) -> Result<&Self, PathError> {
-        std::fs::set_permissions(&self.path, permissions)?;
+        std::fs::set_permissions(self.to_path_buf(), permissions)?;
         Ok(self)
     }
 
@@ -526,11 +567,11 @@ impl Path {
     }
 
     pub fn fs_symlink_metadata(&self) -> Result<std::fs::Metadata, PathError> {
-        Ok(std::fs::symlink_metadata(&self.path)?)
+        Ok(std::fs::symlink_metadata(self.to_path_buf())?)
     }
 
     pub fn fs_metadata(&self) -> Result<std::fs::Metadata, PathError> {
-        Ok(std::fs::metadata(&self.path)?)
+        Ok(std::fs::metadata(self.to_path_buf())?)
     }
 
     pub fn fs_exists(&self) -> bool {
@@ -1234,7 +1275,7 @@ impl TryFrom<&std::ffi::OsStr> for Path {
                 .ok_or(PathError::InvalidUtf8Path)?;
 
         #[cfg(windows)]
-        let value = normalize_windows_path(value);
+        let value = to_portable_path(value);
 
         Ok(Path::from_str(&value)?)
     }
@@ -1261,7 +1302,7 @@ impl FromFileString for Path {
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
         #[cfg(windows)]
-        let s = normalize_windows_path(s);
+        let s = to_portable_path(s);
 
         Ok(Path {path: resolve_path(&s)})
     }
@@ -1283,7 +1324,21 @@ impl ToHumanString for Path {
 mod tests {
     use std::str::FromStr;
 
-    use super::Path;
+    use super::{Path, from_portable_path, to_portable_path};
+
+    #[test]
+    fn converts_windows_paths() {
+        assert_eq!(to_portable_path(r"C:\work\project"), "/C:/work/project");
+        assert_eq!(to_portable_path(r"\\server\share\project"), "/unc/server/share/project");
+        assert_eq!(to_portable_path(r"\\.\pipe\yarn"), "/unc/.dot/pipe/yarn");
+        assert_eq!(to_portable_path(r"\\?\C:\work\project"), "/C:/work/project");
+        assert_eq!(to_portable_path(r"\\?\UNC\server\share\project"), "/unc/server/share/project");
+
+        assert_eq!(from_portable_path("/C:/work/project"), r"C:\work\project");
+        assert_eq!(from_portable_path("/unc/server/share/project"), r"\\server\share\project");
+        assert_eq!(from_portable_path("/unc/.dot/pipe/yarn"), r"\\.\pipe\yarn");
+        assert_eq!(from_portable_path("/unc/?/C:/work/project"), r"\\?\C:\work\project");
+    }
 
     #[test]
     fn normalizes_repeated_trailing_separators() {

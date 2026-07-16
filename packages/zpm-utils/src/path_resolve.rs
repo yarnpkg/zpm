@@ -3,7 +3,6 @@ pub fn resolve_path(input: &str) -> String {
         return "".to_string();
     }
 
-    let preserve_unc_prefix = input.starts_with("//") && !input.starts_with("///");
     let mut path = Vec::new();
     for component in input.split('/') {
         match component {
@@ -36,11 +35,6 @@ pub fn resolve_path(input: &str) -> String {
     if path == vec![""] {
         return "/".to_string();
     } else {
-        let resolved = path.join("/");
-        if preserve_unc_prefix && !resolved.starts_with("//") {
-            format!("/{}", resolved)
-        } else {
-            resolved
-        }
+        path.join("/")
     }
 }

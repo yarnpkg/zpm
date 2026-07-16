@@ -496,7 +496,7 @@ async fn start_daemon(project_root: &Path) -> Result<String, Error> {
                     = current_dir.with_join_str("yarn");
 
                 if sibling_switch.fs_exists() {
-                    Ok(sibling_switch.to_file_string())
+                    Ok(sibling_switch.to_native_string())
                 } else {
                     Err(())
                 }

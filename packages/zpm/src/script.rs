@@ -23,7 +23,7 @@ fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, modul
     let binary_name
         = serde_json::to_string(binary_name).expect("expected valid binary name");
     let package_path
-        = serde_json::to_string(&package_path.to_file_string()).expect("expected valid package path");
+        = serde_json::to_string(&package_path.to_native_string()).expect("expected valid package path");
     let module
         = serde_json::to_string(module).expect("expected valid python module");
     let object
@@ -211,7 +211,7 @@ impl ScriptBinaries {
 
     pub fn with_standard(mut self) -> Result<Self, Error> {
         let self_path = get_self_path()?
-            .to_file_string();
+            .to_native_string();
 
         self.binaries.push(ScriptBinary {
             name: "run".to_string(),
@@ -251,12 +251,12 @@ impl ScriptBinaries {
                         self.binaries.push(ScriptBinary {
                             name: name.clone(),
                             argv0: "node".to_string(),
-                            args: vec![binary_path_abs.to_file_string()],
+                            args: vec![binary_path_abs.to_native_string()],
                         });
                     } else {
                         self.binaries.push(ScriptBinary {
                             name: name.clone(),
-                            argv0: binary_path_abs.to_file_string(),
+                            argv0: binary_path_abs.to_native_string(),
                             args: vec![],
                         });
                     }
@@ -440,7 +440,7 @@ impl ScriptEnvironment {
         let self_path
             = get_self_path()?;
 
-        value.env.insert("npm_execpath".to_string(), Some(self_path.to_file_string()));
+        value.env.insert("npm_execpath".to_string(), Some(self_path.to_native_string()));
         value.env.insert("npm_config_user_agent".to_string(), Some(format!("yarn/{}", zpm_switch::get_bin_version())));
 
         Ok(value)
@@ -532,18 +532,18 @@ impl ScriptEnvironment {
         }
 
         if let Some(pnp_path) = project.pnp_path().if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_file_string()));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_native_string()));
         }
 
         if let Some(pnp_loader_path) = project.pnp_loader_path().if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_file_string()));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_native_string()));
         }
 
         self.refresh_package_map(project);
 
-        self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
-        self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
-        self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_file_string()));
+        self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_native_string()));
+        self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_native_string()));
+        self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_native_string()));
         self.trust_check_project_cwd = Some(project.project_cwd.clone());
 
         self
@@ -598,7 +598,7 @@ impl ScriptEnvironment {
         }
 
         if let Some(package_map_path) = project.package_map_path(package_map_workspace).if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-package-map={}", quote_path_if_needed(&package_map_path.to_file_string())));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-package-map={}", quote_path_if_needed(&package_map_path.to_native_string())));
         }
     }
 
@@ -665,7 +665,7 @@ impl ScriptEnvironment {
 
         self.env.insert("npm_package_name".to_string(), Some(locator.ident.to_file_string()));
         self.env.insert("npm_package_version".to_string(), Some(resolution.version.to_file_string()));
-        self.env.insert("npm_package_json".to_string(), Some(manifest_location_abs.to_file_string()));
+        self.env.insert("npm_package_json".to_string(), Some(manifest_location_abs.to_native_string()));
 
         Ok(())
     }
@@ -755,12 +755,12 @@ impl ScriptEnvironment {
 
         let path_separator = if cfg!(windows) {';'} else {':'};
         let next_env_path = match env_path.is_empty() {
-            true => bin_dir.to_file_string(),
-            false => format!("{}{}{}", bin_dir.to_file_string(), path_separator, env_path),
+            true => bin_dir.to_native_string(),
+            false => format!("{}{}{}", bin_dir.to_native_string(), path_separator, env_path),
         };
 
         cmd.env("PATH", next_env_path);
-        cmd.env("BERRY_BIN_FOLDER", bin_dir.to_file_string());
+        cmd.env("BERRY_BIN_FOLDER", bin_dir.to_native_string());
         cmd.args(args);
 
         if self.stdin.is_some() {
@@ -864,14 +864,14 @@ impl ScriptEnvironment {
             Binary::Path {path, kind: BinaryKind::Node} => {
                 let mut node_args = self.node_args.clone();
 
-                node_args.push(path.to_file_string());
+                node_args.push(path.to_native_string());
                 node_args.extend(args.into_iter().map(|arg| arg.as_ref().to_string()));
 
                 self.run_exec("node", node_args).await
             },
 
             Binary::Path {path, kind: BinaryKind::Default} => {
-                self.run_exec(&path.to_file_string(), args).await
+                self.run_exec(&path.to_native_string(), args).await
             },
 
             Binary::PythonEntryPoint {name, package_path, module, object} => {

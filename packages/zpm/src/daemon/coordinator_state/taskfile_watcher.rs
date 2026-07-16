@@ -4,7 +4,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 use zpm_primitives::Ident;
 use zpm_tasks::TaskFile;
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::Path;
 
 pub struct TaskfileWatcher {
     watcher: RecommendedWatcher,
@@ -47,7 +47,7 @@ impl TaskfileWatcher {
                     ws_set.remove(&workspace);
                     if ws_set.is_empty() {
                         self.file_to_workspaces.remove(path);
-                        let _ = self.watcher.unwatch(std::path::Path::new(&path.to_file_string()));
+                        let _ = self.watcher.unwatch(&path.to_path_buf());
                     }
                 }
             }
@@ -65,7 +65,7 @@ impl TaskfileWatcher {
             if is_new {
                 let _ = self
                     .watcher
-                    .watch(std::path::Path::new(&path.to_file_string()), RecursiveMode::NonRecursive);
+                    .watch(&path.to_path_buf(), RecursiveMode::NonRecursive);
             }
         }
 

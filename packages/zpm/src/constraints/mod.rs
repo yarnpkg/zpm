@@ -1,6 +1,6 @@
 use structs::{ConstraintsDependency, ConstraintsPackage, ConstraintsWorkspace};
 use zpm_parsers::JsonDocument;
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::Path;
 
 use crate::{
     constraints::structs::{ConstraintsContext, ConstraintsOutput}, error::Error, install::InstallState, project::{Project, Workspace}, resolvers::Resolution, script::ScriptEnvironment
@@ -53,7 +53,7 @@ pub async fn check_constraints(project: &Project, fix: bool) -> Result<Constrain
         .with_cwd(project.project_cwd.clone())
         .with_project(&project)
         .enable_shell_forwarding()
-        .run_exec("node", &vec![script_path.to_file_string(), result_path.to_file_string()])
+        .run_exec("node", &vec![script_path.to_native_string(), result_path.to_native_string()])
         .await?
         .ok()?;
 

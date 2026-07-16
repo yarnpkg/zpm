@@ -53,7 +53,7 @@ impl<'a> Iterator for PathIterator<'a> {
         let mut sub_path
             = &self.path_str[0..next_slash_idx];
 
-        if sub_path.ends_with('/') && sub_path.len() > 1 && !(sub_path.len() == 3 && sub_path.as_bytes().get(1) == Some(&b':')) {
+        if sub_path.ends_with('/') && sub_path.len() > 1 && !(cfg!(windows) && sub_path.len() == 4 && sub_path.as_bytes().get(2) == Some(&b':')) {
             sub_path = &sub_path[..sub_path.len() - 1];
         }
 
@@ -90,7 +90,7 @@ impl<'a> DoubleEndedIterator for PathIterator<'a> {
         let mut sub_path
             = &self.path_str[0..back_idx];
 
-        if sub_path.ends_with('/') && sub_path.len() > 1 && !(sub_path.len() == 3 && sub_path.as_bytes().get(1) == Some(&b':')) {
+        if sub_path.ends_with('/') && sub_path.len() > 1 && !(cfg!(windows) && sub_path.len() == 4 && sub_path.as_bytes().get(2) == Some(&b':')) {
             sub_path = &sub_path[..sub_path.len() - 1];
         }
 

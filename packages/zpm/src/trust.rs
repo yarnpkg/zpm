@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::LazyLock};
 
 use tokio::{process::Command, sync::Mutex};
-use zpm_utils::{DataType, FromFileString, Path, ToFileString};
+use zpm_utils::{DataType, FromFileString, Path};
 
 use crate::{
     error::Error,
@@ -64,8 +64,8 @@ fn get_switch_path() -> Option<Path> {
 
 async fn check_project_trust(switch_path: &Path, project_cwd: &Path) -> Result<Option<bool>, Error> {
     let status
-        = Command::new(switch_path.to_file_string())
-            .args(["switch", "trust", "--check", project_cwd.as_str()])
+        = Command::new(switch_path.to_path_buf())
+            .args(["switch", "trust", "--check", &project_cwd.to_native_string()])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
@@ -81,8 +81,8 @@ async fn check_project_trust(switch_path: &Path, project_cwd: &Path) -> Result<O
 
 async fn trust_project(switch_path: &Path, project_cwd: &Path) -> Result<(), Error> {
     let status
-        = Command::new(switch_path.to_file_string())
-            .args(["switch", "trust", "--set", "true", project_cwd.as_str()])
+        = Command::new(switch_path.to_path_buf())
+            .args(["switch", "trust", "--set", "true", &project_cwd.to_native_string()])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()

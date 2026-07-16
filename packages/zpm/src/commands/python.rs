@@ -2,8 +2,6 @@ use std::process::ExitStatus;
 
 use clipanion::cli;
 use zpm_config::IslandLinker;
-use zpm_utils::ToFileString;
-
 use crate::{error::Error, project, script::ScriptEnvironment};
 
 fn prepend_env_path(key: &str, value: &str, separator: char) -> String {
@@ -19,7 +17,7 @@ fn prepend_env_path(key: &str, value: &str, separator: char) -> String {
 
 fn build_site_packages_pythonpath(site_packages_path: &zpm_utils::Path, separator: char) -> String {
     let mut entries
-        = vec![site_packages_path.to_file_string()];
+        = vec![site_packages_path.to_native_string()];
 
     if let Ok(read_dir) = site_packages_path.fs_read_dir() {
         for entry in read_dir.flatten() {
@@ -44,7 +42,7 @@ fn build_site_packages_pythonpath(site_packages_path: &zpm_utils::Path, separato
             entries.push(
                 site_packages_path
                     .with_join_str(dirname.as_ref())
-                    .to_file_string(),
+                    .to_native_string(),
             );
         }
     }
@@ -120,7 +118,7 @@ impl Python {
             };
 
             let path
-                = prepend_env_path("PATH", &bin_path.to_file_string(), path_separator);
+                = prepend_env_path("PATH", &bin_path.to_native_string(), path_separator);
 
             let pythonpath
                 = prepend_env_path(
@@ -130,7 +128,7 @@ impl Python {
                 );
 
             env = env
-                .with_env_variable("VIRTUAL_ENV", &venv_path.to_file_string())
+                .with_env_variable("VIRTUAL_ENV", &venv_path.to_native_string())
                 .with_env_variable("PYTHONPATH", &pythonpath)
                 .with_env_variable("PATH", &path);
         }
