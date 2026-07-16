@@ -319,15 +319,16 @@ impl<'a> SyncTree<'a> {
             },
 
             SyncNode::Symlink {target_path} => {
-                let is_link_candidate
-                    = metadata.is_symlink() || (self.link_type == LinkType::Junction && metadata.is_dir());
-
                 let symlink_target
-                    = if is_link_candidate {
+                    = if metadata.is_symlink() {
                         match path.fs_read_link() {
                             Ok(target) => Some(target),
-                            Err(_) if self.link_type == LinkType::Junction && metadata.is_dir() && !metadata.is_symlink() => None,
                             Err(error) => return Err(error.into()),
+                        }
+                    } else if self.link_type == LinkType::Junction && metadata.is_dir() {
+                        match path.fs_read_link() {
+                            Ok(target) => Some(target),
+                            Err(_) => None,
                         }
                     } else {
                         None
