@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, ffi::OsStr, io::Read, process::{ExitStatus, Out
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
-use zpm_utils::{FromFileString, Hash64, Path, ToFileString, exit_status_from_code, shell_escape, to_shell_line};
+use zpm_utils::{FromFileString, Hash64, Path, ToFileString, exit_status_from_code, resolve_spawn_program, shell_escape, to_shell_line};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -741,7 +741,20 @@ impl ScriptEnvironment {
 
     /// Prepares a command with the current environment settings.
     fn prepare_command(&mut self, program: &str, args: &[String]) -> Result<(Command, Path), Error> {
-        let mut cmd = Command::new(program);
+        let bin_dir = self.install_binaries()?;
+
+        let env_path = self.env.get("PATH")
+            .cloned()
+            .unwrap_or_else(|| std::env::var("PATH").ok())
+            .unwrap_or_default();
+
+        let path_separator = if cfg!(windows) {';'} else {':'};
+        let next_env_path = match env_path.is_empty() {
+            true => bin_dir.to_native_string(),
+            false => format!("{}{}{}", bin_dir.to_native_string(), path_separator, env_path),
+        };
+
+        let mut cmd = Command::new(resolve_spawn_program(program, &next_env_path));
 
         cmd.current_dir(self.cwd.to_path_buf());
 
@@ -755,19 +768,6 @@ impl ScriptEnvironment {
                 },
             };
         }
-
-        let bin_dir = self.install_binaries()?;
-
-        let env_path = self.env.get("PATH")
-            .cloned()
-            .unwrap_or_else(|| std::env::var("PATH").ok())
-            .unwrap_or_default();
-
-        let path_separator = if cfg!(windows) {';'} else {':'};
-        let next_env_path = match env_path.is_empty() {
-            true => bin_dir.to_native_string(),
-            false => format!("{}{}{}", bin_dir.to_native_string(), path_separator, env_path),
-        };
 
         cmd.env("PATH", next_env_path);
         cmd.env("BERRY_BIN_FOLDER", bin_dir.to_native_string());

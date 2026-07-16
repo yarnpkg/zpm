@@ -101,7 +101,7 @@ async fn proxy_completer_async(ctx: &CompletionContext<'_>) -> Vec<Completion> {
     args.extend(user_args.into_iter().map(String::from));
 
     if let Some(cwd) = get_fake_cwd() {
-        binary.args(&[cwd.to_native_string()]);
+        binary.args(&[cwd.to_file_string()]);
     }
 
     binary.args(&args);
@@ -161,7 +161,7 @@ impl ProxyCommand {
             = self.args.clone();
 
         if let Some(cwd) = get_fake_cwd() {
-            args.insert(0, cwd.to_native_string());
+            args.insert(0, cwd.to_file_string());
         }
 
         ExplicitCommand::run(&reference, &args).await
