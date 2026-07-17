@@ -99,6 +99,10 @@ pub async fn diff_folders(original: &Path, user: &Path) -> Result<String, Error>
     let diff
         = String::from_utf8(diff_command.stdout)?;
 
+    Ok(normalize_diff_paths(&diff, original, user, &original_native, &user_native))
+}
+
+fn normalize_diff_paths(diff: &str, original: &Path, user: &Path, original_native: &str, user_native: &str) -> String {
     let original_path_normalized
         = DIFF_PATH_NORMALIZER.replace(original.as_str(), "/$1/").to_string();
     let user_path_normalized
@@ -108,6 +112,10 @@ pub async fn diff_folders(original: &Path, user: &Path) -> Result<String, Error>
         = DIFF_PATH_NORMALIZER.replace(&original_native.replace('\\', "/"), "/$1/").to_string();
     let user_native_normalized
         = DIFF_PATH_NORMALIZER.replace(&user_native.replace('\\', "/"), "/$1/").to_string();
+    let original_native_raw_normalized
+        = DIFF_PATH_NORMALIZER.replace(&original_native, "/$1/").to_string();
+    let user_native_raw_normalized
+        = DIFF_PATH_NORMALIZER.replace(&user_native, "/$1/").to_string();
 
     let original_path_escaped
         = regex::escape(&original_path_normalized);
@@ -117,14 +125,36 @@ pub async fn diff_folders(original: &Path, user: &Path) -> Result<String, Error>
         = regex::escape(&original_native_normalized);
     let user_native_escaped
         = regex::escape(&user_native_normalized);
+    let original_native_raw_escaped
+        = regex::escape(&original_native_raw_normalized);
+    let user_native_raw_escaped
+        = regex::escape(&user_native_raw_normalized);
 
     let regex
-        = Regex::new(format!("(a|b)({}|{}|{}|{})", original_path_escaped, user_path_escaped, original_native_escaped, user_native_escaped).as_str()).unwrap();
+        = Regex::new(format!(
+            "(a|b)({}|{}|{}|{}|{}|{})",
+            original_path_escaped,
+            user_path_escaped,
+            original_native_escaped,
+            user_native_escaped,
+            original_native_raw_escaped,
+            user_native_raw_escaped,
+        ).as_str()).unwrap();
 
     let diff
         = regex.replace_all(&diff, "$1/").to_string();
 
-    Ok(diff)
+    let diff_header_regex
+        = Regex::new(r#"(?m)^diff --git "([ab]/[^"]+)" "([ab]/[^"]+)"$"#).unwrap();
+    let diff
+        = diff_header_regex.replace_all(&diff, "diff --git $1 $2").to_string();
+
+    let diff_file_header_regex
+        = Regex::new(r#"(?m)^(---|\+\+\+) "([ab]/[^"]+)"$"#).unwrap();
+    let diff
+        = diff_file_header_regex.replace_all(&diff, "$1 $2").to_string();
+
+    diff
 }
 
 fn glob_to_regex(glob: &str) -> String {
@@ -389,4 +419,40 @@ async fn git_clone_into(source: &GitSource, commit: &str, clone_dir: &Path, conf
         .ok()?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_quoted_windows_diff_paths() {
+        let original
+            = Path::from_file_string("/C:/Users/RUNNER~1/AppData/Local/Temp/patch-0/original").unwrap();
+        let user
+            = Path::from_file_string("/C:/Users/RUNNER~1/AppData/Local/Temp/patch-0/user").unwrap();
+
+        let diff = concat!(
+            "diff --git \"a/C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\patch-0\\original/index.js\" \"b/C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\patch-0\\user/index.js\"\n",
+            "index bb9c6f6876154493527577cd78279aa6bb686ebb..fa87b36f4ac82fadaebf78bd20958ed44bfdc3c6 100644\n",
+            "--- \"a/C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\patch-0\\original/index.js\"\n",
+            "+++ \"b/C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\patch-0\\user/index.js\"\n",
+        );
+
+        assert_eq!(
+            normalize_diff_paths(
+                diff,
+                &original,
+                &user,
+                r"C:\Users\RUNNER~1\AppData\Local\Temp\patch-0\original",
+                r"C:\Users\RUNNER~1\AppData\Local\Temp\patch-0\user",
+            ),
+            concat!(
+                "diff --git a/index.js b/index.js\n",
+                "index bb9c6f6876154493527577cd78279aa6bb686ebb..fa87b36f4ac82fadaebf78bd20958ed44bfdc3c6 100644\n",
+                "--- a/index.js\n",
+                "+++ b/index.js\n",
+            ),
+        );
+    }
 }
