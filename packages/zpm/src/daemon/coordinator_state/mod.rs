@@ -141,9 +141,9 @@ impl CoordinatorState {
     ) -> TransitionEffects {
         if self.graph.try_complete_task(task_id) {
             self.on_task_completed(task_id, exit_code)
-        } else if self.graph.has_failed_subtask(task_id) {
+        } else if let Some(subtask_exit_code) = self.graph.failed_subtask_exit_code(task_id) {
             // Subtask already failed - fail the parent (no signal for propagated failure)
-            self.fail_task(task_id, 1, None)
+            self.fail_task(task_id, subtask_exit_code, None)
         } else {
             // Task stays in WaitingForSubtasks until all subtasks complete
             TransitionEffects::default()
@@ -192,7 +192,7 @@ impl CoordinatorState {
     ) -> TransitionEffects {
         let mut effects = TransitionEffects::default();
 
-        self.graph.mark_failed(task_id);
+        self.graph.mark_failed(task_id, exit_code);
 
         let close = self.close_task(task_id);
         effects.notifications.push(DaemonNotification::TaskCompleted {
