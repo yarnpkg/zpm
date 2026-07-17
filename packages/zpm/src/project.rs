@@ -1306,10 +1306,12 @@ impl Project {
                         = detect_git_operation(&self.project_cwd)
                             .await?
                             .unwrap_or(GitOperation::Merge);
+                    let lockfile_path_native
+                        = lockfile_path.to_native_string();
 
                     ScriptEnvironment::new()?
                         .with_cwd(self.project_cwd.clone())
-                        .run_exec("git", vec!["checkout", git_operation.true_theirs(), lockfile_path.as_str()])
+                        .run_exec("git", vec!["checkout", git_operation.true_theirs(), &lockfile_path_native])
                         .await?
                         .ok()
                         .map_err(|e| Error::LockfileAutofixGitError(e.to_string()))?;

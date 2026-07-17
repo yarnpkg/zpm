@@ -58,17 +58,28 @@ impl Link {
         let mut document
             = JsonDocument::new(manifest_content)?;
 
+        let root_canonical_path
+            = root_path.fs_canonicalize()?;
+        let shell_path
+            = root_path.with_join(&project.shell_cwd);
+
         for destination in &self.destinations {
+            let destination_path = if destination.is_absolute() {
+                destination.clone()
+            } else {
+                shell_path.with_join(destination)
+            };
+
             let canonical_destination
-                = destination.fs_canonicalize()?;
+                = destination_path.fs_canonicalize()?;
 
             // Prevent linking a project to itself
-            if root_path.contains(&canonical_destination) || canonical_destination.contains(root_path) {
+            if root_canonical_path.contains(&canonical_destination) || canonical_destination.contains(&root_canonical_path) {
                 return Err(Error::CannotLinkToSelf);
             }
 
             let target_workspace
-                = Workspace::from_root_path(&canonical_destination)?;
+                = Workspace::from_root_path(&destination_path)?;
 
             if self.all {
                 let child_workspaces
@@ -76,7 +87,7 @@ impl Link {
 
                 if let Some(name) = &target_workspace.manifest.name {
                     if self.private || !target_workspace.manifest.private.unwrap_or(false) {
-                        self.add_resolution(&mut document, name, &canonical_destination, root_path)?;
+                        self.add_resolution(&mut document, name, &destination_path, root_path)?;
                     }
                 }
 
@@ -94,9 +105,9 @@ impl Link {
             } else {
                 let name
                     = target_workspace.manifest.name.as_ref()
-                        .ok_or_else(|| Error::LinkedPackageMissingName(canonical_destination.clone()))?;
+                        .ok_or_else(|| Error::LinkedPackageMissingName(destination_path.clone()))?;
 
-                self.add_resolution(&mut document, name, &canonical_destination, root_path)?;
+                self.add_resolution(&mut document, name, &destination_path, root_path)?;
             }
         }
 
@@ -107,7 +118,7 @@ impl Link {
 
     fn add_resolution(&self, document: &mut JsonDocument, name: &Ident, workspace_path: &Path, root_path: &Path) -> Result<(), Error> {
         let portal_path = if self.relative {
-            workspace_path.relative_to(root_path)
+            workspace_path.relative_to_if_same_root(root_path)
         } else {
             workspace_path.clone()
         };

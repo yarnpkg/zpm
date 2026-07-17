@@ -1,8 +1,8 @@
-use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
+use std::process::ExitStatus;
 
 use indexmap::IndexMap;
 use zpm_parsers::JsonDocument;
-use zpm_utils::Path;
+use zpm_utils::{Path, exit_status_from_code};
 use clipanion::cli;
 
 use crate::{commands::tasks::run_silent_dependencies::TaskRunSilentDependencies, error::Error, project, script::ScriptEnvironment};
@@ -33,7 +33,7 @@ impl RunList {
             .lazy_install().await?;
 
         list_scripts(&project, self.json)?;
-        Ok(ExitStatus::from_raw(0))
+        Ok(exit_status_from_code(0))
     }
 }
 
@@ -195,7 +195,7 @@ impl Run {
                         Error::BinaryNotFound(name)
                     })
                 } else {
-                    Ok(ExitStatus::from_raw(0))
+                    Ok(exit_status_from_code(0))
                 }
             } else {
                 Err(maybe_binary.unwrap_err())

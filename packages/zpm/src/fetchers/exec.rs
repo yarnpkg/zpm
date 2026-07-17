@@ -73,7 +73,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         ScriptEnvironment::new()?
             .without_pnp_loader()
             .with_cwd(parent_context_directory.clone())
-            .run_exec("node", [wrapper_path.to_file_string(), script_path.to_file_string()])
+            .run_exec("node", [wrapper_path.to_native_string(), script_path.to_native_string()])
             .await?
             .ok()?;
 
@@ -142,8 +142,8 @@ fn is_exec_allowed(context: &InstallContext<'_>, locator: &Locator) -> bool {
 
 fn make_wrapper(temp_dir: &Path, build_dir: &Path, locator: &str) -> Result<String, Error> {
     let exec_env = serde_json::json!({
-        "tempDir": temp_dir.to_file_string(),
-        "buildDir": build_dir.to_file_string(),
+        "tempDir": temp_dir.to_native_string(),
+        "buildDir": build_dir.to_native_string(),
         "locator": locator,
     });
 

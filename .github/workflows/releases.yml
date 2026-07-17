@@ -48,12 +48,19 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+            ext: ''
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
+            ext: ''
           - target: i686-unknown-linux-musl
             os: ubuntu-latest
+            ext: ''
           - target: aarch64-apple-darwin
             os: macos-latest
+            ext: ''
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: '.exe'
 
     name: 'Building ${{matrix.target}}'
     runs-on: ${{matrix.os}}
@@ -70,8 +77,24 @@ jobs:
           version: ${{needs.check.outputs.version}}
 
       - name: Generate the archive files
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
-          zip -jX yarn-${{matrix.target}}.zip target/${{matrix.target}}/release-lto-nodebug/{yarn-bin,yarn,LICENSE.md}
+          zip -jX yarn-${{matrix.target}}.zip \
+            target/${{matrix.target}}/release-lto-nodebug/yarn-bin${{matrix.ext}} \
+            target/${{matrix.target}}/release-lto-nodebug/yarn${{matrix.ext}} \
+            target/${{matrix.target}}/release-lto-nodebug/LICENSE.md
+
+      - name: Generate the archive files
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archiveRoot = New-Item -ItemType Directory -Path "archive-${{matrix.target}}"
+          Copy-Item "target/${{matrix.target}}/release-lto-nodebug/yarn-bin${{matrix.ext}}" $archiveRoot
+          Copy-Item "target/${{matrix.target}}/release-lto-nodebug/yarn${{matrix.ext}}" $archiveRoot
+          Copy-Item "target/${{matrix.target}}/release-lto-nodebug/LICENSE.md" $archiveRoot
+          Compress-Archive -Path "$archiveRoot/*" -DestinationPath "yarn-${{matrix.target}}.zip"
+          Remove-Item -Recurse -Force $archiveRoot
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -173,7 +196,7 @@ jobs:
               const ext = includes(targetName, `windows`) ? `.exe` : ``;
 
               // We don't need to distribute Yarn Switch itself
-              fs.unlinkSync(path.join(destinationPath, `yarn`));
+              fs.unlinkSync(path.join(destinationPath, `yarn${ext}`));
 
               // Rename the binary to `yarn`
               fs.renameSync(path.join(destinationPath, `yarn-bin${ext}`), path.join(destinationPath, `yarn${ext}`));
@@ -190,6 +213,7 @@ jobs:
               const os = findFirst(targetName, {
                 linux: `linux`,
                 darwin: `darwin`,
+                win32: `windows`,
               });
 
               fs.writeFileSync(path.join(destinationPath, `package.json`), `${JSON.stringify({

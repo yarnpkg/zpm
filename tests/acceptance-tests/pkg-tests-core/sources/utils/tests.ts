@@ -178,6 +178,7 @@ export enum RequestType {
   BulkAdvisories = `bulkAdvisories`,
   NodeDistIndex = `nodeDistIndex`,
   NodeDistTarball = `nodeDistTarball`,
+  NodeDistZip = `nodeDistZip`,
   OtelTraces = `otelTraces`,
   YarnSwitchInfo = `yarnSwitchInfo`,
   YarnSwitchTarball = `yarnSwitchTarball`,
@@ -229,6 +230,9 @@ export type Request = {
   type: RequestType.NodeDistIndex;
 } | {
   type: RequestType.NodeDistTarball;
+  name: string;
+} | {
+  type: RequestType.NodeDistZip;
   name: string;
 } | {
   type: RequestType.OtelTraces;
@@ -1071,6 +1075,20 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       stream.pipeline(tar, gzip, response, () => {});
     },
 
+    async [RequestType.NodeDistZip](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.NodeDistZip)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const zip = buildZipFromEntries([{
+        name: `${parsedRequest.name}/node.exe` as PortablePath,
+        mode: 0o755,
+        data: Buffer.from(`#!/usr/bin/env bash\necho "${parsedRequest.name}"\n`),
+      }]);
+
+      response.writeHead(200, {[`Content-Type`]: `application/octet-stream`});
+      response.end(zip);
+    },
+
     async [RequestType.OtelTraces](parsedRequest, request, response) {
       if (parsedRequest.type !== RequestType.OtelTraces)
         throw new Error(`Assertion failed: Invalid request type`);
@@ -1192,6 +1210,11 @@ exit 0
     } else if ((match = url.match(/^\/node\/dist\/v([0-9]+\.[0-9]+\.[0-9]+)\/(node-v(\1)-[a-z0-9-]+)\.tar\.gz$/))) {
       return {
         type: RequestType.NodeDistTarball,
+        name: match[2]!,
+      };
+    } else if ((match = url.match(/^\/node\/dist\/v([0-9]+\.[0-9]+\.[0-9]+)\/(node-v(\1)-[a-z0-9-]+)\.zip$/))) {
+      return {
+        type: RequestType.NodeDistZip,
         name: match[2]!,
       };
     } else if (url === `/v1/traces`) {

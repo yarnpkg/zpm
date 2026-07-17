@@ -57,6 +57,8 @@ pub struct TaskInfo {
     pub is_target: bool,
     /// For long-lived tasks: has the warm-up period completed?
     pub warm_up_complete: bool,
+    /// Exit code that caused the task to fail, if any.
+    pub failure_exit_code: Option<i32>,
 }
 
 impl Default for TaskInfo {
@@ -65,6 +67,7 @@ impl Default for TaskInfo {
             state: TaskState::Pending,
             is_target: false,
             warm_up_complete: false,
+            failure_exit_code: None,
         }
     }
 }
@@ -360,11 +363,19 @@ impl TaskGraph {
             .unwrap_or(false)
     }
 
-    pub fn has_failed_subtask(&self, task_id: &ContextualTaskId) -> bool {
+    pub fn failed_subtask_exit_code(&self, task_id: &ContextualTaskId) -> Option<i32> {
         if let Some(subtasks) = self.subtasks.get(task_id) {
-            subtasks.iter().any(|s| self.is_failed_or_cancelled(s))
+            subtasks
+                .iter()
+                .find(|subtask| self.is_failed_or_cancelled(subtask))
+                .map(|subtask| {
+                    self.tasks
+                        .get(subtask)
+                        .and_then(|info| info.failure_exit_code)
+                        .unwrap_or(1)
+                })
         } else {
-            false
+            None
         }
     }
 
@@ -404,8 +415,10 @@ impl TaskGraph {
         self.ensure_task_info(task_id).state = TaskState::Completed;
     }
 
-    pub fn mark_failed(&mut self, task_id: &ContextualTaskId) {
-        self.ensure_task_info(task_id).state = TaskState::Failed;
+    pub fn mark_failed(&mut self, task_id: &ContextualTaskId, exit_code: i32) {
+        let info = self.ensure_task_info(task_id);
+        info.state = TaskState::Failed;
+        info.failure_exit_code = Some(exit_code);
     }
 
     pub fn mark_cancelled(&mut self, task_id: &ContextualTaskId) {
@@ -457,4 +470,3 @@ impl TaskGraph {
         self.subtasks.len()
     }
 }
-

@@ -35,6 +35,6 @@ pub fn resolve_path(input: &str) -> String {
     if path == vec![""] {
         return "/".to_string();
     } else {
-        format!("{}", path.join("/"))
+        path.join("/")
     }
 }

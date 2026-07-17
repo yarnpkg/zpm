@@ -6,6 +6,14 @@ use std::path::Path;
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(target_vendor, values(\"browserpod\"))");
 
+    if env::var_os("CARGO_CFG_TARGET_OS").is_some_and(|value| value == "windows")
+        && env::var_os("CARGO_CFG_TARGET_ENV").is_some_and(|value| value == "msvc")
+    {
+        // MSVC executables default to a 1 MiB main-thread stack, which is too
+        // small for project and configuration hydration in larger workspaces.
+        println!("cargo::rustc-link-arg-bin=yarn-bin=/STACK:8388608");
+    }
+
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("ui_assets.rs");
 

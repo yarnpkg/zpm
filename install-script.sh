@@ -74,11 +74,26 @@ case $platform in
 'Darwin arm64')
   target=aarch64-apple-darwin
   ;;
+'MINGW64_NT'*' x86_64' | 'MSYS_NT'*' x86_64' | 'CYGWIN_NT'*' x86_64')
+  target=x86_64-pc-windows-msvc
+  ;;
+'MINGW64_NT'*' ARM64' | 'MINGW64_NT'*' aarch64' | 'MSYS_NT'*' ARM64' | 'MSYS_NT'*' aarch64' | 'CYGWIN_NT'*' ARM64' | 'CYGWIN_NT'*' aarch64')
+  target=x86_64-pc-windows-msvc
+  ;;
 'Linux aarch64' | 'Linux arm64')
   target=aarch64-unknown-linux-musl
   ;;
 'Linux x86_64' | *)
   target=x86_64-unknown-linux-musl
+  ;;
+esac
+
+case $target in
+*-windows-*)
+  ext=.exe
+  ;;
+*)
+  ext=
   ;;
 esac
 
@@ -100,16 +115,16 @@ curl --fail --location --progress-bar --output "$archive" $yarn_uri ||
     error "Failed to download Yarn from $(colorize "$color_url" "$yarn_uri")"
 
 unzip -q "$archive" -d "$tmp_dir"
-rm "$tmp_dir"/yarn-bin
+rm "$tmp_dir"/yarn-bin$ext
 rm "$archive"
 
 if [[ -n "$bin_dir" ]]; then
-  mv -f "$tmp_dir"/yarn "$bin_dir"/
+  mv -f "$tmp_dir"/yarn$ext "$bin_dir"/
 else
   rm -rf "$install_dir"
   mv "$tmp_dir" "$install_dir"
 
   echo
 
-  "$install_dir"/yarn switch postinstall -H "$HOME"
+  "$install_dir"/yarn$ext switch postinstall -H "$HOME"
 fi

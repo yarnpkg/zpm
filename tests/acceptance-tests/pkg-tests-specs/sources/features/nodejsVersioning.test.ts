@@ -175,7 +175,7 @@ describe(`Features`, () => {
         }, async ({path, run, source}) => {
           await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
             supportedArchitectures: {
-              os: [`linux`, `darwin`],
+              os: [`linux`, `darwin`, `win32`],
               cpu: [`x64`],
             },
           });
@@ -193,6 +193,30 @@ describe(`Features`, () => {
           expect(nodeFiles).toEqual([
             expect.stringMatching(/@yarnpkg-node-darwin-x64-builtin-22\.0\.0-/),
             expect.stringMatching(/@yarnpkg-node-linux-x64-builtin-22\.0\.0-/),
+            expect.stringMatching(/@yarnpkg-node-win-x64-builtin-22\.0\.0-/),
+          ]);
+        }),
+      );
+
+      test(
+        `it should fetch the Windows @yarnpkg/node package on win32`,
+        makeTemporaryEnv({
+          dependencies: {
+            [`@yarnpkg/node`]: `builtin:^22.0.0`,
+          },
+        }, async ({path, run, source}) => {
+          await run(`install`, {
+            env: {
+              YARN_CPU_OVERRIDE: `x64`,
+              YARN_OS_OVERRIDE: `win32`,
+            },
+          });
+
+          const allCachedFiles = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+          const nodeFiles = allCachedFiles.sort().filter(file => file.startsWith(`@yarnpkg-node-`));
+
+          expect(nodeFiles).toEqual([
+            expect.stringMatching(/@yarnpkg-node-win-x64-builtin-22\.0\.0-/),
           ]);
         }),
       );

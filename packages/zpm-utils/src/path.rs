@@ -1,10 +1,186 @@
-use std::{collections::BTreeMap, io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}, sync::atomic::{AtomicU64, Ordering}, time::SystemTime};
+use std::{collections::BTreeMap, io::{Read, Write}, str::{FromStr, Split}, sync::atomic::{AtomicU64, Ordering}, time::SystemTime};
 
 use rkyv::Archive;
 
 use crate::{diff_data, impl_file_string_from_str, impl_file_string_serialization, path_resolve::resolve_path, DataType, FromFileString, IoResultExt, PathError, PathIterator, ToFileString, ToHumanString};
 
 static ATOMIC_WRITE_NONCE: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(any(windows, test))]
+fn to_portable_path(value: &str) -> String {
+    let value = value.replace('\\', "/");
+
+    if let Some(value) = value.strip_prefix("//?/UNC/") {
+        format!("/unc/?/UNC/{}", value)
+    } else if value.starts_with("//?/")
+        && value.as_bytes().get(5) == Some(&b':')
+        && value.as_bytes().get(4).map_or(false, u8::is_ascii_alphabetic)
+    {
+        value[3..].to_string()
+    } else if value.as_bytes().get(1) == Some(&b':')
+        && value.as_bytes().first().map_or(false, u8::is_ascii_alphabetic)
+    {
+        format!("/{}", value)
+    } else if let Some(value) = value.strip_prefix("//./") {
+        format!("/unc/.dot/{}", value)
+    } else if let Some(value) = value.strip_prefix("//") {
+        format!("/unc/{}", value)
+    } else {
+        value
+    }
+}
+
+#[cfg(any(windows, test))]
+fn from_portable_path(value: &str) -> String {
+    if value.as_bytes().get(2) == Some(&b':')
+        && value.as_bytes().get(1).map_or(false, u8::is_ascii_alphabetic)
+    {
+        value[1..].replace('/', "\\")
+    } else if let Some(value) = value.strip_prefix("/unc/.dot/") {
+        format!("\\\\.\\{}", value.replace('/', "\\"))
+    } else if let Some(value) = value.strip_prefix("/unc/?/UNC/") {
+        format!("\\\\?\\UNC\\{}", value.replace('/', "\\"))
+    } else if let Some(value) = value.strip_prefix("/unc/?/") {
+        format!("\\\\?\\{}", value.replace('/', "\\"))
+    } else if let Some(value) = value.strip_prefix("/unc/") {
+        format!("\\\\{}", value.replace('/', "\\"))
+    } else {
+        value.replace('/', "\\")
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_path_root(value: &str) -> Option<String> {
+    if value.as_bytes().get(2) == Some(&b':')
+        && value.as_bytes().get(1).map_or(false, u8::is_ascii_alphabetic)
+        && value.starts_with('/')
+    {
+        return Some(value[..3].to_ascii_lowercase());
+    }
+
+    let unc_path
+        = value.strip_prefix("/unc/")?;
+
+    let mut parts
+        = unc_path.split('/');
+
+    Some(format!(
+        "/unc/{}/{}",
+        parts.next()?.to_ascii_lowercase(),
+        parts.next()?.to_ascii_lowercase(),
+    ))
+}
+
+#[cfg(windows)]
+fn fs_set_mode_0600(path: &std::path::Path) -> Result<(), std::io::Error> {
+    use std::{ffi::OsStr, iter, mem, os::windows::ffi::OsStrExt, ptr::{null, null_mut}};
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, ERROR_SUCCESS, GENERIC_ALL, HANDLE, LocalFree},
+        Security::{
+            Authorization::{
+                EXPLICIT_ACCESS_W, GRANT_ACCESS, NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT,
+                SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
+                TRUSTEE_W,
+            },
+            DACL_SECURITY_INFORMATION, GetTokenInformation, NO_INHERITANCE,
+            PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER, TokenUser,
+        },
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+
+    struct OwnedHandle(HANDLE);
+
+    impl Drop for OwnedHandle {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+
+    struct OwnedAcl(*mut windows_sys::Win32::Security::ACL);
+
+    impl Drop for OwnedAcl {
+        fn drop(&mut self) {
+            unsafe {
+                LocalFree(self.0.cast());
+            }
+        }
+    }
+
+    fn win32_error(code: u32) -> std::io::Error {
+        std::io::Error::from_raw_os_error(code as i32)
+    }
+
+    unsafe {
+        let mut token = null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let token = OwnedHandle(token);
+
+        let mut token_user_len = 0;
+        GetTokenInformation(token.0, TokenUser, null_mut(), 0, &mut token_user_len);
+        if token_user_len == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let token_user_unit_size
+            = mem::size_of::<usize>();
+        let token_user_units
+            = (token_user_len as usize + token_user_unit_size - 1) / token_user_unit_size;
+        let mut token_user_data = vec![0usize; token_user_units];
+        if GetTokenInformation(token.0, TokenUser, token_user_data.as_mut_ptr().cast(), token_user_len, &mut token_user_len) == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let token_user
+            = &*(token_user_data.as_ptr().cast::<TOKEN_USER>());
+        let user_sid
+            = token_user.User.Sid;
+
+        let explicit_access = EXPLICIT_ACCESS_W {
+            grfAccessPermissions: GENERIC_ALL,
+            grfAccessMode: GRANT_ACCESS,
+            grfInheritance: NO_INHERITANCE,
+            Trustee: TRUSTEE_W {
+                pMultipleTrustee: null_mut(),
+                MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_USER,
+                ptstrName: user_sid.cast(),
+            },
+        };
+
+        let mut acl = null_mut();
+        let result
+            = SetEntriesInAclW(1, &explicit_access, null(), &mut acl);
+        if result != ERROR_SUCCESS {
+            return Err(win32_error(result));
+        }
+        let acl = OwnedAcl(acl);
+
+        let wide_path = OsStr::new(path)
+            .encode_wide()
+            .chain(iter::once(0))
+            .collect::<Vec<_>>();
+
+        let result = SetNamedSecurityInfoW(
+            wide_path.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            acl.0,
+            null_mut(),
+        );
+        if result != ERROR_SUCCESS {
+            return Err(win32_error(result));
+        }
+    }
+
+    Ok(())
+}
 
 #[derive(Debug)]
 pub struct SyncEntry {
@@ -36,11 +212,19 @@ pub struct ExplicitPath {
     pub raw_path: RawPath,
 }
 
+fn is_explicit_path_parameter(s: &str) -> bool {
+    is_explicit_path_parameter_for_platform(s, cfg!(windows))
+}
+
+fn is_explicit_path_parameter_for_platform(s: &str, windows: bool) -> bool {
+    s.contains('/') || (windows && s.contains('\\'))
+}
+
 impl FromFileString for ExplicitPath {
     type Error = PathError;
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        if !s.contains('/') {
+        if !is_explicit_path_parameter(s) {
             return Err(PathError::InvalidExplicitPathParameter(s.to_string()));
         }
 
@@ -151,7 +335,14 @@ impl Path {
     }
 
     pub fn home_dir() -> Result<Option<Path>, PathError> {
-        Ok(std::env::var("HOME")
+        #[cfg(windows)]
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"));
+
+        #[cfg(not(windows))]
+        let home = std::env::var("HOME");
+
+        Ok(home
             .ok()
             .map(|s| Path::try_from(s))
             .transpose()?)
@@ -291,6 +482,10 @@ impl Path {
     }
 
     pub fn dirname<'a>(&'a self) -> Option<Path> {
+        if self.is_root() {
+            return None;
+        }
+
         let mut slice_len
             = self.path.len();
 
@@ -306,6 +501,9 @@ impl Path {
             = &self.path[..slice_len];
 
         if let Some(last_slash) = slice.rfind('/') {
+            if cfg!(windows) && last_slash == 3 && slice.as_bytes().get(2) == Some(&b':') {
+                return Some(Path::from_str(&slice[..=last_slash]).unwrap());
+            }
             if last_slash > 0 {
                 return Some(Path::from_str(&slice[..last_slash]).unwrap());
             } else {
@@ -384,11 +582,23 @@ impl Path {
     }
 
     pub fn to_path_buf(&self) -> std::path::PathBuf {
+        #[cfg(windows)]
+        return std::path::PathBuf::from(from_portable_path(&self.path));
+
+        #[cfg(not(windows))]
         std::path::PathBuf::from(&self.path)
+    }
+
+    pub fn to_native_string(&self) -> String {
+        self.to_path_buf().to_string_lossy().into_owned()
     }
 
     pub fn is_root(&self) -> bool {
         self.path == "/"
+            || (cfg!(windows) && self.path.len() == 4 && self.path.as_bytes().get(2) == Some(&b':') && self.path.ends_with('/'))
+            || (cfg!(windows) && self.path.strip_prefix("/unc/")
+                .map(|path| path.trim_end_matches('/').split('/').count() == 2)
+                .unwrap_or(false))
     }
 
     pub fn is_absolute(&self) -> bool {
@@ -425,7 +635,7 @@ impl Path {
     }
 
     pub fn sys_set_current_dir(&self) -> Result<(), PathError> {
-        std::env::set_current_dir(&self.path)?;
+        std::env::set_current_dir(self.to_path_buf())?;
         Ok(())
     }
 
@@ -439,12 +649,12 @@ impl Path {
     pub unsafe fn sys_set_current_dir_with_pwd(&self) -> Result<(), PathError> {
         self.sys_set_current_dir()?;
         // SAFETY: caller contract guarantees single-threaded startup.
-        unsafe { std::env::set_var("PWD", self.as_str()); }
+        unsafe { std::env::set_var("PWD", self.to_path_buf()); }
         Ok(())
     }
 
     pub fn fs_canonicalize(&self) -> Result<Path, PathError> {
-        Ok(Path::try_from(std::fs::canonicalize(&self.path)?)?)
+        Ok(Path::try_from(std::fs::canonicalize(self.to_path_buf())?)?)
     }
 
     pub fn fs_create_parent(&self) -> Result<&Self, PathError> {
@@ -456,26 +666,66 @@ impl Path {
     }
 
     pub fn fs_create_dir_all(&self) -> Result<&Self, PathError> {
-        std::fs::create_dir_all(&self.path)?;
+        std::fs::create_dir_all(self.to_path_buf())?;
         Ok(self)
     }
 
     pub fn fs_create_dir(&self) -> Result<&Self, PathError> {
-        std::fs::create_dir(&self.path)?;
+        std::fs::create_dir(self.to_path_buf())?;
         Ok(self)
     }
 
     pub fn fs_set_permissions(&self, permissions: std::fs::Permissions) -> Result<&Self, PathError> {
-        std::fs::set_permissions(&self.path, permissions)?;
+        std::fs::set_permissions(self.to_path_buf(), permissions)?;
         Ok(self)
     }
 
+    pub fn fs_set_mode(&self, mode: u32) -> Result<&Self, PathError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            self.fs_set_permissions(std::fs::Permissions::from_mode(mode))?;
+        }
+
+        #[cfg(windows)]
+        {
+            if mode == 0o600 {
+                fs_set_mode_0600(&self.to_path_buf())?;
+            }
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = mode;
+        }
+
+        Ok(self)
+    }
+
+    pub fn fs_is_executable(&self) -> Result<bool, PathError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            return Ok(self.fs_metadata()?.permissions().mode() & 0o111 != 0);
+        }
+
+        #[cfg(windows)]
+        {
+            Ok(false)
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            Ok(false)
+        }
+    }
+
     pub fn fs_symlink_metadata(&self) -> Result<std::fs::Metadata, PathError> {
-        Ok(std::fs::symlink_metadata(&self.path)?)
+        Ok(std::fs::symlink_metadata(self.to_path_buf())?)
     }
 
     pub fn fs_metadata(&self) -> Result<std::fs::Metadata, PathError> {
-        Ok(std::fs::metadata(&self.path)?)
+        Ok(std::fs::metadata(self.to_path_buf())?)
     }
 
     pub fn fs_exists(&self) -> bool {
@@ -495,6 +745,11 @@ impl Path {
     }
 
     pub fn fs_is_real_dir(&self) -> bool {
+        #[cfg(windows)]
+        if junction::exists(self.to_path_buf()).unwrap_or(false) {
+            return false;
+        }
+
         self.fs_symlink_metadata().map(|m| m.is_dir()).unwrap_or(false)
     }
 
@@ -766,6 +1021,9 @@ impl Path {
     }
 
     pub fn fs_expect<T: AsRef<[u8]>>(&self, expected_data: T, is_exec: bool) -> Result<&Self, PathError> {
+        #[cfg(windows)]
+        let _ = is_exec;
+
         let current_content
             = self.fs_read()
                 .ok_missing()?;
@@ -809,6 +1067,9 @@ impl Path {
     }
 
     pub fn fs_change<T: AsRef<[u8]>>(&self, data: T, is_exec: bool) -> Result<&Self, PathError> {
+        #[cfg(windows)]
+        let _ = is_exec;
+
         let path_buf = self.to_path_buf();
 
         let update_content = self.fs_read()
@@ -919,6 +1180,22 @@ impl Path {
     }
 
     pub fn fs_rm(&self) -> Result<&Self, PathError> {
+        #[cfg(windows)]
+        if junction::exists(self.to_path_buf()).unwrap_or(false) {
+            junction::delete(self.to_path_buf())?;
+            return Ok(self);
+        }
+
+        #[cfg(windows)]
+        if self.fs_is_symlink() {
+            match self.fs_metadata() {
+                Ok(metadata) if metadata.is_dir() => std::fs::remove_dir(self.to_path_buf())?,
+                _ => std::fs::remove_file(self.to_path_buf())?,
+            }
+
+            return Ok(self);
+        }
+
         match self.fs_is_real_dir() {
             true => std::fs::remove_dir_all(self.to_path_buf()),
             false => std::fs::remove_file(self.to_path_buf()),
@@ -928,11 +1205,54 @@ impl Path {
     }
 
     pub fn fs_symlink(&self, target: &Path) -> Result<&Self, PathError> {
+        #[cfg(unix)]
         std::os::unix::fs::symlink(&target.path, &self.path)?;
+
+        #[cfg(windows)]
+        {
+            let resolved_target = if target.is_absolute() {
+                target.clone()
+            } else {
+                self.dirname().unwrap_or_default().with_join(target)
+            };
+
+            if resolved_target.fs_is_dir() {
+                std::os::windows::fs::symlink_dir(target.to_path_buf(), self.to_path_buf())?;
+            } else {
+                std::os::windows::fs::symlink_file(target.to_path_buf(), self.to_path_buf())?;
+            }
+        }
+
+        Ok(self)
+    }
+
+    pub fn fs_junction(&self, target: &Path) -> Result<&Self, PathError> {
+        #[cfg(windows)]
+        {
+            let resolved_target = if target.is_absolute() {
+                target.clone()
+            } else {
+                self.dirname().unwrap_or_default().with_join(target)
+            };
+            if resolved_target.fs_is_dir() {
+                junction::create(resolved_target.to_path_buf(), self.to_path_buf())?;
+            } else {
+                self.fs_symlink(target)?;
+            }
+        }
+
+        #[cfg(not(windows))]
+        self.fs_symlink(target)?;
+
         Ok(self)
     }
 
     pub fn fs_read_link(&self) -> Result<Path, PathError> {
+        #[cfg(windows)]
+        if junction::exists(self.to_path_buf()).unwrap_or(false) {
+            return Ok(Path::try_from(junction::get_target(self.to_path_buf())?)?);
+        }
+
         Ok(Path::try_from(std::fs::read_link(&self.to_path_buf())?)?)
     }
 
@@ -1107,6 +1427,17 @@ impl Path {
         }
     }
 
+    pub fn relative_to_if_same_root(&self, other: &Path) -> Path {
+        #[cfg(any(windows, test))]
+        if let (Some(self_root), Some(other_root)) = (windows_path_root(&self.path), windows_path_root(&other.path)) {
+            if self_root != other_root {
+                return self.clone();
+            }
+        }
+
+        self.relative_to(other)
+    }
+
     fn normalize(&mut self) {
         self.path = resolve_path(&self.path);
     }
@@ -1130,7 +1461,14 @@ impl TryFrom<&std::ffi::OsStr> for Path {
     type Error = PathError;
 
     fn try_from(value: &std::ffi::OsStr) -> Result<Self, Self::Error> {
-        Ok(Path::from_str(std::str::from_utf8(value.as_bytes())?)?)
+        let value
+            = value.to_str()
+                .ok_or(PathError::InvalidUtf8Path)?;
+
+        #[cfg(windows)]
+        let value = to_portable_path(value);
+
+        Ok(Path::from_str(&value)?)
     }
 }
 
@@ -1154,7 +1492,10 @@ impl FromFileString for Path {
     type Error = PathError;
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        Ok(Path {path: resolve_path(s)})
+        #[cfg(windows)]
+        let s = to_portable_path(s);
+
+        Ok(Path {path: resolve_path(&s)})
     }
 }
 
@@ -1174,7 +1515,43 @@ impl ToHumanString for Path {
 mod tests {
     use std::str::FromStr;
 
-    use super::Path;
+    use super::{Path, from_portable_path, is_explicit_path_parameter_for_platform, to_portable_path};
+
+    #[test]
+    fn converts_windows_paths() {
+        assert_eq!(to_portable_path(r"C:\work\project"), "/C:/work/project");
+        assert_eq!(to_portable_path(r"\\server\share\project"), "/unc/server/share/project");
+        assert_eq!(to_portable_path(r"\\.\pipe\yarn"), "/unc/.dot/pipe/yarn");
+        assert_eq!(to_portable_path(r"\\?\C:\work\project"), "/C:/work/project");
+        assert_eq!(to_portable_path(r"\\?\UNC\server\share\project"), "/unc/?/UNC/server/share/project");
+
+        assert_eq!(from_portable_path("/C:/work/project"), r"C:\work\project");
+        assert_eq!(from_portable_path("/unc/server/share/project"), r"\\server\share\project");
+        assert_eq!(from_portable_path("/unc/.dot/pipe/yarn"), r"\\.\pipe\yarn");
+        assert_eq!(from_portable_path("/unc/?/C:/work/project"), r"\\?\C:\work\project");
+        assert_eq!(from_portable_path("/unc/?/UNC/server/share/project"), r"\\?\UNC\server\share\project");
+        assert_eq!(from_portable_path(".pnpm/no-deps/node_modules/no-deps"), r".pnpm\no-deps\node_modules\no-deps");
+    }
+
+    #[test]
+    fn classifies_backslash_paths_as_explicit_only_on_windows() {
+        assert!(is_explicit_path_parameter_for_platform("./workspace", false));
+        assert!(is_explicit_path_parameter_for_platform(r"D:\a\zpm\zpm\tests\acceptance-tests", true));
+        assert!(!is_explicit_path_parameter_for_platform(r"foo\bar", false));
+    }
+
+    #[test]
+    fn keeps_windows_link_targets_absolute_across_roots() {
+        assert_eq!(
+            Path::from_str("/D:/fixtures/no-deps").unwrap().relative_to_if_same_root(&Path::from_str("/C:/project/node_modules").unwrap()),
+            Path::from_str("/D:/fixtures/no-deps").unwrap(),
+        );
+
+        assert_eq!(
+            Path::from_str("/C:/project/.store/no-deps").unwrap().relative_to_if_same_root(&Path::from_str("/C:/project/node_modules").unwrap()),
+            Path::from_str("../.store/no-deps").unwrap(),
+        );
+    }
 
     #[test]
     fn normalizes_repeated_trailing_separators() {

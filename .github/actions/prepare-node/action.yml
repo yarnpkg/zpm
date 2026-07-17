@@ -23,7 +23,11 @@ runs:
         chmod +x "${{inputs.switch}}"
         install_dir="${RUNNER_TEMP}/yarn-switch-bin"
         mkdir -p "${install_dir}"
-        cp -f "${{inputs.switch}}" "${install_dir}/yarn"
+        if [[ "${RUNNER_OS}" == "Windows" ]]; then
+          cp -f "${{inputs.switch}}" "${install_dir}/yarn.exe"
+        else
+          cp -f "${{inputs.switch}}" "${install_dir}/yarn"
+        fi
         echo "${install_dir}" >> "${GITHUB_PATH}"
 
     - name: Add link to the local path
@@ -41,4 +45,7 @@ runs:
     - name: Install dependencies
       shell: bash
       run: |
+        if [[ -n "${{inputs.switch}}" ]]; then
+          export YARN_ENABLE_IMMUTABLE_INSTALLS=0
+        fi
         yarn install

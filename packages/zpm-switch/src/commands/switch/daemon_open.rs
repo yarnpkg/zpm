@@ -123,7 +123,7 @@ impl DaemonOpenCommand {
             .arg("daemon")
             .arg("--auth-token")
             .arg(&auth_token)
-            .current_dir(detected_root.to_file_string())
+            .current_dir(detected_root.to_path_buf())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -135,8 +135,11 @@ impl DaemonOpenCommand {
             binary.env("USERPROFILE", userprofile);
         }
 
-        use std::os::unix::process::CommandExt;
-        binary.process_group(0);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            binary.process_group(0);
+        }
 
         let mut child
             = binary

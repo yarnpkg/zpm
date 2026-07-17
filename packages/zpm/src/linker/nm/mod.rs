@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zpm_primitives::{VersionFilter, Ident, Locator, Reference};
-use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
+use zpm_sync::{LinkType, SyncItem, SyncTemplate, SyncTree};
 use zpm_utils::{FromFileString, IoResultExt, Path, ToHumanString};
 
 use crate::{
@@ -146,7 +146,7 @@ fn register_workspace_symlinks_at(
 
         let target_path
             = workspace_dir
-                .relative_to(&host_abs_path.with_join(&symlink_path).dirname().unwrap_or_default());
+                .relative_to_if_same_root(&host_abs_path.with_join(&symlink_path).dirname().unwrap_or_default());
 
         let symlink_location
             = host_abs_path.with_join(&symlink_path);
@@ -241,8 +241,13 @@ fn generate_workspace_node_modules(
         = workspace_dir
             .with_join_str("node_modules");
 
+    let link_type = match project.config.settings.win_link_type.value {
+        zpm_config::WinLinkType::Symlinks => LinkType::Symlink,
+        zpm_config::WinLinkType::Junctions => LinkType::Junction,
+    };
     let mut workspace_nm_tree
-        = SyncTree::new();
+        = SyncTree::new()
+            .with_link_type(link_type);
 
     workspace_nm_tree.dry_run = false;
 
@@ -349,7 +354,7 @@ fn generate_workspace_node_modules(
                     }
 
                     let target_path
-                        = package_directory.relative_to(&child_abs_path.dirname().unwrap());
+                        = package_directory.relative_to_if_same_root(&child_abs_path.dirname().unwrap());
 
                     workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
                         target_path: target_path.clone(),

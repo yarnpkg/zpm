@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::{Arc, LazyLock}};
+use std::{collections::BTreeMap, ffi::OsStr, io::Read, process::{ExitStatus, Output}, sync::{Arc, LazyLock}};
 
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
-use zpm_utils::{FromFileString, Hash64, Path, ToFileString, shell_escape, to_shell_line};
+use zpm_utils::{FromFileString, Hash64, Path, ToFileString, exit_status_from_code, resolve_spawn_program, shell_escape, to_shell_line};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -23,7 +23,7 @@ fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, modul
     let binary_name
         = serde_json::to_string(binary_name).expect("expected valid binary name");
     let package_path
-        = serde_json::to_string(&package_path.to_file_string()).expect("expected valid package path");
+        = serde_json::to_string(&package_path.to_native_string()).expect("expected valid package path");
     let module
         = serde_json::to_string(module).expect("expected valid python module");
     let object
@@ -39,6 +39,16 @@ fn quote_path_if_needed(path: &str) -> String {
         serde_json::to_string(path).expect("expected valid path")
     } else {
         path.to_string()
+    }
+}
+
+fn node_esm_loader_path(path: &Path) -> String {
+    if cfg!(windows) {
+        url::Url::from_file_path(path.to_path_buf())
+            .expect("expected valid file URL")
+            .to_string()
+    } else {
+        path.to_native_string()
     }
 }
 
@@ -59,24 +69,24 @@ fn make_executable_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &[Stri
         bin_dir
             .with_join_str(format!("{}.cmd", name))
             .fs_write_text(&cmd_script)?;
-    } else {
-        let escaped_args = args
-            .iter()
-            .map(|arg| format!("'{}'", arg.replace("'", "'\"'\"'")))
-            .collect_vec()
-            .join(" ");
-
-        let sh_script = format!(
-            "#!/bin/sh\nexec \"{}\" {} \"$@\"\n",
-            argv0,
-            escaped_args,
-        );
-
-        bin_dir
-            .with_join_str(name)
-            .fs_write_text(&sh_script)?
-            .fs_set_permissions(Permissions::from_mode(0o755))?;
     }
+
+    let escaped_args = args
+        .iter()
+        .map(|arg| format!("'{}'", arg.replace("'", "'\"'\"'")))
+        .collect_vec()
+        .join(" ");
+
+    let sh_script = format!(
+        "#!/bin/sh\nexec \"{}\" {} \"$@\"\n",
+        argv0,
+        escaped_args,
+    );
+
+    bin_dir
+        .with_join_str(name)
+        .fs_write_text(&sh_script)?
+        .fs_set_mode(0o755)?;
 
     Ok(())
 }
@@ -211,7 +221,7 @@ impl ScriptBinaries {
 
     pub fn with_standard(mut self) -> Result<Self, Error> {
         let self_path = get_self_path()?
-            .to_file_string();
+            .to_native_string();
 
         self.binaries.push(ScriptBinary {
             name: "run".to_string(),
@@ -251,12 +261,12 @@ impl ScriptBinaries {
                         self.binaries.push(ScriptBinary {
                             name: name.clone(),
                             argv0: "node".to_string(),
-                            args: vec![binary_path_abs.to_file_string()],
+                            args: vec![binary_path_abs.to_native_string()],
                         });
                     } else {
                         self.binaries.push(ScriptBinary {
                             name: name.clone(),
-                            argv0: binary_path_abs.to_file_string(),
+                            argv0: binary_path_abs.to_native_string(),
                             args: vec![],
                         });
                     }
@@ -295,7 +305,7 @@ pub enum ScriptResult {
 impl ScriptResult {
     pub fn new_success() -> Self {
         Self::Success(Output {
-            status: ExitStatus::from_raw(0),
+            status: exit_status_from_code(0),
             stdout: Vec::new(),
             stderr: Vec::new(),
         })
@@ -440,7 +450,7 @@ impl ScriptEnvironment {
         let self_path
             = get_self_path()?;
 
-        value.env.insert("npm_execpath".to_string(), Some(self_path.to_file_string()));
+        value.env.insert("npm_execpath".to_string(), Some(self_path.to_native_string()));
         value.env.insert("npm_config_user_agent".to_string(), Some(format!("yarn/{}", zpm_switch::get_bin_version())));
 
         Ok(value)
@@ -532,18 +542,18 @@ impl ScriptEnvironment {
         }
 
         if let Some(pnp_path) = project.pnp_path().if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_file_string()));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_native_string()));
         }
 
         if let Some(pnp_loader_path) = project.pnp_loader_path().if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_file_string()));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", node_esm_loader_path(&pnp_loader_path)));
         }
 
         self.refresh_package_map(project);
 
-        self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
-        self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
-        self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_file_string()));
+        self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_native_string()));
+        self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_native_string()));
+        self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_native_string()));
         self.trust_check_project_cwd = Some(project.project_cwd.clone());
 
         self
@@ -598,7 +608,7 @@ impl ScriptEnvironment {
         }
 
         if let Some(package_map_path) = project.package_map_path(package_map_workspace).if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-package-map={}", quote_path_if_needed(&package_map_path.to_file_string())));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-package-map={}", quote_path_if_needed(&package_map_path.to_native_string())));
         }
     }
 
@@ -665,7 +675,7 @@ impl ScriptEnvironment {
 
         self.env.insert("npm_package_name".to_string(), Some(locator.ident.to_file_string()));
         self.env.insert("npm_package_version".to_string(), Some(resolution.version.to_file_string()));
-        self.env.insert("npm_package_json".to_string(), Some(manifest_location_abs.to_file_string()));
+        self.env.insert("npm_package_json".to_string(), Some(manifest_location_abs.to_native_string()));
 
         Ok(())
     }
@@ -731,7 +741,20 @@ impl ScriptEnvironment {
 
     /// Prepares a command with the current environment settings.
     fn prepare_command(&mut self, program: &str, args: &[String]) -> Result<(Command, Path), Error> {
-        let mut cmd = Command::new(program);
+        let bin_dir = self.install_binaries()?;
+
+        let env_path = self.env.get("PATH")
+            .cloned()
+            .unwrap_or_else(|| std::env::var("PATH").ok())
+            .unwrap_or_default();
+
+        let path_separator = if cfg!(windows) {';'} else {':'};
+        let next_env_path = match env_path.is_empty() {
+            true => bin_dir.to_native_string(),
+            false => format!("{}{}{}", bin_dir.to_native_string(), path_separator, env_path),
+        };
+
+        let mut cmd = Command::new(resolve_spawn_program(program, &next_env_path));
 
         cmd.current_dir(self.cwd.to_path_buf());
 
@@ -746,20 +769,8 @@ impl ScriptEnvironment {
             };
         }
 
-        let bin_dir = self.install_binaries()?;
-
-        let env_path = self.env.get("PATH")
-            .cloned()
-            .unwrap_or_else(|| std::env::var("PATH").ok())
-            .unwrap_or_default();
-
-        let next_env_path = match env_path.is_empty() {
-            true => bin_dir.to_file_string(),
-            false => format!("{}:{}", bin_dir.to_file_string(), env_path),
-        };
-
         cmd.env("PATH", next_env_path);
-        cmd.env("BERRY_BIN_FOLDER", bin_dir.to_file_string());
+        cmd.env("BERRY_BIN_FOLDER", bin_dir.to_native_string());
         cmd.args(args);
 
         if self.stdin.is_some() {
@@ -863,14 +874,14 @@ impl ScriptEnvironment {
             Binary::Path {path, kind: BinaryKind::Node} => {
                 let mut node_args = self.node_args.clone();
 
-                node_args.push(path.to_file_string());
+                node_args.push(path.to_native_string());
                 node_args.extend(args.into_iter().map(|arg| arg.as_ref().to_string()));
 
                 self.run_exec("node", node_args).await
             },
 
             Binary::Path {path, kind: BinaryKind::Default} => {
-                self.run_exec(&path.to_file_string(), args).await
+                self.run_exec(&path.to_native_string(), args).await
             },
 
             Binary::PythonEntryPoint {name, package_path, module, object} => {

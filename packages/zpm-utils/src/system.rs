@@ -45,6 +45,9 @@ const LIBC: Option<Libc> = Some(Libc::Musl);
 #[cfg(target_env = "")]
 const LIBC: Option<Libc> = None;
 
+#[cfg(target_env = "msvc")]
+const LIBC: Option<Libc> = None;
+
 fn detect_libc() -> Option<Libc> {
     let ldd_contents
         = Path::from_str(LDD_PATH).unwrap()

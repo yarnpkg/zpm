@@ -779,6 +779,10 @@ fn check_resolution_cache(ctx: &InstallContext<'_>, lockfile: &Lockfile, descrip
                 = lockfile.entries.get(locator)
                     .unwrap_or_else(|| panic!("Expected a matching resolution to be found in the lockfile for any resolved locator; not found for {}.", locator.to_print_string()));
 
+            if !lockfile_variants_cover_systems(ctx, lockfile, &entry.resolution) {
+                return Ok(Some(CacheHit::Pinned(locator.clone())));
+            }
+
             return Ok(Some(CacheHit::Full(entry.resolution.clone().into_resolution_result(ctx)?)));
         }
     }
@@ -788,6 +792,24 @@ fn check_resolution_cache(ctx: &InstallContext<'_>, lockfile: &Lockfile, descrip
     }
 
     Ok(None)
+}
+
+fn lockfile_variants_cover_systems(ctx: &InstallContext<'_>, lockfile: &Lockfile, resolution: &Resolution) -> bool {
+    let Some(systems) = ctx.systems else {
+        return true;
+    };
+
+    if resolution.variants.is_empty() {
+        return true;
+    }
+
+    systems.iter().all(|system| {
+        resolution.variants.iter().any(|variant| {
+            lockfile.resolutions.get(variant)
+                .and_then(|locator| lockfile.entries.get(locator))
+                .is_some_and(|entry| entry.resolution.requirements.validate_system(system))
+        })
+    })
 }
 
 // Legacy types kept for compatibility with resolver/fetcher function signatures.

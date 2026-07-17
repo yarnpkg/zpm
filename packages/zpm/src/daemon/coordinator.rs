@@ -101,7 +101,7 @@ async fn run_daemon_internal(
         = mpsc::unbounded_channel::<notify::Event>();
 
     let project_cwd_for_loop
-        = project.project_cwd.to_file_string();
+        = project.project_cwd.to_path_buf();
 
     tokio::spawn(async move {
         run_coordinator_loop(
@@ -180,7 +180,7 @@ async fn run_coordinator_loop(
     default_warmup_period: Duration,
     file_notify_tx: mpsc::UnboundedSender<notify::Event>,
     taskfile_notify_tx: mpsc::UnboundedSender<notify::Event>,
-    project_cwd: String,
+    project_cwd: std::path::PathBuf,
 ) {
     let mut state
         = CoordinatorState::new(
@@ -188,7 +188,7 @@ async fn run_coordinator_loop(
             max_closed_tasks,
             file_notify_tx,
             taskfile_notify_tx,
-            std::path::PathBuf::from(project_cwd),
+            project_cwd,
         );
 
     initialize_taskfile_watcher(&mut state.taskfile_watcher, &project);
@@ -928,7 +928,7 @@ fn is_binary_extension(path: &Path) -> bool {
 
 fn read_file_content(path: &Path) -> Option<(String, String)> {
     if is_binary_extension(path) {
-        let bytes = std::fs::read(path.to_file_string()).ok()?;
+        let bytes = std::fs::read(path.to_path_buf()).ok()?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
         Some((encoded, "base64".to_string()))
     } else {

@@ -1,7 +1,7 @@
 use std::process::{Command, ExitStatus};
 
 use clipanion::cli;
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::Path;
 
 use crate::{error::Error};
 
@@ -31,7 +31,7 @@ impl Flamegraph {
             = Path::current_exe()?;
 
         let result = Command::new(samply_path.to_path_buf())
-            .args(["record", &current_exe.to_file_string()])
+            .args(["record", &current_exe.to_native_string()])
             .args(&self.args)
             .status()?;
 

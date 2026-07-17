@@ -84,7 +84,7 @@ async fn proxy_completer_async(ctx: &CompletionContext<'_>) -> Vec<Completion> {
             cmd
         },
         PackageManagerReference::Local(params) => {
-            std::process::Command::new(params.path.to_file_string())
+            std::process::Command::new(params.path.to_path_buf())
         },
     };
 
