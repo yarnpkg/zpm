@@ -118,7 +118,7 @@ impl Link {
 
     fn add_resolution(&self, document: &mut JsonDocument, name: &Ident, workspace_path: &Path, root_path: &Path) -> Result<(), Error> {
         let portal_path = if self.relative {
-            workspace_path.relative_to(root_path)
+            workspace_path.relative_to_if_same_root(root_path)
         } else {
             workspace_path.clone()
         };
