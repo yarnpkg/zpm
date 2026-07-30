@@ -340,14 +340,11 @@ pub async fn get_id_token(options: &GetIdTokenOptions<'_>) -> Result<Option<Stri
     actions_id_token_request_url.query_pairs_mut()
         .append_pair("audience", options.audience);
 
-    let response
+    let body
         = options.http_client.get(actions_id_token_request_url)?
             .header("authorization", Some(format!("Bearer {}", actions_id_token_request_token)))
-            .send()
+            .send_text()
             .await?;
-
-    let body
-        = response.text().await?;
 
     #[derive(Deserialize)]
     struct ActionsIdTokenResponse {
@@ -485,14 +482,15 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
 
     let bytes = match params.authorization {
         Some(authorization) => {
-            let response = params.http_client.get(&url)?
+            let (response, bytes) = params.http_client.get(&url)?
                 .header("authorization", Some(authorization))
                 .enable_status_check(false)
-                .send().await?;
+                .send_bytes().await?;
 
             handle_invalid_authentication_error(params, &response).await?;
 
-            response.error_for_status()?.bytes().await?
+            response.error_for_status()?;
+            bytes
         },
 
         None => {
@@ -510,16 +508,17 @@ pub async fn get_uncached(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
     let url
         = format!("{}{}", params.registry, params.path);
 
-    let response = params.http_client.get(&url)?
+    let (response, bytes) = params.http_client.get(&url)?
         .header("authorization", params.authorization)
         .enable_status_check(false)
-        .send().await?;
+        .send_bytes().await?;
 
     if params.authorization.is_some() {
         handle_invalid_authentication_error(params, &response).await?;
     }
 
-    Ok(response.error_for_status()?.bytes().await?)
+    response.error_for_status()?;
+    Ok(bytes)
 }
 
 const CACHED_VERSION_FIELDS: &[&str] = &[
@@ -740,8 +739,8 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
         }
     }
 
-    let response
-        = request.send().await?;
+    let (response, fresh_body)
+        = request.send_bytes().await?;
 
     if params.authorization.is_some() {
         let npm_params = NpmHttpParams {
@@ -769,8 +768,7 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
 
-    let fresh_body
-        = response.error_for_status()?.bytes().await?;
+    response.error_for_status()?;
 
     // Keep stale version entries the fresh response omits so
     // resolution still works when a published version is later

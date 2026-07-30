@@ -64,12 +64,16 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     };
 
     let cached_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
-        let response = project.http_client.get(&params.url)?
+        let (_, tgz_data) = project.http_client.get(&params.url)?
             .header("authorization", authorization.as_deref())
-            .send().await?;
-
-        let tgz_data = response.bytes().await
-            .map_err(|err| Error::RemoteRegistryError(Arc::new(err)))?;
+            .send_bytes().await
+            .map_err(|err| {
+                if err.is_body() || err.is_decode() {
+                    Error::RemoteRegistryError(Arc::new(err))
+                } else {
+                    err.into()
+                }
+            })?;
         let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
             let tar_data
                 = zpm_formats::tar::unpack_tgz(&tgz_data)?;

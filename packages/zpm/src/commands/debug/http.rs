@@ -29,9 +29,7 @@ impl Http {
         with_report_result(report, async {
             project.http_client
                 .get(&self.url)?
-                .send()
-                .await?
-                .text()
+                .send_text()
                 .await?;
 
             Ok(())

@@ -97,13 +97,11 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let cached_blob
         = package_cache.ensure_blob(locator.clone(), ".zip", || async {
-            let response
+            let (_, bytes)
                 = project.http_client.get(&artifact_url)?
-                    .send()
+                    .send_bytes()
                     .await?;
 
-            let bytes
-                = response.bytes().await?;
             Ok(bytes.to_vec())
         }).await?.into_info();
 

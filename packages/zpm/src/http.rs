@@ -1,6 +1,6 @@
-use std::{collections::HashSet, net::SocketAddr, sync::{Arc, LazyLock, OnceLock}, time::Duration};
+use std::{collections::HashSet, future::Future, net::SocketAddr, sync::{Arc, LazyLock, OnceLock}, time::Duration};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
 use hickory_resolver::{config::LookupIpStrategy, TokioResolver};
 use http::HeaderMap;
@@ -181,7 +181,11 @@ impl<'a> HttpRequest<'a> {
         self
     }
 
-    pub async fn send(self) -> Result<Response, reqwest::Error> {
+    async fn send_with<T, F, Fut>(self, consume: F) -> Result<T, reqwest::Error>
+    where
+        F: Fn(Response) -> Fut,
+        Fut: Future<Output = Result<T, reqwest::Error>>,
+    {
         let mut retry_count
             = 0;
 
@@ -222,31 +226,89 @@ impl<'a> HttpRequest<'a> {
                 }
             };
 
-            if self.enable_retry && retry_count < self.client.config.http_retry {
-                let is_failure = match &response {
-                    Ok(response) => response.status().is_server_error() || matches!(response.status().as_u16(), 408 | 413 | 429),
-                    Err(_) => true,
-                };
+            let is_failure = match &response {
+                Ok(response) => response.status().is_server_error() || matches!(response.status().as_u16(), 408 | 413 | 429),
+                Err(_) => true,
+            };
 
-                if is_failure {
-                    retry_count += 1;
+            if self.enable_retry && retry_count < self.client.config.http_retry && is_failure {
+                retry_count += 1;
 
-                    let sleep_duration
-                        = 2_u64.saturating_pow(retry_count as u32);
-                    let bounded_sleep_duration
-                        = std::cmp::min(sleep_duration, 10);
+                let sleep_duration
+                    = 2_u64.saturating_pow(retry_count as u32);
+                let bounded_sleep_duration
+                    = std::cmp::min(sleep_duration, 10);
 
-                    tokio::time::sleep(Duration::from_secs(bounded_sleep_duration)).await;
-                    continue;
-                }
+                tokio::time::sleep(Duration::from_secs(bounded_sleep_duration)).await;
+                continue;
             }
 
-            return if self.enable_status_check {
-                response?.error_for_status()
+            let response
+                = response?;
+
+            let response = if self.enable_status_check {
+                response.error_for_status()?
             } else {
                 response
             };
+
+            let result
+                = consume(response).await;
+
+            if self.enable_retry && retry_count < self.client.config.http_retry && result.is_err() {
+                retry_count += 1;
+
+                let sleep_duration
+                    = 2_u64.saturating_pow(retry_count as u32);
+                let bounded_sleep_duration
+                    = std::cmp::min(sleep_duration, 10);
+
+                tokio::time::sleep(Duration::from_secs(bounded_sleep_duration)).await;
+                continue;
+            }
+
+            return result;
         }
+    }
+
+    pub async fn send(self) -> Result<Response, reqwest::Error> {
+        self.send_with(|response| async move {
+            Ok(response)
+        }).await
+    }
+
+    pub async fn send_text(self) -> Result<String, reqwest::Error> {
+        self.send_with(|response| response.text()).await
+    }
+
+    /// Buffers the response body inside the retry loop while retaining the
+    /// drained response so callers can inspect its status and headers.
+    pub async fn send_bytes(self) -> Result<(Response, Bytes), reqwest::Error> {
+        let enable_status_check
+            = self.enable_status_check;
+
+        self.send_with(move |mut response| async move {
+            if !enable_status_check
+                && (response.status().is_client_error()
+                    || response.status().is_server_error()
+                    || response.status().as_u16() == 304)
+            {
+                return Ok((response, Bytes::new()));
+            }
+
+            let capacity
+                = response.content_length()
+                    .and_then(|length| usize::try_from(length).ok())
+                    .unwrap_or_default();
+            let mut body
+                = BytesMut::with_capacity(capacity);
+
+            while let Some(chunk) = response.chunk().await? {
+                body.extend_from_slice(&chunk);
+            }
+
+            Ok((response, body.freeze()))
+        }).await
     }
 
     pub fn headers(&self) -> HeaderMap {
@@ -523,11 +585,8 @@ impl HttpClient {
             let request
                 = self.get(&url_str)?;
 
-            let result
-                = request.send().await?;
-
-            let bytes
-                = result.bytes().await?;
+            let (_, bytes)
+                = request.send_bytes().await?;
 
             Ok(bytes)
         }).await;
