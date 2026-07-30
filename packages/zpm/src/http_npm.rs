@@ -16,7 +16,7 @@ use zpm_utils::{DataType, Path};
 
 use crate::{
     error::Error,
-    http::{HttpClient, HttpRequest},
+    http::{HttpClient, HttpRequest, HttpResponse},
     npm,
     report::{current_report, PromptType},
 };
@@ -487,7 +487,8 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
                 .enable_status_check(false)
                 .send_bytes().await?;
 
-            handle_invalid_authentication_error(params, &response).await?;
+            let response
+                = handle_invalid_authentication_error(params, response).await?;
 
             response.error_for_status()?;
             bytes
@@ -513,9 +514,11 @@ pub async fn get_uncached(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
         .enable_status_check(false)
         .send_bytes().await?;
 
-    if params.authorization.is_some() {
-        handle_invalid_authentication_error(params, &response).await?;
-    }
+    let response = if params.authorization.is_some() {
+        handle_invalid_authentication_error(params, response).await?
+    } else {
+        response
+    };
 
     response.error_for_status()?;
     Ok(bytes)
@@ -742,7 +745,7 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
     let (response, fresh_body)
         = request.send_bytes().await?;
 
-    if params.authorization.is_some() {
+    let response = if params.authorization.is_some() {
         let npm_params = NpmHttpParams {
             http_client: params.http_client,
             registry: params.registry,
@@ -750,8 +753,10 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
             authorization: params.authorization,
             otp: None,
         };
-        handle_invalid_authentication_error(&npm_params, &response).await?;
-    }
+        handle_invalid_authentication_error(&npm_params, response).await?
+    } else {
+        response
+    };
 
     if response.status().as_u16() == 304 {
         if let Some(cached) = cached {
@@ -837,7 +842,7 @@ fn merge_versions_into_fresh(stale: &[u8], fresh: &[u8]) -> Vec<u8> {
     serde_json::to_vec(&fresh_json).unwrap_or_else(|_| fresh.to_vec())
 }
 
-pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {
+pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<HttpResponse, Error> {
     let url
         = format!("{}{}", params.registry, params.path);
 
@@ -860,15 +865,17 @@ pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, 
             = ask_for_otp(params, &response).await?;
 
         request = inject_otp_headers(request, otp);
+        drop(response);
         response = request.send().await?;
     }
 
-    handle_invalid_authentication_error(params, &response).await?;
+    let response
+        = handle_invalid_authentication_error(params, response).await?;
 
     Ok(response.error_for_status()?)
 }
 
-pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {
+pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<HttpResponse, Error> {
     let url
         = format!("{}{}", params.registry, params.path);
 
@@ -891,10 +898,12 @@ pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<Response, E
             = ask_for_otp(params, &response).await?;
 
         request = inject_otp_headers(request, otp);
+        drop(response);
         response = request.send().await?;
     }
 
-    handle_invalid_authentication_error(params, &response).await?;
+    let response
+        = handle_invalid_authentication_error(params, response).await?;
 
     if let Err(error) = response.error_for_status_ref() {
         let body
@@ -920,14 +929,16 @@ fn inject_otp_headers(request: HttpRequest<'_>, otp: String) -> HttpRequest<'_> 
     request.header("npm-otp", Some(otp))
 }
 
-async fn handle_invalid_authentication_error(params: &NpmHttpParams<'_>, response: &Response) -> Result<(), Error> {
-    if is_otp_error(response) {
+async fn handle_invalid_authentication_error(params: &NpmHttpParams<'_>, response: HttpResponse) -> Result<HttpResponse, Error> {
+    if is_otp_error(&response) {
         return Err(Error::AuthenticationError(
             "Invalid OTP token".to_string()
         ));
     }
 
     if response.status().as_u16() == 401 {
+        drop(response);
+
         let attempted_as = match whoami(params.http_client, params.registry, params.authorization).await {
             Ok(Some(username)) => username,
             Ok(None) => "an anonymous user".to_string(),
@@ -939,7 +950,7 @@ async fn handle_invalid_authentication_error(params: &NpmHttpParams<'_>, respons
         ));
     }
 
-    Ok(())
+    Ok(response)
 }
 
 fn is_otp_error(response: &Response) -> bool {

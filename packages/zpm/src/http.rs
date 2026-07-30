@@ -1,4 +1,4 @@
-use std::{collections::HashSet, future::Future, net::SocketAddr, sync::{Arc, LazyLock, OnceLock}, time::Duration};
+use std::{collections::HashSet, future::Future, net::SocketAddr, ops::{Deref, DerefMut}, sync::{Arc, LazyLock, OnceLock}, time::Duration};
 
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
@@ -8,7 +8,7 @@ use itertools::Itertools;
 #[cfg(not(all(target_arch = "wasm64", target_vendor = "browserpod")))]
 use reqwest::Identity;
 use reqwest::{dns::{self, Addrs}, header::{HeaderName, HeaderValue}, Body, Certificate, Client, ClientBuilder, Method, Proxy, RequestBuilder, Response, Url};
-use tokio::sync::OnceCell;
+use tokio::sync::{OnceCell, OwnedSemaphorePermit, Semaphore};
 use wax::Program;
 use zpm_config::{Configuration, NetworkSettings, Setting};
 use zpm_utils::Glob;
@@ -118,6 +118,7 @@ pub struct HttpClient {
 
     client: Client,
     network_clients: Vec<(Glob, Client)>,
+    network_semaphore: Arc<Semaphore>,
 
     /// Cache for GET requests to avoid duplicate network calls for the same URL.
     /// Uses OnceCell for each URL to handle concurrent requests to the same URL.
@@ -130,8 +131,60 @@ impl std::fmt::Debug for HttpClient {
             .field("config", &self.config)
             .field("client", &self.client)
             .field("network_clients", &format!("<{} entries>", self.network_clients.len()))
+            .field("network_semaphore", &self.network_semaphore)
             .field("get_cache", &format!("<{} entries>", self.get_cache.len()))
             .finish()
+    }
+}
+
+#[derive(Debug)]
+pub struct HttpResponse {
+    response: Response,
+    permit: Option<OwnedSemaphorePermit>,
+}
+
+impl HttpResponse {
+    fn new(response: Response, permit: OwnedSemaphorePermit) -> Self {
+        Self {response, permit: Some(permit)}
+    }
+
+    fn release_permit(&mut self) {
+        self.permit.take();
+    }
+
+    pub async fn bytes(self) -> Result<Bytes, reqwest::Error> {
+        let Self {response, permit} = self;
+        let result = response.bytes().await;
+        drop(permit);
+        result
+    }
+
+    pub async fn text(self) -> Result<String, reqwest::Error> {
+        let Self {response, permit} = self;
+        let result = response.text().await;
+        drop(permit);
+        result
+    }
+
+    pub fn error_for_status(self) -> Result<Self, reqwest::Error> {
+        let Self {response, permit} = self;
+
+        response.error_for_status()
+            .map(|response| Self {response, permit})
+    }
+}
+
+impl Deref for HttpResponse {
+    type Target = Response;
+
+    fn deref(&self) -> &Self::Target {
+        &self.response
+    }
+}
+
+impl DerefMut for HttpResponse {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.response
     }
 }
 
@@ -183,7 +236,7 @@ impl<'a> HttpRequest<'a> {
 
     async fn send_with<T, F, Fut>(self, consume: F) -> Result<T, reqwest::Error>
     where
-        F: Fn(Response) -> Fut,
+        F: Fn(HttpResponse) -> Fut,
         Fut: Future<Output = Result<T, reqwest::Error>>,
     {
         let mut retry_count
@@ -194,6 +247,12 @@ impl<'a> HttpRequest<'a> {
                 .map(|s| s.to_string());
 
         loop {
+            let permit
+                = self.client.network_semaphore.clone()
+                    .acquire_owned()
+                    .await
+                    .expect("network semaphore should remain open");
+
             let mut fetch_future = Box::pin(async {
                 self.builder.try_clone()
                     .expect("builder should be clonable")
@@ -233,6 +292,8 @@ impl<'a> HttpRequest<'a> {
 
             if self.enable_retry && retry_count < self.client.config.http_retry && is_failure {
                 retry_count += 1;
+                drop(response);
+                drop(permit);
 
                 let sleep_duration
                     = 2_u64.saturating_pow(retry_count as u32);
@@ -253,10 +314,11 @@ impl<'a> HttpRequest<'a> {
             };
 
             let result
-                = consume(response).await;
+                = consume(HttpResponse::new(response, permit)).await;
 
             if self.enable_retry && retry_count < self.client.config.http_retry && result.is_err() {
                 retry_count += 1;
+                drop(result);
 
                 let sleep_duration
                     = 2_u64.saturating_pow(retry_count as u32);
@@ -271,7 +333,7 @@ impl<'a> HttpRequest<'a> {
         }
     }
 
-    pub async fn send(self) -> Result<Response, reqwest::Error> {
+    pub async fn send(self) -> Result<HttpResponse, reqwest::Error> {
         self.send_with(|response| async move {
             Ok(response)
         }).await
@@ -283,7 +345,7 @@ impl<'a> HttpRequest<'a> {
 
     /// Buffers the response body inside the retry loop while retaining the
     /// drained response so callers can inspect its status and headers.
-    pub async fn send_bytes(self) -> Result<(Response, Bytes), reqwest::Error> {
+    pub async fn send_bytes(self) -> Result<(HttpResponse, Bytes), reqwest::Error> {
         let enable_status_check
             = self.enable_status_check;
 
@@ -307,6 +369,7 @@ impl<'a> HttpRequest<'a> {
                 body.extend_from_slice(&chunk);
             }
 
+            response.release_permit();
             Ok((response, body.freeze()))
         }).await
     }
@@ -378,8 +441,6 @@ impl HttpClient {
 
             // Enable connection keep-alive
             .tcp_keepalive(Duration::from_secs(60))
-
-            .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(config.settings.network_concurrency.value))
 
             .dns_resolver(Arc::new(HickoryDnsResolver::default()));
 
@@ -483,6 +544,9 @@ impl HttpClient {
     }
 
     pub fn new(config: &Configuration) -> Result<Arc<Self>, Error> {
+        let network_concurrency
+            = config.settings.network_concurrency.value;
+
         let network_settings: Vec<_> = config.settings.network_settings.clone()
             .into_iter()
             // Sort the config by key length to match on the most specific pattern.
@@ -516,6 +580,7 @@ impl HttpClient {
         Ok(Arc::new(Self {
             client,
             network_clients,
+            network_semaphore: Arc::new(Semaphore::new(network_concurrency)),
             config,
             get_cache: DashMap::new(),
         }))
@@ -600,5 +665,147 @@ impl HttpClient {
 
     pub fn put(&self, url: impl AsRef<str>) -> Result<HttpRequest<'_>, Error> {
         self.request(url, Method::PUT)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, convert::Infallible, sync::atomic::{AtomicUsize, Ordering}};
+
+    use futures::stream;
+    use http_body_util::{BodyExt, StreamBody};
+    use hyper::{body::Frame, server::conn::http1, service::service_fn, Request, StatusCode};
+    use hyper_util::rt::TokioIo;
+    use tokio::{net::TcpListener, task::JoinHandle};
+    use zpm_config::ConfigurationContext;
+    use zpm_utils::LastModifiedAt;
+
+    use super::*;
+
+    const REQUEST_COUNT: usize = 20;
+    const REQUEST_DELAY: Duration = Duration::from_millis(50);
+
+    #[derive(Default)]
+    struct ServerState {
+        active: AtomicUsize,
+        peak: AtomicUsize,
+    }
+
+    struct ActiveRequest(Arc<ServerState>);
+
+    impl ActiveRequest {
+        fn new(state: Arc<ServerState>) -> Self {
+            let active = state.active.fetch_add(1, Ordering::SeqCst) + 1;
+            state.peak.fetch_max(active, Ordering::SeqCst);
+            Self(state)
+        }
+    }
+
+    impl Drop for ActiveRequest {
+        fn drop(&mut self) {
+            self.0.active.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    fn test_client(network_concurrency: usize) -> Arc<HttpClient> {
+        let context = ConfigurationContext {
+            env: BTreeMap::new(),
+            user_cwd: None,
+            project_cwd: None,
+            package_cwd: None,
+        };
+        let mut last_modified_at = LastModifiedAt::new();
+        let mut config = Configuration::load(&context, &mut last_modified_at).unwrap();
+
+        config.settings.enforce_unsafe_http.value = true;
+        config.settings.http_retry.value = 0;
+        config.settings.network_concurrency.value = network_concurrency;
+
+        HttpClient::new(&config).unwrap()
+    }
+
+    async fn start_server() -> (String, Arc<ServerState>, JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let state = Arc::new(ServerState::default());
+        let server_state = state.clone();
+
+        let task = tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let connection_state = server_state.clone();
+
+                tokio::spawn(async move {
+                    let service = service_fn(move |request: Request<hyper::body::Incoming>| {
+                        let request_state = connection_state.clone();
+
+                        async move {
+                            let status = if request.uri().path() == "/failure" {
+                                StatusCode::INTERNAL_SERVER_ERROR
+                            } else {
+                                StatusCode::OK
+                            };
+                            let active_request = ActiveRequest::new(request_state);
+                            let body = StreamBody::new(stream::once(async move {
+                                tokio::time::sleep(REQUEST_DELAY).await;
+                                drop(active_request);
+                                Ok::<_, Infallible>(Frame::data(Bytes::from_static(b"ok")))
+                            })).boxed();
+
+                            Ok::<_, Infallible>(http::Response::builder()
+                                .status(status)
+                                .body(body)
+                                .unwrap())
+                        }
+                    });
+
+                    let _ = http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), service)
+                        .await;
+                });
+            }
+        });
+
+        (format!("http://{address}"), state, task)
+    }
+
+    #[tokio::test]
+    async fn network_concurrency_limits_in_flight_response_bodies() {
+        let network_concurrency = 2;
+        let client = test_client(network_concurrency);
+        let (server_url, state, server_task) = start_server().await;
+
+        futures::future::try_join_all((0..REQUEST_COUNT).map(|request_index| {
+            let client = client.clone();
+            let url = format!("{server_url}/{request_index}");
+
+            async move {
+                client.get(url)?.send().await?.bytes().await?;
+                Ok::<_, Error>(())
+            }
+        })).await.unwrap();
+
+        assert_eq!(state.peak.load(Ordering::SeqCst), network_concurrency);
+        assert_eq!(state.active.load(Ordering::SeqCst), 0);
+
+        server_task.abort();
+    }
+
+    #[tokio::test]
+    async fn network_concurrency_permit_is_released_after_failure() {
+        let client = test_client(1);
+        let (server_url, state, server_task) = start_server().await;
+
+        assert!(client.get(format!("{server_url}/failure")).unwrap().send().await.is_err());
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            client.get(format!("{server_url}/success"))?.send().await?.bytes().await?;
+            Ok::<_, Error>(())
+        }).await.unwrap().unwrap();
+
+        assert_eq!(state.peak.load(Ordering::SeqCst), 1);
+        assert_eq!(state.active.load(Ordering::SeqCst), 0);
+
+        server_task.abort();
     }
 }

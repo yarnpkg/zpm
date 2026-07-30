@@ -28,6 +28,7 @@ describe(`Features`, () => {
       `it should retry truncated response bodies`,
       makeTemporaryEnv({}, {
         httpRetry: 1,
+        networkConcurrency: 1,
         unsafeHttpWhitelist: [`127.0.0.1`],
       }, async ({path, run, source}) => {
         const archivePath = await tests.getPackageArchivePath(`no-deps`, `1.0.0`);

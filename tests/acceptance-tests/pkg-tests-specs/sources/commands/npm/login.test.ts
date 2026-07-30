@@ -108,7 +108,9 @@ describe(`Commands`, () => {
 
     test(
       `it should throw an error when credentials are incorrect`,
-      makeTemporaryEnv({}, async ({path, run, source}) => {
+      makeTemporaryEnv({}, {
+        networkConcurrency: 1,
+      }, async ({path, run, source}) => {
         await expect(
           run(`npm`, `login`, {
             env: {
