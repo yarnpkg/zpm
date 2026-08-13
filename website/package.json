@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build && node --experimental-strip-types scripts/generate-og.ts",
+    "build": "puppeteer browsers install chrome && astro build && node --experimental-strip-types scripts/generate-og.ts",
     "build:browserpod-yarn": "bash scripts/build-browserpod-yarn.sh",
     "preview": "astro preview",
     "record": "node --experimental-strip-types scripts/record-terminal.ts"
