@@ -48,6 +48,16 @@ pub enum PnpFallbackMode {
     All,
 }
 
+#[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LazyInstallMode {
+    #[literal("focused")]
+    Focused,
+
+    #[literal("all")]
+    All,
+}
+
 /// How far the node-modules linker is allowed to hoist a workspace's
 /// dependencies. Mirrors berry's `nmHoistingLimits`.
 #[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]

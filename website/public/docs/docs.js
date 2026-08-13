@@ -1,21 +1,7 @@
-/* ─────────────── Shared starfield + theme (minimal) ─────────────── */
+/* ─────────────── Shared starfield (minimal) ─────────────── */
+/* Theme state (window.__theme / window.__setTheme / #theme-toggle wiring)
+   is owned by Nav.astro, which runs before this script. */
 (function () {
-  // Theme
-  const saved = localStorage.getItem(`yarn-theme`) || `dark`;
-  document.documentElement.setAttribute(`data-theme`, saved);
-  window.__theme = saved;
-
-  function setTheme(t) {
-    document.documentElement.setAttribute(`data-theme`, t);
-    localStorage.setItem(`yarn-theme`, t);
-    window.__theme = t;
-    window.dispatchEvent(new CustomEvent(`themechange`, {detail: t}));
-  }
-  window.__setTheme = setTheme;
-
-  const btn = document.getElementById(`theme-toggle`);
-  if (btn) btn.addEventListener(`click`, () => setTheme(window.__theme === `dark` ? `light` : `dark`));
-
   // Starfield canvas (lighter, non-interactive)
   const canvas = document.getElementById(`stars`);
   if (!canvas) return;

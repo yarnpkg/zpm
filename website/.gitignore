@@ -1,2 +1,6 @@
 dist/
 .astro/
+.env
+.env.*
+!.env.example
+!.env.production

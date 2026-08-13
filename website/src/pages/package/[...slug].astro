@@ -60,19 +60,4 @@ const octicons = {
   <PackagePage client:only="react" brandIcons={brandIcons} octicons={octicons} />
 </BaseLayout>
 
-<script is:inline>
-(function(){
-  function setTheme(t) {
-    document.documentElement.setAttribute('data-theme', t);
-    localStorage.setItem('yarn-theme', t);
-    window.__theme = t;
-    window.dispatchEvent(new CustomEvent('themechange', {detail: t}));
-  }
-  window.__setTheme = setTheme;
-  window.__theme = localStorage.getItem('yarn-theme') || 'dark';
-  var btn = document.getElementById('theme-toggle');
-  if (btn) btn.addEventListener('click', function() {
-    setTheme(window.__theme === 'dark' ? 'light' : 'dark');
-  });
-})();
-</script>
+<!-- Theme wiring (window.__setTheme / #theme-toggle) is owned by Nav.astro. -->

@@ -228,6 +228,11 @@
         }
       }
     },
+    "lazyInstallMode": {
+      "type": "crate::LazyInstallMode",
+      "description": "Whether lazy installs should install only the active workspace and its dependencies or the entire project",
+      "default": "all"
+    },
     "networkSettings": {
       "type": "object",
       "description": "Configuration specific to each network setting",

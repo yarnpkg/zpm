@@ -12,7 +12,7 @@ const html = await renderDocsMarkdown(schemaToMarkdown(schema));
 const fields = schemaFieldNames(schema);
 ---
 
-<DocsLayout title="Manifest (package.json)" activePage="manifest" mainMaxWidth="820px" description="Reference for all supported package.json fields in Yarn projects.">
+<DocsLayout title="Manifest (package.json)" activePage="reference" mainMaxWidth="820px" description="Reference for all supported package.json fields in Yarn projects.">
   <Fragment slot="sidebar">
     <ReferenceSidebar activePage="manifest" fields={fields} />
   </Fragment>

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version=2.10.0
+version=3.0.1
 toolchain=browserpod-$version
 base_url=https://rt.browserpod.io/$version/rust
 tarball=browserpod-rust-$version.tar.gz
@@ -26,6 +26,8 @@ if command -v brew >/dev/null 2>&1; then
 
   if [[ -n "$llvm_prefix" && -d "$llvm_prefix/bin" ]]; then
     export PATH="$llvm_prefix/bin:$PATH"
+    export BP_CLANG="$llvm_prefix/bin/clang"
+    export BP_LLVM_AR="$llvm_prefix/bin/llvm-ar"
   fi
 fi
 

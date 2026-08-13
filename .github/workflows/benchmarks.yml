@@ -42,15 +42,22 @@ jobs:
 
   benchmark:
     strategy:
+      fail-fast: false
       matrix:
+        packageManager: ${{ fromJSON(github.event_name == 'schedule' && '[["Yarn 6.x","zpm"],["Yarn 4.x","yarn"],["npm","npm"],["pnpm","pnpm"],["Yarn Classic","classic"]]' || '[["Yarn 6.x","zpm"]]') }}
         benchmark:
           - [Next.js, next]
           - [Gatsby, gatsby]
           - [Monorepo, monorepo]
+        scenario:
+          - [Full cold install, install-full-cold]
+          - [Cache only, install-cache-only]
+          - [Cache + lockfile, install-cache-and-lock]
+          - [Recurrent call, install-ready]
 
     needs: [build]
 
-    name: 'Running the ${{matrix.benchmark[0]}} benchmark'
+    name: 'Running ${{matrix.packageManager[0]}} on ${{matrix.benchmark[0]}} (${{matrix.scenario[0]}})'
     runs-on: ubuntu-latest
 
     steps:
@@ -69,10 +76,6 @@ jobs:
       run: |
         chmod +x local/{yarn,yarn-bin}
 
-    - name: Install Flamegraph
-      run: |
-        cargo install flamegraph@0.6.9
-
     - name: Install Hyperfine
       run: |
         wget https://github.com/sharkdp/hyperfine/releases/download/v1.10.0/hyperfine_1.10.0_amd64.deb
@@ -88,10 +91,10 @@ jobs:
 
     - name: 'Run the performance test'
       run: |
-        bash scripts/bench-run.sh zpm ${{matrix.benchmark[1]}} hyperfine "$BENCH_DIR" || true
+        bash scripts/bench-run.sh ${{matrix.packageManager[1]}} ${{matrix.benchmark[1]}} hyperfine "$BENCH_DIR" ${{matrix.scenario[1]}} || true
 
         if [[ '${{github.event.inputs.sendReport}}' != 'false' ]]; then
-          yarn node scripts/submit-bench-data.js zpm ${{matrix.benchmark[1]}} "$BENCH_DIR"
+          yarn node scripts/submit-bench-data.js ${{matrix.packageManager[1]}} ${{matrix.benchmark[1]}} "$BENCH_DIR"
         fi
       env:
         DD_API_KEY: ${{secrets.DD_API_KEY}}

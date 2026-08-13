@@ -9,6 +9,15 @@
     { "label": "Quiz", "key": "quiz", "href": "/quiz/" },
     { "label": "Blog", "key": "blog", "href": "/blog" }
   ],
+  "sidebarToTopbar": {
+    "getting-started": "install",
+    "concepts": "concepts",
+    "advanced": "extra",
+    "appendix": "extra",
+    "contributing": "extra",
+    "extra": "extra",
+    "reference": "reference"
+  },
   "categoryToSidebar": {
     "getting-started": "getting-started",
     "concepts": "concepts",
@@ -30,8 +39,8 @@
       "links": [
         { "label": "Manifest — package.json", "href": "/configuration/manifest/", "page": "manifest" },
         { "label": "Settings — .yarnrc.yml", "href": "/configuration/yarnrc/", "page": "yarnrc" },
-        { "label": "Yarn CLI", "href": "/cli/install/" },
-        { "label": "Yarn Switch CLI", "href": "/switch/switch/" },
+        { "label": "Yarn CLI", "href": "/cli/install/", "pagePrefix": "cli/" },
+        { "label": "Yarn Switch CLI", "href": "/switch/switch/", "pagePrefix": "switch/" },
         { "label": "Protocols", "href": "/protocol/npm/", "pagePrefix": "protocol/" }
       ],
       "protocols": [

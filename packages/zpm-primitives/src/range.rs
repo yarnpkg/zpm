@@ -6,7 +6,7 @@ use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
 use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
 
-use crate::{PeerRange, PypiSpecifierSet, SemverPeerRange};
+use crate::{PeerRange, PypiRangeParameters, PypiSpecifierSet, SemverPeerRange};
 
 use super::{Descriptor, Ident, Registry};
 
@@ -28,18 +28,29 @@ fn format_registry_tag(ident: &Option<Ident>, tag: &str) -> String {
     }
 }
 
-fn format_pypi_specifier(ident: &Option<Ident>, specifier: &PypiSpecifierSet) -> String {
-    match ident {
-        Some(ident) => format!("pypi:{}@{}", ident.to_file_string(), specifier.to_file_string()),
-        None => format!("pypi:{}", specifier.to_file_string()),
+fn format_pypi_parameters(parameters: &Option<PypiRangeParameters>) -> String {
+    match parameters {
+        Some(parameters) if !parameters.is_empty() => format!("#{}", parameters.to_file_string()),
+        _ => String::new(),
     }
 }
 
-fn format_pypi_tag(ident: &Option<Ident>, tag: &str) -> String {
-    match ident {
+fn format_pypi_specifier(ident: &Option<Ident>, specifier: &PypiSpecifierSet, parameters: &Option<PypiRangeParameters>) -> String {
+    let base = match ident {
+        Some(ident) => format!("pypi:{}@{}", ident.to_file_string(), specifier.to_file_string()),
+        None => format!("pypi:{}", specifier.to_file_string()),
+    };
+
+    format!("{}{}", base, format_pypi_parameters(parameters))
+}
+
+fn format_pypi_tag(ident: &Option<Ident>, tag: &str, parameters: &Option<PypiRangeParameters>) -> String {
+    let base = match ident {
         Some(ident) => format!("pypi:{}@{}", ident.to_file_string(), tag),
         None => format!("pypi:{}", tag),
-    }
+    };
+
+    format!("{}{}", base, format_pypi_parameters(parameters))
 }
 
 fn format_jsr_semver(ident: &Option<Ident>, range: &zpm_semver::Range) -> String {
@@ -121,20 +132,22 @@ pub enum Range {
         tag: EcoString,
     },
 
-    #[pattern(r"pypi:(?:(?<ident>.*)@)?(?<specifier>.*)")]
-    #[to_file_string(|params| format_pypi_specifier(&params.ident, &params.specifier))]
-    #[to_print_string(|params| DataType::Range.colorize(&format_pypi_specifier(&params.ident, &params.specifier)))]
+    #[pattern(r"pypi:(?:(?<ident>(?:@[^#@]+/)?[^#@]+)@)?(?<specifier>[^#]*)(?:#(?<parameters>[^#]+))?")]
+    #[to_file_string(|params| format_pypi_specifier(&params.ident, &params.specifier, &params.parameters))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_pypi_specifier(&params.ident, &params.specifier, &params.parameters)))]
     PypiSpecifier {
         ident: Option<Ident>,
         specifier: PypiSpecifierSet,
+        parameters: Option<PypiRangeParameters>,
     },
 
-    #[pattern(r"pypi:(?:(?<ident>.*)@)?(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
-    #[to_file_string(|params| format_pypi_tag(&params.ident, params.tag.as_str()))]
-    #[to_print_string(|params| DataType::Range.colorize(&format_pypi_tag(&params.ident, params.tag.as_str())))]
+    #[pattern(r"pypi:(?:(?<ident>(?:@[^#@]+/)?[^#@]+)@)?(?<tag>[-a-z0-9._^v][-a-z0-9._]*)(?:#(?<parameters>[^#]+))?")]
+    #[to_file_string(|params| format_pypi_tag(&params.ident, params.tag.as_str(), &params.parameters))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_pypi_tag(&params.ident, params.tag.as_str(), &params.parameters)))]
     PypiTag {
         ident: Option<Ident>,
         tag: EcoString,
+        parameters: Option<PypiRangeParameters>,
     },
 
     #[pattern(r"jsr:(?:(?<ident>.*)@)?(?<range>.*)")]
@@ -289,10 +302,10 @@ impl Range {
                 => Some(Descriptor::new(params.ident.clone().unwrap(), RegistryTagRange {ident: None, tag: params.tag.clone()}.into())),
 
             Range::PypiSpecifier(params) if params.ident.is_some()
-                => Some(Descriptor::new(params.ident.clone().unwrap(), PypiSpecifierRange {ident: None, specifier: params.specifier.clone()}.into())),
+                => Some(Descriptor::new(params.ident.clone().unwrap(), PypiSpecifierRange {ident: None, specifier: params.specifier.clone(), parameters: params.parameters.clone()}.into())),
 
             Range::PypiTag(params) if params.ident.is_some()
-                => Some(Descriptor::new(params.ident.clone().unwrap(), PypiTagRange {ident: None, tag: params.tag.clone()}.into())),
+                => Some(Descriptor::new(params.ident.clone().unwrap(), PypiTagRange {ident: None, tag: params.tag.clone(), parameters: params.parameters.clone()}.into())),
 
             Range::JsrSemver(params) if params.ident.is_some()
                 => Some(Descriptor::new(params.ident.clone().unwrap(), JsrSemverRange {ident: None, range: params.range.clone()}.into())),
@@ -330,11 +343,11 @@ impl Range {
             },
 
             Range::PypiSpecifier(params) => {
-                Range::PypiSpecifier(PypiSpecifierRange {ident: None, specifier: params.specifier.clone()})
+                Range::PypiSpecifier(PypiSpecifierRange {ident: None, specifier: params.specifier.clone(), parameters: params.parameters.clone()})
             },
 
             Range::PypiTag(params) => {
-                Range::PypiTag(PypiTagRange {ident: None, tag: params.tag.clone()})
+                Range::PypiTag(PypiTagRange {ident: None, tag: params.tag.clone(), parameters: params.parameters.clone()})
             },
 
             Range::JsrSemver(params) => {

@@ -6,12 +6,10 @@ use zpm_utils::is_ci;
 use crate::errors::Error;
 
 static HTTP_CLIENT: LazyLock<Result<Client, Error>> = LazyLock::new(|| {
-    let mut builder = reqwest::Client::builder();
+    let builder = reqwest::Client::builder();
 
     #[cfg(not(all(target_arch = "wasm64", target_vendor = "browserpod")))]
-    {
-        builder = builder.use_rustls_tls();
-    }
+    let builder = builder.use_rustls_tls();
 
     let client = builder
         .build()?;

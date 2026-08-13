@@ -17,12 +17,11 @@ const browserPodHeaders = {
 };
 
 function browserPodPreviewHeaders() {
-  const applyHeaders = (server) => {
+  const applyHeaders = server => {
     server.middlewares.use((req, res, next) => {
-      if (req.url?.startsWith(`/playground`)) {
+      if (req.url?.startsWith(`/playground`))
         for (const [name, value] of Object.entries(browserPodHeaders))
           res.setHeader(name, value);
-      }
 
       next();
     });
@@ -37,6 +36,9 @@ function browserPodPreviewHeaders() {
 
 export default defineConfig({
   site: `https://v6.yarnpkg.com`,
+  devToolbar: {
+    enabled: false,
+  },
   integrations: [react(), sitemap({filter: page => !page.includes(`/presentation/`)})],
   build: {
     format: `file`,

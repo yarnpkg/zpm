@@ -2,9 +2,14 @@ import '@xterm/xterm/css/xterm.css';
 import type {Terminal as XtermTerminal} from '@xterm/xterm';
 import {useEffect, useRef}              from 'react';
 
+export type PlaygroundPodApi = {
+  writeFile(path: string, content: string): Promise<void>;
+};
+
 interface Props {
   files: Array<PlaygroundFile>;
   version: string;
+  onApi?: (api: PlaygroundPodApi | null) => void;
 }
 
 type BrowserPodApi = {
@@ -46,14 +51,13 @@ export type PlaygroundFile = {
 
 const cyan = `\x1b[38;2;125;211;252m`;
 const green = `\x1b[38;2;134;239;172m`;
-const purple = `\x1b[38;2;216;180;254m`;
 const yellow = `\x1b[38;2;253;224;71m`;
 const dim = `\x1b[38;2;148;163;184m`;
 const red = `\x1b[38;2;252;165;165m`;
 const reset = `\x1b[0m`;
 
 const PROJECT_PATH = `/home/user/yarn-playground`;
-const BROWSERPOD_RUNTIME_URL = `https://rt.browserpod.io/2.10.0/browserpod.js`;
+const BROWSERPOD_RUNTIME_URL = `https://rt.browserpod.io/3.0.1/browserpod.js`;
 const YARN_BIN_DIR = `/home/user/.local/bin`;
 const YARN_BIN_PATH = `${YARN_BIN_DIR}/yarn`;
 const YARN_BIN_ASSET = `/browserpod/yarn-bin.wasm`;
@@ -65,7 +69,7 @@ function writeLines(term: XtermTerminal, lines: Array<string>) {
 
 function getBrowserPodApiKey() {
   const env = import.meta.env as Record<string, string | undefined>;
-  return env.PUBLIC_BROWSERPOD_API_KEY ?? env.VITE_BPAPIKEY ?? env.VITE_BP_APIKEY ?? ``;
+  return env.PUBLIC_BROWSERPOD_API_KEY ?? ``;
 }
 
 function dirname(path: string) {
@@ -90,6 +94,12 @@ function formatUnknownError(error: unknown) {
   }
 }
 
+async function writeProjectFile(pod: BrowserPodInstance, path: string, content: string) {
+  const podFile = await pod.createFile(`${PROJECT_PATH}/${path}`, `utf-8`);
+  await podFile.write(content);
+  await podFile.close();
+}
+
 async function writeProjectFiles(pod: BrowserPodInstance, files: Array<PlaygroundFile>) {
   try {
     await pod.createDirectory(PROJECT_PATH, {recursive: true});
@@ -102,8 +112,9 @@ async function writeProjectFiles(pod: BrowserPodInstance, files: Array<Playgroun
   for (const file of files) {
     const directory = dirname(file.path);
 
-    if (directory)
+    if (directory) {
       directories.add(directory);
+    }
   }
 
   for (const directory of directories) {
@@ -117,28 +128,57 @@ async function writeProjectFiles(pod: BrowserPodInstance, files: Array<Playgroun
   }
 
   for (const file of files) {
-    const path = `${PROJECT_PATH}/${file.path}`;
-
     try {
-      const podFile = await pod.createFile(path, `utf-8`);
-      await podFile.write(file.content);
-      await podFile.close();
+      await writeProjectFile(pod, file.path, file.content);
     } catch (error) {
-      throw new Error(`Failed to write ${path}: ${formatUnknownError(error)}`);
+      throw new Error(`Failed to write ${PROJECT_PATH}/${file.path}: ${formatUnknownError(error)}`);
     }
   }
 }
 
-async function writeYarnBinary(pod: BrowserPodInstance) {
+async function writeYarnBinary(pod: BrowserPodInstance, onProgress: (ratio: number) => void) {
   const response = await fetch(YARN_BIN_ASSET);
 
   if (!response.ok)
     return false;
 
+  const total = Number(response.headers.get(`content-length`)) || 0;
+  let data: ArrayBuffer | Uint8Array;
+
+  if (response.body && total > 0) {
+    const reader = response.body.getReader();
+    const chunks: Array<Uint8Array> = [];
+    let received = 0;
+
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done)
+        break;
+
+      chunks.push(value);
+      received += value.length;
+
+      // The transfer may be compressed, in which case content-length
+      // undershoots the decoded byte count; clamp to keep the display sane.
+      onProgress(Math.min(1, received / total));
+    }
+
+    const merged = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    data = merged;
+  } else {
+    data = await response.arrayBuffer();
+  }
+
   await pod.createDirectory(YARN_BIN_DIR, {recursive: true});
 
   const podFile = await pod.createFile(YARN_BIN_PATH, `binary`);
-  await podFile.write(await response.arrayBuffer());
+  await podFile.write(data instanceof Uint8Array ? data.buffer as ArrayBuffer : data);
   await podFile.close();
   return true;
 }
@@ -158,8 +198,11 @@ async function writeShellConfig(pod: BrowserPodInstance) {
   await podFile.close();
 }
 
-export function PlaygroundTerminal({files, version}: Props) {
+export function PlaygroundTerminal({files, version, onApi}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const onApiRef = useRef(onApi);
+  onApiRef.current = onApi;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -191,7 +234,7 @@ export function PlaygroundTerminal({files, version}: Props) {
         fontFamily: `'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`,
         fontSize: 13,
         lineHeight: 1.35,
-        scrollback: 200,
+        scrollback: 1000,
         theme: {
           background: `#00000000`,
           black: `#0f172a`,
@@ -216,9 +259,23 @@ export function PlaygroundTerminal({files, version}: Props) {
         },
       });
 
+      let awaitingRestart = false;
+      let launchShell: (() => Promise<void>) | null = null;
+
       term.loadAddon(fitAddon);
       term.open(container);
-      term.onData(data => browserPodTerminal?.readData(data));
+      term.onData(data => {
+        if (awaitingRestart) {
+          if (data.includes(`\r`) && launchShell) {
+            awaitingRestart = false;
+            launchShell();
+          }
+
+          return;
+        }
+
+        browserPodTerminal?.readData(data);
+      });
 
       focusTerm = () => term?.focus();
       container.addEventListener(`pointerdown`, focusTerm);
@@ -244,7 +301,7 @@ export function PlaygroundTerminal({files, version}: Props) {
 
       if (!apiKey) {
         writeLines(term, [
-          `${yellow}[browserpod]${reset} Missing API key; set PUBLIC_BROWSERPOD_API_KEY or VITE_BP_APIKEY.`,
+          `${yellow}[browserpod]${reset} Missing API key; set PUBLIC_BROWSERPOD_API_KEY.`,
           `${dim}The terminal is wired to BrowserPod, but boot is skipped without credentials.${reset}`,
           `${green}$${reset} `,
         ]);
@@ -261,6 +318,8 @@ export function PlaygroundTerminal({files, version}: Props) {
       }
 
       try {
+        writeLines(term, [`${dim}[browserpod] Booting pod…${reset}`]);
+
         const {BrowserPod} = await import(/* @vite-ignore */ BROWSERPOD_RUNTIME_URL) as {BrowserPod: BrowserPodApi | null};
 
         if (!BrowserPod)
@@ -284,19 +343,56 @@ export function PlaygroundTerminal({files, version}: Props) {
 
         await writeProjectFiles(pod, files);
 
-        if (await writeYarnBinary(pod)) {
+        onApiRef.current?.({
+          writeFile: async (path, content) => {
+            if (disposed)
+              return;
+
+            await writeProjectFile(pod, path, content);
+          },
+        });
+
+        const mounted = await writeYarnBinary(pod, ratio => {
+          term?.write(`\r\x1b[K${dim}[browserpod] Downloading the Yarn binary… ${Math.round(ratio * 100)}%${reset}`);
+        });
+
+        if (disposed || !term)
+          return;
+
+        term.write(`\r\x1b[K`);
+
+        if (mounted) {
           writeLines(term, [
-            `${cyan}[browserpod]${reset} Mounted ${YARN_BIN_ASSET}`,
+            `${cyan}[browserpod]${reset} Mounted the WASM Yarn binary`,
             `${cyan}[browserpod]${reset} Starting shell; \`yarn\` is available on PATH.`,
             ``,
           ]);
 
           await writeShellConfig(pod);
-          await pod.run(`/bin/bash`, [`--rcfile`, BASHRC_PATH, `-i`], {
-            cwd: PROJECT_PATH,
-            env: [`PATH=${YARN_BIN_DIR}:/bin:/usr/bin`],
-            terminal: browserPodTerminal,
-          });
+
+          launchShell = async () => {
+            try {
+              await pod.run(`/bin/bash`, [`--rcfile`, BASHRC_PATH, `-i`], {
+                cwd: PROJECT_PATH,
+                env: [`PATH=${YARN_BIN_DIR}:/bin:/usr/bin`],
+                terminal: browserPodTerminal!,
+              });
+            } catch (error) {
+              if (disposed || !term)
+                return;
+
+              writeLines(term, [`${red}[browserpod]${reset} ${formatUnknownError(error)}`]);
+            }
+
+            if (disposed || !term)
+              return;
+
+            awaitingRestart = true;
+            writeLines(term, [
+              ``,
+              `${yellow}[browserpod]${reset} Shell exited — press Enter to start a new one.`,
+            ]);
+          };
         } else {
           writeLines(term, [
             `${yellow}[browserpod]${reset} ${YARN_BIN_ASSET} is missing.`,
@@ -304,8 +400,28 @@ export function PlaygroundTerminal({files, version}: Props) {
             `${cyan}[browserpod]${reset} Opening BrowserPod bash in the mounted project instead.`,
           ]);
 
-          await pod.run(`bash`, [], {cwd: PROJECT_PATH, terminal: browserPodTerminal});
+          launchShell = async () => {
+            try {
+              await pod.run(`bash`, [], {cwd: PROJECT_PATH, terminal: browserPodTerminal!});
+            } catch (error) {
+              if (disposed || !term)
+                return;
+
+              writeLines(term, [`${red}[browserpod]${reset} ${formatUnknownError(error)}`]);
+            }
+
+            if (disposed || !term)
+              return;
+
+            awaitingRestart = true;
+            writeLines(term, [
+              ``,
+              `${yellow}[browserpod]${reset} Shell exited — press Enter to start a new one.`,
+            ]);
+          };
         }
+
+        launchShell();
       } catch (error) {
         if (!term || disposed)
           return;
@@ -320,7 +436,10 @@ export function PlaygroundTerminal({files, version}: Props) {
     start();
 
     return () => {
+      // BrowserPod 3.0 exposes no shutdown API for pods or terminals, so a
+      // replaced pod (e.g. on template switch) is left for the GC to collect.
       disposed = true;
+      onApiRef.current?.(null);
       resizeObserver?.disconnect();
       if (focusTerm)
         container.removeEventListener(`pointerdown`, focusTerm);

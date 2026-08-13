@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::{Arc, LazyLock, Mutex}};
+use std::{collections::{BTreeMap, BTreeSet, HashMap, HashSet}, sync::{Arc, LazyLock, Mutex}};
 
 use chrono::{DateTime, Utc};
 use colored::Colorize;
@@ -208,20 +208,25 @@ impl IntoResolutionResult for FetchResult {
 struct InstallMaps {
     resolution_map: Arc<WaitMap<Descriptor, ResolutionResult>>,
     fetch_map: Arc<WaitMap<Locator, FetchResult>>,
+    resolution_tx: tokio::sync::mpsc::UnboundedSender<ResolutionEvent>,
 }
 
-/// Resolve a single descriptor: runs `get_or_init` for the resolution + starts
-/// the fetch, then returns child descriptors to be resolved next.
-///
-/// The resolution logic is split: `get_or_init` runs only the core resolution +
-/// starts the fetch. Children are returned (not recursed into) so the caller
-/// can drive them iteratively, avoiding stack overflow on deep dependency trees.
+/// The work unlocked by resolving a descriptor. Child resolutions and the
+/// package fetch can be scheduled independently.
+struct ResolutionEvent {
+    children: Vec<Descriptor>,
+    locator: Locator,
+    is_mock_request: bool,
+}
+
+/// Resolve a single descriptor. The initializer emits a [`ResolutionEvent`]
+/// so its children and fetch can be scheduled independently.
 async fn resolve_one<'a>(
     descriptor: Descriptor,
     ctx: &'a InstallContext<'a>,
     lockfile: &'a Lockfile,
     maps: &'a InstallMaps,
-) -> Vec<Descriptor> {
+) {
     let cell
         = maps.resolution_map.entry(descriptor.clone());
 
@@ -229,53 +234,76 @@ async fn resolve_one<'a>(
         resolve_descriptor_impl(descriptor.clone(), ctx, lockfile, maps)
     }).await;
 
-    let Ok(result) = result else {
-        return vec![];
-    };
-
-    let children
-        = result.resolution.dependencies
-            .values()
-            .chain(result.resolution.variants.iter())
-            .cloned()
-            .collect();
-
-    children
+    // Errors are collected from the WaitMap after both worklists drain.
+    let _ = result;
 }
 
 /// Iteratively resolve all descriptors starting from the given roots.
-/// Uses `FuturesUnordered` to process descriptors concurrently without
-/// recursive async calls (which would overflow the stack on deep trees).
+/// Resolution and fetch use separate worklists so downloading and packing a
+/// parent archive never delays discovery of its child dependencies.
 async fn resolve_all<'a>(
     roots: impl IntoIterator<Item = Descriptor>,
     ctx: &'a InstallContext<'a>,
     lockfile: &'a Lockfile,
     maps: &'a InstallMaps,
+    mut resolution_rx: tokio::sync::mpsc::UnboundedReceiver<ResolutionEvent>,
 ) {
-    let mut in_flight
+    let mut resolving
         = FuturesUnordered::new();
+    let mut fetching
+        = FuturesUnordered::new();
+    let mut scheduled
+        = HashSet::new();
 
     for descriptor in roots {
-        in_flight.push(resolve_one(descriptor, ctx, lockfile, maps));
+        if scheduled.insert(descriptor.clone()) {
+            resolving.push(resolve_one(descriptor, ctx, lockfile, maps));
+        }
     }
 
-    while let Some(children) = in_flight.next().await {
-        for child in children {
-            // Only schedule children whose resolution hasn't been started yet.
-            // This prevents infinite loops on cyclic dependency graphs.
-            let cell
-                = maps.resolution_map.entry(child.clone());
+    enum Completed {
+        Resolution,
+        Fetch,
+        ResolutionEvent(ResolutionEvent),
+    }
 
-            if !cell.initialized() {
-                in_flight.push(resolve_one(child, ctx, lockfile, maps));
+    while !resolving.is_empty() || !fetching.is_empty() || !resolution_rx.is_empty() {
+        let completed = tokio::select! {
+            result = resolving.next(), if !resolving.is_empty() => {
+                result.expect("resolution worklist cannot be empty");
+                Completed::Resolution
+            },
+            result = fetching.next(), if !fetching.is_empty() => {
+                result.expect("fetch worklist cannot be empty");
+                Completed::Fetch
+            },
+            event = resolution_rx.recv() => {
+                Completed::ResolutionEvent(event.expect("resolution sender cannot close during resolution"))
+            },
+        };
+
+        if let Completed::ResolutionEvent(event) = completed {
+            fetching.push(ensure_fetched(
+                event.locator,
+                event.is_mock_request,
+                ctx,
+                maps,
+            ));
+
+            for child in event.children {
+                // Deduplicate at queue insertion time. Checking the OnceCell
+                // isn't sufficient because queued futures may not be polled yet.
+                if scheduled.insert(child.clone()) {
+                    resolving.push(resolve_one(child, ctx, lockfile, maps));
+                }
             }
         }
     }
 }
 
 /// The actual resolution logic for a single descriptor.
-/// Returns the resolution result; does NOT recurse into children (that happens
-/// in `resolve_one` after the OnceCell init completes, via the `resolve_all` worklist).
+/// Returns the resolution result and emits its children to the iterative
+/// `resolve_all` worklist instead of recursing into them.
 ///
 /// Returns a `BoxFuture` to support recursive calls for inner descriptors
 /// (e.g. alias->inner, patch->inner) without causing infinite future sizes.
@@ -302,7 +330,7 @@ fn resolve_descriptor_impl<'a>(
                             verify_resolution_consistency(&descriptor, &result.resolution.locator)
                         }).await.map_err(Arc::new)?;
                     }
-                    start_fetch(&result, ctx, maps).await;
+                    enqueue_resolution(&result, ctx, maps);
                     return Ok(result);
                 },
 
@@ -328,7 +356,7 @@ fn resolve_descriptor_impl<'a>(
                         ).await.map_err(|_| Error::TaskTimeout)?
                     }).await.map_err(Arc::new)?;
 
-                    start_fetch(&result, ctx, maps).await;
+                    enqueue_resolution(&result, ctx, maps);
                     return Ok(result);
                 },
             }
@@ -418,18 +446,18 @@ fn resolve_descriptor_impl<'a>(
             ).await.map_err(|_| Error::TaskTimeout)?
         }).await.map_err(Arc::new)?;
 
-        // Phase 4: Start fetch (children are handled by resolve_all worklist after init completes)
-        start_fetch(&result, ctx, maps).await;
+        enqueue_resolution(&result, ctx, maps);
 
         Ok(result)
     }.boxed()
 }
 
-/// Start a fetch for the resolved locator.
-async fn start_fetch<'a>(
+/// Emit the child resolutions and fetch unlocked by a successful resolution.
+/// The scheduler runs them independently so both pipelines can overlap.
+fn enqueue_resolution(
     result: &ResolutionResult,
-    ctx: &'a InstallContext<'a>,
-    maps: &'a InstallMaps,
+    ctx: &InstallContext<'_>,
+    maps: &InstallMaps,
 ) {
     let systems
         = ctx.systems.unwrap();
@@ -448,7 +476,16 @@ async fn start_fetch<'a>(
         }
     }
 
-    ensure_fetched(locator, is_mock_request, ctx, maps).await;
+    let children
+        = result.resolution.dependencies
+            .values()
+            .chain(result.resolution.variants.iter())
+            .cloned()
+            .collect();
+
+    maps.resolution_tx
+        .send(ResolutionEvent {children, locator, is_mock_request})
+        .expect("resolution receiver cannot close during resolution");
 }
 
 /// Ensure a locator is fetched. Uses the fetch WaitMap for deduplication.
@@ -777,12 +814,14 @@ impl InstallOpResult {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
 #[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
 #[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
 pub struct InstallState {
     pub last_installed_at: u128,
+    pub installed_workspaces: Option<BTreeSet<Ident>>,
+    pub install_config_hash: Option<Hash64>,
     pub content_flags: BTreeMap<Locator, ContentFlags>,
     pub resolution_tree: ResolutionTree,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
@@ -809,6 +848,29 @@ pub struct InstallState {
     pub nm_mode: Option<String>,
 }
 
+impl Default for InstallState {
+    fn default() -> Self {
+        Self {
+            last_installed_at: 0,
+            installed_workspaces: Some(BTreeSet::new()),
+            install_config_hash: None,
+            content_flags: BTreeMap::new(),
+            resolution_tree: ResolutionTree::default(),
+            descriptor_to_locator: BTreeMap::new(),
+            normalized_resolutions: BTreeMap::new(),
+            packages_by_location: BTreeMap::new(),
+            locations_by_package: BTreeMap::new(),
+            optional_packages: BTreeSet::new(),
+            disabled_locators: BTreeSet::new(),
+            conditional_locators: BTreeSet::new(),
+            island_descriptor_to_locator: BTreeMap::new(),
+            island_normalized_resolutions: BTreeMap::new(),
+            cache_checksums: BTreeMap::new(),
+            nm_mode: None,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Install {
     pub lockfile: Lockfile,
@@ -816,6 +878,7 @@ pub struct Install {
     pub package_data: BTreeMap<Locator, PackageData>,
     pub install_state: InstallState,
     pub roots: BTreeSet<Descriptor>,
+    pub installed_workspaces: Option<BTreeSet<Ident>>,
     pub resolved_islands: Vec<crate::island::ResolvedIsland>,
     pub skip_build: bool,
     pub skip_link_step: bool,
@@ -977,8 +1040,6 @@ impl Install {
             self.lockfile.workspaces
                 = compute_workspace_hashes(&graph, &workspace_locators);
 
-            project.attach_install_state(self.install_state)?;
-
             if !self.skip_lockfile_update {
                 project.write_lockfile(&self.lockfile)?;
             }
@@ -1012,6 +1073,12 @@ impl Install {
 
             self.install_state.packages_by_location
                 = link_result.packages_by_location;
+
+            self.install_state.installed_workspaces
+                = self.installed_workspaces.clone();
+
+            self.install_state.install_config_hash
+                = Some(project.install_config_hash());
 
             project.attach_install_state(self.install_state)?;
 
@@ -1099,6 +1166,11 @@ impl<'a> InstallManager<'a> {
         self
     }
 
+    pub fn with_installed_workspaces(mut self, installed_workspaces: Option<BTreeSet<Ident>>) -> Self {
+        self.result.installed_workspaces = installed_workspaces;
+        self
+    }
+
     pub fn with_constraints_check(mut self, constraints_check: bool) -> Self {
         self.result.constraints_check = constraints_check;
         self
@@ -1115,9 +1187,13 @@ impl<'a> InstallManager<'a> {
     }
 
     pub async fn resolve_and_fetch(mut self) -> Result<Install, Error> {
+        let (resolution_tx, resolution_rx)
+            = tokio::sync::mpsc::unbounded_channel();
+
         let maps = InstallMaps {
             resolution_map: Arc::new(WaitMap::new()),
             fetch_map: Arc::new(WaitMap::new()),
+            resolution_tx,
         };
 
         let lockfile
@@ -1181,7 +1257,7 @@ impl<'a> InstallManager<'a> {
         let roots = self.result.roots.clone();
 
         async_section("Installing packages", async {
-            let greedy_future = resolve_all(roots, &self.context, &lockfile, &maps);
+            let greedy_future = resolve_all(roots, &self.context, &lockfile, &maps, resolution_rx);
 
             if let Some(ref islands) = resolved_islands {
                 // Store resolved islands for use during linking
@@ -1235,43 +1311,43 @@ impl<'a> InstallManager<'a> {
                 greedy_future.await;
             }
 
+            // Collect errors from both maps
+            let mut errors
+                = maps.resolution_map.collect_errors();
+
+            errors.extend(maps.fetch_map.collect_errors());
+
+            if !errors.is_empty() {
+                return Err(Error::SilentError);
+            }
+
+            let resolution_map
+                = Arc::try_unwrap(maps.resolution_map)
+                    .unwrap_or_else(|_| panic!("resolution_map should have no other references"));
+
+            let fetch_map
+                = Arc::try_unwrap(maps.fetch_map)
+                    .unwrap_or_else(|_| panic!("fetch_map should have no other references"));
+
+            for (descriptor, result) in resolution_map.into_results() {
+                let Ok(ResolutionResult { resolution, original_resolution, package_data }) = result else {
+                    unreachable!("Already handled above")
+                };
+
+                self.record_descriptor(descriptor, resolution.locator.clone());
+                self.record_resolution(resolution, original_resolution, package_data)?;
+            }
+
+            for (locator, result) in fetch_map.into_results() {
+                let Ok(FetchResult {package_data, ..}) = result else {
+                    unreachable!("Already handled above");
+                };
+
+                self.record_fetch(locator, package_data)?;
+            }
+
             Ok::<(), Error>(())
         }).await?;
-
-        // Collect errors from both maps
-        let mut errors
-            = maps.resolution_map.collect_errors();
-
-        errors.extend(maps.fetch_map.collect_errors());
-
-        if !errors.is_empty() {
-            return Err(Error::SilentError);
-        }
-
-        let resolution_map
-            = Arc::try_unwrap(maps.resolution_map)
-                .unwrap_or_else(|_| panic!("resolution_map should have no other references"));
-
-        let fetch_map
-            = Arc::try_unwrap(maps.fetch_map)
-                .unwrap_or_else(|_| panic!("fetch_map should have no other references"));
-
-        for (descriptor, result) in resolution_map.into_results() {
-            let Ok(ResolutionResult { resolution, original_resolution, package_data }) = result else {
-                unreachable!("Already handled above")
-            };
-
-            self.record_descriptor(descriptor, resolution.locator.clone());
-            self.record_resolution(resolution, original_resolution, package_data)?;
-        }
-
-        for (locator, result) in fetch_map.into_results() {
-            let Ok(FetchResult {package_data, ..}) = result else {
-                unreachable!("Already handled above");
-            };
-
-            self.record_fetch(locator, package_data)?;
-        }
 
         let check_checksums = self.context.check_checksums;
 
@@ -1478,9 +1554,25 @@ impl<'a> InstallManager<'a> {
     }
 
     fn record_resolution(&mut self, resolution: Resolution, original_resolution: Resolution, package_data: Option<PackageData>) -> Result<(), Error> {
-        self.result.install_state.normalized_resolutions.insert(resolution.locator.clone(), resolution.clone());
+        let locator
+            = resolution.locator.clone();
+        let is_new_package
+            = !self.result.install_state.normalized_resolutions.contains_key(&locator);
 
-        self.result.lockfile.entries.insert(resolution.locator.clone(), LockfileEntry {
+        self.result.install_state.normalized_resolutions.insert(locator.clone(), resolution.clone());
+
+        if is_new_package {
+            tracing::event!(
+                target: "yarn::resolver",
+                tracing::Level::INFO,
+                locator = %locator.to_file_string(),
+                ident = %locator.ident.to_file_string(),
+                reference = %locator.reference.to_file_string(),
+                "yarn.resolver.package_add",
+            );
+        }
+
+        self.result.lockfile.entries.insert(locator.clone(), LockfileEntry {
             checksum: None,
             resolution: original_resolution,
         });
@@ -1489,15 +1581,15 @@ impl<'a> InstallManager<'a> {
             let systems
                 = self.context.systems.unwrap();
 
-            self.result.install_state.conditional_locators.insert(resolution.locator.clone());
+            self.result.install_state.conditional_locators.insert(locator.clone());
 
             if !resolution.requirements.validate_any(systems) {
-                self.result.install_state.disabled_locators.insert(resolution.locator.clone());
+                self.result.install_state.disabled_locators.insert(locator.clone());
             }
         }
 
         if let Some(package_data) = package_data {
-            self.record_fetch(resolution.locator, package_data)?;
+            self.record_fetch(locator, package_data)?;
         }
 
         Ok(())
@@ -1538,7 +1630,7 @@ fn dep_locators<'a>(
         .collect()
 }
 
-fn compute_workspace_hashes(
+pub(crate) fn compute_workspace_hashes(
     graph: &BTreeMap<Locator, BTreeSet<Locator>>,
     workspace_locators: &[(Ident, Locator)],
 ) -> BTreeMap<Ident, Hash64> {

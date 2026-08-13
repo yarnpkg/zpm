@@ -89,7 +89,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let fetch_archive = || async {
         let bytes
-            = http_npm::get(&http_npm::NpmHttpParams {
+            = http_npm::get_uncached(&http_npm::NpmHttpParams {
                 http_client: &project.http_client,
                 registry: &fetch_registry,
                 path: &fetch_path,

@@ -280,12 +280,10 @@ impl<'a> HttpRequest<'a> {
 
 impl HttpClient {
     fn build_client(config: &Configuration, network_settings: Option<&NetworkSettings>) -> Result<Client, Error> {
-        let mut client_builder = reqwest::Client::builder();
+        let client_builder = reqwest::Client::builder();
 
         #[cfg(not(all(target_arch = "wasm64", target_vendor = "browserpod")))]
-        {
-            client_builder = client_builder.use_rustls_tls();
-        }
+        let client_builder = client_builder.use_rustls_tls();
 
         let mut client_builder = client_builder
             // Connection pooling settings
@@ -356,22 +354,22 @@ impl HttpClient {
 
                 #[cfg(not(all(target_arch = "wasm64", target_vendor = "browserpod")))]
                 {
-                let cert_content
-                    = cert_path.fs_read_prealloc()?;
+                    let cert_content
+                        = cert_path.fs_read_prealloc()?;
 
-                let key_content
-                    = key_path.fs_read_prealloc()?;
+                    let key_content
+                        = key_path.fs_read_prealloc()?;
 
-                let mut identity_content
-                    = cert_content;
+                    let mut identity_content
+                        = cert_content;
 
-                identity_content.push(b'\n');
-                identity_content.extend_from_slice(&key_content);
+                    identity_content.push(b'\n');
+                    identity_content.extend_from_slice(&key_content);
 
-                let identity
-                    = Identity::from_pem(&identity_content)?;
+                    let identity
+                        = Identity::from_pem(&identity_content)?;
 
-                client_builder = client_builder.identity(identity);
+                    client_builder = client_builder.identity(identity);
                 }
             },
 

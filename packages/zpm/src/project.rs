@@ -7,7 +7,7 @@ use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
 use zpm_tasks::{parse as parse_taskfile, ResolvedTasks, TaskFile, TaskId};
-use zpm_utils::{DataType, Glob, IoResultExt, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
+use zpm_utils::{DataType, Glob, Hash64, IoResultExt, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -19,13 +19,15 @@ use crate::{
     git::{GitOperation, detect_git_operation},
     http::HttpClient,
     http_npm,
-    install::{InstallContext, InstallManager, InstallResult, InstallState},
-    lockfile::{Lockfile, from_legacy_berry_lockfile, from_pnpm_node_modules},
+    install::{InstallContext, InstallManager, InstallResult, InstallState, compute_workspace_hashes},
+    lockfile::{Lockfile, LockfileMetadata, from_legacy_berry_lockfile, from_pnpm_node_modules},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
+    primitives_exts::RangeExt,
     report::{StreamReport, StreamReportConfig, async_section, current_report, with_report_result},
     script::{Binary, ScriptEnvironment},
     tasks::TASK_FILE_NAME,
+    trust::{ensure_project_trusted, ProjectTrustReason},
 };
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
@@ -204,6 +206,10 @@ impl Project {
             = Configuration::load(&configuration_context, &mut last_modified_at)
                 .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
 
+        if config.requires_trust {
+            ensure_project_trusted(&project_cwd, ProjectTrustReason::ConfigurationInterpolation).await?;
+        }
+
         if config.settings.enable_migration_mode.value {
             config.settings.enable_global_cache.value = true;
             config.settings.enable_global_cache.source = config.settings.enable_migration_mode.source;
@@ -356,14 +362,14 @@ impl Project {
             = self.lockfile_path();
 
         let mut lockfile
-            = Project::lockfile_from(&lockfile_path)?;
+            = Project::lockfile_from(&lockfile_path, &self.config)?;
 
         if self.config.settings.enable_migration_mode.value {
             let source_lockfile_path
                 = self.project_cwd.with_join_str(LOCKFILE_NAME);
 
             let source_lockfile
-                = Project::lockfile_from(&source_lockfile_path)?;
+                = Project::lockfile_from(&source_lockfile_path, &self.config)?;
 
             lockfile.resolutions.extend(source_lockfile.resolutions.into_iter());
         }
@@ -371,7 +377,7 @@ impl Project {
         Ok(lockfile)
     }
 
-    fn lockfile_from(lockfile_path: &Path) -> Result<Lockfile, Error> {
+    fn lockfile_from(lockfile_path: &Path, config: &Configuration) -> Result<Lockfile, Error> {
         if !lockfile_path.fs_exists() {
             // Check for pnpm node_modules in the same directory
             if let Some(project_cwd) = lockfile_path.dirname() {
@@ -379,7 +385,7 @@ impl Project {
                     = project_cwd.with_join_str("node_modules/.pnpm");
 
                 if pnpm_dir.fs_exists() {
-                    return from_pnpm_node_modules(&project_cwd);
+                    return from_pnpm_node_modules(&project_cwd, config);
                 }
             }
 
@@ -723,6 +729,40 @@ impl Project {
             .ok_or(Error::WorkspacePathNotFound(rel_path.clone()))
     }
 
+    pub fn workspace_dependency_closure(&self, roots: impl IntoIterator<Item = Ident>, include_dev_dependencies: bool) -> Result<BTreeSet<Ident>, Error> {
+        let mut processed_queue
+            = BTreeSet::new();
+
+        let mut process_queue
+            = roots.into_iter().collect::<Vec<_>>();
+
+        while let Some(ident) = process_queue.pop() {
+            if !processed_queue.insert(ident.clone()) {
+                continue;
+            }
+
+            let workspace
+                = self.workspace_by_ident(&ident)?;
+
+            let mut relevant_dependencies
+                = workspace.manifest.remote.dependencies.values()
+                    .chain(workspace.manifest.remote.optional_dependencies.values())
+                    .collect::<Vec<_>>();
+
+            if include_dev_dependencies {
+                relevant_dependencies.extend(workspace.manifest.dev_dependencies.values());
+            }
+
+            for dependency in relevant_dependencies {
+                if let Some(workspace) = self.try_workspace_by_descriptor(dependency)? {
+                    process_queue.push(workspace.name.clone());
+                }
+            }
+        }
+
+        Ok(processed_queue)
+    }
+
     pub fn try_workspace_by_file_path(&self, rel_path: &Path) -> Result<Option<&Workspace>, Error> {
         let workspace
             = self.workspaces.iter()
@@ -812,6 +852,174 @@ impl Project {
             .unwrap_or_else(|| panic!("Expected {} to have a package location", locator.to_print_string()));
 
         self.package_binaries_at(locator, package_location)
+    }
+
+    pub fn is_lockfile_fresh(&self) -> Result<bool, Error> {
+        fn normalize_lockfile_descriptor(descriptor: &mut Descriptor) {
+            match &descriptor.range {
+                Range::AnonymousSemver(params) => {
+                    descriptor.range = zpm_primitives::RegistrySemverRange {
+                        ident: None,
+                        range: params.range.clone(),
+                    }.into();
+                },
+
+                Range::AnonymousTag(params) => {
+                    descriptor.range = zpm_primitives::RegistryTagRange {
+                        ident: None,
+                        tag: params.tag.clone(),
+                    }.into();
+                },
+
+                _ => {},
+            }
+        }
+
+        if self.config.settings.enable_hardened_mode.value {
+            return Ok(false);
+        }
+
+        if self.install_state.as_ref().and_then(|install_state| install_state.install_config_hash.as_ref()) != Some(&self.install_config_hash()) {
+            return Ok(false);
+        }
+
+        if !self.config.settings.unstable_islands.is_empty() {
+            return Ok(false);
+        }
+
+        if self.workspaces.iter().any(|workspace| !workspace.manifest.resolutions.is_empty()) {
+            return Ok(false);
+        }
+
+        let lockfile
+            = self.lockfile()?;
+
+        if lockfile.metadata.version != LockfileMetadata::new().version {
+            return Ok(false);
+        }
+
+        if !lockfile.islands.is_empty() {
+            return Ok(false);
+        }
+
+        let mut graph
+            = BTreeMap::<Locator, BTreeSet<Locator>>::new();
+
+        let mut used_resolutions
+            = BTreeMap::<Descriptor, Locator>::new();
+
+        let mut used_entries
+            = BTreeSet::<Locator>::new();
+
+        let mut process_queue
+            = self.workspaces.iter()
+                .map(|workspace| workspace.locator())
+                .collect::<Vec<_>>();
+
+        let mut processed_queue
+            = BTreeSet::new();
+
+        while let Some(locator) = process_queue.pop() {
+            if !processed_queue.insert(locator.clone()) {
+                continue;
+            }
+
+            let mut child_locators
+                = BTreeSet::new();
+
+            let dependency_descriptors
+                = if let Some(workspace) = self.try_workspace_by_locator(&locator)? {
+                    workspace.manifest.remote.dependencies.values()
+                        .chain(workspace.manifest.remote.optional_dependencies.values())
+                        .chain(workspace.manifest.dev_dependencies.values())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                } else {
+                    let Some(entry) = lockfile.entries.get(&locator) else {
+                        return Ok(false);
+                    };
+
+                    if entry.resolution.locator != locator {
+                        return Ok(false);
+                    }
+
+                    used_entries.insert(locator.clone());
+
+                    entry.resolution.dependencies.values()
+                        .chain(entry.resolution.variants.iter())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                };
+
+            for mut descriptor in dependency_descriptors {
+                if let Some(workspace) = self.try_workspace_by_descriptor(&descriptor)? {
+                    let dependency_locator
+                        = workspace.locator();
+
+                    child_locators.insert(dependency_locator.clone());
+                    process_queue.push(dependency_locator);
+                    continue;
+                }
+
+                let range_details
+                    = descriptor.range.details();
+
+                if range_details.transient_resolution
+                    || range_details.fetch_before_resolve
+                    || matches!(descriptor.range, Range::Catalog(_))
+                {
+                    return Ok(false);
+                }
+
+                normalize_lockfile_descriptor(&mut descriptor);
+
+                let Some(dependency_locator) = lockfile.resolutions.get(&descriptor) else {
+                    return Ok(false);
+                };
+
+                let Some(entry) = lockfile.entries.get(dependency_locator) else {
+                    return Ok(false);
+                };
+
+                if entry.resolution.locator != *dependency_locator {
+                    return Ok(false);
+                }
+
+                used_resolutions.insert(descriptor, dependency_locator.clone());
+                used_entries.insert(dependency_locator.clone());
+                child_locators.insert(dependency_locator.clone());
+                process_queue.push(dependency_locator.clone());
+            }
+
+            graph.insert(locator, child_locators);
+        }
+
+        if lockfile.resolutions != used_resolutions {
+            return Ok(false);
+        }
+
+        if lockfile.entries.keys().cloned().collect::<BTreeSet<_>>() != used_entries {
+            return Ok(false);
+        }
+
+        let workspace_locators
+            = self.workspaces.iter()
+                .map(|workspace| (workspace.name.clone(), workspace.locator()))
+                .collect::<Vec<_>>();
+
+        let workspace_hashes = compute_workspace_hashes(&graph, &workspace_locators);
+        if lockfile.workspaces != workspace_hashes {
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
+    pub(crate) fn install_config_hash(&self) -> Hash64 {
+        Hash64::from_data(
+            serde_json::to_vec(&self.config.settings)
+                .expect("configuration settings should always be serializable"),
+        )
     }
 
     fn find_visible_dependency_location(&self, issuer_location: &Path, ident: &Ident, locator: &Locator) -> Result<Option<Path>, Error> {
@@ -940,13 +1148,57 @@ impl Project {
             self.local_cache_path().fs_exists()
         };
 
+        let required_workspaces
+            = self.try_workspace_by_rel_path(&self.package_cwd)?
+                .map(|workspace| self.workspace_dependency_closure([workspace.name.clone()], true))
+                .transpose()?;
+
         if cache_exists {
             if let Some(install_state) = &self.install_state {
                 if !self.last_modified_at.has_changed_since(install_state.last_installed_at) {
-                    return Ok(());
+                    if install_state.install_config_hash.as_ref() == Some(&self.install_config_hash()) {
+                        match &required_workspaces {
+                            None => return Ok(()),
+                            Some(required_workspaces) => {
+                                match &install_state.installed_workspaces {
+                                    None => return Ok(()),
+                                    Some(installed_workspaces) => {
+                                        if self.config.settings.lazy_install_mode.value == zpm_config::LazyInstallMode::All {
+                                            // When mode is All, only skip if all workspaces were installed
+                                        } else if required_workspaces.is_subset(installed_workspaces) {
+                                            return Ok(());
+                                        }
+                                    },
+                                }
+                            },
+                        }
+                    }
                 }
             }
         }
+
+        let install_roots = if self.config.settings.lazy_install_mode.value != zpm_config::LazyInstallMode::Focused
+            || !cache_exists
+        {
+            None
+        } else if let (Some(install_state), Some(required_workspaces)) = (&self.install_state, &required_workspaces) {
+            match &install_state.installed_workspaces {
+                None => None,
+                Some(installed_workspaces) => {
+                    if self.is_lockfile_fresh()? {
+                        let roots = installed_workspaces.iter()
+                            .chain(required_workspaces.iter())
+                            .cloned();
+
+                        Some(self.workspace_dependency_closure(roots, true)?)
+                    } else {
+                        None
+                    }
+                },
+            }
+        } else {
+            None
+        };
 
         let install = self.run_install(RunInstallOptions {
             check_checksums: false,
@@ -956,7 +1208,7 @@ impl Project {
             refresh_lockfile: false,
             silent_or_error: true,
             mode: None,
-            roots: None,
+            roots: install_roots,
             ..Default::default()
         });
 
@@ -1093,6 +1345,7 @@ impl Project {
                     .with_lockfile(lockfile?)
                     .with_previous_state(self.install_state.as_ref())
                     .with_roots(roots)
+                    .with_installed_workspaces(options.roots.clone())
                     .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
                     .with_skip_link_step(options.mode == Some(InstallMode::UpdateLockfile))
                     .with_skip_lockfile_update(options.roots.is_some())

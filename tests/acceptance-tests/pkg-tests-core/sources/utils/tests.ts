@@ -178,6 +178,7 @@ export enum RequestType {
   BulkAdvisories = `bulkAdvisories`,
   NodeDistIndex = `nodeDistIndex`,
   NodeDistTarball = `nodeDistTarball`,
+  OtelTraces = `otelTraces`,
   YarnSwitchInfo = `yarnSwitchInfo`,
   YarnSwitchTarball = `yarnSwitchTarball`,
 }
@@ -229,6 +230,9 @@ export type Request = {
 } | {
   type: RequestType.NodeDistTarball;
   name: string;
+} | {
+  type: RequestType.OtelTraces;
+  body?: unknown;
 } | {
   type: RequestType.YarnSwitchInfo;
   platform: string;
@@ -374,6 +378,115 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
         packagetype: `bdist_wheel`,
         path: `/repositories/pypi/pypi_one_dep-1.0.0-py3-none-any.whl`,
         uploadTime: `2024-06-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-extra-provider`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-no-deps (>=1.0.0); extra == "feature"`,
+        `pypi-entry-points (>=1.0.0); extra == "tools"`,
+        `pypi-entry-points (>=1.0.0); extra == "Feature_Name"`,
+      ],
+      files: [{
+        filename: `pypi_extra_provider-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_extra_provider-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-08-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-extra-forwarder`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-extra-provider[feature] (>=1.0.0)`,
+      ],
+      files: [{
+        filename: `pypi_extra_forwarder-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_extra_forwarder-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-08-02T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-base-with-base-forwarder`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-extra-with-base (>=1.0.0)`,
+      ],
+      files: [{
+        filename: `pypi_base_with_base_forwarder-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_base_with_base_forwarder-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-08-05T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-extra-with-base-forwarder`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-extra-with-base[feature] (>=1.0.0)`,
+      ],
+      files: [{
+        filename: `pypi_extra_with_base_forwarder-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_extra_with_base_forwarder-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-08-06T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-extra-with-base-chain-forwarder`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-extra-with-base-forwarder (>=1.0.0)`,
+      ],
+      files: [{
+        filename: `pypi_extra_with_base_chain_forwarder-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_extra_with_base_chain_forwarder-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-08-07T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-extra-overrides-base`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-no-deps (==1.0.0)`,
+        `pypi-no-deps (>=1.1.0); extra == "feature"`,
+      ],
+      files: [{
+        filename: `pypi_extra_overrides_base-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_extra_overrides_base-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-08-03T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-extra-narrows-base`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-no-deps (>=1.0.0)`,
+        `pypi-no-deps (==1.0.0); extra == "feature"`,
+      ],
+      files: [{
+        filename: `pypi_extra_narrows_base-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_extra_narrows_base-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-08-08T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-extra-with-base`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-entry-points (>=1.0.0)`,
+        `pypi-no-deps (>=1.0.0); extra == "feature"`,
+      ],
+      files: [{
+        filename: `pypi_extra_with_base-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_extra_with_base-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-08-04T00:00:00Z`,
       }],
     },
   },
@@ -958,6 +1071,30 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       stream.pipeline(tar, gzip, response, () => {});
     },
 
+    async [RequestType.OtelTraces](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.OtelTraces)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const chunks: Array<Buffer> = [];
+
+      request.on(`data`, chunk => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+
+      request.on(`end`, () => {
+        const body = Buffer.concat(chunks).toString();
+
+        try {
+          parsedRequest.body = JSON.parse(body);
+        } catch {
+          parsedRequest.body = body;
+        }
+
+        response.writeHead(200, {[`Content-Type`]: `application/json`});
+        response.end(`{}`);
+      });
+    },
+
     async [RequestType.YarnSwitchInfo](parsedRequest, request, response) {
       if (parsedRequest.type !== RequestType.YarnSwitchInfo)
         throw new Error(`Assertion failed: Invalid request type`);
@@ -1056,6 +1193,10 @@ exit 0
       return {
         type: RequestType.NodeDistTarball,
         name: match[2]!,
+      };
+    } else if (url === `/v1/traces`) {
+      return {
+        type: RequestType.OtelTraces,
       };
     } else if ((match = url.match(/^\/@yarnpkg\/yarn-([^/]+)\/-\/yarn-\1-([^/]+)\.tgz$/))) {
       // Yarn Switch tarball: /@yarnpkg/yarn-{platform}/-/yarn-{platform}-{version}.tgz

@@ -414,22 +414,22 @@ state.starSpeed = motionToRad(state.starMotion);
 
 let reinitStars;
 
+// The #theme-toggle button is wired by Nav.astro; this page only reacts to
+// theme changes so the interactive starfield picks up the new palette.
 function applyTheme(t) {
-  document.documentElement.setAttribute(`data-theme`, t);
-  localStorage.setItem(`yarn-theme`, t);
-  state.theme = t;
-  reinitStars?.();
+  window.__setTheme(t);
 }
+
+window.addEventListener(`themechange`, event => {
+  state.theme = event.detail;
+  reinitStars?.();
+});
 
 function applyAccent(h) {
   document.documentElement.style.setProperty(`--accent-h`, h);
 }
 applyTheme(state.theme);
 applyAccent(state.accentHue);
-
-document.getElementById(`theme-toggle`).addEventListener(`click`, () => {
-  applyTheme(state.theme === `dark` ? `light` : `dark`);
-});
 
 const installBox = document.getElementById(`install-box`);
 const copyBtn = document.getElementById(`copy-btn`);

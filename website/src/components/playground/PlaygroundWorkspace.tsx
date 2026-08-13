@@ -1,11 +1,11 @@
-import {lazy, Suspense, useCallback, useEffect, useMemo, useState} from 'react';
+import {lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 
-import {OctIcon} from '../package/icons';
-import {PlaygroundTerminal} from './PlaygroundTerminal';
+import type {PlaygroundEntry, PlaygroundTemplate}                          from '../../playground/types';
+import {OctIcon}                                                           from '../package/icons';
+import type {IconData}                                                     from '../package/types';
 
-import type {IconData} from '../package/types';
-import type {PlaygroundFile} from './PlaygroundTerminal';
-import type {PlaygroundEntry, PlaygroundTemplate} from '../../playground/types';
+import {PlaygroundTerminal}                                                from './PlaygroundTerminal';
+import type {PlaygroundFile, PlaygroundPodApi}                             from './PlaygroundTerminal';
 
 const MonacoEditor = lazy(() => import(`@monaco-editor/react`).then(m => ({default: m.default})));
 
@@ -18,11 +18,18 @@ type TreeOcticons = {
 const TERMINAL_ENTRY: PlaygroundEntry = {depth: 0, name: `terminal`, path: `terminal`, kind: `terminal`};
 const EMPTY_TEMPLATE: PlaygroundTemplate = {description: ``, entries: [], id: ``, label: `No templates`};
 
+const EDIT_SYNC_DEBOUNCE_MS = 400;
+
 const selectClassName = `h-[38px] w-full rounded-lg border border-[var(--line-strong)] bg-[color-mix(in_oklch,var(--fg)_6%,transparent)] px-3 font-mono text-xs font-medium text-[var(--fg)] outline-none focus:border-[var(--accent-line)] focus:shadow-[0_0_0_3px_var(--accent-soft)]`;
 const treeItemClassName = `flex min-h-[30px] w-full items-center gap-2 whitespace-nowrap rounded-[7px] border-0 bg-transparent py-0 pr-2 text-left font-[inherit] text-[13px] leading-none text-[var(--fg-dim)] disabled:cursor-default enabled:cursor-pointer enabled:hover:bg-[color-mix(in_oklch,var(--fg)_7%,transparent)] enabled:hover:text-[var(--fg)]`;
 const activeTreeItemClassName = `bg-[color-mix(in_oklch,var(--accent)_12%,transparent)] text-[var(--fg)]`;
-const tabClassName = `inline-flex h-[38px] max-w-[220px] flex-none cursor-pointer items-center gap-[7px] whitespace-nowrap border-x border-y-0 border-x-transparent bg-transparent px-3 font-mono text-xs font-medium text-[var(--fg-mute)] hover:bg-[color-mix(in_oklch,var(--fg)_5%,transparent)] hover:text-[var(--fg-dim)]`;
+const tabClassName = `inline-flex h-[38px] flex-none items-center gap-[7px] whitespace-nowrap border-x border-y-0 border-x-transparent bg-transparent px-3 font-mono text-xs font-medium text-[var(--fg-mute)] hover:bg-[color-mix(in_oklch,var(--fg)_5%,transparent)] hover:text-[var(--fg-dim)]`;
+// Fixed width sized so `package.json` (the longest common name) fits without
+// truncation; longer names get an ellipsis.
+const fileTabClassName = `w-[164px]`;
 const activeTabClassName = `border-x-[var(--line)] bg-[color-mix(in_oklch,var(--fg)_7%,transparent)] text-[var(--fg)]`;
+const tabSelectClassName = `inline-flex min-w-0 flex-1 cursor-pointer items-center gap-[7px] border-0 bg-transparent p-0 font-[inherit] text-[length:inherit] text-inherit`;
+const tabCloseClassName = `inline-flex h-4 w-4 flex-none cursor-pointer items-center justify-center rounded border-0 bg-transparent p-0 text-[13px] leading-none text-[var(--fg-mute)] hover:bg-[color-mix(in_oklch,var(--fg)_12%,transparent)] hover:text-[var(--fg)]`;
 
 function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(` `);
@@ -54,41 +61,45 @@ function setupPlaygroundMonacoTheme(monaco: any) {
       'scrollbarSlider.hoverBackground': `#a8b0d440`,
     },
   });
+}
 
-  monaco.editor.defineTheme(`playground-light`, {
-    base: `vs`,
-    inherit: true,
-    rules: [
-      {token: `comment`, foreground: `7a84a8`},
-      {token: `keyword`, foreground: `7030b0`},
-      {token: `string`, foreground: `286840`},
-      {token: `number`, foreground: `885510`},
-      {token: `type`, foreground: `205878`},
-      {token: `function`, foreground: `205878`},
-    ],
-    colors: {
-      'editor.background': `#00000000`,
-      'editor.foreground': `#0c1030`,
-      'editor.lineHighlightBackground': `#00000005`,
-      'editorLineNumber.foreground': `#515a7a`,
-      'editorLineNumber.activeForeground': `#252d50`,
-      'editor.selectionBackground': `#0c103018`,
-      'editor.inactiveSelectionBackground': `#0c10300d`,
-      'editorIndentGuide.background': `#0c103010`,
-      'editorIndentGuide.activeBackground': `#0c103020`,
-      'scrollbarSlider.background': `#0c103018`,
-      'scrollbarSlider.hoverBackground': `#0c103028`,
-    },
-  });
+function requestedPresetId(templates: Array<PlaygroundTemplate>) {
+  const requested = new URLSearchParams(window.location.search).get(`template`);
+  return requested && templates.some(template => template.id === requested)
+    ? requested
+    : null;
+}
+
+function syncPresetToUrl(presetId: string) {
+  if (typeof window === `undefined`)
+    return;
+
+  const url = new URL(window.location.href);
+  url.searchParams.set(`template`, presetId);
+  window.history.replaceState(null, ``, url);
 }
 
 export function PlaygroundWorkspace({version, octicons, templates}: {version: string, octicons: TreeOcticons, templates: Array<PlaygroundTemplate>}) {
+  // The preset starts identical on server and client to keep hydration
+  // stable; the ?template= deep link is applied right after mount.
   const [presetId, setPresetId] = useState(() => templates[0]?.id ?? ``);
+
+  useEffect(() => {
+    const requested = requestedPresetId(templates);
+    if (requested !== null) {
+      setPresetId(requested);
+    }
+  }, []);
+
   const [selectedPath, setSelectedPath] = useState(`terminal`);
   const [openFilePaths, setOpenFilePaths] = useState<Array<string>>([]);
   const [lastFilePath, setLastFilePath] = useState<string | null>(null);
+  const [editedContents, setEditedContents] = useState<Record<string, string>>({});
   const [monacoReady, setMonacoReady] = useState(false);
-  const [isDark, setIsDark] = useState(() => typeof document !== `undefined` && document.documentElement.getAttribute(`data-theme`) !== `light`);
+
+  const podApiRef = useRef<PlaygroundPodApi | null>(null);
+  const pendingWritesRef = useRef(new Map<string, string>());
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const preset = templates.find(template => template.id === presetId) ?? templates[0] ?? EMPTY_TEMPLATE;
   const entries = preset.entries;
@@ -111,8 +122,9 @@ export function PlaygroundWorkspace({version, octicons, templates}: {version: st
     if (selectedPath === `terminal`)
       return;
 
-    if (!entries.some(entry => entry.path === selectedPath && entry.kind !== `folder`))
+    if (!entries.some(entry => entry.path === selectedPath && entry.kind !== `folder`)) {
       setSelectedPath(`terminal`);
+    }
   }, [entries, selectedPath]);
 
   const openFileEntries = useMemo(() => {
@@ -146,11 +158,74 @@ export function PlaygroundWorkspace({version, octicons, templates}: {version: st
     setSelectedPath(entry.path);
   }, []);
 
+  const closeFile = useCallback((path: string) => {
+    const remaining = openFilePaths.filter(other => other !== path);
+    const fallback = remaining[remaining.length - 1] ?? null;
+
+    setOpenFilePaths(remaining);
+
+    if (selectedPath === path)
+      setSelectedPath(fallback ?? `terminal`);
+    if (lastFilePath === path) {
+      setLastFilePath(fallback);
+    }
+  }, [lastFilePath, openFilePaths, selectedPath]);
+
+  const flushPendingWrites = useCallback(() => {
+    const api = podApiRef.current;
+    if (!api)
+      return;
+
+    for (const [path, content] of pendingWritesRef.current) {
+      api.writeFile(path, content).catch(() => {
+        // Sync failures are non-fatal; the terminal reports pod-level errors.
+      });
+    }
+
+    pendingWritesRef.current.clear();
+  }, []);
+
+  const handlePodApi = useCallback((api: PlaygroundPodApi | null) => {
+    podApiRef.current = api;
+    flushPendingWrites();
+  }, [flushPendingWrites]);
+
+  const handleEditorChange = useCallback((path: string, content: string) => {
+    setEditedContents(contents => ({...contents, [path]: content}));
+    pendingWritesRef.current.set(path, content);
+
+    if (syncTimerRef.current !== null)
+      clearTimeout(syncTimerRef.current);
+
+    syncTimerRef.current = setTimeout(() => {
+      syncTimerRef.current = null;
+      flushPendingWrites();
+    }, EDIT_SYNC_DEBOUNCE_MS);
+  }, [flushPendingWrites]);
+
+  useEffect(() => {
+    return () => {
+      if (syncTimerRef.current !== null) {
+        clearTimeout(syncTimerRef.current);
+      }
+    };
+  }, []);
+
   const handlePresetChange = useCallback((presetId: string) => {
+    if (syncTimerRef.current !== null) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
+
+    pendingWritesRef.current.clear();
+
     setPresetId(presetId);
     setOpenFilePaths([]);
     setLastFilePath(null);
+    setEditedContents({});
     setSelectedPath(`terminal`);
+
+    syncPresetToUrl(presetId);
   }, []);
 
   const handleMonacoMount = useCallback((_editor: any, monaco: any) => {
@@ -158,30 +233,18 @@ export function PlaygroundWorkspace({version, octicons, templates}: {version: st
     setMonacoReady(true);
   }, []);
 
-  useEffect(() => {
-    const handler = (event: Event) => setIsDark((event as CustomEvent).detail !== `light`);
-    window.addEventListener(`themechange`, handler);
-    return () => window.removeEventListener(`themechange`, handler);
-  }, []);
-
-  const editorTheme = monacoReady
-    ? isDark ? `playground-dark` : `playground-light`
-    : isDark ? `vs-dark` : `vs`;
+  // The playground window is pinned to the dark palette in both site themes,
+  // so the editor always uses the dark theme.
+  const editorTheme = monacoReady ? `playground-dark` : `vs-dark`;
 
   return (
-    <div className="grid min-h-0 grid-cols-[minmax(210px,18vw)_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]">
-      <aside className="min-w-0 overflow-auto border-r border-[var(--line)] bg-black/85 p-[18px] max-[900px]:max-h-[min(240px,32dvh)] max-[900px]:border-r-0 max-[900px]:border-b max-[560px]:p-3.5" aria-label="Playground files">
-        <select id="playground-version" className={`${selectClassName} mb-4`} aria-label="Yarn version" defaultValue={`Yarn ${version}`}>
-          <option>{`Yarn ${version}`}</option>
-          <option>Yarn stable</option>
-          <option>Yarn canary</option>
-        </select>
-
-        <div className="mb-[22px]">
+    <div className={`grid min-h-0 grid-cols-[minmax(210px,18vw)_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]`}>
+      <aside className={`min-w-0 overflow-auto border-r border-[var(--line)] bg-black/85 p-[18px] max-[900px]:max-h-[min(240px,32dvh)] max-[900px]:border-r-0 max-[900px]:border-b max-[560px]:p-3.5`} aria-label={`Playground files`}>
+        <div className={`mb-[22px]`}>
           <select
-            id="playground-preset"
+            id={`playground-preset`}
             className={selectClassName}
-            aria-label="Playground preset"
+            aria-label={`Playground preset`}
             value={presetId}
             onChange={event => handlePresetChange(event.currentTarget.value)}
           >
@@ -191,18 +254,13 @@ export function PlaygroundWorkspace({version, octicons, templates}: {version: st
               </option>
             ))}
           </select>
-          {preset.description && (
-            <p className="m-0 mt-2 text-[12px] leading-[1.4] text-[var(--fg-mute)]">
-              {preset.description}
-            </p>
-          )}
         </div>
 
-        <div className="mb-2 block font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--fg-mute)]">
+        <div className={`mb-2 block font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--fg-mute)]`}>
           Files
         </div>
 
-        <ol className="m-0 flex list-none flex-col gap-0.5 p-0">
+        <ol className={`m-0 flex list-none flex-col gap-0.5 p-0`}>
           {entries.map(file => {
             const selectable = file.kind !== `folder`;
             const icon = file.kind === `terminal`
@@ -212,17 +270,19 @@ export function PlaygroundWorkspace({version, octicons, templates}: {version: st
                 : octicons.file;
 
             return (
-              <li key={file.path} className="m-0 p-0">
+              <li key={file.path} className={`m-0 p-0`}>
                 <button
-                  type="button"
+                  type={`button`}
                   className={classNames(treeItemClassName, selectedPath === file.path && activeTreeItemClassName)}
                   style={{paddingLeft: 8 + file.depth * 16}}
                   disabled={!selectable}
                   aria-current={selectedPath === file.path ? `page` : undefined}
                   onClick={selectable ? () => selectEntry(file) : undefined}
                 >
-                  <span className="inline-flex h-3.5 w-3.5 flex-none items-center justify-center text-[var(--fg-mute)]" aria-hidden="true">
-                    <OctIcon icon={icon} size={14} />
+                  <span className={`inline-flex h-3.5 w-3.5 flex-none items-center justify-center text-[var(--fg-mute)]`} aria-hidden={`true`}>
+                    {/* The folder glyph spans the full 16px grid while file
+                        glyphs are inset; nudge it so left edges line up. */}
+                    <OctIcon icon={icon} size={14} className={file.kind === `folder` ? `translate-x-[1.5px] scale-[0.92]` : undefined} />
                   </span>
                   <span>{file.name}</span>
                 </button>
@@ -241,42 +301,51 @@ export function PlaygroundWorkspace({version, octicons, templates}: {version: st
         )}
         aria-label={selectedEntry.kind === `terminal` ? `Terminal output` : `Editor`}
       >
-        <div className="flex min-w-0 items-end gap-0.5 overflow-x-auto border-b border-[var(--line)] bg-black/85 px-3 [scrollbar-width:thin]" role="tablist" aria-label="Open playground views">
+        <div className={`flex min-w-0 items-end gap-0.5 overflow-x-auto border-b border-[var(--line)] bg-black/85 px-3 [scrollbar-width:thin]`} aria-label={`Open playground views`}>
           <button
-            type="button"
-            className={classNames(tabClassName, selectedPath === `terminal` && activeTabClassName)}
-            role="tab"
-            aria-selected={selectedPath === `terminal`}
+            type={`button`}
+            className={classNames(tabClassName, `cursor-pointer`, selectedPath === `terminal` && activeTabClassName)}
             onClick={() => setSelectedPath(`terminal`)}
           >
             <OctIcon icon={octicons.terminal} size={14} />
-            <span className="min-w-0 overflow-hidden text-ellipsis">terminal</span>
+            <span className={`min-w-0 overflow-hidden text-ellipsis`}>terminal</span>
           </button>
 
           {openFileEntries.map(entry => (
-            <button
+            <div
               key={entry.path}
-              type="button"
-              className={classNames(tabClassName, selectedPath === entry.path && activeTabClassName)}
-              role="tab"
-              aria-selected={selectedPath === entry.path}
+              className={classNames(tabClassName, fileTabClassName, selectedPath === entry.path && activeTabClassName)}
               title={entry.path}
-              onClick={() => setSelectedPath(entry.path)}
             >
-              <OctIcon icon={octicons.file} size={14} />
-              <span className="min-w-0 overflow-hidden text-ellipsis">{entry.name}</span>
-            </button>
+              <button
+                type={`button`}
+                className={tabSelectClassName}
+                onClick={() => setSelectedPath(entry.path)}
+              >
+                <OctIcon icon={octicons.file} size={14} />
+                <span className={`min-w-0 overflow-hidden text-ellipsis`}>{entry.name}</span>
+              </button>
+              <button
+                type={`button`}
+                className={tabCloseClassName}
+                aria-label={`Close ${entry.name}`}
+                onClick={() => closeFile(entry.path)}
+              >
+                ×
+              </button>
+            </div>
           ))}
+
         </div>
 
-        <div className="relative min-h-0 min-w-0">
+        <div className={`relative min-h-0 min-w-0`}>
           <div className={classNames(
             `absolute inset-0 min-h-0 min-w-0`,
             selectedEntry.kind === `terminal`
               ? `visible pointer-events-auto opacity-100`
               : `invisible pointer-events-none opacity-0`,
           )}>
-            <PlaygroundTerminal files={terminalFiles} version={version} />
+            <PlaygroundTerminal files={terminalFiles} version={version} onApi={handlePodApi} />
           </div>
 
           {editorEntry && (
@@ -286,11 +355,12 @@ export function PlaygroundWorkspace({version, octicons, templates}: {version: st
                 ? `visible pointer-events-auto opacity-100`
                 : `invisible pointer-events-none opacity-0`,
             )}>
-              <div className="playground-editor-shell absolute inset-0 min-h-0 min-w-0">
-                <Suspense fallback={<div className="flex items-center p-[18px] font-mono text-xs text-[var(--fg-mute)]">Loading editor...</div>}>
+              <div className={`playground-editor-shell absolute inset-0 min-h-0 min-w-0`}>
+                <Suspense fallback={<div className={`flex items-center p-[18px] font-mono text-xs text-[var(--fg-mute)]`}>Loading editor...</div>}>
                   <MonacoEditor
-                    height="100%"
+                    height={`100%`}
                     language={editorEntry.language ?? `plaintext`}
+                    onChange={value => handleEditorChange(editorEntry.path, value ?? ``)}
                     onMount={handleMonacoMount}
                     options={{
                       automaticLayout: true,
@@ -300,7 +370,6 @@ export function PlaygroundWorkspace({version, octicons, templates}: {version: st
                       lineHeight: 20,
                       minimap: {enabled: false},
                       padding: {top: 16, bottom: 16},
-                      readOnly: true,
                       renderLineHighlight: `line`,
                       scrollBeyondLastLine: false,
                       scrollbar: {
@@ -311,7 +380,7 @@ export function PlaygroundWorkspace({version, octicons, templates}: {version: st
                     }}
                     path={editorEntry.path}
                     theme={editorTheme}
-                    value={editorEntry.content ?? ``}
+                    value={editedContents[editorEntry.path] ?? editorEntry.content ?? ``}
                   />
                 </Suspense>
               </div>
