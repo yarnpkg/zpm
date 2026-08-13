@@ -61,7 +61,10 @@ const treeOcticons = {
         </div>
       </div>
 
-      <PlaygroundWorkspace client:load version={yarnVersion} octicons={treeOcticons} templates={templates} />
+      {/* client:only (rather than client:load) so the initial preset can be
+          read synchronously from ?template= without an SSR hydration
+          mismatch, avoiding a throwaway BrowserPod boot on deep links. */}
+      <PlaygroundWorkspace client:only="react" version={yarnVersion} octicons={treeOcticons} templates={templates} />
 
       <div class="border-t border-[var(--line)] bg-black/90 px-[18px] py-[13px] text-center text-[13px] leading-[1.4] text-[var(--fg-dim)]">
         This playground runs Yarn {yarnVersion} compiled to WASM, thanks to the incredible work of the <a href="https://browserpod.io/" class="font-medium text-[var(--fg)] underline decoration-[var(--accent-line)] underline-offset-2 hover:decoration-[var(--accent)]">BrowserPod</a> folks.

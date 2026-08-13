@@ -1,6 +1,6 @@
-import {readdir, readFile, stat} from 'node:fs/promises';
-import path                    from 'node:path';
-import {fileURLToPath}         from 'node:url';
+import {readdir, readFile, stat}                                              from 'node:fs/promises';
+import path                                                                   from 'node:path';
+import {fileURLToPath}                                                        from 'node:url';
 
 import type {PlaygroundEntry, PlaygroundTemplate, PlaygroundTemplateManifest} from './types';
 
@@ -40,8 +40,9 @@ async function resolveTemplatesPath() {
 
   for (const candidate of candidates) {
     try {
-      if ((await stat(candidate)).isDirectory())
+      if ((await stat(candidate)).isDirectory()) {
         return candidate;
+      }
     } catch {
       // Keep trying the other known source locations.
     }
@@ -62,8 +63,9 @@ function assertTemplateManifest(folder: string, value: unknown): asserts value i
   if (manifest.description !== undefined && typeof manifest.description !== `string`)
     throw new Error(`${folder}/${templateManifestName} "description" must be a string when set`);
 
-  if (manifest.order !== undefined && typeof manifest.order !== `number`)
+  if (manifest.order !== undefined && typeof manifest.order !== `number`) {
     throw new Error(`${folder}/${templateManifestName} "order" must be a number when set`);
+  }
 }
 
 function compareNames(a: string, b: string) {

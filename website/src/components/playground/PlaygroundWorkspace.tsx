@@ -80,17 +80,10 @@ function syncPresetToUrl(presetId: string) {
 }
 
 export function PlaygroundWorkspace({version, octicons, templates}: {version: string, octicons: TreeOcticons, templates: Array<PlaygroundTemplate>}) {
-  // The preset starts identical on server and client to keep hydration
-  // stable; the ?template= deep link is applied right after mount.
-  const [presetId, setPresetId] = useState(() => templates[0]?.id ?? ``);
-
-  useEffect(() => {
-    const requested = requestedPresetId(templates);
-    if (requested !== null) {
-      setPresetId(requested);
-    }
-  }, []);
-
+  // This component renders with client:only, so the ?template= deep link can
+  // be read synchronously here — the first render (and thus the single
+  // BrowserPod boot) already uses the requested template.
+  const [presetId, setPresetId] = useState(() => requestedPresetId(templates) ?? templates[0]?.id ?? ``);
   const [selectedPath, setSelectedPath] = useState(`terminal`);
   const [openFilePaths, setOpenFilePaths] = useState<Array<string>>([]);
   const [lastFilePath, setLastFilePath] = useState<string | null>(null);

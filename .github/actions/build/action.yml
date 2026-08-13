@@ -76,7 +76,10 @@ runs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
       with:
-        shared-key: ${{inputs.profile}}-${{inputs.target}}
+        # The browserpod toolchains report the same rustc fingerprint across
+        # releases, so cargo would reuse stale cached artifacts after a
+        # toolchain bump; key the cache on the browserpod version instead.
+        shared-key: ${{inputs.profile}}-${{inputs.target}}${{inputs.target == 'wasm32-browserpod-linux-musl' && format('-browserpod-{0}', inputs.browserpod-version) || ''}}
 
     - name: Build ${{steps.version.outputs.version}}
       shell: bash

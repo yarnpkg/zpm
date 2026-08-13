@@ -16,6 +16,9 @@
     "scripts/**/*",
     "src/**/*"
   ],
+  "exclude": [
+    "src/playground/templates/**"
+  ],
   "files": [
     "config/manifest.json",
     "config/yarnrc.json"

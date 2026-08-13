@@ -215,7 +215,7 @@ export function PlaygroundTerminal({files, version, onApi}: Props) {
     let resizeObserver: ResizeObserver | null = null;
     let focusTerm: (() => void) | null = null;
 
-    async function start() {
+    async function start(mount: HTMLDivElement) {
       const [{Terminal}, {FitAddon}] = await Promise.all([
         import(`@xterm/xterm`),
         import(`@xterm/addon-fit`),
@@ -263,7 +263,7 @@ export function PlaygroundTerminal({files, version, onApi}: Props) {
       let launchShell: (() => Promise<void>) | null = null;
 
       term.loadAddon(fitAddon);
-      term.open(container);
+      term.open(mount);
       term.onData(data => {
         if (awaitingRestart) {
           if (data.includes(`\r`) && launchShell) {
@@ -278,7 +278,7 @@ export function PlaygroundTerminal({files, version, onApi}: Props) {
       });
 
       focusTerm = () => term?.focus();
-      container.addEventListener(`pointerdown`, focusTerm);
+      mount.addEventListener(`pointerdown`, focusTerm);
 
       requestAnimationFrame(() => {
         if (!term || disposed)
@@ -295,7 +295,7 @@ export function PlaygroundTerminal({files, version, onApi}: Props) {
         fitAddon.fit();
       });
 
-      resizeObserver.observe(container);
+      resizeObserver.observe(mount);
 
       const apiKey = getBrowserPodApiKey();
 
@@ -433,7 +433,7 @@ export function PlaygroundTerminal({files, version, onApi}: Props) {
       }
     }
 
-    start();
+    start(container);
 
     return () => {
       // BrowserPod 3.0 exposes no shutdown API for pods or terminals, so a

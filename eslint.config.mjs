@@ -16,12 +16,14 @@ const browserGlobals = {
 export default [
   {
     ignores: [
+      `.claude/**`,
       `.pnp.*`,
       `.yarn/**`,
       `**/*.rs`,
       `**/dist`,
       `tests/acceptance-tests/pkg-tests-fixtures`,
       `website/.astro`,
+      `website/src/playground/templates/**`,
       `packages/zpm/src/constraints/constraints.tpl.js`,
       `**/generated/**`,
       `**/*.generated.ts`,

@@ -38,6 +38,14 @@ if ! rustup toolchain list | grep -q "^$toolchain"; then
   BP_DIST_BASE=$base_url sh "$tmp/install.sh" "$toolchain"
 fi
 
+# Pin libc to the version shipped in the BrowserPod sysroot, mirroring the
+# CI build action, so local builds match CI instead of failing on a newer libc.
+sysroot=$(rustc "+$toolchain" --print sysroot)
+libc_manifest="$sysroot/lib/browserpod-libc/Cargo.toml"
+libc_version=$(awk -F '"' '/^version = / { print $2; exit }' "$libc_manifest")
+
+cargo "+$toolchain" update -p libc --precise "$libc_version"
+
 cargo "+$toolchain" build \
   --bin yarn-bin \
   --profile "$profile" \
