@@ -6,6 +6,7 @@ use zpm_config::{Configuration, ConfigurationContext, IslandLinker, Source};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
+use zpm_switch::get_bin_version;
 use zpm_tasks::{parse as parse_taskfile, ResolvedTasks, TaskFile, TaskId};
 use zpm_utils::{DataType, Glob, Hash64, Hash64Writer, IoResultExt, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
 use serde::Deserialize;
@@ -1018,10 +1019,19 @@ impl Project {
     }
 
     pub(crate) fn install_config_hash(&self) -> Hash64 {
-        Hash64::from_data(
-            serde_json::to_vec(&self.config.settings)
-                .expect("configuration settings should always be serializable"),
-        )
+        let mut writer
+            = Hash64Writer::new();
+
+        // The binary version participates so that an upgraded Yarn
+        // always runs one full install: builtin patches, linker
+        // layouts, and install fix-ups can all change across releases
+        // in ways the other freshness checks can't see.
+        writer.update(get_bin_version().as_bytes());
+
+        writer.update(serde_json::to_vec(&self.config.settings)
+            .expect("configuration settings should always be serializable"));
+
+        writer.finalize()
     }
 
     /// The "quick pass" behind the up-to-date fast path: re-derives
