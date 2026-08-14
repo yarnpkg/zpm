@@ -1096,25 +1096,38 @@ impl Install {
                 project.write_lockfile(&self.lockfile)?;
             }
 
-            self.install_state.lockfile_changed_at
-                = project.lockfile_changed_at()?;
+            let has_pending_builds
+                = !link_result.build_requests.entries.is_empty();
+
+            // The freshness marker only goes in once the builds went
+            // through: stamping earlier would let an interrupted (or
+            // `--mode=skip-build`) install pass the fast path with
+            // builds still pending.
+            self.install_state.lockfile_changed_at = if has_pending_builds {
+                None
+            } else {
+                project.lockfile_changed_at()?
+            };
 
             project.attach_install_state(self.install_state)?;
 
-            if !self.skip_build && !link_result.build_requests.entries.is_empty() {
+            if !self.skip_build && has_pending_builds {
                 let build_future
                     = build::BuildManager::new(link_result.build_requests).run(project);
 
                 let build_result
                     = async_section("Building packages", build_future).await;
 
-                let build_failed = match &build_result {
-                    Ok(build) => !build.build_errors.is_empty(),
-                    Err(_) => true,
+                let build_succeeded = match &build_result {
+                    Ok(build) => build.build_errors.is_empty(),
+                    Err(_) => false,
                 };
 
-                if build_failed {
-                    invalidate_install_freshness(project)?;
+                if build_succeeded {
+                    if let Some(mut install_state) = project.install_state.take() {
+                        install_state.lockfile_changed_at = project.lockfile_changed_at()?;
+                        project.attach_install_state(install_state)?;
+                    }
                 }
 
                 match build_result {

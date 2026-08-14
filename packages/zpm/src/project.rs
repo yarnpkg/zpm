@@ -1290,6 +1290,19 @@ impl Project {
             return Ok(false);
         }
 
+        // The nm linker guarantees every workspace a node_modules
+        // folder, so a missing one means the tree was wiped and needs
+        // relinking. (Deletions *inside* a package folder are on
+        // --force, like any other manual damage.)
+        if self.config.settings.node_linker.value == zpm_config::NodeLinker::NodeModules {
+            let all_workspace_trees_present = self.workspaces.iter()
+                .all(|workspace| workspace.path.with_join_str("node_modules").fs_exists());
+
+            if !all_workspace_trees_present {
+                return Ok(false);
+            }
+        }
+
         // PnP installs materialize some packages on disk (build scripts,
         // `prefer_extracted`, optional zips); if any package may be in
         // that situation, a missing unplugged folder means the project

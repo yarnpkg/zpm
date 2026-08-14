@@ -1,5 +1,5 @@
-import {Filename, xfs, ppath, npath} from '@yarnpkg/fslib';
-import {tests, misc}                 from 'pkg-tests-core';
+import {Filename, PortablePath, xfs, ppath, npath} from '@yarnpkg/fslib';
+import {tests, misc}                               from 'pkg-tests-core';
 
 const {getPackageArchivePath} = tests;
 
@@ -1247,6 +1247,66 @@ describe(`Commands`, () => {
 
           await expect(xfs.readFilePromise(pnpPath, `utf8`)).resolves.not.toEqual(`corrupted`);
         }),
+      );
+
+      test(
+        `it should not take the fast path while builds are pending after --mode=skip-build`,
+        makeTemporaryEnv({
+          dependencies: {
+            [`no-deps-scripted`]: `1.0.0`,
+          },
+        }, async ({path, run, source}) => {
+          await run(`install`, `--mode=skip-build`);
+
+          // The skipped builds are still pending; a plain install must
+          // run them rather than declare the project up-to-date.
+          const {stdout} = await run(`install`, `--inline-builds`);
+
+          expect(stdout).toContain(`no-deps-scripted@npm:1.0.0 must be built because it never has been before`);
+
+          // Once the builds went through, the fast path resumes.
+          const {stdout: secondStdout} = await run(`install`);
+
+          expect(secondStdout).toContain(`All dependencies are up-to-date, nothing to do.`);
+        }),
+      );
+
+      test(
+        `it should run a full install when a workspace's node_modules was removed`,
+        makeTemporaryEnv(
+          {
+            private: true,
+            workspaces: [`ws`],
+            dependencies: {
+              [`no-deps`]: `2.0.0`,
+            },
+          },
+          {
+            nodeLinker: `node-modules`,
+          },
+          async ({path, run, source}) => {
+            await xfs.mkdirPromise(ppath.join(path, `ws`));
+            await xfs.writeJsonPromise(ppath.join(path, `ws/package.json`), {
+              name: `ws`,
+              dependencies: {
+                [`no-deps`]: `1.0.0`,
+              },
+            });
+
+            await run(`install`);
+
+            // The conflicting version nests inside the workspace's own
+            // node_modules; wiping that folder must not be masked by
+            // the fast path.
+            await expect(xfs.existsPromise(ppath.join(path, `ws/node_modules/no-deps` as PortablePath))).resolves.toEqual(true);
+
+            await xfs.removePromise(ppath.join(path, `ws/node_modules` as PortablePath));
+
+            await run(`install`);
+
+            await expect(xfs.existsPromise(ppath.join(path, `ws/node_modules/no-deps` as PortablePath))).resolves.toEqual(true);
+          },
+        ),
       );
 
       test(

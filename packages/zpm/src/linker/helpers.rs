@@ -381,6 +381,11 @@ pub fn ensure_unpacked_store_entry(
         checksum.short(),
     ));
 
+    // A crashed run can leave this exact path behind (pids and the
+    // nonce both reset, typically in containers); extracting over its
+    // leftovers would graft stale files into an immutable store entry.
+    let _ = tmp_path.fs_rm().ok_missing();
+
     tmp_path.fs_create_dir_all()?;
 
     if let Err(error) = extract_zip_entries_to(&tmp_path, package_data) {
