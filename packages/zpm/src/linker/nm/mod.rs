@@ -223,9 +223,6 @@ impl PreviousPackageMap {
     }
 }
 
-/// Builds the sync tree for one workspace's node_modules. The caller
-/// runs the returned trees (possibly in parallel; they cover disjoint
-/// folders) once every workspace was planned.
 /// Resolves the unpacked store used for clonefile materialization:
 /// `Some` only for the classic nmMode on systems where copy-on-write
 /// clones between the store and the project actually work.
@@ -241,6 +238,9 @@ fn clone_store_for(project: &Project) -> Option<Path> {
         .then_some(store_root)
 }
 
+/// Builds the sync tree for one workspace's node_modules. The caller
+/// runs the returned trees (possibly in parallel; they cover disjoint
+/// folders) once every workspace was planned.
 fn generate_workspace_node_modules(
     project: &Project,
     install: &Install,

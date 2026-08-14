@@ -1259,14 +1259,6 @@ impl Project {
             return Ok(false);
         }
 
-        // Transient ranges (file:, exec:, patches, portals) resolve
-        // from content that can change without any manifest or
-        // lockfile edit; re-derive their hashes and compare them with
-        // the recorded resolutions.
-        if !self.transient_resolutions_unchanged(install_state)? {
-            return Ok(false);
-        }
-
         if install_state.lockfile_changed_at.is_none()
             || install_state.lockfile_changed_at != self.lockfile_changed_at()?
         {
@@ -1303,6 +1295,15 @@ impl Project {
             if needs_unplugged && !self.unplugged_path().fs_exists() {
                 return Ok(false);
             }
+        }
+
+        // Transient ranges (file:, exec:, patches, portals) resolve
+        // from content that can change without any manifest or
+        // lockfile edit; re-derive their hashes and compare them with
+        // the recorded resolutions. This is the costliest check
+        // (packing file: folders reads them in full), so it runs last.
+        if !self.transient_resolutions_unchanged(install_state)? {
+            return Ok(false);
         }
 
         Ok(true)

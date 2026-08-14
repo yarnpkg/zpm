@@ -1019,7 +1019,9 @@ describe(`Commands`, () => {
 
           const {stdout} = await run(`install`);
 
-          expect(stdout).toContain(`All dependencies are up-to-date, nothing to do. Run with \`--force\` to ignore this check.`);
+          // The `--force` part of the message is colorized, so only
+          // assert the stable prefix.
+          expect(stdout).toContain(`All dependencies are up-to-date, nothing to do.`);
           await expect(xfs.readFilePromise(pnpPath, `utf8`)).resolves.toEqual(`corrupted`);
         }),
       );

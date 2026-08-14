@@ -1,7 +1,7 @@
 use clipanion::cli;
 use zpm_config::Source;
 use zpm_parsers::JsonDocument;
-use zpm_utils::is_terminal;
+use zpm_utils::{DataType, is_terminal};
 
 use crate::{error::Error, immutable, project::{self, InstallMode, RunInstallOptions}, report::{self, StreamReport, StreamReportConfig, with_report_result}};
 
@@ -149,7 +149,7 @@ impl Install {
 
             with_report_result(report, async {
                 report::if_active(|report| {
-                    report.info("All dependencies are up-to-date, nothing to do. Run with `--force` to ignore this check.".to_string());
+                    report.info(format!("All dependencies are up-to-date, nothing to do. Run with {} to ignore this check.", DataType::Code.colorize("--force")));
                 });
 
                 Ok(())
