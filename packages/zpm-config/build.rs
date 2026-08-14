@@ -423,8 +423,17 @@ impl Generator {
                 let lc_snake_name
                     = name.to_case(Case::Snake);
 
+                // A one-or-many field is a single logical value, so the project
+                // configuration must replace the user one rather than extend it
+                // like regular list settings do.
+                let user_expr = if field.one_or_many {
+                    format!("if let Partial::Value(_) = &project.{lc_snake_name} {{ Partial::Missing }} else {{ user.{lc_snake_name} }}")
+                } else {
+                    format!("user.{lc_snake_name}")
+                };
+
                 let merge_expr
-                    = format!("MergeSettings::merge(context, user.{lc_snake_name}, project.{lc_snake_name}, {default})");
+                    = format!("MergeSettings::merge(context, {user_expr}, project.{lc_snake_name}, {default})");
 
                 if struct_name == &self.root_name {
                     writeln!(writer, "            {lc_snake_name}: {{").unwrap();

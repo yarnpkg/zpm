@@ -1459,6 +1459,30 @@ mod tests {
         )
     }
 
+    fn settings_from_user_and_project_yaml(user_text: &str, project_text: &str) -> Settings {
+        let context = ConfigurationContext {
+            env: BTreeMap::new(),
+            user_cwd: None,
+            project_cwd: None,
+            package_cwd: None,
+        };
+
+        let user
+            = serde_yaml::from_str::<intermediate::Settings>(user_text)
+                .expect("The configuration should be valid");
+
+        let project
+            = serde_yaml::from_str::<intermediate::Settings>(project_text)
+                .expect("The configuration should be valid");
+
+        Settings::merge(
+            &context,
+            Partial::Value(user),
+            Partial::Value(project),
+            || panic!("No configuration found"),
+        )
+    }
+
     fn supported_systems(text: &str) -> Vec<SystemSet> {
         settings_from_yaml(text).supported_systems()
     }
@@ -1585,6 +1609,44 @@ mod tests {
         // The cross product of both entries would have allowed it, but each
         // entry has to match on its own.
         assert!(!foo_ia32.validate_any(&sets));
+    }
+
+    #[test]
+    fn supported_architectures_should_be_replaced_by_the_project_configuration() {
+        let settings = settings_from_user_and_project_yaml(r#"
+            supportedArchitectures:
+              os: [darwin]
+              cpu: [arm64]
+        "#, r#"
+            supportedArchitectures:
+              os: [linux]
+              cpu: [x64]
+        "#);
+
+        // The project configuration must replace the user one, not extend it;
+        // otherwise a project couldn't narrow down a user-level architecture set.
+        let sets = settings.supported_systems();
+
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].os, os(&["linux"]));
+        assert_eq!(sets[0].arch, cpu(&["x64"]));
+    }
+
+    #[test]
+    fn supported_architectures_should_use_the_user_configuration_when_the_project_doesnt_set_it() {
+        let settings = settings_from_user_and_project_yaml(r#"
+            supportedArchitectures:
+              os: [darwin]
+              cpu: [arm64]
+        "#, r#"
+            enableTelemetry: false
+        "#);
+
+        let sets = settings.supported_systems();
+
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].os, os(&["darwin"]));
+        assert_eq!(sets[0].arch, cpu(&["arm64"]));
     }
 }
 
