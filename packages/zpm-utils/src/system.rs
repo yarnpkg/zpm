@@ -97,6 +97,31 @@ impl System {
     }
 }
 
+/// A set of systems, described by one list of supported values per field.
+/// The systems covered by the set are the cross product of all the fields;
+/// a `None` field means that all values are supported, whereas an empty
+/// list means that none are.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SystemSet {
+    pub arch: Option<Vec<Cpu>>,
+    pub os: Option<Vec<Os>>,
+    pub libc: Option<Vec<Libc>>,
+}
+
+impl SystemSet {
+    /// The set only containing the system we're currently running on.
+    pub fn from_current() -> Self {
+        let current
+            = System::from_current();
+
+        Self {
+            arch: Some(current.arch.into_iter().collect()),
+            os: Some(current.os.into_iter().collect()),
+            libc: Some(current.libc.into_iter().collect()),
+        }
+    }
+}
+
 impl ToFileString for System {
     fn to_file_string(&self) -> String {
         let mut segments
@@ -252,28 +277,29 @@ impl Requirements {
         true
     }
 
-    pub fn validate_any(&self, info: &Vec<System>) -> bool {
-        let is_arch_valid = self.arch.is_empty() || self.arch.iter()
-            .any(|requirement| info.iter().any(|system| system.arch.as_ref() == Some(requirement)));
+    /// Whether the requirements are satisfied by at least one of the given
+    /// sets. Each set is checked as a whole, so listing two sets is *not*
+    /// the same as merging their fields together into a single one.
+    pub fn validate_any(&self, sets: &[SystemSet]) -> bool {
+        sets.iter().any(|set| self.validate_set(set))
+    }
 
-        if !is_arch_valid {
-            return false;
+    pub fn validate_set(&self, set: &SystemSet) -> bool {
+        fn is_field_valid<T: PartialEq>(requirements: &[T], supported: &Option<Vec<T>>) -> bool {
+            if requirements.is_empty() {
+                return true;
+            }
+
+            let Some(supported) = supported else {
+                return true;
+            };
+
+            requirements.iter()
+                .any(|requirement| supported.contains(requirement))
         }
 
-        let is_os_valid = self.os.is_empty() || self.os.iter()
-            .any(|requirement| info.iter().any(|system| system.os.as_ref() == Some(requirement)));
-
-        if !is_os_valid {
-            return false;
-        }
-
-        let is_libc_valid = self.libc.is_empty() || self.libc.iter()
-            .any(|requirement| info.iter().any(|system| system.libc.as_ref() == Some(requirement)));
-
-        if !is_libc_valid {
-            return false;
-        }
-
-        true
+        is_field_valid(&self.arch, &set.arch)
+            && is_field_valid(&self.os, &set.os)
+            && is_field_valid(&self.libc, &set.libc)
     }
 }

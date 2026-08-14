@@ -21,6 +21,7 @@ static WARNED_HOSTNAMES: LazyLock<tokio::sync::Mutex<HashSet<String>>> = LazyLoc
 pub struct HttpConfig {
     pub enforce_unsafe_http: bool,
     pub http_retry: usize,
+    pub http_timeout: u64,
     pub unsafe_http_whitelist: Vec<Setting<Glob>>,
     pub slow_network_timeout: u64,
 
@@ -164,6 +165,19 @@ impl<'a> HttpRequest<'a> {
 
     pub fn enable_status_check(mut self, enable_status_check: bool) -> Self {
         self.enable_status_check = enable_status_check;
+        self
+    }
+
+    /// Overrides the client-wide timeout for this specific request. It covers
+    /// the whole exchange (connection included), which makes it suitable to
+    /// bound requests that must not stall the command they're part of. Note
+    /// that the request timeout is never allowed to exceed the global
+    /// `httpTimeout` setting.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        let bounded_timeout
+            = std::cmp::min(timeout, Duration::from_millis(self.client.config.http_timeout));
+
+        self.builder = self.builder.timeout(bounded_timeout);
         self
     }
 
@@ -428,6 +442,7 @@ impl HttpClient {
         let config = HttpConfig {
             enforce_unsafe_http: config.settings.enforce_unsafe_http.value,
             http_retry: config.settings.http_retry.value,
+            http_timeout: config.settings.http_timeout.value,
             unsafe_http_whitelist: config.settings.unsafe_http_whitelist.clone(),
             slow_network_timeout: config.settings.slow_network_timeout.value,
 

@@ -105,6 +105,9 @@ struct Field {
     title: Option<String>,
     description: Option<String>,
     default: Option<Expression>,
+    /// Set on array fields that also accept a single item, which then gets
+    /// treated as a list of one (`supportedArchitectures`, for instance).
+    one_or_many: Option<bool>,
     property_aliases: Option<BTreeMap<String, Vec<String>>>,
     properties: Option<BTreeMap<String, Field>>,
     additional_keys: Option<Box<Field>>,
@@ -162,6 +165,7 @@ impl Field {
                         type_: field.get_type(),
                         aliases: field_aliases,
                         default: field_default,
+                        one_or_many: field.one_or_many.unwrap_or(false),
                     });
                 }
 
@@ -258,6 +262,7 @@ struct GeneratorField {
     type_: InternalType,
     aliases: Vec<String>,
     default: String,
+    one_or_many: bool,
 }
 
 struct Generator {
@@ -300,7 +305,13 @@ impl Generator {
                     writeln!(writer, "        #[serde(alias = \"{alias_camel_case}\")]").unwrap();
                 }
 
-                writeln!(writer, "        #[serde(default)] pub {lc_snake_name}: Partial<{}>,", type_.to_intermediate_type_string()).unwrap();
+                let deserialize_with = if field.one_or_many {
+                    ", deserialize_with = \"crate::deserialize_one_or_many\""
+                } else {
+                    ""
+                };
+
+                writeln!(writer, "        #[serde(default{deserialize_with})] pub {lc_snake_name}: Partial<{}>,", type_.to_intermediate_type_string()).unwrap();
             }
 
             writeln!(writer, "    }}").unwrap();

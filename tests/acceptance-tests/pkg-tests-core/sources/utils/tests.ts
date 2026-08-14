@@ -764,7 +764,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
             }),
           )),
         ),
-        time,
+        ...(!name.startsWith(`no-time-`) ? {time} : {}),
         [`dist-tags`]: {
           latest: semver.maxSatisfying(versions, `*`),
           ...distTags,

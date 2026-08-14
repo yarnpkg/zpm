@@ -12,11 +12,29 @@ pub mod hoist;
 
 const EXPECT_CHILDREN: &str = "All nodes should be expanded by the end of the hoisting process";
 
-fn collect_binaries_from_dependencies(install: &Install, children: &BTreeMap<Ident, usize>, work_tree: &WorkTree) -> BTreeMap<String, (Ident, Path)> {
+/// Collects the binaries exposed by the packages sitting in a node's
+/// `node_modules` folder. Names may collide (two packages exporting the
+/// same bin, often through aliases); the node's own dependencies win
+/// over packages that merely got hoisted next to them, and otherwise
+/// the first candidate wins - same tie-break as Berry's
+/// `createBinSymlinkMap`.
+fn collect_binaries_from_dependencies(install: &Install, node: &hoist::WorkNode, work_tree: &WorkTree) -> BTreeMap<String, (Ident, Path)> {
     let mut binaries
         = BTreeMap::new();
 
-    for (ident, child_idx) in children {
+    let children
+        = node.children.as_ref()
+            .expect(EXPECT_CHILDREN);
+
+    let is_direct_dependency = |ident: &Ident| {
+        node.dependencies.contains_key(ident)
+    };
+
+    let children_by_priority
+        = children.iter().filter(|(ident, _)| is_direct_dependency(ident))
+            .chain(children.iter().filter(|(ident, _)| !is_direct_dependency(ident)));
+
+    for (ident, child_idx) in children_by_priority {
         let child_node
             = &work_tree.nodes[*child_idx];
 
@@ -26,7 +44,8 @@ fn collect_binaries_from_dependencies(install: &Install, children: &BTreeMap<Ide
         if let Some(content_flags) = install.install_state.content_flags.get(&physical_locator) {
             for (bin_name, binary) in &content_flags.binaries {
                 if let content_flags::Binary::Node(bin_path) = binary {
-                    binaries.insert(bin_name.clone(), (ident.clone(), bin_path.clone()));
+                    binaries.entry(bin_name.clone())
+                        .or_insert_with(|| (ident.clone(), bin_path.clone()));
                 }
             }
         }
@@ -437,7 +456,7 @@ fn generate_workspace_node_modules(
         // Register bin symlinks for all direct dependencies of this node
         // Skip any bins that conflict with workspace binaries (workspace takes precedence)
         let mut binaries
-            = collect_binaries_from_dependencies(install, children, &work_tree);
+            = collect_binaries_from_dependencies(install, node, &work_tree);
 
         // For root level, filter out bins that conflict with workspace binaries
         if node_rel_path.is_empty() {

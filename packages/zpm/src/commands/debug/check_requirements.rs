@@ -21,7 +21,7 @@ impl CheckRequirements {
             = Project::new(None).await?;
 
         let systems
-            = project.config.settings.supported_architectures.to_systems();
+            = project.config.settings.supported_systems();
 
         println!("Systems: {:#?}", systems);
         println!();

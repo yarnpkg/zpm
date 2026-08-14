@@ -244,13 +244,7 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     let registry_data: RegistryMetadata
         = JsonDocument::hydrate_from_slice(&bytes[..])?;
 
-    // Iterate in reverse order as we assume that users will most likely use newer versions.
-    for (version, manifest) in registry_data.versions.iter().rev() {
-        // Skip if the version is not in the range
-        if !params.range.check(version) {
-            continue;
-        }
-
+    let is_approved = |version: &zpm_semver::Version| {
         // Skip if the version is more recent than the minimum age gate
         let time = if !minimal_age_gate.is_zero() {
             registry_data.time.as_ref().and_then(|map| map.get(version))
@@ -258,10 +252,29 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
             None
         };
 
-        if !is_package_approved(context, package_ident, version, time, minimal_age_gate) {
-            continue;
-        }
+        is_package_approved(context, package_ident, version, time, minimal_age_gate)
+    };
 
+    // Iterate in reverse order as we assume that users will most likely use newer versions.
+    let mut in_range = registry_data.versions.iter().rev()
+        .filter(|(version, _)| params.range.check(version))
+        .peekable();
+
+    let candidate = match in_range.peek() {
+        Some(_) => in_range.find(|(version, _)| is_approved(version)),
+
+        // The `*` range never matches a prerelease, so a package whose only
+        // published versions are prereleases wouldn't be installable at all;
+        // when nothing matched we thus retry while tolerating them. We keep
+        // this scoped to `*` so that the semantics of other ranges are left
+        // untouched.
+        None if params.range.is_wildcard() => registry_data.versions.iter().rev()
+            .find(|(version, _)| params.range.check_ignore_rc(*version) && is_approved(version)),
+
+        None => None,
+    };
+
+    if let Some((version, manifest)) = candidate {
         let manifest
             = JsonDocument::hydrate_from_value(manifest)?;
 

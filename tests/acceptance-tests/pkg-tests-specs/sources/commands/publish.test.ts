@@ -88,6 +88,22 @@ describe(`publish`, () =>   {
     })).resolves.toBeTruthy();
   }));
 
+  test(`should fail rather than prompt for an otp when not attached to a terminal`, makeTemporaryEnv({
+    name: `otp-prompt-required`,
+    version: `1.0.0`,
+  }, async ({path, run, source}) => {
+    await run(`install`);
+
+    await expect(run(`npm`, `publish`, {
+      env: {
+        // Otherwise the OTP prompt would be short-circuited before we get a
+        // chance to detect that we're not running in an interactive terminal
+        YARN_IS_TEST_ENV: undefined,
+        YARN_NPM_AUTH_TOKEN: validLogins.otpUser.npmAuthToken,
+      },
+    })).rejects.toThrowError(/isn't running in an interactive terminal/);
+  }));
+
   test(`should publish a package with the readme content`, makeTemporaryEnv({
     name: `readme-required`,
     version: `1.0.0`,

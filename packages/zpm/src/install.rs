@@ -8,7 +8,7 @@ use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
-use zpm_utils::{DataType, Hash64, Hash64Writer, IoResultExt, Path, System, ToHumanString, UrlEncoded, scc_tarjan_pearce};
+use zpm_utils::{DataType, Hash64, Hash64Writer, IoResultExt, Path, SystemSet, ToHumanString, UrlEncoded, scc_tarjan_pearce};
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
@@ -21,7 +21,7 @@ use crate::{
 pub struct InstallContext<'a> {
     pub package_cache: Option<&'a CompositeCache>,
     pub project: Option<&'a Project>,
-    pub systems: Option<&'a Vec<System>>,
+    pub systems: Option<&'a Vec<SystemSet>>,
     pub check_checksums: bool,
     pub check_resolutions: bool,
     pub prune_dev_dependencies: bool,
@@ -138,7 +138,7 @@ impl<'a> InstallContext<'a> {
         self
     }
 
-    pub fn with_systems(mut self, systems: Option<&'a Vec<System>>) -> Self {
+    pub fn with_systems(mut self, systems: Option<&'a Vec<SystemSet>>) -> Self {
         self.systems = systems;
         self
     }
@@ -709,7 +709,14 @@ fn verify_resolution_consistency(descriptor: &Descriptor, locator: &Locator) -> 
                 return Err(mismatch());
             }
 
-            if !range_params.range.check(resolved_version) {
+            // The npm resolver lets a `*` range fall back on prereleases when
+            // the package doesn't have any stable version, so we must accept
+            // them here as well (otherwise the very resolutions we produce
+            // would be reported as inconsistent).
+            let in_range = range_params.range.check(resolved_version)
+                || (range_params.range.is_wildcard() && range_params.range.check_ignore_rc(resolved_version));
+
+            if !in_range {
                 return Err(mismatch());
             }
         },

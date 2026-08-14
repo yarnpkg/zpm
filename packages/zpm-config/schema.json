@@ -628,29 +628,27 @@
       "default": 5000
     },
     "supportedArchitectures": {
-      "type": "object",
-      "title": "SupportedArchitectures",
-      "description": "The list of architectures we need to download in the cache.",
-      "properties": {
-        "cpu": {
-          "type": "array",
-          "description": "List of CPU architectures to cover.",
-          "items": {
-            "type": "zpm_utils::Cpu"
-          }
-        },
-        "libc": {
-          "type": "array",
-          "description": "The list of standard C libraries to cover.",
-          "items": {
-            "type": "zpm_utils::Libc"
-          }
-        },
-        "os": {
-          "type": "array",
-          "description": "The list of operating systems to cover.",
-          "items": {
-            "type": "zpm_utils::Os"
+      "type": "array",
+      "oneOrMany": true,
+      "description": "The list of architectures we need to download in the cache. Can either be a single entry (whose fields are combined together as a cross product) or a list of entries (each entry being matched independently).",
+      "items": {
+        "type": "object",
+        "title": "SupportedArchitectures",
+        "properties": {
+          "cpu": {
+            "type": "crate::ArchitectureFilter<zpm_utils::Cpu>",
+            "description": "The CPU architecture (or list of architectures) to cover, or null to cover them all.",
+            "default": "current"
+          },
+          "libc": {
+            "type": "crate::ArchitectureFilter<zpm_utils::Libc>",
+            "description": "The standard C library (or list of libraries) to cover, or null to cover them all.",
+            "default": "current"
+          },
+          "os": {
+            "type": "crate::ArchitectureFilter<zpm_utils::Os>",
+            "description": "The operating system (or list of systems) to cover, or null to cover them all.",
+            "default": "current"
           }
         }
       }

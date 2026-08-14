@@ -279,6 +279,48 @@ describe(`Features`, () => {
       );
 
       test(
+        `it should inherit the global minimum release age in rules that don't set it`,
+        makeTemporaryEnv({
+          dependencies: {[`@scoped/release-date`]: `^1.0.0`},
+        }, {
+          npmMinimalAgeGate: 0,
+        }, async ({run, source}) => {
+          await run(`config`, `set`, `packageRules`, `--json`, JSON.stringify([{
+            packageFilter: `@scoped/*`,
+            npmAlwaysAuth: false,
+          }]));
+
+          await run(`install`);
+
+          await expect(source(`require('@scoped/release-date/package.json')`)).resolves.toMatchObject({
+            name: `@scoped/release-date`,
+            version: `1.1.2`,
+          });
+        }),
+      );
+
+      test(
+        `it should inherit the global minimum release age in source rules that don't set it`,
+        makeTemporaryEnv({
+          dependencies: {[`@scoped/release-date`]: `^1.0.0`},
+        }, {
+          npmMinimalAgeGate: 0,
+        }, async ({run, source}) => {
+          await run(`config`, `set`, `sourceRules`, `--json`, JSON.stringify([{
+            ecosystemFilter: `npm`,
+            npmAlwaysAuth: false,
+          }]));
+
+          await run(`install`);
+
+          await expect(source(`require('@scoped/release-date/package.json')`)).resolves.toMatchObject({
+            name: `@scoped/release-date`,
+            version: `1.1.2`,
+          });
+        }),
+      );
+
+      test(
         `it should work with scoped packages`,
         makeTemporaryEnv({
           dependencies: {[`@scoped/release-date`]: `1.1.1`},
@@ -407,6 +449,22 @@ describe(`Features`, () => {
           await expect(source(`require('@scoped/release-date/package.json')`)).resolves.toMatchObject({
             name: `@scoped/release-date`,
             version: `1.1.0`,
+          });
+        }),
+      );
+    });
+
+    describe(`packages with no release time metadata (e.g. GitHub Packages)`, () => {
+      test(
+        `it should install a package with no release time even if npmMinimalAgeGate is set`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({run, source}) => {
+          await run(`add`, `no-time-deps`);
+
+          await expect(source(`require('no-time-deps/package.json')`)).resolves.toMatchObject({
+            name: `no-time-deps`,
+            version: `1.0.0`,
           });
         }),
       );

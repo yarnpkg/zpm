@@ -244,6 +244,34 @@ describe(`Node Modules`, () => {
     ),
   );
 
+  test(`should prefer direct dependency bins over transitive dependency bins`,
+    makeTemporaryEnv(
+      {
+        dependencies: {
+          [`@fixture/native`]: `npm:has-bin-entries@2.0.0`,
+          [`has-bin-entries`]: `npm:one-dep-alias-bins@1.0.0`,
+        },
+      },
+      {
+        nodeLinker: `node-modules`,
+      },
+      async ({path, run}) => {
+        await run(`install`);
+
+        // The direct dependency must win over the transitive alias, even
+        // though the transitive one sorts first
+        const binSymlink = await xfs.readlinkPromise(npath.toPortablePath(`${path}/node_modules/.bin/has-bin-entries-with-relative-require`));
+        expect(binSymlink).toContain(`@fixture/native`);
+
+        if (process.platform !== `win32`) {
+          await expect(run(`node`, `${path}/node_modules/.bin/has-bin-entries-with-relative-require`)).resolves.toMatchObject({
+            stdout: `2.0.0\n`,
+          });
+        }
+      },
+    ),
+  );
+
   test(`should support dependency via link: protocol to a missing folder`,
     makeTemporaryEnv(
       {

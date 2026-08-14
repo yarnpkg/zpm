@@ -421,7 +421,20 @@ impl Audit {
 
             if self.recursive && first_visit {
                 if let Some(resolution) = install_state.resolution_tree.locator_resolutions.get(&locator) {
-                    for descriptor in resolution.dependencies.values() {
+                    let workspace
+                        = project.workspaces.iter()
+                            .find(|workspace| workspace.locator() == physical_locator);
+
+                    for (ident, descriptor) in &resolution.dependencies {
+                        // Workspaces store their development dependencies alongside their regular ones,
+                        // even though those aren't part of the transitive production dependency graph.
+                        let is_dev_dependency
+                            = workspace.is_some_and(|workspace| workspace.manifest.dev_dependencies.contains_key(ident));
+
+                        if is_dev_dependency && !include_dev_dependencies {
+                            continue;
+                        }
+
                         if let Some(dep_locator) = install_state.resolution_tree.descriptor_to_locator.get(descriptor) {
                             queue.push((locator.clone(), dep_locator.clone()));
                         }

@@ -1020,6 +1020,14 @@ async fn ask_for_otp(params: &NpmHttpParams<'_>, response: &Response) -> Result<
 
     render_otp_notice(&response).await;
 
+    // Nobody's there to answer the prompt when we're not attached to a
+    // terminal; erroring out is better than hanging forever.
+    if !zpm_utils::is_terminal() {
+        return Err(Error::AuthenticationError(
+            "The registry requires additional authentication, but Yarn isn't running in an interactive terminal; rerun this command with --otp <code>".to_string()
+        ));
+    }
+
     let report_guard
         = current_report().await;
 

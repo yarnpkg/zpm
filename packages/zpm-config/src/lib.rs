@@ -1,7 +1,7 @@
 use std::{cell::Cell, collections::{BTreeMap, BTreeSet}, fmt::Display, ops::Deref, sync::Arc, time::UNIX_EPOCH};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, IoResultExt, LastModifiedAt, Libc, Os, Path, RawString, Serialized, System, ToFileString, ToHumanString, tree};
+use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, IoResultExt, LastModifiedAt, Libc, Os, Path, RawString, Serialized, System, SystemSet, ToFileString, ToHumanString, tree};
 
 #[derive(Debug, Clone)]
 pub struct ConfigurationContext {
@@ -108,6 +108,57 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for Partial<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         T::deserialize(deserializer).map(Partial::Value)
     }
+}
+
+/// Deserializes a list setting that also accepts a single item, which is then
+/// treated as a list of one. Used by settings such as `supportedArchitectures`,
+/// which historically only accepted a single entry.
+fn deserialize_one_or_many<'de, D, T>(deserializer: D) -> Result<Partial<Vec<T>>, D::Error>
+    where D: Deserializer<'de>, T: Deserialize<'de>
+{
+    struct OneOrManyVisitor<T> {
+        marker: std::marker::PhantomData<T>,
+    }
+
+    impl<'de, T: Deserialize<'de>> de::Visitor<'de> for OneOrManyVisitor<T> {
+        type Value = Partial<Vec<T>>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a single entry or a list of entries")
+        }
+
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Partial::Value(Vec::new()))
+        }
+
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Partial::Value(Vec::new()))
+        }
+
+        fn visit_some<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+            deserializer.deserialize_any(self)
+        }
+
+        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let mut values
+                = Vec::new();
+
+            while let Some(value) = seq.next_element::<T>()? {
+                values.push(value);
+            }
+
+            Ok(Partial::Value(values))
+        }
+
+        fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+            let value
+                = T::deserialize(de::value::MapAccessDeserializer::new(map))?;
+
+            Ok(Partial::Value(vec![value]))
+        }
+    }
+
+    deserializer.deserialize_any(OneOrManyVisitor {marker: std::marker::PhantomData})
 }
 
 impl<T> Partial<T> where T: Default {
@@ -814,6 +865,22 @@ impl SourceRule {
 }
 
 impl Settings {
+    /// The systems we need to download packages for. Each entry of
+    /// `supportedArchitectures` yields one set, and a package is kept as soon
+    /// as it's compatible with at least one of them.
+    pub fn supported_systems(&self) -> Vec<SystemSet> {
+        // An empty list would mean "no architecture at all", which is never
+        // what the user wants; we fallback on the current architecture instead
+        // (which is also what happens when the setting isn't set at all).
+        if self.supported_architectures.is_empty() {
+            return vec![SystemSet::from_current()];
+        }
+
+        self.supported_architectures.iter()
+            .map(|entry| entry.to_system_set())
+            .collect()
+    }
+
     pub fn disable_age_gate(&mut self) {
         self.npm_minimal_age_gate.force(std::time::Duration::ZERO, Source::Cli);
 
@@ -878,63 +945,36 @@ fn validate_intermediate_settings(settings: &intermediate::Settings) -> Result<(
     Ok(())
 }
 
-impl SupportedArchitectures {
-    pub fn to_systems(&self) -> Vec<System> {
-        let mut systems
-            = Vec::new();
+/// Replaces the `current` placeholders by the values of the system we're
+/// currently running on. Placeholders without a current value (the libc on
+/// systems that don't have one, for instance) are simply removed.
+fn resolve_current<T: PartialEq + Clone>(values: &ArchitectureFilter<T>, current: Option<&T>, placeholder: &T) -> Option<Vec<T>> {
+    let values
+        = values.as_list()?;
 
+    let resolved = values.iter()
+        .flat_map(|value| if value == placeholder {
+            current.cloned()
+        } else {
+            Some(value.clone())
+        })
+        .collect();
+
+    Some(resolved)
+}
+
+impl SupportedArchitectures {
+    /// The set of systems covered by this entry. Each field is matched
+    /// independently, so the entry covers the cross product of its fields.
+    pub fn to_system_set(&self) -> SystemSet {
         let current
             = System::from_current();
 
-        let cpus = if self.cpu.is_empty() {
-            vec![&Cpu::Current]
-        } else {
-            self.cpu.iter().map(|c| &c.value).collect()
-        };
-
-        let os = if self.os.is_empty() {
-            vec![&Os::Current]
-        } else {
-            self.os.iter().map(|o| &o.value).collect()
-        };
-
-        let libc = if self.libc.is_empty() {
-            vec![&Libc::Current]
-        } else {
-            self.libc.iter().map(|l| &l.value).collect()
-        };
-
-        for &cpu in &cpus {
-            for &os in &os {
-                for &libc in &libc {
-                    let arch = if cpu == &Cpu::Current {
-                        current.arch.clone()
-                    } else {
-                        Some(cpu.clone())
-                    };
-
-                    let os = if os == &Os::Current {
-                        current.os.clone()
-                    } else {
-                        Some(os.clone())
-                    };
-
-                    let libc = if libc == &Libc::Current {
-                        current.libc.clone()
-                    } else {
-                        Some(libc.clone())
-                    };
-
-                    systems.push(System {
-                        arch,
-                        os,
-                        libc,
-                    });
-                }
-            }
+        SystemSet {
+            arch: resolve_current(&self.cpu.value, current.arch.as_ref(), &Cpu::Current),
+            os: resolve_current(&self.os.value, current.os.as_ref(), &Os::Current),
+            libc: resolve_current(&self.libc.value, current.libc.as_ref(), &Libc::Current),
         }
-
-        systems
     }
 }
 
@@ -1395,6 +1435,159 @@ pub use fns::*;
 mod types;
 pub use types::*;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings_from_yaml(text: &str) -> Settings {
+        let context = ConfigurationContext {
+            env: BTreeMap::new(),
+            user_cwd: None,
+            project_cwd: None,
+            package_cwd: None,
+        };
+
+        let project
+            = serde_yaml::from_str::<intermediate::Settings>(text)
+                .expect("The configuration should be valid");
+
+        Settings::merge(
+            &context,
+            Partial::Missing,
+            Partial::Value(project),
+            || panic!("No configuration found"),
+        )
+    }
+
+    fn supported_systems(text: &str) -> Vec<SystemSet> {
+        settings_from_yaml(text).supported_systems()
+    }
+
+    fn cpu(values: &[&str]) -> Option<Vec<Cpu>> {
+        Some(values.iter().map(|value| Cpu::from_file_string(value).unwrap()).collect())
+    }
+
+    fn os(values: &[&str]) -> Option<Vec<Os>> {
+        Some(values.iter().map(|value| Os::from_file_string(value).unwrap()).collect())
+    }
+
+    fn libc(values: &[&str]) -> Option<Vec<Libc>> {
+        Some(values.iter().map(|value| Libc::from_file_string(value).unwrap()).collect())
+    }
+
+    #[test]
+    fn supported_architectures_should_support_the_legacy_object_form() {
+        let sets = supported_systems(r#"
+            supportedArchitectures:
+              os: [darwin, linux]
+              cpu: [arm64, x64]
+              libc: [glibc]
+        "#);
+
+        assert_eq!(sets, vec![SystemSet {
+            arch: cpu(&["arm64", "x64"]),
+            os: os(&["darwin", "linux"]),
+            libc: libc(&["glibc"]),
+        }]);
+    }
+
+    #[test]
+    fn supported_architectures_should_support_a_list_of_entries() {
+        let sets = supported_systems(r#"
+            supportedArchitectures:
+              - os: darwin
+                cpu: arm64
+                libc: musl
+              - os: linux
+                cpu: x64
+                libc: glibc
+        "#);
+
+        assert_eq!(sets, vec![SystemSet {
+            arch: cpu(&["arm64"]),
+            os: os(&["darwin"]),
+            libc: libc(&["musl"]),
+        }, SystemSet {
+            arch: cpu(&["x64"]),
+            os: os(&["linux"]),
+            libc: libc(&["glibc"]),
+        }]);
+    }
+
+    #[test]
+    fn supported_architectures_should_default_the_fields_that_arent_set_on_an_entry() {
+        let sets = supported_systems(r#"
+            supportedArchitectures:
+              - os: linux
+        "#);
+
+        let current
+            = System::from_current();
+
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].os, os(&["linux"]));
+        assert_eq!(sets[0].arch, Some(current.arch.into_iter().collect::<Vec<_>>()));
+    }
+
+    #[test]
+    fn supported_architectures_should_preserve_null_fields_inside_an_entry() {
+        let sets = supported_systems(r#"
+            supportedArchitectures:
+              - os: foo
+                cpu: [x64, ia32]
+                libc: null
+        "#);
+
+        assert_eq!(sets, vec![SystemSet {
+            arch: cpu(&["x64", "ia32"]),
+            os: os(&["foo"]),
+            libc: None,
+        }]);
+    }
+
+    #[test]
+    fn supported_architectures_should_fallback_on_the_current_architecture_when_the_list_is_empty() {
+        let sets = supported_systems(r#"
+            supportedArchitectures: []
+        "#);
+
+        assert_eq!(sets, vec![SystemSet::from_current()]);
+    }
+
+    #[test]
+    fn supported_architectures_should_fallback_on_the_current_architecture_when_unset() {
+        let sets = supported_systems(r#"
+            enableGlobalCache: true
+        "#);
+
+        assert_eq!(sets, vec![SystemSet::from_current()]);
+    }
+
+    #[test]
+    fn supported_architectures_entries_are_matched_independently() {
+        let sets = supported_systems(r#"
+            supportedArchitectures:
+              - os: foo
+                cpu: x64
+                libc: glibc
+              - os: bar
+                cpu: ia32
+                libc: musl
+        "#);
+
+        let foo_x64 = System::new(cpu(&["x64"]).unwrap().pop(), os(&["foo"]).unwrap().pop(), None)
+            .to_requirements();
+        let foo_ia32 = System::new(cpu(&["ia32"]).unwrap().pop(), os(&["foo"]).unwrap().pop(), None)
+            .to_requirements();
+
+        assert!(foo_x64.validate_any(&sets));
+
+        // The cross product of both entries would have allowed it, but each
+        // entry has to match on its own.
+        assert!(!foo_ia32.validate_any(&sets));
+    }
+}
+
 // Rust doesn't support specialization, so we can't have a blanket implementation for FromStr
 // and a different one for Option<T: FromStr>; instead we manually generate whatever we need.
 merge_settings!(std::time::Duration, |s: &str| FromFileString::from_file_string(s).unwrap());
@@ -1445,6 +1638,10 @@ merge_optional_settings!(zpm_utils::Glob);
 merge_optional_settings!(zpm_utils::Libc);
 merge_optional_settings!(zpm_utils::Os);
 merge_optional_settings!(zpm_utils::Secret<String>);
+
+merge_settings!(crate::types::ArchitectureFilter<zpm_utils::Cpu>, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::ArchitectureFilter<zpm_utils::Libc>, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::ArchitectureFilter<zpm_utils::Os>, |s: &str| FromFileString::from_file_string(s).unwrap());
 
 merge_settings!(crate::types::NodeLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::NodePackageMapType, |s: &str| FromFileString::from_file_string(s).unwrap());

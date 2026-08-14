@@ -45,6 +45,37 @@ describe(`Plugins`, () => {
       );
 
       test(
+        `it should warn and add the package without @types when the Algolia index can't be reached`,
+        makeTemporaryEnv({}, {
+          tsEnableAutoTypes: true,
+        }, async ({path, run, source}) => {
+          // Simulates a network where the Algolia index can't be reached (for
+          // instance a corporate proxy silently dropping the request); the
+          // registry is configured through the environment and stays reachable
+          await xfs.writeFilePromise(ppath.join(path, `.yarnrc.yml`), [
+            `networkSettings:`,
+            `  "*.algolia.net":`,
+            `    enableNetwork: false`,
+            ``,
+          ].join(`\n`));
+
+          const {stdout} = await run(`add`, `is-number`);
+
+          expect(stdout).toMatch(/Couldn't query Algolia's npm-search index/);
+
+          const manifest = await readManifest(path);
+
+          expect(manifest).toMatchObject({
+            dependencies: {
+              [`is-number`]: `^2.0.0`,
+            },
+          });
+
+          expect(manifest).not.toHaveProperty(`devDependencies`);
+        }),
+      );
+
+      test(
         `it should automatically enable automatic @types insertion when a tsconfig is detected in the current workspace`,
         makeTemporaryMonorepoEnv({
           workspaces: [`packages/*`],
