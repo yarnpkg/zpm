@@ -2442,6 +2442,41 @@ describe(`Node Modules`, () => {
       ),
     );
 
+    testIf(
+      () => process.platform === `darwin`,
+      `should materialize packages from the unpacked store via clonefile`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+        },
+        async ({path, run, source}) => {
+          await run(`install`);
+
+          // The unpacked store should hold a pristine copy of the
+          // package, keyed by locator and checksum.
+          const storePath = ppath.join(path, `.yarn/global/unpacked` as PortablePath);
+          const storeEntries = await xfs.readdirPromise(storePath);
+          expect(storeEntries.some(entry => entry.startsWith(`no-deps-npm-1.0.0-`))).toBe(true);
+
+          // A reinstall into an empty node_modules goes through the
+          // clone path and must produce a working package.
+          await xfs.removePromise(ppath.join(path, Filename.nodeModules));
+          await touchManifest(path);
+          await run(`install`);
+
+          await expect(source(`require('no-deps')`)).resolves.toEqual({
+            name: `no-deps`,
+            version: `1.0.0`,
+          });
+        },
+      ),
+    );
+
     it(`should leave unchanged packages untouched in hardlink modes`,
       makeTemporaryEnv(
         {

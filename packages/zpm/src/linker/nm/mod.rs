@@ -226,6 +226,21 @@ impl PreviousPackageMap {
 /// Builds the sync tree for one workspace's node_modules. The caller
 /// runs the returned trees (possibly in parallel; they cover disjoint
 /// folders) once every workspace was planned.
+/// Resolves the unpacked store used for clonefile materialization:
+/// `Some` only for the classic nmMode on systems where copy-on-write
+/// clones between the store and the project actually work.
+fn clone_store_for(project: &Project) -> Option<Path> {
+    if project.config.settings.nm_mode.value != zpm_config::NmMode::Classic {
+        return None;
+    }
+
+    let store_root = project.config.settings.global_folder.value
+        .with_join_str("unpacked");
+
+    linker::helpers::clonefile_supported(&store_root, &project.project_cwd)
+        .then_some(store_root)
+}
+
 fn generate_workspace_node_modules(
     project: &Project,
     install: &Install,
@@ -233,10 +248,12 @@ fn generate_workspace_node_modules(
     workspace_node_idx: usize,
     package_map_builder: Option<&mut NodeModulesPackageMapBuilder>,
     previous_map: Option<&PreviousPackageMap>,
+    clone_store: Option<&Path>,
     packages_by_location: &mut BTreeMap<Path, zpm_primitives::Locator>,
     canonical_build_locations: &mut BTreeMap<Locator, Path>,
     force_rebuild_locators: &mut BTreeSet<Locator>,
     cas_extractions: &mut Vec<(Path, Locator)>,
+    clone_extractions: &mut Vec<(Path, Locator)>,
 ) -> Result<(SyncTree<'static>, Path), Error> {
     let mut package_map_builder
         = package_map_builder;
@@ -445,6 +462,17 @@ fn generate_workspace_node_modules(
                             previous_map.matches_package(&abs_path, &child_node.locator, checksum)
                         });
 
+                    // Leaf packages with a known checksum can be
+                    // materialized as a copy-on-write clone of the
+                    // unpacked store instead of file-by-file writes.
+                    // Only fresh folders qualify: reconciling an
+                    // existing one in place preserves its inode, which
+                    // file watchers rely on across updates.
+                    let use_clone = clone_store.is_some()
+                        && !dest_exists
+                        && !has_nested_children
+                        && checksum.is_some();
+
                     if hardlinks_mode {
                         // Hand off to the CAS extractor; `Any` keeps
                         // the parent walk from treating the folder as
@@ -454,6 +482,9 @@ fn generate_workspace_node_modules(
                         if !assume_up_to_date {
                             cas_extractions.push((dest_abs_path.clone(), child_node.locator.clone()));
                         }
+                    } else if use_clone {
+                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Any)?;
+                        clone_extractions.push((dest_abs_path.clone(), child_node.locator.clone()));
                     } else {
                         workspace_nm_tree.register_entry(child_rel_path, SyncItem::Folder {
                             template: Some(SyncTemplate::Zip {
@@ -516,14 +547,16 @@ fn generate_workspace_node_modules(
     Ok((workspace_nm_tree, workspace_abs_path))
 }
 
-/// Runs every workspace tree, then the CAS extractions, on the rayon
-/// pool. `block_in_place` keeps the heavy filesystem work from
-/// starving the tokio worker the linker runs on.
+/// Runs every workspace tree, then the CAS and clone extractions, on
+/// the rayon pool. `block_in_place` keeps the heavy filesystem work
+/// from starving the tokio worker the linker runs on.
 fn run_workspace_trees(
     project: &Project,
     install: &Install,
     workspace_trees: Vec<(SyncTree<'static>, Path)>,
     cas_extractions: &[(Path, Locator)],
+    clone_store: Option<&Path>,
+    clone_extractions: &[(Path, Locator)],
 ) -> Result<(), Error> {
     tokio::task::block_in_place(|| {
         use rayon::prelude::*;
@@ -541,6 +574,40 @@ fn run_workspace_trees(
 
                 Ok(())
             })?;
+
+        if let Some(store_root) = clone_store {
+            clone_extractions.par_iter().try_for_each(|(dest_abs_path, locator)| -> Result<(), Error> {
+                let physical_locator
+                    = locator.physical_locator();
+
+                let package_data = install.package_data
+                    .get(&physical_locator)
+                    .unwrap_or_else(|| panic!("Expected package_data for {}", locator.to_print_string()));
+
+                let checksum = install.lockfile.entries
+                    .get(&physical_locator)
+                    .and_then(|entry| entry.checksum.clone())
+                    .or_else(|| install.install_state.cache_checksums.get(&physical_locator).cloned())
+                    .expect("Clone extractions are only planned for packages with a checksum");
+
+                let store_entry = linker::helpers::ensure_unpacked_store_entry(
+                    store_root,
+                    &physical_locator,
+                    &checksum,
+                    package_data,
+                )?;
+
+                if linker::helpers::clone_package_from_store(dest_abs_path, &store_entry).is_err() {
+                    // The volumes may not support clones after all
+                    // (say, the store was probed against another
+                    // mount); extract the archive like before.
+                    let _ = dest_abs_path.fs_rm().ok_missing();
+                    linker::helpers::extract_zip_entries_to(dest_abs_path, package_data)?;
+                }
+
+                Ok(())
+            })?;
+        }
 
         run_cas_extractions(project, install, cas_extractions)
     })
@@ -628,10 +695,15 @@ pub async fn link_island_nm(
         = BTreeSet::new();
     let mut cas_extractions
         = Vec::new();
+    let mut clone_extractions
+        = Vec::new();
     let mut package_maps
         = Vec::new();
     let mut workspace_trees
         = Vec::new();
+
+    let clone_store
+        = clone_store_for(project);
 
     for workspace_ident in &island.workspace_idents {
         let workspace = project.workspace_by_ident(workspace_ident)?;
@@ -666,10 +738,12 @@ pub async fn link_island_nm(
             0,
             Some(&mut package_map_builder),
             previous_map.as_ref(),
+            clone_store.as_ref(),
             &mut packages_by_location,
             &mut canonical_build_locations,
             &mut force_rebuild_locators,
             &mut cas_extractions,
+            &mut clone_extractions,
         )?);
 
         package_maps.push((
@@ -678,7 +752,7 @@ pub async fn link_island_nm(
         ));
     }
 
-    run_workspace_trees(project, install, workspace_trees, &cas_extractions)?;
+    run_workspace_trees(project, install, workspace_trees, &cas_extractions, clone_store.as_ref(), &clone_extractions)?;
 
     for (package_map_path, package_map) in package_maps {
         persist_package_map_at(&package_map_path, &package_map)?;
@@ -933,6 +1007,8 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
         = BTreeSet::new();
     let mut cas_extractions
         = Vec::new();
+    let mut clone_extractions
+        = Vec::new();
 
     hoister.hoist();
 
@@ -948,6 +1024,9 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
         project.nm_path(),
     );
 
+    let clone_store
+        = clone_store_for(project);
+
     let mut project_queue
         = vec![0usize];
 
@@ -962,16 +1041,18 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
             workspace_node_idx,
             Some(&mut package_map_builder),
             previous_map.as_ref(),
+            clone_store.as_ref(),
             &mut packages_by_location,
             &mut canonical_build_locations,
             &mut force_rebuild_locators,
             &mut cas_extractions,
+            &mut clone_extractions,
         )?);
 
         project_queue.extend_from_slice(&work_tree.nodes[workspace_node_idx].workspaces_idx);
     }
 
-    run_workspace_trees(project, install, workspace_trees, &cas_extractions)?;
+    run_workspace_trees(project, install, workspace_trees, &cas_extractions, clone_store.as_ref(), &clone_extractions)?;
 
     persist_package_map(project, &package_map_builder.build()?)?;
 

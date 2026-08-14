@@ -859,6 +859,35 @@ impl Path {
         Ok(self)
     }
 
+    /**
+     * Clone this file or directory tree to `new_path` using the OS
+     * copy-on-write primitive (`clonefile` on macOS). The destination
+     * must not exist. Fails on platforms or filesystems without
+     * support; callers are expected to fall back to a regular copy.
+     */
+    pub fn fs_clonefile(&self, new_path: &Path) -> Result<&Self, PathError> {
+        #[cfg(target_os = "macos")]
+        {
+            let source = std::ffi::CString::new(self.to_path_buf().as_os_str().as_bytes())
+                .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+            let target = std::ffi::CString::new(new_path.to_path_buf().as_os_str().as_bytes())
+                .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+
+            if unsafe {libc::clonefile(source.as_ptr(), target.as_ptr(), 0)} != 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+
+            Ok(self)
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = new_path;
+
+            Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "clonefile is not supported on this platform").into())
+        }
+    }
+
     pub fn fs_copy(&self, new_path: &Path) -> Result<&Self, PathError> {
         match self.fs_is_dir() {
             true => {

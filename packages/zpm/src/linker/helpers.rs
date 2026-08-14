@@ -3,7 +3,7 @@ use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::Perm
 use zpm_formats::iter_ext::IterExt;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, VersionFilter, Locator, Reference};
-use zpm_utils::{Path, PathError, System};
+use zpm_utils::{IoResultExt, Path, PathError, System};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -279,6 +279,138 @@ fn link_into_local_index(
     drop(shard);
 
     ensure_hardlink(target_path, &canonical_path)
+}
+
+/// Extracts every entry of the package archive under `destination`,
+/// with no completion marker; used for the unpacked store and as the
+/// fallback when a clone fails halfway.
+pub(crate) fn extract_zip_entries_to(destination: &Path, package_data: &PackageData) -> Result<(), Error> {
+    let package_subpath
+        = package_data.package_subpath();
+
+    let package_bytes = match package_data {
+        PackageData::Zip {archive_path, ..} => archive_path.fs_read()?,
+        _ => panic!("Expected a zip archive"),
+    };
+
+    let entries
+        = zpm_formats::zip::entries_from_zip(&package_bytes)?
+            .into_iter()
+            .strip_path_prefix(&package_subpath)
+            .collect::<Vec<_>>();
+
+    for entry in entries {
+        let target_path = destination
+            .with_join(&entry.name);
+
+        target_path.fs_create_parent()?;
+
+        target_path
+            .fs_write(&entry.data)?
+            .fs_set_permissions(Permissions::from_mode(entry.mode as u32))?;
+    }
+
+    Ok(())
+}
+
+/// Whether copy-on-write clones work between the unpacked store and
+/// the project. Probed once per process by cloning a marker file; any
+/// failure (other platform, other filesystem, cross-volume setup)
+/// simply disables clone-based materialization.
+pub fn clonefile_supported(store_root: &Path, project_cwd: &Path) -> bool {
+    use std::sync::OnceLock;
+
+    static SUPPORTED: OnceLock<bool> = OnceLock::new();
+
+    *SUPPORTED.get_or_init(|| {
+        let probe = || -> Result<(), Error> {
+            store_root.fs_create_dir_all()?;
+
+            let source = store_root
+                .with_join_str(format!(".clone-probe-{}", std::process::id()));
+            let target = project_cwd
+                .with_join_str(format!(".clone-probe-{}", std::process::id()));
+
+            source.fs_write([])?;
+            let _ = target.fs_rm_file().ok_missing();
+
+            let cloned = source.fs_clonefile(&target);
+
+            let _ = source.fs_rm_file().ok_missing();
+            let _ = target.fs_rm_file().ok_missing();
+
+            cloned?;
+
+            Ok(())
+        };
+
+        probe().is_ok()
+    })
+}
+
+/// Ensures the unpacked store holds a pristine copy of the package,
+/// keyed by locator and content checksum, and returns its path. The
+/// entry is built in a temp folder and renamed in place so concurrent
+/// installs can race safely.
+pub fn ensure_unpacked_store_entry(
+    store_root: &Path,
+    locator: &Locator,
+    checksum: &zpm_utils::Hash64,
+    package_data: &PackageData,
+) -> Result<Path, Error> {
+    let entry_path = store_root.with_join_str(format!(
+        "{}-{}-{}",
+        locator.ident.slug(),
+        locator.reference.slug(),
+        checksum.short(),
+    ));
+
+    if entry_path.fs_exists() {
+        return Ok(entry_path);
+    }
+
+    // The nonce keeps parallel extractions of the same package (the
+    // tree may materialize one locator at several locations) from
+    // clobbering each other's temp folder.
+    static STORE_TMP_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    let tmp_path = store_root.with_join_str(format!(
+        ".tmp-{}-{}-{}",
+        std::process::id(),
+        STORE_TMP_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        checksum.short(),
+    ));
+
+    tmp_path.fs_create_dir_all()?;
+
+    if let Err(error) = extract_zip_entries_to(&tmp_path, package_data) {
+        let _ = tmp_path.fs_rm().ok_missing();
+        return Err(error);
+    }
+
+    if let Err(error) = tmp_path.fs_rename(&entry_path) {
+        let _ = tmp_path.fs_rm().ok_missing();
+
+        // Another process finished the same entry first; use theirs.
+        if !entry_path.fs_exists() {
+            return Err(error.into());
+        }
+    }
+
+    Ok(entry_path)
+}
+
+/// Materializes `destination` as a copy-on-write clone of the store
+/// entry, replacing whatever was there.
+pub fn clone_package_from_store(destination: &Path, store_entry: &Path) -> Result<(), Error> {
+    if destination.fs_exists() {
+        destination.fs_rm()?;
+    }
+
+    destination.fs_create_parent()?;
+    store_entry.fs_clonefile(destination)?;
+
+    Ok(())
 }
 
 /// Stamped on every CAS entry. An mtime that doesn't match flags
