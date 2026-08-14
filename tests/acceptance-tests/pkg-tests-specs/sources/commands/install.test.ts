@@ -1017,8 +1017,9 @@ describe(`Commands`, () => {
           const pnpPath = ppath.join(path, Filename.pnpCjs);
           await xfs.writeFilePromise(pnpPath, `corrupted`);
 
-          await run(`install`);
+          const {stdout} = await run(`install`);
 
+          expect(stdout).toContain(`All dependencies are up-to-date, nothing to do. Run with \`--force\` to ignore this check.`);
           await expect(xfs.readFilePromise(pnpPath, `utf8`)).resolves.toEqual(`corrupted`);
         }),
       );

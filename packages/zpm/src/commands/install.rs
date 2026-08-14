@@ -3,7 +3,7 @@ use zpm_config::Source;
 use zpm_parsers::JsonDocument;
 use zpm_utils::is_terminal;
 
-use crate::{error::Error, immutable, project::{self, InstallMode, RunInstallOptions}};
+use crate::{error::Error, immutable, project::{self, InstallMode, RunInstallOptions}, report::{self, StreamReport, StreamReportConfig, with_report_result}};
 
 /// Install dependencies
 ///
@@ -140,6 +140,21 @@ impl Install {
             && self.mode.is_none()
             && project.is_install_up_to_date()?
         {
+            let report = StreamReport::new(StreamReportConfig {
+                include_version: true,
+                json: self.json,
+                silent_or_error: self.silent,
+                ..StreamReportConfig::from_config(&project.config)
+            });
+
+            with_report_result(report, async {
+                report::if_active(|report| {
+                    report.info("All dependencies are up-to-date, nothing to do. Run with `--force` to ignore this check.".to_string());
+                });
+
+                Ok(())
+            }).await?;
+
             return Ok(());
         }
 
