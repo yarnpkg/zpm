@@ -64,8 +64,8 @@ pub struct Install {
     refresh_lockfile: bool,
 
     /// Run a full install even when everything looks up-to-date; defaults to true in interactive terminals
-    #[cli::option("-f,--force")]
-    force: Option<bool>,
+    #[cli::option("-f,--force", default = is_terminal())]
+    force: bool,
 
     /// Select which install artifacts Yarn should generate
     #[cli::option("--mode")]
@@ -133,10 +133,7 @@ impl Install {
         // install is provably still current. Interactive runs skip this
         // fast path so that a manually damaged project (say, a deleted
         // package folder) heals when the user reaches for `yarn install`.
-        let force = self.force
-            .unwrap_or_else(is_terminal);
-
-        if !force
+        if !self.force
             && !self.check_resolutions
             && !self.check_checksums
             && !refresh_lockfile
@@ -175,7 +172,7 @@ impl Install {
             silent_or_error: self.silent,
             json: self.json,
             inline_builds: self.inline_builds,
-            force,
+            force: self.force,
             ..Default::default()
         }).await?;
 

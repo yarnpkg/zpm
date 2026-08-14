@@ -1023,6 +1023,112 @@ impl Project {
         )
     }
 
+    /// Fingerprints the local files that feed resolution and fetch but
+    /// escape the manifest mtime guard: `file:` tarballs, patch files,
+    /// portal manifests. Returns `None` when the project depends on
+    /// sources that can't be cheaply fingerprinted (`exec:`, `file:`
+    /// folders), in which case an install can never be skipped.
+    /// Registry-backed ranges (including `npm:` aliases) are immutable
+    /// and don't participate.
+    pub fn local_sources_fingerprint(&self) -> Result<Option<Hash64>, Error> {
+        fn record(entries: &mut BTreeMap<Path, u128>, path: Path) -> Result<(), Error> {
+            let mtime = match path.fs_metadata() {
+                Ok(metadata) => metadata.modified()?
+                    .duration_since(UNIX_EPOCH).unwrap()
+                    .as_nanos(),
+
+                // A deleted source fails the install on its own; the
+                // fingerprint only has to change when it comes back.
+                Err(_) => 0,
+            };
+
+            entries.insert(path, mtime);
+
+            Ok(())
+        }
+
+        fn scan_range(project: &Project, base_path: &Path, range: &Range, entries: &mut BTreeMap<Path, u128>) -> Result<bool, Error> {
+            match range {
+                Range::Exec(_) | Range::Folder(_) => {
+                    return Ok(false);
+                },
+
+                Range::Tarball(params) => {
+                    record(entries, base_path.with_join_str(&params.path))?;
+                },
+
+                Range::Portal(params) => {
+                    // Portals aren't copied, but their manifest feeds
+                    // the resolution.
+                    record(entries, base_path.with_join_str(&params.path).with_join_str(MANIFEST_NAME))?;
+                },
+
+                Range::Patch(params) => {
+                    // Path handling mirrors the patch fetcher: builtin
+                    // patches ship with Yarn, `~/` is project-relative,
+                    // and anything else resolves against the parent.
+                    match params.path.as_str() {
+                        "<builtin>" => {},
+
+                        path if path.starts_with("~/") => {
+                            record(entries, project.project_cwd.with_join_str(&path[2..]))?;
+                        },
+
+                        path => {
+                            let patch_path = Path::try_from(path)?;
+
+                            if patch_path.is_absolute() {
+                                record(entries, patch_path)?;
+                            } else {
+                                record(entries, base_path.with_join(&patch_path))?;
+                            }
+                        },
+                    }
+
+                    if !scan_range(project, base_path, &params.inner.0.range, entries)? {
+                        return Ok(false);
+                    }
+                },
+
+                _ => {},
+            }
+
+            Ok(true)
+        }
+
+        let mut entries
+            = BTreeMap::new();
+
+        for workspace in &self.workspaces {
+            let manifest
+                = &workspace.manifest;
+
+            let ranges = manifest.remote.dependencies.values()
+                .chain(manifest.remote.optional_dependencies.values())
+                .chain(manifest.dev_dependencies.values())
+                .map(|descriptor| &descriptor.range)
+                .chain(manifest.resolutions.iter().map(|(_, range)| range));
+
+            for range in ranges {
+                if !scan_range(self, &workspace.path, range, &mut entries)? {
+                    return Ok(None);
+                }
+            }
+        }
+
+        let mut digest
+            = String::new();
+
+        for (path, mtime) in &entries {
+            digest.push_str(&path.to_file_string());
+            digest.push('\n');
+            digest.push_str(&mtime.to_string());
+            digest.push('\n');
+        }
+
+        Ok(Some(Hash64::from_data(digest)))
+    }
+
     /// Modification time of the lockfile, in nanoseconds since the
     /// epoch; `None` when the lockfile doesn't exist.
     pub fn lockfile_changed_at(&self) -> Result<Option<u128>, Error> {
@@ -1081,26 +1187,16 @@ impl Project {
             return Ok(false);
         }
 
-        // Some ranges resolve or fetch from mutable local state (file:,
-        // exec:, patches, catalogs, ...); their content can change with
-        // no manifest or lockfile edit, so they always need a real pass.
-        let has_transient_ranges = install_state.descriptor_to_locator.keys()
-            .any(|descriptor| {
-                // Workspace ranges are nominally transient but their
-                // sources are already covered by the manifest mtime
-                // guard above.
-                if descriptor.range.is_workspace() {
-                    return false;
-                }
+        // Some ranges resolve or fetch from mutable local files (file:
+        // tarballs, patches, portal manifests); those aren't covered by
+        // the manifest mtime guard, so compare their fingerprint
+        // against the one recorded at install time. `None` means the
+        // project uses sources that can't be fingerprinted at all
+        // (exec:, file: folders) and always needs a real pass.
+        let local_sources
+            = self.local_sources_fingerprint()?;
 
-                let range_details = descriptor.range.details();
-
-                range_details.transient_resolution
-                    || range_details.fetch_before_resolve
-                    || matches!(descriptor.range, Range::Catalog(_))
-            });
-
-        if has_transient_ranges {
+        if local_sources.is_none() || install_state.local_sources_hash != local_sources {
             return Ok(false);
         }
 

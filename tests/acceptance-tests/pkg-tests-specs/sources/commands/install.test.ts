@@ -1,6 +1,8 @@
 import {Filename, xfs, ppath, npath} from '@yarnpkg/fslib';
 import {tests, misc}                 from 'pkg-tests-core';
 
+const {getPackageArchivePath} = tests;
+
 describe(`Commands`, () => {
   describe(`install`, () => {
     test(
@@ -1125,6 +1127,60 @@ describe(`Commands`, () => {
             await expect(source(`require('no-deps')`)).resolves.toEqual({name: `no-deps`, version: `1.0.0`});
           },
         ),
+      );
+
+      test(
+        `it should take the fast path when dependencies use registry aliases`,
+        makeTemporaryEnv({
+          dependencies: {
+            [`aliased`]: `npm:no-deps@1.0.0`,
+          },
+        }, async ({path, run, source}) => {
+          await run(`install`);
+
+          // Registry aliases are immutable; they must not disable the
+          // fast path. A corrupted artifact surviving the second
+          // install proves it was skipped.
+          const pnpPath = ppath.join(path, Filename.pnpCjs);
+          await xfs.writeFilePromise(pnpPath, `corrupted`);
+
+          await run(`install`);
+
+          await expect(xfs.readFilePromise(pnpPath, `utf8`)).resolves.toEqual(`corrupted`);
+        }),
+      );
+
+      test(
+        `it should take the fast path with file: tarballs until they change`,
+        makeTemporaryEnv({
+          dependencies: {
+            [`pkg`]: `file:./pkg.tgz`,
+          },
+        }, async ({path, run, source}) => {
+          const noDeps1 = await getPackageArchivePath(`no-deps`, `1.0.0`);
+          const noDeps2 = await getPackageArchivePath(`no-deps`, `2.0.0`);
+
+          const destination = ppath.join(path, `pkg.tgz`);
+
+          await xfs.copyPromise(destination, noDeps1);
+          await run(`install`);
+
+          const pnpPath = ppath.join(path, Filename.pnpCjs);
+          await xfs.writeFilePromise(pnpPath, `corrupted`);
+
+          // The tarball didn't change: fast path.
+          await run(`install`);
+          await expect(xfs.readFilePromise(pnpPath, `utf8`)).resolves.toEqual(`corrupted`);
+
+          // The tarball changed: full install.
+          await xfs.copyPromise(destination, noDeps2);
+          await run(`install`);
+
+          await expect(xfs.readFilePromise(pnpPath, `utf8`)).resolves.not.toEqual(`corrupted`);
+          await expect(source(`require('pkg/package.json')`)).resolves.toMatchObject({
+            version: `2.0.0`,
+          });
+        }),
       );
 
       test(
