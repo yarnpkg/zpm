@@ -1,6 +1,7 @@
 use clipanion::cli;
 use zpm_config::Source;
 use zpm_parsers::JsonDocument;
+use zpm_utils::is_terminal;
 
 use crate::{error::Error, immutable, project::{self, InstallMode, RunInstallOptions}};
 
@@ -61,6 +62,10 @@ pub struct Install {
     /// Refresh package metadata stored in the lockfile
     #[cli::option("--refresh-lockfile", default = false)]
     refresh_lockfile: bool,
+
+    /// Run a full install even when everything looks up-to-date; defaults to true in interactive terminals
+    #[cli::option("-f,--force")]
+    force: Option<bool>,
 
     /// Select which install artifacts Yarn should generate
     #[cli::option("--mode")]
@@ -123,6 +128,23 @@ impl Install {
 
         let refresh_lockfile = self.refresh_lockfile
             || project.config.settings.enable_hardened_mode.value;
+
+        // A plain `yarn install` can stop right away when the previous
+        // install is provably still current. Interactive runs skip this
+        // fast path so that a manually damaged project (say, a deleted
+        // package folder) heals when the user reaches for `yarn install`.
+        let force = self.force
+            .unwrap_or_else(is_terminal);
+
+        if !force
+            && !self.check_resolutions
+            && !self.check_checksums
+            && !refresh_lockfile
+            && self.mode.is_none()
+            && project.is_install_up_to_date()?
+        {
+            return Ok(());
+        }
 
         sort_workspace_dependencies(&project)?;
 

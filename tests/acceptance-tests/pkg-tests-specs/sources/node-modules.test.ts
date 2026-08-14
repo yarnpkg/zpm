@@ -154,7 +154,9 @@ describe(`Node Modules`, () => {
 
         await writeFile(npath.toPortablePath(`${path}/dist/bin/index.js`), ``);
 
-        await expect(run(`install`)).resolves.toBeTruthy();
+        // The bin target appeared without any manifest change, so this
+        // repair needs --force (the default in interactive terminals).
+        await expect(run(`install`, `--force`)).resolves.toBeTruthy();
         const stats = await xfs.lstatPromise(npath.toPortablePath(`${path}/node_modules/.bin/pkg`));
 
         expect(stats).toBeDefined();
@@ -1910,7 +1912,9 @@ describe(`Node Modules`, () => {
         await run(`install`);
         await xfs.removePromise(`${path}/node_modules/one-dep-scripted` as PortablePath);
 
-        const {stdout} = await run(`install`);
+        // Repairing damage inside node_modules needs --force (the
+        // default in interactive terminals).
+        const {stdout} = await run(`install`, `--force`);
 
         // Yarn must reinstall and rebuild only the removed package
         expect(stdout).not.toMatch(new RegExp(`no-deps-scripted@npm:1.0.0 must be built`));
@@ -1991,7 +1995,10 @@ describe(`Node Modules`, () => {
       async ({path, run}) => {
         await run(`install`);
         await xfs.removePromise(`${path}/node_modules/has-bin-entries` as PortablePath);
-        await run(`install`);
+
+        // Repairing damage inside node_modules needs --force (the
+        // default in interactive terminals).
+        await run(`install`, `--force`);
         const {mode} = await xfs.lstatPromise(npath.toPortablePath(`${path}/node_modules/has-bin-entries/bin.js`));
         const permissions = (mode & 0o777).toString(8);
         expect(permissions).toBe(process.platform === `win32` ? `666` : `755`);

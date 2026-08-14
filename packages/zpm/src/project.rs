@@ -1022,6 +1022,128 @@ impl Project {
         )
     }
 
+    /// Modification time of the lockfile, in nanoseconds since the
+    /// epoch; `None` when the lockfile doesn't exist.
+    pub fn lockfile_changed_at(&self) -> Result<Option<u128>, Error> {
+        let metadata = match self.lockfile_path().fs_metadata() {
+            Ok(metadata) => metadata,
+            Err(err) => return match err.io_kind() {
+                Some(ErrorKind::NotFound) | Some(ErrorKind::NotADirectory) => Ok(None),
+                _ => Err(err.into()),
+            },
+        };
+
+        Ok(Some(metadata.modified()?
+            .duration_since(UNIX_EPOCH).unwrap()
+            .as_nanos()))
+    }
+
+    /// Cheap check that the artifacts of the last install are still
+    /// current: the install state is fresh, the configuration didn't
+    /// change, the lockfile wasn't edited out-of-band, and the cache
+    /// and linker outputs are still on disk. `yarn install` uses this
+    /// to skip installs that are provably no-ops; anything uncertain
+    /// falls through to a full install.
+    pub fn is_install_up_to_date(&mut self) -> Result<bool, Error> {
+        match self.import_install_state() {
+            Ok(_) => {},
+
+            Err(Error::InstallStateNotFound | Error::InvalidInstallState) => {
+                self.install_state = None;
+                return Ok(false);
+            },
+
+            Err(e) => {
+                return Err(e);
+            },
+        };
+
+        let Some(install_state) = &self.install_state else {
+            return Ok(false);
+        };
+
+        // A focused install may have skipped part of the project; an
+        // explicit `yarn install` must bring everything up to date.
+        if install_state.installed_workspaces.is_some() {
+            return Ok(false);
+        }
+
+        if self.last_modified_at.has_changed_since(install_state.last_installed_at) {
+            return Ok(false);
+        }
+
+        if install_state.install_config_hash.as_ref() != Some(&self.install_config_hash()) {
+            return Ok(false);
+        }
+
+        if !self.config.settings.unstable_islands.is_empty() {
+            return Ok(false);
+        }
+
+        // Some ranges resolve or fetch from mutable local state (file:,
+        // exec:, patches, catalogs, ...); their content can change with
+        // no manifest or lockfile edit, so they always need a real pass.
+        let has_transient_ranges = install_state.descriptor_to_locator.keys()
+            .any(|descriptor| {
+                // Workspace ranges are nominally transient but their
+                // sources are already covered by the manifest mtime
+                // guard above.
+                if descriptor.range.is_workspace() {
+                    return false;
+                }
+
+                let range_details = descriptor.range.details();
+
+                range_details.transient_resolution
+                    || range_details.fetch_before_resolve
+                    || matches!(descriptor.range, Range::Catalog(_))
+            });
+
+        if has_transient_ranges {
+            return Ok(false);
+        }
+
+        if install_state.lockfile_changed_at.is_none()
+            || install_state.lockfile_changed_at != self.lockfile_changed_at()?
+        {
+            return Ok(false);
+        }
+
+        if !self.preferred_cache_path().fs_exists() {
+            return Ok(false);
+        }
+
+        let linker_artifact = match self.config.settings.node_linker.value {
+            zpm_config::NodeLinker::Pnp
+                => self.pnp_path(),
+            zpm_config::NodeLinker::NodeModules | zpm_config::NodeLinker::Pnpm
+                => self.package_map_path(None),
+        };
+
+        if !linker_artifact.fs_exists() {
+            return Ok(false);
+        }
+
+        // PnP installs materialize some packages on disk (build scripts,
+        // `prefer_extracted`, optional zips); if any package may be in
+        // that situation, a missing unplugged folder means the project
+        // needs a repair pass. Over-approximating is fine — it only
+        // costs a full install when the folder is legitimately absent.
+        if self.config.settings.node_linker.value == zpm_config::NodeLinker::Pnp {
+            let needs_unplugged = !install_state.optional_packages.is_empty()
+                || install_state.content_flags.values().any(|flags| {
+                    flags.prefer_extracted
+                        .unwrap_or(flags.suggest_extracted || !flags.build_commands.is_empty())
+                });
+
+            if needs_unplugged && !self.unplugged_path().fs_exists() {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
     fn find_visible_dependency_location(&self, issuer_location: &Path, ident: &Ident, locator: &Locator) -> Result<Option<Path>, Error> {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;

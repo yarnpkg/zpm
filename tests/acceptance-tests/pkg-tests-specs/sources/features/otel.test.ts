@@ -199,7 +199,9 @@ describe(`Features`, () => {
         ]);
 
         const hotRecording = await startRegistryRecording(async () => {
-          await run(`install`, {env});
+          // A plain up-to-date install takes the fast path and emits no
+          // spans; the hot expectations describe a full install pass.
+          await run(`install`, `--force`, {env});
         });
 
         const hotPayload = getOtelPayload(hotRecording);

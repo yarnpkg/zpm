@@ -25,7 +25,11 @@ describe(`Features`, () => {
     }, async ({path, run, source}) => {
       await run(`install`);
       await xfs.removePromise(`${path}/.yarn/global/cache`);
-      await run(`install`);
+
+      // A plain up-to-date install would be skipped and wouldn't
+      // recreate the mirror folder; the assertion is about what a real
+      // install pass stores in it.
+      await run(`install`, `--force`);
 
       const fileCount = (await xfs.readdirPromise(`${path}/.yarn/global/cache`)).length;
       expect(fileCount).toEqual(0);
