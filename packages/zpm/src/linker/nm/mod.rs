@@ -5,7 +5,7 @@ use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
 use zpm_utils::{FromFileString, IoResultExt, Path, ToHumanString};
 
 use crate::{
-    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{NodeModulesPackageMapBuilder, persist_package_map, persist_package_map_at}}, project::Project
+    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{self, NodeModulesPackageMapBuilder, PackageMap, persist_package_map, persist_package_map_at}}, project::Project
 };
 
 pub mod hoist;
@@ -194,12 +194,42 @@ fn register_workspace_bin_symlinks(workspace_nm_tree: &mut SyncTree, workspace_p
     Ok(())
 }
 
+/// Context for the incremental link: the package map left by the last
+/// completed install, and the base its package ids are relative to.
+pub(crate) struct PreviousPackageMap {
+    map: PackageMap,
+    base_path: Path,
+}
+
+impl PreviousPackageMap {
+    /// Loads the previous package map, unless incremental linking is
+    /// disabled for this pass (`--force`, or an `nmMode` transition
+    /// that requires rewriting existing folders).
+    fn load(project: &Project, install: &Install, package_map_path: &Path, base_path: Path) -> Option<Self> {
+        if install.force || nm_mode_transitioned(project) {
+            return None;
+        }
+
+        Some(Self {
+            map: package_map::load_package_map(package_map_path)?,
+            base_path,
+        })
+    }
+
+    fn matches_package(&self, abs_path: &Path, locator: &Locator, checksum: Option<&zpm_utils::Hash64>) -> bool {
+        let id = package_map::get_package_id(&self.base_path, &abs_path.without_trailing_separators());
+
+        self.map.matches_package(&id, locator, checksum)
+    }
+}
+
 fn generate_workspace_node_modules(
     project: &Project,
     install: &Install,
     work_tree: &WorkTree,
     workspace_node_idx: usize,
     package_map_builder: Option<&mut NodeModulesPackageMapBuilder>,
+    previous_map: Option<&PreviousPackageMap>,
     packages_by_location: &mut BTreeMap<Path, zpm_primitives::Locator>,
     canonical_build_locations: &mut BTreeMap<Locator, Path>,
     force_rebuild_locators: &mut BTreeSet<Locator>,
@@ -381,22 +411,53 @@ fn generate_workspace_node_modules(
                         let _ = dest_abs_path.fs_rm().ok_missing();
                     }
 
-                    if !dest_abs_path.fs_exists() {
+                    let dest_exists
+                        = dest_abs_path.fs_exists();
+
+                    if !dest_exists {
                         force_rebuild_locators.insert(child_node.locator.clone());
                     }
+
+                    // The folder can be left alone when the previous
+                    // install already materialized this exact archive
+                    // here and nothing nests packages inside it (in
+                    // either the previous or the new layout).
+                    let has_nested_children
+                        = child_node.children.as_ref().is_some_and(|children| !children.is_empty());
+
+                    // Same source as the map builder: lockfile checksum
+                    // first, install-state shadow for conditional
+                    // locators.
+                    let physical_locator
+                        = child_node.locator.physical_locator();
+
+                    let checksum = install.lockfile.entries
+                        .get(&physical_locator)
+                        .and_then(|entry| entry.checksum.as_ref())
+                        .or_else(|| install.install_state.cache_checksums.get(&physical_locator));
+
+                    let assume_up_to_date = dest_exists
+                        && !has_nested_children
+                        && previous_map.is_some_and(|previous_map| {
+                            previous_map.matches_package(&abs_path, &child_node.locator, checksum)
+                        });
 
                     if hardlinks_mode {
                         // Hand off to the CAS extractor; `Any` keeps
                         // the parent walk from treating the folder as
                         // extraneous while leaving its contents alone.
                         workspace_nm_tree.register_entry(child_rel_path, SyncItem::Any)?;
-                        cas_extractions.push((dest_abs_path.clone(), child_node.locator.clone()));
+
+                        if !assume_up_to_date {
+                            cas_extractions.push((dest_abs_path.clone(), child_node.locator.clone()));
+                        }
                     } else {
                         workspace_nm_tree.register_entry(child_rel_path, SyncItem::Folder {
                             template: Some(SyncTemplate::Zip {
                                 archive_path: archive_path.clone(),
                                 inner_path: package_directory.relative_to(&archive_path),
                             }),
+                            assume_up_to_date,
                         })?;
                     }
 
@@ -552,6 +613,13 @@ pub async fn link_island_nm(
         let mut package_map_builder
             = NodeModulesPackageMapBuilder::new_at(project, install, package_map_base_path.clone());
 
+        let previous_map = PreviousPackageMap::load(
+            project,
+            install,
+            &project.package_map_path(Some(workspace)),
+            package_map_base_path.clone(),
+        );
+
         let mut work_tree = WorkTree::new_for_island_workspace(
             project,
             &install.install_state,
@@ -569,6 +637,7 @@ pub async fn link_island_nm(
             &work_tree,
             0,
             Some(&mut package_map_builder),
+            previous_map.as_ref(),
             &mut packages_by_location,
             &mut canonical_build_locations,
             &mut force_rebuild_locators,
@@ -840,6 +909,13 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
     let mut package_map_builder
         = NodeModulesPackageMapBuilder::new(project, install);
 
+    let previous_map = PreviousPackageMap::load(
+        project,
+        install,
+        &project.package_map_path(None),
+        project.nm_path(),
+    );
+
     let mut project_queue
         = vec![0usize];
 
@@ -850,6 +926,7 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
             &work_tree,
             workspace_node_idx,
             Some(&mut package_map_builder),
+            previous_map.as_ref(),
             &mut packages_by_location,
             &mut canonical_build_locations,
             &mut force_rebuild_locators,

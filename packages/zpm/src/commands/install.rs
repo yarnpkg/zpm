@@ -175,6 +175,7 @@ impl Install {
             silent_or_error: self.silent,
             json: self.json,
             inline_builds: self.inline_builds,
+            force,
             ..Default::default()
         }).await?;
 

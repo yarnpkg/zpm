@@ -893,6 +893,7 @@ pub struct Install {
     pub skip_lockfile_update: bool,
     pub constraints_check: bool,
     pub inline_builds: bool,
+    pub force: bool,
     pub extension_tracking: Arc<Mutex<ExtensionTracking>>,
 }
 
@@ -1226,6 +1227,11 @@ impl<'a> InstallManager<'a> {
 
     pub fn with_skip_lockfile_update(mut self, skip_lockfile_update: bool) -> Self {
         self.result.skip_lockfile_update = skip_lockfile_update;
+        self
+    }
+
+    pub fn with_force(mut self, force: bool) -> Self {
+        self.result.force = force;
         self
     }
 

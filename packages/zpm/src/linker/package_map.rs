@@ -1,28 +1,75 @@
 use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use zpm_config::NodePackageMapType;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Ident, Locator};
-use zpm_utils::{Path, ToFileString, ToHumanString};
+use zpm_utils::{Hash64, Path, ToFileString, ToHumanString};
 
 use crate::{error::Error, install::Install, project::Project, tree_resolver::ResolutionTree};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PackageMap {
-    packages: BTreeMap<String, PackageMapPackage>,
+    pub(crate) packages: BTreeMap<String, PackageMapPackage>,
 }
 
-#[derive(Debug, Serialize)]
-struct PackageMapPackage {
-    url: String,
-    dependencies: BTreeMap<String, String>,
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct PackageMapPackage {
+    pub(crate) url: String,
+    pub(crate) dependencies: BTreeMap<String, String>,
+
+    /// Which package (and archive content) this location was last
+    /// materialized from. The incremental nm linker compares these
+    /// against its plan to skip re-extracting unchanged packages.
+    /// Runtime consumers of the map ignore them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) locator: Option<Locator>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) checksum: Option<Hash64>,
+}
+
+impl PackageMap {
+    /// True when the previous install materialized `id` from the exact
+    /// same package archive, and nothing was nested inside its folder.
+    pub(crate) fn matches_package(&self, id: &str, locator: &Locator, checksum: Option<&Hash64>) -> bool {
+        let Some(previous) = self.packages.get(id) else {
+            return false;
+        };
+
+        if previous.locator.as_ref() != Some(locator) {
+            return false;
+        }
+
+        if previous.checksum.is_none() || previous.checksum.as_ref() != checksum {
+            return false;
+        }
+
+        // A package that previously hosted nested packages can't be
+        // skipped wholesale: the nested folders may have to disappear,
+        // and only a template expansion prunes them.
+        let nested_prefix = format!("{id}/");
+
+        !self.packages
+            .range(nested_prefix.clone()..)
+            .next()
+            .is_some_and(|(key, _)| key.starts_with(&nested_prefix))
+    }
+}
+
+/// Reads a package map left by a previous install; `None` when absent
+/// or unreadable (in which case the linker just syncs everything).
+pub fn load_package_map(package_map_path: &Path) -> Option<PackageMap> {
+    let src = package_map_path.fs_read_text().ok()?;
+
+    JsonDocument::hydrate_from_str(&src).ok()
 }
 
 #[derive(Debug)]
 struct PackageMapNode {
     id: String,
     package_path: Path,
+    locator: Locator,
     dependency_names: Option<BTreeSet<String>>,
 }
 
@@ -71,6 +118,7 @@ impl<'a> NodeModulesPackageMapBuilder<'a> {
         let package_map_node = PackageMapNode {
             id: get_package_id(&self.base_path, &normalized_location),
             package_path: normalized_package_path.clone(),
+            locator: locator.clone(),
             dependency_names: Some(get_package_dependency_names(self.project, self.install, locator, &normalized_package_path)),
         };
 
@@ -92,6 +140,17 @@ impl<'a> NodeModulesPackageMapBuilder<'a> {
             = BTreeMap::new();
 
         for package_map_node in self.package_map_nodes.values() {
+            // Conditional locators keep their checksum out of the
+            // lockfile (arch-stability), so fall back to the shadow
+            // copy in the install state.
+            let physical_locator
+                = package_map_node.locator.physical_locator();
+
+            let checksum = self.install.lockfile.entries
+                .get(&physical_locator)
+                .and_then(|entry| entry.checksum.clone())
+                .or_else(|| self.install.install_state.cache_checksums.get(&physical_locator).cloned());
+
             packages.insert(package_map_node.id.clone(), PackageMapPackage {
                 url: get_relative_url(&self.base_path, &package_map_node.package_path),
                 dependencies: self.get_package_dependencies(
@@ -101,6 +160,8 @@ impl<'a> NodeModulesPackageMapBuilder<'a> {
                         NodePackageMapType::Loose => None,
                     },
                 )?,
+                locator: Some(package_map_node.locator.clone()),
+                checksum,
             });
         }
 
@@ -229,6 +290,8 @@ impl PnpmPackageMapBuilder {
             packages.insert(get_package_id(&self.base_path, &package_map_node.package_location), PackageMapPackage {
                 url: get_relative_url(&self.base_path, &package_map_node.package_location),
                 dependencies: serialize_pnpm_dependencies(&dependencies, &package_ids_by_locator)?,
+                locator: None,
+                checksum: None,
             });
         }
 
@@ -345,7 +408,7 @@ fn get_relative_url(from: &Path, to: &Path) -> String {
     }
 }
 
-fn get_package_id(base_path: &Path, location: &Path) -> String {
+pub(crate) fn get_package_id(base_path: &Path, location: &Path) -> String {
     let relative_path
         = location.relative_to(base_path);
 

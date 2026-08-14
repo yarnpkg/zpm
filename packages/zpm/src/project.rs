@@ -124,6 +124,7 @@ pub struct RunInstallOptions {
     pub silent_or_error: bool,
     pub json: bool,
     pub inline_builds: bool,
+    pub force: bool,
 }
 
 pub struct Project {
@@ -1471,6 +1472,7 @@ impl Project {
                     .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
                     .with_skip_link_step(options.mode == Some(InstallMode::UpdateLockfile))
                     .with_skip_lockfile_update(options.roots.is_some())
+                    .with_force(options.force)
                     .resolve_and_fetch().await?
                     .link_and_build(self).await?;
 
