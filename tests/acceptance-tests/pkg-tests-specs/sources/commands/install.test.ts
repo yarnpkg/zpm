@@ -1184,6 +1184,69 @@ describe(`Commands`, () => {
       );
 
       test(
+        `it should take the fast path with file: folders until their content changes`,
+        makeTemporaryEnv({
+          dependencies: {
+            [`local-pkg`]: `file:./local-pkg`,
+          },
+        }, async ({path, run, source}) => {
+          await xfs.mkdirPromise(ppath.join(path, `local-pkg`));
+          await xfs.writeJsonPromise(ppath.join(path, `local-pkg/package.json`), {name: `local-pkg`, version: `1.0.0`});
+          await xfs.writeFilePromise(ppath.join(path, `local-pkg/index.js`), `module.exports = 1;\n`);
+
+          await run(`install`);
+
+          const pnpPath = ppath.join(path, Filename.pnpCjs);
+          await xfs.writeFilePromise(pnpPath, `corrupted`);
+
+          // The folder didn't change: fast path.
+          await run(`install`);
+          await expect(xfs.readFilePromise(pnpPath, `utf8`)).resolves.toEqual(`corrupted`);
+
+          // The folder content changed: full install.
+          await xfs.writeFilePromise(ppath.join(path, `local-pkg/index.js`), `module.exports = 2;\n`);
+          await run(`install`);
+
+          await expect(xfs.readFilePromise(pnpPath, `utf8`)).resolves.not.toEqual(`corrupted`);
+          await expect(source(`require('local-pkg')`)).resolves.toEqual(2);
+        }),
+      );
+
+      test(
+        `it should re-run the install when a portal target's manifest changes`,
+        makeTemporaryEnv({
+          dependencies: {
+            [`portaled`]: `portal:./portaled`,
+          },
+        }, async ({path, run, source}) => {
+          await xfs.mkdirPromise(ppath.join(path, `portaled`));
+          await xfs.writeJsonPromise(ppath.join(path, `portaled/package.json`), {name: `portaled`, version: `1.0.0`});
+
+          await run(`install`);
+
+          const pnpPath = ppath.join(path, Filename.pnpCjs);
+          await xfs.writeFilePromise(pnpPath, `corrupted`);
+
+          // Nothing changed: fast path.
+          await run(`install`);
+          await expect(xfs.readFilePromise(pnpPath, `utf8`)).resolves.toEqual(`corrupted`);
+
+          // The portal target's manifest changed: full install.
+          await xfs.writeJsonPromise(ppath.join(path, `portaled/package.json`), {
+            name: `portaled`,
+            version: `1.0.0`,
+            dependencies: {
+              [`no-deps`]: `1.0.0`,
+            },
+          });
+
+          await run(`install`);
+
+          await expect(xfs.readFilePromise(pnpPath, `utf8`)).resolves.not.toEqual(`corrupted`);
+        }),
+      );
+
+      test(
         `it should run a full install when the configuration changed`,
         makeTemporaryEnv({
           dependencies: {

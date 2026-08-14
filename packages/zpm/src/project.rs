@@ -7,7 +7,7 @@ use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
 use zpm_tasks::{parse as parse_taskfile, ResolvedTasks, TaskFile, TaskId};
-use zpm_utils::{DataType, Glob, Hash64, IoResultExt, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
+use zpm_utils::{DataType, Glob, Hash64, Hash64Writer, IoResultExt, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -23,6 +23,7 @@ use crate::{
     lockfile::{Lockfile, LockfileMetadata, from_legacy_berry_lockfile, from_pnpm_node_modules},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
+    npm::NpmEntryExt,
     primitives_exts::RangeExt,
     report::{StreamReport, StreamReportConfig, async_section, current_report, with_report_result},
     script::{Binary, ScriptEnvironment},
@@ -1023,110 +1024,181 @@ impl Project {
         )
     }
 
-    /// Fingerprints the local files that feed resolution and fetch but
-    /// escape the manifest mtime guard: `file:` tarballs, patch files,
-    /// portal manifests. Returns `None` when the project depends on
-    /// sources that can't be cheaply fingerprinted (`exec:`, `file:`
-    /// folders), in which case an install can never be skipped.
-    /// Registry-backed ranges (including `npm:` aliases) are immutable
-    /// and don't participate.
-    pub fn local_sources_fingerprint(&self) -> Result<Option<Hash64>, Error> {
-        fn record(entries: &mut BTreeMap<Path, u128>, path: Path) -> Result<(), Error> {
-            let mtime = match path.fs_metadata() {
-                Ok(metadata) => metadata.modified()?
-                    .duration_since(UNIX_EPOCH).unwrap()
-                    .as_nanos(),
+    /// The "quick pass" behind the up-to-date fast path: re-derives
+    /// the content hashes feeding transient resolutions (`file:`
+    /// tarballs and folders, `exec:` scripts, patch files, portal
+    /// manifests) and compares them with the locators recorded by the
+    /// previous install. Registry-backed ranges (including `npm:`
+    /// aliases) are immutable and never checked, so this costs nothing
+    /// for projects without local sources. Returns `false` when
+    /// anything changed - the regular install then redoes the work for
+    /// real - or when a hash can't be re-derived cheaply.
+    fn transient_resolutions_unchanged(&self, install_state: &InstallState) -> Result<bool, Error> {
+        fn resolve_local_path(context_directory: &Path, raw_path: &str) -> Result<Path, Error> {
+            let path = Path::try_from(raw_path)?;
 
-                // A deleted source fails the install on its own; the
-                // fingerprint only has to change when it comes back.
-                Err(_) => 0,
-            };
-
-            entries.insert(path, mtime);
-
-            Ok(())
+            Ok(if path.is_absolute() {
+                path
+            } else {
+                context_directory.with_join(&path)
+            })
         }
 
-        fn scan_range(project: &Project, base_path: &Path, range: &Range, entries: &mut BTreeMap<Path, u128>) -> Result<bool, Error> {
-            match range {
-                Range::Exec(_) | Range::Folder(_) => {
-                    return Ok(false);
-                },
+        let mut cache_packer
+            = None;
 
-                Range::Tarball(params) => {
-                    record(entries, base_path.with_join_str(&params.path))?;
-                },
+        for (descriptor, locator) in &install_state.descriptor_to_locator {
+            let range = descriptor.range.physical_range();
 
-                Range::Portal(params) => {
-                    // Portals aren't copied, but their manifest feeds
-                    // the resolution.
-                    record(entries, base_path.with_join_str(&params.path).with_join_str(MANIFEST_NAME))?;
-                },
-
-                Range::Patch(params) => {
-                    // Path handling mirrors the patch fetcher: builtin
-                    // patches ship with Yarn, `~/` is project-relative,
-                    // and anything else resolves against the parent.
-                    match params.path.as_str() {
-                        "<builtin>" => {},
-
-                        path if path.starts_with("~/") => {
-                            record(entries, project.project_cwd.with_join_str(&path[2..]))?;
-                        },
-
-                        path => {
-                            let patch_path = Path::try_from(path)?;
-
-                            if patch_path.is_absolute() {
-                                record(entries, patch_path)?;
-                            } else {
-                                record(entries, base_path.with_join(&patch_path))?;
-                            }
-                        },
-                    }
-
-                    if !scan_range(project, base_path, &params.inner.0.range, entries)? {
-                        return Ok(false);
-                    }
-                },
-
-                _ => {},
+            if !matches!(range, Range::Tarball(_) | Range::Folder(_) | Range::Exec(_) | Range::Patch(_) | Range::Portal(_)) {
+                continue;
             }
 
-            Ok(true)
-        }
+            if let Range::Patch(params) = range {
+                // Builtin patches ship with the binary; nothing on
+                // disk to watch.
+                if params.path == "<builtin>" {
+                    continue;
+                }
 
-        let mut entries
-            = BTreeMap::new();
-
-        for workspace in &self.workspaces {
-            let manifest
-                = &workspace.manifest;
-
-            let ranges = manifest.remote.dependencies.values()
-                .chain(manifest.remote.optional_dependencies.values())
-                .chain(manifest.dev_dependencies.values())
-                .map(|descriptor| &descriptor.range)
-                .chain(manifest.resolutions.iter().map(|(_, range)| range));
-
-            for range in ranges {
-                if !scan_range(self, &workspace.path, range, &mut entries)? {
-                    return Ok(None);
+                // A patch over another transient package would need
+                // its inner source re-derived through the parent
+                // chain; too exotic to bother, never skip.
+                if matches!(
+                    params.inner.0.range.physical_range(),
+                    Range::Tarball(_) | Range::Folder(_) | Range::Exec(_) | Range::Portal(_),
+                ) {
+                    return Ok(false);
                 }
             }
+
+            // Relative paths hang from the parent package. Workspace
+            // parents are mutable and re-derivable; zip-backed parents
+            // are immutable snapshots whose inner files can't change
+            // under us; disk-backed parents (portals, links) are
+            // mutable but can't be verified from here.
+            let context_directory = match &descriptor.parent {
+                Some(parent) => {
+                    let physical = parent.physical_locator();
+
+                    match self.try_workspace_by_locator(&physical)? {
+                        Some(workspace) => workspace.path.clone(),
+
+                        None => {
+                            let parent_reference = physical.reference.physical_reference();
+
+                            if parent_reference.is_portal() || parent_reference.is_link() {
+                                return Ok(false);
+                            }
+
+                            continue;
+                        },
+                    }
+                },
+
+                None => self.project_cwd.clone(),
+            };
+
+            let unchanged = match (range, locator.reference.physical_reference()) {
+                (Range::Tarball(_), Reference::Tarball(reference_params)) => {
+                    let tarball_path
+                        = resolve_local_path(&context_directory, &reference_params.path)?;
+
+                    match tarball_path.fs_read() {
+                        Ok(data) => reference_params.hash == Some(Hash64::from_data(data)),
+                        Err(_) => false,
+                    }
+                },
+
+                (Range::Exec(_), Reference::Exec(reference_params)) => {
+                    let script_path
+                        = resolve_local_path(&context_directory, &reference_params.path)?;
+
+                    match script_path.fs_read() {
+                        Ok(data) => {
+                            // Mirrors `resolvers::exec::compute_exec_hash`.
+                            let mut writer = Hash64Writer::new();
+                            writer.update(b"exec-v2");
+                            writer.update(data);
+
+                            reference_params.hash == Some(writer.finalize())
+                        },
+                        Err(_) => false,
+                    }
+                },
+
+                (Range::Folder(_), Reference::Folder(reference_params)) => {
+                    let folder_path
+                        = resolve_local_path(&context_directory, &reference_params.path)?;
+
+                    let packer = match &cache_packer {
+                        Some(packer) => packer,
+                        None => cache_packer.insert(self.package_cache()?.packer()),
+                    };
+
+                    // Mirrors `resolvers::folder::compute_folder_hash`.
+                    let hash = zpm_formats::entries_from_folder(&folder_path)
+                        .map_err(Error::from)
+                        .and_then(|entries| {
+                            entries
+                                .into_iter()
+                                .prepare_npm_entries(&descriptor.ident.nm_subdir())
+                                .map_err(Error::from)
+                        })
+                        .and_then(|entries| packer.pack(entries).map_err(Error::from))
+                        .map(|archive| {
+                            let mut writer = Hash64Writer::new();
+                            writer.update(b"file-folder-v2");
+                            writer.update(archive);
+
+                            writer.finalize()
+                        });
+
+                    match hash {
+                        Ok(hash) => reference_params.hash == Some(hash),
+                        Err(_) => false,
+                    }
+                },
+
+                (Range::Portal(_), Reference::Portal(reference_params)) => {
+                    let manifest_path = resolve_local_path(&context_directory, &reference_params.path)?
+                        .with_join_str(MANIFEST_NAME);
+
+                    match manifest_path.fs_read_text() {
+                        Ok(manifest_text) => {
+                            reference_params.hash
+                                == Some(crate::resolvers::portal::compute_portal_manifest_hash(&manifest_text))
+                        },
+                        Err(_) => false,
+                    }
+                },
+
+                (Range::Patch(_), Reference::Patch(reference_params)) => {
+                    // Path handling mirrors the patch fetcher: `~/` is
+                    // project-relative, anything else resolves against
+                    // the parent.
+                    let patch_path = match reference_params.path.as_str() {
+                        path if path.starts_with("~/") => self.project_cwd.with_join_str(&path[2..]),
+                        path => resolve_local_path(&context_directory, path)?,
+                    };
+
+                    match patch_path.fs_read_text() {
+                        Ok(patch_content) => reference_params.checksum == Some(Hash64::from_string(&patch_content)),
+                        Err(_) => false,
+                    }
+                },
+
+                // The recorded locator doesn't match the range shape;
+                // never skip on inconsistent state.
+                _ => false,
+            };
+
+            if !unchanged {
+                return Ok(false);
+            }
         }
 
-        let mut digest
-            = String::new();
-
-        for (path, mtime) in &entries {
-            digest.push_str(&path.to_file_string());
-            digest.push('\n');
-            digest.push_str(&mtime.to_string());
-            digest.push('\n');
-        }
-
-        Ok(Some(Hash64::from_data(digest)))
+        Ok(true)
     }
 
     /// Modification time of the lockfile, in nanoseconds since the
@@ -1187,16 +1259,11 @@ impl Project {
             return Ok(false);
         }
 
-        // Some ranges resolve or fetch from mutable local files (file:
-        // tarballs, patches, portal manifests); those aren't covered by
-        // the manifest mtime guard, so compare their fingerprint
-        // against the one recorded at install time. `None` means the
-        // project uses sources that can't be fingerprinted at all
-        // (exec:, file: folders) and always needs a real pass.
-        let local_sources
-            = self.local_sources_fingerprint()?;
-
-        if local_sources.is_none() || install_state.local_sources_hash != local_sources {
+        // Transient ranges (file:, exec:, patches, portals) resolve
+        // from content that can change without any manifest or
+        // lockfile edit; re-derive their hashes and compare them with
+        // the recorded resolutions.
+        if !self.transient_resolutions_unchanged(install_state)? {
             return Ok(false);
         }
 

@@ -853,12 +853,6 @@ pub struct InstallState {
     /// up-to-date fast path compares against this instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lockfile_changed_at: Option<u128>,
-
-    /// Fingerprint of the local files feeding resolutions (file:
-    /// tarballs, patch files, portal manifests) as of when this state
-    /// was written; see `Project::local_sources_fingerprint`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub local_sources_hash: Option<Hash64>,
 }
 
 impl Default for InstallState {
@@ -881,7 +875,6 @@ impl Default for InstallState {
             cache_checksums: BTreeMap::new(),
             nm_mode: None,
             lockfile_changed_at: None,
-            local_sources_hash: None,
         }
     }
 }
@@ -1105,9 +1098,6 @@ impl Install {
 
             self.install_state.lockfile_changed_at
                 = project.lockfile_changed_at()?;
-
-            self.install_state.local_sources_hash
-                = project.local_sources_fingerprint()?;
 
             project.attach_install_state(self.install_state)?;
 
