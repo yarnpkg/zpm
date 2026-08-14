@@ -68,6 +68,11 @@ impl Hash64 {
         hex::encode(&self.state[0..3])
     }
 
+    /// First byte of the hash; handy for sharding locks or maps.
+    pub fn first_byte(&self) -> u8 {
+        self.state.first().copied().unwrap_or(0)
+    }
+
     pub fn short(&self) -> String {
         hex::encode(&self.state[0..16])
     }

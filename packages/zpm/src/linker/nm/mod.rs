@@ -223,6 +223,9 @@ impl PreviousPackageMap {
     }
 }
 
+/// Builds the sync tree for one workspace's node_modules. The caller
+/// runs the returned trees (possibly in parallel; they cover disjoint
+/// folders) once every workspace was planned.
 fn generate_workspace_node_modules(
     project: &Project,
     install: &Install,
@@ -234,7 +237,7 @@ fn generate_workspace_node_modules(
     canonical_build_locations: &mut BTreeMap<Locator, Path>,
     force_rebuild_locators: &mut BTreeSet<Locator>,
     cas_extractions: &mut Vec<(Path, Locator)>,
-) -> Result<(), Error> {
+) -> Result<(SyncTree<'static>, Path), Error> {
     let mut package_map_builder
         = package_map_builder;
 
@@ -271,7 +274,7 @@ fn generate_workspace_node_modules(
         = workspace_dir
             .with_join_str("node_modules");
 
-    let mut workspace_nm_tree
+    let mut workspace_nm_tree: SyncTree<'static>
         = SyncTree::new();
 
     workspace_nm_tree.dry_run = false;
@@ -510,14 +513,37 @@ fn generate_workspace_node_modules(
         register_bin_symlinks_at_path(&mut workspace_nm_tree, &node_rel_path, &binaries)?;
     }
 
-    workspace_nm_tree
-        .run(workspace_abs_path.clone())?;
+    Ok((workspace_nm_tree, workspace_abs_path))
+}
 
-    // Always materialize node_modules: tools (and tests) expect the
-    // directory to exist even when the workspace has no deps.
-    workspace_abs_path.fs_create_dir_all()?;
+/// Runs every workspace tree, then the CAS extractions, on the rayon
+/// pool. `block_in_place` keeps the heavy filesystem work from
+/// starving the tokio worker the linker runs on.
+fn run_workspace_trees(
+    project: &Project,
+    install: &Install,
+    workspace_trees: Vec<(SyncTree<'static>, Path)>,
+    cas_extractions: &[(Path, Locator)],
+) -> Result<(), Error> {
+    tokio::task::block_in_place(|| {
+        use rayon::prelude::*;
 
-    Ok(())
+        workspace_trees
+            .par_iter()
+            .try_for_each(|(workspace_nm_tree, workspace_abs_path)| -> Result<(), Error> {
+                workspace_nm_tree
+                    .run(workspace_abs_path.clone())?;
+
+                // Always materialize node_modules: tools (and tests)
+                // expect the directory to exist even when the
+                // workspace has no deps.
+                workspace_abs_path.fs_create_dir_all()?;
+
+                Ok(())
+            })?;
+
+        run_cas_extractions(project, install, cas_extractions)
+    })
 }
 
 fn build_requests_from_locations(
@@ -604,6 +630,8 @@ pub async fn link_island_nm(
         = Vec::new();
     let mut package_maps
         = Vec::new();
+    let mut workspace_trees
+        = Vec::new();
 
     for workspace_ident in &island.workspace_idents {
         let workspace = project.workspace_by_ident(workspace_ident)?;
@@ -631,7 +659,7 @@ pub async fn link_island_nm(
 
         hoister.hoist();
 
-        generate_workspace_node_modules(
+        workspace_trees.push(generate_workspace_node_modules(
             project,
             install,
             &work_tree,
@@ -642,7 +670,7 @@ pub async fn link_island_nm(
             &mut canonical_build_locations,
             &mut force_rebuild_locators,
             &mut cas_extractions,
-        )?;
+        )?);
 
         package_maps.push((
             project.package_map_path(Some(workspace)),
@@ -650,7 +678,7 @@ pub async fn link_island_nm(
         ));
     }
 
-    run_cas_extractions(project, install, &cas_extractions)?;
+    run_workspace_trees(project, install, workspace_trees, &cas_extractions)?;
 
     for (package_map_path, package_map) in package_maps {
         persist_package_map_at(&package_map_path, &package_map)?;
@@ -706,10 +734,13 @@ fn run_cas_extractions(
         return Ok(());
     }
 
+    use rayon::prelude::*;
+
     match project.config.settings.nm_mode.value {
         zpm_config::NmMode::HardlinksLocal => {
-            let mut local_index = BTreeMap::new();
-            for (dest_abs_path, locator) in cas_extractions {
+            let local_index = linker::helpers::LocalDedupIndex::new();
+
+            cas_extractions.par_iter().try_for_each(|(dest_abs_path, locator)| {
                 let package_data = install.package_data
                     .get(&locator.physical_locator())
                     .unwrap_or_else(|| panic!("Expected package_data for {}", locator.to_print_string()));
@@ -717,21 +748,22 @@ fn run_cas_extractions(
                 linker::helpers::fs_extract_archive_with_local_dedup(
                     dest_abs_path,
                     package_data,
-                    &mut local_index,
-                )?;
-            }
+                    &local_index,
+                ).map(|_| ())
+            })?;
         },
         zpm_config::NmMode::HardlinksGlobal => {
             let index_root = project.config.settings.global_folder.value
                 .with_join_str("index");
 
-            for (dest_abs_path, locator) in cas_extractions {
+            cas_extractions.par_iter().try_for_each(|(dest_abs_path, locator)| {
                 let package_data = install.package_data
                     .get(&locator.physical_locator())
                     .unwrap_or_else(|| panic!("Expected package_data for {}", locator.to_print_string()));
 
-                linker::helpers::fs_extract_archive_with_cas(dest_abs_path, package_data, &index_root)?;
-            }
+                linker::helpers::fs_extract_archive_with_cas(dest_abs_path, package_data, &index_root)
+                    .map(|_| ())
+            })?;
         },
         zpm_config::NmMode::Classic => {},
     }
@@ -919,8 +951,11 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
     let mut project_queue
         = vec![0usize];
 
+    let mut workspace_trees
+        = Vec::new();
+
     while let Some(workspace_node_idx) = project_queue.pop() {
-        generate_workspace_node_modules(
+        workspace_trees.push(generate_workspace_node_modules(
             project,
             install,
             &work_tree,
@@ -931,12 +966,12 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
             &mut canonical_build_locations,
             &mut force_rebuild_locators,
             &mut cas_extractions,
-        )?;
+        )?);
 
         project_queue.extend_from_slice(&work_tree.nodes[workspace_node_idx].workspaces_idx);
     }
 
-    run_cas_extractions(project, install, &cas_extractions)?;
+    run_workspace_trees(project, install, workspace_trees, &cas_extractions)?;
 
     persist_package_map(project, &package_map_builder.build()?)?;
 

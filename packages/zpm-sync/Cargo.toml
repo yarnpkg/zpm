@@ -4,6 +4,7 @@ edition = "2021"
 
 [dependencies]
 itertools = { workspace = true }
+rayon = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 zpm-formats = { workspace = true }

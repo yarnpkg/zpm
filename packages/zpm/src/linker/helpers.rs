@@ -96,22 +96,64 @@ pub fn fs_extract_archive_with_cas(destination: &Path, package_data: &PackageDat
 
 /// Project-local dedup with no side-channel index. The first
 /// destination for a given content hash is written normally and
-/// recorded in `local_index`; later destinations hardlink to it.
+/// recorded in the index; later destinations hardlink to it.
 pub fn fs_extract_archive_with_local_dedup(
     destination: &Path,
     package_data: &PackageData,
-    local_index: &mut BTreeMap<zpm_utils::Hash64, Path>,
+    local_index: &LocalDedupIndex,
 ) -> Result<bool, Error> {
     fs_extract_archive_impl(destination, package_data, ExtractMode::LocalDedup { local_index })
+}
+
+const DEDUP_SHARDS: usize = 64;
+
+/// Content-hash index shared between parallel extractions. Sharded by
+/// the hash's first byte so identical contents serialize on one lock
+/// while unrelated files proceed concurrently.
+pub struct LocalDedupIndex {
+    shards: Vec<std::sync::Mutex<BTreeMap<zpm_utils::Hash64, Path>>>,
+}
+
+impl LocalDedupIndex {
+    pub fn new() -> Self {
+        Self {
+            shards: (0..DEDUP_SHARDS)
+                .map(|_| std::sync::Mutex::new(BTreeMap::new()))
+                .collect(),
+        }
+    }
+
+    fn shard(&self, hash: &zpm_utils::Hash64) -> &std::sync::Mutex<BTreeMap<zpm_utils::Hash64, Path>> {
+        &self.shards[hash.first_byte() as usize % DEDUP_SHARDS]
+    }
+}
+
+impl Default for LocalDedupIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Serializes concurrent global-CAS writes of identical contents;
+/// without it, two threads could interleave writes to the same index
+/// entry. Keyed by the entry's content hash.
+fn cas_shard_lock(first_byte: u8) -> &'static std::sync::Mutex<()> {
+    use std::sync::OnceLock;
+
+    static LOCKS: OnceLock<Vec<std::sync::Mutex<()>>> = OnceLock::new();
+
+    let locks = LOCKS.get_or_init(|| (0..DEDUP_SHARDS).map(|_| std::sync::Mutex::new(())).collect());
+
+    &locks[first_byte as usize % DEDUP_SHARDS]
 }
 
 enum ExtractMode<'a> {
     Classic,
     Cas { index_root: &'a Path },
-    LocalDedup { local_index: &'a mut BTreeMap<zpm_utils::Hash64, Path> },
+    LocalDedup { local_index: &'a LocalDedupIndex },
 }
 
-fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mut mode: ExtractMode<'_>) -> Result<bool, Error> {
+fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mode: ExtractMode<'_>) -> Result<bool, Error> {
     let ready_path = destination
         .with_join_str(".ready");
 
@@ -144,7 +186,7 @@ fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mut m
 
         target_path.fs_create_parent()?;
 
-        match &mut mode {
+        match &mode {
             ExtractMode::Cas { index_root } => {
                 link_into_cas(&target_path, &entry.data, entry.mode as u32, index_root)?;
             },
@@ -212,21 +254,29 @@ fn link_into_local_index(
     target_path: &Path,
     data: &[u8],
     mode: u32,
-    local_index: &mut BTreeMap<zpm_utils::Hash64, Path>,
+    local_index: &LocalDedupIndex,
 ) -> Result<(), Error> {
     let mode_bits = mode & 0o777;
     let hash = zpm_utils::Hash64::from_data(data);
 
+    let mut shard = local_index.shard(&hash)
+        .lock()
+        .unwrap();
+
     // Fall through to write_canonical when the recorded path is gone;
-    // that re-registers a new home for this hash.
-    let canonical_path = local_index.get(&hash).cloned()
+    // that re-registers a new home for this hash. The canonical write
+    // happens under the shard lock so a concurrent extraction of the
+    // same content can't hardlink to a half-written file.
+    let canonical_path = shard.get(&hash).cloned()
         .filter(|p| p.fs_exists());
 
     let Some(canonical_path) = canonical_path else {
         write_canonical(target_path, data, mode_bits)?;
-        local_index.insert(hash, target_path.clone());
+        shard.insert(hash, target_path.clone());
         return Ok(());
     };
+
+    drop(shard);
 
     ensure_hardlink(target_path, &canonical_path)
 }
@@ -261,6 +311,12 @@ fn link_into_cas(target_path: &Path, data: &[u8], mode: u32, index_root: &Path) 
         .with_join_str(&index_filename);
 
     index_dir.fs_create_dir_all()?;
+
+    // Serialize on the content hash so parallel extractions of the
+    // same file can't interleave their writes to the index entry.
+    let _shard_guard = cas_shard_lock(u8::from_str_radix(&hash[..2], 16).unwrap_or(0))
+        .lock()
+        .unwrap();
 
     let mut needs_rewrite = !index_path.fs_exists();
 

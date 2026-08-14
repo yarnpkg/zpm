@@ -217,17 +217,34 @@ impl<'a> SyncTree<'a> {
     }
 
     pub fn run(&self, root_path: Path) -> Result<Vec<FileOp>, SyncError> {
+        use rayon::prelude::*;
+
         let mut file_ops
             = Vec::new();
 
-        let mut queue
+        // Nodes are processed level by level so parents always exist
+        // before their children; within a level every node is
+        // independent and can run in parallel.
+        let mut current_level
             = vec![(root_path, 0)];
 
-        while let Some((path, node_idx)) = queue.pop() {
-            let next_tasks
-                = self.process_node(path, node_idx, &mut file_ops)?;
+        while !current_level.is_empty() {
+            let results = current_level
+                .into_par_iter()
+                .map(|(path, node_idx)| {
+                    let mut ops = Vec::new();
+                    let next_tasks = self.process_node(path, node_idx, &mut ops)?;
 
-            queue.extend(next_tasks);
+                    Ok((ops, next_tasks))
+                })
+                .collect::<Result<Vec<_>, SyncError>>()?;
+
+            current_level = Vec::new();
+
+            for (ops, next_tasks) in results {
+                file_ops.extend(ops);
+                current_level.extend(next_tasks);
+            }
         }
 
         Ok(file_ops)

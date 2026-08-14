@@ -5403,6 +5403,7 @@ name = "zpm-sync"
 version = "0.0.0"
 dependencies = [
  "itertools 0.14.0",
+ "rayon",
  "serde",
  "thiserror 2.0.18",
  "zpm-formats",
