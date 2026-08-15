@@ -1,6 +1,6 @@
 {
   "name": "@yarnpkg/monorepo",
-  "packageManager": "yarn@6.0.0-rc.19",
+  "packageManager": "yarn@6.0.0-git.20260814.hash-4421e301548e85d07d894540f89adc1345b1374a",
   "scripts": {
     "codegen:daemon-types": "cargo run -p zpm --bin generate_daemon_types",
     "codegen:daemon-types:check": "cargo run -p zpm --bin generate_daemon_types -- --check",

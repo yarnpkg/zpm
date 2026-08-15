@@ -3,14 +3,14 @@
     "version": 9
   },
   "workspaces": {
-    "@yarnpkg/monorepo": "eddbbccdb321f78248af868f80ac6c9a9a2c7ac3703e8d1e9a52a14f8f61231eadae404f19111b09d93b5d999e71bfe46b009500ee55183f4bfcd935c9db7638",
+    "@yarnpkg/monorepo": "e537b0a7fa1ecc3f6ec4a5fd8fdaae1e45122965e971733a9766ed95ba4d59148b143e36302160003d14318320f997ad62ca3c603c516ff7ad80567083ed1275",
     "@yarnpkg/website": "26cb7cb1ffe53aa62a7055a447eae22dc1c5dd3e96e1222066c65209b4058255598efb57d882e759bf615eac76d19337a6f60665f0205bf7dc101368e48abc77",
     "@yarnpkg/zpm-constraints": "a602e3cc3ea1dd931ef50091753a9f1de3a06ff9ee0efb29c8222fb3491132ccbac1581220770e74dcf06e2c30189f636b1d7eb691bfdeff36012d3169630bc6",
-    "@yarnpkg/zpm-daemon-ui": "c7ca05eb5a4d7c70d789b59619d2b12edf79de647fcd3495cec8d50914a2cd74b51dad090c562716eab187f7d407122678fd2ee2aafeb858e55a81599c6ce530",
-    "acceptance-tests": "2c1ffd88b6971fe22e14338775531c02f85ab6101125903525acebdfdfc9d86df2763ab2160473a70f7c0ccb9be9a8f7a129130f8c4ccca9dd8d0745e05c12ab",
+    "@yarnpkg/zpm-daemon-ui": "4eb540829382d117e5b625f696d92a376384c8df02d519c359dc734322d75bae6f387358643459dc7b83a113af713e52bca493804ec85c30ca8d2ac9ad314f2c",
+    "acceptance-tests": "f743c449b709e94cbbea6f60c2281c9d24a30c2ce7cdfa52af51c393ef52b93b4363b9962d64cf976f326b8ecd715f23352766d1a45b71be188e4972f0218bb8",
     "pkg-tests-core": "27dc1794f148dca7d11639e6ea0877781dcf88daf2e38af45bae8a0f9f259d4f49cb3f960e27849a3ee1e9d702da717d0060409c37fe6b26b23e509382d945e9",
     "pkg-tests-fixtures": "634e2d39424349e30ef9ace3cbe374d6c2b404ab29491084908f538e4f9823567caa6d900e0c15e78c1515ed8b1418294c0e3063027fb7475982d0ddd62c2b64",
-    "pkg-tests-specs": "377aaa5abdb3d7c57990e82ed0fa6e4f0ac62d7fbcdd45dd3e69ab4eb1406232d7181d99bf55cb6aace05c7f94eccbe198b834dfcc25dd400e3084df68a22195"
+    "pkg-tests-specs": "46fd5503c56d268ea878a6655f569016155248430d7362464ea0d44edef3c998304e9cf67c9a95dd9358c3279b2a8fc71460f61586b73fa4dc0a8e7d76b9421d"
   },
   "entries": {
     "@algolia/abtesting@npm:1.18.1": {
@@ -7357,6 +7357,13 @@
         }
       }
     },
+    "abbrev@npm:^5.0.0": {
+      "checksum": "17873c9df94748d4f25935d7e5094d41d88a32827bb2ad927db7fbd36fe64b5f88fad6f3256b788cf699f97f6efef27a81a346e6518ddf5d5849642777415017",
+      "resolution": {
+        "resolution": "abbrev@npm:5.0.0",
+        "version": "5.0.0"
+      }
+    },
     "acorn@npm:^8.15.0": {
       "checksum": "ed7053eb83a8c131ffce1abb573ca45431ceb5ec684cedc7ef44523475157b8d96edd0a69d198ff8dbbbb9cbbd38c0d0584c77f553f6ad7b1cc62a825cd7f937",
       "resolution": {
@@ -9908,7 +9915,7 @@
         "version": "6.0.1"
       }
     },
-    "env-paths@npm:^2.2.1": {
+    "env-paths@npm:^2.2.0, env-paths@npm:^2.2.1": {
       "checksum": "f1740c5cfa1f277cb8f0c9751eec990828d430a524f70f770757cfdf569257a8ffbc43e1e6a724bda5fd96680f2a19ba02a647ea69364785804960e03ded0cdd",
       "resolution": {
         "resolution": "env-paths@npm:2.2.1",
@@ -10609,6 +10616,13 @@
         }
       }
     },
+    "exponential-backoff@npm:^3.1.1": {
+      "checksum": "77086c6d4cd6021765248683de9242cc3fce47179a662cd489b06d155a09045346a0df0b8561c9429f3e58c601ba837fc55c4e07af95bed9d6cd929204036b42",
+      "resolution": {
+        "resolution": "exponential-backoff@npm:3.1.3",
+        "version": "3.1.3"
+      }
+    },
     "extend@npm:^3.0.0": {
       "checksum": "b2750a8884cf6b4690409f9c56b81966819273d9f232e1300271499227e79f71cc71416ac4548fa6c544a831e15432e36e1c9282040682a87e79ebd3abc7a4dc",
       "resolution": {
@@ -11202,7 +11216,7 @@
         }
       }
     },
-    "graceful-fs@npm:^4.2.10, graceful-fs@npm:^4.2.4, graceful-fs@npm:^4.2.9": {
+    "graceful-fs@npm:^4.2.10, graceful-fs@npm:^4.2.4, graceful-fs@npm:^4.2.6, graceful-fs@npm:^4.2.9": {
       "checksum": "dff3c6ff874d12e505e1fdaa5425c880e8d8e0d720cddda38a28f2bbf1c37da241603fb9d05fc6fec3ff1120f07dffbdf23127dfa654da7ef18021931b1bc12d",
       "resolution": {
         "resolution": "graceful-fs@npm:4.2.11",
@@ -12223,6 +12237,13 @@
       "resolution": {
         "resolution": "isexe@npm:2.0.0",
         "version": "2.0.0"
+      }
+    },
+    "isexe@npm:^4.0.0": {
+      "checksum": "9be54001e72ff2efbca8e02ee5552b79d81c126ac47ee6e334506c7da8ffa987dc51aad879edc834c79bc2fd0ef53a8e3725dfbadb52031c3fe2f1ab0fa9cad6",
+      "resolution": {
+        "resolution": "isexe@npm:4.0.0",
+        "version": "4.0.0"
       }
     },
     "istanbul-lib-coverage@npm:^3.0.0, istanbul-lib-coverage@npm:^3.2.0": {
@@ -14612,6 +14633,25 @@
         "version": "1.6.7"
       }
     },
+    "node-gyp@npm:*": {
+      "checksum": "fd48a6b4775e3615654c16be20a8a812e32b117c9d12a43b5ac1c3506d3e3fb2e4e8a9eb677104bfb918a873c433e11695f9eee7d2733ac0564cb719c90626aa",
+      "resolution": {
+        "resolution": "node-gyp@npm:13.0.1",
+        "version": "13.0.1",
+        "dependencies": {
+          "env-paths": "^2.2.0",
+          "exponential-backoff": "^3.1.1",
+          "graceful-fs": "^4.2.6",
+          "nopt": "^10.0.0",
+          "proc-log": "^7.0.0",
+          "semver": "^7.3.5",
+          "tar": "^7.5.4",
+          "tinyglobby": "^0.2.12",
+          "undici": "^8.4.1",
+          "which": "^7.0.0"
+        }
+      }
+    },
     "node-int64@npm:^0.4.0": {
       "checksum": "163620e2657781fecff525af63868bbf9cb00a99c935a5e2e4408b99a0c9e8d4b3ac4432eb6c776daf92b6c04e326de2c40e8bde643a55fdf6ea219932d8e0d7",
       "resolution": {
@@ -14638,6 +14678,16 @@
       "resolution": {
         "resolution": "node-watch@npm:0.7.3",
         "version": "0.7.3"
+      }
+    },
+    "nopt@npm:^10.0.0": {
+      "checksum": "02d56c4870f8f0442243ff22877a980b77cce28648b909228147c630bc534aa7dec9de132994538691d41a8e221a74191836c51bda73684f6605109efe671918",
+      "resolution": {
+        "resolution": "nopt@npm:10.0.1",
+        "version": "10.0.1",
+        "dependencies": {
+          "abbrev": "^5.0.0"
+        }
       }
     },
     "normalize-path@npm:^3.0.0": {
@@ -15330,6 +15380,13 @@
       "resolution": {
         "resolution": "proc-log@npm:6.1.0",
         "version": "6.1.0"
+      }
+    },
+    "proc-log@npm:^7.0.0": {
+      "checksum": "8a31a22ebcdefc81cbcfac1b757211489eb9c33199938c378a0845fa3c76fedd5c9da89fe5ac64998cca8f3b855c937b09afa0f19c04d43621baf00726607ca3",
+      "resolution": {
+        "resolution": "proc-log@npm:7.0.0",
+        "version": "7.0.0"
       }
     },
     "process-nextick-args@npm:~2.0.0": {
@@ -17279,6 +17336,20 @@
         }
       }
     },
+    "tar@npm:^7.5.4": {
+      "checksum": "602985e860dec206f42c582076e088f4fd65e89adf2237ebf019c7060d604ec38e3d86883056703d3e80447e7d478561ef8888c72369cb6015369bb7254d63bc",
+      "resolution": {
+        "resolution": "tar@npm:7.5.20",
+        "version": "7.5.20",
+        "dependencies": {
+          "@isaacs/fs-minipass": "^4.0.0",
+          "chownr": "^3.0.0",
+          "minipass": "^7.1.2",
+          "minizlib": "^3.1.0",
+          "yallist": "^5.0.0"
+        }
+      }
+    },
     "tar-fs@npm:^1.16.0": {
       "checksum": "18ebfa1788a40ef3761a756d62adc328bda194916895f996d82fec210dd84b3a83497b0b88a969e671f82d9a852de38b73e8bd3754b64f18528bbc0d87b035c7",
       "resolution": {
@@ -17407,6 +17478,17 @@
       "resolution": {
         "resolution": "tinyexec@npm:1.1.2",
         "version": "1.1.2"
+      }
+    },
+    "tinyglobby@npm:^0.2.12": {
+      "checksum": "5a5f0e648836fbe413ba31d29204fdfc4f206a4878868cc926e528413637e27ab73997b7e4939444918b11c45e604ce706e39fee335474185b7b014ea7010733",
+      "resolution": {
+        "resolution": "tinyglobby@npm:0.2.17",
+        "version": "0.2.17",
+        "dependencies": {
+          "fdir": "^6.5.0",
+          "picomatch": "^4.0.4"
+        }
       }
     },
     "tinyglobby@npm:^0.2.13, tinyglobby@npm:^0.2.15": {
@@ -17725,6 +17807,13 @@
       "resolution": {
         "resolution": "uncrypto@npm:0.1.3",
         "version": "0.1.3"
+      }
+    },
+    "undici@npm:^8.4.1": {
+      "checksum": "fae70318a7ec30b40d168fdc034547777d3897578dd60a4cdbbc3c4f6be61533c7e3a665960d4dd3ea5949f34c860444905bd19a4c19cc9c904e968d4e0ce8dd",
+      "resolution": {
+        "resolution": "undici@npm:8.7.0",
+        "version": "8.7.0"
       }
     },
     "undici-types@npm:~7.16.0": {
@@ -18326,6 +18415,16 @@
         "version": "2.0.2",
         "dependencies": {
           "isexe": "^2.0.0"
+        }
+      }
+    },
+    "which@npm:^7.0.0": {
+      "checksum": "a51c8b81c57af84c8a94aac0d27faa2b4fef8c2fd72976a00c68ad5adf3de2e8011a53cdc34224a68338a41d82caa6559b7f325f31c76fff0c5c26cae4c310a9",
+      "resolution": {
+        "resolution": "which@npm:7.0.0",
+        "version": "7.0.0",
+        "dependencies": {
+          "isexe": "^4.0.0"
         }
       }
     },
