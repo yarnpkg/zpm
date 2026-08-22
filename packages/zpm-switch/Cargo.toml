@@ -43,3 +43,4 @@ reqwest = { workspace = true, default-features = false, features = ["rustls-tls"
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
+predicates = { workspace = true, default-features = false, features = ["diff"] }

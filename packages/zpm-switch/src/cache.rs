@@ -47,6 +47,16 @@ impl CacheKey {
 }
 
 pub fn cache_dir() -> Result<Path, Error> {
+    if let Ok(cache_dir) = std::env::var("YARNSW_CACHE_PATH") {
+        let cache_dir = Path::try_from(cache_dir)?;
+
+        if !cache_dir.is_absolute() {
+            return Err(Error::CachePathNotAbsolute(cache_dir));
+        }
+
+        return Ok(cache_dir);
+    }
+
     let cache_dir = Path::home_dir()?
         .ok_or(Error::MissingHomeFolder)?
         .with_join_str(".yarn/switch/cache");
