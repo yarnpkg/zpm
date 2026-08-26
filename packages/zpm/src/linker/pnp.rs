@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
+use std::{collections::{BTreeMap, BTreeSet}, io::Write, str::FromStr, sync::OnceLock};
 
 use zpm_config::PnpFallbackMode;
 use zpm_parsers::JsonDocument;
@@ -21,8 +21,14 @@ use crate::{
     project::Project,
 };
 
+#[cfg(test)]
+#[path = "./pnp.test.rs"]
+mod pnp_tests;
+
 const PNP_CJS_TEMPLATE: &[u8] = std::include_bytes!("pnp-cjs.brotli.dat");
 const PNP_MJS_TEMPLATE: &[u8] = std::include_bytes!("pnp-mjs.brotli.dat");
+static PNP_CJS_TEMPLATE_CACHE: OnceLock<Box<str>> = OnceLock::new();
+static PNP_MJS_TEMPLATE_CACHE: OnceLock<Box<str>> = OnceLock::new();
 
 fn make_virtual_path(base: &Path, component: &str, to: &Path) -> Path {
     if base.basename() != Some("__virtual__") {
@@ -155,6 +161,7 @@ struct PnpState {
  * We use this function rather than JsonDocument::to_string_pretty because we want a single quote string, to
  * avoid having to escape the very common double quote found in the JSON payload.
  */
+#[cfg(test)]
 fn single_quote_stringify(s: &str) -> String {
     let mut escaped
         = String::with_capacity(s.len() * 110 / 100);
@@ -174,21 +181,129 @@ fn single_quote_stringify(s: &str) -> String {
     escaped
 }
 
+fn cached_template<'a>(cache: &'a OnceLock<Box<str>>, compressed: &[u8]) -> Result<&'a str, Error> {
+    if let Some(template) = cache.get() {
+        return Ok(template.as_ref());
+    }
+
+    let template = misc::unpack_brotli_data(compressed)?
+        .into_boxed_str();
+
+    let _ = cache.set(template);
+
+    Ok(cache.get().expect("PnP template cache must be initialized").as_ref())
+}
+
+fn pnp_cjs_template() -> Result<&'static str, Error> {
+    cached_template(&PNP_CJS_TEMPLATE_CACHE, PNP_CJS_TEMPLATE)
+}
+
+fn pnp_loader_template() -> Result<&'static str, Error> {
+    cached_template(&PNP_MJS_TEMPLATE_CACHE, PNP_MJS_TEMPLATE)
+}
+
+struct SingleQuotedJsStringWriter<'a, W> {
+    inner: &'a mut W,
+}
+
+impl<'a, W> SingleQuotedJsStringWriter<'a, W> {
+    fn new(inner: &'a mut W) -> Self {
+        Self { inner }
+    }
+}
+
+impl<W: Write> Write for SingleQuotedJsStringWriter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut last_start = 0;
+
+        for (index, byte) in buf.iter().enumerate() {
+            if !matches!(byte, b'\'' | b'\\' | b'\n') {
+                continue;
+            }
+
+            if last_start != index {
+                self.inner.write_all(&buf[last_start..index])?;
+            }
+
+            self.inner.write_all(&[b'\\', *byte])?;
+            last_start = index + 1;
+        }
+
+        if last_start != buf.len() {
+            self.inner.write_all(&buf[last_start..])?;
+        }
+
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+fn write_single_quoted_json_string<W: Write, T: Serialize>(writer: &mut W, value: &T) -> Result<(), Error> {
+    writer.write_all(b"'")?;
+
+    {
+        let mut escaped_writer = SingleQuotedJsStringWriter::new(writer);
+        JsonDocument::write_to_pretty(&mut escaped_writer, value)?;
+        escaped_writer.flush()?;
+    }
+
+    writer.write_all(b"'")?;
+
+    Ok(())
+}
+
+fn build_inline_script_bytes(shebang: &str, state: &PnpState) -> Result<Vec<u8>, Error> {
+    let template = pnp_cjs_template()?;
+    let mut script = Vec::with_capacity(shebang.len() + template.len() + 4096);
+
+    script.write_all(shebang.as_bytes())?;
+    script.write_all(b"\n/* eslint-disable */\n")?;
+    script.write_all(b"// @ts-nocheck\n")?;
+    script.write_all(b"\"use strict\";\n")?;
+    script.write_all(b"\n")?;
+    script.write_all(b"const RAW_RUNTIME_STATE =\n")?;
+    write_single_quoted_json_string(&mut script, state)?;
+    script.write_all(b";\n")?;
+    script.write_all(b"\n")?;
+    script.write_all(b"function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n")?;
+    script.write_all(b"  return hydrateRuntimeState(JSON.parse(RAW_RUNTIME_STATE), {basePath: basePath || __dirname});\n")?;
+    script.write_all(b"}\n")?;
+    script.write_all(template.as_bytes())?;
+
+    Ok(script)
+}
+
+fn build_split_setup_script_bytes(shebang: &str) -> Result<Vec<u8>, Error> {
+    let template = pnp_cjs_template()?;
+    let mut script = Vec::with_capacity(shebang.len() + template.len() + 512);
+
+    script.write_all(shebang.as_bytes())?;
+    script.write_all(b"\n/* eslint-disable */\n")?;
+    script.write_all(b"// @ts-nocheck\n")?;
+    script.write_all(b"\"use strict\";\n")?;
+    script.write_all(b"\n")?;
+    script.write_all(b"function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n")?;
+    script.write_all(b"  const fs = require('fs');\n")?;
+    script.write_all(b"  const path = require('path');\n")?;
+    script.write_all(b"  const pnpDataFilepath = path.resolve(__dirname, '.pnp.data.json');\n")?;
+    script.write_all(b"  return hydrateRuntimeState(JSON.parse(fs.readFileSync(pnpDataFilepath, 'utf8')), {basePath: basePath || __dirname});\n")?;
+    script.write_all(b"}\n")?;
+    script.write_all(template.as_bytes())?;
+
+    Ok(script)
+}
+
+fn build_split_data_bytes(state: &PnpState) -> Result<Vec<u8>, Error> {
+    let mut data = Vec::new();
+    JsonDocument::write_to(&mut data, state)?;
+    Ok(data)
+}
+
 fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Error> {
-    let script = vec![
-        project.config.settings.pnp_shebang.value.as_str(), "\n",
-        "/* eslint-disable */\n",
-        "// @ts-nocheck\n",
-        "\"use strict\";\n",
-        "\n",
-        "const RAW_RUNTIME_STATE =\n",
-        &single_quote_stringify(&JsonDocument::to_string_pretty(&state)?), ";\n",
-        "\n",
-        "function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n",
-        "  return hydrateRuntimeState(JSON.parse(RAW_RUNTIME_STATE), {basePath: basePath || __dirname});\n",
-        "}\n",
-        &misc::unpack_brotli_data(PNP_CJS_TEMPLATE)?,
-    ].join("");
+    let script = build_inline_script_bytes(project.config.settings.pnp_shebang.value.as_str(), state)?;
 
     project.pnp_path()
         .fs_create_parent()?
@@ -198,20 +313,7 @@ fn generate_inline_files(project: &Project, state: &PnpState) -> Result<(), Erro
 }
 
 fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error> {
-    let script = vec![
-        project.config.settings.pnp_shebang.value.as_str(), "\n",
-        "/* eslint-disable */\n",
-        "// @ts-nocheck\n",
-        "\"use strict\";\n",
-        "\n",
-        "function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n",
-        "  const fs = require('fs');\n",
-        "  const path = require('path');\n",
-        "  const pnpDataFilepath = path.resolve(__dirname, '.pnp.data.json');\n",
-        "  return hydrateRuntimeState(JSON.parse(fs.readFileSync(pnpDataFilepath, 'utf8')), {basePath: basePath || __dirname});\n",
-        "}\n",
-        &misc::unpack_brotli_data(PNP_CJS_TEMPLATE)?,
-    ].join("");
+    let script = build_split_setup_script_bytes(project.config.settings.pnp_shebang.value.as_str())?;
 
     project.pnp_path()
         .fs_create_parent()?
@@ -219,7 +321,7 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
 
     project.pnp_data_path()
         .fs_create_parent()?
-        .fs_change(JsonDocument::to_string(&state)?, false)?;
+        .fs_change(build_split_data_bytes(state)?, false)?;
 
     Ok(())
 }
@@ -577,7 +679,7 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
     }
 
     project.pnp_loader_path()
-        .fs_change(&misc::unpack_brotli_data(PNP_MJS_TEMPLATE)?, false)?;
+        .fs_change(pnp_loader_template()?, false)?;
 
     let package_build_dependencies = linker::helpers::populate_build_entry_dependencies(
         &package_build_entries,
