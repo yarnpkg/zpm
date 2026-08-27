@@ -227,9 +227,11 @@ export type Request = {
   type: RequestType.BulkAdvisories;
 } | {
   type: RequestType.NodeDistIndex;
+  private: boolean;
 } | {
   type: RequestType.NodeDistTarball;
   name: string;
+  private: boolean;
 } | {
   type: RequestType.OtelTraces;
   body?: unknown;
@@ -508,6 +510,8 @@ export const validLogins = {
   otpUser: new Login(`otp-user`, {otp: true}),
   otpUserWithNotice: new Login(`otp-user-with-notice`, {otp: true, notice: true}),
 } as const;
+
+export const validNodeDistAuthHeader = `secret-token`;
 
 let whitelist = new Map();
 let recording: Array<Request> | null = null;
@@ -1185,14 +1189,16 @@ exit 0
       return {
         type: RequestType.Repository,
       };
-    } else if ((match = url.match(/^\/node\/dist\/index.json$/))) {
+    } else if ((match = url.match(/^\/node(-private)?\/dist\/index.json$/))) {
       return {
         type: RequestType.NodeDistIndex,
+        private: typeof match[1] !== `undefined`,
       };
-    } else if ((match = url.match(/^\/node\/dist\/v([0-9]+\.[0-9]+\.[0-9]+)\/(node-v(\1)-[a-z0-9-]+)\.tar\.gz$/))) {
+    } else if ((match = url.match(/^\/node(-private)?\/dist\/v([0-9]+\.[0-9]+\.[0-9]+)\/(node-v(\2)-[a-z0-9-]+)\.tar\.gz$/))) {
       return {
         type: RequestType.NodeDistTarball,
-        name: match[2]!,
+        name: match[3]!,
+        private: typeof match[1] !== `undefined`,
       };
     } else if (url === `/v1/traces`) {
       return {
@@ -1338,7 +1344,22 @@ exit 0
             recording.push(parsedRequest);
 
           const {authorization} = req.headers;
-          if (authorization != null) {
+          const isPrivateNodeDistRequest = (
+            parsedRequest.type === RequestType.NodeDistIndex
+            || parsedRequest.type === RequestType.NodeDistTarball
+          ) && parsedRequest.private;
+
+          if (isPrivateNodeDistRequest) {
+            if (authorization == null) {
+              sendError(res, 401, `Authentication required`);
+              return;
+            }
+
+            if (authorization !== validNodeDistAuthHeader) {
+              sendError(res, 401, `Invalid token`);
+              return;
+            }
+          } else if (authorization != null) {
             const user = validAuthorizations.get(authorization);
             if (!user) {
               sendError(res, 401, `Invalid token`);

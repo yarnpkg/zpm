@@ -1208,6 +1208,26 @@
         }
       ]
     },
+    "nodeDistAuthHeader": {
+      "_package": "@yarnpkg/core",
+      "title": "Authorization header to send when downloading Node.js distributions.",
+      "description": "When specified, the value will be sent as an `Authorization` header when fetching both the release index and distribution archives from `nodeDistUrl`. This is typically paired with a custom `nodeDistUrl` for an internal node.js distribution mirror.",
+      "type": ["string", "null"],
+      "_examples": [
+        {
+          "description": "Do not pass an `Authorization` header.",
+          "value": null
+        },
+        {
+          "description": "Pass a Bearer token in the `Authorization` header.",
+          "value": "Bearer a-token-here"
+        },
+        {
+          "description": "Pass a Bearer token from an environment variable.",
+          "value": "Bearer ${NODE_DIST_BEARER_TOKEN}"
+        }
+      ]
+    },
     "npmMinimalAgeGate": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Minimum package version age required before installation.",

@@ -1,5 +1,7 @@
 import {Filename, ppath, PortablePath, xfs} from '@yarnpkg/fslib';
-import {yarn}                               from 'pkg-tests-core';
+import {tests, yarn}                        from 'pkg-tests-core';
+
+const {startPackageServer, validNodeDistAuthHeader} = tests;
 
 describe(`Features`, () => {
   describe(`Node.js Versioning`, () => {
@@ -62,6 +64,44 @@ describe(`Features`, () => {
         expect(stdout.trim()).toMatch(/^node-v22.0.0-linux-x64$/);
       }),
     );
+
+    describe(`Distribution authentication`, () => {
+      test(
+        `it should send the configured authorization header`,
+        makeTemporaryEnv({
+          dependencies: {
+            [`@yarnpkg/node`]: `builtin:^22.0.0`,
+          },
+        }, async ({run}) => {
+          await run(`install`, {
+            nodeDistUrl: `${await startPackageServer()}/node-private/dist`,
+            nodeDistAuthHeader: validNodeDistAuthHeader,
+            env: {
+              YARN_CPU_OVERRIDE: `x64`,
+              YARN_OS_OVERRIDE: `linux`,
+            },
+          });
+        }),
+      );
+
+      test(
+        `it should fail with a descriptive error when the authorization header is invalid`,
+        makeTemporaryEnv({
+          dependencies: {
+            [`@yarnpkg/node`]: `builtin:^22.0.0`,
+          },
+        }, async ({run}) => {
+          await expect(run(`install`, {
+            nodeDistUrl: `${await startPackageServer()}/node-private/dist`,
+            nodeDistAuthHeader: `Bearer invalid-node-dist-token`,
+            env: {
+              YARN_CPU_OVERRIDE: `x64`,
+              YARN_OS_OVERRIDE: `linux`,
+            },
+          })).rejects.toThrow(/Network error: HTTP status client error \(401 Unauthorized\) for url .*\/node-private\/dist\/index\.json/);
+        }),
+      );
+    });
 
     describe(`Monorepo support`, () => {
       test(
