@@ -1,7 +1,9 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
 use zpm_primitives::{PypiSpecifierSet, PypiVersion, PythonTargetEnv};
+use zpm_primitives::Ident;
 use zpm_utils::FromFileString;
+use zpm_config::{Configuration, EcosystemFilter, PackageRule};
 
 const DEFAULT_MANYLINUX_MAJOR: u16 = 2;
 // supportedTargets currently records the libc family, but not its version. Use a modern
@@ -30,12 +32,25 @@ pub struct PypiDistribution {
     pub requires_python: Option<String>,
 }
 
-pub fn pypi_registry_base() -> String {
-    std::env::var("ZPM_PYPI_REGISTRY")
-        .ok()
-        .unwrap_or_else(|| "https://pypi.org".to_string())
-        .trim_end_matches('/')
-        .to_string()
+fn package_rule_matches(rule: &PackageRule, ident: &Ident) -> bool {
+    rule.ecosystem_filter.value.map_or(true, |filter| filter == EcosystemFilter::Pypi)
+        && rule.package_filter.value.as_ref().map_or(true, |filter| filter.check(ident))
+}
+
+pub fn get_registry(config: &Configuration, ident: &Ident) -> String {
+    let mut registry
+        = std::env::var("ZPM_PYPI_REGISTRY")
+            .unwrap_or_else(|_| config.settings.pypi_registry_server.value.clone());
+
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, ident) {
+            if let Some(value) = &rule.pypi_registry_server.value {
+                registry = value.clone();
+            }
+        }
+    }
+
+    registry.trim_end_matches('/').to_string()
 }
 
 pub fn encode_path_segment(segment: &str) -> String {

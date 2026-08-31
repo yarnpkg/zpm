@@ -81,6 +81,14 @@ impl fmt::Display for IslandPackageKey {
 pub enum IslandPackage {
     Root,
     Named(IslandPackageKey),
+    ExtraProxy {
+        key: IslandPackageKey,
+        extra: String,
+    },
+    ExtraFeature {
+        key: IslandPackageKey,
+        extra: String,
+    },
 }
 
 impl fmt::Display for IslandPackage {
@@ -88,7 +96,33 @@ impl fmt::Display for IslandPackage {
         match self {
             IslandPackage::Root => write!(f, "<root>"),
             IslandPackage::Named(key) => write!(f, "{}", key),
+            IslandPackage::ExtraProxy { key, extra } |
+            IslandPackage::ExtraFeature { key, extra } => write!(f, "{}[{}]", key, extra),
         }
+    }
+}
+
+impl IslandPackage {
+    pub fn ident(&self) -> Option<&Ident> {
+        match self {
+            IslandPackage::Root => None,
+            IslandPackage::Named(key)
+            | IslandPackage::ExtraProxy { key, .. }
+            | IslandPackage::ExtraFeature { key, .. } => Some(&key.ident),
+        }
+    }
+
+    pub fn key(&self) -> Option<&IslandPackageKey> {
+        match self {
+            IslandPackage::Root => None,
+            IslandPackage::Named(key)
+            | IslandPackage::ExtraProxy { key, .. }
+            | IslandPackage::ExtraFeature { key, .. } => Some(key),
+        }
+    }
+
+    pub fn is_proxy(&self) -> bool {
+        matches!(self, IslandPackage::ExtraProxy { .. } | IslandPackage::ExtraFeature { .. })
     }
 }
 

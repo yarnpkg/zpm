@@ -323,28 +323,32 @@ impl MarkerExpr {
     }
 
     pub fn evaluate(&self, target: &PythonTargetEnv) -> Result<bool, MarkerError> {
+        self.evaluate_with_extra(Some(target), None)
+    }
+
+    pub fn evaluate_with_extra(&self, target: Option<&PythonTargetEnv>, extra: Option<&str>) -> Result<bool, MarkerError> {
         match self {
             MarkerExpr::Any => Ok(true),
             MarkerExpr::Never => Ok(false),
             MarkerExpr::And {lhs, rhs} => {
-                if !lhs.evaluate(target)? {
+                if !lhs.evaluate_with_extra(target, extra)? {
                     return Ok(false);
                 }
 
-                rhs.evaluate(target)
+                rhs.evaluate_with_extra(target, extra)
             },
             MarkerExpr::Or {lhs, rhs} => {
-                if lhs.evaluate(target)? {
+                if lhs.evaluate_with_extra(target, extra)? {
                     return Ok(true);
                 }
 
-                rhs.evaluate(target)
+                rhs.evaluate_with_extra(target, extra)
             },
             MarkerExpr::Not {expr} => {
-                Ok(!expr.evaluate(target)?)
+                Ok(!expr.evaluate_with_extra(target, extra)?)
             },
             MarkerExpr::Compare {lhs, op, rhs} => {
-                evaluate_marker_comparison(lhs, *op, rhs, target)
+                evaluate_marker_comparison(lhs, *op, rhs, target, extra)
             },
         }
     }
@@ -397,15 +401,25 @@ impl MarkerValue {
         }
     }
 
-    fn evaluate<'a>(&'a self, target: &'a PythonTargetEnv) -> Result<EvaluatedMarkerValue<'a>, MarkerError> {
+    fn evaluate<'a>(&'a self, target: Option<&'a PythonTargetEnv>, extra: Option<&'a str>) -> Result<EvaluatedMarkerValue<'a>, MarkerError> {
         match self {
             MarkerValue::String(value) => Ok(EvaluatedMarkerValue {
                 value: Cow::Borrowed(value),
                 variable: None,
             }),
             MarkerValue::Variable(variable) => {
+                if *variable == MarkerVariable::Extra {
+                    let value = extra
+                        .ok_or_else(|| MarkerError::MissingTargetField(variable.as_str()))?;
+
+                    return Ok(EvaluatedMarkerValue {
+                        value: Cow::Owned(crate::normalize_pypi_extra(value)),
+                        variable: Some(*variable),
+                    });
+                }
+
                 let value
-                    = target.get(*variable)
+                    = target.and_then(|target| target.get(*variable))
                         .ok_or_else(|| MarkerError::MissingTargetField(variable.as_str()))?;
 
                 Ok(EvaluatedMarkerValue {
@@ -439,11 +453,11 @@ struct EvaluatedMarkerValue<'a> {
     variable: Option<MarkerVariable>,
 }
 
-fn evaluate_marker_comparison(lhs: &MarkerValue, op: MarkerOp, rhs: &MarkerValue, target: &PythonTargetEnv) -> Result<bool, MarkerError> {
+fn evaluate_marker_comparison(lhs: &MarkerValue, op: MarkerOp, rhs: &MarkerValue, target: Option<&PythonTargetEnv>, extra: Option<&str>) -> Result<bool, MarkerError> {
     let lhs
-        = lhs.evaluate(target)?;
+        = lhs.evaluate(target, extra)?;
     let rhs
-        = rhs.evaluate(target)?;
+        = rhs.evaluate(target, extra)?;
 
     match op {
         MarkerOp::In => Ok(rhs.value.contains(lhs.value.as_ref())),
@@ -453,6 +467,8 @@ fn evaluate_marker_comparison(lhs: &MarkerValue, op: MarkerOp, rhs: &MarkerValue
                 = if lhs.variable.map_or(false, |variable| variable.uses_version_comparison())
                     || rhs.variable.map_or(false, |variable| variable.uses_version_comparison()) {
                     compare_marker_versions(&lhs, &rhs)?
+                } else if lhs.variable == Some(MarkerVariable::Extra) || rhs.variable == Some(MarkerVariable::Extra) {
+                    crate::normalize_pypi_extra(lhs.value.as_ref()).cmp(&crate::normalize_pypi_extra(rhs.value.as_ref()))
                 } else {
                     lhs.value.as_ref().cmp(rhs.value.as_ref())
                 };
@@ -516,6 +532,7 @@ fn python_platform_machine(arch: Option<&Cpu>, os: Option<&Os>) -> Result<Option
         Cpu::Aarch64 if matches!(os, Some(Os::MacOS)) => Ok(Some("arm64".to_string())),
         Cpu::Aarch64 => Ok(Some("aarch64".to_string())),
         Cpu::I386 => Ok(Some("i386".to_string())),
+        Cpu::Wasm64 => Ok(Some("wasm64".to_string())),
         Cpu::Current | Cpu::Other(_) => Err(PythonTargetError::UnsupportedSystemValue {
             field: "cpu",
             value: arch.to_file_string(),

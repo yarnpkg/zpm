@@ -177,6 +177,29 @@ const socialLinkClass = `text-[var(--fg-dim)] inline-flex items-center justify-c
 </style>
 
 <script is:inline>
+/*
+  Canonical theme wiring for every page that renders this nav. Pages must not
+  attach their own #theme-toggle listener; to react to theme changes, listen
+  for the `themechange` event or call `window.__setTheme`.
+*/
+(function() {
+  function setTheme(t) {
+    document.documentElement.setAttribute(`data-theme`, t);
+    localStorage.setItem(`yarn-theme`, t);
+    window.__theme = t;
+    window.dispatchEvent(new CustomEvent(`themechange`, {detail: t}));
+  }
+
+  window.__setTheme = setTheme;
+  window.__theme = localStorage.getItem(`yarn-theme`) || `dark`;
+
+  var btn = document.getElementById(`theme-toggle`);
+  if (btn)
+    btn.addEventListener(`click`, function() {
+      setTheme(window.__theme === `dark` ? `light` : `dark`);
+    });
+})();
+
 (function() {
   var menu = document.getElementById(`mobile-menu`);
   var toggle = document.getElementById(`mobile-menu-toggle`);

@@ -3,31 +3,21 @@ use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
-use zpm_utils::{DataType, FromFileString, Hash64, Path, ToFileString, shell_escape, to_shell_line};
+use zpm_utils::{FromFileString, Hash64, Path, ToFileString, shell_escape, to_shell_line};
 use itertools::Itertools;
 use regex::Regex;
-use tokio::{process::Command, sync::Mutex};
+use tokio::process::Command;
 
 use crate::{
     error::Error,
     project::Project,
-    report::{current_report, PromptType},
+    trust::{ensure_project_trusted, ProjectTrustReason},
 };
 
 static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
 static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
+static PACKAGE_MAP_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r#"\s*--experimental-package-map(?:=|\s+)(?:"[^"]*"|'[^']*'|\S+)\s*"#).unwrap());
 static JS_EXTENSION: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
-type TrustPromptResultCache = BTreeMap<Path, bool>;
-
-static TRUST_PROMPT_RESULTS: LazyLock<Mutex<TrustPromptResultCache>> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
-
-fn get_cached_trust_prompt_result(cache: &TrustPromptResultCache, project_cwd: &Path) -> Option<bool> {
-    cache.get(project_cwd).copied()
-}
-
-fn set_cached_trust_prompt_result(cache: &mut TrustPromptResultCache, project_cwd: &Path, trusted: bool) {
-    cache.insert(project_cwd.clone(), trusted);
-}
 
 fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, module: &str, object: &str) -> String {
     let binary_name
@@ -42,6 +32,14 @@ fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, modul
     format!(
         "import importlib, sys\nsys.path.insert(0, {package_path})\nmodule = importlib.import_module({module})\nentry = module\nfor part in {object}.split('.'):\n    entry = getattr(entry, part)\nsys.argv[0] = {binary_name}\nsys.exit(entry())"
     )
+}
+
+fn quote_path_if_needed(path: &str) -> String {
+    if path.chars().any(char::is_whitespace) {
+        serde_json::to_string(path).expect("expected valid path")
+    } else {
+        path.to_string()
+    }
 }
 
 fn make_executable_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &[String]) -> Result<(), Error> {
@@ -144,12 +142,6 @@ fn get_self_path() -> Result<Path, Error> {
         .unwrap_or_else(|| Path::current_exe())?;
 
     Ok(self_path)
-}
-
-fn get_switch_path() -> Option<Path> {
-    std::env::var(zpm_switch::YARNSW_PATH_ENV)
-        .ok()
-        .and_then(|path| Path::from_file_string(&path).ok())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -547,6 +539,8 @@ impl ScriptEnvironment {
             self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_file_string()));
         }
 
+        self.refresh_package_map(project);
+
         self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
         self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
         self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_file_string()));
@@ -566,6 +560,7 @@ impl ScriptEnvironment {
 
         let updated = CJS_LOADER_MATCHER.replace_all(&current, " ");
         let updated = ESM_LOADER_MATCHER.replace_all(&updated, " ");
+        let updated = PACKAGE_MAP_MATCHER.replace_all(&updated, " ");
         let updated = updated.trim();
 
         if current != updated {
@@ -579,65 +574,58 @@ impl ScriptEnvironment {
         }
     }
 
+    fn refresh_package_map(&mut self, project: &Project) {
+        self.remove_package_map();
+
+        if !project.config.settings.node_experimental_package_map.value {
+            return;
+        }
+
+        let cwd_rel_path = if self.cwd.is_absolute() {
+            self.cwd.forward_relative_to(&project.project_cwd)
+        } else {
+            Some(self.cwd.clone())
+        };
+
+        let package_map_workspace = cwd_rel_path
+            .as_ref()
+            .and_then(|cwd_rel_path| project.try_island_by_rel_path(cwd_rel_path, zpm_config::IslandLinker::NodeModules));
+
+        if package_map_workspace.is_none()
+            && project.config.settings.node_linker.value == zpm_config::NodeLinker::Pnp
+        {
+            return;
+        }
+
+        if let Some(package_map_path) = project.package_map_path(package_map_workspace).if_exists() {
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-package-map={}", quote_path_if_needed(&package_map_path.to_file_string())));
+        }
+    }
+
+    fn remove_package_map(&mut self) {
+        let current = self.env.get("NODE_OPTIONS")
+            .and_then(|opt| opt.clone())
+            .or_else(|| std::env::var("NODE_OPTIONS").ok());
+
+        let Some(current) = current else {
+            return;
+        };
+
+        let updated = PACKAGE_MAP_MATCHER.replace_all(&current, " ");
+        let updated = updated.trim();
+
+        if current != updated {
+            if updated.is_empty() {
+                self.env.insert("NODE_OPTIONS".to_string(), None);
+            } else {
+                self.env.insert("NODE_OPTIONS".to_string(), Some(updated.to_string()));
+            }
+        }
+    }
+
     pub fn without_pnp_loader(mut self) -> Self {
         self.remove_pnp_loader();
         self
-    }
-
-    async fn check_project_trust(switch_path: &Path, project_cwd: &Path) -> Result<Option<bool>, Error> {
-        let status
-            = Command::new(switch_path.to_file_string())
-                .args(["switch", "trust", "--check", project_cwd.as_str()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await?;
-
-        match status.code() {
-            Some(0) => Ok(Some(true)),
-            Some(2) => Ok(Some(false)),
-            Some(3) => Ok(None),
-            _ => Err(Error::ChildProcessFailed("yarn switch trust --check".to_string())),
-        }
-    }
-
-    async fn set_project_trust(switch_path: &Path, project_cwd: &Path, trusted: bool) -> Result<(), Error> {
-        let trusted_arg
-            = trusted.to_string();
-
-        let status
-            = Command::new(switch_path.to_file_string())
-                .args(["switch", "trust", "--set", &trusted_arg, project_cwd.as_str()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await?;
-
-        if status.success() {
-            Ok(())
-        } else {
-            Err(Error::ChildProcessFailed("yarn switch trust --set".to_string()))
-        }
-    }
-
-    async fn prompt_project_trust(project_cwd: &Path) -> Result<bool, Error> {
-        if !zpm_utils::is_terminal() {
-            return Err(Error::ProjectTrustRequired(project_cwd.clone()));
-        }
-
-        let report_guard
-            = current_report().await;
-
-        let report
-            = report_guard.as_ref()
-                .ok_or_else(|| Error::ProjectTrustRequired(project_cwd.clone()))?;
-
-        let answer = report.prompt(PromptType::Confirm(format!(
-            "Yarn needs to run potentially dangerous commands in {}. Do you trust this project?",
-            DataType::Path.colorize(&project_cwd.to_home_string()),
-        ))).await;
-
-        Ok(answer == "true")
     }
 
     async fn ensure_trusted(&self) -> Result<(), Error> {
@@ -649,37 +637,7 @@ impl ScriptEnvironment {
             return Ok(());
         };
 
-        let Some(switch_path) = get_switch_path() else {
-            return Ok(());
-        };
-
-        match Self::check_project_trust(&switch_path, project_cwd).await? {
-            Some(true) => return Ok(()),
-            Some(false) => return Err(Error::ProjectNotTrusted(project_cwd.clone())),
-            None => (),
-        }
-
-        let mut prompt_results
-            = TRUST_PROMPT_RESULTS.lock().await;
-
-        let trusted = match get_cached_trust_prompt_result(&prompt_results, project_cwd) {
-            Some(trusted) => trusted,
-            None => {
-                let trusted
-                    = Self::prompt_project_trust(project_cwd).await?;
-
-                Self::set_project_trust(&switch_path, project_cwd, trusted).await?;
-
-                set_cached_trust_prompt_result(&mut prompt_results, project_cwd, trusted);
-
-                trusted
-            },
-        };
-
-        match trusted {
-            true => Ok(()),
-            false => Err(Error::ProjectNotTrusted(project_cwd.clone())),
-        }
+        ensure_project_trusted(project_cwd, ProjectTrustReason::InstallScripts).await
     }
 
     pub fn with_standard_binaries(mut self) -> Self {
@@ -724,6 +682,7 @@ impl ScriptEnvironment {
             .with_join(package_cwd_rel);
 
         self.attach_package_variables(project, locator)?;
+        self.refresh_package_map(project);
 
         let binaries
             = project.package_visible_binaries(locator)?;
@@ -995,25 +954,5 @@ impl ScriptEnvironment {
                 .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 
         Ok(status)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn trust_prompt_result_cache_is_scoped_by_project_cwd() {
-        let first_project
-            = Path::from_file_string("/tmp/first-project").unwrap();
-        let second_project
-            = Path::from_file_string("/tmp/second-project").unwrap();
-        let mut cache
-            = TrustPromptResultCache::new();
-
-        set_cached_trust_prompt_result(&mut cache, &first_project, true);
-
-        assert_eq!(get_cached_trust_prompt_result(&cache, &first_project), Some(true));
-        assert_eq!(get_cached_trust_prompt_result(&cache, &second_project), None);
     }
 }

@@ -3,7 +3,7 @@ use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::Perm
 use zpm_formats::iter_ext::IterExt;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, VersionFilter, Locator, Reference};
-use zpm_utils::{Path, PathError, System};
+use zpm_utils::{IoResultExt, Path, PathError, System};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -96,22 +96,64 @@ pub fn fs_extract_archive_with_cas(destination: &Path, package_data: &PackageDat
 
 /// Project-local dedup with no side-channel index. The first
 /// destination for a given content hash is written normally and
-/// recorded in `local_index`; later destinations hardlink to it.
+/// recorded in the index; later destinations hardlink to it.
 pub fn fs_extract_archive_with_local_dedup(
     destination: &Path,
     package_data: &PackageData,
-    local_index: &mut BTreeMap<zpm_utils::Hash64, Path>,
+    local_index: &LocalDedupIndex,
 ) -> Result<bool, Error> {
     fs_extract_archive_impl(destination, package_data, ExtractMode::LocalDedup { local_index })
+}
+
+const DEDUP_SHARDS: usize = 64;
+
+/// Content-hash index shared between parallel extractions. Sharded by
+/// the hash's first byte so identical contents serialize on one lock
+/// while unrelated files proceed concurrently.
+pub struct LocalDedupIndex {
+    shards: Vec<std::sync::Mutex<BTreeMap<zpm_utils::Hash64, Path>>>,
+}
+
+impl LocalDedupIndex {
+    pub fn new() -> Self {
+        Self {
+            shards: (0..DEDUP_SHARDS)
+                .map(|_| std::sync::Mutex::new(BTreeMap::new()))
+                .collect(),
+        }
+    }
+
+    fn shard(&self, hash: &zpm_utils::Hash64) -> &std::sync::Mutex<BTreeMap<zpm_utils::Hash64, Path>> {
+        &self.shards[hash.first_byte() as usize % DEDUP_SHARDS]
+    }
+}
+
+impl Default for LocalDedupIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Serializes concurrent global-CAS writes of identical contents;
+/// without it, two threads could interleave writes to the same index
+/// entry. Keyed by the entry's content hash.
+fn cas_shard_lock(first_byte: u8) -> &'static std::sync::Mutex<()> {
+    use std::sync::OnceLock;
+
+    static LOCKS: OnceLock<Vec<std::sync::Mutex<()>>> = OnceLock::new();
+
+    let locks = LOCKS.get_or_init(|| (0..DEDUP_SHARDS).map(|_| std::sync::Mutex::new(())).collect());
+
+    &locks[first_byte as usize % DEDUP_SHARDS]
 }
 
 enum ExtractMode<'a> {
     Classic,
     Cas { index_root: &'a Path },
-    LocalDedup { local_index: &'a mut BTreeMap<zpm_utils::Hash64, Path> },
+    LocalDedup { local_index: &'a LocalDedupIndex },
 }
 
-fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mut mode: ExtractMode<'_>) -> Result<bool, Error> {
+fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mode: ExtractMode<'_>) -> Result<bool, Error> {
     let ready_path = destination
         .with_join_str(".ready");
 
@@ -144,7 +186,7 @@ fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mut m
 
         target_path.fs_create_parent()?;
 
-        match &mut mode {
+        match &mode {
             ExtractMode::Cas { index_root } => {
                 link_into_cas(&target_path, &entry.data, entry.mode as u32, index_root)?;
             },
@@ -212,23 +254,168 @@ fn link_into_local_index(
     target_path: &Path,
     data: &[u8],
     mode: u32,
-    local_index: &mut BTreeMap<zpm_utils::Hash64, Path>,
+    local_index: &LocalDedupIndex,
 ) -> Result<(), Error> {
     let mode_bits = mode & 0o777;
     let hash = zpm_utils::Hash64::from_data(data);
 
+    let mut shard = local_index.shard(&hash)
+        .lock()
+        .unwrap();
+
     // Fall through to write_canonical when the recorded path is gone;
-    // that re-registers a new home for this hash.
-    let canonical_path = local_index.get(&hash).cloned()
+    // that re-registers a new home for this hash. The canonical write
+    // happens under the shard lock so a concurrent extraction of the
+    // same content can't hardlink to a half-written file.
+    let canonical_path = shard.get(&hash).cloned()
         .filter(|p| p.fs_exists());
 
     let Some(canonical_path) = canonical_path else {
         write_canonical(target_path, data, mode_bits)?;
-        local_index.insert(hash, target_path.clone());
+        shard.insert(hash, target_path.clone());
         return Ok(());
     };
 
+    drop(shard);
+
     ensure_hardlink(target_path, &canonical_path)
+}
+
+/// Extracts every entry of the package archive under `destination`,
+/// with no completion marker; used for the unpacked store and as the
+/// fallback when a clone fails halfway.
+pub(crate) fn extract_zip_entries_to(destination: &Path, package_data: &PackageData) -> Result<(), Error> {
+    let package_subpath
+        = package_data.package_subpath();
+
+    let package_bytes = match package_data {
+        PackageData::Zip {archive_path, ..} => archive_path.fs_read()?,
+        _ => panic!("Expected a zip archive"),
+    };
+
+    let entries
+        = zpm_formats::zip::entries_from_zip(&package_bytes)?
+            .into_iter()
+            .strip_path_prefix(&package_subpath)
+            .collect::<Vec<_>>();
+
+    for entry in entries {
+        let target_path = destination
+            .with_join(&entry.name);
+
+        target_path.fs_create_parent()?;
+
+        target_path
+            .fs_write(&entry.data)?
+            .fs_set_permissions(Permissions::from_mode(entry.mode as u32))?;
+    }
+
+    Ok(())
+}
+
+/// Whether copy-on-write clones work between the unpacked store and
+/// the project. Probed once per process by cloning a marker file; any
+/// failure (other platform, other filesystem, cross-volume setup)
+/// simply disables clone-based materialization.
+pub fn clonefile_supported(store_root: &Path, project_cwd: &Path) -> bool {
+    use std::sync::OnceLock;
+
+    static SUPPORTED: OnceLock<bool> = OnceLock::new();
+
+    *SUPPORTED.get_or_init(|| {
+        let probe = || -> Result<(), Error> {
+            store_root.fs_create_dir_all()?;
+
+            let source = store_root
+                .with_join_str(format!(".clone-probe-{}", std::process::id()));
+            let target = project_cwd
+                .with_join_str(format!(".clone-probe-{}", std::process::id()));
+
+            source.fs_write([])?;
+            let _ = target.fs_rm_file().ok_missing();
+
+            let cloned = source.fs_clonefile(&target);
+
+            let _ = source.fs_rm_file().ok_missing();
+            let _ = target.fs_rm_file().ok_missing();
+
+            cloned?;
+
+            Ok(())
+        };
+
+        probe().is_ok()
+    })
+}
+
+/// Ensures the unpacked store holds a pristine copy of the package,
+/// keyed by locator and content checksum, and returns its path. The
+/// entry is built in a temp folder and renamed in place so concurrent
+/// installs can race safely.
+pub fn ensure_unpacked_store_entry(
+    store_root: &Path,
+    locator: &Locator,
+    checksum: &zpm_utils::Hash64,
+    package_data: &PackageData,
+) -> Result<Path, Error> {
+    let entry_path = store_root.with_join_str(format!(
+        "{}-{}-{}",
+        locator.ident.slug(),
+        locator.reference.slug(),
+        checksum.short(),
+    ));
+
+    if entry_path.fs_exists() {
+        return Ok(entry_path);
+    }
+
+    // The nonce keeps parallel extractions of the same package (the
+    // tree may materialize one locator at several locations) from
+    // clobbering each other's temp folder.
+    static STORE_TMP_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    let tmp_path = store_root.with_join_str(format!(
+        ".tmp-{}-{}-{}",
+        std::process::id(),
+        STORE_TMP_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        checksum.short(),
+    ));
+
+    // A crashed run can leave this exact path behind (pids and the
+    // nonce both reset, typically in containers); extracting over its
+    // leftovers would graft stale files into an immutable store entry.
+    let _ = tmp_path.fs_rm().ok_missing();
+
+    tmp_path.fs_create_dir_all()?;
+
+    if let Err(error) = extract_zip_entries_to(&tmp_path, package_data) {
+        let _ = tmp_path.fs_rm().ok_missing();
+        return Err(error);
+    }
+
+    if let Err(error) = tmp_path.fs_rename(&entry_path) {
+        let _ = tmp_path.fs_rm().ok_missing();
+
+        // Another process finished the same entry first; use theirs.
+        if !entry_path.fs_exists() {
+            return Err(error.into());
+        }
+    }
+
+    Ok(entry_path)
+}
+
+/// Materializes `destination` as a copy-on-write clone of the store
+/// entry, replacing whatever was there.
+pub fn clone_package_from_store(destination: &Path, store_entry: &Path) -> Result<(), Error> {
+    if destination.fs_exists() {
+        destination.fs_rm()?;
+    }
+
+    destination.fs_create_parent()?;
+    store_entry.fs_clonefile(destination)?;
+
+    Ok(())
 }
 
 /// Stamped on every CAS entry. An mtime that doesn't match flags
@@ -261,6 +448,12 @@ fn link_into_cas(target_path: &Path, data: &[u8], mode: u32, index_root: &Path) 
         .with_join_str(&index_filename);
 
     index_dir.fs_create_dir_all()?;
+
+    // Serialize on the content hash so parallel extractions of the
+    // same file can't interleave their writes to the index entry.
+    let _shard_guard = cas_shard_lock(u8::from_str_radix(&hash[..2], 16).unwrap_or(0))
+        .lock()
+        .unwrap();
 
     let mut needs_rewrite = !index_path.fs_exists();
 
@@ -343,7 +536,7 @@ pub fn populate_build_entry_dependencies(package_build_entries: &BTreeMap<Locato
 }
 pub struct PackageBuildInfo {
     pub must_extract: bool,
-    pub build_commands: Option<Vec<build::Command>>,
+    pub build_step: build::BuildStep,
 }
 
 pub fn get_package_internal_info(project: &Project, install: &Install, dependencies_meta: &Vec<(VersionFilter, PackageMeta)>, locator: &Locator, resolution: &Resolution, physical_package_data: &PackageData) -> PackageBuildInfo {
@@ -375,9 +568,10 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     // .pnp.cjs file to change depending on the system.
     let has_build_commands = package_flags.build_commands.len() > 0;
     let scripts_allowed_by_meta = package_meta.built.unwrap_or(project.config.settings.enable_scripts.value);
+    let scripts_can_run
+        = locator.reference.is_workspace_reference() || scripts_allowed_by_meta;
     let should_build_if_compatible
-        = has_build_commands
-            && (locator.reference.is_workspace_reference() || scripts_allowed_by_meta);
+        = has_build_commands && scripts_can_run;
 
     // Optional dependencies baked by zip archives are always extracted,
     // as we have no way to know whether they would be extracted if we
@@ -399,14 +593,18 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     let is_compatible = resolution.requirements
         .validate_system(&System::from_current());
 
-    let must_build
-        = should_build_if_compatible && is_compatible;
-
-    let build_commands
-        = must_build.then_some(package_flags.build_commands.clone());
+    let build_step = if !has_build_commands {
+        build::BuildStep::Commands(Vec::new())
+    } else if !is_compatible {
+        build::BuildStep::Skip(build::BuildSkip::Incompatible)
+    } else if !scripts_can_run {
+        build::BuildStep::Skip(build::BuildSkip::Disabled)
+    } else {
+        build::BuildStep::Commands(package_flags.build_commands.clone())
+    };
 
     PackageBuildInfo {
         must_extract,
-        build_commands,
+        build_step,
     }
 }

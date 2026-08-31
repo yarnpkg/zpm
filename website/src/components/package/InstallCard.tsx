@@ -1,9 +1,9 @@
 import {useState, useCallback} from 'react';
 
-import type {PmTab} from './types';
-import {useIcons} from './contexts';
-import {OctIcon, BrandIcon} from './icons';
-import {PM_COMMANDS} from './utils';
+import {useIcons}              from './contexts';
+import {OctIcon, BrandIcon}    from './icons';
+import type {PmTab}            from './types';
+import {PM_COMMANDS}           from './utils';
 
 export function InstallCard({name, pmTab, onPmTabChange}: {
   name: string; pmTab: PmTab; onPmTabChange: (t: PmTab) => void;

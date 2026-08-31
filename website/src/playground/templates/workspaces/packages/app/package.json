@@ -1,0 +1,8 @@
+{
+  "name": "@demo/app",
+  "private": true,
+  "dependencies": {
+    "@demo/tools": "workspace:*",
+    "react": "^19.2.5"
+  }
+}

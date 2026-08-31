@@ -14,9 +14,13 @@ const sidebarActivePage = frontmatter.sidebarActivePage || frontmatter.activePag
 const sidebarKey = frontmatter.sidebar || `getting-started`;
 const sidebarDef = (navigation.sidebars as Record<string, { sections?: string[] }>)[sidebarKey];
 const sections = sidebarDef?.sections;
+
+// The topbar highlights whichever navigation.topbar key matches activePage;
+// doc slugs never match, so derive the topbar key from the sidebar instead.
+const topbarActivePage = (navigation.sidebarToTopbar as Record<string, string>)[sidebarKey] ?? frontmatter.activePage;
 ---
 
-<DocsLayout title={frontmatter.title} description={frontmatter.description} breadcrumb={breadcrumb} activePage={frontmatter.activePage} mainMaxWidth={frontmatter.mainMaxWidth}>
+<DocsLayout title={frontmatter.title} description={frontmatter.description} breadcrumb={breadcrumb} activePage={topbarActivePage} mainMaxWidth={frontmatter.mainMaxWidth}>
   <Fragment slot="sidebar">
     {sections
       ? <ContentSidebar sections={sections} activePage={sidebarActivePage} />

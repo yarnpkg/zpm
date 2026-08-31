@@ -1,8 +1,9 @@
 use clipanion::cli;
 use zpm_config::Source;
 use zpm_parsers::JsonDocument;
+use zpm_utils::{DataType, is_terminal};
 
-use crate::{error::Error, immutable, project::{self, InstallMode, RunInstallOptions}};
+use crate::{error::Error, immutable, project::{self, InstallMode, RunInstallOptions}, report::{self, StreamReport, StreamReportConfig, with_report_result}};
 
 /// Install dependencies
 ///
@@ -61,6 +62,10 @@ pub struct Install {
     /// Refresh package metadata stored in the lockfile
     #[cli::option("--refresh-lockfile", default = false)]
     refresh_lockfile: bool,
+
+    /// Run a full install even when everything looks up-to-date; defaults to true in interactive terminals
+    #[cli::option("-f,--force", default = is_terminal())]
+    force: bool,
 
     /// Select which install artifacts Yarn should generate
     #[cli::option("--mode")]
@@ -124,6 +129,35 @@ impl Install {
         let refresh_lockfile = self.refresh_lockfile
             || project.config.settings.enable_hardened_mode.value;
 
+        // A plain `yarn install` can stop right away when the previous
+        // install is provably still current. Interactive runs skip this
+        // fast path so that a manually damaged project (say, a deleted
+        // package folder) heals when the user reaches for `yarn install`.
+        if !self.force
+            && !self.check_resolutions
+            && !self.check_checksums
+            && !refresh_lockfile
+            && self.mode.is_none()
+            && project.is_install_up_to_date()?
+        {
+            let report = StreamReport::new(StreamReportConfig {
+                include_version: true,
+                json: self.json,
+                silent_or_error: self.silent,
+                ..StreamReportConfig::from_config(&project.config)
+            });
+
+            with_report_result(report, async {
+                report::if_active(|report| {
+                    report.info(format!("All dependencies are up-to-date, nothing to do. Run with {} to ignore this check.", DataType::Code.colorize("--force")));
+                });
+
+                Ok(())
+            }).await?;
+
+            return Ok(());
+        }
+
         sort_workspace_dependencies(&project)?;
 
         // Snapshot each `immutablePatterns` glob so we can fail loudly
@@ -153,6 +187,7 @@ impl Install {
             silent_or_error: self.silent,
             json: self.json,
             inline_builds: self.inline_builds,
+            force: self.force,
             ..Default::default()
         }).await?;
 

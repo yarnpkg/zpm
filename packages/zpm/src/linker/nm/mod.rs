@@ -5,18 +5,36 @@ use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
 use zpm_utils::{FromFileString, IoResultExt, Path, ToHumanString};
 
 use crate::{
-    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}}, project::Project
+    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{self, NodeModulesPackageMapBuilder, PackageMap, persist_package_map, persist_package_map_at}}, project::Project
 };
 
 pub mod hoist;
 
 const EXPECT_CHILDREN: &str = "All nodes should be expanded by the end of the hoisting process";
 
-fn collect_binaries_from_dependencies(install: &Install, children: &BTreeMap<Ident, usize>, work_tree: &WorkTree) -> BTreeMap<String, (Ident, Path)> {
+/// Collects the binaries exposed by the packages sitting in a node's
+/// `node_modules` folder. Names may collide (two packages exporting the
+/// same bin, often through aliases); the node's own dependencies win
+/// over packages that merely got hoisted next to them, and otherwise
+/// the first candidate wins - same tie-break as Berry's
+/// `createBinSymlinkMap`.
+fn collect_binaries_from_dependencies(install: &Install, node: &hoist::WorkNode, work_tree: &WorkTree) -> BTreeMap<String, (Ident, Path)> {
     let mut binaries
         = BTreeMap::new();
 
-    for (ident, child_idx) in children {
+    let children
+        = node.children.as_ref()
+            .expect(EXPECT_CHILDREN);
+
+    let is_direct_dependency = |ident: &Ident| {
+        node.dependencies.contains_key(ident)
+    };
+
+    let children_by_priority
+        = children.iter().filter(|(ident, _)| is_direct_dependency(ident))
+            .chain(children.iter().filter(|(ident, _)| !is_direct_dependency(ident)));
+
+    for (ident, child_idx) in children_by_priority {
         let child_node
             = &work_tree.nodes[*child_idx];
 
@@ -26,7 +44,8 @@ fn collect_binaries_from_dependencies(install: &Install, children: &BTreeMap<Ide
         if let Some(content_flags) = install.install_state.content_flags.get(&physical_locator) {
             for (bin_name, binary) in &content_flags.binaries {
                 if let content_flags::Binary::Node(bin_path) = binary {
-                    binaries.insert(bin_name.clone(), (ident.clone(), bin_path.clone()));
+                    binaries.entry(bin_name.clone())
+                        .or_insert_with(|| (ident.clone(), bin_path.clone()));
                 }
             }
         }
@@ -86,6 +105,7 @@ fn register_workspace_symlinks_at(
     project: &Project,
     install: &Install,
     workspace_nm_tree: &mut SyncTree,
+    mut package_map_builder: Option<&mut NodeModulesPackageMapBuilder>,
     host_node: &hoist::WorkNode,
     host_abs_path: &Path,
     candidate_workspaces: impl IntoIterator<Item = (Ident, Path)>,
@@ -147,9 +167,20 @@ fn register_workspace_symlinks_at(
             = workspace_dir
                 .relative_to(&host_abs_path.with_join(&symlink_path).dirname().unwrap_or_default());
 
+        let symlink_location
+            = host_abs_path.with_join(&symlink_path);
+
         workspace_nm_tree.register_entry(symlink_path, SyncItem::Symlink {
             target_path,
         })?;
+
+        if let Some(package_map_builder) = package_map_builder.as_deref_mut() {
+            package_map_builder.register_package(
+                symlink_location,
+                workspace_dir,
+                &target_locator,
+            );
+        }
     }
 
     Ok(())
@@ -182,16 +213,70 @@ fn register_workspace_bin_symlinks(workspace_nm_tree: &mut SyncTree, workspace_p
     Ok(())
 }
 
+/// Context for the incremental link: the package map left by the last
+/// completed install, and the base its package ids are relative to.
+pub(crate) struct PreviousPackageMap {
+    map: PackageMap,
+    base_path: Path,
+}
+
+impl PreviousPackageMap {
+    /// Loads the previous package map, unless incremental linking is
+    /// disabled for this pass (`--force`, or an `nmMode` transition
+    /// that requires rewriting existing folders).
+    fn load(project: &Project, install: &Install, package_map_path: &Path, base_path: Path) -> Option<Self> {
+        if install.force || nm_mode_transitioned(project) {
+            return None;
+        }
+
+        Some(Self {
+            map: package_map::load_package_map(package_map_path)?,
+            base_path,
+        })
+    }
+
+    fn matches_package(&self, abs_path: &Path, locator: &Locator, checksum: Option<&zpm_utils::Hash64>) -> bool {
+        let id = package_map::get_package_id(&self.base_path, &abs_path.without_trailing_separators());
+
+        self.map.matches_package(&id, locator, checksum)
+    }
+}
+
+/// Resolves the unpacked store used for clonefile materialization:
+/// `Some` only for the classic nmMode on systems where copy-on-write
+/// clones between the store and the project actually work.
+fn clone_store_for(project: &Project) -> Option<Path> {
+    if project.config.settings.nm_mode.value != zpm_config::NmMode::Classic {
+        return None;
+    }
+
+    let store_root = project.config.settings.global_folder.value
+        .with_join_str("unpacked");
+
+    linker::helpers::clonefile_supported(&store_root, &project.project_cwd)
+        .then_some(store_root)
+}
+
+/// Builds the sync tree for one workspace's node_modules. The caller
+/// runs the returned trees (possibly in parallel; they cover disjoint
+/// folders) once every workspace was planned.
 fn generate_workspace_node_modules(
     project: &Project,
     install: &Install,
     work_tree: &WorkTree,
     workspace_node_idx: usize,
+    package_map_builder: Option<&mut NodeModulesPackageMapBuilder>,
+    previous_map: Option<&PreviousPackageMap>,
+    clone_store: Option<&Path>,
     packages_by_location: &mut BTreeMap<Path, zpm_primitives::Locator>,
     canonical_build_locations: &mut BTreeMap<Locator, Path>,
     force_rebuild_locators: &mut BTreeSet<Locator>,
     cas_extractions: &mut Vec<(Path, Locator)>,
-) -> Result<(), Error> {
+    clone_extractions: &mut Vec<(Path, Locator)>,
+) -> Result<(SyncTree<'static>, Path), Error> {
+    let mut package_map_builder
+        = package_map_builder;
+
     let hardlinks_mode = matches!(
         project.config.settings.nm_mode.value,
         zpm_config::NmMode::HardlinksLocal | zpm_config::NmMode::HardlinksGlobal,
@@ -213,11 +298,19 @@ fn generate_workspace_node_modules(
         = project.project_cwd
             .with_join(&workspace.rel_path);
 
+    if let Some(package_map_builder) = package_map_builder.as_deref_mut() {
+        package_map_builder.register_package(
+            workspace_dir.clone(),
+            workspace_dir.clone(),
+            &workspace_node.locator,
+        );
+    }
+
     let workspace_abs_path
         = workspace_dir
             .with_join_str("node_modules");
 
-    let mut workspace_nm_tree
+    let mut workspace_nm_tree: SyncTree<'static>
         = SyncTree::new();
 
     workspace_nm_tree.dry_run = false;
@@ -255,6 +348,7 @@ fn generate_workspace_node_modules(
             project,
             install,
             &mut workspace_nm_tree,
+            package_map_builder.as_deref_mut(),
             &work_tree.nodes[workspace_node_idx],
             &workspace_abs_path,
             candidate_workspaces,
@@ -315,6 +409,14 @@ fn generate_workspace_node_modules(
                     let child_abs_path
                         = workspace_abs_path.with_join(&child_rel_path);
 
+                    if let Some(package_map_builder) = package_map_builder.as_deref_mut() {
+                        package_map_builder.register_package(
+                            child_abs_path.clone(),
+                            package_directory.clone(),
+                            &child_node.locator,
+                        );
+                    }
+
                     let target_path
                         = package_directory.relative_to(&child_abs_path.dirname().unwrap());
 
@@ -328,6 +430,14 @@ fn generate_workspace_node_modules(
                 },
 
                 Some(PackageData::Zip {archive_path, package_directory, ..}) => {
+                    if let Some(package_map_builder) = package_map_builder.as_deref_mut() {
+                        package_map_builder.register_package(
+                            abs_path.clone(),
+                            abs_path.clone(),
+                            &child_node.locator,
+                        );
+                    }
+
                     // SyncTree re-extracts user-deleted destinations
                     // automatically; we just need to flag for rebuild
                     // so the build cache doesn't short-circuit.
@@ -340,22 +450,67 @@ fn generate_workspace_node_modules(
                         let _ = dest_abs_path.fs_rm().ok_missing();
                     }
 
-                    if !dest_abs_path.fs_exists() {
+                    let dest_exists
+                        = dest_abs_path.fs_exists();
+
+                    if !dest_exists {
                         force_rebuild_locators.insert(child_node.locator.clone());
                     }
+
+                    // The folder can be left alone when the previous
+                    // install already materialized this exact archive
+                    // here and nothing nests packages inside it (in
+                    // either the previous or the new layout).
+                    let has_nested_children
+                        = child_node.children.as_ref().is_some_and(|children| !children.is_empty());
+
+                    // Same source as the map builder: lockfile checksum
+                    // first, install-state shadow for conditional
+                    // locators.
+                    let physical_locator
+                        = child_node.locator.physical_locator();
+
+                    let checksum = install.lockfile.entries
+                        .get(&physical_locator)
+                        .and_then(|entry| entry.checksum.as_ref())
+                        .or_else(|| install.install_state.cache_checksums.get(&physical_locator));
+
+                    let assume_up_to_date = dest_exists
+                        && !has_nested_children
+                        && previous_map.is_some_and(|previous_map| {
+                            previous_map.matches_package(&abs_path, &child_node.locator, checksum)
+                        });
+
+                    // Leaf packages with a known checksum can be
+                    // materialized as a copy-on-write clone of the
+                    // unpacked store instead of file-by-file writes.
+                    // Only fresh folders qualify: reconciling an
+                    // existing one in place preserves its inode, which
+                    // file watchers rely on across updates.
+                    let use_clone = clone_store.is_some()
+                        && !dest_exists
+                        && !has_nested_children
+                        && checksum.is_some();
 
                     if hardlinks_mode {
                         // Hand off to the CAS extractor; `Any` keeps
                         // the parent walk from treating the folder as
                         // extraneous while leaving its contents alone.
                         workspace_nm_tree.register_entry(child_rel_path, SyncItem::Any)?;
-                        cas_extractions.push((dest_abs_path.clone(), child_node.locator.clone()));
+
+                        if !assume_up_to_date {
+                            cas_extractions.push((dest_abs_path.clone(), child_node.locator.clone()));
+                        }
+                    } else if use_clone {
+                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Any)?;
+                        clone_extractions.push((dest_abs_path.clone(), child_node.locator.clone()));
                     } else {
                         workspace_nm_tree.register_entry(child_rel_path, SyncItem::Folder {
                             template: Some(SyncTemplate::Zip {
                                 archive_path: archive_path.clone(),
                                 inner_path: package_directory.relative_to(&archive_path),
                             }),
+                            assume_up_to_date,
                         })?;
                     }
 
@@ -373,6 +528,14 @@ fn generate_workspace_node_modules(
                         let target_path
                             = Path::from_file_string(&params.path)?;
 
+                        if let Some(package_map_builder) = package_map_builder.as_deref_mut() {
+                            package_map_builder.register_package(
+                                abs_path.clone(),
+                                target_path.clone(),
+                                &child_node.locator,
+                            );
+                        }
+
                         workspace_nm_tree.register_entry(child_rel_path, SyncItem::Symlink {
                             target_path,
                         })?;
@@ -388,7 +551,7 @@ fn generate_workspace_node_modules(
         // Register bin symlinks for all direct dependencies of this node
         // Skip any bins that conflict with workspace binaries (workspace takes precedence)
         let mut binaries
-            = collect_binaries_from_dependencies(install, children, &work_tree);
+            = collect_binaries_from_dependencies(install, node, &work_tree);
 
         // For root level, filter out bins that conflict with workspace binaries
         if node_rel_path.is_empty() {
@@ -400,14 +563,73 @@ fn generate_workspace_node_modules(
         register_bin_symlinks_at_path(&mut workspace_nm_tree, &node_rel_path, &binaries)?;
     }
 
-    workspace_nm_tree
-        .run(workspace_abs_path.clone())?;
+    Ok((workspace_nm_tree, workspace_abs_path))
+}
 
-    // Always materialize node_modules: tools (and tests) expect the
-    // directory to exist even when the workspace has no deps.
-    workspace_abs_path.fs_create_dir_all()?;
+/// Runs every workspace tree, then the CAS and clone extractions, on
+/// the rayon pool. `block_in_place` keeps the heavy filesystem work
+/// from starving the tokio worker the linker runs on.
+fn run_workspace_trees(
+    project: &Project,
+    install: &Install,
+    workspace_trees: Vec<(SyncTree<'static>, Path)>,
+    cas_extractions: &[(Path, Locator)],
+    clone_store: Option<&Path>,
+    clone_extractions: &[(Path, Locator)],
+) -> Result<(), Error> {
+    tokio::task::block_in_place(|| {
+        use rayon::prelude::*;
 
-    Ok(())
+        workspace_trees
+            .par_iter()
+            .try_for_each(|(workspace_nm_tree, workspace_abs_path)| -> Result<(), Error> {
+                workspace_nm_tree
+                    .run(workspace_abs_path.clone())?;
+
+                // Always materialize node_modules: tools (and tests)
+                // expect the directory to exist even when the
+                // workspace has no deps.
+                workspace_abs_path.fs_create_dir_all()?;
+
+                Ok(())
+            })?;
+
+        if let Some(store_root) = clone_store {
+            clone_extractions.par_iter().try_for_each(|(dest_abs_path, locator)| -> Result<(), Error> {
+                let physical_locator
+                    = locator.physical_locator();
+
+                let package_data = install.package_data
+                    .get(&physical_locator)
+                    .unwrap_or_else(|| panic!("Expected package_data for {}", locator.to_print_string()));
+
+                let checksum = install.lockfile.entries
+                    .get(&physical_locator)
+                    .and_then(|entry| entry.checksum.clone())
+                    .or_else(|| install.install_state.cache_checksums.get(&physical_locator).cloned())
+                    .expect("Clone extractions are only planned for packages with a checksum");
+
+                let store_entry = linker::helpers::ensure_unpacked_store_entry(
+                    store_root,
+                    &physical_locator,
+                    &checksum,
+                    package_data,
+                )?;
+
+                if linker::helpers::clone_package_from_store(dest_abs_path, &store_entry).is_err() {
+                    // The volumes may not support clones after all
+                    // (say, the store was probed against another
+                    // mount); extract the archive like before.
+                    let _ = dest_abs_path.fs_rm().ok_missing();
+                    linker::helpers::extract_zip_entries_to(dest_abs_path, package_data)?;
+                }
+
+                Ok(())
+            })?;
+        }
+
+        run_cas_extractions(project, install, cas_extractions)
+    })
 }
 
 fn build_requests_from_locations(
@@ -450,16 +672,16 @@ fn build_requests_from_locations(
             physical_package_data,
         );
 
-        let Some(build_commands) = info.build_commands else {
+        if info.build_step.is_noop() {
             continue;
-        };
+        }
 
         package_build_entries.insert(locator.clone(), all_build_entries.len());
 
         all_build_entries.push(build::BuildRequest {
             cwd: build_cwd.clone(),
             locator: locator.clone(),
-            commands: build_commands,
+            build_step: info.build_step,
             allowed_to_fail: tree.optional_builds.contains(locator),
             force_rebuild: force_rebuild_locators.contains(locator),
             inline_builds: install.inline_builds,
@@ -492,10 +714,30 @@ pub async fn link_island_nm(
         = BTreeSet::new();
     let mut cas_extractions
         = Vec::new();
+    let mut clone_extractions
+        = Vec::new();
+    let mut package_maps
+        = Vec::new();
+    let mut workspace_trees
+        = Vec::new();
+
+    let clone_store
+        = clone_store_for(project);
 
     for workspace_ident in &island.workspace_idents {
         let workspace = project.workspace_by_ident(workspace_ident)?;
         let workspace_locator = workspace.locator();
+        let package_map_base_path
+            = workspace.path.with_join_str("node_modules");
+        let mut package_map_builder
+            = NodeModulesPackageMapBuilder::new_at(project, install, package_map_base_path.clone());
+
+        let previous_map = PreviousPackageMap::load(
+            project,
+            install,
+            &project.package_map_path(Some(workspace)),
+            package_map_base_path.clone(),
+        );
 
         let mut work_tree = WorkTree::new_for_island_workspace(
             project,
@@ -508,19 +750,32 @@ pub async fn link_island_nm(
 
         hoister.hoist();
 
-        generate_workspace_node_modules(
+        workspace_trees.push(generate_workspace_node_modules(
             project,
             install,
             &work_tree,
             0,
+            Some(&mut package_map_builder),
+            previous_map.as_ref(),
+            clone_store.as_ref(),
             &mut packages_by_location,
             &mut canonical_build_locations,
             &mut force_rebuild_locators,
             &mut cas_extractions,
-        )?;
+            &mut clone_extractions,
+        )?);
+
+        package_maps.push((
+            project.package_map_path(Some(workspace)),
+            package_map_builder.build()?,
+        ));
     }
 
-    run_cas_extractions(project, install, &cas_extractions)?;
+    run_workspace_trees(project, install, workspace_trees, &cas_extractions, clone_store.as_ref(), &clone_extractions)?;
+
+    for (package_map_path, package_map) in package_maps {
+        persist_package_map_at(&package_map_path, &package_map)?;
+    }
 
     let dependencies_meta
         = linker::helpers::TopLevelConfiguration::from_project(project);
@@ -572,10 +827,13 @@ fn run_cas_extractions(
         return Ok(());
     }
 
+    use rayon::prelude::*;
+
     match project.config.settings.nm_mode.value {
         zpm_config::NmMode::HardlinksLocal => {
-            let mut local_index = BTreeMap::new();
-            for (dest_abs_path, locator) in cas_extractions {
+            let local_index = linker::helpers::LocalDedupIndex::new();
+
+            cas_extractions.par_iter().try_for_each(|(dest_abs_path, locator)| {
                 let package_data = install.package_data
                     .get(&locator.physical_locator())
                     .unwrap_or_else(|| panic!("Expected package_data for {}", locator.to_print_string()));
@@ -583,21 +841,22 @@ fn run_cas_extractions(
                 linker::helpers::fs_extract_archive_with_local_dedup(
                     dest_abs_path,
                     package_data,
-                    &mut local_index,
-                )?;
-            }
+                    &local_index,
+                ).map(|_| ())
+            })?;
         },
         zpm_config::NmMode::HardlinksGlobal => {
             let index_root = project.config.settings.global_folder.value
                 .with_join_str("index");
 
-            for (dest_abs_path, locator) in cas_extractions {
+            cas_extractions.par_iter().try_for_each(|(dest_abs_path, locator)| {
                 let package_data = install.package_data
                     .get(&locator.physical_locator())
                     .unwrap_or_else(|| panic!("Expected package_data for {}", locator.to_print_string()));
 
-                linker::helpers::fs_extract_archive_with_cas(dest_abs_path, package_data, &index_root)?;
-            }
+                linker::helpers::fs_extract_archive_with_cas(dest_abs_path, package_data, &index_root)
+                    .map(|_| ())
+            })?;
         },
         zpm_config::NmMode::Classic => {},
     }
@@ -767,30 +1026,54 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
         = BTreeSet::new();
     let mut cas_extractions
         = Vec::new();
+    let mut clone_extractions
+        = Vec::new();
 
     hoister.hoist();
 
     check_external_portal_conflicts(project, install, &work_tree)?;
 
+    let mut package_map_builder
+        = NodeModulesPackageMapBuilder::new(project, install);
+
+    let previous_map = PreviousPackageMap::load(
+        project,
+        install,
+        &project.package_map_path(None),
+        project.nm_path(),
+    );
+
+    let clone_store
+        = clone_store_for(project);
+
     let mut project_queue
         = vec![0usize];
 
+    let mut workspace_trees
+        = Vec::new();
+
     while let Some(workspace_node_idx) = project_queue.pop() {
-        generate_workspace_node_modules(
+        workspace_trees.push(generate_workspace_node_modules(
             project,
             install,
             &work_tree,
             workspace_node_idx,
+            Some(&mut package_map_builder),
+            previous_map.as_ref(),
+            clone_store.as_ref(),
             &mut packages_by_location,
             &mut canonical_build_locations,
             &mut force_rebuild_locators,
             &mut cas_extractions,
-        )?;
+            &mut clone_extractions,
+        )?);
 
         project_queue.extend_from_slice(&work_tree.nodes[workspace_node_idx].workspaces_idx);
     }
 
-    run_cas_extractions(project, install, &cas_extractions)?;
+    run_workspace_trees(project, install, workspace_trees, &cas_extractions, clone_store.as_ref(), &clone_extractions)?;
+
+    persist_package_map(project, &package_map_builder.build()?)?;
 
     let dependencies_meta
         = linker::helpers::TopLevelConfiguration::from_project(project);

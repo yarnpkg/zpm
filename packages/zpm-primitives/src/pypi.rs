@@ -1,8 +1,8 @@
-use std::{cmp::Ordering, str::FromStr};
+use std::{cmp::Ordering, collections::BTreeSet, str::FromStr};
 
 use rkyv::Archive;
 use zpm_semver::VersionRc;
-use zpm_utils::{DataType, EcoVec, FromFileString, ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
+use zpm_utils::{DataType, EcoVec, FromFileString, QueryString, QueryStringValue, ToFileString, ToHumanString, impl_file_string_from_str, impl_file_string_serialization};
 
 #[derive(thiserror::Error, Clone, Debug, PartialEq, Eq)]
 pub enum PypiError {
@@ -14,6 +14,15 @@ pub enum PypiError {
 
     #[error("Cannot project PEP 440 version to semver: {0}")]
     InvalidSemverProjection(String),
+
+    #[error("Invalid PyPI extra: {0}")]
+    InvalidExtra(String),
+
+    #[error("Invalid PyPI range parameter: {0}")]
+    InvalidRangeParameter(String),
+
+    #[error("Invalid PyPI range parameters: {0}")]
+    InvalidRangeParameters(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -162,6 +171,18 @@ impl PypiSpecifierSet {
         &self.raw
     }
 
+    pub fn intersection(&self, other: &Self) -> Result<Self, PypiError> {
+        if self.is_any() {
+            return Ok(other.clone());
+        }
+
+        if other.is_any() {
+            return Ok(self.clone());
+        }
+
+        Self::from_file_string(&format!("{},{}", self.raw, other.raw))
+    }
+
     pub fn contains(&self, version: &PypiVersion) -> Result<bool, PypiError> {
         if self.is_any() {
             return Ok(true);
@@ -180,18 +201,6 @@ impl PypiSpecifierSet {
                 .map_err(|_| PypiError::InvalidSpecifier(self.raw.clone()))?;
 
         Ok(parsed_version == pinned)
-    }
-
-    pub fn intersection(&self, other: &Self) -> Result<Self, PypiError> {
-        if self.is_any() {
-            return Ok(other.clone());
-        }
-
-        if other.is_any() {
-            return Ok(self.clone());
-        }
-
-        Self::from_file_string(&format!("{},{}", self.raw, other.raw))
     }
 }
 
@@ -244,10 +253,8 @@ impl_file_string_from_str!(PypiSpecifierSet);
 impl_file_string_serialization!(PypiSpecifierSet);
 
 pub fn canonicalize_pypi_name(name: &str) -> String {
-    let mut result
-        = String::new();
-    let mut previous_was_separator
-        = false;
+    let mut result = String::new();
+    let mut previous_was_separator = false;
 
     for ch in name.chars().flat_map(char::to_lowercase) {
         if matches!(ch, '-' | '_' | '.') {
@@ -264,6 +271,215 @@ pub fn canonicalize_pypi_name(name: &str) -> String {
     result
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash))]
+pub struct PypiExtras {
+    raw: Vec<String>,
+}
+
+impl PypiExtras {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    pub fn from_iter<I, S>(extras: I) -> Result<Self, PypiError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut unique = BTreeSet::new();
+
+        for extra in extras {
+            let extra = extra.as_ref().trim();
+
+            if !is_valid_extra(extra) {
+                return Err(PypiError::InvalidExtra(extra.to_string()));
+            }
+
+            unique.insert(normalize_pypi_extra(extra));
+        }
+
+        Ok(Self {
+            raw: unique.into_iter().collect(),
+        })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.raw.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.raw.iter().map(|extra| extra.as_str())
+    }
+
+    pub fn contains(&self, extra: &str) -> bool {
+        let extra = normalize_pypi_extra(extra);
+        self.raw.iter().any(|candidate| candidate == &extra)
+    }
+
+    pub fn union(&self, other: &Self) -> Result<Self, PypiError> {
+        Self::from_iter(self.iter().chain(other.iter()))
+    }
+}
+
+pub fn normalize_pypi_extra(extra: &str) -> String {
+    let mut normalized
+        = String::with_capacity(extra.len());
+    let mut previous_was_separator
+        = false;
+
+    for ch in extra.chars() {
+        if ch == '-' || ch == '_' || ch == '.' {
+            if !previous_was_separator {
+                normalized.push('-');
+                previous_was_separator = true;
+            }
+        } else {
+            normalized.push(ch.to_ascii_lowercase());
+            previous_was_separator = false;
+        }
+    }
+
+    normalized
+}
+
+fn is_valid_extra(extra: &str) -> bool {
+    let mut chars = extra.chars();
+
+    let Some(first) = chars.next() else {
+        return false;
+    };
+
+    if !first.is_ascii_alphanumeric() {
+        return false;
+    }
+
+    let mut previous = first;
+
+    for ch in chars {
+        if !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_' && ch != '.' {
+            return false;
+        }
+
+        previous = ch;
+    }
+
+    previous.is_ascii_alphanumeric()
+}
+
+impl FromFileString for PypiExtras {
+    type Error = PypiError;
+
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
+        Self::from_iter(src.split(','))
+    }
+}
+
+impl ToFileString for PypiExtras {
+    fn to_file_string(&self) -> String {
+        self.raw.join(",")
+    }
+}
+
+impl ToHumanString for PypiExtras {
+    fn to_print_string(&self) -> String {
+        DataType::Range.colorize(&self.to_file_string())
+    }
+}
+
+impl_file_string_from_str!(PypiExtras);
+impl_file_string_serialization!(PypiExtras);
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash))]
+pub struct PypiRangeParameters {
+    pub extras: Option<PypiExtras>,
+}
+
+impl PypiRangeParameters {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    pub fn from_extras(extras: PypiExtras) -> Self {
+        Self {
+            extras: (!extras.is_empty()).then_some(extras),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.extras.as_ref().map(|extras| extras.is_empty()).unwrap_or(true)
+    }
+
+    pub fn merge(&self, other: &Self) -> Result<Self, PypiError> {
+        let extras = match (&self.extras, &other.extras) {
+            (Some(left), Some(right)) => Some(left.union(right)?),
+            (Some(left), None) => Some(left.clone()),
+            (None, Some(right)) => Some(right.clone()),
+            (None, None) => None,
+        };
+
+        Ok(Self {
+            extras,
+        })
+    }
+}
+
+impl FromFileString for PypiRangeParameters {
+    type Error = PypiError;
+
+    fn from_file_string(src: &str) -> Result<Self, Self::Error> {
+        let query_string
+            = QueryString::from_file_string(src)
+                .map_err(|err| PypiError::InvalidRangeParameters(err.to_string()))?;
+
+        let mut parameters
+            = Self::empty();
+
+        for (key, value) in query_string.fields {
+            match (key.as_str(), value) {
+                ("extras", QueryStringValue::String(value)) => {
+                    parameters.extras = Some(PypiExtras::from_file_string(&value)?);
+                },
+
+                ("extras", QueryStringValue::True) => {
+                    return Err(PypiError::InvalidRangeParameter(key));
+                },
+
+                _ => {
+                    return Err(PypiError::InvalidRangeParameter(key));
+                },
+            }
+        }
+
+        Ok(parameters)
+    }
+}
+
+impl ToFileString for PypiRangeParameters {
+    fn to_file_string(&self) -> String {
+        let mut parameters
+            = Vec::new();
+
+        if let Some(extras) = &self.extras {
+            if !extras.is_empty() {
+                parameters.push(format!("extras={}", extras.to_file_string()));
+            }
+        }
+
+        parameters.join("&")
+    }
+}
+
+impl ToHumanString for PypiRangeParameters {
+    fn to_print_string(&self) -> String {
+        DataType::Range.colorize(&self.to_file_string())
+    }
+}
+
+impl_file_string_from_str!(PypiRangeParameters);
+impl_file_string_serialization!(PypiRangeParameters);
+
 #[cfg(test)]
 mod tests {
     use zpm_utils::ToFileString;
@@ -278,10 +494,8 @@ mod tests {
 
     #[test]
     fn test_pypi_specifier_intersection() {
-        let a
-            = PypiSpecifierSet::from_file_string(">=1.0.0").unwrap();
-        let b
-            = PypiSpecifierSet::from_file_string("<2.0.0").unwrap();
+        let a = PypiSpecifierSet::from_file_string(">=1.0.0").unwrap();
+        let b = PypiSpecifierSet::from_file_string("<2.0.0").unwrap();
 
         assert_eq!(">=1.0.0, <2.0.0", a.intersection(&b).unwrap().to_file_string());
     }

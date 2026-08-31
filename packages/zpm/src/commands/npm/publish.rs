@@ -111,7 +111,7 @@ impl Publish {
         let registry_base
             = match pack_result.pack_manifest.publish_config.registry.as_deref() {
                 Some(registry) => registry.strip_suffix('/').unwrap_or(registry).to_string(),
-                None => http_npm::get_registry(&project.config, ident.scope(), true)?.to_string(),
+                None => http_npm::get_registry_for_ident(&project.config, Some(ident), true)?.to_string(),
             };
         let manifest_access
             = pack_result.pack_manifest.publish_config.access.map(NpmPublishAccess::from);

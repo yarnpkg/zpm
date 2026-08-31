@@ -6,7 +6,7 @@ use zpm_utils::ToFileString;
 use crate::{
     error::Error,
     install::{FetchResult, InstallContext},
-    pypi::{PypiDistribution, pypi_registry_base, encode_path_segment, select_best_wheel},
+    pypi::{PypiDistribution, get_registry, encode_path_segment, select_best_wheel},
 };
 
 use super::PackageData;
@@ -29,7 +29,7 @@ async fn resolve_artifact_url(context: &InstallContext<'_>, params: &PypiRegistr
     let metadata_url
         = format!(
             "{}/pypi/{}/{}/json",
-            pypi_registry_base(),
+            get_registry(&project.config, &params.ident),
             encode_path_segment(params.ident.as_str()),
             encode_path_segment(&params.version.to_file_string()),
         );
@@ -97,13 +97,11 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let cached_blob
         = package_cache.ensure_blob(locator.clone(), ".zip", || async {
-            let response
+            let (_, bytes)
                 = project.http_client.get(&artifact_url)?
-                    .send()
+                    .send_bytes()
                     .await?;
 
-            let bytes
-                = response.bytes().await?;
             Ok(bytes.to_vec())
         }).await?.into_info();
 

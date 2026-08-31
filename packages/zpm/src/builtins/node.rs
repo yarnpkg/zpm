@@ -30,7 +30,7 @@ pub async fn resolve_nodejs_version(context: &InstallContext<'_>, range: &zpm_se
         = format!("{}/index.json", project.config.settings.node_dist_url.value);
 
     let text
-        = project.http_client.get(&release_url)?.send().await?.text().await?;
+        = project.http_client.get(&release_url)?.send_text().await?;
 
     #[derive(Deserialize)]
     struct NodejsManifest {
@@ -173,11 +173,9 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
         = system.arch.clone();
 
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async move {
-        let bytes
+        let (_, bytes)
             = project.http_client.get(&url)?
-                .send().await?
-                .error_for_status()?
-                .bytes().await?;
+                .send_bytes().await?;
 
         let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
             let tar_data

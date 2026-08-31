@@ -128,6 +128,9 @@ pub enum Error {
 
     #[error("Failed to write to socket: {0}")]
     SocketWriteError(Arc<std::io::Error>),
+
+    #[error("Cache path must be absolute but got {path}", path = .0.to_print_string())]
+    CachePathNotAbsolute(Path),
 }
 
 impl From<std::str::Utf8Error> for Error {

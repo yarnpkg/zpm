@@ -3,7 +3,7 @@
   const DESIGN_H_DEFAULT = 1080;
   const OVERLAY_HIDE_MS = 1800;
 
-  const pad2 = (n) => String(n).padStart(2, '0');
+  const pad2 = n => String(n).padStart(2, `0`);
 
   const stylesheet = `
     :host {
@@ -204,11 +204,13 @@
   `;
 
   class DeckStage extends HTMLElement {
-    static get observedAttributes() { return ['width', 'height', 'noscale']; }
+    static get observedAttributes() {
+      return [`width`, `height`, `noscale`];
+    }
 
     constructor() {
       super();
-      this._root = this.attachShadow({ mode: 'open' });
+      this._root = this.attachShadow({mode: `open`});
       this._index = 0;
       this._slides = [];
       this._hideTimer = null;
@@ -226,76 +228,80 @@
     }
 
     get designWidth() {
-      return parseInt(this.getAttribute('width'), 10) || DESIGN_W_DEFAULT;
+      return parseInt(this.getAttribute(`width`), 10) || DESIGN_W_DEFAULT;
     }
     get designHeight() {
-      return parseInt(this.getAttribute('height'), 10) || DESIGN_H_DEFAULT;
+      return parseInt(this.getAttribute(`height`), 10) || DESIGN_H_DEFAULT;
     }
 
     connectedCallback() {
       this._render();
-      window.addEventListener('keydown', this._onKey);
-      window.addEventListener('resize', this._onResize);
-      window.addEventListener('mousemove', this._onMouseMove, { passive: true });
-      document.addEventListener('fullscreenchange', this._onFullscreenChange);
+      window.addEventListener(`keydown`, this._onKey);
+      window.addEventListener(`resize`, this._onResize);
+      window.addEventListener(`mousemove`, this._onMouseMove, {passive: true});
+      document.addEventListener(`fullscreenchange`, this._onFullscreenChange);
     }
 
     disconnectedCallback() {
-      window.removeEventListener('keydown', this._onKey);
-      window.removeEventListener('resize', this._onResize);
-      window.removeEventListener('mousemove', this._onMouseMove);
-      document.removeEventListener('fullscreenchange', this._onFullscreenChange);
-      if (this._hideTimer) clearTimeout(this._hideTimer);
-      if (this._mouseIdleTimer) clearTimeout(this._mouseIdleTimer);
+      window.removeEventListener(`keydown`, this._onKey);
+      window.removeEventListener(`resize`, this._onResize);
+      window.removeEventListener(`mousemove`, this._onMouseMove);
+      document.removeEventListener(`fullscreenchange`, this._onFullscreenChange);
+      if (this._hideTimer)
+        clearTimeout(this._hideTimer);
+
+      if (this._mouseIdleTimer) {
+        clearTimeout(this._mouseIdleTimer);
+      }
     }
 
     attributeChangedCallback() {
       if (this._canvas) {
-        this._canvas.style.width = this.designWidth + 'px';
-        this._canvas.style.height = this.designHeight + 'px';
-        this._canvas.style.setProperty('--deck-design-w', this.designWidth + 'px');
-        this._canvas.style.setProperty('--deck-design-h', this.designHeight + 'px');
+        this._canvas.style.width = `${this.designWidth}px`;
+        this._canvas.style.height = `${this.designHeight}px`;
+        this._canvas.style.setProperty(`--deck-design-w`, `${this.designWidth}px`);
+        this._canvas.style.setProperty(`--deck-design-h`, `${this.designHeight}px`);
         this._fit();
       }
     }
 
     _render() {
-      const style = document.createElement('style');
+      const style = document.createElement(`style`);
       style.textContent = stylesheet;
 
-      const stage = document.createElement('div');
-      stage.className = 'stage';
+      const stage = document.createElement(`div`);
+      stage.className = `stage`;
 
-      const canvas = document.createElement('div');
-      canvas.className = 'canvas';
-      canvas.style.width = this.designWidth + 'px';
-      canvas.style.height = this.designHeight + 'px';
-      canvas.style.setProperty('--deck-design-w', this.designWidth + 'px');
-      canvas.style.setProperty('--deck-design-h', this.designHeight + 'px');
+      const canvas = document.createElement(`div`);
+      canvas.className = `canvas`;
+      canvas.style.width = `${this.designWidth}px`;
+      canvas.style.height = `${this.designHeight}px`;
+      canvas.style.setProperty(`--deck-design-w`, `${this.designWidth}px`);
+      canvas.style.setProperty(`--deck-design-h`, `${this.designHeight}px`);
 
-      const slot = document.createElement('slot');
-      slot.addEventListener('slotchange', this._onSlotChange);
+      const slot = document.createElement(`slot`);
+      slot.addEventListener(`slotchange`, this._onSlotChange);
       canvas.appendChild(slot);
       stage.appendChild(canvas);
 
-      const tapzones = document.createElement('div');
-      tapzones.className = 'tapzones';
-      tapzones.setAttribute('aria-hidden', 'true');
-      const tzBack = document.createElement('div');
-      tzBack.className = 'tapzone';
-      const tzMid = document.createElement('div');
-      tzMid.className = 'tapzone';
-      tzMid.style.pointerEvents = 'none';
-      const tzFwd = document.createElement('div');
-      tzFwd.className = 'tapzone';
-      tzBack.addEventListener('click', this._onTapBack);
-      tzFwd.addEventListener('click', this._onTapForward);
+      const tapzones = document.createElement(`div`);
+      tapzones.className = `tapzones`;
+      tapzones.setAttribute(`aria-hidden`, `true`);
+      const tzBack = document.createElement(`div`);
+      tzBack.className = `tapzone`;
+      const tzMid = document.createElement(`div`);
+      tzMid.className = `tapzone`;
+      tzMid.style.pointerEvents = `none`;
+      const tzFwd = document.createElement(`div`);
+      tzFwd.className = `tapzone`;
+      tzBack.addEventListener(`click`, this._onTapBack);
+      tzFwd.addEventListener(`click`, this._onTapForward);
       tapzones.append(tzBack, tzMid, tzFwd);
 
-      const overlay = document.createElement('div');
-      overlay.className = 'overlay';
-      overlay.setAttribute('role', 'toolbar');
-      overlay.setAttribute('aria-label', 'Deck controls');
+      const overlay = document.createElement(`div`);
+      overlay.className = `overlay`;
+      overlay.setAttribute(`role`, `toolbar`);
+      overlay.setAttribute(`aria-label`, `Deck controls`);
       overlay.innerHTML = `
         <button class="btn prev" type="button" aria-label="Previous slide" title="Previous">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg>
@@ -309,35 +315,35 @@
         <button class="btn present" type="button" aria-label="Present (fullscreen)" title="Present (P)">Present<span class="kbd">P</span></button>
       `;
 
-      overlay.querySelector('.prev').addEventListener('click', () => this._go(this._index - 1, 'click'));
-      overlay.querySelector('.next').addEventListener('click', () => this._go(this._index + 1, 'click'));
-      overlay.querySelector('.reset').addEventListener('click', () => this._go(0, 'click'));
-      overlay.querySelector('.present').addEventListener('click', this._togglePresent);
+      overlay.querySelector(`.prev`).addEventListener(`click`, () => this._go(this._index - 1, `click`));
+      overlay.querySelector(`.next`).addEventListener(`click`, () => this._go(this._index + 1, `click`));
+      overlay.querySelector(`.reset`).addEventListener(`click`, () => this._go(0, `click`));
+      overlay.querySelector(`.present`).addEventListener(`click`, this._togglePresent);
 
       this._root.append(style, stage, tapzones, overlay);
       this._canvas = canvas;
       this._slot = slot;
       this._overlay = overlay;
-      this._countEl = overlay.querySelector('.current');
-      this._totalEl = overlay.querySelector('.total');
+      this._countEl = overlay.querySelector(`.current`);
+      this._totalEl = overlay.querySelector(`.total`);
     }
 
     _onSlotChange() {
       this._collectSlides();
       this._restoreIndex();
-      this._applyIndex({ showOverlay: false, broadcast: true, reason: 'init' });
+      this._applyIndex({showOverlay: false, broadcast: true, reason: `init`});
       this._fit();
     }
 
     _collectSlides() {
-      const assigned = this._slot.assignedElements({ flatten: true });
-      this._slides = assigned.filter((el) => {
+      const assigned = this._slot.assignedElements({flatten: true});
+      this._slides = assigned.filter(el => {
         const tag = el.tagName;
-        return tag !== 'TEMPLATE' && tag !== 'SCRIPT' && tag !== 'STYLE';
+        return tag !== `TEMPLATE` && tag !== `SCRIPT` && tag !== `STYLE`;
       });
 
       this._slides.forEach((slide, i) => {
-        slide.setAttribute('data-deck-slide', String(i));
+        slide.setAttribute(`data-deck-slide`, String(i));
       });
 
       const total = this._slides.length || 1;
@@ -345,32 +351,41 @@
       if (this._totalEl) this._totalEl.textContent = String(total);
       this._slides.forEach((slide, i) => {
         const slideStr = pad2(i + 1);
-        slide.querySelectorAll('[data-deck-slide-fill]').forEach((el) => {
+        slide.querySelectorAll(`[data-deck-slide-fill]`).forEach(el => {
           el.textContent = slideStr;
         });
-        slide.querySelectorAll('[data-deck-total-fill]').forEach((el) => {
+        slide.querySelectorAll(`[data-deck-total-fill]`).forEach(el => {
           el.textContent = totalStr;
         });
       });
-      if (this._index >= this._slides.length) this._index = Math.max(0, this._slides.length - 1);
-    }
-
-    _restoreIndex() {
-      const h = (location.hash || '').match(/^#(\d+)$/);
-      if (h) {
-        const n = parseInt(h[1], 10) - 1;
-        if (n >= 0 && n < this._slides.length) this._index = n;
+      if (this._index >= this._slides.length) {
+        this._index = Math.max(0, this._slides.length - 1);
       }
     }
 
-    _applyIndex({ showOverlay = true, broadcast = true, reason = 'init' } = {}) {
+    _restoreIndex() {
+      const h = (location.hash || ``).match(/^#(\d+)$/);
+      if (h) {
+        const n = parseInt(h[1], 10) - 1;
+        if (n >= 0 && n < this._slides.length) {
+          this._index = n;
+        }
+      }
+    }
+
+    _applyIndex({showOverlay = true, broadcast = true, reason = `init`} = {}) {
       if (!this._slides.length) return;
       const prev = this._prevIndex == null ? -1 : this._prevIndex;
       const curr = this._index;
-      try { history.replaceState(null, '', '#' + (curr + 1)); } catch (e) {}
+      try {
+        history.replaceState(null, ``, `#${curr + 1}`);
+      } catch {}
       this._slides.forEach((s, i) => {
-        if (i === curr) s.setAttribute('data-deck-active', '');
-        else s.removeAttribute('data-deck-active');
+        if (i === curr) {
+          s.setAttribute(`data-deck-active`, ``);
+        } else {
+          s.removeAttribute(`data-deck-active`);
+        }
       });
       if (this._countEl) this._countEl.textContent = String(curr + 1);
 
@@ -383,7 +398,7 @@
           previousSlide: prev >= 0 ? (this._slides[prev] || null) : null,
           reason,
         };
-        this.dispatchEvent(new CustomEvent('slidechange', {
+        this.dispatchEvent(new CustomEvent(`slidechange`, {
           detail,
           bubbles: true,
           composed: true,
@@ -391,25 +406,31 @@
       }
 
       this._prevIndex = curr;
-      if (showOverlay) this._flashOverlay();
+      if (showOverlay) {
+        this._flashOverlay();
+      }
     }
 
     _flashOverlay() {
       if (!this._overlay) return;
       if (this._isPresenting) return;
-      this._overlay.setAttribute('data-visible', '');
+      this._overlay.setAttribute(`data-visible`, ``);
       if (this._hideTimer) clearTimeout(this._hideTimer);
       this._hideTimer = setTimeout(() => {
-        this._overlay.removeAttribute('data-visible');
+        this._overlay.removeAttribute(`data-visible`);
       }, OVERLAY_HIDE_MS);
     }
 
     _togglePresent() {
       if (document.fullscreenElement) {
-        if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        }
       } else {
         const el = document.documentElement;
-        if (el && el.requestFullscreen) el.requestFullscreen().catch(() => {});
+        if (el && el.requestFullscreen) {
+          el.requestFullscreen().catch(() => {});
+        }
       }
     }
 
@@ -417,7 +438,7 @@
       this._isPresenting = !!document.fullscreenElement;
       if (!this._overlay) return;
       if (this._isPresenting) {
-        this._overlay.removeAttribute('data-visible');
+        this._overlay.removeAttribute(`data-visible`);
         if (this._hideTimer) {
           clearTimeout(this._hideTimer);
           this._hideTimer = null;
@@ -427,8 +448,8 @@
 
     _fit() {
       if (!this._canvas) return;
-      if (this.hasAttribute('noscale')) {
-        this._canvas.style.transform = 'none';
+      if (this.hasAttribute(`noscale`)) {
+        this._canvas.style.transform = `none`;
         return;
       }
       const vw = window.innerWidth;
@@ -437,7 +458,9 @@
       this._canvas.style.transform = `scale(${s})`;
     }
 
-    _onResize() { this._fit(); }
+    _onResize() {
+      this._fit();
+    }
 
     _onMouseMove() {
       this._flashOverlay();
@@ -445,12 +468,12 @@
 
     _onTapBack(e) {
       e.preventDefault();
-      this._go(this._index - 1, 'tap');
+      this._go(this._index - 1, `tap`);
     }
 
     _onTapForward(e) {
       e.preventDefault();
-      this._go(this._index + 1, 'tap');
+      this._go(this._index + 1, `tap`);
     }
 
     _onKey(e) {
@@ -461,21 +484,23 @@
       const key = e.key;
       let handled = true;
 
-      if (key === 'ArrowRight' || key === 'PageDown' || key === ' ' || key === 'Spacebar') {
-        this._go(this._index + 1, 'keyboard');
-      } else if (key === 'ArrowLeft' || key === 'PageUp') {
-        this._go(this._index - 1, 'keyboard');
-      } else if (key === 'Home') {
-        this._go(0, 'keyboard');
-      } else if (key === 'End') {
-        this._go(this._slides.length - 1, 'keyboard');
-      } else if (key === 'r' || key === 'R') {
-        this._go(0, 'keyboard');
-      } else if (key === 'p' || key === 'P') {
+      if (key === `ArrowRight` || key === `PageDown` || key === ` ` || key === `Spacebar`) {
+        this._go(this._index + 1, `keyboard`);
+      } else if (key === `ArrowLeft` || key === `PageUp`) {
+        this._go(this._index - 1, `keyboard`);
+      } else if (key === `Home`) {
+        this._go(0, `keyboard`);
+      } else if (key === `End`) {
+        this._go(this._slides.length - 1, `keyboard`);
+      } else if (key === `r` || key === `R`) {
+        this._go(0, `keyboard`);
+      } else if (key === `p` || key === `P`) {
         this._togglePresent();
       } else if (/^[0-9]$/.test(key)) {
-        const n = key === '0' ? 9 : parseInt(key, 10) - 1;
-        if (n < this._slides.length) this._go(n, 'keyboard');
+        const n = key === `0` ? 9 : parseInt(key, 10) - 1;
+        if (n < this._slides.length) {
+          this._go(n, `keyboard`);
+        }
       } else {
         handled = false;
       }
@@ -486,7 +511,7 @@
       }
     }
 
-    _go(i, reason = 'api') {
+    _go(i, reason = `api`) {
       if (!this._slides.length) return;
       const clamped = Math.max(0, Math.min(this._slides.length - 1, i));
       if (clamped === this._index) {
@@ -494,18 +519,30 @@
         return;
       }
       this._index = clamped;
-      this._applyIndex({ showOverlay: true, broadcast: true, reason });
+      this._applyIndex({showOverlay: true, broadcast: true, reason});
     }
 
-    get index() { return this._index; }
-    get length() { return this._slides.length; }
-    goTo(i) { this._go(i, 'api'); }
-    next() { this._go(this._index + 1, 'api'); }
-    prev() { this._go(this._index - 1, 'api'); }
-    reset() { this._go(0, 'api'); }
+    get index() {
+      return this._index;
+    }
+    get length() {
+      return this._slides.length;
+    }
+    goTo(i) {
+      this._go(i, `api`);
+    }
+    next() {
+      this._go(this._index + 1, `api`);
+    }
+    prev() {
+      this._go(this._index - 1, `api`);
+    }
+    reset() {
+      this._go(0, `api`);
+    }
   }
 
-  if (!customElements.get('deck-stage')) {
-    customElements.define('deck-stage', DeckStage);
+  if (!customElements.get(`deck-stage`)) {
+    customElements.define(`deck-stage`, DeckStage);
   }
 })();

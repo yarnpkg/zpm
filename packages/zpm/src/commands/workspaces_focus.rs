@@ -1,11 +1,9 @@
-use std::collections::BTreeSet;
-
 use clipanion::cli;
 use zpm_primitives::Ident;
 
 use crate::{
     error::Error,
-    project::{Project, RunInstallOptions, Workspace},
+    project::{Project, RunInstallOptions},
 };
 
 /// Install a focused set of workspaces
@@ -43,42 +41,25 @@ impl WorkspacesFocus {
         let mut project
             = Project::new(None).await?;
 
-        let workspaces = if self.all {
-            project.workspaces.iter().collect::<Vec<_>>()
+        let roots = if self.all {
+            project.workspaces.iter()
+                .map(|workspace| workspace.name.clone())
+                .collect::<Vec<_>>()
         } else if self.workspaces.is_empty() {
-            vec![project.active_workspace()?]
+            vec![project.active_workspace()?.name.clone()]
         } else {
-            project.workspaces.iter().filter(|w| self.workspaces.contains(&w.name)).collect::<Vec<_>>()
+            project.workspaces.iter()
+                .filter(|workspace| self.workspaces.contains(&workspace.name))
+                .map(|workspace| workspace.name.clone())
+                .collect::<Vec<_>>()
         };
 
-        let mut process_queue: Vec<&Workspace>
-            = workspaces.clone();
-        let mut processed_queue
-            = BTreeSet::from_iter(process_queue.iter().map(|w| &w.name));
-
-        while let Some(workspace) = process_queue.pop() {
-            let mut relevant_dependencies
-                = workspace.manifest.remote.dependencies.iter()
-                    .map(|(_, d)| d)
-                    .collect::<Vec<_>>();
-
-            if !self.production {
-                relevant_dependencies.extend(workspace.manifest.dev_dependencies.iter()
-                    .map(|(_, d)| d));
-            }
-
-            for dependency in relevant_dependencies {
-                if let Some(workspace) = project.try_workspace_by_descriptor(&dependency)? {
-                    if processed_queue.insert(&workspace.name) {
-                        process_queue.push(workspace);
-                    }
-                }
-            }
-        }
+        let focused_workspaces
+            = project.workspace_dependency_closure(roots, !self.production)?;
 
         project.run_install(RunInstallOptions {
             prune_dev_dependencies: self.production,
-            roots: Some(processed_queue.into_iter().cloned().collect()),
+            roots: Some(focused_workspaces),
             ..Default::default()
         }).await?;
 

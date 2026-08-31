@@ -245,7 +245,7 @@ jobs:
                   cwd: artifactPath,
               });
 
-              cp.execFileSync(`yarn`, [`npm`, `publish`, `--access`, `public`], {
+              cp.execFileSync(`yarn`, [`npm`, `publish`, `--access`, `public`, `--staged`], {
                 stdio: `inherit`,
                 cwd: artifactPath,
               });

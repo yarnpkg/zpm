@@ -154,7 +154,9 @@ describe(`Node Modules`, () => {
 
         await writeFile(npath.toPortablePath(`${path}/dist/bin/index.js`), ``);
 
-        await expect(run(`install`)).resolves.toBeTruthy();
+        // The bin target appeared without any manifest change, so this
+        // repair needs --force (the default in interactive terminals).
+        await expect(run(`install`, `--force`)).resolves.toBeTruthy();
         const stats = await xfs.lstatPromise(npath.toPortablePath(`${path}/node_modules/.bin/pkg`));
 
         expect(stats).toBeDefined();
@@ -240,6 +242,34 @@ describe(`Node Modules`, () => {
         const binSymlink = await xfs.readlinkPromise(npath.toPortablePath(`${path}/node_modules/.bin/has-bin-entries`));
         // Workspace bin points to ../../my-bin.js (up from .bin, up from node_modules)
         expect(binSymlink).toContain(`my-bin.js`);
+      },
+    ),
+  );
+
+  test(`should prefer direct dependency bins over transitive dependency bins`,
+    makeTemporaryEnv(
+      {
+        dependencies: {
+          [`@fixture/native`]: `npm:has-bin-entries@2.0.0`,
+          [`has-bin-entries`]: `npm:one-dep-alias-bins@1.0.0`,
+        },
+      },
+      {
+        nodeLinker: `node-modules`,
+      },
+      async ({path, run}) => {
+        await run(`install`);
+
+        // The direct dependency must win over the transitive alias, even
+        // though the transitive one sorts first
+        const binSymlink = await xfs.readlinkPromise(npath.toPortablePath(`${path}/node_modules/.bin/has-bin-entries-with-relative-require`));
+        expect(binSymlink).toContain(`@fixture/native`);
+
+        if (process.platform !== `win32`) {
+          await expect(run(`node`, `${path}/node_modules/.bin/has-bin-entries-with-relative-require`)).resolves.toMatchObject({
+            stdout: `2.0.0\n`,
+          });
+        }
       },
     ),
   );
@@ -1910,7 +1940,9 @@ describe(`Node Modules`, () => {
         await run(`install`);
         await xfs.removePromise(`${path}/node_modules/one-dep-scripted` as PortablePath);
 
-        const {stdout} = await run(`install`);
+        // Repairing damage inside node_modules needs --force (the
+        // default in interactive terminals).
+        const {stdout} = await run(`install`, `--force`);
 
         // Yarn must reinstall and rebuild only the removed package
         expect(stdout).not.toMatch(new RegExp(`no-deps-scripted@npm:1.0.0 must be built`));
@@ -1991,7 +2023,10 @@ describe(`Node Modules`, () => {
       async ({path, run}) => {
         await run(`install`);
         await xfs.removePromise(`${path}/node_modules/has-bin-entries` as PortablePath);
-        await run(`install`);
+
+        // Repairing damage inside node_modules needs --force (the
+        // default in interactive terminals).
+        await run(`install`, `--force`);
         const {mode} = await xfs.lstatPromise(npath.toPortablePath(`${path}/node_modules/has-bin-entries/bin.js`));
         const permissions = (mode & 0o777).toString(8);
         expect(permissions).toBe(process.platform === `win32` ? `666` : `755`);
@@ -2134,6 +2169,7 @@ describe(`Node Modules`, () => {
         await run(`install`);
 
         await expect(xfs.readdirPromise(ppath.join(path, Filename.nodeModules))).resolves.toEqual([
+          `.package-map.json`,
           `native`,
           `native-foo-x64`,
           `native-foo-x86`,
@@ -2242,4 +2278,261 @@ describe(`Node Modules`, () => {
       },
     ),
   );
+
+  describe(`incremental linking`, () => {
+    // Bumps the manifest mtime so the install isn't skipped wholesale
+    // by the up-to-date fast path; the linker still runs and gets to
+    // make its own per-package decisions.
+    const touchManifest = async (path: PortablePath) => {
+      const newTime = new Date(Date.now() + 5000);
+      await xfs.utimesPromise(ppath.join(path, Filename.manifest), newTime, newTime);
+    };
+
+    it(`should leave unchanged packages untouched on subsequent installs`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          const indexPath = ppath.join(path, `node_modules/no-deps/index.js` as PortablePath);
+          await xfs.writeFilePromise(indexPath, `corrupted`);
+
+          await touchManifest(path);
+          await run(`install`);
+
+          // The package's plan didn't change, so its folder must not
+          // have been re-extracted.
+          await expect(xfs.readFilePromise(indexPath, `utf8`)).resolves.toEqual(`corrupted`);
+        },
+      ),
+    );
+
+    it(`should rewrite packages when --force is set`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          const indexPath = ppath.join(path, `node_modules/no-deps/index.js` as PortablePath);
+          await xfs.writeFilePromise(indexPath, `corrupted`);
+
+          await run(`install`, `--force`);
+
+          await expect(xfs.readFilePromise(indexPath, `utf8`)).resolves.not.toEqual(`corrupted`);
+        },
+      ),
+    );
+
+    it(`should rewrite packages when their resolution changes`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          const indexPath = ppath.join(path, `node_modules/no-deps/index.js` as PortablePath);
+          await xfs.writeFilePromise(indexPath, `corrupted`);
+
+          await xfs.writeJsonPromise(ppath.join(path, Filename.manifest), {
+            dependencies: {
+              [`no-deps`]: `2.0.0`,
+            },
+          });
+
+          await run(`install`);
+
+          await expect(xfs.readFilePromise(indexPath, `utf8`)).resolves.not.toEqual(`corrupted`);
+          await expect(xfs.readJsonPromise(ppath.join(path, `node_modules/no-deps/package.json` as PortablePath))).resolves.toMatchObject({
+            version: `2.0.0`,
+          });
+        },
+      ),
+    );
+
+    it(`should still prune removed packages`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+            [`has-bin-entries`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          await xfs.writeJsonPromise(ppath.join(path, Filename.manifest), {
+            dependencies: {
+              [`no-deps`]: `1.0.0`,
+            },
+          });
+
+          await run(`install`);
+
+          await expect(xfs.existsPromise(ppath.join(path, `node_modules/has-bin-entries` as PortablePath))).resolves.toEqual(false);
+          await expect(xfs.existsPromise(ppath.join(path, `node_modules/no-deps/index.js` as PortablePath))).resolves.toEqual(true);
+        },
+      ),
+    );
+
+    it(`should re-extract packages whose folder went missing`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          await xfs.removePromise(ppath.join(path, `node_modules/no-deps` as PortablePath));
+
+          await touchManifest(path);
+          await run(`install`);
+
+          await expect(xfs.existsPromise(ppath.join(path, `node_modules/no-deps/package.json` as PortablePath))).resolves.toEqual(true);
+        },
+      ),
+    );
+
+    it(`should not skip packages that host nested packages`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `2.0.0`,
+            [`one-fixed-dep`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          // one-fixed-dep needs no-deps@1.0.0, which conflicts with the
+          // hoisted no-deps@2.0.0 and thus nests inside its folder.
+          await expect(xfs.existsPromise(ppath.join(path, `node_modules/one-fixed-dep/node_modules/no-deps` as PortablePath))).resolves.toEqual(true);
+
+          const indexPath = ppath.join(path, `node_modules/one-fixed-dep/index.js` as PortablePath);
+          await xfs.writeFilePromise(indexPath, `corrupted`);
+
+          await touchManifest(path);
+          await run(`install`);
+
+          await expect(xfs.readFilePromise(indexPath, `utf8`)).resolves.not.toEqual(`corrupted`);
+        },
+      ),
+    );
+
+    it(`should record the source of each package in the package map`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          const packageMap = await xfs.readJsonPromise(ppath.join(path, `node_modules/.package-map.json` as PortablePath));
+
+          expect(packageMap.packages[`no-deps`].locator).toContain(`no-deps`);
+          expect(packageMap.packages[`no-deps`].checksum).toBeDefined();
+        },
+      ),
+    );
+
+    testIf(
+      () => process.platform === `darwin`,
+      `should materialize packages from the unpacked store via clonefile`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+        },
+        async ({path, run, source}) => {
+          await run(`install`);
+
+          // The unpacked store should hold a pristine copy of the
+          // package, keyed by locator and checksum.
+          const storePath = ppath.join(path, `.yarn/global/unpacked` as PortablePath);
+          const storeEntries = await xfs.readdirPromise(storePath);
+          expect(storeEntries.some(entry => entry.startsWith(`no-deps-npm-1.0.0-`))).toBe(true);
+
+          // A reinstall into an empty node_modules goes through the
+          // clone path and must produce a working package.
+          await xfs.removePromise(ppath.join(path, Filename.nodeModules));
+          await touchManifest(path);
+          await run(`install`);
+
+          await expect(source(`require('no-deps')`)).resolves.toEqual({
+            name: `no-deps`,
+            version: `1.0.0`,
+          });
+        },
+      ),
+    );
+
+    it(`should leave unchanged packages untouched in hardlink modes`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+          nmMode: `hardlinks-local`,
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          const indexPath = ppath.join(path, `node_modules/no-deps/index.js` as PortablePath);
+          await xfs.removePromise(indexPath);
+          await xfs.writeFilePromise(indexPath, `corrupted`);
+
+          await touchManifest(path);
+          await run(`install`);
+
+          await expect(xfs.readFilePromise(indexPath, `utf8`)).resolves.toEqual(`corrupted`);
+
+          await run(`install`, `--force`);
+
+          await expect(xfs.readFilePromise(indexPath, `utf8`)).resolves.not.toEqual(`corrupted`);
+        },
+      ),
+    );
+  });
 });

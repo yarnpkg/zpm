@@ -20,12 +20,10 @@ pub async fn download_into(source: &GitSource, commit: &str, download_dir: &Path
     };
 
     let response
-        = http_client.get(public_tarball_url(owner, &repository, commit))?.send().await;
+        = http_client.get(public_tarball_url(owner, &repository, commit))?.send_bytes().await;
 
     let tgz_data = match response {
-        Ok(response) => {
-            response.bytes().await.map_err(|_| Error::ReplaceMe)?
-        },
+        Ok((_, tgz_data)) => tgz_data,
 
         Err(err) if err.status() == Some(StatusCode::NOT_FOUND) => {
             return Ok(None);

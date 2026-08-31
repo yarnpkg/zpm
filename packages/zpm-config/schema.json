@@ -228,6 +228,11 @@
         }
       }
     },
+    "lazyInstallMode": {
+      "type": "crate::LazyInstallMode",
+      "description": "Whether lazy installs should install only the active workspace and its dependencies or the entire project",
+      "default": "all"
+    },
     "networkSettings": {
       "type": "object",
       "description": "Configuration specific to each network setting",
@@ -276,6 +281,16 @@
       "type": "crate::NodeLinker",
       "description": "The linker to use for node_modules",
       "default": "pnp"
+    },
+    "nodeExperimentalPackageMap": {
+      "type": "boolean",
+      "description": "Whether to inject the generated Node.js package map into NODE_OPTIONS for node-modules and pnpm installs",
+      "default": false
+    },
+    "nodePackageMapType": {
+      "type": "crate::NodePackageMapType",
+      "description": "Whether generated package maps should reflect declared dependencies (standard) or the installed node_modules layout (loose)",
+      "default": "standard"
     },
     "nmHoistingLimits": {
       "type": "crate::NmHoistingLimits",
@@ -380,6 +395,11 @@
       "description": "The URL of the default npm registry server",
       "default": "https://registry.npmjs.org"
     },
+    "pypiRegistryServer": {
+      "type": "string",
+      "description": "The URL of the default PyPI registry server",
+      "default": "https://pypi.org"
+    },
     "npmScopes": {
       "type": "object",
       "description": "Configuration specific to each npm scope",
@@ -406,6 +426,86 @@
           "npmAuthToken": {
             "type": ["zpm_utils::Secret<String>", "null"],
             "description": "The token to use for authentication when querying the npm registry"
+          }
+        }
+      }
+    },
+    "packageRules": {
+      "type": "array",
+      "description": "Package-specific configuration rules. Each rule must define at least one filter.",
+      "items": {
+        "type": "object",
+        "title": "PackageRule",
+        "properties": {
+          "ecosystemFilter": {
+            "type": ["crate::EcosystemFilter", "null"],
+            "description": "The package ecosystem this rule applies to"
+          },
+          "packageFilter": {
+            "type": ["zpm_primitives::IdentGlob", "null"],
+            "description": "The package name glob this rule applies to"
+          },
+          "npmRegistryServer": {
+            "type": ["string", "null"],
+            "description": "The URL of the npm registry server to use for matching packages"
+          },
+          "npmPublishRegistry": {
+            "type": ["string", "null"],
+            "description": "The URL of the npm registry server to use when publishing matching packages"
+          },
+          "pypiRegistryServer": {
+            "type": ["string", "null"],
+            "description": "The URL of the PyPI registry server to use for matching packages"
+          },
+          "npmMinimalAgeGate": {
+            "type": ["std::time::Duration", "null"],
+            "description": "Minimum age of an npm package version to be considered for matching packages"
+          },
+          "npmAlwaysAuth": {
+            "type": ["boolean", "null"],
+            "description": "Whether to always send authentication headers when querying npm registries for matching packages"
+          },
+          "npmAuthIdent": {
+            "type": ["string", "null"],
+            "description": "The username to use for npm authentication for matching packages"
+          },
+          "npmAuthToken": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The token to use for npm authentication for matching packages"
+          }
+        }
+      }
+    },
+    "sourceRules": {
+      "type": "array",
+      "description": "Source-specific configuration rules. Each rule must define at least one filter.",
+      "items": {
+        "type": "object",
+        "title": "SourceRule",
+        "properties": {
+          "ecosystemFilter": {
+            "type": ["crate::EcosystemFilter", "null"],
+            "description": "The source ecosystem this rule applies to"
+          },
+          "registryFilter": {
+            "type": ["string", "null"],
+            "description": "The normalized registry URL this rule applies to"
+          },
+          "npmMinimalAgeGate": {
+            "type": ["std::time::Duration", "null"],
+            "description": "Minimum age of an npm package version to be considered from matching sources"
+          },
+          "npmAlwaysAuth": {
+            "type": ["boolean", "null"],
+            "description": "Whether to always send authentication headers when querying matching npm sources"
+          },
+          "npmAuthIdent": {
+            "type": ["string", "null"],
+            "description": "The username to use for npm authentication for matching sources"
+          },
+          "npmAuthToken": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The token to use for npm authentication for matching sources"
           }
         }
       }
@@ -545,29 +645,27 @@
       }
     },
     "supportedArchitectures": {
-      "type": "object",
-      "title": "SupportedArchitectures",
-      "description": "The list of architectures we need to download in the cache.",
-      "properties": {
-        "cpu": {
-          "type": "array",
-          "description": "List of CPU architectures to cover.",
-          "items": {
-            "type": "zpm_utils::Cpu"
-          }
-        },
-        "libc": {
-          "type": "array",
-          "description": "The list of standard C libraries to cover.",
-          "items": {
-            "type": "zpm_utils::Libc"
-          }
-        },
-        "os": {
-          "type": "array",
-          "description": "The list of operating systems to cover.",
-          "items": {
-            "type": "zpm_utils::Os"
+      "type": "array",
+      "oneOrMany": true,
+      "description": "The list of architectures we need to download in the cache. Can either be a single entry (whose fields are combined together as a cross product) or a list of entries (each entry being matched independently).",
+      "items": {
+        "type": "object",
+        "title": "SupportedArchitectures",
+        "properties": {
+          "cpu": {
+            "type": "crate::ArchitectureFilter<zpm_utils::Cpu>",
+            "description": "The CPU architecture (or list of architectures) to cover, or null to cover them all.",
+            "default": "current"
+          },
+          "libc": {
+            "type": "crate::ArchitectureFilter<zpm_utils::Libc>",
+            "description": "The standard C library (or list of libraries) to cover, or null to cover them all.",
+            "default": "current"
+          },
+          "os": {
+            "type": "crate::ArchitectureFilter<zpm_utils::Os>",
+            "description": "The operating system (or list of systems) to cover, or null to cover them all.",
+            "default": "current"
           }
         }
       }

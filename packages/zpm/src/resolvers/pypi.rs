@@ -2,13 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{de::DeserializeOwned, Deserialize};
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Descriptor, Ident, Locator, MarkerExpr, MarkerValue, MarkerVariable, PypiRegistryReference, PypiSpecifierRange, PypiSpecifierSet, PypiTagRange, PythonFork, PythonTargetEnv, Reference, Range, canonicalize_pypi_name};
+use zpm_primitives::{Descriptor, Ident, Locator, MarkerExpr, MarkerValue, MarkerVariable, PypiExtras, PypiRangeParameters, PypiRegistryReference, PypiSpecifierRange, PypiSpecifierSet, PypiTagRange, PythonFork, PythonTargetEnv, Reference, Range, canonicalize_pypi_name};
 use zpm_utils::{FromFileString, ToFileString, UrlEncoded};
 
 use crate::{
     error::Error,
     install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
-    pypi::{PypiDistribution, pypi_registry_base, encode_path_segment, select_best_wheel},
+    pypi::{PypiDistribution, get_registry, encode_path_segment, select_best_wheel},
     resolvers::Resolution,
 };
 
@@ -37,16 +37,6 @@ pub struct PypiRequirement {
     pub marker: MarkerExpr,
 }
 
-impl PypiRequirement {
-    fn specifier(&self) -> &PypiSpecifierSet {
-        let Range::PypiSpecifier(params) = &self.descriptor.range else {
-            unreachable!("PyPI requirements should always use PyPI specifier descriptors");
-        };
-
-        &params.specifier
-    }
-}
-
 pub fn canonicalize_pypi_ident(ident: &Ident) -> Result<Ident, Error> {
     Ident::from_file_string(&canonicalize_pypi_name(ident.as_str()))
         .map_err(|err| Error::InvalidIdent(err.to_string()))
@@ -70,6 +60,7 @@ pub fn canonicalize_pypi_descriptor(descriptor: &Descriptor) -> Result<(Ident, D
             let range = Range::PypiSpecifier(PypiSpecifierRange {
                 ident: params.ident.as_ref().map(|_| package_ident.clone()),
                 specifier: params.specifier.clone(),
+                parameters: params.parameters.clone(),
             });
 
             Ok((package_ident, Descriptor::new_bound(descriptor_ident, range, descriptor.parent.clone())))
@@ -87,6 +78,7 @@ pub fn canonicalize_pypi_descriptor(descriptor: &Descriptor) -> Result<(Ident, D
             let range = Range::PypiTag(PypiTagRange {
                 ident: params.ident.as_ref().map(|_| package_ident.clone()),
                 tag: params.tag.clone(),
+                parameters: params.parameters.clone(),
             });
 
             Ok((package_ident, Descriptor::new_bound(descriptor_ident, range, descriptor.parent.clone())))
@@ -101,31 +93,12 @@ fn parse_requires_dist_entry(requirement: &str) -> Result<Option<PypiRequirement
         = pep_508::parse(requirement)
             .map_err(|errors| Error::InvalidResolution(format!("Invalid PyPI Requires-Dist entry `{requirement}`: {errors:?}")))?;
 
-    if !dependency.extras.is_empty() {
-        return Err(Error::InvalidResolution(format!(
-            "Unsupported PyPI Requires-Dist entry `{requirement}`: requested dependency extras are not supported yet",
-        )));
-    }
-
     let marker
         = dependency.marker.as_ref()
             .map(MarkerExpr::from_pep508_marker)
             .transpose()
             .map_err(|err| Error::InvalidResolution(format!("Unsupported PyPI Requires-Dist marker in `{requirement}`: {err}")))?
             .unwrap_or(MarkerExpr::Any);
-
-    let marker_variables
-        = marker_variables(&marker);
-
-    if marker_variables.contains(&MarkerVariable::Extra) {
-        if marker_variables.len() == 1 {
-            return Ok(None);
-        }
-
-        return Err(Error::InvalidResolution(format!(
-            "Unsupported PyPI Requires-Dist marker in `{requirement}`: mixed `extra` markers are not supported yet",
-        )));
-    }
 
     let specifier
         = specifier_from_pep508_spec(dependency.spec.as_ref(), requirement)?;
@@ -134,8 +107,9 @@ fn parse_requires_dist_entry(requirement: &str) -> Result<Option<PypiRequirement
         = canonicalize_pypi_ident(&Ident::from_file_string(dependency.name)
             .map_err(|err| Error::InvalidIdent(err.to_string()))?)?;
 
-    let descriptor
-        = descriptor_from_pypi_requirement(ident.clone(), specifier);
+    let extras = PypiExtras::from_iter(dependency.extras)
+        .map_err(|err| Error::InvalidRange(err.to_string()))?;
+    let descriptor = descriptor_from_pypi_requirement(ident.clone(), specifier, extras);
 
     Ok(Some(PypiRequirement {
         ident,
@@ -157,35 +131,18 @@ fn parse_requires_dist(requirements: &[String]) -> Result<Vec<PypiRequirement>, 
     Ok(parsed)
 }
 
+#[cfg(test)]
 fn build_unconditional_dependency_map(requirements: &[PypiRequirement]) -> Result<BTreeMap<Ident, Descriptor>, Error> {
-    build_dependency_map(requirements.iter().filter(|requirement| requirement.marker == MarkerExpr::Any))
+    build_context_dependency_map(requirements, true, &PypiExtras::empty(), None, false)
 }
 
+#[cfg(test)]
 fn build_targetless_island_dependency_map(requirements: &[PypiRequirement]) -> Result<BTreeMap<Ident, Descriptor>, Error> {
-    for requirement in requirements {
-        if requirement.marker != MarkerExpr::Any && requirement.marker != MarkerExpr::Never {
-            return Err(Error::InvalidResolution(format!(
-                "Cannot evaluate PyPI marker for {} without a Python target environment; configure supportedTargets with python.version",
-                requirement.ident.to_file_string(),
-            )));
-        }
-    }
-
-    build_unconditional_dependency_map(requirements)
+    build_context_dependency_map(requirements, true, &PypiExtras::empty(), None, true)
 }
 
-fn build_fork_dependency_map(requirements: &[PypiRequirement], fork: &PythonFork) -> Result<BTreeMap<Ident, Descriptor>, Error> {
-    let mut active_requirements
-        = Vec::new();
-
-    for requirement in requirements {
-        if is_requirement_active_for_fork(requirement, fork)? {
-            active_requirements.push(requirement);
-        }
-    }
-
-    let dependencies
-        = build_dependency_map(active_requirements)?;
+fn build_fork_dependency_map_with_extras(requirements: &[PypiRequirement], fork: &PythonFork, include_base: bool, active_extras: &PypiExtras) -> Result<BTreeMap<Ident, Descriptor>, Error> {
+    let dependencies = build_context_dependency_map(requirements, include_base, active_extras, fork.target.as_ref(), true)?;
 
     Ok(dependencies.into_iter()
         .map(|(ident, descriptor)| {
@@ -194,48 +151,103 @@ fn build_fork_dependency_map(requirements: &[PypiRequirement], fork: &PythonFork
         .collect())
 }
 
-fn is_requirement_active_for_fork(requirement: &PypiRequirement, fork: &PythonFork) -> Result<bool, Error> {
-    match &requirement.marker {
-        MarkerExpr::Any => Ok(true),
-        MarkerExpr::Never => Ok(false),
-        marker => {
-            let target
-                = fork.target.as_ref()
-                    .ok_or_else(|| Error::InvalidResolution(format!("Cannot evaluate PyPI marker for {} without a Python target environment", requirement.ident.to_file_string())))?;
-
-            marker.evaluate(target)
-                .map_err(|err| Error::InvalidResolution(format!("Cannot evaluate PyPI marker for {}: {err}", requirement.ident.to_file_string())))
-        },
-    }
-}
-
 pub fn build_dependency_map<'a>(requirements: impl IntoIterator<Item = &'a PypiRequirement>) -> Result<BTreeMap<Ident, Descriptor>, Error> {
-    let mut grouped
-        = BTreeMap::<Ident, PypiSpecifierSet>::new();
+    let mut grouped = BTreeMap::<Ident, Descriptor>::new();
 
     for requirement in requirements {
-        if let Some(specifier) = grouped.get_mut(&requirement.ident) {
-            *specifier = specifier.intersection(requirement.specifier())
-                .map_err(|err| Error::InvalidRange(err.to_string()))?;
+        if let Some(existing) = grouped.get_mut(&requirement.ident) {
+            merge_dependency_descriptor(existing, requirement.descriptor.clone())?;
         } else {
-            grouped.insert(requirement.ident.clone(), requirement.specifier().clone());
+            grouped.insert(requirement.ident.clone(), requirement.descriptor.clone());
         }
     }
 
-    Ok(grouped.into_iter()
-        .map(|(ident, specifier)| {
-            let descriptor
-                = descriptor_from_pypi_requirement(ident.clone(), specifier);
-
-            (ident, descriptor)
-        })
-        .collect())
+    Ok(grouped)
 }
 
-fn descriptor_from_pypi_requirement(ident: Ident, specifier: PypiSpecifierSet) -> Descriptor {
+fn build_context_dependency_map(requirements: &[PypiRequirement], include_base: bool, active_extras: &PypiExtras, target: Option<&PythonTargetEnv>, require_target: bool) -> Result<BTreeMap<Ident, Descriptor>, Error> {
+    let mut active = Vec::new();
+
+    for requirement in requirements {
+        let variables = marker_variables(&requirement.marker);
+        let has_extra = variables.contains(&MarkerVariable::Extra);
+        let needs_target = variables.iter().any(|variable| *variable != MarkerVariable::Extra);
+
+        if needs_target && target.is_none() {
+            if require_target {
+                return Err(Error::InvalidResolution(format!(
+                    "Cannot evaluate PyPI marker for {} without a Python target environment; configure supportedTargets with python.version",
+                    requirement.ident.to_file_string(),
+                )));
+            }
+            continue;
+        }
+
+        let applies = if has_extra {
+            let mut applies = false;
+            for extra in active_extras.iter() {
+                if requirement.marker.evaluate_with_extra(target, Some(extra))
+                    .map_err(|err| Error::InvalidResolution(format!("Cannot evaluate PyPI marker for {}: {err}", requirement.ident.to_file_string())))? {
+                    applies = true;
+                    break;
+                }
+            }
+            applies
+        } else if include_base {
+            requirement.marker.evaluate_with_extra(target, None)
+                .map_err(|err| Error::InvalidResolution(format!("Cannot evaluate PyPI marker for {}: {err}", requirement.ident.to_file_string())))?
+        } else {
+            false
+        };
+
+        if applies {
+            active.push(requirement);
+        }
+    }
+
+    build_dependency_map(active)
+}
+
+pub fn merge_dependency_descriptor(existing: &mut Descriptor, incoming: Descriptor) -> Result<(), Error> {
+    if existing == &incoming {
+        return Ok(());
+    }
+    if existing.ident != incoming.ident || existing.parent != incoming.parent {
+        return Err(Error::InvalidResolution(format!("Cannot merge PyPI dependency descriptors {} and {}", existing.to_file_string(), incoming.to_file_string())));
+    }
+
+    let existing_file_string = existing.to_file_string();
+    let incoming_file_string = incoming.to_file_string();
+    merge_dependency_ranges(&mut existing.range, incoming.range).map_err(|_| {
+        Error::InvalidResolution(format!("Cannot merge PyPI dependency descriptors {} and {}", existing_file_string, incoming_file_string))
+    })
+}
+
+fn merge_dependency_ranges(existing: &mut Range, incoming: Range) -> Result<(), ()> {
+    match (existing, incoming) {
+        (Range::PypiSpecifier(existing), Range::PypiSpecifier(incoming)) => {
+            existing.specifier = existing.specifier.intersection(&incoming.specifier)
+                .map_err(|_| ())?;
+            existing.parameters = match (&existing.parameters, &incoming.parameters) {
+                (Some(left), Some(right)) => Some(left.merge(right).map_err(|_| ())?),
+                (Some(left), None) => Some(left.clone()),
+                (None, Some(right)) => Some(right.clone()),
+                (None, None) => None,
+            };
+            Ok(())
+        },
+        (Range::Env(existing), Range::Env(incoming)) if existing.hash == incoming.hash => {
+            merge_dependency_ranges(existing.inner.as_mut(), *incoming.inner)
+        },
+        _ => Err(()),
+    }
+}
+
+fn descriptor_from_pypi_requirement(ident: Ident, specifier: PypiSpecifierSet, extras: PypiExtras) -> Descriptor {
     Descriptor::new(ident, Range::PypiSpecifier(PypiSpecifierRange {
         ident: None,
         specifier,
+        parameters: (!extras.is_empty()).then(|| PypiRangeParameters::from_extras(extras)),
     }))
 }
 
@@ -316,30 +328,30 @@ fn project_pep440_to_semver(version: &zpm_primitives::PypiVersion) -> Result<zpm
         .map_err(|err| Error::InvalidResolution(err.to_string()))
 }
 
-fn build_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String]) -> Result<ResolutionResult, Error> {
+fn build_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String], include_base: bool, active_extras: &PypiExtras) -> Result<ResolutionResult, Error> {
     let mut resolution
         = Resolution::new_empty(locator, project_pep440_to_semver(version)?);
     let requirements
         = parse_requires_dist(requires_dist)?;
-    resolution.dependencies = build_unconditional_dependency_map(&requirements)?;
+    resolution.dependencies = build_context_dependency_map(&requirements, include_base, active_extras, None, false)?;
     resolution.into_resolution_result(context)
 }
 
-fn build_targetless_island_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String]) -> Result<ResolutionResult, Error> {
+fn build_targetless_island_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String], include_base: bool, active_extras: &PypiExtras) -> Result<ResolutionResult, Error> {
     let mut resolution
         = Resolution::new_empty(locator, project_pep440_to_semver(version)?);
     let requirements
         = parse_requires_dist(requires_dist)?;
-    resolution.dependencies = build_targetless_island_dependency_map(&requirements)?;
+    resolution.dependencies = build_context_dependency_map(&requirements, include_base, active_extras, None, true)?;
     resolution.into_resolution_result(context)
 }
 
-fn build_fork_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String], fork: &PythonFork) -> Result<ResolutionResult, Error> {
+fn build_fork_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String], fork: &PythonFork, include_base: bool, active_extras: &PypiExtras) -> Result<ResolutionResult, Error> {
     let mut resolution
         = Resolution::new_empty(locator.env_qualified_with_hash(fork.id.clone()), project_pep440_to_semver(version)?);
     let requirements
         = parse_requires_dist(requires_dist)?;
-    resolution.dependencies = build_fork_dependency_map(&requirements, fork)?;
+    resolution.dependencies = build_fork_dependency_map_with_extras(&requirements, fork, include_base, active_extras)?;
     resolution.into_resolution_result(context)
 }
 
@@ -441,8 +453,11 @@ where
 async fn fetch_project_metadata(context: &InstallContext<'_>, package_ident: &Ident) -> Result<PypiProjectMetadata, Error> {
     let package_ident
         = canonicalize_pypi_ident(package_ident)?;
+    let project
+        = context.project
+            .expect("The project is required for resolving PyPI packages");
     let base
-        = pypi_registry_base();
+        = get_registry(&project.config, &package_ident);
     let url
         = format!("{}/pypi/{}/json", base, encode_path_segment(package_ident.as_str()));
     fetch_json(context, &url).await
@@ -451,8 +466,11 @@ async fn fetch_project_metadata(context: &InstallContext<'_>, package_ident: &Id
 async fn fetch_version_metadata(context: &InstallContext<'_>, package_ident: &Ident, version: &zpm_primitives::PypiVersion) -> Result<PypiVersionMetadata, Error> {
     let package_ident
         = canonicalize_pypi_ident(package_ident)?;
+    let project
+        = context.project
+            .expect("The project is required for resolving PyPI packages");
     let base
-        = pypi_registry_base();
+        = get_registry(&project.config, &package_ident);
     let url
         = format!(
             "{}/pypi/{}/{}/json",
@@ -584,7 +602,8 @@ pub async fn resolve_specifier_descriptor(context: &InstallContext<'_>, descript
     let requires_dist
         = version_metadata.info.requires_dist.unwrap_or_default();
 
-    build_resolution_result(context, locator, &resolved_version, &requires_dist)
+    let active_extras = params.parameters.as_ref().and_then(|parameters| parameters.extras.clone()).unwrap_or_default();
+    build_resolution_result(context, locator, &resolved_version, &requires_dist, true, &active_extras)
 }
 
 pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &PypiTagRange) -> Result<ResolutionResult, Error> {
@@ -627,7 +646,8 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let requires_dist
         = version_metadata.info.requires_dist.unwrap_or_default();
 
-    build_resolution_result(context, locator, &resolved_version, &requires_dist)
+    let active_extras = params.parameters.as_ref().and_then(|parameters| parameters.extras.clone()).unwrap_or_default();
+    build_resolution_result(context, locator, &resolved_version, &requires_dist, true, &active_extras)
 }
 
 pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference) -> Result<ResolutionResult, Error> {
@@ -638,7 +658,7 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
     let requires_dist
         = version_metadata.info.requires_dist.unwrap_or_default();
 
-    build_resolution_result(context, locator.clone(), &params.version, &requires_dist)
+    build_resolution_result(context, locator.clone(), &params.version, &requires_dist, true, &PypiExtras::empty())
 }
 
 pub async fn resolve_locator_requiring_python_target(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference) -> Result<ResolutionResult, Error> {
@@ -649,7 +669,7 @@ pub async fn resolve_locator_requiring_python_target(context: &InstallContext<'_
     let requires_dist
         = version_metadata.info.requires_dist.unwrap_or_default();
 
-    build_targetless_island_resolution_result(context, locator.clone(), &params.version, &requires_dist)
+    build_targetless_island_resolution_result(context, locator.clone(), &params.version, &requires_dist, true, &PypiExtras::empty())
 }
 
 pub async fn resolve_locator_for_fork(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, fork: &PythonFork) -> Result<ResolutionResult, Error> {
@@ -660,7 +680,37 @@ pub async fn resolve_locator_for_fork(context: &InstallContext<'_>, locator: &Lo
     let requires_dist
         = version_metadata.info.requires_dist.unwrap_or_default();
 
-    build_fork_resolution_result(context, locator.clone(), &params.version, &requires_dist, fork)
+    build_fork_resolution_result(context, locator.clone(), &params.version, &requires_dist, fork, true, &PypiExtras::empty())
+}
+
+pub async fn resolve_locator_extra(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, extra: &str) -> Result<ResolutionResult, Error> {
+    resolve_locator_extra_without_target(context, locator, params, extra, false).await
+}
+
+pub async fn resolve_locator_extra_requiring_python_target(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, extra: &str) -> Result<ResolutionResult, Error> {
+    resolve_locator_extra_without_target(context, locator, params, extra, true).await
+}
+
+pub async fn resolve_locator_extra_for_fork(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, extra: &str, fork: &PythonFork) -> Result<ResolutionResult, Error> {
+    let package_ident = canonicalize_pypi_ident(&params.ident)?;
+    let version_metadata = fetch_version_metadata(context, &package_ident, &params.version).await?;
+    let requires_dist = version_metadata.info.requires_dist.unwrap_or_default();
+    let active_extras = PypiExtras::from_iter([extra]).map_err(|err| Error::InvalidRange(err.to_string()))?;
+
+    build_fork_resolution_result(context, locator.clone(), &params.version, &requires_dist, fork, false, &active_extras)
+}
+
+async fn resolve_locator_extra_without_target(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, extra: &str, require_target: bool) -> Result<ResolutionResult, Error> {
+    let package_ident = canonicalize_pypi_ident(&params.ident)?;
+    let version_metadata = fetch_version_metadata(context, &package_ident, &params.version).await?;
+    let requires_dist = version_metadata.info.requires_dist.unwrap_or_default();
+    let active_extras = PypiExtras::from_iter([extra]).map_err(|err| Error::InvalidRange(err.to_string()))?;
+
+    if require_target {
+        build_targetless_island_resolution_result(context, locator.clone(), &params.version, &requires_dist, false, &active_extras)
+    } else {
+        build_resolution_result(context, locator.clone(), &params.version, &requires_dist, false, &active_extras)
+    }
 }
 
 #[cfg(test)]
@@ -711,24 +761,28 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_requires_dist_rejects_requested_extras() {
-        let message
-            = invalid_resolution_message(parse_requires_dist_entry("friendly-bard[http] >=1.0.0").unwrap_err());
+    fn test_parse_requires_dist_keeps_requested_extras() {
+        let requirement = parse_one("friendly-bard[http] >=1.0.0");
+        let Range::PypiSpecifier(range) = requirement.descriptor.range else {
+            panic!("expected PyPI specifier range");
+        };
 
-        assert!(message.contains("requested dependency extras"));
+        assert!(range.parameters.unwrap().extras.unwrap().contains("http"));
     }
 
     #[test]
-    fn test_parse_requires_dist_extra_only_markers_are_inactive() {
-        assert!(parse_requires_dist_entry("friendly-bard >=1.0.0; extra == 'http'").unwrap().is_none());
+    fn test_parse_requires_dist_keeps_extra_only_markers() {
+        let requirement = parse_one("friendly-bard >=1.0.0; extra == 'http'");
+        assert!(marker_variables(&requirement.marker).contains(&MarkerVariable::Extra));
     }
 
     #[test]
-    fn test_parse_requires_dist_rejects_mixed_extra_markers() {
-        let message
-            = invalid_resolution_message(parse_requires_dist_entry("friendly-bard >=1.0.0; extra == 'http' and python_version >= '3.11'").unwrap_err());
+    fn test_parse_requires_dist_keeps_mixed_extra_markers() {
+        let requirement = parse_one("friendly-bard >=1.0.0; extra == 'http' and python_version >= '3.11'");
+        let variables = marker_variables(&requirement.marker);
 
-        assert!(message.contains("mixed `extra` markers"));
+        assert!(variables.contains(&MarkerVariable::Extra));
+        assert!(variables.contains(&MarkerVariable::PythonVersion));
     }
 
     #[test]

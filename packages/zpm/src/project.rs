@@ -1,12 +1,14 @@
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::Arc, time::{Duration, UNIX_EPOCH}};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::{Arc, mpsc}, time::{Duration, UNIX_EPOCH}};
 
+use colored::Colorize;
 use globset::{GlobBuilder, GlobSetBuilder};
-use zpm_config::{Configuration, ConfigurationContext, Source};
+use zpm_config::{Configuration, ConfigurationContext, IslandLinker, Source};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
+use zpm_switch::get_bin_version;
 use zpm_tasks::{parse as parse_taskfile, ResolvedTasks, TaskFile, TaskId};
-use zpm_utils::{Glob, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
+use zpm_utils::{DataType, Glob, Hash64, Hash64Writer, IoResultExt, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
 
@@ -18,13 +20,16 @@ use crate::{
     git::{GitOperation, detect_git_operation},
     http::HttpClient,
     http_npm,
-    install::{InstallContext, InstallManager, InstallResult, InstallState},
-    lockfile::{Lockfile, from_legacy_berry_lockfile, from_pnpm_node_modules},
+    install::{InstallContext, InstallManager, InstallResult, InstallState, compute_workspace_hashes},
+    lockfile::{Lockfile, LockfileMetadata, from_legacy_berry_lockfile, from_pnpm_node_modules},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
+    npm::NpmEntryExt,
+    primitives_exts::RangeExt,
     report::{StreamReport, StreamReportConfig, async_section, current_report, with_report_result},
     script::{Binary, ScriptEnvironment},
     tasks::TASK_FILE_NAME,
+    trust::{ensure_project_trusted, ProjectTrustReason},
 };
 
 pub const LOCKFILE_NAME: &str = "yarn.lock";
@@ -32,6 +37,65 @@ pub const MANIFEST_NAME: &str = "package.json";
 pub const PNP_CJS_NAME: &str = ".pnp.cjs";
 pub const PNP_ESM_NAME: &str = ".pnp.loader.mjs";
 pub const PNP_DATA_NAME: &str = ".pnp.data.json";
+pub const PACKAGE_MAP_NAME: &str = ".package-map.json";
+const LOCKFILE_DIFF_LINE_LIMIT: usize = 100;
+const LOCKFILE_DIFF_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn colorize_diff_line(line: &str) -> String {
+    if line.starts_with("+") && !line.starts_with("+++") {
+        line.green().to_string()
+    } else if line.starts_with("-") && !line.starts_with("---") {
+        line.red().to_string()
+    } else if line.starts_with("@@") {
+        DataType::Info.colorize(line)
+    } else if line.starts_with("+++") || line.starts_with("---") {
+        DataType::Path.colorize(line)
+    } else {
+        line.to_string()
+    }
+}
+
+fn render_lockfile_diff(current: Option<Vec<u8>>, expected: Vec<u8>) -> Option<String> {
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let current_text = current
+            .as_deref()
+            .map(String::from_utf8_lossy)
+            .unwrap_or_else(|| "".into())
+            .into_owned();
+        let expected_text
+            = String::from_utf8_lossy(&expected).into_owned();
+
+        let diff = similar::TextDiff::from_lines(&current_text, &expected_text)
+            .unified_diff()
+            .header("current yarn.lock", "generated yarn.lock")
+            .to_string();
+
+        let mut truncated = false;
+        let mut lines = Vec::new();
+
+        for (idx, line) in diff.lines().enumerate() {
+            if idx >= LOCKFILE_DIFF_LINE_LIMIT {
+                truncated = true;
+                break;
+            }
+
+            lines.push(colorize_diff_line(line));
+        }
+
+        if truncated {
+            lines.push(DataType::Code.colorize(&format!(
+                "... Diff truncated after {} lines.",
+                LOCKFILE_DIFF_LINE_LIMIT,
+            )));
+        }
+
+        let _ = tx.send(lines.join("\n"));
+    });
+
+    rx.recv_timeout(LOCKFILE_DIFF_TIMEOUT).ok()
+}
 
 #[zpm_enum(or_else = |s| Err(Error::InvalidInstallMode(s.to_string())))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +126,7 @@ pub struct RunInstallOptions {
     pub silent_or_error: bool,
     pub json: bool,
     pub inline_builds: bool,
+    pub force: bool,
 }
 
 pub struct Project {
@@ -143,6 +208,10 @@ impl Project {
         let mut config
             = Configuration::load(&configuration_context, &mut last_modified_at)
                 .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
+
+        if config.requires_trust {
+            ensure_project_trusted(&project_cwd, ProjectTrustReason::ConfigurationInterpolation).await?;
+        }
 
         if config.settings.enable_migration_mode.value {
             config.settings.enable_global_cache.value = true;
@@ -228,6 +297,13 @@ impl Project {
         self.project_cwd.with_join_str("node_modules")
     }
 
+    pub fn package_map_path(&self, workspace: Option<&Workspace>) -> Path {
+        workspace
+            .map(|workspace| workspace.path.with_join_str("node_modules"))
+            .unwrap_or_else(|| self.nm_path())
+            .with_join_str(PACKAGE_MAP_NAME)
+    }
+
     pub fn ignore_path(&self) -> Path {
         self.project_cwd.with_join_str(".yarn/ignore")
     }
@@ -289,14 +365,14 @@ impl Project {
             = self.lockfile_path();
 
         let mut lockfile
-            = Project::lockfile_from(&lockfile_path)?;
+            = Project::lockfile_from(&lockfile_path, &self.config)?;
 
         if self.config.settings.enable_migration_mode.value {
             let source_lockfile_path
                 = self.project_cwd.with_join_str(LOCKFILE_NAME);
 
             let source_lockfile
-                = Project::lockfile_from(&source_lockfile_path)?;
+                = Project::lockfile_from(&source_lockfile_path, &self.config)?;
 
             lockfile.resolutions.extend(source_lockfile.resolutions.into_iter());
         }
@@ -304,7 +380,7 @@ impl Project {
         Ok(lockfile)
     }
 
-    fn lockfile_from(lockfile_path: &Path) -> Result<Lockfile, Error> {
+    fn lockfile_from(lockfile_path: &Path, config: &Configuration) -> Result<Lockfile, Error> {
         if !lockfile_path.fs_exists() {
             // Check for pnpm node_modules in the same directory
             if let Some(project_cwd) = lockfile_path.dirname() {
@@ -312,7 +388,7 @@ impl Project {
                     = project_cwd.with_join_str("node_modules/.pnpm");
 
                 if pnpm_dir.fs_exists() {
-                    return from_pnpm_node_modules(&project_cwd);
+                    return from_pnpm_node_modules(&project_cwd, config);
                 }
             }
 
@@ -407,7 +483,27 @@ impl Project {
             = JsonDocument::to_string_pretty(lockfile)?;
 
         if self.config.settings.enable_immutable_installs.value {
-            lockfile_path.fs_expect_with(contents.as_bytes(), || Error::ImmutableLockfile)?;
+            let current_content = lockfile_path
+                .fs_read()
+                .ok_missing()?;
+
+            if current_content.as_ref().is_some_and(|current| current.as_slice() == contents.as_bytes()) {
+                return Ok(());
+            }
+
+            let diff
+                = render_lockfile_diff(current_content.clone(), contents.into_bytes());
+
+            if let Some(diff) = diff {
+                crate::report::if_active(|report| {
+                    report.add_log_format("Lockfile changes".to_string(), diff);
+                });
+            }
+
+            return Err(match current_content {
+                Some(_) => Error::ImmutableLockfileModification,
+                None => Error::ImmutableLockfileCreation,
+            });
         } else {
             lockfile_path.fs_change(contents, false)?;
         }
@@ -636,12 +732,69 @@ impl Project {
             .ok_or(Error::WorkspacePathNotFound(rel_path.clone()))
     }
 
+    pub fn workspace_dependency_closure(&self, roots: impl IntoIterator<Item = Ident>, include_dev_dependencies: bool) -> Result<BTreeSet<Ident>, Error> {
+        let mut processed_queue
+            = BTreeSet::new();
+
+        let mut process_queue
+            = roots.into_iter().collect::<Vec<_>>();
+
+        while let Some(ident) = process_queue.pop() {
+            if !processed_queue.insert(ident.clone()) {
+                continue;
+            }
+
+            let workspace
+                = self.workspace_by_ident(&ident)?;
+
+            let mut relevant_dependencies
+                = workspace.manifest.remote.dependencies.values()
+                    .chain(workspace.manifest.remote.optional_dependencies.values())
+                    .collect::<Vec<_>>();
+
+            if include_dev_dependencies {
+                relevant_dependencies.extend(workspace.manifest.dev_dependencies.values());
+            }
+
+            for dependency in relevant_dependencies {
+                if let Some(workspace) = self.try_workspace_by_descriptor(dependency)? {
+                    process_queue.push(workspace.name.clone());
+                }
+            }
+        }
+
+        Ok(processed_queue)
+    }
+
     pub fn try_workspace_by_file_path(&self, rel_path: &Path) -> Result<Option<&Workspace>, Error> {
         let workspace
             = self.workspaces.iter()
                 .find(|w| w.rel_path.contains(rel_path));
 
         Ok(workspace)
+    }
+
+    pub fn try_closest_workspace_by_rel_path(&self, rel_path: &Path) -> Option<&Workspace> {
+        for candidate_path in rel_path.iter_path().rev() {
+            if let Some(workspace) = self.try_workspace_by_rel_path(&candidate_path).ok().flatten() {
+                return Some(workspace);
+            }
+        }
+
+        None
+    }
+
+    pub fn try_island_by_rel_path(&self, rel_path: &Path, linker: IslandLinker) -> Option<&Workspace> {
+        let workspace
+            = self.try_closest_workspace_by_rel_path(rel_path)?;
+
+        self.config.settings.unstable_islands
+            .values()
+            .any(|island| {
+                island.linker.value == linker
+                    && island.workspaces.iter().any(|glob| glob.value.check(&workspace.name))
+            })
+            .then_some(workspace)
     }
 
     pub fn package_location(&self, locator: &Locator) -> Result<&Path, Error> {
@@ -702,6 +855,481 @@ impl Project {
             .unwrap_or_else(|| panic!("Expected {} to have a package location", locator.to_print_string()));
 
         self.package_binaries_at(locator, package_location)
+    }
+
+    pub fn is_lockfile_fresh(&self) -> Result<bool, Error> {
+        fn normalize_lockfile_descriptor(descriptor: &mut Descriptor) {
+            match &descriptor.range {
+                Range::AnonymousSemver(params) => {
+                    descriptor.range = zpm_primitives::RegistrySemverRange {
+                        ident: None,
+                        range: params.range.clone(),
+                    }.into();
+                },
+
+                Range::AnonymousTag(params) => {
+                    descriptor.range = zpm_primitives::RegistryTagRange {
+                        ident: None,
+                        tag: params.tag.clone(),
+                    }.into();
+                },
+
+                _ => {},
+            }
+        }
+
+        if self.config.settings.enable_hardened_mode.value {
+            return Ok(false);
+        }
+
+        if self.install_state.as_ref().and_then(|install_state| install_state.install_config_hash.as_ref()) != Some(&self.install_config_hash()) {
+            return Ok(false);
+        }
+
+        if !self.config.settings.unstable_islands.is_empty() {
+            return Ok(false);
+        }
+
+        if self.workspaces.iter().any(|workspace| !workspace.manifest.resolutions.is_empty()) {
+            return Ok(false);
+        }
+
+        let lockfile
+            = self.lockfile()?;
+
+        if lockfile.metadata.version != LockfileMetadata::new().version {
+            return Ok(false);
+        }
+
+        if !lockfile.islands.is_empty() {
+            return Ok(false);
+        }
+
+        let mut graph
+            = BTreeMap::<Locator, BTreeSet<Locator>>::new();
+
+        let mut used_resolutions
+            = BTreeMap::<Descriptor, Locator>::new();
+
+        let mut used_entries
+            = BTreeSet::<Locator>::new();
+
+        let mut process_queue
+            = self.workspaces.iter()
+                .map(|workspace| workspace.locator())
+                .collect::<Vec<_>>();
+
+        let mut processed_queue
+            = BTreeSet::new();
+
+        while let Some(locator) = process_queue.pop() {
+            if !processed_queue.insert(locator.clone()) {
+                continue;
+            }
+
+            let mut child_locators
+                = BTreeSet::new();
+
+            let dependency_descriptors
+                = if let Some(workspace) = self.try_workspace_by_locator(&locator)? {
+                    workspace.manifest.remote.dependencies.values()
+                        .chain(workspace.manifest.remote.optional_dependencies.values())
+                        .chain(workspace.manifest.dev_dependencies.values())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                } else {
+                    let Some(entry) = lockfile.entries.get(&locator) else {
+                        return Ok(false);
+                    };
+
+                    if entry.resolution.locator != locator {
+                        return Ok(false);
+                    }
+
+                    used_entries.insert(locator.clone());
+
+                    entry.resolution.dependencies.values()
+                        .chain(entry.resolution.variants.iter())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                };
+
+            for mut descriptor in dependency_descriptors {
+                if let Some(workspace) = self.try_workspace_by_descriptor(&descriptor)? {
+                    let dependency_locator
+                        = workspace.locator();
+
+                    child_locators.insert(dependency_locator.clone());
+                    process_queue.push(dependency_locator);
+                    continue;
+                }
+
+                let range_details
+                    = descriptor.range.details();
+
+                if range_details.transient_resolution
+                    || range_details.fetch_before_resolve
+                    || matches!(descriptor.range, Range::Catalog(_))
+                {
+                    return Ok(false);
+                }
+
+                normalize_lockfile_descriptor(&mut descriptor);
+
+                let Some(dependency_locator) = lockfile.resolutions.get(&descriptor) else {
+                    return Ok(false);
+                };
+
+                let Some(entry) = lockfile.entries.get(dependency_locator) else {
+                    return Ok(false);
+                };
+
+                if entry.resolution.locator != *dependency_locator {
+                    return Ok(false);
+                }
+
+                used_resolutions.insert(descriptor, dependency_locator.clone());
+                used_entries.insert(dependency_locator.clone());
+                child_locators.insert(dependency_locator.clone());
+                process_queue.push(dependency_locator.clone());
+            }
+
+            graph.insert(locator, child_locators);
+        }
+
+        if lockfile.resolutions != used_resolutions {
+            return Ok(false);
+        }
+
+        if lockfile.entries.keys().cloned().collect::<BTreeSet<_>>() != used_entries {
+            return Ok(false);
+        }
+
+        let workspace_locators
+            = self.workspaces.iter()
+                .map(|workspace| (workspace.name.clone(), workspace.locator()))
+                .collect::<Vec<_>>();
+
+        let workspace_hashes = compute_workspace_hashes(&graph, &workspace_locators);
+        if lockfile.workspaces != workspace_hashes {
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
+    pub(crate) fn install_config_hash(&self) -> Hash64 {
+        let mut writer
+            = Hash64Writer::new();
+
+        // The binary version participates so that an upgraded Yarn
+        // always runs one full install: builtin patches, linker
+        // layouts, and install fix-ups can all change across releases
+        // in ways the other freshness checks can't see.
+        writer.update(get_bin_version().as_bytes());
+
+        writer.update(serde_json::to_vec(&self.config.settings)
+            .expect("configuration settings should always be serializable"));
+
+        writer.finalize()
+    }
+
+    /// The "quick pass" behind the up-to-date fast path: re-derives
+    /// the content hashes feeding transient resolutions (`file:`
+    /// tarballs and folders, `exec:` scripts, patch files, portal
+    /// manifests) and compares them with the locators recorded by the
+    /// previous install. Registry-backed ranges (including `npm:`
+    /// aliases) are immutable and never checked, so this costs nothing
+    /// for projects without local sources. Returns `false` when
+    /// anything changed - the regular install then redoes the work for
+    /// real - or when a hash can't be re-derived cheaply.
+    fn transient_resolutions_unchanged(&self, install_state: &InstallState) -> Result<bool, Error> {
+        fn resolve_local_path(context_directory: &Path, raw_path: &str) -> Result<Path, Error> {
+            let path = Path::try_from(raw_path)?;
+
+            Ok(if path.is_absolute() {
+                path
+            } else {
+                context_directory.with_join(&path)
+            })
+        }
+
+        let mut cache_packer
+            = None;
+
+        for (descriptor, locator) in &install_state.descriptor_to_locator {
+            let range = descriptor.range.physical_range();
+
+            if !matches!(range, Range::Tarball(_) | Range::Folder(_) | Range::Exec(_) | Range::Patch(_) | Range::Portal(_)) {
+                continue;
+            }
+
+            if let Range::Patch(params) = range {
+                // Builtin patches ship with the binary; nothing on
+                // disk to watch.
+                if params.path == "<builtin>" {
+                    continue;
+                }
+
+                // A patch over another transient package would need
+                // its inner source re-derived through the parent
+                // chain; too exotic to bother, never skip.
+                if matches!(
+                    params.inner.0.range.physical_range(),
+                    Range::Tarball(_) | Range::Folder(_) | Range::Exec(_) | Range::Portal(_),
+                ) {
+                    return Ok(false);
+                }
+            }
+
+            // Relative paths hang from the parent package. Workspace
+            // parents are mutable and re-derivable; zip-backed parents
+            // are immutable snapshots whose inner files can't change
+            // under us; disk-backed parents (portals, links) are
+            // mutable but can't be verified from here.
+            let context_directory = match &descriptor.parent {
+                Some(parent) => {
+                    let physical = parent.physical_locator();
+
+                    match self.try_workspace_by_locator(&physical)? {
+                        Some(workspace) => workspace.path.clone(),
+
+                        None => {
+                            let parent_reference = physical.reference.physical_reference();
+
+                            if parent_reference.is_portal() || parent_reference.is_link() {
+                                return Ok(false);
+                            }
+
+                            continue;
+                        },
+                    }
+                },
+
+                None => self.project_cwd.clone(),
+            };
+
+            let unchanged = match (range, locator.reference.physical_reference()) {
+                (Range::Tarball(_), Reference::Tarball(reference_params)) => {
+                    let tarball_path
+                        = resolve_local_path(&context_directory, &reference_params.path)?;
+
+                    match tarball_path.fs_read() {
+                        Ok(data) => reference_params.hash == Some(Hash64::from_data(data)),
+                        Err(_) => false,
+                    }
+                },
+
+                (Range::Exec(_), Reference::Exec(reference_params)) => {
+                    let script_path
+                        = resolve_local_path(&context_directory, &reference_params.path)?;
+
+                    match script_path.fs_read() {
+                        Ok(data) => {
+                            // Mirrors `resolvers::exec::compute_exec_hash`.
+                            let mut writer = Hash64Writer::new();
+                            writer.update(b"exec-v2");
+                            writer.update(data);
+
+                            reference_params.hash == Some(writer.finalize())
+                        },
+                        Err(_) => false,
+                    }
+                },
+
+                (Range::Folder(_), Reference::Folder(reference_params)) => {
+                    let folder_path
+                        = resolve_local_path(&context_directory, &reference_params.path)?;
+
+                    let packer = match &cache_packer {
+                        Some(packer) => packer,
+                        None => cache_packer.insert(self.package_cache()?.packer()),
+                    };
+
+                    // Mirrors `resolvers::folder::compute_folder_hash`.
+                    let hash = zpm_formats::entries_from_folder(&folder_path)
+                        .map_err(Error::from)
+                        .and_then(|entries| {
+                            entries
+                                .into_iter()
+                                .prepare_npm_entries(&descriptor.ident.nm_subdir())
+                                .map_err(Error::from)
+                        })
+                        .and_then(|entries| packer.pack(entries).map_err(Error::from))
+                        .map(|archive| {
+                            let mut writer = Hash64Writer::new();
+                            writer.update(b"file-folder-v2");
+                            writer.update(archive);
+
+                            writer.finalize()
+                        });
+
+                    match hash {
+                        Ok(hash) => reference_params.hash == Some(hash),
+                        Err(_) => false,
+                    }
+                },
+
+                (Range::Portal(_), Reference::Portal(reference_params)) => {
+                    let manifest_path = resolve_local_path(&context_directory, &reference_params.path)?
+                        .with_join_str(MANIFEST_NAME);
+
+                    match manifest_path.fs_read_text() {
+                        Ok(manifest_text) => {
+                            reference_params.hash
+                                == Some(crate::resolvers::portal::compute_portal_manifest_hash(&manifest_text))
+                        },
+                        Err(_) => false,
+                    }
+                },
+
+                (Range::Patch(_), Reference::Patch(reference_params)) => {
+                    // Path handling mirrors the patch fetcher: `~/` is
+                    // project-relative, anything else resolves against
+                    // the parent.
+                    let patch_path = match reference_params.path.as_str() {
+                        path if path.starts_with("~/") => self.project_cwd.with_join_str(&path[2..]),
+                        path => resolve_local_path(&context_directory, path)?,
+                    };
+
+                    match patch_path.fs_read_text() {
+                        Ok(patch_content) => reference_params.checksum == Some(Hash64::from_string(&patch_content)),
+                        Err(_) => false,
+                    }
+                },
+
+                // The recorded locator doesn't match the range shape;
+                // never skip on inconsistent state.
+                _ => false,
+            };
+
+            if !unchanged {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    /// Modification time of the lockfile, in nanoseconds since the
+    /// epoch; `None` when the lockfile doesn't exist.
+    pub fn lockfile_changed_at(&self) -> Result<Option<u128>, Error> {
+        let metadata = match self.lockfile_path().fs_metadata() {
+            Ok(metadata) => metadata,
+            Err(err) => return match err.io_kind() {
+                Some(ErrorKind::NotFound) | Some(ErrorKind::NotADirectory) => Ok(None),
+                _ => Err(err.into()),
+            },
+        };
+
+        Ok(Some(metadata.modified()?
+            .duration_since(UNIX_EPOCH).unwrap()
+            .as_nanos()))
+    }
+
+    /// Cheap check that the artifacts of the last install are still
+    /// current: the install state is fresh, the configuration didn't
+    /// change, the lockfile wasn't edited out-of-band, and the cache
+    /// and linker outputs are still on disk. `yarn install` uses this
+    /// to skip installs that are provably no-ops; anything uncertain
+    /// falls through to a full install.
+    pub fn is_install_up_to_date(&mut self) -> Result<bool, Error> {
+        match self.import_install_state() {
+            Ok(_) => {},
+
+            Err(Error::InstallStateNotFound | Error::InvalidInstallState) => {
+                self.install_state = None;
+                return Ok(false);
+            },
+
+            Err(e) => {
+                return Err(e);
+            },
+        };
+
+        let Some(install_state) = &self.install_state else {
+            return Ok(false);
+        };
+
+        // A focused install may have skipped part of the project; an
+        // explicit `yarn install` must bring everything up to date.
+        if install_state.installed_workspaces.is_some() {
+            return Ok(false);
+        }
+
+        if self.last_modified_at.has_changed_since(install_state.last_installed_at) {
+            return Ok(false);
+        }
+
+        if install_state.install_config_hash.as_ref() != Some(&self.install_config_hash()) {
+            return Ok(false);
+        }
+
+        if !self.config.settings.unstable_islands.is_empty() {
+            return Ok(false);
+        }
+
+        if install_state.lockfile_changed_at.is_none()
+            || install_state.lockfile_changed_at != self.lockfile_changed_at()?
+        {
+            return Ok(false);
+        }
+
+        if !self.preferred_cache_path().fs_exists() {
+            return Ok(false);
+        }
+
+        let linker_artifact = match self.config.settings.node_linker.value {
+            zpm_config::NodeLinker::Pnp
+                => self.pnp_path(),
+            zpm_config::NodeLinker::NodeModules | zpm_config::NodeLinker::Pnpm
+                => self.package_map_path(None),
+        };
+
+        if !linker_artifact.fs_exists() {
+            return Ok(false);
+        }
+
+        // The nm linker guarantees every workspace a node_modules
+        // folder, so a missing one means the tree was wiped and needs
+        // relinking. (Deletions *inside* a package folder are on
+        // --force, like any other manual damage.)
+        if self.config.settings.node_linker.value == zpm_config::NodeLinker::NodeModules {
+            let all_workspace_trees_present = self.workspaces.iter()
+                .all(|workspace| workspace.path.with_join_str("node_modules").fs_exists());
+
+            if !all_workspace_trees_present {
+                return Ok(false);
+            }
+        }
+
+        // PnP installs materialize some packages on disk (build scripts,
+        // `prefer_extracted`, optional zips); if any package may be in
+        // that situation, a missing unplugged folder means the project
+        // needs a repair pass. Over-approximating is fine — it only
+        // costs a full install when the folder is legitimately absent.
+        if self.config.settings.node_linker.value == zpm_config::NodeLinker::Pnp {
+            let needs_unplugged = !install_state.optional_packages.is_empty()
+                || install_state.content_flags.values().any(|flags| {
+                    flags.prefer_extracted
+                        .unwrap_or(flags.suggest_extracted || !flags.build_commands.is_empty())
+                });
+
+            if needs_unplugged && !self.unplugged_path().fs_exists() {
+                return Ok(false);
+            }
+        }
+
+        // Transient ranges (file:, exec:, patches, portals) resolve
+        // from content that can change without any manifest or
+        // lockfile edit; re-derive their hashes and compare them with
+        // the recorded resolutions. This is the costliest check
+        // (packing file: folders reads them in full), so it runs last.
+        if !self.transient_resolutions_unchanged(install_state)? {
+            return Ok(false);
+        }
+
+        Ok(true)
     }
 
     fn find_visible_dependency_location(&self, issuer_location: &Path, ident: &Ident, locator: &Locator) -> Result<Option<Path>, Error> {
@@ -830,13 +1458,57 @@ impl Project {
             self.local_cache_path().fs_exists()
         };
 
+        let required_workspaces
+            = self.try_workspace_by_rel_path(&self.package_cwd)?
+                .map(|workspace| self.workspace_dependency_closure([workspace.name.clone()], true))
+                .transpose()?;
+
         if cache_exists {
             if let Some(install_state) = &self.install_state {
                 if !self.last_modified_at.has_changed_since(install_state.last_installed_at) {
-                    return Ok(());
+                    if install_state.install_config_hash.as_ref() == Some(&self.install_config_hash()) {
+                        match &required_workspaces {
+                            None => return Ok(()),
+                            Some(required_workspaces) => {
+                                match &install_state.installed_workspaces {
+                                    None => return Ok(()),
+                                    Some(installed_workspaces) => {
+                                        if self.config.settings.lazy_install_mode.value == zpm_config::LazyInstallMode::All {
+                                            // When mode is All, only skip if all workspaces were installed
+                                        } else if required_workspaces.is_subset(installed_workspaces) {
+                                            return Ok(());
+                                        }
+                                    },
+                                }
+                            },
+                        }
+                    }
                 }
             }
         }
+
+        let install_roots = if self.config.settings.lazy_install_mode.value != zpm_config::LazyInstallMode::Focused
+            || !cache_exists
+        {
+            None
+        } else if let (Some(install_state), Some(required_workspaces)) = (&self.install_state, &required_workspaces) {
+            match &install_state.installed_workspaces {
+                None => None,
+                Some(installed_workspaces) => {
+                    if self.is_lockfile_fresh()? {
+                        let roots = installed_workspaces.iter()
+                            .chain(required_workspaces.iter())
+                            .cloned();
+
+                        Some(self.workspace_dependency_closure(roots, true)?)
+                    } else {
+                        None
+                    }
+                },
+            }
+        } else {
+            None
+        };
 
         let install = self.run_install(RunInstallOptions {
             check_checksums: false,
@@ -846,7 +1518,7 @@ impl Project {
             refresh_lockfile: false,
             silent_or_error: true,
             mode: None,
-            roots: None,
+            roots: install_roots,
             ..Default::default()
         });
 
@@ -983,9 +1655,11 @@ impl Project {
                     .with_lockfile(lockfile?)
                     .with_previous_state(self.install_state.as_ref())
                     .with_roots(roots)
+                    .with_installed_workspaces(options.roots.clone())
                     .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
                     .with_skip_link_step(options.mode == Some(InstallMode::UpdateLockfile))
                     .with_skip_lockfile_update(options.roots.is_some())
+                    .with_force(options.force)
                     .resolve_and_fetch().await?
                     .link_and_build(self).await?;
 

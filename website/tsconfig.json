@@ -1,3 +1,26 @@
 {
-  "extends": "astro/tsconfigs/strict"
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "noEmit": false,
+    "outDir": "./dist/types"
+  },
+  "include": [
+    ".astro/**/*.d.ts",
+    "astro.config.mjs",
+    "config/**/*",
+    "plugins/**/*",
+    "public/**/*",
+    "scripts/**/*",
+    "src/**/*"
+  ],
+  "exclude": [
+    "src/playground/templates/**"
+  ],
+  "files": [
+    "config/manifest.json",
+    "config/yarnrc.json"
+  ]
 }

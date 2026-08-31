@@ -241,8 +241,10 @@ impl Info {
                     .filter(|descriptor| !resolution.peer_dependencies.contains_key(&descriptor.ident))
                     .map(|descriptor| (descriptor, &install_state.resolution_tree.descriptor_to_locator[descriptor]))
                     .map(|(descriptor, locator)| {
+                        // The descriptors are always reported as seen by the base package, but
+                        // the locators keep their virtual instances when `--virtuals` is set.
                         if self.virtuals {
-                            DescriptorResolution::new(descriptor.clone(), locator.clone())
+                            DescriptorResolution::new(descriptor.physical_descriptor(), locator.clone())
                         } else {
                             DescriptorResolution::new(descriptor.physical_descriptor(), locator.physical_locator())
                         }

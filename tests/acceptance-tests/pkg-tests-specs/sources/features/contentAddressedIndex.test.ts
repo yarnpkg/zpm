@@ -107,7 +107,9 @@ describe(`Features`, () => {
 
         await xfs.writeFilePromise(referenceFile, newContent);
 
-        await run(`install`);
+        // Repairing damage inside node_modules needs --force (the
+        // default in interactive terminals).
+        await run(`install`, `--force`);
 
         await expect(xfs.readFilePromise(referenceFile, `utf8`)).resolves.toEqual(originalContent);
       }),
@@ -141,7 +143,9 @@ describe(`Features`, () => {
 
           await xfs.writeFilePromise(referenceFileA, newContent);
 
-          await run(`install`, {cwd: path});
+          // Repairing damage inside node_modules needs --force (the
+          // default in interactive terminals).
+          await run(`install`, `--force`, {cwd: path});
 
           await expect(xfs.readFilePromise(referenceFileA, `utf8`)).resolves.toEqual(originalContent);
           await expect(xfs.readFilePromise(referenceFileB, `utf8`)).resolves.toEqual(originalContent);

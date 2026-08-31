@@ -1,0 +1,132 @@
+---
+import {readFile} from 'node:fs/promises';
+
+import octIconData from '@iconify-json/octicon/icons.json';
+
+import BaseLayout from '../layouts/BaseLayout.astro';
+import {PlaygroundWorkspace} from '../components/playground/PlaygroundWorkspace';
+import {loadPlaygroundTemplates} from '../playground/loadTemplates';
+import '../styles/theme.css';
+
+const rootPackage = JSON.parse(await readFile(new URL(`../../../package.json`, import.meta.url), `utf8`));
+const yarnVersion = rootPackage.packageManager.replace(/^yarn@/, ``);
+const templates = await loadPlaygroundTemplates({yarnVersion});
+
+function extractOct(name: string) {
+  const icon = (octIconData as any).icons[name];
+  if (!icon) throw new Error(`Unknown octicon: ${name}`);
+  const suffix = name.match(/-(\d+)$/)?.[1];
+  const base = suffix ? Number(suffix) : 16;
+  return {body: icon.body, width: icon.width ?? base, height: icon.height ?? base};
+}
+
+const treeOcticons = {
+  file: extractOct(`file-code-16`),
+  folder: extractOct(`file-directory-fill-16`),
+  terminal: extractOct(`terminal-16`),
+};
+---
+
+<BaseLayout title="Playground — Yarn" variant="docs" activePage="playground" description="A browser-based Yarn playground preview.">
+  <script is:inline>
+    (function() {
+      var nav = document.querySelector(`nav`);
+
+      function syncNavHeight() {
+        document.documentElement.style.setProperty(
+          `--playground-nav-height`,
+          (nav ? nav.getBoundingClientRect().height : 73) + `px`,
+        );
+      }
+
+      syncNavHeight();
+      window.addEventListener(`resize`, syncNavHeight);
+
+      if (nav && `ResizeObserver` in window)
+        new ResizeObserver(syncNavHeight).observe(nav);
+    })();
+  </script>
+
+  <main class="playground-shell box-border flex h-[calc(100dvh_-_var(--playground-nav-height,73px))] min-h-0 items-stretch justify-center p-[clamp(18px,3.4vw,42px)] max-[900px]:p-4 max-[560px]:p-2.5">
+    <section class="playground-window grid h-[min(820px,100%)] min-h-0 w-[min(1480px,100%)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[18px] border border-[rgba(168,176,212,0.18)] bg-black/95 [background-image:linear-gradient(135deg,rgba(255,255,255,0.045),transparent_42%)] shadow-[0_30px_90px_-45px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.14)] backdrop-blur-[28px] backdrop-saturate-150 max-[900px]:h-full max-[900px]:rounded-[14px]" aria-label="Yarn playground">
+      <div class="grid min-h-[46px] grid-cols-[96px_minmax(0,1fr)_96px] items-center gap-4 border-b border-[var(--line)] bg-black/90 px-[18px] max-[900px]:grid-cols-[auto_minmax(0,1fr)_auto] max-[560px]:gap-2.5 max-[560px]:px-3">
+        <div class="flex gap-2 max-[560px]:gap-1.5" aria-hidden="true">
+          <span class="h-[11px] w-[11px] rounded-full border border-[color-mix(in_oklch,var(--fg)_18%,transparent)] bg-red-400/80"></span>
+          <span class="h-[11px] w-[11px] rounded-full border border-[color-mix(in_oklch,var(--fg)_18%,transparent)] bg-yellow-300/80"></span>
+          <span class="h-[11px] w-[11px] rounded-full border border-[color-mix(in_oklch,var(--fg)_18%,transparent)] bg-emerald-400/80"></span>
+        </div>
+
+        <div class="flex min-w-0 justify-self-center items-baseline text-[13px] font-semibold text-[var(--fg)] max-[900px]:justify-self-start">
+          <span>Yarn Playground</span>
+        </div>
+      </div>
+
+      {/* client:only (rather than client:load) so the initial preset can be
+          read synchronously from ?template= without an SSR hydration
+          mismatch, avoiding a throwaway BrowserPod boot on deep links. */}
+      <PlaygroundWorkspace client:only="react" version={yarnVersion} octicons={treeOcticons} templates={templates} />
+
+      <div class="border-t border-[var(--line)] bg-black/90 px-[18px] py-[13px] text-center text-[13px] leading-[1.4] text-[var(--fg-dim)]">
+        This playground runs Yarn {yarnVersion} compiled to WASM, thanks to the incredible work of the <a href="https://browserpod.io/" class="font-medium text-[var(--fg)] underline decoration-[var(--accent-line)] underline-offset-2 hover:decoration-[var(--accent)]">BrowserPod</a> folks.
+      </div>
+    </section>
+  </main>
+
+  <style is:global>
+    html:has(.playground-shell),
+    body:has(.playground-shell) {
+      overflow: hidden;
+    }
+
+    /*
+      The playground window keeps its dark terminal look in both themes, so
+      the theme tokens used inside it are pinned to their dark values here.
+    */
+    .playground-window {
+      --accent: oklch(0.78 0.16 var(--accent-h));
+      --accent-soft: oklch(0.78 0.16 var(--accent-h) / 0.14);
+      --accent-line: oklch(0.78 0.16 var(--accent-h) / 0.35);
+      --fg: #e8ecff;
+      --fg-dim: #a8b0d4;
+      --fg-mute: #6872a0;
+      --line: rgba(168, 176, 212, 0.14);
+      --line-strong: rgba(168, 176, 212, 0.28);
+    }
+
+    /*
+      On short viewports the 100dvh lock would collapse the terminal row onto
+      the footer; fall back to a fixed-height window and regular scrolling.
+    */
+    @media (max-height: 620px) {
+      html:has(.playground-shell),
+      body:has(.playground-shell) {
+        overflow: auto;
+      }
+
+      .playground-shell {
+        height: auto;
+        min-height: calc(100dvh - var(--playground-nav-height, 73px));
+      }
+
+      .playground-window {
+        height: 560px;
+      }
+    }
+
+    .playground-terminal-mount .xterm,
+    .playground-terminal-mount .xterm-viewport,
+    .playground-terminal-mount .xterm-screen {
+      background: transparent !important;
+    }
+
+    .playground-terminal-mount .xterm {
+      height: 100%;
+    }
+
+    .playground-editor-shell .monaco-editor,
+    .playground-editor-shell .monaco-editor-background,
+    .playground-editor-shell .monaco-editor .margin {
+      background-color: transparent !important;
+    }
+  </style>
+</BaseLayout>

@@ -1,7 +1,7 @@
 import {npath, xfs} from '@yarnpkg/fslib';
 
 const {
-  tests: {testIf},
+  tests: {startPackageServer, testIf},
   misc,
 } = require(`pkg-tests-core`);
 
@@ -88,6 +88,22 @@ describe(`publish`, () =>   {
     })).resolves.toBeTruthy();
   }));
 
+  test(`should fail rather than prompt for an otp when not attached to a terminal`, makeTemporaryEnv({
+    name: `otp-prompt-required`,
+    version: `1.0.0`,
+  }, async ({path, run, source}) => {
+    await run(`install`);
+
+    await expect(run(`npm`, `publish`, {
+      env: {
+        // Otherwise the OTP prompt would be short-circuited before we get a
+        // chance to detect that we're not running in an interactive terminal
+        YARN_IS_TEST_ENV: undefined,
+        YARN_NPM_AUTH_TOKEN: validLogins.otpUser.npmAuthToken,
+      },
+    })).rejects.toThrowError(/isn't running in an interactive terminal/);
+  }));
+
   test(`should publish a package with the readme content`, makeTemporaryEnv({
     name: `readme-required`,
     version: `1.0.0`,
@@ -137,6 +153,50 @@ describe(`publish`, () =>   {
 
     expect(result).toHaveProperty(`files`);
     expect(Array.isArray(result.files)).toBe(true);
+  }));
+
+  test(`should let package rules override the top-level publish registry`, makeTemporaryEnv({
+    name: `@scope/json-test`,
+    version: `1.0.0`,
+  }, async ({path, run}) => {
+    const registryUrl = await startPackageServer();
+
+    await xfs.writeFilePromise(npath.toPortablePath(`${path}/.yarnrc.yml`), [
+      `npmPublishRegistry: ${registryUrl}/publish`,
+      `packageRules:`,
+      `  - packageFilter: "@scope/*"`,
+      `    npmRegistryServer: ${registryUrl}/package`,
+    ].join(`\n`));
+
+    await run(`install`);
+
+    const {stdout} = await run(`npm`, `publish`, `--json`, `--dry-run`, `--tolerate-republish`);
+    const jsonObjects = misc.parseJsonStream(stdout);
+    const result = jsonObjects.find((obj: any) => obj.name && obj.version);
+
+    expect(result).toHaveProperty(`registry`, `http://registry.example.org/package`);
+  }));
+
+  test(`should keep scope registries ahead of the top-level publish registry`, makeTemporaryEnv({
+    name: `@scope/json-test`,
+    version: `1.0.0`,
+  }, async ({path, run}) => {
+    const registryUrl = await startPackageServer();
+
+    await xfs.writeFilePromise(npath.toPortablePath(`${path}/.yarnrc.yml`), [
+      `npmPublishRegistry: ${registryUrl}/publish`,
+      `npmScopes:`,
+      `  scope:`,
+      `    npmRegistryServer: ${registryUrl}/scope`,
+    ].join(`\n`));
+
+    await run(`install`);
+
+    const {stdout} = await run(`npm`, `publish`, `--json`, `--dry-run`, `--tolerate-republish`);
+    const jsonObjects = misc.parseJsonStream(stdout);
+    const result = jsonObjects.find((obj: any) => obj.name && obj.version);
+
+    expect(result).toHaveProperty(`registry`, `http://registry.example.org/scope`);
   }));
 
   test(`should honor publishConfig access and registry`, makeTemporaryEnv({

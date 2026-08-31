@@ -126,11 +126,16 @@ pub enum Reference {
         path: String,
     },
 
-    #[pattern(r"portal:(?<path>.*)")]
-    #[to_file_string(|params| format!("portal:{}", params.path))]
-    #[to_print_string(|params| DataType::Reference.colorize(&format!("portal:{}", params.path)))]
+    #[pattern(r"portal:(?<path>.*?)(?:#(?<hash>[a-f0-9]*))?")]
+    #[to_file_string(|params| format_local("portal", &params.path, &params.hash))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format_local("portal", &params.path, &params.hash)))]
     Portal {
         path: String,
+
+        /// Hash of the portal target's manifest. Portals aren't
+        /// copied, but their manifest feeds the resolution, so the
+        /// locator must change when it does.
+        hash: Option<Hash64>,
     },
 
     #[pattern(r"exec:(?<path>.*?)(?:#(?<hash>[a-f0-9]*))?")]

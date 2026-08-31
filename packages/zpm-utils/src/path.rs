@@ -341,6 +341,22 @@ impl Path {
         }
     }
 
+    pub fn without_trailing_separators(&self) -> Path {
+        if self.is_root() {
+            return self.clone();
+        }
+
+        let trimmed = self.path.trim_end_matches('/');
+
+        if trimmed.len() == self.path.len() {
+            self.clone()
+        } else {
+            Path {
+                path: trimmed.to_string(),
+            }
+        }
+    }
+
     pub fn extname<'a>(&'a self) -> Option<&'a str> {
         self.basename().and_then(|basename| {
             if let Some(mut last_dot) = basename.rfind('.') {
@@ -843,6 +859,35 @@ impl Path {
         Ok(self)
     }
 
+    /**
+     * Clone this file or directory tree to `new_path` using the OS
+     * copy-on-write primitive (`clonefile` on macOS). The destination
+     * must not exist. Fails on platforms or filesystems without
+     * support; callers are expected to fall back to a regular copy.
+     */
+    pub fn fs_clonefile(&self, new_path: &Path) -> Result<&Self, PathError> {
+        #[cfg(target_os = "macos")]
+        {
+            let source = std::ffi::CString::new(self.to_path_buf().as_os_str().as_bytes())
+                .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+            let target = std::ffi::CString::new(new_path.to_path_buf().as_os_str().as_bytes())
+                .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+
+            if unsafe {libc::clonefile(source.as_ptr(), target.as_ptr(), 0)} != 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+
+            Ok(self)
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = new_path;
+
+            Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "clonefile is not supported on this platform").into())
+        }
+    }
+
     pub fn fs_copy(&self, new_path: &Path) -> Result<&Self, PathError> {
         match self.fs_is_dir() {
             true => {
@@ -1151,6 +1196,28 @@ impl ToFileString for Path {
 impl ToHumanString for Path {
     fn to_print_string(&self) -> String {
         DataType::Path.colorize(&self.to_home_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::Path;
+
+    #[test]
+    fn normalizes_repeated_trailing_separators() {
+        assert_eq!(Path::from_str("foo//").unwrap().as_str(), "foo/");
+        assert_eq!(Path::from_str("/foo///").unwrap().as_str(), "/foo/");
+        assert_eq!(Path::from_str("///").unwrap().as_str(), "/");
+    }
+
+    #[test]
+    fn removes_trailing_separators() {
+        assert_eq!(Path::from_str("foo/").unwrap().without_trailing_separators().as_str(), "foo");
+        assert_eq!(Path::from_str("/foo/").unwrap().without_trailing_separators().as_str(), "/foo");
+        assert_eq!(Path::from_str("/").unwrap().without_trailing_separators().as_str(), "/");
+        assert_eq!(Path::new().without_trailing_separators().as_str(), "");
     }
 }
 

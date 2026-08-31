@@ -1,0 +1,14 @@
+{
+  "name": "node-modules-linker",
+  "packageManager": "yarn@{{YARN_VERSION}}",
+  "private": true,
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.0"
+  }
+}

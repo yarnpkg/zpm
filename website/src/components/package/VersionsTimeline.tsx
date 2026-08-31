@@ -1,7 +1,7 @@
-import {useState} from 'react';
+import {useState}                                                       from 'react';
 
-import {useIcons} from './contexts';
-import {OctIcon} from './icons';
+import {useIcons}                                                       from './contexts';
+import {OctIcon}                                                        from './icons';
 import {formatDate, versionLabel, compareSemverDesc, isNoisyPrerelease} from './utils';
 
 export function VersionsTimeline({versions, distTags, time}: {

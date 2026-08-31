@@ -239,7 +239,7 @@ async fn resolve_island_once(
     let requires_python_target
         = island.linker == zpm_config::IslandLinker::Venv && fork_for_provider.is_none();
 
-    let (solution, resolution_cache) = tokio::task::spawn_blocking(move || {
+    let (solution, resolution_cache, extra_resolution_cache) = tokio::task::spawn_blocking(move || {
         let provider = IslandDependencyProvider::new(
             island_id.clone(),
             locked_versions,
@@ -272,15 +272,16 @@ async fn resolve_island_once(
 
         // Extract cached resolutions before provider is dropped
         let cache = provider.resolution_cache.into_inner();
+        let extra_cache = provider.extra_resolution_cache.into_inner();
 
-        result.map(|solution| (solution, cache))
+        result.map(|solution| (solution, cache, extra_cache))
     }).await.map_err(|e| Error::IslandResolutionFailed {
         island_id: island.id.clone(),
         message: format!("Join error: {}", e),
     })??;
 
     // Phase 5: Convert pubgrub solution to descriptor_to_locator + resolutions
-    convert_solution(&island.id, solution, &resolution_cache, &workspace_deps, fork.as_ref())
+    convert_solution(&island.id, solution, &resolution_cache, &extra_resolution_cache, &workspace_deps, fork.as_ref())
 }
 
 #[allow(dead_code)]
@@ -406,18 +407,30 @@ fn convert_solution(
     island_id: &str,
     solution: pubgrub::SelectedDependencies<IslandDependencyProvider<'_>>,
     resolution_cache: &BTreeMap<Locator, Resolution>,
+    extra_resolution_cache: &BTreeMap<(Locator, String), Resolution>,
     workspace_deps: &BTreeMap<IslandPackageKey, BTreeMap<Ident, Descriptor>>,
     fork: Option<&PythonFork>,
 ) -> Result<IslandResolutionResult, Error> {
     let mut descriptor_to_locator = BTreeMap::new();
     let mut normalized_resolutions = BTreeMap::new();
     let mut package_to_locator = BTreeMap::new();
+    let mut extra_resolutions = Vec::new();
 
     for (package, island_version) in &solution {
         // Skip the virtual root
         let package_key = match package {
             IslandPackage::Root => continue,
             IslandPackage::Named(key) => key,
+            IslandPackage::ExtraProxy { .. } => continue,
+            IslandPackage::ExtraFeature { key, extra } => {
+                let raw_locator = island_version.0.clone();
+
+                if let Some(resolution) = extra_resolution_cache.get(&(raw_locator.clone(), extra.clone())) {
+                    extra_resolutions.push((key.clone(), raw_locator, resolution.clone()));
+                }
+
+                continue;
+            }
         };
 
         // Workspace packages: include them with their dependencies so the
@@ -490,6 +503,7 @@ fn convert_solution(
                 = qualify_descriptor_for_fork(Descriptor::new(package_key.ident.clone(), Range::PypiSpecifier(PypiSpecifierRange {
                     ident: None,
                     specifier,
+                    parameters: None,
                 })), fork);
             let version
                 = version.to_lossy_semver()
@@ -526,6 +540,23 @@ fn convert_solution(
         package_to_locator.insert(package_key.clone(), locator.clone());
         descriptor_to_locator.insert(descriptor, locator.clone());
         normalized_resolutions.insert(locator, resolution);
+    }
+
+    for (key, _, extra_resolution) in extra_resolutions {
+        if let Some(base_locator) = package_to_locator.get(&key) {
+            if let Some(base_resolution) = normalized_resolutions.get_mut(base_locator) {
+                for (dep_ident, extra_descriptor) in extra_resolution.dependencies {
+                    match base_resolution.dependencies.get_mut(&dep_ident) {
+                        Some(base_descriptor) => {
+                            crate::resolvers::pypi::merge_dependency_descriptor(base_descriptor, extra_descriptor)?;
+                        },
+                        None => {
+                            base_resolution.dependencies.insert(dep_ident, extra_descriptor);
+                        },
+                    }
+                }
+            }
+        }
     }
 
     // Second pass: add descriptor-to-locator mappings for transitive

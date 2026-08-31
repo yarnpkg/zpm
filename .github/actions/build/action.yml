@@ -12,6 +12,10 @@ inputs:
   version:
     description: 'The version of the build'
     required: false
+  browserpod-version:
+    description: 'The Browserpod runtime/toolchain version'
+    required: false
+    default: '3.0.1'
 
 outputs:
   version:
@@ -22,12 +26,31 @@ runs:
   using: composite
   steps:
     - name: Install cross
-      if: ${{ !endsWith(inputs.target, '-apple-darwin') }}
+      if: ${{ !endsWith(inputs.target, '-apple-darwin') && inputs.target != 'wasm32-browserpod-linux-musl' }}
       uses: taiki-e/install-action@a27ef18d36cfa66b0af3a360104621793b41c036 # v2.54.3
       with:
         tool: cross
 
+    - name: Install Browserpod Rust
+      if: ${{ inputs.target == 'wasm32-browserpod-linux-musl' }}
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y llvm
+
+        browserpod_version='${{inputs.browserpod-version}}'
+        browserpod_toolchain="browserpod-$browserpod_version"
+        browserpod_base_url="https://rt.browserpod.io/$browserpod_version/rust"
+
+        tmp=$(mktemp -d)
+
+        curl -fsSL "$browserpod_base_url/install.sh" -o "$tmp/install.sh"
+        curl -fsSL "$browserpod_base_url/browserpod-rust-$browserpod_version.tar.gz" -o "$tmp/browserpod-rust-$browserpod_version.tar.gz"
+
+        BP_DIST_BASE="$browserpod_base_url" sh "$tmp/install.sh" "$browserpod_toolchain"
+
     - name: Add Rust Target
+      if: ${{ inputs.target != 'wasm32-browserpod-linux-musl' }}
       shell: bash
       run: |
         rustup target add '${{inputs.target}}'
@@ -53,12 +76,24 @@ runs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
       with:
-        shared-key: ${{inputs.profile}}-${{inputs.target}}
+        # The browserpod toolchains report the same rustc fingerprint across
+        # releases, so cargo would reuse stale cached artifacts after a
+        # toolchain bump; key the cache on the browserpod version instead.
+        shared-key: ${{inputs.profile}}-${{inputs.target}}${{inputs.target == 'wasm32-browserpod-linux-musl' && format('-browserpod-{0}', inputs.browserpod-version) || ''}}
 
     - name: Build ${{steps.version.outputs.version}}
       shell: bash
       run: |
-        if [[ "${{inputs.target}}" == *-apple-darwin ]]; then
+        if [[ "${{inputs.target}}" == "wasm32-browserpod-linux-musl" ]]; then
+          browserpod_sysroot=$(rustc "+browserpod-${{inputs.browserpod-version}}" --print sysroot)
+          browserpod_libc_manifest="$browserpod_sysroot/lib/browserpod-libc/Cargo.toml"
+          browserpod_libc_version=$(awk -F '"' '/^version = / { print $2; exit }' "$browserpod_libc_manifest")
+
+          cargo "+browserpod-${{inputs.browserpod-version}}" update -p libc --precise "$browserpod_libc_version"
+          cargo "+browserpod-${{inputs.browserpod-version}}" build --verbose --bin yarn-bin --profile=${{inputs.profile}} --target=${{inputs.target}}
+
+          cp target/${{inputs.target}}/${{inputs.profile}}/yarn-bin target/${{inputs.target}}/${{inputs.profile}}/yarn-bin.wasm
+        elif [[ "${{inputs.target}}" == *-apple-darwin ]]; then
           cargo build --verbose --profile=${{inputs.profile}} --target=${{inputs.target}}
         else
           cross build --verbose --profile=${{inputs.profile}} --target=${{inputs.target}}

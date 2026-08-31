@@ -113,7 +113,7 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
     }
 
     let type_idents
-        = query_algolia(&search_space, &project.http_client).await?;
+        = query_algolia(&search_space, &project.config, &project.http_client).await;
 
     for (ident, _) in type_idents {
         let Some((descriptor, request)) = candidate_requests.remove(&ident) else {
@@ -231,7 +231,7 @@ impl Add {
             = project::Project::new(None).await?;
 
         if self.no_time_gate {
-            project.config.settings.npm_minimal_age_gate.force(std::time::Duration::ZERO, zpm_config::Source::Cli);
+            project.config.settings.disable_age_gate();
         }
 
         let range_kind = if self.fixed {
@@ -361,7 +361,7 @@ impl Add {
             = project::Project::new(None).await?;
 
         if self.no_time_gate {
-            project.config.settings.npm_minimal_age_gate.force(std::time::Duration::ZERO, zpm_config::Source::Cli);
+            project.config.settings.disable_age_gate();
         }
 
         let enforced_resolutions

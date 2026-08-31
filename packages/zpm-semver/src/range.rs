@@ -168,6 +168,16 @@ impl Range {
         }
     }
 
+    /// Whether the range is the wildcard `*` range.
+    ///
+    /// The npm resolver special-cases it: since `*` never matches a prerelease
+    /// (cf. `check`), packages that only ever published prereleases wouldn't be
+    /// installable at all, so `*` is allowed to fall back on them when nothing
+    /// else matches.
+    pub fn is_wildcard(&self) -> bool {
+        self.source.as_str() == "*"
+    }
+
     pub fn check(&self, version: &Version) -> bool {
         let mut n = 0;
 

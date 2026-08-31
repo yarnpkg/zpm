@@ -1,0 +1,8 @@
+{
+  "browserpod": "3.0.1",
+  "rustToolchain": "browserpod-3.0.1",
+  "source": "https://rt.browserpod.io/3.0.1/rust/browserpod-rust-3.0.1.tar.gz",
+  "target": "wasm32-browserpod-linux-musl",
+  "profile": "release-lto-nodebug",
+  "binary": "yarn-bin.wasm"
+}

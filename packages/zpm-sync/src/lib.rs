@@ -25,6 +25,13 @@ pub enum SyncItem<'a> {
 
     Folder {
         template: Option<SyncTemplate>,
+
+        /// The caller vouches that the on-disk content of this folder
+        /// already matches its template; the sync keeps the folder
+        /// without expanding the template. Explicitly registered
+        /// children are still visited.
+        #[serde(default)]
+        assume_up_to_date: bool,
     },
 
     Symlink {
@@ -68,6 +75,7 @@ impl From<std::io::Error> for SyncError {
 pub struct SyncCheck {
     pub must_remove: bool,
     pub must_create: bool,
+    pub exists: bool,
 }
 
 pub struct SyncTree<'a> {
@@ -113,6 +121,7 @@ impl<'a> SyncTree<'a> {
             dry_run: true,
             nodes: vec![SyncNode::Folder {
                 template: None,
+                assume_up_to_date: false,
                 children: BTreeMap::new(),
             }],
         }
@@ -154,7 +163,7 @@ impl<'a> SyncTree<'a> {
         let node
             = &self.nodes[node_idx];
 
-        matches!(node, SyncNode::Folder {template: None, children} if children.is_empty())
+        matches!(node, SyncNode::Folder {template: None, children, ..} if children.is_empty())
     }
 
     pub fn register_entry(&mut self, rel_path: Path, entry: SyncItem<'a>) -> Result<(), SyncError> {
@@ -192,9 +201,10 @@ impl<'a> SyncTree<'a> {
         let existing_node
             = &mut self.nodes[existing_node_idx];
 
-        if let SyncNode::Folder {template: existing_template, ..} = existing_node {
-            if let SyncItem::Folder {template: new_template, ..} = &entry {
+        if let SyncNode::Folder {template: existing_template, assume_up_to_date: existing_assume, ..} = existing_node {
+            if let SyncItem::Folder {template: new_template, assume_up_to_date: new_assume} = &entry {
                 *existing_template = new_template.clone();
+                *existing_assume = *new_assume;
                 return Ok(());
             }
         }
@@ -207,17 +217,34 @@ impl<'a> SyncTree<'a> {
     }
 
     pub fn run(&self, root_path: Path) -> Result<Vec<FileOp>, SyncError> {
+        use rayon::prelude::*;
+
         let mut file_ops
             = Vec::new();
 
-        let mut queue
+        // Nodes are processed level by level so parents always exist
+        // before their children; within a level every node is
+        // independent and can run in parallel.
+        let mut current_level
             = vec![(root_path, 0)];
 
-        while let Some((path, node_idx)) = queue.pop() {
-            let next_tasks
-                = self.process_node(path, node_idx, &mut file_ops)?;
+        while !current_level.is_empty() {
+            let results = current_level
+                .into_par_iter()
+                .map(|(path, node_idx)| {
+                    let mut ops = Vec::new();
+                    let next_tasks = self.process_node(path, node_idx, &mut ops)?;
 
-            queue.extend(next_tasks);
+                    Ok((ops, next_tasks))
+                })
+                .collect::<Result<Vec<_>, SyncError>>()?;
+
+            current_level = Vec::new();
+
+            for (ops, next_tasks) in results {
+                file_ops.extend(ops);
+                current_level.extend(next_tasks);
+            }
         }
 
         Ok(file_ops)
@@ -251,6 +278,7 @@ impl<'a> SyncTree<'a> {
 
             self.nodes.push(SyncNode::Folder {
                 template: None,
+                assume_up_to_date: false,
                 children: BTreeMap::new(),
             });
         }
@@ -263,6 +291,7 @@ impl<'a> SyncTree<'a> {
             return Ok(SyncCheck {
                 must_remove: false,
                 must_create: false,
+                exists: true,
             });
         }
 
@@ -270,6 +299,7 @@ impl<'a> SyncTree<'a> {
             return Ok(SyncCheck {
                 must_remove: false,
                 must_create: true,
+                exists: false,
             });
         };
 
@@ -285,6 +315,7 @@ impl<'a> SyncTree<'a> {
                 Ok(SyncCheck {
                     must_remove: !is_dir,
                     must_create: !is_dir && template.is_none(),
+                    exists: true,
                 })
             },
 
@@ -301,6 +332,7 @@ impl<'a> SyncTree<'a> {
                 Ok(SyncCheck {
                     must_remove: !is_file_up_to_date,
                     must_create: !is_file_up_to_date,
+                    exists: true,
                 })
             },
 
@@ -316,6 +348,7 @@ impl<'a> SyncTree<'a> {
                 Ok(SyncCheck {
                     must_remove: !is_symlink_up_to_date,
                     must_create: !is_symlink_up_to_date,
+                    exists: true,
                 })
             },
         }
@@ -346,7 +379,7 @@ impl<'a> SyncTree<'a> {
                 Ok(vec![])
             },
 
-            SyncNode::Folder {template, children, ..} => {
+            SyncNode::Folder {template, assume_up_to_date, children} => {
                 if check.must_create {
                     if self.dry_run {
                         file_ops.push(FileOp::CreateFolder(path.clone()));
@@ -355,9 +388,15 @@ impl<'a> SyncTree<'a> {
                     }
                 }
 
+                // An assumed folder that turns out to be missing (or of
+                // the wrong type) self-heals through the regular
+                // template expansion.
+                let expand_template
+                    = !assume_up_to_date || !check.exists || check.must_remove;
+
                 if let Some(template) = &template {
                     match template {
-                        SyncTemplate::Zip {archive_path, inner_path} => {
+                        SyncTemplate::Zip {archive_path, inner_path} if expand_template => {
                             let zip_buffer
                                 = archive_path.fs_read()?;
 
@@ -382,6 +421,10 @@ impl<'a> SyncTree<'a> {
                                 = template_tree.run(path.clone())?;
 
                             file_ops.extend(inner_file_ops);
+                        },
+
+                        SyncTemplate::Zip {..} => {
+                            // Assumed up-to-date; leave the folder as is.
                         },
                     }
                 } else {
@@ -454,6 +497,7 @@ pub enum SyncNode<'a> {
 
     Folder {
         template: Option<SyncTemplate>,
+        assume_up_to_date: bool,
         children: BTreeMap<String, usize>,
     },
 
@@ -472,8 +516,9 @@ impl<'a> From<SyncItem<'a>> for SyncNode<'a> {
         match entry {
             SyncItem::Any => SyncNode::Any,
 
-            SyncItem::Folder {template} => SyncNode::Folder {
+            SyncItem::Folder {template, assume_up_to_date} => SyncNode::Folder {
                 template,
+                assume_up_to_date,
                 children: BTreeMap::new(),
             },
 

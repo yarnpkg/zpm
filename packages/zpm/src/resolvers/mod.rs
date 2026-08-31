@@ -354,7 +354,7 @@ pub async fn resolve_versions(context: &InstallContext<'_>, registry: &Registry)
                 .expect("The project is required for resolving versions");
 
             let registry_base
-                = http_npm::get_registry(&project.config, ident.scope(), false)?;
+                = http_npm::get_registry_for_ident(&project.config, Some(ident), false)?;
 
             let authorization
                 = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {

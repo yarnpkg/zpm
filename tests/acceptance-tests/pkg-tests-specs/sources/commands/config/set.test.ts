@@ -76,6 +76,28 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should reject package rules without filters`,
+      makeTemporaryEnv({}, async ({run}) => {
+        await expect(run(`config`, `set`, `packageRules`, `--json`, JSON.stringify([{
+          npmAlwaysAuth: true,
+        }]))).rejects.toMatchObject({
+          code: 1,
+        });
+      }),
+    );
+
+    test(
+      `it should reject source rules without filters`,
+      makeTemporaryEnv({}, async ({run}) => {
+        await expect(run(`config`, `set`, `sourceRules`, `--json`, JSON.stringify([{
+          npmAlwaysAuth: true,
+        }]))).rejects.toMatchObject({
+          code: 1,
+        });
+      }),
+    );
+
+    test(
       `it should allow running the command from arbitrary folders if the -H,--home option is set`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         const tmpDir = await xfs.mktempPromise();

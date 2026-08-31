@@ -9,14 +9,14 @@ use serde::Deserialize;
 use sha2::{Sha256, Digest};
 use tokio::sync::OnceCell;
 use tokio::task::JoinHandle;
-use zpm_config::Configuration;
+use zpm_config::{Configuration, EcosystemFilter, NpmRegistry, NpmScope, PackageRule, SourceRule};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
 use zpm_utils::{DataType, Path};
 
 use crate::{
     error::Error,
-    http::{HttpClient, HttpRequest},
+    http::{HttpClient, HttpRequest, HttpResponse},
     npm,
     report::{current_report, PromptType},
 };
@@ -36,87 +36,237 @@ pub enum AuthorizationMode {
     BestEffort,
 }
 
-macro_rules! scope_registry_setting {
-    ($config:expr, $registry:expr, $ident:expr, $field:ident) => {
-        (|| {
-            if let Some(ident) = &$ident {
-                if let Some(scope) = ident.scope() {
-                    let scope_key = scope.strip_prefix('@').unwrap_or(scope);
-                    let scope_settings
-                        = $config.settings.npm_scopes.get(scope_key);
-
-                    if let Some(scope_settings) = scope_settings {
-                        if let Some(value) = scope_settings.$field.value.as_ref() {
-                            return Some(value);
-                        }
-                    }
-                }
-            }
-
-            // Try exact match first
-            if let Some(registry_settings) = $config.settings.npm_registries.get($registry) {
-                if let Some(value) = registry_settings.$field.value.as_ref() {
-                    return Some(value);
-                }
-            }
-
-            // Also try with trailing slash (for normalization)
-            let registry_with_slash = format!("{}/", $registry);
-            if let Some(registry_settings) = $config.settings.npm_registries.get(&registry_with_slash) {
-                if let Some(value) = registry_settings.$field.value.as_ref() {
-                    return Some(value);
-                }
-            }
-
-            None
-        })()
-    }
+fn normalize_registry_url(registry: &str) -> &str {
+    registry.trim_end_matches('/')
 }
 
-fn get_registry_raw<'a>(config: &'a Configuration, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
-    if let Some(scope) = scope {
-        let scope_settings
-            = config.settings.npm_scopes.get(scope.strip_prefix('@').unwrap_or(scope));
+fn ecosystem_matches(filter: Option<EcosystemFilter>, ecosystem: EcosystemFilter) -> bool {
+    filter.map_or(true, |filter| filter == ecosystem)
+}
 
-        if let Some(scope_settings) = scope_settings {
-            if publish {
-                let npm_publish_registry
-                    = scope_settings.npm_publish_registry.value.as_ref().map(|s| s.as_str());
+fn package_rule_matches(rule: &PackageRule, ecosystem: EcosystemFilter, ident: Option<&Ident>) -> bool {
+    ecosystem_matches(rule.ecosystem_filter.value, ecosystem)
+        && rule.package_filter.value.as_ref().map_or(true, |filter| {
+            ident.map_or(false, |ident| filter.check(ident))
+        })
+}
 
-                if let Some(registry) = npm_publish_registry {
-                    return Ok(registry);
-                }
+fn source_rule_matches(rule: &SourceRule, ecosystem: EcosystemFilter, registry: &str) -> bool {
+    ecosystem_matches(rule.ecosystem_filter.value, ecosystem)
+        && rule.registry_filter.value.as_ref().map_or(true, |filter| {
+            normalize_registry_url(filter) == normalize_registry_url(registry)
+        })
+}
+
+fn legacy_scope_settings<'a>(config: &'a Configuration, ident: Option<&Ident>) -> Option<&'a NpmScope> {
+    let scope = ident?.scope()?;
+    config.settings.npm_scopes.get(scope.strip_prefix('@').unwrap_or(scope))
+}
+
+fn legacy_registry_settings<'a>(config: &'a Configuration, registry: &str) -> Option<&'a NpmRegistry> {
+    if let Some(registry_settings) = config.settings.npm_registries.get(registry) {
+        return Some(registry_settings);
+    }
+
+    let registry_with_slash = format!("{}/", registry);
+    if let Some(registry_settings) = config.settings.npm_registries.get(&registry_with_slash) {
+        return Some(registry_settings);
+    }
+
+    let normalized_registry
+        = normalize_registry_url(registry);
+
+    config.settings.npm_registries.iter()
+        .find_map(|(candidate, settings)| {
+            (normalize_registry_url(candidate) == normalized_registry).then_some(settings)
+        })
+}
+
+fn get_registry_raw<'a>(config: &'a Configuration, ident: Option<&Ident>, publish: bool) -> Result<&'a str, Error> {
+    let mut registry
+        = config.settings.npm_registry_server.value.as_str();
+
+    if publish {
+        if let Some(value) = config.settings.npm_publish_registry.value.as_deref() {
+            registry = value;
+        }
+    }
+
+    if let Some(scope_settings) = legacy_scope_settings(config, ident) {
+        if let Some(value) = scope_settings.npm_registry_server.value.as_deref() {
+            registry = value;
+        }
+    }
+
+    if publish {
+        if let Some(scope_settings) = legacy_scope_settings(config, ident) {
+            if let Some(value) = scope_settings.npm_publish_registry.value.as_deref() {
+                registry = value;
             }
+        }
+    }
 
-            let npm_registry_server
-                = scope_settings.npm_registry_server.value.as_ref().map(|s| s.as_str());
-
-            if let Some(registry) = npm_registry_server {
-                return Ok(registry);
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, EcosystemFilter::Npm, ident) {
+            if let Some(value) = rule.npm_registry_server.value.as_deref() {
+                registry = value;
             }
         }
     }
 
     if publish {
-        let publish_registry
-            = config.settings.npm_publish_registry.value.as_ref().map(|s| s.as_str());
-
-        if let Some(registry) = publish_registry {
-            return Ok(registry);
+        for rule in &config.settings.package_rules {
+            if package_rule_matches(rule, EcosystemFilter::Npm, ident) {
+                if let Some(value) = rule.npm_publish_registry.value.as_deref() {
+                    registry = value;
+                }
+            }
         }
     }
 
-    let registry_server
-        = config.settings.npm_registry_server.value.as_str();
+    Ok(registry)
+}
 
-    Ok(registry_server)
+pub fn get_registry_for_ident<'a>(config: &'a Configuration, ident: Option<&Ident>, publish: bool) -> Result<&'a str, Error> {
+    let registry
+        = get_registry_raw(config, ident, publish)?;
+
+    Ok(normalize_registry_url(registry))
 }
 
 pub fn get_registry<'a>(config: &'a Configuration, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
-    let registry
-        = get_registry_raw(config, scope, publish)?;
+    let scoped_ident
+        = scope.map(|scope| Ident::new(format!("@{}/*", scope.strip_prefix('@').unwrap_or(scope))));
 
-    Ok(registry.strip_suffix('/').unwrap_or(registry))
+    get_registry_for_ident(config, scoped_ident.as_ref(), publish)
+}
+
+fn get_npm_always_auth(config: &Configuration, registry: &str, ident: Option<&Ident>) -> Option<bool> {
+    let mut value
+        = None;
+
+    if let Some(registry_settings) = legacy_registry_settings(config, registry) {
+        if let Some(next) = registry_settings.npm_always_auth.value {
+            value = Some(next);
+        }
+    }
+
+    if let Some(scope_settings) = legacy_scope_settings(config, ident) {
+        if let Some(next) = scope_settings.npm_always_auth.value {
+            value = Some(next);
+        }
+    }
+
+    for rule in &config.settings.source_rules {
+        if source_rule_matches(rule, EcosystemFilter::Npm, registry) {
+            if let Some(next) = rule.npm_always_auth.value {
+                value = Some(next);
+            }
+        }
+    }
+
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, EcosystemFilter::Npm, ident) {
+            if let Some(next) = rule.npm_always_auth.value {
+                value = Some(next);
+            }
+        }
+    }
+
+    value
+}
+
+fn get_npm_auth_token<'a>(config: &'a Configuration, registry: &str, ident: Option<&Ident>) -> Option<&'a zpm_utils::Secret<String>> {
+    let mut value
+        = None;
+
+    if let Some(registry_settings) = legacy_registry_settings(config, registry) {
+        if let Some(next) = registry_settings.npm_auth_token.value.as_ref() {
+            value = Some(next);
+        }
+    }
+
+    if let Some(scope_settings) = legacy_scope_settings(config, ident) {
+        if let Some(next) = scope_settings.npm_auth_token.value.as_ref() {
+            value = Some(next);
+        }
+    }
+
+    for rule in &config.settings.source_rules {
+        if source_rule_matches(rule, EcosystemFilter::Npm, registry) {
+            if let Some(next) = rule.npm_auth_token.value.as_ref() {
+                value = Some(next);
+            }
+        }
+    }
+
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, EcosystemFilter::Npm, ident) {
+            if let Some(next) = rule.npm_auth_token.value.as_ref() {
+                value = Some(next);
+            }
+        }
+    }
+
+    value
+}
+
+fn get_npm_auth_ident<'a>(config: &'a Configuration, registry: &str, ident: Option<&Ident>) -> Option<&'a String> {
+    let mut value
+        = None;
+
+    if let Some(registry_settings) = legacy_registry_settings(config, registry) {
+        if let Some(next) = registry_settings.npm_auth_ident.value.as_ref() {
+            value = Some(next);
+        }
+    }
+
+    if let Some(scope_settings) = legacy_scope_settings(config, ident) {
+        if let Some(next) = scope_settings.npm_auth_ident.value.as_ref() {
+            value = Some(next);
+        }
+    }
+
+    for rule in &config.settings.source_rules {
+        if source_rule_matches(rule, EcosystemFilter::Npm, registry) {
+            if let Some(next) = rule.npm_auth_ident.value.as_ref() {
+                value = Some(next);
+            }
+        }
+    }
+
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, EcosystemFilter::Npm, ident) {
+            if let Some(next) = rule.npm_auth_ident.value.as_ref() {
+                value = Some(next);
+            }
+        }
+    }
+
+    value
+}
+
+pub fn get_minimal_age_gate(config: &Configuration, registry: &str, ident: &Ident) -> std::time::Duration {
+    let mut value
+        = config.settings.npm_minimal_age_gate.value;
+
+    for rule in &config.settings.source_rules {
+        if source_rule_matches(rule, EcosystemFilter::Npm, registry) {
+            if let Some(next) = rule.npm_minimal_age_gate.value {
+                value = next;
+            }
+        }
+    }
+
+    for rule in &config.settings.package_rules {
+        if package_rule_matches(rule, EcosystemFilter::Npm, Some(ident)) {
+            if let Some(next) = rule.npm_minimal_age_gate.value {
+                value = next;
+            }
+        }
+    }
+
+    value
 }
 
 pub struct GetAuthorizationOptions<'a> {
@@ -141,8 +291,8 @@ pub fn should_authenticate(options: &GetAuthorizationOptions<'_>) -> bool {
             }
 
             // For unscoped packages, only authenticate if npmAlwaysAuth is true
-            *scope_registry_setting!(options.configuration, options.registry, options.ident, npm_always_auth)
-                .unwrap_or(&options.configuration.settings.npm_always_auth.value)
+            get_npm_always_auth(options.configuration, options.registry, options.ident)
+                .unwrap_or(options.configuration.settings.npm_always_auth.value)
         },
 
         AuthorizationMode::AlwaysAuthenticate | AuthorizationMode::BestEffort => {
@@ -190,14 +340,11 @@ pub async fn get_id_token(options: &GetIdTokenOptions<'_>) -> Result<Option<Stri
     actions_id_token_request_url.query_pairs_mut()
         .append_pair("audience", options.audience);
 
-    let response
+    let body
         = options.http_client.get(actions_id_token_request_url)?
             .header("authorization", Some(format!("Bearer {}", actions_id_token_request_token)))
-            .send()
+            .send_text()
             .await?;
-
-    let body
-        = response.text().await?;
 
     #[derive(Deserialize)]
     struct ActionsIdTokenResponse {
@@ -274,8 +421,8 @@ fn is_auth_strictly_required(options: &GetAuthorizationOptions<'_>) -> bool {
             }
 
             // For unscoped packages, npmAlwaysAuth=true means auth is strictly required
-            *scope_registry_setting!(options.configuration, options.registry, options.ident, npm_always_auth)
-                .unwrap_or(&options.configuration.settings.npm_always_auth.value)
+            get_npm_always_auth(options.configuration, options.registry, options.ident)
+                .unwrap_or(options.configuration.settings.npm_always_auth.value)
         },
 
         AuthorizationMode::BestEffort | AuthorizationMode::NeverAuthenticate => false,
@@ -291,7 +438,7 @@ pub async fn get_authorization(options: &GetAuthorizationOptions<'_>) -> Result<
     }
 
     let auth_token
-        = scope_registry_setting!(options.configuration, options.registry, options.ident, npm_auth_token)
+        = get_npm_auth_token(options.configuration, options.registry, options.ident)
             .or_else(|| options.configuration.settings.npm_auth_token.value.as_ref());
 
     if let Some(auth_token) = auth_token {
@@ -299,7 +446,7 @@ pub async fn get_authorization(options: &GetAuthorizationOptions<'_>) -> Result<
     }
 
     let auth_ident
-        = scope_registry_setting!(options.configuration, options.registry, options.ident, npm_auth_ident)
+        = get_npm_auth_ident(options.configuration, options.registry, options.ident)
             .or_else(|| options.configuration.settings.npm_auth_ident.value.as_ref());
 
     if let Some(auth_ident) = auth_ident {
@@ -335,14 +482,16 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
 
     let bytes = match params.authorization {
         Some(authorization) => {
-            let response = params.http_client.get(&url)?
+            let (response, bytes) = params.http_client.get(&url)?
                 .header("authorization", Some(authorization))
                 .enable_status_check(false)
-                .send().await?;
+                .send_bytes().await?;
 
-            handle_invalid_authentication_error(params, &response).await?;
+            let response
+                = handle_invalid_authentication_error(params, response).await?;
 
-            response.error_for_status()?.bytes().await?
+            response.error_for_status()?;
+            bytes
         },
 
         None => {
@@ -350,6 +499,28 @@ pub async fn get(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
         },
     };
 
+    Ok(bytes)
+}
+
+/// Fetch a response without retaining its body in the process-wide HTTP
+/// cache. Package archives are already deduplicated by the install fetch map
+/// and can be released as soon as they have been converted into cache zips.
+pub async fn get_uncached(params: &NpmHttpParams<'_>) -> Result<Bytes, Error> {
+    let url
+        = format!("{}{}", params.registry, params.path);
+
+    let (response, bytes) = params.http_client.get(&url)?
+        .header("authorization", params.authorization)
+        .enable_status_check(false)
+        .send_bytes().await?;
+
+    let response = if params.authorization.is_some() {
+        handle_invalid_authentication_error(params, response).await?
+    } else {
+        response
+    };
+
+    response.error_for_status()?;
     Ok(bytes)
 }
 
@@ -571,10 +742,10 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
         }
     }
 
-    let response
-        = request.send().await?;
+    let (response, fresh_body)
+        = request.send_bytes().await?;
 
-    if params.authorization.is_some() {
+    let response = if params.authorization.is_some() {
         let npm_params = NpmHttpParams {
             http_client: params.http_client,
             registry: params.registry,
@@ -582,8 +753,10 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
             authorization: params.authorization,
             otp: None,
         };
-        handle_invalid_authentication_error(&npm_params, &response).await?;
-    }
+        handle_invalid_authentication_error(&npm_params, response).await?
+    } else {
+        response
+    };
 
     if response.status().as_u16() == 304 {
         if let Some(cached) = cached {
@@ -600,8 +773,7 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
 
-    let fresh_body
-        = response.error_for_status()?.bytes().await?;
+    response.error_for_status()?;
 
     // Keep stale version entries the fresh response omits so
     // resolution still works when a published version is later
@@ -670,7 +842,7 @@ fn merge_versions_into_fresh(stale: &[u8], fresh: &[u8]) -> Vec<u8> {
     serde_json::to_vec(&fresh_json).unwrap_or_else(|_| fresh.to_vec())
 }
 
-pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {
+pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<HttpResponse, Error> {
     let url
         = format!("{}{}", params.registry, params.path);
 
@@ -693,15 +865,17 @@ pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<Response, 
             = ask_for_otp(params, &response).await?;
 
         request = inject_otp_headers(request, otp);
+        drop(response);
         response = request.send().await?;
     }
 
-    handle_invalid_authentication_error(params, &response).await?;
+    let response
+        = handle_invalid_authentication_error(params, response).await?;
 
     Ok(response.error_for_status()?)
 }
 
-pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<Response, Error> {
+pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<HttpResponse, Error> {
     let url
         = format!("{}{}", params.registry, params.path);
 
@@ -724,10 +898,12 @@ pub async fn put(params: &NpmHttpParams<'_>, body: String) -> Result<Response, E
             = ask_for_otp(params, &response).await?;
 
         request = inject_otp_headers(request, otp);
+        drop(response);
         response = request.send().await?;
     }
 
-    handle_invalid_authentication_error(params, &response).await?;
+    let response
+        = handle_invalid_authentication_error(params, response).await?;
 
     if let Err(error) = response.error_for_status_ref() {
         let body
@@ -753,14 +929,16 @@ fn inject_otp_headers(request: HttpRequest<'_>, otp: String) -> HttpRequest<'_> 
     request.header("npm-otp", Some(otp))
 }
 
-async fn handle_invalid_authentication_error(params: &NpmHttpParams<'_>, response: &Response) -> Result<(), Error> {
-    if is_otp_error(response) {
+async fn handle_invalid_authentication_error(params: &NpmHttpParams<'_>, response: HttpResponse) -> Result<HttpResponse, Error> {
+    if is_otp_error(&response) {
         return Err(Error::AuthenticationError(
             "Invalid OTP token".to_string()
         ));
     }
 
     if response.status().as_u16() == 401 {
+        drop(response);
+
         let attempted_as = match whoami(params.http_client, params.registry, params.authorization).await {
             Ok(Some(username)) => username,
             Ok(None) => "an anonymous user".to_string(),
@@ -772,7 +950,7 @@ async fn handle_invalid_authentication_error(params: &NpmHttpParams<'_>, respons
         ));
     }
 
-    Ok(())
+    Ok(response)
 }
 
 fn is_otp_error(response: &Response) -> bool {
@@ -850,6 +1028,14 @@ async fn ask_for_otp(params: &NpmHttpParams<'_>, response: &Response) -> Result<
     }
 
     render_otp_notice(&response).await;
+
+    // Nobody's there to answer the prompt when we're not attached to a
+    // terminal; erroring out is better than hanging forever.
+    if !zpm_utils::is_terminal() {
+        return Err(Error::AuthenticationError(
+            "The registry requires additional authentication, but Yarn isn't running in an interactive terminal; rerun this command with --otp <code>".to_string()
+        ));
+    }
 
     let report_guard
         = current_report().await;
