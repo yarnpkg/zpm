@@ -10,6 +10,8 @@ use crate::{
     script::ScriptEnvironment,
 };
 
+pub mod python;
+
 #[derive(Debug)]
 enum PackageManager {
     Npm,
