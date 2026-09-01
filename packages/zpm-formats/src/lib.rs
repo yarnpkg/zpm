@@ -127,6 +127,16 @@ pub struct Entry<'a> {
 }
 
 impl<'a> Entry<'a> {
+    /// Whether this archive entry represents a directory rather than a file.
+    ///
+    /// ZIP producers aren't consistent about setting the Unix file type bits,
+    /// but the trailing slash is part of the ZIP format's conventional
+    /// directory representation. Check both so callers don't have to know
+    /// which convention a particular archive used.
+    pub fn is_directory(&self) -> bool {
+        self.name.as_str().ends_with('/') || self.mode & 0o170000 == 0o040000
+    }
+
     pub fn new(name: Path) -> Self {
         Entry {
             name,
@@ -163,9 +173,16 @@ impl<'a> Entry<'a> {
 
 pub fn entries_to_disk<'a>(entries: &[Entry<'a>], base: &Path) -> Result<(), Error> {
     for entry in entries {
-        base.with_join(&entry.name)
-            .fs_create_parent()?
-            .fs_change(&entry.data, entry.mode & 0o111 == 0o111)?;
+        let target
+            = base.with_join(&entry.name);
+
+        if entry.is_directory() {
+            target.fs_create_dir_all()?;
+        } else {
+            target
+                .fs_create_parent()?
+                .fs_change(&entry.data, entry.mode & 0o111 == 0o111)?;
+        }
     }
 
     Ok(())
@@ -206,6 +223,36 @@ pub fn entries_from_folder<'a>(path: &Path) -> Result<Vec<Entry<'a>>, Error> {
     }
 
     Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use super::*;
+
+    #[test]
+    fn test_entries_to_disk_handles_explicit_directory_entries() {
+        let base = Path::try_from(std::env::temp_dir()
+            .join(format!("zpm-formats-directory-entry-{}", std::process::id())))
+            .unwrap();
+        let directory = Path::try_from("package/").unwrap();
+        let file = Path::try_from("package/module.py").unwrap();
+
+        if base.fs_exists() {
+            base.fs_rm().unwrap();
+        }
+
+        entries_to_disk(&[
+            Entry::new(directory),
+            Entry::new_file(file, Cow::Borrowed(b"value = 42\n")),
+        ], &base).unwrap();
+
+        assert!(base.with_join_str("package").fs_is_dir());
+        assert_eq!("value = 42\n", base.with_join_str("package/module.py").fs_read_text().unwrap());
+
+        base.fs_rm().unwrap();
+    }
 }
 
 pub fn entries_from_files<'a>(base: &Path, files: &[Path]) -> Result<Vec<Entry<'a>>, Error> {
