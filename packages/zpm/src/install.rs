@@ -1390,10 +1390,18 @@ impl<'a> InstallManager<'a> {
                     crate::island::resolve_island(island, &self.context, &lockfile)
                 });
 
-                let (_, island_results) = futures::future::try_join(
-                    async { greedy_future.await; Ok::<(), Error>(()) },
-                    futures::future::try_join_all(island_futures),
-                ).await?;
+                // join (not try_join/try_join_all): resolve_island relies on
+                // its spawn_blocking handles being awaited to completion (see
+                // the transmute safety comment in resolve_island_once), so a
+                // sibling island's error must not drop in-flight island
+                // futures. Errors are propagated once everything has settled.
+                let (_, island_results) = futures::future::join(
+                    greedy_future,
+                    futures::future::join_all(island_futures),
+                ).await;
+
+                let island_results = island_results.into_iter()
+                    .collect::<Result<Vec<_>, Error>>()?;
 
                 // Merge island results into install state and fetch packages
                 let mut island_locators = Vec::new();

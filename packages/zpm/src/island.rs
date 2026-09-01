@@ -118,9 +118,17 @@ pub async fn resolve_island(
         lockfile_island: LockfileIsland::default(),
     };
 
-    for fork in forks {
-        let result
-            = resolve_island_once(island, ctx, lockfile, Some(fork)).await?;
+    // Forks are independent, so resolve them concurrently. We use join_all
+    // rather than try_join_all: resolve_island_once relies on its
+    // spawn_blocking handle being awaited to completion (see the transmute
+    // safety comment there), so sibling futures must not be dropped on the
+    // first error.
+    let results = futures::future::join_all(
+        forks.into_iter().map(|fork| resolve_island_once(island, ctx, lockfile, Some(fork))),
+    ).await;
+
+    for result in results {
+        let result = result?;
 
         merged.descriptor_to_locator.extend(result.descriptor_to_locator);
         merged.normalized_resolutions.extend(result.normalized_resolutions);
@@ -245,6 +253,15 @@ async fn resolve_island_once(
     // SAFETY: the JoinHandle is `.await`ed immediately below, so the closure
     // always completes before this function returns — the references in `ctx`
     // remain valid for the entire duration of the blocking task.
+    //
+    // CAUTION: this only holds while every caller polls this future to
+    // completion. tokio never cancels a spawn_blocking task, so if this
+    // future is dropped at the `.await` (a sibling erroring inside
+    // try_join_all, a select!/timeout wrapper), the solver keeps running
+    // with dangling `ctx` references. Callers must therefore await through
+    // non-cancelling combinators only (join/join_all — see resolve_island
+    // and the island await in install.rs), until the TODO below removes
+    // the transmute entirely.
     let handle = tokio::runtime::Handle::current();
     let island_id = island.id.clone();
     let enforced_resolutions = ctx.enforced_resolutions.clone();
