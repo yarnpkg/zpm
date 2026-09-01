@@ -111,7 +111,7 @@ impl Project {
 
         let target_version = target.manifest.remote.version.as_ref();
 
-        let satisfies = match &descriptor.range {
+        let satisfies = match descriptor.range.physical_range() {
             Range::WorkspaceMagic(_) => true,
             Range::WorkspacePath(_) => true,
             Range::WorkspaceIdent(_) => true,

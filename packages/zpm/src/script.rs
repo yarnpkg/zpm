@@ -42,7 +42,7 @@ fn quote_path_if_needed(path: &str) -> String {
     }
 }
 
-fn make_executable_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &[String]) -> Result<(), Error> {
+pub(crate) fn make_executable_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &[String]) -> Result<(), Error> {
     if cfg!(windows) {
         let escaped_args = args
             .iter()

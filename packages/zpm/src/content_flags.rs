@@ -162,7 +162,7 @@ fn parse_pypi_entry_point_value(value: &str) -> Option<(String, String)> {
     Some((module_name.to_string(), object_name.to_string()))
 }
 
-fn extract_pypi_binaries(package_bytes: &[u8]) -> Result<BTreeMap<String, Binary>, Error> {
+pub(crate) fn extract_pypi_binaries(package_bytes: &[u8]) -> Result<BTreeMap<String, Binary>, Error> {
     let entries
         = zpm_formats::zip::entries_from_zip(package_bytes)?;
 
@@ -216,7 +216,7 @@ fn extract_pypi_binaries(package_bytes: &[u8]) -> Result<BTreeMap<String, Binary
 
 impl ContentFlags {
     pub fn extract(locator: &Locator, package_data: &PackageData) -> Result<Self, Error> {
-        if matches!(locator.reference, Reference::Link(_)) {
+        if matches!(locator.reference.physical_reference(), Reference::Link(_)) {
             return Ok(Self::default());
         }
 
@@ -261,7 +261,7 @@ impl ContentFlags {
         let package_bytes
             = archive_path.fs_read()?;
 
-        if matches!(locator.reference, Reference::PypiShorthand(_) | Reference::PypiRegistry(_)) {
+        if matches!(locator.reference.physical_reference(), Reference::PypiShorthand(_) | Reference::PypiRegistry(_)) {
             return Ok(Self {
                 binaries: extract_pypi_binaries(&package_bytes)?,
                 build_commands: vec![],

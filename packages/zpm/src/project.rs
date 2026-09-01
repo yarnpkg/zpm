@@ -594,7 +594,7 @@ impl Project {
             self.workspaces.iter().find(|w| w.rel_path == self.package_cwd)
                 .ok_or(Error::ActivePackageNotWorkspace)?
                 .locator()
-        };
+        }.physical_locator();
 
         let Reference::WorkspaceIdent(_) = &active_package.reference else {
             return Err(Error::ActivePackageNotWorkspace);
@@ -1060,7 +1060,7 @@ impl Project {
         for (descriptor, locator) in &install_state.descriptor_to_locator {
             let range = descriptor.range.physical_range();
 
-            if !matches!(range, Range::Tarball(_) | Range::Folder(_) | Range::Exec(_) | Range::Patch(_) | Range::Portal(_)) {
+            if !matches!(range, Range::Tarball(_) | Range::Folder(_) | Range::PypiFile(_) | Range::Exec(_) | Range::Patch(_) | Range::Portal(_)) {
                 continue;
             }
 
@@ -1076,7 +1076,7 @@ impl Project {
                 // chain; too exotic to bother, never skip.
                 if matches!(
                     params.inner.0.range.physical_range(),
-                    Range::Tarball(_) | Range::Folder(_) | Range::Exec(_) | Range::Portal(_),
+                    Range::Tarball(_) | Range::Folder(_) | Range::PypiFile(_) | Range::Exec(_) | Range::Portal(_),
                 ) {
                     return Ok(false);
                 }
@@ -1166,6 +1166,22 @@ impl Project {
 
                     match hash {
                         Ok(hash) => reference_params.hash == Some(hash),
+                        Err(_) => false,
+                    }
+                },
+
+                (Range::PypiFile(_), Reference::PypiRegistry(reference_params)) => {
+                    let Some(url) = &reference_params.url else {
+                        return Ok(false);
+                    };
+                    let Some(source) = crate::pypi::parse_local_wheel_url(&url.0)? else {
+                        return Ok(false);
+                    };
+                    let wheel_path
+                        = resolve_local_path(&context_directory, &source.path)?;
+
+                    match wheel_path.fs_read() {
+                        Ok(data) => source.checksum == Hash64::from_data(data),
                         Err(_) => false,
                     }
                 },
@@ -1552,7 +1568,8 @@ impl Project {
         Ok(())
     }
 
-    pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<InstallResult, Error> {
+    pub fn run_install(&mut self, options: RunInstallOptions) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<InstallResult, Error>> + '_>> {
+        Box::pin(async move {
         // Useful for optimization purposes as we can reuse some information such as content flags.
         // Discard errors; worst case scenario we just recompute the whole state from scratch.
         if self.install_state.is_none() {
@@ -1670,6 +1687,7 @@ impl Project {
         drain_background_writes.drain().await;
 
         install_outcome
+        })
     }
 
     /// Resolve a task and all its dependencies.
