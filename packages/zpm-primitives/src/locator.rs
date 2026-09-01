@@ -56,11 +56,13 @@ impl Locator {
     }
 
     pub fn physical_locator(&self) -> Locator {
-        if let Reference::Virtual(params) = &self.reference {
-            Locator::new_bound(self.ident.clone(), params.inner.physical_reference().clone(), self.parent.clone())
-        } else {
-            self.clone()
+        let physical_reference = self.reference.physical_reference();
+
+        if physical_reference == &self.reference {
+            return self.clone();
         }
+
+        Locator::new_bound(self.ident.clone(), physical_reference.clone(), self.parent.clone())
     }
 
     pub fn virtualized_for(&self, parent: &Locator) -> Locator {
@@ -76,6 +78,14 @@ impl Locator {
         Locator {
             ident: self.ident.clone(),
             reference,
+            parent: self.parent.clone(),
+        }
+    }
+
+    pub fn env_qualified_with_hash(&self, hash: Hash64) -> Locator {
+        Locator {
+            ident: self.ident.clone(),
+            reference: self.reference.env_qualified_with_hash(hash),
             parent: self.parent.clone(),
         }
     }
@@ -159,7 +169,35 @@ impl_file_string_serialization!(Locator);
 #[rstest]
 #[case("foo@npm:1.0.0")]
 #[case("foo@pypi:1.0.0")]
+#[case(&format!("foo@env:{}#pypi:1.0.0", Hash64::from_data("fork").to_file_string()))]
 #[case("foo@npm:1.0.0::parent=root@workspace:.")]
 fn test_locator_serialization(#[case] str: &str) {
     assert_eq!(str, Locator::from_file_string(str).unwrap().to_file_string());
+}
+
+#[test]
+fn test_env_locator_physical_locator() {
+    let hash
+        = Hash64::from_data("fork");
+    let locator
+        = Locator::from_file_string(&format!("foo@env:{}#pypi:1.0.0", hash.to_file_string())).unwrap();
+
+    assert_eq!("foo@pypi:1.0.0", locator.physical_locator().to_file_string());
+}
+
+#[test]
+fn test_env_locator_preserves_virtual_outer_wrapper() {
+    let fork_hash
+        = Hash64::from_data("fork");
+    let peer_hash
+        = Hash64::from_data("peer");
+    let locator
+        = Locator::from_file_string("foo@pypi:1.0.0").unwrap()
+            .virtualized_with_hash(peer_hash.clone())
+            .env_qualified_with_hash(fork_hash.clone());
+
+    assert_eq!(
+        format!("foo@virtual:{}#env:{}#pypi:1.0.0", peer_hash.to_file_string(), fork_hash.to_file_string()),
+        locator.to_file_string(),
+    );
 }

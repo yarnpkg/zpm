@@ -4,6 +4,8 @@ use zpm_utils::EcoString;
 use regex::Regex;
 use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
+#[cfg(test)]
+use zpm_utils::FromFileString;
 use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
 
 use crate::{PeerRange, PypiRangeParameters, PypiSpecifierSet, SemverPeerRange};
@@ -19,6 +21,65 @@ fn format_registry_semver(ident: &Option<Ident>, range: &zpm_semver::Range) -> S
         Some(ident) => format!("npm:{}@{}", ident.to_file_string(), range.to_file_string()),
         None => format!("npm:{}", range.to_file_string()),
     }
+}
+
+#[test]
+fn test_env_range_serialization() {
+    let hash
+        = Hash64::from_data("fork").to_file_string();
+    let range
+        = format!("env:{hash}#pypi:>=1.0.0");
+
+    assert_eq!(range, Range::from_file_string(&range).unwrap().to_file_string());
+}
+
+#[test]
+fn test_env_range_physical_range() {
+    let hash
+        = Hash64::from_data("fork");
+    let range
+        = Range::from_file_string(&format!("env:{}#pypi:>=1.0.0", hash.to_file_string())).unwrap();
+
+    assert_eq!("pypi:>=1.0.0", range.physical_range().to_file_string());
+}
+
+#[test]
+fn test_env_range_preserves_virtual_outer_wrapper() {
+    let fork_hash
+        = Hash64::from_data("fork");
+    let peer_hash
+        = Hash64::from_data("peer");
+    let range
+        = Range::from_file_string(&format!("virtual:pypi:>=1.0.0#{}", peer_hash.to_file_string())).unwrap();
+
+    assert_eq!(
+        format!("virtual:env:{}#pypi:>=1.0.0#{}", fork_hash.to_file_string(), peer_hash.to_file_string()),
+        range.env_qualified_with_hash(fork_hash).to_file_string(),
+    );
+}
+
+#[test]
+fn test_anonymous_tag_allows_arbitrary_dist_tags() {
+    // Dist-tag names aren't restricted to lowercase (e.g. `Beta`, `RC1`)
+    assert!(matches!(Range::from_file_string("Beta").unwrap(), Range::AnonymousTag(_)));
+
+    // But protocol-qualified ranges must not be swallowed by the tag pattern
+    let hash = Hash64::from_data("fork").to_file_string();
+    assert!(matches!(Range::from_file_string(&format!("env:{hash}#pypi:>=1.0.0")).unwrap(), Range::Env(_)));
+}
+
+#[test]
+fn test_pypi_file_range_serialization() {
+    let range = "pypi-file:./wheels/demo-1.2.3-py3-none-any.whl#extras=cli,test";
+
+    assert_eq!(range, Range::from_file_string(range).unwrap().to_file_string());
+}
+
+#[test]
+fn test_pypi_git_range_serialization() {
+    let range = "pypi-git:https://example.com/demo.git#commit=0123456789012345678901234567890123456789";
+
+    assert_eq!(range, Range::from_file_string(range).unwrap().to_file_string());
 }
 
 fn format_registry_tag(ident: &Option<Ident>, tag: &str) -> String {
@@ -51,6 +112,14 @@ fn format_pypi_tag(ident: &Option<Ident>, tag: &str, parameters: &Option<PypiRan
     };
 
     format!("{}{}", base, format_pypi_parameters(parameters))
+}
+
+fn format_pypi_file(path: &str, parameters: &Option<PypiRangeParameters>) -> String {
+    format!("pypi-file:{}{}", path, format_pypi_parameters(parameters))
+}
+
+fn format_pypi_git(git: &zpm_git::GitRange) -> String {
+    format!("pypi-git:{}", git.to_file_string())
 }
 
 fn format_jsr_semver(ident: &Option<Ident>, range: &zpm_semver::Range) -> String {
@@ -148,6 +217,21 @@ pub enum Range {
         ident: Option<Ident>,
         tag: EcoString,
         parameters: Option<PypiRangeParameters>,
+    },
+
+    #[pattern(r"pypi-file:(?<path>.*\.whl)(?:#(?<parameters>[^#]+))?")]
+    #[to_file_string(|params| format_pypi_file(&params.path, &params.parameters))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_pypi_file(&params.path, &params.parameters)))]
+    PypiFile {
+        path: String,
+        parameters: Option<PypiRangeParameters>,
+    },
+
+    #[pattern(r"pypi-git:(?<git>.*)")]
+    #[to_file_string(|params| format_pypi_git(&params.git))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_pypi_git(&params.git)))]
+    PypiGit {
+        git: zpm_git::GitRange,
     },
 
     #[pattern(r"jsr:(?:(?<ident>.*)@)?(?<range>.*)")]
@@ -264,7 +348,9 @@ pub enum Range {
         url: String,
     },
 
-    #[pattern(r"(?<tag>.*)")]
+    // Anything without a colon, so protocol-qualified ranges (env:, virtual:,
+    // etc.) fall through to their own patterns below
+    #[pattern(r"(?<tag>[^:]*)")]
     #[to_file_string(|params| params.tag.as_str().to_string())]
     #[to_print_string(|params| DataType::Range.colorize(params.tag.as_str()))]
     AnonymousTag {
@@ -279,6 +365,18 @@ pub enum Range {
     #[struct_attr(rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
     #[struct_attr(rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))))]
     Virtual {
+        #[rkyv(omit_bounds)]
+        inner: Box<Range>,
+        hash: Hash64,
+    },
+
+    #[pattern(r"env:(?<hash>[a-f0-9]*)#(?<inner>.*)$")]
+    #[to_file_string(|params| format!("env:{}#{}", params.hash.to_file_string(), params.inner.to_file_string()))]
+    #[to_print_string(|params| format!("{} {}", params.inner.to_print_string(), DataType::Range.colorize(&format!("[env:{}]", params.hash.mini()))))]
+    #[struct_attr(rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+    #[struct_attr(rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+    #[struct_attr(rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))))]
+    Env {
         #[rkyv(omit_bounds)]
         inner: Box<Range>,
         hash: Hash64,
@@ -316,24 +414,83 @@ impl Range {
             Range::Patch(params)
                 => Some(params.inner.0.clone()),
 
+            Range::Env(params)
+                => params.inner.inner_descriptor()
+                    .map(|descriptor| descriptor.env_qualified_with_hash(params.hash.clone())),
+
             _ => None,
         }
     }
 
     pub fn physical_range(&self) -> &Range {
-        if let Range::Virtual(params) = self {
-            params.inner.physical_range()
-        } else {
-            self
+        match self {
+            Range::Virtual(params) => {
+                params.inner.physical_range()
+            },
+
+            Range::Env(params) => {
+                params.inner.physical_range()
+            },
+
+            _ => {
+                self
+            },
+        }
+    }
+
+    /// Applies a transformation to the protocol-level range while preserving
+    /// logical identity wrappers such as `virtual:` and `env:`.
+    pub fn map_physical<F>(self, transform: F) -> Range
+    where
+        F: FnOnce(Range) -> Range,
+    {
+        match self {
+            Range::Virtual(mut params) => {
+                params.inner = Box::new(params.inner.map_physical(transform));
+                Range::Virtual(params)
+            },
+
+            Range::Env(mut params) => {
+                params.inner = Box::new(params.inner.map_physical(transform));
+                Range::Env(params)
+            },
+
+            physical => transform(physical),
+        }
+    }
+
+    pub fn env_qualified_with_hash(&self, hash: Hash64) -> Range {
+        match self {
+            Range::Virtual(params) => {
+                Range::Virtual(VirtualRange {
+                    inner: Box::new(params.inner.env_qualified_with_hash(hash)),
+                    hash: params.hash.clone(),
+                })
+            },
+
+            Range::Env(params) if params.hash == hash => {
+                self.clone()
+            },
+
+            _ => {
+                Range::Env(EnvRange {
+                    inner: Box::new(self.clone()),
+                    hash,
+                })
+            },
         }
     }
 
     pub fn is_workspace(&self) -> bool {
-        matches!(self, Range::WorkspaceMagic(_) | Range::WorkspaceSemver(_) | Range::WorkspaceIdent(_) | Range::WorkspacePath(_))
+        matches!(self.physical_range(), Range::WorkspaceMagic(_) | Range::WorkspaceSemver(_) | Range::WorkspaceIdent(_) | Range::WorkspacePath(_))
     }
 
     pub fn to_anonymous_range(&self) -> Range {
         match self {
+            Range::Env(params) => {
+                params.inner.to_anonymous_range().env_qualified_with_hash(params.hash.clone())
+            },
+
             Range::RegistrySemver(params) => {
                 Range::AnonymousSemver(AnonymousSemverRange {range: params.range.clone()})
             },
@@ -350,6 +507,14 @@ impl Range {
                 Range::PypiTag(PypiTagRange {ident: None, tag: params.tag.clone(), parameters: params.parameters.clone()})
             },
 
+            Range::PypiFile(_) => {
+                self.clone()
+            },
+
+            Range::PypiGit(_) => {
+                self.clone()
+            },
+
             Range::JsrSemver(params) => {
                 Range::JsrSemver(JsrSemverRange {ident: None, range: params.range.clone()})
             },
@@ -364,6 +529,10 @@ impl Range {
 
     pub fn to_semver_range(&self) -> Option<zpm_semver::Range> {
         match self {
+            Range::Env(params) => {
+                params.inner.to_semver_range()
+            },
+
             Range::AnonymousSemver(params) => {
                 Some(params.range.clone())
             },
@@ -382,12 +551,32 @@ impl Range {
 
     pub fn registry(&self, default_ident: &Ident) -> Registry {
         match self {
+            Range::Env(params) => {
+                params.inner.registry(default_ident)
+            },
+
             Range::AnonymousSemver(_) => {
                 Registry::Npm(default_ident.clone())
             },
 
             Range::RegistrySemver(params) => {
                 Registry::Npm(params.ident.clone().unwrap_or_else(|| default_ident.clone()))
+            },
+
+            Range::PypiSpecifier(params) => {
+                Registry::Pypi(params.ident.clone().unwrap_or_else(|| default_ident.clone()))
+            },
+
+            Range::PypiTag(params) => {
+                Registry::Pypi(params.ident.clone().unwrap_or_else(|| default_ident.clone()))
+            },
+
+            Range::PypiFile(_) => {
+                Registry::Pypi(default_ident.clone())
+            },
+
+            Range::PypiGit(_) => {
+                Registry::Pypi(default_ident.clone())
             },
 
             Range::JsrSemver(params) => {
@@ -414,6 +603,10 @@ impl Range {
 
     pub fn to_peer_range(&self) -> Result<PeerRange, RangeError> {
         match self {
+            Range::Env(params) => {
+                params.inner.to_peer_range()
+            },
+
             Range::AnonymousSemver(params) => {
                 Ok(PeerRange::Semver(SemverPeerRange {range: params.range.clone()}))
             },

@@ -5,4 +5,5 @@ pub enum Registry {
     None,
     Workspace(Ident),
     Npm(Ident),
+    Pypi(Ident),
 }
