@@ -1,14 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use pubgrub::Reporter;
-use zpm_primitives::{Descriptor, Ident, Locator, Reference, ShorthandReference, WorkspaceIdentReference};
-use zpm_utils::FromFileString;
+use zpm_primitives::{Descriptor, Ident, Locator, PypiSpecifierRange, PypiSpecifierSet, PythonFork, Range, Reference, ShorthandReference, WorkspaceIdentReference};
+use zpm_utils::{FromFileString, Hash64, ToFileString};
 
 use crate::error::Error;
 use crate::install::InstallContext;
 use crate::island_provider::IslandDependencyProvider;
-use crate::island_types::{IslandPackage, IslandVersion, IslandVersionSet};
-use crate::lockfile::Lockfile;
+use crate::island_types::{IslandPackage, IslandPackageKey, IslandRegistry, IslandVersion, IslandVersionSet};
+use crate::lockfile::{Lockfile, LockfileIsland, LockfileIslandFork};
+use crate::primitives_exts::RangeExt;
 use crate::project::Workspace;
 use crate::resolvers::Resolution;
 
@@ -21,6 +22,7 @@ pub struct ResolvedIsland {
     pub workspace_idents: BTreeSet<Ident>,
     pub root_descriptors: BTreeSet<Descriptor>,
     pub linker: zpm_config::IslandLinker,
+    pub python_link_version: Option<String>,
 }
 
 /// The result of resolving an island's dependency graph.
@@ -29,6 +31,7 @@ pub struct IslandResolutionResult {
     pub island_id: String,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
     pub normalized_resolutions: BTreeMap<Locator, Resolution>,
+    pub lockfile_island: LockfileIsland,
 }
 
 /// Build resolved islands from config settings + project workspaces.
@@ -72,6 +75,7 @@ pub fn resolve_islands(
             workspace_idents,
             root_descriptors,
             linker: island_def.linker.value,
+            python_link_version: island_def.python.value.link_version.clone(),
         });
     }
 
@@ -89,50 +93,141 @@ pub async fn resolve_island(
     ctx: &InstallContext<'_>,
     lockfile: &Lockfile,
 ) -> Result<IslandResolutionResult, Error> {
+    let project = ctx.project
+        .expect("Project is required for island resolution");
+
+    let forks
+        = if island.linker == zpm_config::IslandLinker::Venv {
+            project.config.settings.python_target_envs()
+                .map_err(|err| Error::InvalidResolution(format!("Invalid Python target environment: {err}")))?
+                .into_iter()
+                .map(PythonFork::from_target)
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+    if forks.is_empty() {
+        return resolve_island_once(island, ctx, lockfile, None).await;
+    }
+
+    let mut merged = IslandResolutionResult {
+        island_id: island.id.clone(),
+        descriptor_to_locator: BTreeMap::new(),
+        normalized_resolutions: BTreeMap::new(),
+        lockfile_island: LockfileIsland::default(),
+    };
+
+    for fork in forks {
+        let result
+            = resolve_island_once(island, ctx, lockfile, Some(fork)).await?;
+
+        merged.descriptor_to_locator.extend(result.descriptor_to_locator);
+        merged.normalized_resolutions.extend(result.normalized_resolutions);
+        merged.lockfile_island.forks.extend(result.lockfile_island.forks);
+    }
+
+    Ok(merged)
+}
+
+/// Canonicalize a workspace dependency for island resolution: pypi
+/// descriptors are normalized (preserving the manifest alias when the
+/// canonical ident differs), and ranges that require a binding are bound
+/// to the declaring workspace.
+fn canonicalize_workspace_dependency(
+    ident: &Ident,
+    descriptor: &Descriptor,
+    workspace: &Workspace,
+) -> Result<(Ident, Descriptor), Error> {
+    let (ident, descriptor)
+        = crate::resolvers::pypi::canonicalize_pypi_descriptor(descriptor)
+            .map(|(package_ident, descriptor)| {
+                if package_ident == descriptor.ident {
+                    (package_ident, descriptor)
+                } else {
+                    (ident.clone(), descriptor)
+                }
+            })?;
+
+    let descriptor = if descriptor.range.details().require_binding && descriptor.parent.is_none() {
+        Descriptor::new_bound(
+            descriptor.ident.clone(),
+            descriptor.range.clone(),
+            Some(workspace.locator()),
+        )
+    } else {
+        descriptor
+    };
+
+    Ok((ident, descriptor))
+}
+
+async fn resolve_island_once(
+    island: &ResolvedIsland,
+    ctx: &InstallContext<'_>,
+    lockfile: &Lockfile,
+    fork: Option<PythonFork>,
+) -> Result<IslandResolutionResult, Error> {
     // Phase 2: Build locked_versions map (preferred locators from lockfile)
-    let locked_versions = build_locked_versions(island, lockfile);
+    let fork_id
+        = fork.as_ref()
+            .map(|fork| fork.id.clone())
+            .unwrap_or_else(LockfileIsland::default_fork_id);
+    let locked_versions = build_locked_versions(island, lockfile, &fork_id);
 
     // Phase 3: Build root_deps (workspace singletons) and workspace_deps
     let project = ctx.project
         .expect("Project is required for island resolution");
 
     let mut root_deps: BTreeMap<IslandPackage, IslandVersionSet> = BTreeMap::new();
-    let mut workspace_deps: BTreeMap<Ident, BTreeMap<Ident, Descriptor>> = BTreeMap::new();
+    let mut workspace_deps: BTreeMap<IslandPackageKey, BTreeMap<Ident, Descriptor>> = BTreeMap::new();
 
     for workspace in &project.workspaces {
-        if !island.workspace_idents.contains(&workspace.name) {
-            continue;
+        let workspace_key
+            = IslandPackageKey::new(workspace.name.clone(), IslandRegistry::Workspace);
+        let is_island_root
+            = island.workspace_idents.contains(&workspace.name);
+
+        if is_island_root {
+            // Create a workspace locator using WorkspaceIdentReference
+            let mut ws_locator = Locator::new(
+                workspace.name.clone(),
+                WorkspaceIdentReference {
+                    ident: workspace.name.clone(),
+                }.into(),
+            );
+
+            if let Some(fork) = &fork {
+                ws_locator = ws_locator.env_qualified_with_hash(fork.id.clone());
+            }
+
+            // Root depends on each configured island workspace as an exact
+            // singleton. Other workspaces are available to the provider only
+            // when reached through one of these roots.
+            root_deps.insert(
+                IslandPackage::Named(workspace_key.clone()),
+                IslandVersionSet::exact_singleton(IslandVersion(ws_locator)),
+            );
         }
-
-        // Create a workspace locator using WorkspaceIdentReference
-        let ws_locator = Locator::new(
-            workspace.name.clone(),
-            WorkspaceIdentReference {
-                ident: workspace.name.clone(),
-            }.into(),
-        );
-        let ws_version = IslandVersion(ws_locator);
-
-        // Root depends on each workspace as an exact singleton
-        root_deps.insert(
-            IslandPackage::Named(workspace.name.clone()),
-            IslandVersionSet::exact_singleton(ws_version),
-        );
 
         // Collect this workspace's dependencies for the provider
         let mut deps: BTreeMap<Ident, Descriptor> = BTreeMap::new();
 
         for (ident, descriptor) in &workspace.manifest.remote.dependencies {
-            deps.insert(ident.clone(), descriptor.clone());
+            let (ident, descriptor)
+                = canonicalize_workspace_dependency(ident, descriptor, workspace)?;
+            deps.insert(ident, descriptor);
         }
 
-        if !ctx.prune_dev_dependencies {
+        if is_island_root && !ctx.prune_dev_dependencies {
             for (ident, descriptor) in &workspace.manifest.dev_dependencies {
-                deps.insert(ident.clone(), descriptor.clone());
+                let (ident, descriptor)
+                    = canonicalize_workspace_dependency(ident, descriptor, workspace)?;
+                deps.insert(ident, descriptor);
             }
         }
 
-        workspace_deps.insert(workspace.name.clone(), deps);
+        workspace_deps.insert(workspace_key, deps);
     }
 
     // TODO: Phase 1 — lockfile fast-path. Currently disabled; always
@@ -161,6 +256,9 @@ pub async fn resolve_island(
     };
 
     let workspace_deps_for_provider = workspace_deps.clone();
+    let fork_for_provider = fork.clone();
+    let requires_python_target
+        = island.linker == zpm_config::IslandLinker::Venv && fork_for_provider.is_none();
 
     let (solution, resolution_cache, extra_resolution_cache) = tokio::task::spawn_blocking(move || {
         let provider = IslandDependencyProvider::new(
@@ -171,6 +269,8 @@ pub async fn resolve_island(
             root_deps,
             ctx_static,
             workspace_deps_for_provider,
+            fork_for_provider,
+            requires_python_target,
         );
 
         let root_locator = Locator::new(
@@ -202,7 +302,7 @@ pub async fn resolve_island(
     })??;
 
     // Phase 5: Convert pubgrub solution to descriptor_to_locator + resolutions
-    convert_solution(&island.id, solution, &resolution_cache, &extra_resolution_cache, &workspace_deps)
+    convert_solution(&island.id, solution, &resolution_cache, &extra_resolution_cache, &workspace_deps, fork.as_ref())
 }
 
 #[allow(dead_code)]
@@ -212,7 +312,7 @@ pub async fn resolve_island(
 fn is_island_lockfile_valid(
     locked_island: &BTreeMap<Descriptor, Locator>,
     lockfile: &Lockfile,
-    current_root_deps: &BTreeMap<Ident, IslandVersionSet>,
+    current_root_deps: &BTreeMap<IslandPackageKey, IslandVersionSet>,
 ) -> bool {
     if locked_island.is_empty() && current_root_deps.is_empty() {
         return true;
@@ -236,6 +336,7 @@ fn is_island_lockfile_valid(
         .collect();
 
     let current_idents: BTreeSet<&Ident> = current_root_deps.keys()
+        .map(|key| &key.ident)
         .collect();
 
     // Every current dep must be present, and the locked island shouldn't
@@ -263,12 +364,14 @@ fn is_island_lockfile_valid(
 /// Build an IslandResolutionResult from cached lockfile data.
 fn island_result_from_lockfile(
     island_id: &str,
-    locked_island: &BTreeMap<Descriptor, Locator>,
+    locked_island: &LockfileIsland,
     lockfile: &Lockfile,
 ) -> Result<IslandResolutionResult, Error> {
     let mut normalized_resolutions = BTreeMap::new();
+    let descriptor_to_locator
+        = locked_island.flatten_resolutions();
 
-    for locator in locked_island.values() {
+    for locator in descriptor_to_locator.values() {
         if let Some(entry) = lockfile.entries.get(locator) {
             normalized_resolutions.insert(locator.clone(), entry.resolution.clone());
         }
@@ -276,8 +379,9 @@ fn island_result_from_lockfile(
 
     Ok(IslandResolutionResult {
         island_id: island_id.to_string(),
-        descriptor_to_locator: locked_island.clone(),
+        descriptor_to_locator,
         normalized_resolutions,
+        lockfile_island: locked_island.clone(),
     })
 }
 
@@ -285,12 +389,14 @@ fn island_result_from_lockfile(
 fn build_locked_versions(
     island: &ResolvedIsland,
     lockfile: &Lockfile,
-) -> BTreeMap<Ident, Locator> {
+    fork_id: &Hash64,
+) -> BTreeMap<IslandPackageKey, Locator> {
     let mut locked = BTreeMap::new();
 
-    if let Some(locked_island) = lockfile.islands.get(&island.id) {
-        for locator in locked_island.values() {
-            locked.entry(locator.ident.clone()).or_insert_with(|| locator.clone());
+    if let Some(locked_fork) = lockfile.islands.get(&island.id)
+        .and_then(|locked_island| locked_island.forks.get(fork_id)) {
+        for locator in locked_fork.resolutions.values() {
+            locked.entry(IslandPackageKey::from_locator(locator)).or_insert_with(|| locator.clone());
         }
     }
 
@@ -304,6 +410,9 @@ fn build_locked_versions(
 /// pre-resolving them via `resolve_descriptor` before entering pubgrub.
 pub fn range_to_version_set(range: &zpm_primitives::Range) -> Option<IslandVersionSet> {
     match range {
+        zpm_primitives::Range::Env(params) => {
+            range_to_version_set(&params.inner)
+        }
         zpm_primitives::Range::AnonymousSemver(params) => {
             Some(IslandVersionSet::from_semver_range(&params.range))
         }
@@ -320,24 +429,25 @@ fn convert_solution(
     solution: pubgrub::SelectedDependencies<IslandDependencyProvider<'_>>,
     resolution_cache: &BTreeMap<Locator, Resolution>,
     extra_resolution_cache: &BTreeMap<(Locator, String), Resolution>,
-    workspace_deps: &BTreeMap<Ident, BTreeMap<Ident, Descriptor>>,
+    workspace_deps: &BTreeMap<IslandPackageKey, BTreeMap<Ident, Descriptor>>,
+    fork: Option<&PythonFork>,
 ) -> Result<IslandResolutionResult, Error> {
     let mut descriptor_to_locator = BTreeMap::new();
     let mut normalized_resolutions = BTreeMap::new();
-    let mut ident_to_locator = BTreeMap::new();
+    let mut package_to_locator = BTreeMap::new();
     let mut extra_resolutions = Vec::new();
 
     for (package, island_version) in &solution {
         // Skip the virtual root
-        let ident = match package {
+        let package_key = match package {
             IslandPackage::Root => continue,
-            IslandPackage::Named(ident) => ident,
+            IslandPackage::Named(key) => key,
             IslandPackage::ExtraProxy { .. } => continue,
-            IslandPackage::ExtraFeature { ident, extra } => {
+            IslandPackage::ExtraFeature { key, extra } => {
                 let raw_locator = island_version.0.clone();
 
                 if let Some(resolution) = extra_resolution_cache.get(&(raw_locator.clone(), extra.clone())) {
-                    extra_resolutions.push((ident.clone(), raw_locator, resolution.clone()));
+                    extra_resolutions.push((key.clone(), raw_locator, resolution.clone()));
                 }
 
                 continue;
@@ -348,46 +458,77 @@ fn convert_solution(
         // tree resolver (and later the WorkTree) can look them up.
         if island_version.0.reference.is_workspace_reference() {
             let locator = island_version.0.clone();
-            let descriptor = Descriptor::new(ident.clone(), zpm_primitives::WorkspaceMagicRange {
+            let descriptor = qualify_descriptor_for_fork(Descriptor::new(package_key.ident.clone(), zpm_primitives::WorkspaceMagicRange {
                 magic: zpm_semver::RangeKind::Caret,
-            }.into());
+            }.into()), fork);
 
             let mut resolution = Resolution::new_empty(locator.clone(), zpm_semver::Version::default());
 
             // Populate the workspace resolution's dependencies from the
             // workspace manifest deps that were passed to the provider.
-            if let Some(deps) = workspace_deps.get(ident) {
-                resolution.dependencies = deps.clone();
+            if let Some(deps) = workspace_deps.get(package_key) {
+                resolution.dependencies = deps.iter()
+                    .map(|(ident, descriptor)| (ident.clone(), qualify_descriptor_for_fork(descriptor.clone(), fork)))
+                    .collect();
             }
 
-            ident_to_locator.insert(ident.clone(), locator.clone());
+            package_to_locator.insert(package_key.clone(), locator.clone());
             descriptor_to_locator.insert(descriptor, locator.clone());
             normalized_resolutions.insert(locator, resolution);
             continue;
         }
 
         let raw_locator = island_version.0.clone();
+        let physical_reference
+            = raw_locator.reference.physical_reference();
 
         // Extract semver version from npm references, if applicable.
-        let npm_version = match &raw_locator.reference {
+        let npm_version = match physical_reference {
             Reference::Shorthand(params) => Some(params.version.clone()),
             Reference::Registry(params) => Some(params.version.clone()),
+            _ => None,
+        };
+
+        let pypi_version = match physical_reference {
+            Reference::PypiShorthand(params) => Some(params.version.clone()),
+            Reference::PypiRegistry(params) => Some(params.version.clone()),
             _ => None,
         };
 
         let (locator, descriptor, version) = if let Some(version) = npm_version {
             // npm packages: normalize RegistryReference → ShorthandReference
             // and create a semver descriptor.
-            let locator = Locator::new(ident.clone(), ShorthandReference {
-                version: version.clone(),
-            }.into());
+            let locator = if fork.is_some() {
+                raw_locator.clone()
+            } else {
+                Locator::new(package_key.ident.clone(), ShorthandReference {
+                    version: version.clone(),
+                }.into())
+            };
 
-            let descriptor = Descriptor::new_semver(ident.clone(), &format!("npm:{}", zpm_utils::ToFileString::to_file_string(&version)))
+            let descriptor = Descriptor::new_semver(package_key.ident.clone(), &format!("npm:{}", zpm_utils::ToFileString::to_file_string(&version)))
                 .unwrap_or_else(|_| {
-                    Descriptor::new(ident.clone(), zpm_primitives::AnonymousSemverRange {
+                    Descriptor::new(package_key.ident.clone(), zpm_primitives::AnonymousSemverRange {
                         range: zpm_semver::Range::exact(version.clone()),
                     }.into())
                 });
+
+            (locator, qualify_descriptor_for_fork(descriptor, fork), version)
+        } else if let Some(version) = pypi_version {
+            let locator
+                = raw_locator.clone();
+            let specifier
+                = PypiSpecifierSet::from_file_string(&format!("=={}", version.to_file_string()))
+                    .map_err(|err| Error::InvalidRange(err.to_string()))?;
+            let descriptor
+                = qualify_descriptor_for_fork(Descriptor::new(package_key.ident.clone(), Range::PypiSpecifier(PypiSpecifierRange {
+                    ident: None,
+                    specifier,
+                    parameters: None,
+                })), fork);
+            let version
+                = version.to_lossy_semver()
+                    .map_err(|err| Error::InvalidResolution(err.to_string()))?;
 
             (locator, descriptor, version)
         } else {
@@ -401,7 +542,7 @@ fn convert_solution(
                 .unwrap_or_else(|_| zpm_primitives::AnonymousSemverRange {
                     range: zpm_semver::Range::any(),
                 }.into());
-            let descriptor = Descriptor::new(ident.clone(), range);
+            let descriptor = Descriptor::new(package_key.ident.clone(), range);
 
             (locator, descriptor, zpm_semver::Version::default())
         };
@@ -417,13 +558,13 @@ fn convert_solution(
             })
             .unwrap_or_else(|| Resolution::new_empty(locator.clone(), version));
 
-        ident_to_locator.insert(ident.clone(), locator.clone());
+        package_to_locator.insert(package_key.clone(), locator.clone());
         descriptor_to_locator.insert(descriptor, locator.clone());
         normalized_resolutions.insert(locator, resolution);
     }
 
-    for (ident, _, extra_resolution) in extra_resolutions {
-        if let Some(base_locator) = ident_to_locator.get(&ident) {
+    for (key, _, extra_resolution) in extra_resolutions {
+        if let Some(base_locator) = package_to_locator.get(&key) {
             if let Some(base_resolution) = normalized_resolutions.get_mut(base_locator) {
                 for (dep_ident, extra_descriptor) in extra_resolution.dependencies {
                     match base_resolution.dependencies.get_mut(&dep_ident) {
@@ -444,20 +585,55 @@ fn convert_solution(
     // these to look up dependency descriptors (e.g. no-deps@npm:^1.0.0)
     // that appear in a package's resolution.dependencies.
     for resolution in normalized_resolutions.values() {
-        for (dep_ident, dep_descriptor) in &resolution.dependencies {
-            if let Some(dep_locator) = ident_to_locator.get(dep_ident) {
+        for dep_descriptor in resolution.dependencies.values() {
+            let dep_package
+                = IslandPackageKey::from_descriptor(dep_descriptor);
+
+            if let Some(dep_locator) = package_to_locator.get(&dep_package) {
                 descriptor_to_locator
                     .entry(dep_descriptor.clone())
                     .or_insert_with(|| dep_locator.clone());
             }
         }
+
+        for variant_descriptor in &resolution.variants {
+            let variant_package
+                = IslandPackageKey::from_descriptor(variant_descriptor);
+
+            if let Some(variant_locator) = package_to_locator.get(&variant_package) {
+                descriptor_to_locator
+                    .entry(variant_descriptor.clone())
+                    .or_insert_with(|| variant_locator.clone());
+            }
+        }
     }
+
+    let fork_id
+        = fork.map(|fork| fork.id.clone())
+            .unwrap_or_else(LockfileIsland::default_fork_id);
+    let fork_target
+        = fork.and_then(|fork| fork.target.clone());
+    let mut lockfile_island
+        = LockfileIsland::default();
+
+    lockfile_island.forks.insert(fork_id, LockfileIslandFork {
+        target: fork_target,
+        resolutions: descriptor_to_locator.clone(),
+    });
 
     Ok(IslandResolutionResult {
         island_id: island_id.to_string(),
         descriptor_to_locator,
         normalized_resolutions,
+        lockfile_island,
     })
+}
+
+fn qualify_descriptor_for_fork(descriptor: Descriptor, fork: Option<&PythonFork>) -> Descriptor {
+    match fork {
+        Some(fork) => descriptor.env_qualified_with_hash(fork.id.clone()),
+        None => descriptor,
+    }
 }
 
 fn handle_pubgrub_error(
@@ -495,5 +671,69 @@ fn handle_pubgrub_error(
     Error::IslandResolutionFailed {
         island_id: island_id.to_string(),
         message,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn descriptor_for(fork_id: &Hash64, range: &str) -> Descriptor {
+        Descriptor::from_file_string(&format!(
+            "foo@env:{}#{}",
+            fork_id.to_file_string(),
+            range,
+        )).unwrap()
+    }
+
+    fn locator_for(fork_id: &Hash64, reference: &str) -> Locator {
+        Locator::from_file_string(&format!(
+            "foo@env:{}#{}",
+            fork_id.to_file_string(),
+            reference,
+        )).unwrap()
+    }
+
+    #[test]
+    fn test_locked_versions_are_scoped_to_active_fork() {
+        let island = ResolvedIsland {
+            id: "main".to_string(),
+            workspace_idents: BTreeSet::new(),
+            root_descriptors: BTreeSet::new(),
+            linker: zpm_config::IslandLinker::Venv,
+            python_link_version: None,
+        };
+        let fork_a
+            = Hash64::from_data("fork-a");
+        let fork_b
+            = Hash64::from_data("fork-b");
+        let locator_a
+            = locator_for(&fork_a, "npm:1.0.0");
+        let locator_b
+            = locator_for(&fork_b, "npm:2.0.0");
+
+        let mut lockfile_island
+            = LockfileIsland::default();
+        lockfile_island.forks.insert(fork_a.clone(), LockfileIslandFork {
+            target: None,
+            resolutions: BTreeMap::from([(descriptor_for(&fork_a, "npm:^1.0.0"), locator_a)]),
+        });
+        lockfile_island.forks.insert(fork_b.clone(), LockfileIslandFork {
+            target: None,
+            resolutions: BTreeMap::from([(descriptor_for(&fork_b, "npm:^1.0.0"), locator_b.clone())]),
+        });
+
+        let mut lockfile
+            = Lockfile::new();
+        lockfile.islands.insert("main".to_string(), lockfile_island);
+
+        let locked
+            = build_locked_versions(&island, &lockfile, &fork_b);
+
+        assert_eq!(1, locked.len());
+        assert_eq!(
+            Some(&locator_b),
+            locked.get(&IslandPackageKey::new(Ident::from_file_string("foo").unwrap(), IslandRegistry::Npm)),
+        );
     }
 }
