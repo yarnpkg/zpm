@@ -1,4 +1,4 @@
-use std::process::ExitStatus;
+use std::{collections::BTreeSet, process::ExitStatus};
 
 use clipanion::cli;
 use zpm_config::IslandLinker;
@@ -17,11 +17,14 @@ fn prepend_env_path(key: &str, value: &str, separator: char) -> String {
     }
 }
 
-fn build_site_packages_pythonpath(site_packages_path: &zpm_utils::Path, separator: char) -> String {
-    let mut entries
-        = vec![site_packages_path.to_file_string()];
+fn discover_site_packages_paths(venv_path: &zpm_utils::Path) -> Vec<zpm_utils::Path> {
+    let mut paths
+        = BTreeSet::new();
 
-    if let Ok(read_dir) = site_packages_path.fs_read_dir() {
+    let lib_path
+        = venv_path.with_join_str("lib");
+
+    if let Ok(read_dir) = lib_path.fs_read_dir() {
         for entry in read_dir.flatten() {
             let Ok(file_type) = entry.file_type() else {
                 continue;
@@ -37,15 +40,64 @@ fn build_site_packages_pythonpath(site_packages_path: &zpm_utils::Path, separato
             let dirname
                 = dirname.to_string_lossy();
 
-            if dirname.starts_with('.') {
+            if !dirname.starts_with("python") {
                 continue;
             }
 
-            entries.push(
-                site_packages_path
+            let site_packages_path
+                = lib_path
                     .with_join_str(dirname.as_ref())
-                    .to_file_string(),
-            );
+                    .with_join_str("site-packages");
+
+            if site_packages_path.fs_exists() {
+                paths.insert(site_packages_path);
+            }
+        }
+    }
+
+    let legacy_site_packages_path
+        = lib_path.with_join_str("site-packages");
+
+    if legacy_site_packages_path.fs_exists() {
+        paths.insert(legacy_site_packages_path);
+    }
+
+    paths.into_iter().collect()
+}
+
+fn build_site_packages_pythonpath(site_packages_paths: &[zpm_utils::Path], separator: char) -> String {
+    let mut entries
+        = Vec::new();
+
+    for site_packages_path in site_packages_paths {
+        entries.push(site_packages_path.to_file_string());
+
+        if let Ok(read_dir) = site_packages_path.fs_read_dir() {
+            for entry in read_dir.flatten() {
+                let Ok(file_type) = entry.file_type() else {
+                    continue;
+                };
+
+                if !file_type.is_dir() {
+                    continue;
+                }
+
+                let dirname
+                    = entry.file_name();
+
+                let dirname
+                    = dirname.to_string_lossy();
+
+                if dirname.starts_with('.') {
+                    continue;
+                }
+
+                entries.push(
+                    site_packages_path
+                        .with_join_str(dirname.as_ref())
+                        .to_file_string(),
+                );
+            }
         }
     }
 
@@ -74,6 +126,45 @@ fn active_workspace_venv(project: &project::Project) -> Option<zpm_utils::Path> 
     )
 }
 
+pub(crate) fn activate_workspace_venv(
+    project: &project::Project,
+    mut env: ScriptEnvironment,
+) -> (ScriptEnvironment, Option<zpm_utils::Path>) {
+    let Some(venv_path) = active_workspace_venv(project) else {
+        return (env, None);
+    };
+    let site_packages_paths
+        = discover_site_packages_paths(&venv_path);
+
+    let bin_path = if cfg!(windows) {
+        venv_path.with_join_str("Scripts")
+    } else {
+        venv_path.with_join_str("bin")
+    };
+
+    let path_separator = if cfg!(windows) {
+        ';'
+    } else {
+        ':'
+    };
+
+    let path
+        = prepend_env_path("PATH", &bin_path.to_file_string(), path_separator);
+    let pythonpath
+        = prepend_env_path(
+            "PYTHONPATH",
+            &build_site_packages_pythonpath(&site_packages_paths, path_separator),
+            path_separator,
+        );
+
+    env = env
+        .with_env_variable("VIRTUAL_ENV", &venv_path.to_file_string())
+        .with_env_variable("PYTHONPATH", &pythonpath)
+        .with_env_variable("PATH", &path);
+
+    (env, Some(bin_path))
+}
+
 /// Run a Python process within the project's environment
 ///
 /// This command mirrors `yarn node`, but for Python. When called from a workspace that belongs to an island using the `venv` linker, it sets up a
@@ -95,48 +186,26 @@ impl Python {
         project
             .lazy_install().await?;
 
-        let mut env = ScriptEnvironment::new()?
+        let env = ScriptEnvironment::new()?
             .with_project(&project)
             .with_package(&project, &project.active_package()?)?
             .enable_shell_forwarding()
             .enable_signal_delegation();
 
-        if let Some(venv_path) = active_workspace_venv(&project) {
-            let site_packages_path
-                = venv_path
-                    .with_join_str("lib")
-                    .with_join_str("site-packages");
-
-            let bin_path = if cfg!(windows) {
-                venv_path.with_join_str("Scripts")
-            } else {
-                venv_path.with_join_str("bin")
-            };
-
-            let path_separator = if cfg!(windows) {
-                ';'
-            } else {
-                ':'
-            };
-
-            let path
-                = prepend_env_path("PATH", &bin_path.to_file_string(), path_separator);
-
-            let pythonpath
-                = prepend_env_path(
-                    "PYTHONPATH",
-                    &build_site_packages_pythonpath(&site_packages_path, path_separator),
-                    path_separator,
-                );
-
-            env = env
-                .with_env_variable("VIRTUAL_ENV", &venv_path.to_file_string())
-                .with_env_variable("PYTHONPATH", &pythonpath)
-                .with_env_variable("PATH", &path);
-        }
+        let (mut env, bin_path)
+            = activate_workspace_venv(&project, env);
+        let python_program = bin_path
+            .map(|bin_path| {
+                let filename = if cfg!(windows) { "python.exe" } else { "python" };
+                let candidate = bin_path.with_join_str(filename);
+                candidate.fs_exists()
+                    .then(|| candidate.to_file_string())
+                    .unwrap_or_else(|| "python".to_string())
+            })
+            .unwrap_or_else(|| "python".to_string());
 
         let result
-            = env.run_exec("python", &self.args).await?;
+            = env.run_exec(&python_program, &self.args).await?;
 
         Ok(result.into())
     }
