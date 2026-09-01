@@ -267,6 +267,16 @@
       "description": "The URL to use for downloading Node.js distributions",
       "default": "https://nodejs.org/dist"
     },
+    "pythonDistUrl": {
+      "type": "string",
+      "description": "The URL to use for downloading Python distributions",
+      "default": "https://github.com/astral-sh/python-build-standalone/releases/download"
+    },
+    "pythonDistMetadataUrl": {
+      "type": "string",
+      "description": "The URL to use for resolving Python distribution metadata",
+      "default": "https://releases.astral.sh/github/versions/main/v1/python-build-standalone.ndjson"
+    },
     "nodeLinker": {
       "type": "crate::NodeLinker",
       "description": "The linker to use for node_modules",
@@ -390,6 +400,14 @@
       "description": "The URL of the default PyPI registry server",
       "default": "https://pypi.org"
     },
+    "pypiAuthIdent": {
+      "type": ["zpm_utils::Secret<String>", "null"],
+      "description": "The username and password, separated by a colon, used for basic authentication to the PyPI registry"
+    },
+    "pypiAuthToken": {
+      "type": ["zpm_utils::Secret<String>", "null"],
+      "description": "The API token used for basic authentication to the PyPI registry"
+    },
     "npmScopes": {
       "type": "object",
       "description": "Configuration specific to each npm scope",
@@ -447,6 +465,14 @@
             "type": ["string", "null"],
             "description": "The URL of the PyPI registry server to use for matching packages"
           },
+          "pypiAuthIdent": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The username and password, separated by a colon, used for PyPI authentication for matching packages"
+          },
+          "pypiAuthToken": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The API token used for PyPI authentication for matching packages"
+          },
           "npmMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
             "description": "Minimum age of an npm package version to be considered for matching packages"
@@ -496,6 +522,14 @@
           "npmAuthToken": {
             "type": ["zpm_utils::Secret<String>", "null"],
             "description": "The token to use for npm authentication for matching sources"
+          },
+          "pypiAuthIdent": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The username and password, separated by a colon, used for PyPI authentication for matching sources"
+          },
+          "pypiAuthToken": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The API token used for PyPI authentication for matching sources"
           }
         }
       }
@@ -627,6 +661,13 @@
       "description": "The timeout in milliseconds to wait for a network request to complete before considering it slow",
       "default": 5000
     },
+    "supportedTargets": {
+      "type": "array",
+      "description": "The list of concrete target environments that should be covered by ecosystem-specific universal lockfiles.",
+      "items": {
+        "type": "crate::types::SupportedTarget"
+      }
+    },
     "supportedArchitectures": {
       "type": "array",
       "oneOrMany": true,
@@ -670,6 +711,11 @@
           "linker": {
             "type": "crate::IslandLinker",
             "description": "The linker to use for workspaces in this island. Supported values are 'node-modules' and 'venv'."
+          },
+          "python": {
+            "type": "crate::types::IslandPython",
+            "description": "Python-specific island settings. linkVersion selects the Python fork to link when multiple supported Python versions match the current system.",
+            "default": "crate::types::IslandPython::default()"
           }
         }
       }

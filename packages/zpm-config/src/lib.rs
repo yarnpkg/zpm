@@ -869,6 +869,19 @@ impl Settings {
     /// `supportedArchitectures` yields one set, and a package is kept as soon
     /// as it's compatible with at least one of them.
     pub fn supported_systems(&self) -> Vec<SystemSet> {
+        if !self.supported_targets.is_empty() {
+            return self.supported_targets.iter()
+                .map(|target| {
+                    let system = target.value.to_system();
+                    SystemSet {
+                        arch: system.arch.map(|arch| vec![arch]),
+                        os: system.os.map(|os| vec![os]),
+                        libc: system.libc.map(|libc| vec![libc]),
+                    }
+                })
+                .collect();
+        }
+
         // An empty list would mean "no architecture at all", which is never
         // what the user wants; we fallback on the current architecture instead
         // (which is also what happens when the setting isn't set at all).
@@ -975,6 +988,24 @@ impl SupportedArchitectures {
             os: resolve_current(&self.os.value, current.os.as_ref(), &Os::Current),
             libc: resolve_current(&self.libc.value, current.libc.as_ref(), &Libc::Current),
         }
+    }
+}
+
+impl Settings {
+    pub fn python_target_envs(&self) -> Result<Vec<zpm_primitives::PythonTargetEnv>, zpm_primitives::PythonTargetError> {
+        let mut targets
+            = Vec::new();
+
+        for target in &self.supported_targets {
+            if let Some(target_env) = target.value.to_python_target_env()? {
+                targets.push(target_env);
+            }
+        }
+
+        targets.sort();
+        targets.dedup();
+
+        Ok(targets)
     }
 }
 
@@ -1516,6 +1547,37 @@ mod tests {
     }
 
     #[test]
+    fn supported_targets_should_keep_omitted_system_fields_unrestricted() {
+        let sets = supported_systems(r#"
+            supportedTargets:
+              - python:
+                  version: "3.10"
+        "#);
+
+        assert_eq!(sets, vec![SystemSet {
+            arch: None,
+            os: None,
+            libc: None,
+        }]);
+    }
+
+    #[test]
+    fn supported_targets_should_only_constrain_explicit_system_fields() {
+        let sets = supported_systems(r#"
+            supportedTargets:
+              - os: linux
+                python:
+                  version: "3.12"
+        "#);
+
+        assert_eq!(sets, vec![SystemSet {
+            arch: None,
+            os: os(&["linux"]),
+            libc: None,
+        }]);
+    }
+
+    #[test]
     fn supported_architectures_should_support_a_list_of_entries() {
         let sets = supported_systems(r#"
             supportedArchitectures:
@@ -1715,6 +1777,8 @@ merge_settings!(crate::types::NmMode, |s: &str| FromFileString::from_file_string
 merge_settings!(crate::types::WinLinkType, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::LogLevel, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::NpmPublishAccess, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::IslandPython, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::SupportedTarget, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::EcosystemFilter, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_optional_settings!(crate::types::NodeLinker);
 merge_optional_settings!(crate::types::NodePackageMapType);
