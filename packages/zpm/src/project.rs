@@ -889,6 +889,7 @@ impl Project {
             &lockfile,
             &self.workspaces,
             self.config.settings.enable_transparent_workspaces.value,
+            false,
         ) else {
             return Ok(false);
         };
@@ -923,6 +924,7 @@ impl Project {
             lockfile,
             &self.workspaces,
             self.config.settings.enable_transparent_workspaces.value,
+            false,
         ).map(|walk| walk.workspace_hashes)
     }
 
@@ -1947,10 +1949,14 @@ pub(crate) struct LockfileWorkspaceWalk {
 /// cross-history comparisons. Returns `None` when the lockfile and
 /// manifests can't produce a consistent graph (the same conditions
 /// under which `is_lockfile_fresh` considers the install not fresh).
+/// With `allow_partial`, unresolved descriptors are skipped so callers
+/// comparing across git refs still get hashes for workspaces they could
+/// rebuild; workspaces with skipped edges are omitted from the hash map.
 pub(crate) fn walk_lockfile_workspaces(
     lockfile: &Lockfile,
     workspaces: &[Workspace],
     enable_transparent_workspaces: bool,
+    allow_partial: bool,
 ) -> Option<LockfileWorkspaceWalk> {
     // Index maps rather than linear scans: the walk visits every
     // descriptor of every workspace, which would otherwise be
@@ -2026,6 +2032,9 @@ pub(crate) fn walk_lockfile_workspaces(
     let mut processed_queue
         = BTreeSet::new();
 
+    let mut incomplete_locators
+        = BTreeSet::<Locator>::new();
+
     while let Some(locator) = process_queue.pop() {
         if !processed_queue.insert(locator.clone()) {
             continue;
@@ -2041,6 +2050,22 @@ pub(crate) fn walk_lockfile_workspaces(
                     .chain(workspace.manifest.dev_dependencies.values())
                     .cloned()
                     .collect::<Vec<_>>()
+            } else if allow_partial {
+                match lockfile.entries.get(&locator) {
+                    Some(entry) if entry.resolution.locator == locator => {
+                        used_entries.insert(locator.clone());
+
+                        entry.resolution.dependencies.values()
+                            .chain(entry.resolution.variants.iter())
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    },
+
+                    _ => {
+                        incomplete_locators.insert(locator.clone());
+                        continue;
+                    },
+                }
             } else {
                 let entry = lockfile.entries.get(&locator)?;
 
@@ -2073,20 +2098,58 @@ pub(crate) fn walk_lockfile_workspaces(
                 || range_details.fetch_before_resolve
                 || matches!(descriptor.range, Range::Catalog(_))
             {
+                if allow_partial {
+                    incomplete_locators.insert(locator.clone());
+                    continue;
+                }
+
                 return None;
             }
 
             normalize_lockfile_descriptor(&mut descriptor);
 
-            let Some(dependency_locator) = lockfile.resolutions.get(&descriptor) else {
-                return None;
-            };
+            let dependency_locator
+                = if allow_partial {
+                    match lockfile.resolutions.get(&descriptor) {
+                        Some(dependency_locator) => dependency_locator.clone(),
 
-            let Some(entry) = lockfile.entries.get(dependency_locator) else {
-                return None;
-            };
+                        None => {
+                            incomplete_locators.insert(locator.clone());
+                            continue;
+                        },
+                    }
+                } else {
+                    let Some(dependency_locator) = lockfile.resolutions.get(&descriptor) else {
+                        return None;
+                    };
 
-            if entry.resolution.locator != *dependency_locator {
+                    dependency_locator.clone()
+                };
+
+            let entry
+                = if allow_partial {
+                    match lockfile.entries.get(&dependency_locator) {
+                        Some(entry) => entry,
+
+                        None => {
+                            incomplete_locators.insert(locator.clone());
+                            continue;
+                        },
+                    }
+                } else {
+                    let Some(entry) = lockfile.entries.get(&dependency_locator) else {
+                        return None;
+                    };
+
+                    entry
+                };
+
+            if entry.resolution.locator != dependency_locator {
+                if allow_partial {
+                    incomplete_locators.insert(locator.clone());
+                    continue;
+                }
+
                 return None;
             }
 
@@ -2099,14 +2162,51 @@ pub(crate) fn walk_lockfile_workspaces(
         graph.insert(locator, child_locators);
     }
 
+    if allow_partial && !incomplete_locators.is_empty() {
+        loop {
+            let mut changed
+                = false;
+
+            for (locator, children) in &graph {
+                if incomplete_locators.contains(locator) {
+                    continue;
+                }
+
+                if children.iter().any(|child| incomplete_locators.contains(child)) {
+                    incomplete_locators.insert(locator.clone());
+                    changed = true;
+                }
+            }
+
+            if !changed {
+                break;
+            }
+        }
+    }
+
     let workspace_locators: Vec<(Ident, Locator)>
         = workspaces.iter()
             .map(|workspace| (workspace.name.clone(), workspace.locator()))
             .collect();
 
+    let workspace_hashes
+        = if allow_partial && !incomplete_locators.is_empty() {
+            compute_workspace_hashes(&graph, &workspace_locators)
+                .into_iter()
+                .filter(|(ident, _)| {
+                    workspace_locators.iter()
+                        .any(|(name, locator)| {
+                            name == ident && !incomplete_locators.contains(locator)
+                        })
+                })
+                .collect()
+        } else {
+            compute_workspace_hashes(&graph, &workspace_locators)
+        };
+
     Some(LockfileWorkspaceWalk {
         used_resolutions,
         used_entries,
-        workspace_hashes: compute_workspace_hashes(&graph, &workspace_locators),
+        workspace_hashes,
     })
 }

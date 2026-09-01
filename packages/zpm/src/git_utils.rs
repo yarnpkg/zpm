@@ -257,6 +257,7 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
                             old,
                             &old_workspaces,
                             project.config.settings.enable_transparent_workspaces.value,
+                            true,
                         ).map(|walk| walk.workspace_hashes))
                 } else {
                     Some(old.workspaces.clone())
