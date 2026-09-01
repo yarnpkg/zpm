@@ -889,6 +889,7 @@ impl Project {
             &lockfile,
             &self.workspaces,
             self.config.settings.enable_transparent_workspaces.value,
+            UnresolvedDependencyPolicy::Abort,
         ) else {
             return Ok(false);
         };
@@ -923,6 +924,7 @@ impl Project {
             lockfile,
             &self.workspaces,
             self.config.settings.enable_transparent_workspaces.value,
+            UnresolvedDependencyPolicy::PoisonSubtree,
         ).map(|walk| walk.workspace_hashes)
     }
 
@@ -1939,6 +1941,22 @@ pub(crate) struct LockfileWorkspaceWalk {
     pub workspace_hashes: BTreeMap<Ident, Hash64>,
 }
 
+/// What to do when a dependency can't be resolved through the
+/// manifests or the lockfile.
+pub(crate) enum UnresolvedDependencyPolicy {
+    /// Abort the walk. Used by the freshness check, where an
+    /// unresolvable dependency must mean "not fresh".
+    Abort,
+
+    /// Poison only the subtrees that reach the unresolvable
+    /// dependency: those workspaces get no hash, every other
+    /// workspace stays attributable. Used by on-demand hash
+    /// computation, where one missing historical manifest (a
+    /// moved/renamed/untracked workspace) must not take down the
+    /// attribution of the whole project.
+    PoisonSubtree,
+}
+
 /// Walks the dependency graph rooted at the given workspaces,
 /// resolving descriptors through the lockfile, and computes the
 /// per-workspace dependency tree hashes from it. The manifests come
@@ -1946,12 +1964,25 @@ pub(crate) struct LockfileWorkspaceWalk {
 /// checks and `--tree-hash`, workspaces rebuilt from a git ref for
 /// cross-history comparisons. Returns `None` when the lockfile and
 /// manifests can't produce a consistent graph (the same conditions
-/// under which `is_lockfile_fresh` considers the install not fresh).
+/// under which `is_lockfile_fresh` considers the install not fresh);
+/// under `PoisonSubtree` the walk keeps going and the poisoned
+/// workspaces are simply absent from the returned hashes.
 pub(crate) fn walk_lockfile_workspaces(
     lockfile: &Lockfile,
     workspaces: &[Workspace],
     enable_transparent_workspaces: bool,
+    unresolved_policy: UnresolvedDependencyPolicy,
 ) -> Option<LockfileWorkspaceWalk> {
+    let abort_on_unresolved = matches!(unresolved_policy, UnresolvedDependencyPolicy::Abort);
+
+    // Sentinel node standing in for any dependency the walk couldn't
+    // resolve; only reachable by poisoned subtrees, which get dropped
+    // from the hashes afterwards.
+    let poison_locator
+        = Locator::new(Ident::new("unresolved-dependency".to_string()), WorkspaceIdentReference {
+            ident: Ident::new("unresolved-dependency".to_string()),
+        }.into());
+
     // Index maps rather than linear scans: the walk visits every
     // descriptor of every workspace, which would otherwise be
     // quadratic on large monorepos.
@@ -2018,6 +2049,23 @@ pub(crate) fn walk_lockfile_workspaces(
     let mut used_entries
         = BTreeSet::<Locator>::new();
 
+    let mut poisoned_locators
+        = BTreeSet::<Locator>::new();
+
+    // Records an unresolvable dependency: either the walk aborts
+    // (freshness) or the dependent subtree is poisoned and the walk
+    // continues.
+    let poison = |poisoned_locators: &mut BTreeSet<Locator>, child_locators: &mut BTreeSet<Locator>, poison_root: &Locator| -> Option<()> {
+        if abort_on_unresolved {
+            return None;
+        }
+
+        poisoned_locators.insert(poison_root.clone());
+        child_locators.insert(poison_root.clone());
+
+        Some(())
+    };
+
     let mut process_queue: Vec<Locator>
         = workspaces.iter()
             .map(|workspace| workspace.locator())
@@ -2034,6 +2082,8 @@ pub(crate) fn walk_lockfile_workspaces(
         let mut child_locators
             = BTreeSet::new();
 
+        // The sentinel stands in for the unresolved dependency; only
+        // poisoned subtrees ever reach it.
         let dependency_descriptors
             = if let Some(workspace) = find_workspace_by_locator(&locator) {
                 workspace.manifest.remote.dependencies.values()
@@ -2042,10 +2092,26 @@ pub(crate) fn walk_lockfile_workspaces(
                     .cloned()
                     .collect::<Vec<_>>()
             } else {
-                let entry = lockfile.entries.get(&locator)?;
+                // An unresolvable node poisons itself and isn't
+                // expanded: nothing below it can be hashed anyway.
+                let bail = |poisoned_locators: &mut BTreeSet<Locator>, locator: &Locator| -> Option<()> {
+                    if abort_on_unresolved {
+                        return None;
+                    }
+
+                    poisoned_locators.insert(locator.clone());
+
+                    Some(())
+                };
+
+                let Some(entry) = lockfile.entries.get(&locator) else {
+                    bail(&mut poisoned_locators, &locator)?;
+                    continue;
+                };
 
                 if entry.resolution.locator != locator {
-                    return None;
+                    bail(&mut poisoned_locators, &locator)?;
+                    continue;
                 }
 
                 used_entries.insert(locator.clone());
@@ -2073,21 +2139,25 @@ pub(crate) fn walk_lockfile_workspaces(
                 || range_details.fetch_before_resolve
                 || matches!(descriptor.range, Range::Catalog(_))
             {
-                return None;
+                poison(&mut poisoned_locators, &mut child_locators, &poison_locator)?;
+                continue;
             }
 
             normalize_lockfile_descriptor(&mut descriptor);
 
             let Some(dependency_locator) = lockfile.resolutions.get(&descriptor) else {
-                return None;
+                poison(&mut poisoned_locators, &mut child_locators, &poison_locator)?;
+                continue;
             };
 
             let Some(entry) = lockfile.entries.get(dependency_locator) else {
-                return None;
+                poison(&mut poisoned_locators, &mut child_locators, &poison_locator)?;
+                continue;
             };
 
             if entry.resolution.locator != *dependency_locator {
-                return None;
+                poison(&mut poisoned_locators, &mut child_locators, &poison_locator)?;
+                continue;
             }
 
             used_resolutions.insert(descriptor, dependency_locator.clone());
@@ -2104,9 +2174,48 @@ pub(crate) fn walk_lockfile_workspaces(
             .map(|workspace| (workspace.name.clone(), workspace.locator()))
             .collect();
 
+    let mut workspace_hashes
+        = compute_workspace_hashes(&graph, &workspace_locators);
+
+    // Drop the hashes of the workspaces whose trees reach a poisoned
+    // node: those are unattributable, but every other workspace keeps
+    // its hash.
+    if !poisoned_locators.is_empty() {
+        let mut reverse_graph: BTreeMap<&Locator, Vec<&Locator>>
+            = BTreeMap::new();
+
+        for (node, children) in &graph {
+            for child in children {
+                reverse_graph.entry(child).or_default().push(node);
+            }
+        }
+
+        let mut tainted_locators
+            = BTreeSet::new();
+
+        let mut taint_queue: Vec<&Locator>
+            = poisoned_locators.iter().collect();
+
+        while let Some(node) = taint_queue.pop() {
+            if !tainted_locators.insert(node.clone()) {
+                continue;
+            }
+
+            if let Some(parents) = reverse_graph.get(node) {
+                taint_queue.extend(parents.iter().copied());
+            }
+        }
+
+        workspace_hashes.retain(|name, _| {
+            workspaces.iter()
+                .find(|workspace| workspace.name == *name)
+                .map_or(false, |workspace| !tainted_locators.contains(&workspace.locator()))
+        });
+    }
+
     Some(LockfileWorkspaceWalk {
         used_resolutions,
         used_entries,
-        workspace_hashes: compute_workspace_hashes(&graph, &workspace_locators),
+        workspace_hashes,
     })
 }

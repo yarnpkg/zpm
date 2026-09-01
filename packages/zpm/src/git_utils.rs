@@ -16,6 +16,7 @@ use crate::{
     manifest::helpers::parse_manifest,
     project::{
         walk_lockfile_workspaces,
+        UnresolvedDependencyPolicy,
         Project,
         Workspace,
         WorkspaceInfo,
@@ -257,6 +258,7 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
                             old,
                             &old_workspaces,
                             project.config.settings.enable_transparent_workspaces.value,
+                            UnresolvedDependencyPolicy::PoisonSubtree,
                         ).map(|walk| walk.workspace_hashes))
                 } else {
                     Some(old.workspaces.clone())

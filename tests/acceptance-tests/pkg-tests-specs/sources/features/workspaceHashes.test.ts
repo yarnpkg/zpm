@@ -213,5 +213,84 @@ describe(`Features`, () => {
         },
       ),
     );
+
+    test(
+      `--since keeps attributing unaffected workspaces when a historical workspace manifest went missing`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        async ({path, run}) => {
+          await fs.writeJson(`${path}/packages/workspace-a/package.json` as PortablePath, {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            scripts: {
+              print: `echo Test Workspace A`,
+            },
+            dependencies: {
+              [`workspace-c`]: `workspace:*`,
+            },
+          });
+
+          await fs.writeJson(`${path}/packages/workspace-b/package.json` as PortablePath, {
+            name: `workspace-b`,
+            version: `1.0.0`,
+            scripts: {
+              print: `echo Test Workspace B`,
+            },
+            dependencies: {
+              [`one-range-dep`]: `1.0.0`,
+            },
+          });
+
+          await fs.writeJson(`${path}/packages/workspace-c/package.json` as PortablePath, {
+            name: `workspace-c`,
+            version: `1.0.0`,
+            scripts: {
+              print: `echo Test Workspace C`,
+            },
+          });
+
+          const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
+
+          // Install with only no-deps@1.0.0 visible, so one-range-dep
+          // resolves to no-deps@1.0.0.
+          await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
+            await run(`install`, {enableWorkspaceHashes: false});
+          });
+
+          await exec.execGitInit({cwd: path});
+          await git(`add`, `-A`);
+          await git(`commit`, `-m`, `First commit`);
+
+          // Rename workspace-c: its manifest no longer exists at the
+          // old ref under its new path, so the old-side hash walk can't
+          // resolve workspace-a's dependency on it anymore.
+          await git(`mv`, `${path}/packages/workspace-c`, `${path}/packages/workspace-c-renamed`);
+
+          // Make no-deps@1.1.0 visible and upgrade; only the lockfile
+          // changes, and only workspace-b's dependency tree changed
+          // through it.
+          await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`, `1.1.0`])]]), async () => {
+            await run(`up`, `-R`, `no-deps`, {enableWorkspaceHashes: false});
+          });
+
+          // workspace-b must still be attributed through the lockfile
+          // (workspace-a is unattributable, but its tree didn't change,
+          // so it must not run either), while workspace-c-renamed runs
+          // through the file-level attribution of its moved manifest.
+          await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes: false})).resolves.toEqual({
+            code: 0,
+            stderr: ``,
+            stdout: [
+              `Test Workspace B\n`,
+              `Test Workspace C\n`,
+              ...forEachVerboseDone,
+            ].join(``),
+          });
+        },
+      ),
+    );
   });
 });
