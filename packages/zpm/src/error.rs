@@ -517,8 +517,11 @@ pub enum Error {
     #[error("Unmatched hunk")]
     UnmatchedHunk(usize),
 
-    #[error("Invalid resolution")]
+    #[error("Invalid resolution: {0}")]
     InvalidResolution(String),
+
+    #[error("Cannot prepare Python package: {0}")]
+    PythonPreparation(String),
 
     #[error("Bad resolution")]
     BadResolution(Descriptor, Locator),
