@@ -202,6 +202,27 @@ impl PypiSpecifierSet {
 
         Ok(parsed_version == pinned)
     }
+
+    /// Whether this constraint explicitly opts into prerelease candidates.
+    ///
+    /// PEP 440 matching and prerelease admission are separate operations. A
+    /// prerelease may satisfy `>=1`, but installers should prefer matching
+    /// final releases unless one of the specifiers itself names a prerelease.
+    pub fn allows_prereleases(&self) -> Result<bool, PypiError> {
+        if self.is_any() {
+            return Ok(false);
+        }
+
+        if let Ok(specifiers) = pep440_rs::VersionSpecifiers::from_str(&self.raw) {
+            return Ok(specifiers.iter().any(|specifier| specifier.any_prerelease()));
+        }
+
+        let pinned
+            = pep440_rs::Version::from_str(&self.raw)
+                .map_err(|_| PypiError::InvalidSpecifier(self.raw.clone()))?;
+
+        Ok(pinned.any_prerelease())
+    }
 }
 
 impl Default for PypiSpecifierSet {
@@ -498,5 +519,12 @@ mod tests {
         let b = PypiSpecifierSet::from_file_string("<2.0.0").unwrap();
 
         assert_eq!(">=1.0.0, <2.0.0", a.intersection(&b).unwrap().to_file_string());
+    }
+
+    #[test]
+    fn test_pypi_specifier_prerelease_policy() {
+        assert!(!PypiSpecifierSet::from_file_string(">=1.0").unwrap().allows_prereleases().unwrap());
+        assert!(PypiSpecifierSet::from_file_string(">=1.0rc1").unwrap().allows_prereleases().unwrap());
+        assert!(PypiSpecifierSet::from_file_string("1.0.dev1").unwrap().allows_prereleases().unwrap());
     }
 }

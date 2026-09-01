@@ -229,6 +229,10 @@ impl Reference {
             return params.inner.must_bind();
         }
 
+        if let Reference::PypiRegistry(params) = self {
+            return params.url.as_ref().is_some_and(|url| url.0.starts_with("file:"));
+        }
+
         matches!(&self, Reference::Link(_) | Reference::Portal(_) | Reference::Tarball(_) | Reference::Folder(_) | Reference::Exec(_))
     }
 

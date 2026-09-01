@@ -400,6 +400,14 @@
       "description": "The URL of the default PyPI registry server",
       "default": "https://pypi.org"
     },
+    "pypiAuthIdent": {
+      "type": ["zpm_utils::Secret<String>", "null"],
+      "description": "The username and password, separated by a colon, used for basic authentication to the PyPI registry"
+    },
+    "pypiAuthToken": {
+      "type": ["zpm_utils::Secret<String>", "null"],
+      "description": "The API token used for basic authentication to the PyPI registry"
+    },
     "npmScopes": {
       "type": "object",
       "description": "Configuration specific to each npm scope",
@@ -457,6 +465,14 @@
             "type": ["string", "null"],
             "description": "The URL of the PyPI registry server to use for matching packages"
           },
+          "pypiAuthIdent": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The username and password, separated by a colon, used for PyPI authentication for matching packages"
+          },
+          "pypiAuthToken": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The API token used for PyPI authentication for matching packages"
+          },
           "npmMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
             "description": "Minimum age of an npm package version to be considered for matching packages"
@@ -506,6 +522,14 @@
           "npmAuthToken": {
             "type": ["zpm_utils::Secret<String>", "null"],
             "description": "The token to use for npm authentication for matching sources"
+          },
+          "pypiAuthIdent": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The username and password, separated by a colon, used for PyPI authentication for matching sources"
+          },
+          "pypiAuthToken": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The API token used for PyPI authentication for matching sources"
           }
         }
       }

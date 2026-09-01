@@ -31,6 +31,8 @@ impl fmt::Display for IslandRegistry {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct IslandPackageKey {
+    /// Canonical source-package identity. Aliases remain dependency-edge
+    /// metadata and don't create independent resolution slots.
     pub ident: Ident,
     pub registry: IslandRegistry,
 }
@@ -51,14 +53,15 @@ impl IslandPackageKey {
     }
 
     pub fn from_locator(locator: &Locator) -> Self {
-        let registry = match locator.reference.physical_reference() {
-            Reference::Registry(_) | Reference::Shorthand(_) => IslandRegistry::Npm,
-            Reference::PypiRegistry(_) | Reference::PypiShorthand(_) => IslandRegistry::Pypi,
-            Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_) => IslandRegistry::Workspace,
-            _ => IslandRegistry::Other,
-        };
-
-        Self::new(locator.ident.clone(), registry)
+        match locator.reference.physical_reference() {
+            Reference::Registry(params) => Self::new(params.ident.clone(), IslandRegistry::Npm),
+            Reference::Shorthand(_) => Self::new(locator.ident.clone(), IslandRegistry::Npm),
+            Reference::PypiRegistry(params) => Self::new(params.ident.clone(), IslandRegistry::Pypi),
+            Reference::PypiShorthand(_) => Self::new(locator.ident.clone(), IslandRegistry::Pypi),
+            Reference::WorkspaceIdent(params) => Self::new(params.ident.clone(), IslandRegistry::Workspace),
+            Reference::WorkspacePath(_) => Self::new(locator.ident.clone(), IslandRegistry::Workspace),
+            _ => Self::new(locator.ident.clone(), IslandRegistry::Other),
+        }
     }
 
     pub fn from_registry(registry: Registry) -> Self {
@@ -438,6 +441,37 @@ mod tests {
         assert_eq!(IslandRegistry::Npm, IslandPackageKey::from_descriptor(&npm).registry);
         assert_eq!(IslandRegistry::Pypi, IslandPackageKey::from_descriptor(&pypi).registry);
         assert_ne!(IslandPackageKey::from_descriptor(&npm), IslandPackageKey::from_descriptor(&pypi));
+    }
+
+    #[test]
+    fn test_aliased_package_keys_round_trip_through_locators() {
+        for (descriptor, locator) in [
+            ("alias@npm:foo@^1.0.0", "alias@npm:foo@1.2.0"),
+            ("alias@pypi:foo@>=1.0.0", "alias@pypi:foo@1.2.0"),
+        ] {
+            let descriptor
+                = Descriptor::from_file_string(descriptor).unwrap();
+            let locator
+                = Locator::from_file_string(locator).unwrap();
+
+            assert_eq!(
+                IslandPackageKey::from_descriptor(&descriptor),
+                IslandPackageKey::from_locator(&locator),
+            );
+        }
+    }
+
+    #[test]
+    fn test_aliases_share_their_canonical_source_key() {
+        let first
+            = Descriptor::from_file_string("first@pypi:foo@>=1.0.0").unwrap();
+        let second
+            = Descriptor::from_file_string("second@pypi:foo@<2.0.0").unwrap();
+
+        assert_eq!(
+            IslandPackageKey::from_descriptor(&first),
+            IslandPackageKey::from_descriptor(&second),
+        );
     }
 
     #[test]

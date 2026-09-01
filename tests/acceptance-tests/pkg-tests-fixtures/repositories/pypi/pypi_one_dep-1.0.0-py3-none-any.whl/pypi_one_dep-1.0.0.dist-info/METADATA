@@ -2,3 +2,5 @@ Metadata-Version: 2.1
 Name: pypi_one_dep
 Version: 1.0.0
 Summary: fixture wheel for integration tests
+Requires-Dist: pypi-no-deps (>=1.0.0)
+Requires-Dist: marker-only-dep (>=1.0.0); python_version < "3.12"

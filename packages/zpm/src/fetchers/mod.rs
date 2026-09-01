@@ -153,7 +153,7 @@ pub fn try_fetch_locator_sync(context: InstallContext, locator: &Locator, is_moc
             },
 
         Reference::PypiShorthand(params)
-            => match pypi::try_fetch_locator_sync(&context, &physical_locator, &PypiRegistryReference {
+            => match pypi::try_fetch_locator_sync(&context, locator, &PypiRegistryReference {
                 ident: physical_locator.ident.clone(),
                 version: params.version.clone(),
                 url: params.url.clone(),
@@ -163,7 +163,7 @@ pub fn try_fetch_locator_sync(context: InstallContext, locator: &Locator, is_moc
             },
 
         Reference::PypiRegistry(params)
-            => match pypi::try_fetch_locator_sync(&context, &physical_locator, params, is_mock_request)? {
+            => match pypi::try_fetch_locator_sync(&context, locator, params, is_mock_request)? {
                 Some(fetch_result) => Ok(SyncFetchAttempt::Success(fetch_result)),
                 None => Ok(SyncFetchAttempt::Failure(dependencies)),
             },
@@ -223,14 +223,14 @@ pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, i
             => npm::fetch_locator(&context, &physical_locator, params, is_mock_request).await,
 
         Reference::PypiShorthand(params)
-            => pypi::fetch_locator(&context, &physical_locator, &PypiRegistryReference {
+            => Box::pin(pypi::fetch_locator(&context, locator, &PypiRegistryReference {
                 ident: physical_locator.ident.clone(),
                 version: params.version.clone(),
                 url: params.url.clone(),
-            }, is_mock_request).await,
+            }, is_mock_request)).await,
 
         Reference::PypiRegistry(params)
-            => pypi::fetch_locator(&context, &physical_locator, params, is_mock_request).await,
+            => Box::pin(pypi::fetch_locator(&context, locator, params, is_mock_request)).await,
 
         Reference::WorkspaceIdent(params)
             => workspace::fetch_locator_ident(&context, &physical_locator, params),

@@ -461,6 +461,14 @@ For the first concrete-target implementation, the provider itself is
 fork-specific, so `IslandPackage` does not need to carry `fork_id`. If we later
 move to a single symbolic PubGrub run, include `fork_id` in the package key.
 
+Aliases remain dependency-edge metadata; they do not create independent
+resolution slots. Within a fork, all descriptors that reference the same
+canonical ecosystem package contribute constraints to the same
+`IslandPackageKey`. Those constraints must be intersected rather than replaced.
+Incompatible alias constraints therefore produce a normal PubGrub conflict,
+and aliases cannot be used to install multiple versions of the same source
+package inside an island.
+
 ### Add PyPI version sets
 
 `IslandVersionSet` needs a PEP 440 variant:

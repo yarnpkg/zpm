@@ -109,6 +109,15 @@ tokio::task_local! {
     static CONTEXT: RefCell<Option<ReportContext>>;
 }
 
+fn current_context_prefix() -> Option<String> {
+    CONTEXT.try_with(|context| {
+        context.borrow().as_ref().map(|context| match context {
+            ReportContext::Descriptor(descriptor) => descriptor.to_print_string(),
+            ReportContext::Locator(locator) => locator.to_print_string(),
+        })
+    }).ok().flatten()
+}
+
 pub async fn with_report<F, R>(report: StreamReport, f: F) -> R where F: Future<Output = R> {
     set_current_report(report).await;
 
@@ -890,26 +899,13 @@ impl StreamReport {
     }
 
     fn with_content_prefix(&self, mut message: String) -> String {
-        CONTEXT.with(move |context: &RefCell<Option<ReportContext>>| {
-            let context
-                = context.borrow();
-
-            let Some(context) = context.as_ref() else {
-                return message;
-            };
-
-            let prefix = match context {
-                ReportContext::Descriptor(descriptor) => descriptor.to_print_string(),
-                ReportContext::Locator(locator) => locator.to_print_string(),
-            };
-
+        if let Some(prefix) = current_context_prefix() {
             message.reserve(prefix.len() + 2 + message.len());
-
             message.insert_str(0, &prefix);
             message.insert_str(prefix.len(), ": ");
+        }
 
-            message
-        })
+        message
     }
 
     fn line(&self, severity: Severity, message: String) -> bool {
@@ -1023,5 +1019,10 @@ mod tests {
             strip_ansi_codes(&reporter.format_prompt("Would you like to trust this project?\nProject: /path/to/project")),
             "? Would you like to trust this project?\n  Project: /path/to/project",
         );
+    }
+
+    #[test]
+    fn context_prefix_is_optional_outside_report_tasks() {
+        assert_eq!(current_context_prefix(), None);
     }
 }

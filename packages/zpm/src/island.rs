@@ -9,6 +9,7 @@ use crate::install::InstallContext;
 use crate::island_provider::IslandDependencyProvider;
 use crate::island_types::{IslandPackage, IslandPackageKey, IslandRegistry, IslandVersion, IslandVersionSet};
 use crate::lockfile::{Lockfile, LockfileIsland, LockfileIslandFork};
+use crate::primitives_exts::RangeExt;
 use crate::project::Workspace;
 use crate::resolvers::Resolution;
 
@@ -150,30 +151,32 @@ async fn resolve_island_once(
     let mut workspace_deps: BTreeMap<IslandPackageKey, BTreeMap<Ident, Descriptor>> = BTreeMap::new();
 
     for workspace in &project.workspaces {
-        if !island.workspace_idents.contains(&workspace.name) {
-            continue;
-        }
-
-        // Create a workspace locator using WorkspaceIdentReference
-        let mut ws_locator = Locator::new(
-            workspace.name.clone(),
-            WorkspaceIdentReference {
-                ident: workspace.name.clone(),
-            }.into(),
-        );
-
-        if let Some(fork) = &fork {
-            ws_locator = ws_locator.env_qualified_with_hash(fork.id.clone());
-        }
-        let ws_version = IslandVersion(ws_locator);
         let workspace_key
             = IslandPackageKey::new(workspace.name.clone(), IslandRegistry::Workspace);
+        let is_island_root
+            = island.workspace_idents.contains(&workspace.name);
 
-        // Root depends on each workspace as an exact singleton
-        root_deps.insert(
-            IslandPackage::Named(workspace_key.clone()),
-            IslandVersionSet::exact_singleton(ws_version),
-        );
+        if is_island_root {
+            // Create a workspace locator using WorkspaceIdentReference
+            let mut ws_locator = Locator::new(
+                workspace.name.clone(),
+                WorkspaceIdentReference {
+                    ident: workspace.name.clone(),
+                }.into(),
+            );
+
+            if let Some(fork) = &fork {
+                ws_locator = ws_locator.env_qualified_with_hash(fork.id.clone());
+            }
+
+            // Root depends on each configured island workspace as an exact
+            // singleton. Other workspaces are available to the provider only
+            // when reached through one of these roots.
+            root_deps.insert(
+                IslandPackage::Named(workspace_key.clone()),
+                IslandVersionSet::exact_singleton(IslandVersion(ws_locator)),
+            );
+        }
 
         // Collect this workspace's dependencies for the provider
         let mut deps: BTreeMap<Ident, Descriptor> = BTreeMap::new();
@@ -188,10 +191,19 @@ async fn resolve_island_once(
                             (ident.clone(), descriptor)
                         }
                     })?;
+            let descriptor = if descriptor.range.details().require_binding && descriptor.parent.is_none() {
+                Descriptor::new_bound(
+                    descriptor.ident.clone(),
+                    descriptor.range.clone(),
+                    Some(workspace.locator()),
+                )
+            } else {
+                descriptor
+            };
             deps.insert(ident, descriptor);
         }
 
-        if !ctx.prune_dev_dependencies {
+        if is_island_root && !ctx.prune_dev_dependencies {
             for (ident, descriptor) in &workspace.manifest.dev_dependencies {
                 let (ident, descriptor)
                     = crate::resolvers::pypi::canonicalize_pypi_descriptor(descriptor)
@@ -202,6 +214,15 @@ async fn resolve_island_once(
                                 (ident.clone(), descriptor)
                             }
                         })?;
+                let descriptor = if descriptor.range.details().require_binding && descriptor.parent.is_none() {
+                    Descriptor::new_bound(
+                        descriptor.ident.clone(),
+                        descriptor.range.clone(),
+                        Some(workspace.locator()),
+                    )
+                } else {
+                    descriptor
+                };
                 deps.insert(ident, descriptor);
             }
         }

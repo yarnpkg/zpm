@@ -1,14 +1,15 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{collections::{BTreeMap, BTreeSet}, str::FromStr, sync::Arc};
 
 use serde::{de::DeserializeOwned, Deserialize};
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Descriptor, Ident, Locator, MarkerExpr, MarkerValue, MarkerVariable, PypiExtras, PypiRangeParameters, PypiRegistryReference, PypiSpecifierRange, PypiSpecifierSet, PypiTagRange, PythonFork, PythonTargetEnv, Reference, Range, canonicalize_pypi_name};
-use zpm_utils::{FromFileString, ToFileString, UrlEncoded};
+use zpm_primitives::{Descriptor, Ident, Locator, MarkerVariable, PypiExtras, PypiFileRange, PypiGitRange, PypiRangeParameters, PypiRegistryReference, PypiSpecifierRange, PypiSpecifierSet, PypiTagRange, PypiVersion, PythonFork, PythonTargetEnv, Reference, Range, canonicalize_pypi_name};
+use zpm_utils::{FromFileString, Hash64, ToFileString, UrlEncoded};
 
 use crate::{
     error::Error,
     install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
-    pypi::{PypiDistribution, get_registry, encode_path_segment, select_best_wheel},
+    prepare,
+    pypi::{PypiDistribution, encode_path_segment, format_local_wheel_url, format_python_git_url, get_artifact_authorization, get_authorization, get_registry, metadata_from_source_tree, metadata_from_wheel, parse_local_wheel_url, parse_python_git_url, parse_simple_project, python_git_project_path, requires_dist_from_wheel, resolve_local_wheel_path, select_best_artifact, select_best_wheel},
     resolvers::Resolution,
 };
 
@@ -34,7 +35,7 @@ struct PypiVersionInfo {
 pub struct PypiRequirement {
     pub ident: Ident,
     pub descriptor: Descriptor,
-    pub marker: MarkerExpr,
+    pub marker: pep508_rs::MarkerTree,
 }
 
 pub fn canonicalize_pypi_ident(ident: &Ident) -> Result<Ident, Error> {
@@ -47,7 +48,7 @@ pub fn canonicalize_pypi_descriptor(descriptor: &Descriptor) -> Result<(Ident, D
         canonicalize_pypi_ident(ident)
     };
 
-    match &descriptor.range {
+    match descriptor.range.physical_range() {
         Range::PypiSpecifier(params) => {
             let package_ident
                 = canonicalize_range_ident(params.ident.as_ref().unwrap_or(&descriptor.ident))?;
@@ -57,11 +58,13 @@ pub fn canonicalize_pypi_descriptor(descriptor: &Descriptor) -> Result<(Ident, D
                 } else {
                     package_ident.clone()
                 };
-            let range = Range::PypiSpecifier(PypiSpecifierRange {
+            let physical_range = Range::PypiSpecifier(PypiSpecifierRange {
                 ident: params.ident.as_ref().map(|_| package_ident.clone()),
                 specifier: params.specifier.clone(),
                 parameters: params.parameters.clone(),
             });
+            let range
+                = descriptor.range.clone().map_physical(|_| physical_range);
 
             Ok((package_ident, Descriptor::new_bound(descriptor_ident, range, descriptor.parent.clone())))
         },
@@ -75,13 +78,33 @@ pub fn canonicalize_pypi_descriptor(descriptor: &Descriptor) -> Result<(Ident, D
                 } else {
                     package_ident.clone()
                 };
-            let range = Range::PypiTag(PypiTagRange {
+            let physical_range = Range::PypiTag(PypiTagRange {
                 ident: params.ident.as_ref().map(|_| package_ident.clone()),
                 tag: params.tag.clone(),
                 parameters: params.parameters.clone(),
             });
+            let range
+                = descriptor.range.clone().map_physical(|_| physical_range);
 
             Ok((package_ident, Descriptor::new_bound(descriptor_ident, range, descriptor.parent.clone())))
+        },
+
+        Range::PypiFile(_) => {
+            let package_ident
+                = canonicalize_range_ident(&descriptor.ident)?;
+            Ok((
+                package_ident.clone(),
+                Descriptor::new_bound(package_ident, descriptor.range.clone(), descriptor.parent.clone()),
+            ))
+        },
+
+        Range::PypiGit(_) => {
+            let package_ident
+                = canonicalize_range_ident(&descriptor.ident)?;
+            Ok((
+                package_ident.clone(),
+                Descriptor::new_bound(package_ident, descriptor.range.clone(), descriptor.parent.clone()),
+            ))
         },
 
         _ => Ok((descriptor.ident.clone(), descriptor.clone())),
@@ -90,31 +113,32 @@ pub fn canonicalize_pypi_descriptor(descriptor: &Descriptor) -> Result<(Ident, D
 
 fn parse_requires_dist_entry(requirement: &str) -> Result<Option<PypiRequirement>, Error> {
     let dependency
-        = pep_508::parse(requirement)
-            .map_err(|errors| Error::InvalidResolution(format!("Invalid PyPI Requires-Dist entry `{requirement}`: {errors:?}")))?;
+        = pep508_rs::Requirement::<pep508_rs::VerbatimUrl>::from_str(requirement)
+            .map_err(|error| Error::InvalidResolution(format!("Invalid PyPI Requires-Dist entry `{requirement}`: {error}")))?;
 
-    let marker
-        = dependency.marker.as_ref()
-            .map(MarkerExpr::from_pep508_marker)
-            .transpose()
-            .map_err(|err| Error::InvalidResolution(format!("Unsupported PyPI Requires-Dist marker in `{requirement}`: {err}")))?
-            .unwrap_or(MarkerExpr::Any);
-
-    let specifier
-        = specifier_from_pep508_spec(dependency.spec.as_ref(), requirement)?;
+    let specifier = match dependency.version_or_url.as_ref() {
+        None => PypiSpecifierSet::any(),
+        Some(pep508_rs::VersionOrUrl::VersionSpecifier(specifiers)) => {
+            PypiSpecifierSet::from_file_string(&specifiers.to_string())
+                .map_err(|err| Error::InvalidRange(err.to_string()))?
+        },
+        Some(pep508_rs::VersionOrUrl::Url(_)) => {
+            return Err(Error::InvalidResolution(format!("Unsupported PyPI Requires-Dist entry `{requirement}`: direct URL requirements are not supported yet")));
+        },
+    };
 
     let ident
-        = canonicalize_pypi_ident(&Ident::from_file_string(dependency.name)
+        = canonicalize_pypi_ident(&Ident::from_file_string(dependency.name.as_ref())
             .map_err(|err| Error::InvalidIdent(err.to_string()))?)?;
 
-    let extras = PypiExtras::from_iter(dependency.extras)
+    let extras = PypiExtras::from_iter(dependency.extras.iter().map(|extra| extra.as_ref()))
         .map_err(|err| Error::InvalidRange(err.to_string()))?;
     let descriptor = descriptor_from_pypi_requirement(ident.clone(), specifier, extras);
 
     Ok(Some(PypiRequirement {
         ident,
         descriptor,
-        marker,
+        marker: dependency.marker,
     }))
 }
 
@@ -186,7 +210,7 @@ fn build_context_dependency_map(requirements: &[PypiRequirement], include_base: 
         let applies = if has_extra {
             let mut applies = false;
             for extra in active_extras.iter() {
-                if requirement.marker.evaluate_with_extra(target, Some(extra))
+                if evaluate_marker(&requirement.marker, target, Some(extra))
                     .map_err(|err| Error::InvalidResolution(format!("Cannot evaluate PyPI marker for {}: {err}", requirement.ident.to_file_string())))? {
                     applies = true;
                     break;
@@ -194,7 +218,7 @@ fn build_context_dependency_map(requirements: &[PypiRequirement], include_base: 
             }
             applies
         } else if include_base {
-            requirement.marker.evaluate_with_extra(target, None)
+            evaluate_marker(&requirement.marker, target, None)
                 .map_err(|err| Error::InvalidResolution(format!("Cannot evaluate PyPI marker for {}: {err}", requirement.ident.to_file_string())))?
         } else {
             false
@@ -251,42 +275,7 @@ fn descriptor_from_pypi_requirement(ident: Ident, specifier: PypiSpecifierSet, e
     }))
 }
 
-fn specifier_from_pep508_spec(spec: Option<&pep_508::Spec<'_>>, requirement: &str) -> Result<PypiSpecifierSet, Error> {
-    let Some(spec) = spec else {
-        return Ok(PypiSpecifierSet::any());
-    };
-
-    match spec {
-        pep_508::Spec::Url(_)
-            => Err(Error::InvalidResolution(format!("Unsupported PyPI Requires-Dist entry `{requirement}`: direct URL requirements are not supported yet"))),
-
-        pep_508::Spec::Version(specifiers) => {
-            let specifier
-                = specifiers.iter()
-                    .map(|specifier| format!("{}{}", format_pep508_comparator(specifier.comparator), specifier.version))
-                    .collect::<Vec<_>>()
-                    .join(",");
-
-            PypiSpecifierSet::from_file_string(&specifier)
-                .map_err(|err| Error::InvalidRange(err.to_string()))
-        },
-    }
-}
-
-fn format_pep508_comparator(comparator: pep_508::Comparator) -> &'static str {
-    match comparator {
-        pep_508::Comparator::Lt => "<",
-        pep_508::Comparator::Le => "<=",
-        pep_508::Comparator::Ne => "!=",
-        pep_508::Comparator::Eq => "==",
-        pep_508::Comparator::Ge => ">=",
-        pep_508::Comparator::Gt => ">",
-        pep_508::Comparator::Cp => "~=",
-        pep_508::Comparator::Ae => "===",
-    }
-}
-
-fn marker_variables(marker: &MarkerExpr) -> BTreeSet<MarkerVariable> {
+fn marker_variables(marker: &pep508_rs::MarkerTree) -> BTreeSet<MarkerVariable> {
     let mut variables
         = BTreeSet::new();
 
@@ -295,30 +284,116 @@ fn marker_variables(marker: &MarkerExpr) -> BTreeSet<MarkerVariable> {
     variables
 }
 
-fn collect_marker_variables(marker: &MarkerExpr, variables: &mut BTreeSet<MarkerVariable>) {
-    match marker {
-        MarkerExpr::Any | MarkerExpr::Never => {},
+fn collect_marker_variables(marker: &pep508_rs::MarkerTree, variables: &mut BTreeSet<MarkerVariable>) {
+    use pep508_rs::MarkerTreeKind;
 
-        MarkerExpr::And {lhs, rhs} | MarkerExpr::Or {lhs, rhs} => {
-            collect_marker_variables(lhs, variables);
-            collect_marker_variables(rhs, variables);
+    match marker.kind() {
+        MarkerTreeKind::True | MarkerTreeKind::False => {},
+        MarkerTreeKind::Version(node) => {
+            variables.insert(match node.key() {
+                pep508_rs::MarkerValueVersion::PythonVersion => MarkerVariable::PythonVersion,
+                pep508_rs::MarkerValueVersion::PythonFullVersion => MarkerVariable::PythonFullVersion,
+                pep508_rs::MarkerValueVersion::ImplementationVersion => MarkerVariable::ImplementationVersion,
+            });
+            for (_, child) in node.edges() {
+                collect_marker_variables(&child, variables);
+            }
         },
-
-        MarkerExpr::Not {expr} => {
-            collect_marker_variables(expr, variables);
+        MarkerTreeKind::String(node) => {
+            variables.insert(marker_string_variable(node.key()));
+            for (_, child) in node.children() {
+                collect_marker_variables(&child, variables);
+            }
         },
-
-        MarkerExpr::Compare {lhs, rhs, ..} => {
-            collect_marker_value_variables(lhs, variables);
-            collect_marker_value_variables(rhs, variables);
+        MarkerTreeKind::In(node) => {
+            variables.insert(marker_string_variable(node.key()));
+            for (_, child) in node.children() {
+                collect_marker_variables(&child, variables);
+            }
+        },
+        MarkerTreeKind::Contains(node) => {
+            variables.insert(marker_string_variable(node.key()));
+            for (_, child) in node.children() {
+                collect_marker_variables(&child, variables);
+            }
+        },
+        MarkerTreeKind::Extra(node) => {
+            variables.insert(MarkerVariable::Extra);
+            for (_, child) in node.children() {
+                collect_marker_variables(&child, variables);
+            }
         },
     }
 }
 
-fn collect_marker_value_variables(value: &MarkerValue, variables: &mut BTreeSet<MarkerVariable>) {
-    if let MarkerValue::Variable(variable) = value {
-        variables.insert(*variable);
+fn marker_string_variable(variable: &pep508_rs::MarkerValueString) -> MarkerVariable {
+    use pep508_rs::MarkerValueString;
+
+    match variable {
+        MarkerValueString::ImplementationName => MarkerVariable::ImplementationName,
+        MarkerValueString::OsName | MarkerValueString::OsNameDeprecated => MarkerVariable::OsName,
+        MarkerValueString::PlatformMachine | MarkerValueString::PlatformMachineDeprecated => MarkerVariable::PlatformMachine,
+        MarkerValueString::PlatformPythonImplementation
+        | MarkerValueString::PlatformPythonImplementationDeprecated
+        | MarkerValueString::PythonImplementationDeprecated => MarkerVariable::PlatformPythonImplementation,
+        MarkerValueString::PlatformRelease => MarkerVariable::PlatformRelease,
+        MarkerValueString::PlatformSystem => MarkerVariable::PlatformSystem,
+        MarkerValueString::PlatformVersion | MarkerValueString::PlatformVersionDeprecated => MarkerVariable::PlatformVersion,
+        MarkerValueString::SysPlatform | MarkerValueString::SysPlatformDeprecated => MarkerVariable::SysPlatform,
     }
+}
+
+fn target_marker_value<'a>(target: &'a PythonTargetEnv, variable: MarkerVariable) -> Option<&'a str> {
+    match variable {
+        MarkerVariable::PythonVersion => Some(&target.python_version),
+        MarkerVariable::PythonFullVersion => target.python_full_version.as_deref(),
+        MarkerVariable::OsName => target.os_name.as_deref(),
+        MarkerVariable::SysPlatform => target.sys_platform.as_deref(),
+        MarkerVariable::PlatformMachine => target.platform_machine.as_deref(),
+        MarkerVariable::PlatformSystem => target.platform_system.as_deref(),
+        MarkerVariable::PlatformRelease => target.platform_release.as_deref(),
+        MarkerVariable::PlatformVersion => target.platform_version.as_deref(),
+        MarkerVariable::PlatformPythonImplementation => target.platform_python_implementation.as_deref(),
+        MarkerVariable::ImplementationName => target.implementation_name.as_deref(),
+        MarkerVariable::ImplementationVersion => target.implementation_version.as_deref(),
+        MarkerVariable::Extra => None,
+    }
+}
+
+fn evaluate_marker(marker: &pep508_rs::MarkerTree, target: Option<&PythonTargetEnv>, extra: Option<&str>) -> Result<bool, String> {
+    let extras = extra
+        .map(pep508_rs::ExtraName::from_str)
+        .transpose()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    let Some(target) = target else {
+        return Ok(marker.evaluate_optional_environment(None, &extras));
+    };
+
+    for variable in marker_variables(marker) {
+        if variable != MarkerVariable::Extra && target_marker_value(target, variable).is_none() {
+            return Err(format!("marker target field {} is unavailable for this Python target", variable.as_str()));
+        }
+    }
+
+    let python_full_version = target.python_full_version.as_deref().unwrap_or(&target.python_version);
+    let environment = pep508_rs::MarkerEnvironment::try_from(pep508_rs::MarkerEnvironmentBuilder {
+        implementation_name: target.implementation_name.as_deref().unwrap_or(""),
+        implementation_version: target.implementation_version.as_deref().unwrap_or(python_full_version),
+        os_name: target.os_name.as_deref().unwrap_or(""),
+        platform_machine: target.platform_machine.as_deref().unwrap_or(""),
+        platform_python_implementation: target.platform_python_implementation.as_deref().unwrap_or(""),
+        platform_release: target.platform_release.as_deref().unwrap_or(""),
+        platform_system: target.platform_system.as_deref().unwrap_or(""),
+        platform_version: target.platform_version.as_deref().unwrap_or(""),
+        python_full_version,
+        python_version: &target.python_version,
+        sys_platform: target.sys_platform.as_deref().unwrap_or(""),
+    }).map_err(|error| error.to_string())?;
+
+    Ok(marker.evaluate(&environment, &extras))
 }
 
 fn project_pep440_to_semver(version: &zpm_primitives::PypiVersion) -> Result<zpm_semver::Version, Error> {
@@ -335,6 +410,210 @@ fn build_resolution_result(context: &InstallContext<'_>, locator: Locator, versi
         = parse_requires_dist(requires_dist)?;
     resolution.dependencies = build_context_dependency_map(&requirements, include_base, active_extras, None, false)?;
     resolution.into_resolution_result(context)
+}
+
+enum LocalWheelResolutionTarget<'a> {
+    Unqualified,
+    RequireTarget,
+    Fork(&'a PythonFork),
+}
+
+fn resolve_file_descriptor_inner(
+    context: &InstallContext<'_>,
+    descriptor: &Descriptor,
+    params: &PypiFileRange,
+    target_mode: LocalWheelResolutionTarget<'_>,
+) -> Result<ResolutionResult, Error> {
+    let project
+        = context.project
+            .expect("The project is required for resolving local PyPI wheels");
+    let wheel_path
+        = resolve_local_wheel_path(project, descriptor.parent.as_ref(), &params.path)?;
+    let wheel
+        = wheel_path.fs_read()
+            .map_err(|error| Error::InvalidResolution(format!("Cannot read local PyPI wheel `{}`: {error}", wheel_path.to_file_string())))?;
+    let metadata
+        = metadata_from_wheel(&wheel)?;
+    let requested_ident
+        = canonicalize_pypi_ident(&descriptor.ident)?;
+    if metadata.ident != requested_ident {
+        return Err(Error::InvalidResolution(format!(
+            "Local PyPI wheel `{}` contains package `{}`, but is required as `{}`",
+            params.path,
+            metadata.ident.to_file_string(),
+            requested_ident.to_file_string(),
+        )));
+    }
+
+    if let LocalWheelResolutionTarget::Fork(fork) = &target_mode {
+        if let Some(target) = &fork.target {
+            let filename
+                = wheel_path.basename()
+                    .ok_or_else(|| Error::InvalidResolution(format!("Local PyPI wheel path has no filename: {}", params.path)))?;
+            let distribution = PypiDistribution {
+                filename: filename.to_string(),
+                packagetype: "bdist_wheel".to_string(),
+                url: String::new(),
+                upload_time: None,
+                upload_time_iso_8601: None,
+                requires_python: None,
+            };
+            if select_best_wheel(&[distribution], Some(target)).is_none() {
+                return Err(Error::InvalidResolution(format!(
+                    "Local PyPI wheel `{}` is incompatible with the selected Python target",
+                    params.path,
+                )));
+            }
+        }
+    }
+
+    let checksum
+        = Hash64::from_data(&wheel);
+    let reference: Reference
+        = PypiRegistryReference {
+            ident: metadata.ident.clone(),
+            version: metadata.version.clone(),
+            url: Some(UrlEncoded::new(format_local_wheel_url(&params.path, &checksum))),
+        }.into();
+    let locator
+        = Locator::new_bound(descriptor.ident.clone(), reference, descriptor.parent.clone().map(Arc::new));
+    let active_extras
+        = params.parameters.as_ref().and_then(|parameters| parameters.extras.clone()).unwrap_or_default();
+
+    match target_mode {
+        LocalWheelResolutionTarget::Unqualified => build_resolution_result(
+            context,
+            locator,
+            &metadata.version,
+            &metadata.requires_dist,
+            true,
+            &active_extras,
+        ),
+        LocalWheelResolutionTarget::RequireTarget => build_targetless_island_resolution_result(
+            context,
+            locator,
+            &metadata.version,
+            &metadata.requires_dist,
+            true,
+            &active_extras,
+        ),
+        LocalWheelResolutionTarget::Fork(fork) => build_fork_resolution_result(
+            context,
+            locator,
+            &metadata.version,
+            &metadata.requires_dist,
+            fork,
+            true,
+            &active_extras,
+        ),
+    }
+}
+
+pub fn resolve_file_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &PypiFileRange) -> Result<ResolutionResult, Error> {
+    resolve_file_descriptor_inner(context, descriptor, params, LocalWheelResolutionTarget::Unqualified)
+}
+
+pub fn resolve_file_descriptor_requiring_python_target(context: &InstallContext<'_>, descriptor: &Descriptor, params: &PypiFileRange) -> Result<ResolutionResult, Error> {
+    resolve_file_descriptor_inner(context, descriptor, params, LocalWheelResolutionTarget::RequireTarget)
+}
+
+pub fn resolve_file_descriptor_for_fork(context: &InstallContext<'_>, descriptor: &Descriptor, params: &PypiFileRange, fork: &PythonFork) -> Result<ResolutionResult, Error> {
+    resolve_file_descriptor_inner(context, descriptor, params, LocalWheelResolutionTarget::Fork(fork))
+}
+
+async fn resolve_git_descriptor_inner(
+    context: &InstallContext<'_>,
+    descriptor: &Descriptor,
+    params: &PypiGitRange,
+    target_mode: LocalWheelResolutionTarget<'_>,
+) -> Result<ResolutionResult, Error> {
+    let project
+        = context.project
+            .expect("The project is required for resolving Python Git dependencies");
+    let commit
+        = Box::pin(crate::git::resolve_git_treeish(
+            &params.git,
+            &project.http_client.config,
+            &project.config.settings.approved_git_repositories,
+        )).await?;
+    let reference = zpm_git::GitReference {
+        repo: params.git.repo.clone(),
+        commit,
+        prepare_params: params.git.prepare_params.clone(),
+    };
+    let repository_path
+        = Box::pin(crate::git::clone_repository(context, &reference.repo, &reference.commit)).await?;
+    let metadata_result = match python_git_project_path(&repository_path, &reference) {
+        Ok(project_path) => match metadata_from_source_tree(&project_path) {
+            Ok(metadata) => Ok(metadata),
+            Err(_) => {
+                Box::pin(prepare::python::prepare_source_tree(&project_path, None, None)).await
+                    .and_then(|wheel| metadata_from_wheel(&wheel))
+            },
+        },
+        Err(error) => Err(error),
+    };
+    let _ = repository_path.fs_rm();
+    let metadata
+        = metadata_result?;
+    let requested_ident
+        = canonicalize_pypi_ident(&descriptor.ident)?;
+    if metadata.ident != requested_ident {
+        return Err(Error::InvalidResolution(format!(
+            "Python Git dependency contains package `{}`, but is required as `{}`",
+            metadata.ident.to_file_string(),
+            requested_ident.to_file_string(),
+        )));
+    }
+
+    let locator = Locator::new(
+        requested_ident,
+        PypiRegistryReference {
+            ident: metadata.ident.clone(),
+            version: metadata.version.clone(),
+            url: Some(UrlEncoded::new(format_python_git_url(&reference))),
+        }.into(),
+    );
+
+    match target_mode {
+        LocalWheelResolutionTarget::Unqualified => build_resolution_result(
+            context,
+            locator,
+            &metadata.version,
+            &metadata.requires_dist,
+            true,
+            &PypiExtras::empty(),
+        ),
+        LocalWheelResolutionTarget::RequireTarget => build_targetless_island_resolution_result(
+            context,
+            locator,
+            &metadata.version,
+            &metadata.requires_dist,
+            true,
+            &PypiExtras::empty(),
+        ),
+        LocalWheelResolutionTarget::Fork(fork) => build_fork_resolution_result(
+            context,
+            locator,
+            &metadata.version,
+            &metadata.requires_dist,
+            fork,
+            true,
+            &PypiExtras::empty(),
+        ),
+    }
+}
+
+pub async fn resolve_git_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &PypiGitRange) -> Result<ResolutionResult, Error> {
+    resolve_git_descriptor_inner(context, descriptor, params, LocalWheelResolutionTarget::Unqualified).await
+}
+
+pub async fn resolve_git_descriptor_requiring_python_target(context: &InstallContext<'_>, descriptor: &Descriptor, params: &PypiGitRange) -> Result<ResolutionResult, Error> {
+    resolve_git_descriptor_inner(context, descriptor, params, LocalWheelResolutionTarget::RequireTarget).await
+}
+
+pub async fn resolve_git_descriptor_for_fork(context: &InstallContext<'_>, descriptor: &Descriptor, params: &PypiGitRange, fork: &PythonFork) -> Result<ResolutionResult, Error> {
+    resolve_git_descriptor_inner(context, descriptor, params, LocalWheelResolutionTarget::Fork(fork)).await
 }
 
 fn build_targetless_island_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String], include_base: bool, active_extras: &PypiExtras) -> Result<ResolutionResult, Error> {
@@ -356,7 +635,9 @@ fn build_fork_resolution_result(context: &InstallContext<'_>, locator: Locator, 
 }
 
 fn select_version_for_specifier(releases: &BTreeMap<String, Vec<PypiDistribution>>, specifier: &zpm_primitives::PypiSpecifierSet) -> Result<Option<(zpm_primitives::PypiVersion, Vec<PypiDistribution>)>, Error> {
-    let mut best: Option<(zpm_primitives::PypiVersion, Vec<PypiDistribution>)>
+    let mut best_any: Option<(zpm_primitives::PypiVersion, Vec<PypiDistribution>)>
+        = None;
+    let mut best_stable: Option<(zpm_primitives::PypiVersion, Vec<PypiDistribution>)>
         = None;
 
     for (raw_version, distributions) in releases {
@@ -370,8 +651,8 @@ fn select_version_for_specifier(releases: &BTreeMap<String, Vec<PypiDistribution
             continue;
         }
 
-        let should_replace
-            = best.as_ref()
+        let should_replace_any
+            = best_any.as_ref()
                 .map(|(best_version, _)| {
                     version.cmp_pep440(best_version)
                         .map(|ordering| ordering.is_gt())
@@ -379,12 +660,37 @@ fn select_version_for_specifier(releases: &BTreeMap<String, Vec<PypiDistribution
                 })
                 .unwrap_or(true);
 
-        if should_replace {
-            best = Some((version, distributions.clone()));
+        if should_replace_any {
+            best_any = Some((version.clone(), distributions.clone()));
+        }
+
+        if version.is_stable()
+            .map_err(|err| Error::InvalidRange(err.to_string()))?
+        {
+            let should_replace_stable
+                = best_stable.as_ref()
+                    .map(|(best_version, _)| {
+                        version.cmp_pep440(best_version)
+                            .map(|ordering| ordering.is_gt())
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(true);
+
+            if should_replace_stable {
+                best_stable = Some((version, distributions.clone()));
+            }
         }
     }
 
-    Ok(best)
+    let allows_prereleases
+        = specifier.allows_prereleases()
+            .map_err(|err| Error::InvalidRange(err.to_string()))?;
+
+    Ok(if allows_prereleases {
+        best_any
+    } else {
+        best_stable.or(best_any)
+    })
 }
 
 fn select_latest_version(releases: &BTreeMap<String, Vec<PypiDistribution>>) -> Result<Option<(zpm_primitives::PypiVersion, Vec<PypiDistribution>)>, Error> {
@@ -434,7 +740,7 @@ fn select_latest_version(releases: &BTreeMap<String, Vec<PypiDistribution>>) -> 
     Ok(latest_stable.or(latest_any))
 }
 
-async fn fetch_json<T>(context: &InstallContext<'_>, url: &str) -> Result<T, Error>
+async fn fetch_json<T>(context: &InstallContext<'_>, url: &str, authorization: Option<&str>) -> Result<T, Error>
 where
     T: DeserializeOwned,
 {
@@ -443,11 +749,32 @@ where
         .expect("The project is required for resolving PyPI packages");
 
     let bytes
-        = project.http_client.cached_get(url).await?;
+        = project.http_client.cached_get_with_authorization(url, authorization).await?;
 
     let value: T
         = JsonDocument::hydrate_from_slice(&bytes[..])?;
     Ok(value)
+}
+
+fn is_not_found(error: &Error) -> bool {
+    matches!(error, Error::HttpError {inner, ..} if inner.status() == Some(reqwest::StatusCode::NOT_FOUND))
+}
+
+async fn fetch_simple_project_metadata(context: &InstallContext<'_>, package_ident: &Ident, base: &str, authorization: Option<&str>) -> Result<PypiProjectMetadata, Error> {
+    let project
+        = context.project
+            .expect("The project is required for resolving PyPI packages");
+    let url
+        = format!("{}/{}/", base, encode_path_segment(package_ident.as_str()));
+    let bytes
+        = project.http_client.cached_get_with_authorization(&url, authorization).await?;
+    let html
+        = std::str::from_utf8(&bytes)
+            .map_err(|error| Error::InvalidResolution(format!("PyPI Simple API response is not UTF-8: {error}")))?;
+
+    Ok(PypiProjectMetadata {
+        releases: parse_simple_project(html, &url, package_ident)?,
+    })
 }
 
 async fn fetch_project_metadata(context: &InstallContext<'_>, package_ident: &Ident) -> Result<PypiProjectMetadata, Error> {
@@ -458,9 +785,17 @@ async fn fetch_project_metadata(context: &InstallContext<'_>, package_ident: &Id
             .expect("The project is required for resolving PyPI packages");
     let base
         = get_registry(&project.config, &package_ident);
+    let authorization
+        = get_authorization(&project.config, &base, &package_ident);
     let url
         = format!("{}/pypi/{}/json", base, encode_path_segment(package_ident.as_str()));
-    fetch_json(context, &url).await
+    match fetch_json(context, &url, authorization.as_deref()).await {
+        Ok(metadata) => Ok(metadata),
+        Err(error) if is_not_found(&error) => {
+            fetch_simple_project_metadata(context, &package_ident, &base, authorization.as_deref()).await
+        },
+        Err(error) => Err(error),
+    }
 }
 
 async fn fetch_version_metadata(context: &InstallContext<'_>, package_ident: &Ident, version: &zpm_primitives::PypiVersion) -> Result<PypiVersionMetadata, Error> {
@@ -471,6 +806,8 @@ async fn fetch_version_metadata(context: &InstallContext<'_>, package_ident: &Id
             .expect("The project is required for resolving PyPI packages");
     let base
         = get_registry(&project.config, &package_ident);
+    let authorization
+        = get_authorization(&project.config, &base, &package_ident);
     let url
         = format!(
             "{}/pypi/{}/{}/json",
@@ -479,7 +816,100 @@ async fn fetch_version_metadata(context: &InstallContext<'_>, package_ident: &Id
             encode_path_segment(&version.to_file_string()),
         );
 
-    fetch_json(context, &url).await
+    fetch_json(context, &url, authorization.as_deref()).await
+}
+
+async fn fetch_requires_dist(context: &InstallContext<'_>, locator: &Locator, package_ident: &Ident, version: &PypiVersion, artifact_url: Option<&str>) -> Result<Vec<String>, Error> {
+    if let Some(source) = artifact_url.map(parse_local_wheel_url).transpose()?.flatten() {
+        let project
+            = context.project
+                .expect("The project is required for resolving local PyPI wheels");
+        let wheel_path
+            = resolve_local_wheel_path(project, locator.parent.as_deref(), &source.path)?;
+        let wheel
+            = wheel_path.fs_read()
+                .map_err(|error| Error::InvalidResolution(format!("Cannot read local PyPI wheel `{}`: {error}", wheel_path.to_file_string())))?;
+        if Hash64::from_data(&wheel) != source.checksum {
+            return Err(Error::InvalidResolution(format!(
+                "Local PyPI wheel `{}` changed since the lockfile was generated; run install to refresh the lockfile",
+                source.path,
+            )));
+        }
+        let metadata
+            = metadata_from_wheel(&wheel)?;
+        if &metadata.ident != package_ident || !metadata.version.cmp_pep440(version)
+            .map_err(|error| Error::InvalidResolution(error.to_string()))?
+            .is_eq()
+        {
+            return Err(Error::InvalidResolution(format!(
+                "Local PyPI wheel `{}` metadata doesn't match {}@{}",
+                source.path,
+                package_ident.to_file_string(),
+                version.to_file_string(),
+            )));
+        }
+        return Ok(metadata.requires_dist);
+    }
+
+    if let Some(reference) = artifact_url.map(parse_python_git_url).transpose()?.flatten() {
+        let target
+            = crate::fetchers::pypi::preparation_target(context, locator)?;
+        let prepared
+            = crate::fetchers::pypi::prepare_git_wheel(
+                context,
+                package_ident,
+                &reference,
+                target.as_ref(),
+                crate::fetchers::pypi::environment_hash(&locator.reference),
+            ).await?;
+        let metadata
+            = metadata_from_wheel(&prepared.data)?;
+        if &metadata.ident != package_ident || !metadata.version.cmp_pep440(version)
+            .map_err(|error| Error::InvalidResolution(error.to_string()))?
+            .is_eq()
+        {
+            return Err(Error::InvalidResolution(format!(
+                "Python Git dependency metadata doesn't match {}@{}",
+                package_ident.to_file_string(),
+                version.to_file_string(),
+            )));
+        }
+        return Ok(metadata.requires_dist);
+    }
+
+    match fetch_version_metadata(context, package_ident, version).await {
+        Ok(metadata) => return Ok(metadata.info.requires_dist.unwrap_or_default()),
+        Err(error) if is_not_found(&error) => {},
+        Err(error) => return Err(error),
+    }
+
+    let project
+        = context.project
+            .expect("The project is required for resolving PyPI packages");
+    let base
+        = get_registry(&project.config, package_ident);
+    let authorization
+        = get_authorization(&project.config, &base, package_ident);
+    let simple_metadata
+        = fetch_simple_project_metadata(context, package_ident, &base, authorization.as_deref()).await?;
+    let release
+        = simple_metadata.releases.get(&version.to_file_string())
+            .ok_or_else(|| Error::InvalidResolution(format!("PyPI Simple API has no artifacts for {}@{}", package_ident.to_file_string(), version.to_file_string())))?;
+    let metadata_artifact = artifact_url
+        .filter(|url| url::Url::parse(url).ok().and_then(|url| url.path_segments()?.next_back().map(|name| name.ends_with(".whl"))).unwrap_or(false))
+        .map(str::to_string)
+        .or_else(|| release.iter().find(|distribution| distribution.filename.ends_with(".whl")).map(|distribution| distribution.url.clone()))
+        .ok_or_else(|| Error::InvalidResolution(format!(
+            "Cannot read dependency metadata for {}@{} from a Simple API registry because the release has no wheel",
+            package_ident.to_file_string(),
+            version.to_file_string(),
+        )))?;
+    let artifact_authorization
+        = get_artifact_authorization(&project.config, &base, package_ident, &metadata_artifact);
+    let wheel
+        = project.http_client.cached_get_with_authorization(&metadata_artifact, artifact_authorization.as_deref()).await?;
+
+    requires_dist_from_wheel(&wheel)
 }
 
 pub async fn resolve_versions(context: &InstallContext<'_>, package_ident: &Ident) -> Result<Vec<Locator>, Error> {
@@ -500,14 +930,14 @@ pub async fn resolve_versions_for_target(context: &InstallContext<'_>, package_i
             continue;
         };
 
-        let Some(wheel) = select_best_wheel(&release_distributions, target) else {
+        let Some(artifact) = select_best_artifact(&release_distributions, target) else {
             continue;
         };
 
         locators.push(Locator::new(package_ident.clone(), PypiRegistryReference {
             ident: package_ident.clone(),
             version,
-            url: Some(UrlEncoded::new(wheel.url.clone())),
+            url: Some(UrlEncoded::new(artifact.url.clone())),
         }.into()));
     }
 
@@ -579,18 +1009,15 @@ pub async fn resolve_specifier_descriptor(context: &InstallContext<'_>, descript
         = select_version_for_specifier(&project_metadata.releases, &params.specifier)?
             .ok_or_else(|| Error::NoCandidatesFound(descriptor.range.clone()))?;
 
-    let wheel
-        = select_best_wheel(&release_distributions, None)
-            .ok_or_else(|| Error::InvalidResolution(format!("No compatible wheel artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
-
-    let version_metadata
-        = fetch_version_metadata(context, &package_ident, &resolved_version).await?;
+    let artifact
+        = select_best_artifact(&release_distributions, None)
+            .ok_or_else(|| Error::InvalidResolution(format!("No compatible PyPI artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
 
     let reference: Reference
         = PypiRegistryReference {
             ident: package_ident.clone(),
             version: resolved_version.clone(),
-            url: Some(UrlEncoded::new(wheel.url.clone())),
+            url: Some(UrlEncoded::new(artifact.url.clone())),
         }.into();
     let locator
         = if params.ident.is_some() {
@@ -600,7 +1027,7 @@ pub async fn resolve_specifier_descriptor(context: &InstallContext<'_>, descript
         };
 
     let requires_dist
-        = version_metadata.info.requires_dist.unwrap_or_default();
+        = fetch_requires_dist(context, &locator, &package_ident, &resolved_version, Some(&artifact.url)).await?;
 
     let active_extras = params.parameters.as_ref().and_then(|parameters| parameters.extras.clone()).unwrap_or_default();
     build_resolution_result(context, locator, &resolved_version, &requires_dist, true, &active_extras)
@@ -623,18 +1050,15 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
         = select_latest_version(&project_metadata.releases)?
             .ok_or_else(|| Error::NoCandidatesFound(descriptor.range.clone()))?;
 
-    let wheel
-        = select_best_wheel(&release_distributions, None)
-            .ok_or_else(|| Error::InvalidResolution(format!("No compatible wheel artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
-
-    let version_metadata
-        = fetch_version_metadata(context, &package_ident, &resolved_version).await?;
+    let artifact
+        = select_best_artifact(&release_distributions, None)
+            .ok_or_else(|| Error::InvalidResolution(format!("No compatible PyPI artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
 
     let reference: Reference
         = PypiRegistryReference {
             ident: package_ident.clone(),
             version: resolved_version.clone(),
-            url: Some(UrlEncoded::new(wheel.url.clone())),
+            url: Some(UrlEncoded::new(artifact.url.clone())),
         }.into();
     let locator
         = if params.ident.is_some() {
@@ -644,7 +1068,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
         };
 
     let requires_dist
-        = version_metadata.info.requires_dist.unwrap_or_default();
+        = fetch_requires_dist(context, &locator, &package_ident, &resolved_version, Some(&artifact.url)).await?;
 
     let active_extras = params.parameters.as_ref().and_then(|parameters| parameters.extras.clone()).unwrap_or_default();
     build_resolution_result(context, locator, &resolved_version, &requires_dist, true, &active_extras)
@@ -653,10 +1077,8 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
 pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference) -> Result<ResolutionResult, Error> {
     let package_ident
         = canonicalize_pypi_ident(&params.ident)?;
-    let version_metadata
-        = fetch_version_metadata(context, &package_ident, &params.version).await?;
     let requires_dist
-        = version_metadata.info.requires_dist.unwrap_or_default();
+        = fetch_requires_dist(context, locator, &package_ident, &params.version, params.url.as_ref().map(|url| url.0.as_str())).await?;
 
     build_resolution_result(context, locator.clone(), &params.version, &requires_dist, true, &PypiExtras::empty())
 }
@@ -664,10 +1086,8 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
 pub async fn resolve_locator_requiring_python_target(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference) -> Result<ResolutionResult, Error> {
     let package_ident
         = canonicalize_pypi_ident(&params.ident)?;
-    let version_metadata
-        = fetch_version_metadata(context, &package_ident, &params.version).await?;
     let requires_dist
-        = version_metadata.info.requires_dist.unwrap_or_default();
+        = fetch_requires_dist(context, locator, &package_ident, &params.version, params.url.as_ref().map(|url| url.0.as_str())).await?;
 
     build_targetless_island_resolution_result(context, locator.clone(), &params.version, &requires_dist, true, &PypiExtras::empty())
 }
@@ -675,10 +1095,8 @@ pub async fn resolve_locator_requiring_python_target(context: &InstallContext<'_
 pub async fn resolve_locator_for_fork(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, fork: &PythonFork) -> Result<ResolutionResult, Error> {
     let package_ident
         = canonicalize_pypi_ident(&params.ident)?;
-    let version_metadata
-        = fetch_version_metadata(context, &package_ident, &params.version).await?;
     let requires_dist
-        = version_metadata.info.requires_dist.unwrap_or_default();
+        = fetch_requires_dist(context, locator, &package_ident, &params.version, params.url.as_ref().map(|url| url.0.as_str())).await?;
 
     build_fork_resolution_result(context, locator.clone(), &params.version, &requires_dist, fork, true, &PypiExtras::empty())
 }
@@ -693,8 +1111,7 @@ pub async fn resolve_locator_extra_requiring_python_target(context: &InstallCont
 
 pub async fn resolve_locator_extra_for_fork(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, extra: &str, fork: &PythonFork) -> Result<ResolutionResult, Error> {
     let package_ident = canonicalize_pypi_ident(&params.ident)?;
-    let version_metadata = fetch_version_metadata(context, &package_ident, &params.version).await?;
-    let requires_dist = version_metadata.info.requires_dist.unwrap_or_default();
+    let requires_dist = fetch_requires_dist(context, locator, &package_ident, &params.version, params.url.as_ref().map(|url| url.0.as_str())).await?;
     let active_extras = PypiExtras::from_iter([extra]).map_err(|err| Error::InvalidRange(err.to_string()))?;
 
     build_fork_resolution_result(context, locator.clone(), &params.version, &requires_dist, fork, false, &active_extras)
@@ -702,8 +1119,7 @@ pub async fn resolve_locator_extra_for_fork(context: &InstallContext<'_>, locato
 
 async fn resolve_locator_extra_without_target(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, extra: &str, require_target: bool) -> Result<ResolutionResult, Error> {
     let package_ident = canonicalize_pypi_ident(&params.ident)?;
-    let version_metadata = fetch_version_metadata(context, &package_ident, &params.version).await?;
-    let requires_dist = version_metadata.info.requires_dist.unwrap_or_default();
+    let requires_dist = fetch_requires_dist(context, locator, &package_ident, &params.version, params.url.as_ref().map(|url| url.0.as_str())).await?;
     let active_extras = PypiExtras::from_iter([extra]).map_err(|err| Error::InvalidRange(err.to_string()))?;
 
     if require_target {
@@ -717,6 +1133,12 @@ async fn resolve_locator_extra_without_target(context: &InstallContext<'_>, loca
 mod tests {
     use super::*;
 
+    fn releases(versions: &[&str]) -> BTreeMap<String, Vec<PypiDistribution>> {
+        versions.iter()
+            .map(|version| ((*version).to_string(), Vec::new()))
+            .collect()
+    }
+
     fn parse_one(requirement: &str) -> PypiRequirement {
         parse_requires_dist_entry(requirement).unwrap().unwrap()
     }
@@ -729,13 +1151,43 @@ mod tests {
     }
 
     #[test]
+    fn test_select_version_prefers_stable_for_ordinary_specifier() {
+        let selected = select_version_for_specifier(
+            &releases(&["0.28.1", "1.0.dev6"]),
+            &PypiSpecifierSet::from_file_string(">=0.28.0").unwrap(),
+        ).unwrap().unwrap();
+
+        assert_eq!("0.28.1", selected.0.to_file_string());
+    }
+
+    #[test]
+    fn test_select_version_allows_explicit_prerelease() {
+        let selected = select_version_for_specifier(
+            &releases(&["1.0.dev5", "1.0.dev6"]),
+            &PypiSpecifierSet::from_file_string(">=1.0.dev5").unwrap(),
+        ).unwrap().unwrap();
+
+        assert_eq!("1.0.dev6", selected.0.to_file_string());
+    }
+
+    #[test]
+    fn test_select_version_falls_back_to_prerelease() {
+        let selected = select_version_for_specifier(
+            &releases(&["1.0.dev5", "1.0.dev6"]),
+            &PypiSpecifierSet::from_file_string("*").unwrap(),
+        ).unwrap().unwrap();
+
+        assert_eq!("1.0.dev6", selected.0.to_file_string());
+    }
+
+    #[test]
     fn test_parse_requires_dist_canonicalizes_names_and_keeps_markers() {
         let requirement
             = parse_one("Friendly_Bard.Name (>=1.0.0); python_version >= '3.11'");
 
         assert_eq!("friendly-bard-name", requirement.ident.to_file_string());
         assert_eq!("friendly-bard-name@pypi:>=1.0.0", requirement.descriptor.to_file_string());
-        assert_ne!(MarkerExpr::Any, requirement.marker);
+        assert!(!requirement.marker.is_true());
     }
 
     #[test]
@@ -761,6 +1213,23 @@ mod tests {
     }
 
     #[test]
+    fn test_canonicalize_pypi_descriptor_preserves_env_qualification() {
+        let fork_id
+            = zpm_utils::Hash64::from_data("python-fork");
+        let descriptor
+            = Descriptor::from_file_string("Friendly_Bard.Name@pypi:>=1.0.0").unwrap()
+                .env_qualified_with_hash(fork_id.clone());
+        let (package_ident, descriptor)
+            = canonicalize_pypi_descriptor(&descriptor).unwrap();
+
+        assert_eq!("friendly-bard-name", package_ident.to_file_string());
+        assert_eq!(
+            format!("friendly-bard-name@env:{}#pypi:>=1.0.0", fork_id.to_file_string()),
+            descriptor.to_file_string(),
+        );
+    }
+
+    #[test]
     fn test_parse_requires_dist_keeps_requested_extras() {
         let requirement = parse_one("friendly-bard[http] >=1.0.0");
         let Range::PypiSpecifier(range) = requirement.descriptor.range else {
@@ -782,7 +1251,19 @@ mod tests {
         let variables = marker_variables(&requirement.marker);
 
         assert!(variables.contains(&MarkerVariable::Extra));
-        assert!(variables.contains(&MarkerVariable::PythonVersion));
+        assert!(variables.contains(&MarkerVariable::PythonFullVersion));
+    }
+
+    #[test]
+    fn test_parse_requires_dist_supports_parenthesized_markers() {
+        let requirement = parse_one(
+            "Brotli>=1.2; (platform_python_implementation == 'CPython' and sys_platform != 'android' and sys_platform != 'ios') and extra == 'speedups'",
+        );
+        let variables = marker_variables(&requirement.marker);
+
+        assert!(variables.contains(&MarkerVariable::PlatformPythonImplementation));
+        assert!(variables.contains(&MarkerVariable::SysPlatform));
+        assert!(variables.contains(&MarkerVariable::Extra));
     }
 
     #[test]

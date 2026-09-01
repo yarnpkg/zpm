@@ -254,6 +254,12 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
             false => pypi::resolve_tag_descriptor(&context, &descriptor, params).await,
         },
 
+        Range::PypiFile(params)
+            => pypi::resolve_file_descriptor(&context, &descriptor, params),
+
+        Range::PypiGit(params)
+            => Box::pin(pypi::resolve_git_descriptor(&context, &descriptor, params)).await,
+
         Range::JsrSemver(params) => match params.ident.is_some() {
             true => jsr::resolve_aliased(&descriptor, dependencies),
             false => jsr::resolve_semver_descriptor(&context, &descriptor, params).await,

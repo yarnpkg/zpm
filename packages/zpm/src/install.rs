@@ -8,7 +8,7 @@ use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
-use zpm_utils::{DataType, Hash64, Hash64Writer, IoResultExt, Path, SystemSet, ToHumanString, UrlEncoded, scc_tarjan_pearce};
+use zpm_utils::{DataType, Hash64, Hash64Writer, IoResultExt, Path, System, SystemSet, ToHumanString, UrlEncoded, scc_tarjan_pearce};
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
@@ -31,6 +31,9 @@ pub struct InstallContext<'a> {
     pub mode: Option<InstallMode>,
     pub inline_builds: bool,
     pub extension_tracking: Arc<Mutex<ExtensionTracking>>,
+    /// Managed Python archives available to PEP 517 builds, keyed by the
+    /// Python fork that selected them.
+    pub python_build_runtimes: Arc<Mutex<BTreeMap<Hash64, PackageData>>>,
     /// Off-thread tracker for metadata cache writes. The owner must
     /// call `drain` before returning so pending writes aren't dropped
     /// when the runtime shuts down.
@@ -87,6 +90,7 @@ impl<'a> Default for InstallContext<'a> {
             mode: None,
             inline_builds: false,
             extension_tracking: Arc::new(Mutex::new(ExtensionTracking::default())),
+            python_build_runtimes: Arc::new(Mutex::new(BTreeMap::new())),
             background_writes: None,
         }
     }
@@ -1194,6 +1198,56 @@ pub struct InstallManager<'a> {
     result: Install,
 }
 
+/// Combine descriptor-specific views of one package version.
+///
+/// PyPI extras don't create a different distribution locator, but they do add
+/// dependencies. The greedy resolver may therefore resolve the same locator
+/// once for its base descriptor and again for one or more extra-bearing
+/// descriptors. Persisting only the last view makes the lockfile depend on
+/// traversal order and causes the next install to forget extra dependencies.
+fn merge_resolution_views(existing: &mut Resolution, incoming: Resolution) -> Result<(), Error> {
+    if existing.locator != incoming.locator
+        || existing.version != incoming.version
+        || existing.requirements != incoming.requirements
+    {
+        return Err(Error::InvalidResolution(format!(
+            "Conflicting metadata for {}",
+            existing.locator.to_file_string(),
+        )));
+    }
+
+    for (ident, incoming_descriptor) in incoming.dependencies {
+        if let Some(existing_descriptor) = existing.dependencies.get_mut(&ident) {
+            crate::resolvers::pypi::merge_dependency_descriptor(existing_descriptor, incoming_descriptor)?;
+        } else {
+            existing.dependencies.insert(ident, incoming_descriptor);
+        }
+    }
+
+    for (ident, incoming_range) in incoming.peer_dependencies {
+        if let Some(existing_range) = existing.peer_dependencies.get(&ident) {
+            if existing_range != &incoming_range {
+                return Err(Error::InvalidResolution(format!(
+                    "Conflicting peer dependency metadata for {} in {}",
+                    ident.to_file_string(),
+                    existing.locator.to_file_string(),
+                )));
+            }
+        } else {
+            existing.peer_dependencies.insert(ident, incoming_range);
+        }
+    }
+
+    existing.optional_dependencies.extend(incoming.optional_dependencies);
+    existing.optional_peer_dependencies.extend(incoming.optional_peer_dependencies);
+    existing.missing_peer_dependencies.extend(incoming.missing_peer_dependencies);
+    existing.variants.extend(incoming.variants);
+    existing.variants.sort();
+    existing.variants.dedup();
+
+    Ok(())
+}
+
 impl Default for InstallManager<'_> {
     fn default() -> Self {
         Self::new()
@@ -1343,9 +1397,22 @@ impl<'a> InstallManager<'a> {
 
                 // Merge island results into install state and fetch packages
                 let mut island_locators = Vec::new();
+                let mut python_build_runtime_locators = Vec::new();
 
                 for island_result in island_results {
                     let island_id = island_result.island_id.clone();
+
+                    for (fork_id, fork) in &island_result.lockfile_island.forks {
+                        let runtime_locator = fork.resolutions.values().find(|locator| {
+                            locator.ident.as_str().starts_with("@yarnpkg/python-")
+                                && island_result.normalized_resolutions.get(*locator)
+                                    .is_some_and(|resolution| resolution.requirements.validate_system(System::current()))
+                        });
+
+                        if let Some(runtime_locator) = runtime_locator {
+                            python_build_runtime_locators.push((fork_id.clone(), runtime_locator.clone()));
+                        }
+                    }
 
                     // Store per-island mappings (kept separate from global maps
                     // to preserve island isolation)
@@ -1368,6 +1435,30 @@ impl<'a> InstallManager<'a> {
                     // Store island descriptor→locator in lockfile
                     self.result.lockfile.islands
                         .insert(island_id, island_result.lockfile_island);
+                }
+
+                // Sdists are prepared during fetching, before the venv linker
+                // materializes its managed interpreter. Fetch the selected
+                // runtime first and make its archive available to the Python
+                // preparer for packages in the same target fork.
+                for (fork_id, runtime_locator) in python_build_runtime_locators {
+                    if self.context.python_build_runtimes.lock().unwrap().contains_key(&fork_id) {
+                        continue;
+                    }
+
+                    let physical_locator = runtime_locator.physical_locator();
+                    let Reference::Builtin(params) = &physical_locator.reference else {
+                        continue;
+                    };
+                    let fetch_result = crate::fetchers::builtin::fetch_builtin_locator(
+                        &self.context,
+                        &physical_locator,
+                        params,
+                        false,
+                    ).await?;
+
+                    self.context.python_build_runtimes.lock().unwrap()
+                        .insert(fork_id, fetch_result.package_data);
                 }
 
                 // Fetch all island-resolved packages so package_data is
@@ -1625,10 +1716,19 @@ impl<'a> InstallManager<'a> {
     fn record_resolution(&mut self, resolution: Resolution, original_resolution: Resolution, package_data: Option<PackageData>) -> Result<(), Error> {
         let locator
             = resolution.locator.clone();
+        let requirements
+            = resolution.requirements.clone();
         let is_new_package
             = !self.result.install_state.normalized_resolutions.contains_key(&locator);
 
-        self.result.install_state.normalized_resolutions.insert(locator.clone(), resolution.clone());
+        match self.result.install_state.normalized_resolutions.entry(locator.clone()) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(resolution);
+            },
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                merge_resolution_views(entry.get_mut(), resolution)?;
+            },
+        }
 
         if is_new_package {
             tracing::event!(
@@ -1641,18 +1741,25 @@ impl<'a> InstallManager<'a> {
             );
         }
 
-        self.result.lockfile.entries.insert(locator.clone(), LockfileEntry {
-            checksum: None,
-            resolution: original_resolution,
-        });
+        match self.result.lockfile.entries.entry(locator.clone()) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(LockfileEntry {
+                    checksum: None,
+                    resolution: original_resolution,
+                });
+            },
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                merge_resolution_views(&mut entry.get_mut().resolution, original_resolution)?;
+            },
+        }
 
-        if resolution.requirements.is_conditional() {
+        if requirements.is_conditional() {
             let systems
                 = self.context.systems.unwrap();
 
             self.result.install_state.conditional_locators.insert(locator.clone());
 
-            if !resolution.requirements.validate_any(systems) {
+            if !requirements.validate_any(systems) {
                 self.result.install_state.disabled_locators.insert(locator.clone());
             }
         }

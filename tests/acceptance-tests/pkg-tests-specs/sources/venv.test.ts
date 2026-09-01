@@ -1,4 +1,4 @@
-import {PortablePath, npath, xfs} from '@yarnpkg/fslib';
+import {PortablePath, npath, ppath, xfs} from '@yarnpkg/fslib';
 import {tests, yarn}              from 'pkg-tests-core';
 
 async function configureVenvIsland(path: PortablePath, workspaces: Array<string>) {
@@ -140,6 +140,48 @@ describe(`Venv tests`, () => {
 
         await expect(xfs.existsPromise(linkedSelectedDistInfo)).resolves.toBe(true);
         await expect(xfs.existsPromise(linkedOtherDistInfo)).resolves.toBe(false);
+      },
+    ),
+  );
+
+  test(
+    `it should resolve parenthesized PyPI environment markers`,
+    makeTemporaryMonorepoEnv(
+      {
+        workspaces: [`packages/*`],
+      },
+      {
+        [`packages/workspace-a`]: {
+          name: `workspace-a`,
+          version: `1.0.0`,
+          dependencies: {
+            [`pypi-parenthesized-marker`]: `pypi:1.0.0`,
+          },
+        },
+      },
+      async ({path, run}) => {
+        const registryUrl = await tests.startPackageServer();
+
+        await yarn.writeConfiguration(path, {
+          supportedTargets: [currentSupportedTarget(`3.12`)],
+          unstableIslands: {
+            main: {
+              workspaces: [`workspace-a`],
+              linker: `venv`,
+            },
+          },
+        });
+
+        await run(`install`, {
+          env: {
+            ZPM_PYPI_REGISTRY: registryUrl,
+          },
+        });
+
+        await expect(xfs.existsPromise(ppath.join(
+          path,
+          `packages/workspace-a/.venv/lib/site-packages/pypi-no-deps/pypi_no_deps/__init__.py` as PortablePath,
+        ))).resolves.toBe(true);
       },
     ),
   );

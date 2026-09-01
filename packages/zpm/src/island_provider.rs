@@ -182,6 +182,66 @@ impl<'a> IslandDependencyProvider<'a> {
         let physical_range
             = descriptor.range.physical_range();
 
+        if let Range::PypiFile(params) = physical_range {
+            let physical_descriptor
+                = descriptor.physical_descriptor();
+            let result = match &self.fork {
+                Some(fork) => crate::resolvers::pypi::resolve_file_descriptor_for_fork(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                    fork,
+                ),
+                None if self.requires_python_target => crate::resolvers::pypi::resolve_file_descriptor_requiring_python_target(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                ),
+                None => crate::resolvers::pypi::resolve_file_descriptor(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                ),
+            }.map_err(IslandResolutionError::from)?;
+            let locator
+                = self.qualify_locator(&result.resolution.locator);
+            let resolution
+                = self.qualify_resolution(result.resolution, locator.clone());
+            self.resolution_cache.borrow_mut().insert(locator.clone(), resolution);
+
+            return Ok(Some(IslandVersionSet::exact_singleton(IslandVersion(locator))));
+        }
+
+        if let Range::PypiGit(params) = physical_range {
+            let physical_descriptor
+                = descriptor.physical_descriptor();
+            let result = match &self.fork {
+                Some(fork) => self.handle.block_on(crate::resolvers::pypi::resolve_git_descriptor_for_fork(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                    fork,
+                )),
+                None if self.requires_python_target => self.handle.block_on(crate::resolvers::pypi::resolve_git_descriptor_requiring_python_target(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                )),
+                None => self.handle.block_on(crate::resolvers::pypi::resolve_git_descriptor(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                )),
+            }.map_err(IslandResolutionError::from)?;
+            let locator
+                = self.qualify_locator(&result.resolution.locator);
+            let resolution
+                = self.qualify_resolution(result.resolution, locator.clone());
+            self.resolution_cache.borrow_mut().insert(locator.clone(), resolution);
+
+            return Ok(Some(IslandVersionSet::exact_singleton(IslandVersion(locator))));
+        }
+
         let (package_ident, specifier, latest_only) = match physical_range {
             Range::PypiSpecifier(params) => {
                 let package_ident
@@ -236,10 +296,31 @@ impl<'a> IslandDependencyProvider<'a> {
             if include {
                 candidates.push(island_version);
             }
+        }
 
-            if latest_only && !candidates.is_empty() {
-                break;
+        let allows_prereleases = specifier.as_ref()
+            .map(|specifier| specifier.allows_prereleases())
+            .transpose()
+            .map_err(|err| IslandResolutionError {
+                message: err.to_string(),
+            })?
+            .unwrap_or(false);
+
+        if !allows_prereleases {
+            let stable_candidates = candidates.iter()
+                .filter_map(|candidate| candidate.pypi_version()
+                    .and_then(|version| version.is_stable().ok())
+                    .filter(|stable| *stable)
+                    .map(|_| candidate.clone()))
+                .collect::<Vec<_>>();
+
+            if !stable_candidates.is_empty() {
+                candidates = stable_candidates;
             }
+        }
+
+        if latest_only {
+            candidates.truncate(1);
         }
 
         Ok(Some(IslandVersionSet::Exact(ExactSet::one_of(candidates))))
@@ -462,7 +543,7 @@ impl<'a> IslandDependencyProvider<'a> {
 }
 
 fn pypi_extras(range: &Range) -> Vec<String> {
-    match range {
+    match range.physical_range() {
         Range::PypiSpecifier(params) => params.parameters.iter()
             .flat_map(|parameters| parameters.extras.iter())
             .flat_map(|extras| extras.iter().map(|extra| extra.to_string()))
@@ -473,30 +554,42 @@ fn pypi_extras(range: &Range) -> Vec<String> {
             .flat_map(|extras| extras.iter().map(|extra| extra.to_string()))
             .collect(),
 
+        Range::PypiFile(params) => params.parameters.iter()
+            .flat_map(|parameters| parameters.extras.iter())
+            .flat_map(|extras| extras.iter().map(|extra| extra.to_string()))
+            .collect(),
+
         _ => Vec::new(),
     }
 }
 
 fn descriptor_without_pypi_extras(descriptor: &Descriptor) -> Descriptor {
-    let range = match &descriptor.range {
+    let range = descriptor.range.clone().map_physical(|range| match range {
         Range::PypiSpecifier(params) if params.parameters.as_ref().and_then(|parameters| parameters.extras.as_ref()).is_some() => {
             Range::PypiSpecifier(PypiSpecifierRange {
-                ident: params.ident.clone(),
-                specifier: params.specifier.clone(),
+                ident: params.ident,
+                specifier: params.specifier,
                 parameters: None,
             })
-        }
+        },
 
         Range::PypiTag(params) if params.parameters.as_ref().and_then(|parameters| parameters.extras.as_ref()).is_some() => {
             Range::PypiTag(PypiTagRange {
-                ident: params.ident.clone(),
-                tag: params.tag.clone(),
+                ident: params.ident,
+                tag: params.tag,
                 parameters: None,
             })
-        }
+        },
 
-        _ => descriptor.range.clone(),
-    };
+        Range::PypiFile(params) if params.parameters.as_ref().and_then(|parameters| parameters.extras.as_ref()).is_some() => {
+            Range::PypiFile(zpm_primitives::PypiFileRange {
+                path: params.path,
+                parameters: None,
+            })
+        },
+
+        range => range,
+    });
 
     Descriptor::new_bound(descriptor.ident.clone(), range, descriptor.parent.clone())
 }
@@ -508,10 +601,11 @@ fn insert_dependency_packages(
     version_set: IslandVersionSet,
 ) {
     if extras.is_empty() {
-        deps.insert(IslandPackage::Named(key.clone()), version_set);
+        insert_dependency_constraint(deps, IslandPackage::Named(key.clone()), version_set);
     } else {
         for extra in extras {
-            deps.insert(
+            insert_dependency_constraint(
+                deps,
                 IslandPackage::ExtraProxy {
                     key: key.clone(),
                     extra,
@@ -519,6 +613,21 @@ fn insert_dependency_packages(
                 version_set.clone(),
             );
         }
+    }
+}
+
+fn insert_dependency_constraint(
+    deps: &mut BTreeMap<IslandPackage, IslandVersionSet>,
+    package: IslandPackage,
+    incoming: IslandVersionSet,
+) {
+    match deps.get_mut(&package) {
+        Some(existing) => {
+            *existing = existing.intersection(&incoming);
+        },
+        None => {
+            deps.insert(package, incoming);
+        },
     }
 }
 
@@ -683,5 +792,96 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
         let deps = self.fetch_dependencies(version)?;
 
         Ok(Dependencies::Available(deps.into_iter().collect()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zpm_utils::{FromFileString, Hash64, ToFileString};
+
+    #[test]
+    fn test_pypi_extras_are_visible_through_env_ranges() {
+        let fork_id
+            = Hash64::from_data("python-fork");
+        let descriptor
+            = Descriptor::from_file_string("foo@pypi:>=1.0.0#extras=feature")
+                .unwrap()
+                .env_qualified_with_hash(fork_id.clone());
+
+        assert_eq!(vec!["feature"], pypi_extras(&descriptor.range));
+        assert_eq!(
+            format!("foo@env:{}#pypi:>=1.0.0", fork_id.to_file_string()),
+            descriptor_without_pypi_extras(&descriptor).to_file_string(),
+        );
+    }
+
+    #[test]
+    fn test_dependency_constraints_for_the_same_source_are_intersected() {
+        let key
+            = IslandPackageKey::new(Ident::new("foo"), IslandRegistry::Pypi);
+        let one
+            = IslandVersion(Locator::from_file_string("foo@pypi:foo@1.0.0").unwrap());
+        let two
+            = IslandVersion(Locator::from_file_string("foo@pypi:foo@2.0.0").unwrap());
+        let three
+            = IslandVersion(Locator::from_file_string("foo@pypi:foo@3.0.0").unwrap());
+        let mut deps
+            = BTreeMap::new();
+
+        insert_dependency_packages(
+            &mut deps,
+            &key,
+            Vec::new(),
+            IslandVersionSet::Exact(ExactSet::one_of([one.clone(), two.clone()])),
+        );
+        insert_dependency_packages(
+            &mut deps,
+            &key,
+            Vec::new(),
+            IslandVersionSet::Exact(ExactSet::one_of([two.clone(), three.clone()])),
+        );
+
+        let package
+            = IslandPackage::Named(key);
+        let range
+            = deps.get(&package).unwrap();
+
+        assert!(!range.contains(&one));
+        assert!(range.contains(&two));
+        assert!(!range.contains(&three));
+    }
+
+    #[test]
+    fn test_incompatible_constraints_for_the_same_source_are_empty() {
+        let key
+            = IslandPackageKey::new(Ident::new("foo"), IslandRegistry::Pypi);
+        let one
+            = IslandVersion(Locator::from_file_string("foo@pypi:foo@1.0.0").unwrap());
+        let two
+            = IslandVersion(Locator::from_file_string("foo@pypi:foo@2.0.0").unwrap());
+        let mut deps
+            = BTreeMap::new();
+
+        insert_dependency_packages(
+            &mut deps,
+            &key,
+            Vec::new(),
+            IslandVersionSet::exact_singleton(one),
+        );
+        insert_dependency_packages(
+            &mut deps,
+            &key,
+            Vec::new(),
+            IslandVersionSet::exact_singleton(two),
+        );
+
+        let package
+            = IslandPackage::Named(key);
+
+        assert!(matches!(
+            deps.get(&package),
+            Some(IslandVersionSet::Exact(ExactSet::OneOf(versions))) if versions.is_empty()
+        ));
     }
 }

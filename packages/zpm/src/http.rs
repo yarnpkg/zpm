@@ -638,17 +638,28 @@ impl HttpClient {
     /// returns the cached response bytes. Concurrent requests to the same URL
     /// will wait for the first request to complete and share the result.
     pub async fn cached_get(&self, url: impl AsRef<str>) -> Result<Bytes, Error> {
+        self.cached_get_with_authorization(url, None).await
+    }
+
+    /// Performs a cached GET request with an optional Authorization header.
+    /// The credential itself is never retained in the cache key.
+    pub async fn cached_get_with_authorization(&self, url: impl AsRef<str>, authorization: Option<&str>) -> Result<Bytes, Error> {
         let url_str
             = url.as_ref().to_string();
+        let cache_key = match authorization {
+            Some(_) => format!("{}\0authenticated", url_str),
+            None => url_str.clone(),
+        };
 
         let cell = self.get_cache
-            .entry(url_str.clone())
+            .entry(cache_key)
             .or_insert_with(|| Arc::new(OnceCell::new()))
             .clone();
 
         let result = cell.get_or_init(|| async {
             let request
-                = self.get(&url_str)?;
+                = self.get(&url_str)?
+                    .header("authorization", authorization);
 
             let (_, bytes)
                 = request.send_bytes().await?;

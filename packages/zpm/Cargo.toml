@@ -32,6 +32,7 @@ version-ranges = { workspace = true }
 rayon = { workspace = true }
 rkyv = { workspace = true, features = ["bytecheck"] }
 pep-508 = { workspace = true }
+pep508_rs = { workspace = true }
 reqwest = { workspace = true, default-features = false, features = ["gzip", "http2", "hickory-dns"] }
 regex = { workspace = true }
 rust-ini = { workspace = true }
@@ -40,6 +41,7 @@ serde_yaml = { workspace = true }
 similar = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+toml = { workspace = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }

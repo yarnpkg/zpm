@@ -162,7 +162,7 @@ fn parse_pypi_entry_point_value(value: &str) -> Option<(String, String)> {
     Some((module_name.to_string(), object_name.to_string()))
 }
 
-fn extract_pypi_binaries(package_bytes: &[u8]) -> Result<BTreeMap<String, Binary>, Error> {
+pub(crate) fn extract_pypi_binaries(package_bytes: &[u8]) -> Result<BTreeMap<String, Binary>, Error> {
     let entries
         = zpm_formats::zip::entries_from_zip(package_bytes)?;
 

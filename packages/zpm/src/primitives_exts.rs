@@ -115,6 +115,7 @@ impl RangeExt for Range {
 
             Range::Exec(_) |
             Range::Folder(_) |
+            Range::PypiFile(_) |
             Range::Portal(_) |
             Range::Tarball(_) => {
                 RangeDetails {
@@ -126,6 +127,7 @@ impl RangeExt for Range {
             },
 
             Range::Git(_) |
+            Range::PypiGit(_) |
             Range::Url(_) => {
                 RangeDetails {
                     require_binding: false,

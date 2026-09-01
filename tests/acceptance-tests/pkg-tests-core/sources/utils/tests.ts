@@ -3,6 +3,7 @@ import {PortablePath, npath, xfs, ppath, Filename} from '@yarnpkg/fslib';
 import {LibZipImpl, ZIP_UNIX, makeEmptyArchive}    from '@yarnpkg/libzip';
 import {npmAuditTypes}                             from '@yarnpkg/plugin-npm-cli';
 import assert                                      from 'assert';
+import {execFileSync}                              from 'child_process';
 import crypto                                      from 'crypto';
 import finalhandler                                from 'finalhandler';
 import https                                       from 'https';
@@ -49,6 +50,14 @@ async function collectWheelEntries(directory: PortablePath): Promise<Array<ZipEn
       const stat = await xfs.lstatPromise(path);
 
       if (stat.isDirectory()) {
+        const relativePath = ppath.relative(directory, path);
+
+        entries.push({
+          name: `${relativePath}/` as PortablePath,
+          data: Buffer.alloc(0),
+          mode: stat.mode & 0xffff,
+        });
+
         await visit(path);
         continue;
       }
@@ -127,6 +136,39 @@ async function serveDynamicPypiWheel(request: IncomingMessage, response: ServerR
   return true;
 }
 
+async function serveDynamicPypiSdist(request: IncomingMessage, response: ServerResponse) {
+  const pathname = new URL(request.url ?? `/`, `http://localhost`).pathname;
+  const match = pathname.match(/^\/repositories\/pypi\/([^/]+\.(?:tar\.gz|tgz))$/);
+
+  if (match === null)
+    return false;
+
+  const sdistFileName = decodeURIComponent(match[1]!);
+  if (sdistFileName.includes(`/`) || sdistFileName.includes(`\\`))
+    return false;
+
+  const sdistDir = ppath.join(pypiRepositoryDir, sdistFileName as Filename);
+
+  if (!await xfs.existsPromise(sdistDir))
+    return false;
+
+  const stat = await xfs.lstatPromise(sdistDir);
+  if (!stat.isDirectory())
+    return false;
+
+  const projectRoot = sdistFileName.replace(/\.(?:tar\.gz|tgz)$/, ``);
+  const archive = fsUtils.packToStream(sdistDir, {
+    virtualPath: npath.toPortablePath(`/${projectRoot}`),
+  });
+
+  response.writeHead(200, {
+    [`Content-Type`]: `application/gzip`,
+  });
+  stream.pipeline(archive, response, () => {});
+
+  return true;
+}
+
 const TEST_MAJOR = process.env.TEST_MAJOR
   ? parseInt(process.env.TEST_MAJOR, 10)
   : 5;
@@ -171,9 +213,11 @@ export enum RequestType {
   PackageTarball = `packageTarball`,
   PackageVersion = `packageVersion`,
   PypiProjectInfo = `pypiProjectInfo`,
+  PypiSimple = `pypiSimple`,
   PypiVersionInfo = `pypiVersionInfo`,
   Whoami = `whoami`,
   Repository = `repository`,
+  PrivatePypiRepository = `privatePypiRepository`,
   Publish = `publish`,
   BulkAdvisories = `bulkAdvisories`,
   NodeDistIndex = `nodeDistIndex`,
@@ -210,6 +254,9 @@ export type Request = {
   type: RequestType.PypiProjectInfo;
   packageName: string;
 } | {
+  type: RequestType.PypiSimple;
+  packageName: string;
+} | {
   type: RequestType.PypiVersionInfo;
   packageName: string;
   version: string;
@@ -219,6 +266,8 @@ export type Request = {
   login: Login;
 } | {
   type: RequestType.Repository;
+} | {
+  type: RequestType.PrivatePypiRepository;
 } | {
   registry?: string;
   type: RequestType.Publish;
@@ -374,6 +423,14 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
         uploadTime: `2024-01-01T00:00:00Z`,
       }],
     },
+    [`2.0.0rc1`]: {
+      files: [{
+        filename: `pypi_no_deps-2.0.0rc1-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_no_deps-2.0.0rc1-py3-none-any.whl`,
+        uploadTime: `2025-01-01T00:00:00Z`,
+      }],
+    },
   },
   [`pypi-one-dep`]: {
     [`1.0.0`]: {
@@ -399,6 +456,19 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
         filename: `pypi_marker_split-1.0.0-py3-none-any.whl`,
         packagetype: `bdist_wheel`,
         path: `/repositories/pypi/pypi_marker_split-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-08-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-parenthesized-marker`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-no-deps (==1.1.0); (platform_python_implementation == "CPython" and sys_platform != "android" and sys_platform != "ios")`,
+      ],
+      files: [{
+        filename: `pypi_one_dep-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_one_dep-1.0.0-py3-none-any.whl`,
         uploadTime: `2024-08-01T00:00:00Z`,
       }],
     },
@@ -539,6 +609,29 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
         packagetype: `bdist_wheel`,
         path: `/repositories/pypi/pypi_entry_points-1.0.0-py3-none-any.whl`,
         uploadTime: `2024-07-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-sdist`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-no-deps (==1.0.0)`,
+      ],
+      files: [{
+        filename: `pypi_sdist-1.0.0.tar.gz`,
+        packagetype: `sdist`,
+        path: `/repositories/pypi/pypi_sdist-1.0.0.tar.gz`,
+        uploadTime: `2025-02-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-broken-sdist`]: {
+    [`1.0.0`]: {
+      files: [{
+        filename: `pypi_broken_sdist-1.0.0.tar.gz`,
+        packagetype: `sdist`,
+        path: `/repositories/pypi/pypi_broken_sdist-1.0.0.tar.gz`,
+        uploadTime: `2025-02-02T00:00:00Z`,
       }],
     },
   },
@@ -891,6 +984,29 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       }));
     },
 
+    async [RequestType.PypiSimple](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.PypiSimple)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const project = PYPI_FIXTURES[parsedRequest.packageName];
+      if (!project) {
+        processError(response, 404, `PyPI package not found: ${parsedRequest.packageName}`);
+        return;
+      }
+
+      const serverUrl = await startPackageServer();
+      const links = Object.values(project).flatMap(release => release.files.map(file => {
+        const requiresPython = file.requiresPython
+          ? ` data-requires-python=${JSON.stringify(file.requiresPython.replace(/&/g, `&amp;`).replace(/</g, `&lt;`).replace(/>/g, `&gt;`))}`
+          : ``;
+        const privatePath = file.path.replace(/^\/repositories\//, `/private-repositories/`);
+        return `<a href=${JSON.stringify(`${serverUrl}${privatePath}`)}${requiresPython}>${file.filename}</a>`;
+      }));
+
+      response.writeHead(200, {[`Content-Type`]: `text/html; charset=UTF-8`});
+      response.end(`<!doctype html><html><body>${links.join(`\n`)}</body></html>`);
+    },
+
     async [RequestType.PypiVersionInfo](parsedRequest, request, response) {
       if (parsedRequest.type !== RequestType.PypiVersionInfo)
         throw new Error(`Assertion failed: Invalid request type`);
@@ -1003,6 +1119,18 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
     },
 
     async [RequestType.Repository](parsedRequest, request, response) {
+      if (await serveDynamicPypiWheel(request, response))
+        return;
+
+      if (await serveDynamicPypiSdist(request, response))
+        return;
+
+      staticServer(request as any, response as any, finalhandler(request, response));
+    },
+
+    async [RequestType.PrivatePypiRepository](parsedRequest, request, response) {
+      request.url = request.url?.replace(/^\/private-repositories\//, `/repositories/`);
+
       if (await serveDynamicPypiWheel(request, response))
         return;
 
@@ -1136,11 +1264,25 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       const version = parsedRequest.name.match(/^python-v([0-9]+\.[0-9]+\.[0-9]+)-/)?.[1] ?? `0.0.0`;
       const [major, minor] = version.split(`.`);
       const pythonName = `python${major}.${minor}`;
+      const sysPlatform = process.platform === `win32` ? `win32` : process.platform;
+      const platformMachine = process.arch === `x64` ? `x86_64` : process.arch;
+      const systemPython = execFileSync(`which`, [`python3`], {encoding: `utf8`}).trim();
+      const pythonScript = [
+        `#!/usr/bin/env bash`,
+        `if [[ "$1" == "--version" ]]; then`,
+        `  echo "Python ${version}"`,
+        `elif [[ "$1" == "-c" && "$2" == "import platform,sys;print"* ]]; then`,
+        `  printf '${major}.${minor}\\ncpython\\n${sysPlatform}\\n${platformMachine}\\n'`,
+        `else`,
+        `  exec ${JSON.stringify(systemPython)} "$@"`,
+        `fi`,
+        ``,
+      ].join(`\n`);
 
       response.writeHead(200, {[`Content-Type`]: `application/octet-stream`});
 
       const tar = tarStream.pack();
-      tar.entry({name: `python/install/bin/${pythonName}`, mode: 0o755}, `#!/usr/bin/env bash\necho "Python ${version}"\n`);
+      tar.entry({name: `python/install/bin/${pythonName}`, mode: 0o755}, pythonScript);
       tar.entry({name: `python/install/lib/${pythonName}/os.py`, mode: 0o644}, ``);
       tar.finalize();
 
@@ -1259,9 +1401,18 @@ exit 0
 
     url = url.replace(/%2f/gi, `/`);
 
-    if ((match = url.match(/^\/repositories\//))) {
+    if ((match = url.match(/^\/private-repositories\//))) {
+      return {
+        type: RequestType.PrivatePypiRepository,
+      };
+    } else if ((match = url.match(/^\/repositories\//))) {
       return {
         type: RequestType.Repository,
+      };
+    } else if ((match = url.match(/^\/private-pypi\/([^/]+)\/$/))) {
+      return {
+        type: RequestType.PypiSimple,
+        packageName: decodeURIComponent(match[1]!),
       };
     } else if ((match = url.match(/^\/node\/dist\/index.json$/))) {
       return {
@@ -1387,6 +1538,8 @@ exit 0
     switch (parsedRequest.type) {
       case RequestType.Publish:
       case RequestType.Whoami:
+      case RequestType.PypiSimple:
+      case RequestType.PrivatePypiRepository:
         return true;
 
       case RequestType.PackageInfo:

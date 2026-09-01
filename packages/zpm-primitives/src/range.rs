@@ -58,6 +58,20 @@ fn test_env_range_preserves_virtual_outer_wrapper() {
     );
 }
 
+#[test]
+fn test_pypi_file_range_serialization() {
+    let range = "pypi-file:./wheels/demo-1.2.3-py3-none-any.whl#extras=cli,test";
+
+    assert_eq!(range, Range::from_file_string(range).unwrap().to_file_string());
+}
+
+#[test]
+fn test_pypi_git_range_serialization() {
+    let range = "pypi-git:https://example.com/demo.git#commit=0123456789012345678901234567890123456789";
+
+    assert_eq!(range, Range::from_file_string(range).unwrap().to_file_string());
+}
+
 fn format_registry_tag(ident: &Option<Ident>, tag: &str) -> String {
     match ident {
         Some(ident) => format!("npm:{}@{}", ident.to_file_string(), tag),
@@ -88,6 +102,14 @@ fn format_pypi_tag(ident: &Option<Ident>, tag: &str, parameters: &Option<PypiRan
     };
 
     format!("{}{}", base, format_pypi_parameters(parameters))
+}
+
+fn format_pypi_file(path: &str, parameters: &Option<PypiRangeParameters>) -> String {
+    format!("pypi-file:{}{}", path, format_pypi_parameters(parameters))
+}
+
+fn format_pypi_git(git: &zpm_git::GitRange) -> String {
+    format!("pypi-git:{}", git.to_file_string())
 }
 
 fn format_jsr_semver(ident: &Option<Ident>, range: &zpm_semver::Range) -> String {
@@ -185,6 +207,21 @@ pub enum Range {
         ident: Option<Ident>,
         tag: EcoString,
         parameters: Option<PypiRangeParameters>,
+    },
+
+    #[pattern(r"pypi-file:(?<path>.*\.whl)(?:#(?<parameters>[^#]+))?")]
+    #[to_file_string(|params| format_pypi_file(&params.path, &params.parameters))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_pypi_file(&params.path, &params.parameters)))]
+    PypiFile {
+        path: String,
+        parameters: Option<PypiRangeParameters>,
+    },
+
+    #[pattern(r"pypi-git:(?<git>.*)")]
+    #[to_file_string(|params| format_pypi_git(&params.git))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_pypi_git(&params.git)))]
+    PypiGit {
+        git: zpm_git::GitRange,
     },
 
     #[pattern(r"jsr:(?:(?<ident>.*)@)?(?<range>.*)")]
@@ -389,6 +426,27 @@ impl Range {
         }
     }
 
+    /// Applies a transformation to the protocol-level range while preserving
+    /// logical identity wrappers such as `virtual:` and `env:`.
+    pub fn map_physical<F>(self, transform: F) -> Range
+    where
+        F: FnOnce(Range) -> Range,
+    {
+        match self {
+            Range::Virtual(mut params) => {
+                params.inner = Box::new(params.inner.map_physical(transform));
+                Range::Virtual(params)
+            },
+
+            Range::Env(mut params) => {
+                params.inner = Box::new(params.inner.map_physical(transform));
+                Range::Env(params)
+            },
+
+            physical => transform(physical),
+        }
+    }
+
     pub fn env_qualified_with_hash(&self, hash: Hash64) -> Range {
         match self {
             Range::Virtual(params) => {
@@ -435,6 +493,14 @@ impl Range {
 
             Range::PypiTag(params) => {
                 Range::PypiTag(PypiTagRange {ident: None, tag: params.tag.clone(), parameters: params.parameters.clone()})
+            },
+
+            Range::PypiFile(_) => {
+                self.clone()
+            },
+
+            Range::PypiGit(_) => {
+                self.clone()
             },
 
             Range::JsrSemver(params) => {
@@ -491,6 +557,14 @@ impl Range {
 
             Range::PypiTag(params) => {
                 Registry::Pypi(params.ident.clone().unwrap_or_else(|| default_ident.clone()))
+            },
+
+            Range::PypiFile(_) => {
+                Registry::Pypi(default_ident.clone())
+            },
+
+            Range::PypiGit(_) => {
+                Registry::Pypi(default_ident.clone())
             },
 
             Range::JsrSemver(params) => {

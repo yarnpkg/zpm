@@ -184,6 +184,11 @@ fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mode:
         let target_path = destination
             .with_join(&entry.name);
 
+        if entry.is_directory() {
+            target_path.fs_create_dir_all()?;
+            continue;
+        }
+
         target_path.fs_create_parent()?;
 
         match &mode {

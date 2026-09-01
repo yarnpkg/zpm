@@ -30,12 +30,16 @@ impl Exec {
         project
             .lazy_install().await?;
 
-        Ok(ScriptEnvironment::new()?
+        let env = ScriptEnvironment::new()?
             .with_project(&project)
             .with_package(&project, &project.active_package()?)?
             .with_cwd(Path::current_dir()?)
             .enable_shell_forwarding()
-            .enable_signal_delegation()
+            .enable_signal_delegation();
+        let (mut env, _)
+            = super::python::activate_workspace_venv(&project, env);
+
+        Ok(env
             .run_script(&self.script, &self.args)
             .await?
             .into())

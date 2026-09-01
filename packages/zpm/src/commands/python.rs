@@ -126,6 +126,45 @@ fn active_workspace_venv(project: &project::Project) -> Option<zpm_utils::Path> 
     )
 }
 
+pub(crate) fn activate_workspace_venv(
+    project: &project::Project,
+    mut env: ScriptEnvironment,
+) -> (ScriptEnvironment, Option<zpm_utils::Path>) {
+    let Some(venv_path) = active_workspace_venv(project) else {
+        return (env, None);
+    };
+    let site_packages_paths
+        = discover_site_packages_paths(&venv_path);
+
+    let bin_path = if cfg!(windows) {
+        venv_path.with_join_str("Scripts")
+    } else {
+        venv_path.with_join_str("bin")
+    };
+
+    let path_separator = if cfg!(windows) {
+        ';'
+    } else {
+        ':'
+    };
+
+    let path
+        = prepend_env_path("PATH", &bin_path.to_file_string(), path_separator);
+    let pythonpath
+        = prepend_env_path(
+            "PYTHONPATH",
+            &build_site_packages_pythonpath(&site_packages_paths, path_separator),
+            path_separator,
+        );
+
+    env = env
+        .with_env_variable("VIRTUAL_ENV", &venv_path.to_file_string())
+        .with_env_variable("PYTHONPATH", &pythonpath)
+        .with_env_variable("PATH", &path);
+
+    (env, Some(bin_path))
+}
+
 /// Run a Python process within the project's environment
 ///
 /// This command mirrors `yarn node`, but for Python. When called from a workspace that belongs to an island using the `venv` linker, it sets up a
@@ -147,53 +186,23 @@ impl Python {
         project
             .lazy_install().await?;
 
-        let mut env = ScriptEnvironment::new()?
+        let env = ScriptEnvironment::new()?
             .with_project(&project)
             .with_package(&project, &project.active_package()?)?
             .enable_shell_forwarding()
             .enable_signal_delegation();
 
-        let mut python_program
-            = "python".to_string();
-
-        if let Some(venv_path) = active_workspace_venv(&project) {
-            let site_packages_paths
-                = discover_site_packages_paths(&venv_path);
-
-            let bin_path = if cfg!(windows) {
-                venv_path.with_join_str("Scripts")
-            } else {
-                venv_path.with_join_str("bin")
-            };
-
-            let path_separator = if cfg!(windows) {
-                ';'
-            } else {
-                ':'
-            };
-
-            let path
-                = prepend_env_path("PATH", &bin_path.to_file_string(), path_separator);
-
-            let venv_python_path
-                = bin_path.with_join_str("python");
-
-            if venv_python_path.fs_exists() {
-                python_program = venv_python_path.to_file_string();
-            }
-
-            let pythonpath
-                = prepend_env_path(
-                    "PYTHONPATH",
-                    &build_site_packages_pythonpath(&site_packages_paths, path_separator),
-                    path_separator,
-                );
-
-            env = env
-                .with_env_variable("VIRTUAL_ENV", &venv_path.to_file_string())
-                .with_env_variable("PYTHONPATH", &pythonpath)
-                .with_env_variable("PATH", &path);
-        }
+        let (mut env, bin_path)
+            = activate_workspace_venv(&project, env);
+        let python_program = bin_path
+            .map(|bin_path| {
+                let filename = if cfg!(windows) { "python.exe" } else { "python" };
+                let candidate = bin_path.with_join_str(filename);
+                candidate.fs_exists()
+                    .then(|| candidate.to_file_string())
+                    .unwrap_or_else(|| "python".to_string())
+            })
+            .unwrap_or_else(|| "python".to_string());
 
         let result
             = env.run_exec(&python_program, &self.args).await?;
