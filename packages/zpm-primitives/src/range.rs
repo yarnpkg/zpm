@@ -59,6 +59,16 @@ fn test_env_range_preserves_virtual_outer_wrapper() {
 }
 
 #[test]
+fn test_anonymous_tag_allows_arbitrary_dist_tags() {
+    // Dist-tag names aren't restricted to lowercase (e.g. `Beta`, `RC1`)
+    assert!(matches!(Range::from_file_string("Beta").unwrap(), Range::AnonymousTag(_)));
+
+    // But protocol-qualified ranges must not be swallowed by the tag pattern
+    let hash = Hash64::from_data("fork").to_file_string();
+    assert!(matches!(Range::from_file_string(&format!("env:{hash}#pypi:>=1.0.0")).unwrap(), Range::Env(_)));
+}
+
+#[test]
 fn test_pypi_file_range_serialization() {
     let range = "pypi-file:./wheels/demo-1.2.3-py3-none-any.whl#extras=cli,test";
 
@@ -338,7 +348,9 @@ pub enum Range {
         url: String,
     },
 
-    #[pattern(r"(?<tag>[-a-z0-9._^v][-a-z0-9._]*)")]
+    // Anything without a colon, so protocol-qualified ranges (env:, virtual:,
+    // etc.) fall through to their own patterns below
+    #[pattern(r"(?<tag>[^:]*)")]
     #[to_file_string(|params| params.tag.as_str().to_string())]
     #[to_print_string(|params| DataType::Range.colorize(params.tag.as_str()))]
     AnonymousTag {

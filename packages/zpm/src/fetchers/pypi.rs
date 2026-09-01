@@ -248,24 +248,32 @@ fn cache_locator(locator: &Locator, kind: ArtifactKind) -> Locator {
     }
 }
 
+/** Cache key under which the locator's artifact is (or would be) stored,
+ * computed without any network access so mock fetches can use it too */
+fn cache_identity(locator: &Locator, params: &PypiRegistryReference) -> Result<(Locator, &'static str), Error> {
+    let git_reference
+        = params.url.as_ref().map(|url| parse_python_git_url(&url.0)).transpose()?.flatten();
+
+    match (&params.url, git_reference) {
+        (_, Some(reference)) => Ok((
+            python_git_cache_locator(&params.ident, &reference, environment_hash(&locator.reference)),
+            PREPARED_GIT_CACHE_EXT,
+        )),
+        (Some(url), None) => {
+            let kind = artifact_from_url(&url.0)?.kind;
+            Ok((cache_locator(locator, kind), cache_ext_from_params(params)?))
+        },
+        (None, None) => Ok((locator.physical_locator(), ".zip")),
+    }
+}
+
 pub fn try_fetch_locator_sync(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, is_mock_request: bool) -> Result<Option<FetchResult>, Error> {
     let package_cache
         = context.package_cache
             .expect("The package cache is required for fetching PyPI packages");
 
-    let git_reference
-        = params.url.as_ref().map(|url| parse_python_git_url(&url.0)).transpose()?.flatten();
-    let (cache_locator, cache_ext) = match (&params.url, git_reference) {
-        (_, Some(reference)) => (
-            python_git_cache_locator(&params.ident, &reference, environment_hash(&locator.reference)),
-            PREPARED_GIT_CACHE_EXT,
-        ),
-        (Some(url), None) => {
-            let kind = artifact_from_url(&url.0)?.kind;
-            (cache_locator(locator, kind), cache_ext_from_params(params)?)
-        },
-        (None, None) => (locator.physical_locator(), ".zip"),
-    };
+    let (cache_locator, cache_ext)
+        = cache_identity(locator, params)?;
 
     if is_mock_request {
         let archive_path
@@ -293,15 +301,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .expect("The package cache is required for fetching PyPI packages");
 
     if is_mock_request {
-        let git_reference
-            = params.url.as_ref().map(|url| parse_python_git_url(&url.0)).transpose()?.flatten();
-        let (cache_locator, cache_ext) = match git_reference {
-            Some(reference) => (
-                python_git_cache_locator(&params.ident, &reference, environment_hash(&locator.reference)),
-                PREPARED_GIT_CACHE_EXT,
-            ),
-            None => (locator.clone(), ".zip"),
-        };
+        let (cache_locator, cache_ext)
+            = cache_identity(locator, params)?;
         let archive_path
             = package_cache
             .key_path(&cache_locator, cache_ext);

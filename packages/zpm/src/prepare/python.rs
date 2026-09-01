@@ -601,6 +601,42 @@ fn metadata_field<'a>(metadata: &'a str, field: &str) -> Option<&'a str> {
     })
 }
 
+/// Parses a freshly-built wheel, checks that it carries Python distribution
+/// metadata and that its tags are installable on the selected target, and
+/// returns the METADATA contents. Errors are plain messages so each caller
+/// can wrap them with its own subject.
+fn validate_built_wheel(
+    wheel: &[u8],
+    wheel_name: &str,
+    target: Option<&PythonTargetEnv>,
+) -> Result<String, String> {
+    let entries = zpm_formats::zip::entries_from_zip(wheel)
+        .map_err(|error| format!("backend produced an invalid wheel: {error}"))?;
+    let metadata_entry = entries.iter()
+        .find(|entry| entry.name.as_str().ends_with(".dist-info/METADATA"))
+        .ok_or_else(|| "backend produced a wheel without .dist-info/METADATA".to_string())?;
+    let metadata = std::str::from_utf8(&metadata_entry.data)
+        .map_err(|_| "wheel METADATA is not UTF-8".to_string())?;
+
+    if let Some(target) = target {
+        let distribution = crate::pypi::PypiDistribution {
+            filename: wheel_name.to_string(),
+            packagetype: "bdist_wheel".to_string(),
+            url: String::new(),
+            upload_time: None,
+            upload_time_iso_8601: None,
+            requires_python: None,
+        };
+        if crate::pypi::select_best_wheel(&[distribution], Some(target)).is_none() {
+            return Err(format!(
+                "backend produced wheel `{wheel_name}`, which is incompatible with the selected Python target",
+            ));
+        }
+    }
+
+    Ok(metadata.to_string())
+}
+
 fn validate_wheel(
     wheel: &[u8],
     wheel_filename: &str,
@@ -609,13 +645,9 @@ fn validate_wheel(
     target: Option<&PythonTargetEnv>,
     sdist_filename: &str,
 ) -> Result<(), Error> {
-    let entries = zpm_formats::zip::entries_from_zip(wheel)
-        .map_err(|error| invalid_sdist(sdist_filename, format!("backend produced an invalid wheel: {error}")))?;
-    let metadata_entry = entries.iter()
-        .find(|entry| entry.name.as_str().ends_with(".dist-info/METADATA"))
-        .ok_or_else(|| invalid_sdist(sdist_filename, "backend produced a wheel without .dist-info/METADATA"))?;
-    let metadata = std::str::from_utf8(&metadata_entry.data)
-        .map_err(|_| invalid_sdist(sdist_filename, "wheel METADATA is not UTF-8"))?;
+    let metadata = validate_built_wheel(wheel, wheel_filename, target)
+        .map_err(|message| invalid_sdist(sdist_filename, message))?;
+    let metadata = metadata.as_str();
 
     let name = metadata_field(metadata, "Name")
         .ok_or_else(|| invalid_sdist(sdist_filename, "wheel METADATA has no Name field"))?;
@@ -639,22 +671,6 @@ fn validate_wheel(
             version.to_file_string(),
             expected_version.to_file_string(),
         )));
-    }
-
-    if let Some(target) = target {
-        let distribution = crate::pypi::PypiDistribution {
-            filename: wheel_filename.to_string(),
-            packagetype: "bdist_wheel".to_string(),
-            url: String::new(),
-            upload_time: None,
-            upload_time_iso_8601: None,
-            requires_python: None,
-        };
-        if crate::pypi::select_best_wheel(&[distribution], Some(target)).is_none() {
-            return Err(invalid_sdist(sdist_filename, format!(
-                "backend produced wheel `{wheel_filename}`, which is incompatible with the selected Python target",
-            )));
-        }
     }
 
     Ok(())
@@ -773,31 +789,8 @@ pub async fn prepare_project(
         // Local projects don't need to match the JavaScript workspace name,
         // but the backend must still have emitted a valid, target-compatible
         // wheel with Python distribution metadata.
-        let entries = zpm_formats::zip::entries_from_zip(&wheel)
-            .map_err(|error| invalid_sdist(&subject, format!("backend produced an invalid wheel: {error}")))?;
-        if !entries.iter().any(|entry| entry.name.as_str().ends_with(".dist-info/METADATA")) {
-            return Err(invalid_sdist(
-                &subject,
-                "backend produced a wheel without .dist-info/METADATA",
-            ));
-        }
-
-        if let Some(target) = target {
-            let distribution = crate::pypi::PypiDistribution {
-                filename: wheel_name.clone(),
-                packagetype: "bdist_wheel".to_string(),
-                url: String::new(),
-                upload_time: None,
-                upload_time_iso_8601: None,
-                requires_python: None,
-            };
-            if crate::pypi::select_best_wheel(&[distribution], Some(target)).is_none() {
-                return Err(invalid_sdist(
-                    &subject,
-                    format!("backend produced wheel `{wheel_name}`, which is incompatible with the selected Python target"),
-                ));
-            }
-        }
+        validate_built_wheel(&wheel, &wheel_name, target)
+            .map_err(|message| invalid_sdist(&subject, message))?;
 
         Ok(wheel)
     }.await;
@@ -860,27 +853,8 @@ pub async fn prepare_source_tree(
         }).await??;
 
         let wheel = output_root.with_join_str(&wheel_name).fs_read()?;
-        let entries = zpm_formats::zip::entries_from_zip(&wheel)
-            .map_err(|error| Error::PythonPreparation(format!("source project produced an invalid wheel: {error}")))?;
-        if !entries.iter().any(|entry| entry.name.as_str().ends_with(".dist-info/METADATA")) {
-            return Err(Error::PythonPreparation("source project produced a wheel without .dist-info/METADATA".to_string()));
-        }
-
-        if let Some(target) = target {
-            let distribution = crate::pypi::PypiDistribution {
-                filename: wheel_name.clone(),
-                packagetype: "bdist_wheel".to_string(),
-                url: String::new(),
-                upload_time: None,
-                upload_time_iso_8601: None,
-                requires_python: None,
-            };
-            if crate::pypi::select_best_wheel(&[distribution], Some(target)).is_none() {
-                return Err(Error::PythonPreparation(format!(
-                    "source project produced wheel `{wheel_name}`, which is incompatible with the selected Python target",
-                )));
-            }
-        }
+        validate_built_wheel(&wheel, &wheel_name, target)
+            .map_err(|message| Error::PythonPreparation(format!("{subject}: {message}")))?;
 
         Ok(wheel)
     }.await;

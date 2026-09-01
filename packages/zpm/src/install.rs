@@ -1802,8 +1802,19 @@ impl<'a> InstallManager<'a> {
         self.result.install_state.content_flags.insert(locator.clone(), content_flags.clone());
 
         if physical_locator != locator {
-            self.result.package_data.insert(physical_locator.clone(), package_data);
-            self.result.install_state.content_flags.insert(physical_locator, content_flags);
+            // Multiple env-qualified locators may share the same physical
+            // locator, and fetch results are recorded in nondeterministic
+            // order; a mock fetch (MissingZip, from an inactive fork) must
+            // not clobber real data recorded under the physical key.
+            let would_clobber_real_data
+                = matches!(package_data, PackageData::MissingZip {..})
+                    && self.result.package_data.get(&physical_locator)
+                        .is_some_and(|existing| !matches!(existing, PackageData::MissingZip {..}));
+
+            if !would_clobber_real_data {
+                self.result.package_data.insert(physical_locator.clone(), package_data);
+                self.result.install_state.content_flags.insert(physical_locator, content_flags);
+            }
         }
 
         Ok(())

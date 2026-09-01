@@ -118,9 +118,17 @@ pub async fn resolve_island(
         lockfile_island: LockfileIsland::default(),
     };
 
-    for fork in forks {
-        let result
-            = resolve_island_once(island, ctx, lockfile, Some(fork)).await?;
+    // Forks are independent, so resolve them concurrently. We use join_all
+    // rather than try_join_all: resolve_island_once relies on its
+    // spawn_blocking handle being awaited to completion (see the transmute
+    // safety comment there), so sibling futures must not be dropped on the
+    // first error.
+    let results = futures::future::join_all(
+        forks.into_iter().map(|fork| resolve_island_once(island, ctx, lockfile, Some(fork))),
+    ).await;
+
+    for result in results {
+        let result = result?;
 
         merged.descriptor_to_locator.extend(result.descriptor_to_locator);
         merged.normalized_resolutions.extend(result.normalized_resolutions);
@@ -128,6 +136,38 @@ pub async fn resolve_island(
     }
 
     Ok(merged)
+}
+
+/// Canonicalize a workspace dependency for island resolution: pypi
+/// descriptors are normalized (preserving the manifest alias when the
+/// canonical ident differs), and ranges that require a binding are bound
+/// to the declaring workspace.
+fn canonicalize_workspace_dependency(
+    ident: &Ident,
+    descriptor: &Descriptor,
+    workspace: &Workspace,
+) -> Result<(Ident, Descriptor), Error> {
+    let (ident, descriptor)
+        = crate::resolvers::pypi::canonicalize_pypi_descriptor(descriptor)
+            .map(|(package_ident, descriptor)| {
+                if package_ident == descriptor.ident {
+                    (package_ident, descriptor)
+                } else {
+                    (ident.clone(), descriptor)
+                }
+            })?;
+
+    let descriptor = if descriptor.range.details().require_binding && descriptor.parent.is_none() {
+        Descriptor::new_bound(
+            descriptor.ident.clone(),
+            descriptor.range.clone(),
+            Some(workspace.locator()),
+        )
+    } else {
+        descriptor
+    };
+
+    Ok((ident, descriptor))
 }
 
 async fn resolve_island_once(
@@ -183,46 +223,14 @@ async fn resolve_island_once(
 
         for (ident, descriptor) in &workspace.manifest.remote.dependencies {
             let (ident, descriptor)
-                = crate::resolvers::pypi::canonicalize_pypi_descriptor(descriptor)
-                    .map(|(package_ident, descriptor)| {
-                        if package_ident == descriptor.ident {
-                            (package_ident, descriptor)
-                        } else {
-                            (ident.clone(), descriptor)
-                        }
-                    })?;
-            let descriptor = if descriptor.range.details().require_binding && descriptor.parent.is_none() {
-                Descriptor::new_bound(
-                    descriptor.ident.clone(),
-                    descriptor.range.clone(),
-                    Some(workspace.locator()),
-                )
-            } else {
-                descriptor
-            };
+                = canonicalize_workspace_dependency(ident, descriptor, workspace)?;
             deps.insert(ident, descriptor);
         }
 
         if is_island_root && !ctx.prune_dev_dependencies {
             for (ident, descriptor) in &workspace.manifest.dev_dependencies {
                 let (ident, descriptor)
-                    = crate::resolvers::pypi::canonicalize_pypi_descriptor(descriptor)
-                        .map(|(package_ident, descriptor)| {
-                            if package_ident == descriptor.ident {
-                                (package_ident, descriptor)
-                            } else {
-                                (ident.clone(), descriptor)
-                            }
-                        })?;
-                let descriptor = if descriptor.range.details().require_binding && descriptor.parent.is_none() {
-                    Descriptor::new_bound(
-                        descriptor.ident.clone(),
-                        descriptor.range.clone(),
-                        Some(workspace.locator()),
-                    )
-                } else {
-                    descriptor
-                };
+                    = canonicalize_workspace_dependency(ident, descriptor, workspace)?;
                 deps.insert(ident, descriptor);
             }
         }

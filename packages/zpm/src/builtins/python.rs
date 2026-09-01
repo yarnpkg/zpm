@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::{btree_map::Entry as BTreeMapEntry, BTreeMap}, iter::once, str::FromStr};
+use std::{borrow::Cow, collections::{btree_map::Entry as BTreeMapEntry, BTreeMap, HashMap}, iter::once, str::FromStr, sync::{Arc, Mutex, OnceLock}};
 
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -142,19 +142,38 @@ struct StandaloneReleaseArtifact {
     variant: String,
 }
 
-async fn fetch_python_releases(context: &InstallContext<'_>) -> Result<Vec<PythonReleaseManifest>, Error> {
+/// Parsed release indexes, memoized by URL: the HTTP bytes are already
+/// cached, but the index is large (astral's full python-build-standalone
+/// NDJSON) and requested once per descriptor/locator/variant resolution,
+/// so re-parsing it each time is wasteful.
+static PYTHON_RELEASES_CACHE: OnceLock<Mutex<HashMap<String, Arc<Vec<PythonReleaseManifest>>>>> = OnceLock::new();
+
+async fn fetch_python_releases(context: &InstallContext<'_>) -> Result<Arc<Vec<PythonReleaseManifest>>, Error> {
     let project = context.project
         .expect("The project is required for resolving a Python package");
 
     let release_url
         = &project.config.settings.python_dist_metadata_url.value;
 
+    let cache
+        = PYTHON_RELEASES_CACHE.get_or_init(Default::default);
+
+    if let Some(releases) = cache.lock().unwrap().get(release_url) {
+        return Ok(releases.clone());
+    }
+
     let bytes
         = project.http_client.cached_get(release_url).await?;
     let text
         = String::from_utf8_lossy(&bytes);
 
-    parse_python_releases(&text)
+    let releases
+        = Arc::new(parse_python_releases(&text)?);
+
+    Ok(cache.lock().unwrap()
+        .entry(release_url.clone())
+        .or_insert(releases)
+        .clone())
 }
 
 fn parse_python_releases(text: &str) -> Result<Vec<PythonReleaseManifest>, Error> {
@@ -406,19 +425,20 @@ pub async fn resolve_python_version(context: &InstallContext<'_>, range: &zpm_se
         = fetch_python_releases(context).await?;
 
     let highest_matching_version
-        = releases.into_iter()
+        = releases.iter()
             .filter(|release| range.check(&release.version))
             .max_by(|a, b| a.version.cmp(&b.version))
-            .map(|release| release.version);
+            .map(|release| release.version.clone());
 
     Ok(highest_matching_version)
 }
 
 async fn resolve_python_release(context: &InstallContext<'_>, version: &zpm_semver::Version) -> Result<Option<PythonReleaseManifest>, Error> {
     Ok(fetch_python_releases(context).await?
-        .into_iter()
+        .iter()
         .filter(|release| &release.version == version)
-        .max_by(|a, b| a.build.cmp(&b.build)))
+        .max_by(|a, b| a.build.cmp(&b.build))
+        .cloned())
 }
 
 pub async fn resolve_python_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &BuiltinRange) -> Result<ResolutionResult, Error> {
