@@ -901,11 +901,9 @@ impl Project {
             return Ok(false);
         }
 
-        // The hash comparison is only meaningful when the lockfile
-        // is expected to carry hashes; with the setting off an empty
-        // stored map must not fail the freshness check (the
-        // resolutions/entries equality checks above already cover
-        // the same ground).
+        // With the setting off an empty stored map must not fail the
+        // check: the resolutions/entries equality comparisons above
+        // already cover the same ground.
         if self.config.settings.enable_workspace_hashes.value
             && lockfile.workspaces != walk.workspace_hashes {
             return Ok(false);
@@ -916,9 +914,7 @@ impl Project {
 
     /// Computes the per-workspace dependency tree hashes on demand
     /// from the given lockfile and the current workspace manifests,
-    /// for when the stored `workspaces` map is absent. Mirrors the
-    /// graph walk `is_lockfile_fresh` performs, so the resulting
-    /// hashes are value-identical to the ones stored by installs.
+    /// for when the stored `workspaces` map is absent.
     pub fn workspace_hashes_ondemand(
         &self,
         lockfile: &Lockfile,
@@ -1932,33 +1928,31 @@ fn normalize_lockfile_descriptor(descriptor: &mut Descriptor) {
     }
 }
 
-/// The result of walking a lockfile's workspace dependency graph.
-///
-/// `used_resolutions` and `used_entries` record everything the walk
-/// actually consumed, so freshness checks can verify the lockfile
-/// has nothing left over; `workspace_hashes` are the per-workspace
-/// dependency tree hashes computed from the walked graph (the same
-/// values installs store in the lockfile).
+/// Everything a lockfile workspace-graph walk consumed: the
+/// resolutions and entries it used (so freshness checks can verify
+/// the lockfile has nothing left over) and the per-workspace
+/// dependency tree hashes computed along the way (the same values
+/// installs store in the lockfile).
 pub(crate) struct LockfileWorkspaceWalk {
     pub used_resolutions: BTreeMap<Descriptor, Locator>,
     pub used_entries: BTreeSet<Locator>,
     pub workspace_hashes: BTreeMap<Ident, Hash64>,
 }
 
-/// Walks the dependency graph rooted at the given workspaces, resolving
-/// descriptors through the lockfile, and computes the per-workspace
-/// dependency tree hashes from it. The manifests come from the given
-/// workspaces - the current project for freshness checks and
-/// `--tree-hash`, workspaces rebuilt from a git ref for cross-history
-/// comparisons. Returns `None` when the lockfile and manifests can't
-/// produce a consistent graph (the same conditions under which
-/// `is_lockfile_fresh` considers the install not fresh).
+/// Walks the dependency graph rooted at the given workspaces,
+/// resolving descriptors through the lockfile, and computes the
+/// per-workspace dependency tree hashes from it. The manifests come
+/// from the given workspaces - the current project for freshness
+/// checks and `--tree-hash`, workspaces rebuilt from a git ref for
+/// cross-history comparisons. Returns `None` when the lockfile and
+/// manifests can't produce a consistent graph (the same conditions
+/// under which `is_lockfile_fresh` considers the install not fresh).
 pub(crate) fn walk_lockfile_workspaces(
     lockfile: &Lockfile,
     workspaces: &[Workspace],
     enable_transparent_workspaces: bool,
 ) -> Option<LockfileWorkspaceWalk> {
-    // Index maps rather than linear scans: this walk runs over every
+    // Index maps rather than linear scans: the walk visits every
     // descriptor of every workspace, which would otherwise be
     // quadratic on large monorepos.
     let workspaces_by_ident: BTreeMap<&Ident, &Workspace>

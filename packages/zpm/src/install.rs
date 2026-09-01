@@ -1043,25 +1043,32 @@ impl Install {
     pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
         self.report_package_extension_diagnostics(project).await;
 
-        let enable_workspace_hashes
-            = project.config.settings.enable_workspace_hashes.value;
+        let workspace_hashes
+            = if project.config.settings.enable_workspace_hashes.value {
+                let graph = build_locator_graph(
+                    &self.install_state.normalized_resolutions,
+                    &self.install_state.descriptor_to_locator,
+                );
+
+                let workspace_locators: Vec<(Ident, Locator)> = project.workspaces.iter()
+                    .map(|w| (w.name.clone(), w.locator()))
+                    .collect();
+
+                Some((graph, workspace_locators))
+            } else {
+                None
+            };
 
         if self.skip_link_step {
             self.lockfile.workspaces
-                = if enable_workspace_hashes {
-                    let graph = build_locator_graph(
-                        &self.install_state.normalized_resolutions,
-                        &self.install_state.descriptor_to_locator,
-                    );
+                = match workspace_hashes {
+                    Some((graph, workspace_locators)) => {
+                        compute_workspace_hashes(&graph, &workspace_locators)
+                    },
 
-                    let workspace_locators: Vec<(Ident, Locator)>
-                        = project.workspaces.iter()
-                            .map(|w| (w.name.clone(), w.locator()))
-                            .collect();
-
-                    compute_workspace_hashes(&graph, &workspace_locators)
-                } else {
-                    BTreeMap::new()
+                    None => {
+                        BTreeMap::new()
+                    },
                 };
 
             if !self.skip_lockfile_update {
@@ -1079,22 +1086,16 @@ impl Install {
                 });
 
             let hash_handle
-                = if enable_workspace_hashes {
-                    let graph = build_locator_graph(
-                        &self.install_state.normalized_resolutions,
-                        &self.install_state.descriptor_to_locator,
-                    );
+                = match workspace_hashes {
+                    Some((graph, workspace_locators)) => {
+                        Some(tokio::task::spawn_blocking(move || {
+                            compute_workspace_hashes(&graph, &workspace_locators)
+                        }))
+                    },
 
-                    let workspace_locators: Vec<(Ident, Locator)>
-                        = project.workspaces.iter()
-                            .map(|w| (w.name.clone(), w.locator()))
-                            .collect();
-
-                    Some(tokio::task::spawn_blocking(move || {
-                        compute_workspace_hashes(&graph, &workspace_locators)
-                    }))
-                } else {
-                    None
+                    None => {
+                        None
+                    },
                 };
 
             let link_future

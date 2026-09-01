@@ -290,11 +290,14 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
     Ok(changed_workspaces)
 }
 
-/// Fetches the workspace manifests at the given git ref and builds
-/// `Workspace`s from them, so the walk in `fetch_changed_workspaces`
-/// can hash the dependency trees as they were at the ref. Workspaces
-/// whose manifest can't be fetched at the ref (untracked, renamed)
-/// are silently skipped, so the caller can degrade gracefully.
+/// Fetches the workspace manifests at the given git ref in a single
+/// `git cat-file --batch` conversation and rebuilds `Workspace`s
+/// from them, so the walk in `fetch_changed_workspaces` can hash the
+/// dependency trees as they were at the ref. Each request is written
+/// and its response fully read before the next request goes out, so
+/// neither pipe can ever overflow. Manifests missing at the ref
+/// (untracked, renamed workspaces) or failing to parse are silently
+/// skipped, so the caller can degrade gracefully.
 async fn fetch_workspaces_at_ref(project: &Project, git_ref: &str) -> Result<Vec<Workspace>, Error> {
     let manifest_paths: Vec<(Path, String)>
         = project.workspaces.iter()
@@ -309,16 +312,91 @@ async fn fetch_workspaces_at_ref(project: &Project, git_ref: &str) -> Result<Vec
             })
             .collect();
 
+    let rel_paths: Vec<Path>
+        = manifest_paths.iter()
+            .map(|(rel_path, _)| rel_path.clone())
+            .collect();
+
+    let cwd
+        = project.project_cwd.clone();
+
+    let git_ref
+        = git_ref.to_string();
+
     let contents
-        = fetch_files_at_ref(
-            &project.project_cwd,
-            git_ref,
-            &manifest_paths.iter().map(|(_, git_path)| git_path.clone()).collect::<Vec<_>>(),
-        ).await?;
+        = tokio::task::spawn_blocking(move || -> Result<Vec<Option<String>>, Error> {
+            let spawn_error = |error: std::io::Error| Error::SpawnFailed {
+                name: "git".to_string(),
+                path: cwd.clone(),
+                error: Arc::new(Box::new(error)),
+            };
+
+            let mut child
+                = Command::new("git")
+                    .args(["cat-file", "--batch"])
+                    .current_dir(cwd.to_path_buf())
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(spawn_error)?;
+
+            let mut child_stdin
+                = child.stdin.take().unwrap();
+
+            let mut child_stdout
+                = BufReader::new(child.stdout.take().unwrap());
+
+            let mut contents
+                = Vec::with_capacity(manifest_paths.len());
+
+            for (_, git_path) in &manifest_paths {
+                let request
+                    = format!("{}:{}\n", git_ref, git_path);
+
+                child_stdin.write_all(request.as_bytes())
+                    .and_then(|_| child_stdin.flush())
+                    .map_err(spawn_error)?;
+
+                let mut header
+                    = String::new();
+
+                child_stdout.read_line(&mut header)
+                    .map_err(spawn_error)?;
+
+                // `<oid> <type> <size>` on success, `<request> missing`
+                // when the path doesn't exist at the ref.
+                let Some(size) = header.trim_end().rsplit(' ').next().and_then(|field| field.parse::<usize>().ok()) else {
+                    contents.push(None);
+                    continue;
+                };
+
+                let mut content
+                    = vec![0u8; size];
+
+                // Every object ends with a newline separator.
+                let mut separator
+                    = [0u8; 1];
+
+                child_stdout.read_exact(&mut content)
+                    .and_then(|_| child_stdout.read_exact(&mut separator))
+                    .map_err(spawn_error)?;
+
+                contents.push(Some(String::from_utf8_lossy(&content).to_string()));
+            }
+
+            drop(child_stdin);
+
+            if !child.wait().map_err(spawn_error)?.success() {
+                return Err(Error::ChildProcessFailed("git".to_string()));
+            }
+
+            Ok(contents)
+        }).await.map_err(|_| Error::ChildProcessFailed("git".to_string()))??;
 
     let mut workspaces = Vec::new();
 
-    for ((rel_path, _), manifest_content) in manifest_paths.iter().zip(contents) {
+    for (rel_path, manifest_content) in rel_paths.iter().zip(contents) {
         let Some(manifest_content) = manifest_content else {
             continue;
         };
@@ -335,91 +413,6 @@ async fn fetch_workspaces_at_ref(project: &Project, git_ref: &str) -> Result<Vec
     }
 
     Ok(workspaces)
-}
-
-/// Runs one `git cat-file --batch` conversation for the given
-/// `<ref>:<path>` requests and returns each file's content. Each
-/// request is written and its response fully read before the next
-/// request goes out, so neither pipe can ever overflow - no threads,
-/// no whole-stream buffering. Unfetchable paths (missing at the ref)
-/// come back as `None` rather than errors.
-async fn fetch_files_at_ref(cwd: &Path, git_ref: &str, git_paths: &[String]) -> Result<Vec<Option<String>>, Error> {
-    let cwd
-        = cwd.clone();
-
-    let requests: Vec<String>
-        = git_paths.iter()
-            .map(|git_path| format!("{}:{}", git_ref, git_path))
-            .collect();
-
-    tokio::task::spawn_blocking(move || -> Result<Vec<Option<String>>, Error> {
-        let spawn_error = |error: std::io::Error| Error::SpawnFailed {
-            name: "git".to_string(),
-            path: cwd.clone(),
-            error: Arc::new(Box::new(error)),
-        };
-
-        let mut child
-            = Command::new("git")
-                .args(["cat-file", "--batch"])
-                .current_dir(cwd.to_path_buf())
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(spawn_error)?;
-
-        let mut child_stdin
-            = child.stdin.take().unwrap();
-
-        let mut child_stdout
-            = BufReader::new(child.stdout.take().unwrap());
-
-        let mut contents
-            = Vec::with_capacity(requests.len());
-
-        for request in &requests {
-            let mut header
-                = String::new();
-
-            child_stdin.write_all(format!("{}\n", request).as_bytes())
-                .and_then(|_| child_stdin.flush())
-                .map_err(spawn_error)?;
-
-            child_stdout.read_line(&mut header)
-                .map_err(spawn_error)?;
-
-            // `<oid> <type> <size>` on success, `<request> missing`
-            // when the path doesn't exist at the ref.
-            let Some(size) = header.trim_end().rsplit(' ').next().and_then(|field| field.parse::<usize>().ok()) else {
-                contents.push(None);
-                continue;
-            };
-
-            let mut content
-                = vec![0u8; size];
-
-            child_stdout.read_exact(&mut content)
-                .map_err(spawn_error)?;
-
-            // Every object ends with a newline separator.
-            let mut separator
-                = [0u8; 1];
-
-            child_stdout.read_exact(&mut separator)
-                .map_err(spawn_error)?;
-
-            contents.push(Some(String::from_utf8_lossy(&content).to_string()));
-        }
-
-        drop(child_stdin);
-
-        if !child.wait().map_err(spawn_error)?.success() {
-            return Err(Error::ChildProcessFailed("git".to_string()));
-        }
-
-        Ok(contents)
-    }).await.map_err(|_| Error::ChildProcessFailed("git".to_string()))?
 }
 
 /// Fetches and parses the lockfile at a specific git ref.
