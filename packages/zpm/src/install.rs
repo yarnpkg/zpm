@@ -418,7 +418,7 @@ fn resolve_descriptor_impl<'a>(
                     // apply the patch, so we re-fetch directly with is_mock_request
                     // =false, bypassing the shared map. The disk-level package cache
                     // still deduplicates the actual download.
-                    if matches!(fetch_result.package_data, PackageData::MissingZip {..}) {
+                    if fetch_result.package_data.is_missing_zip() {
                         fetch_result = fetch_locator_impl(inner_locator, false, ctx, maps).await?;
                     }
 
@@ -1802,8 +1802,19 @@ impl<'a> InstallManager<'a> {
         self.result.install_state.content_flags.insert(locator.clone(), content_flags.clone());
 
         if physical_locator != locator {
-            self.result.package_data.insert(physical_locator.clone(), package_data);
-            self.result.install_state.content_flags.insert(physical_locator, content_flags);
+            // Multiple env-qualified locators may share the same physical
+            // locator, and fetch results are recorded in nondeterministic
+            // order; a mock fetch (MissingZip, from an inactive fork) must
+            // not clobber real data recorded under the physical key.
+            let would_clobber_real_data
+                = package_data.is_missing_zip()
+                    && self.result.package_data.get(&physical_locator)
+                        .is_some_and(|existing| !existing.is_missing_zip());
+
+            if !would_clobber_real_data {
+                self.result.package_data.insert(physical_locator.clone(), package_data);
+                self.result.install_state.content_flags.insert(physical_locator, content_flags);
+            }
         }
 
         Ok(())

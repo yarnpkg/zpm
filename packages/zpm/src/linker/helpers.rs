@@ -162,7 +162,7 @@ fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mode:
     // Classic mode trusts the .ready marker and skips the zip walk.
     // CAS / local-dedup re-walk so out-of-band edits can be repaired.
     let skip_for_classic = matches!(mode, ExtractMode::Classic) && already_extracted;
-    if skip_for_classic || matches!(package_data, &PackageData::MissingZip {..}) {
+    if skip_for_classic || package_data.is_missing_zip() {
         return Ok(false);
     }
 

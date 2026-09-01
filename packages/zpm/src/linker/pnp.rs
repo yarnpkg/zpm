@@ -340,7 +340,7 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
             package_location_abs = package_unplugged_wrapper_path
                 .with_join(&physical_package_data.package_subpath());
 
-            if !matches!(physical_package_data, PackageData::MissingZip {..}) {
+            if !physical_package_data.is_missing_zip() {
                 extraneous_unplugged_packages.remove(&package_unplugged_wrapper_path);
 
                 concrete_unplugged_packages.insert(
@@ -360,7 +360,7 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
         let package_location_rel = package_location_abs
             .relative_to(&project.project_cwd);
 
-        if !matches!(physical_package_data, PackageData::MissingZip {..}) {
+        if !physical_package_data.is_missing_zip() {
             packages_by_location.insert(
                 package_location_rel.clone(),
                 locator.clone(),
