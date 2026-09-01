@@ -858,26 +858,6 @@ impl Project {
     }
 
     pub fn is_lockfile_fresh(&self) -> Result<bool, Error> {
-        fn normalize_lockfile_descriptor(descriptor: &mut Descriptor) {
-            match &descriptor.range {
-                Range::AnonymousSemver(params) => {
-                    descriptor.range = zpm_primitives::RegistrySemverRange {
-                        ident: None,
-                        range: params.range.clone(),
-                    }.into();
-                },
-
-                Range::AnonymousTag(params) => {
-                    descriptor.range = zpm_primitives::RegistryTagRange {
-                        ident: None,
-                        tag: params.tag.clone(),
-                    }.into();
-                },
-
-                _ => {},
-            }
-        }
-
         if self.config.settings.enable_hardened_mode.value {
             return Ok(false);
         }
@@ -1005,17 +985,40 @@ impl Project {
             return Ok(false);
         }
 
-        let workspace_locators
-            = self.workspaces.iter()
-                .map(|workspace| (workspace.name.clone(), workspace.locator()))
-                .collect::<Vec<_>>();
+        // The hash comparison is only meaningful when the lockfile
+        // is expected to carry hashes; with the setting off an empty
+        // stored map must not fail the freshness check (the
+        // resolutions/entries equality checks above already cover
+        // the same ground).
+        if self.config.settings.enable_workspace_hashes.value {
+            let workspace_locators
+                = self.workspaces.iter()
+                    .map(|workspace| (workspace.name.clone(), workspace.locator()))
+                    .collect::<Vec<_>>();
 
-        let workspace_hashes = compute_workspace_hashes(&graph, &workspace_locators);
-        if lockfile.workspaces != workspace_hashes {
-            return Ok(false);
+            let workspace_hashes = compute_workspace_hashes(&graph, &workspace_locators);
+            if lockfile.workspaces != workspace_hashes {
+                return Ok(false);
+            }
         }
 
         Ok(true)
+    }
+
+    /// Computes the per-workspace dependency tree hashes on demand
+    /// from the given lockfile and the current workspace manifests,
+    /// for when the stored `workspaces` map is absent. Mirrors the
+    /// graph walk `is_lockfile_fresh` performs, so the resulting
+    /// hashes are value-identical to the ones stored by installs.
+    pub fn workspace_hashes_ondemand(
+        &self,
+        lockfile: &Lockfile,
+    ) -> Option<BTreeMap<Ident, Hash64>> {
+        compute_workspace_hashes_from_lockfile(
+            lockfile,
+            &self.workspaces,
+            self.config.settings.enable_transparent_workspaces.value,
+        )
     }
 
     pub(crate) fn install_config_hash(&self) -> Hash64 {
@@ -1998,4 +2001,179 @@ impl Workspace {
 
         Ok(workspaces)
     }
+}
+
+fn normalize_lockfile_descriptor(descriptor: &mut Descriptor) {
+    match &descriptor.range {
+        Range::AnonymousSemver(params) => {
+            descriptor.range = zpm_primitives::RegistrySemverRange {
+                ident: None,
+                range: params.range.clone(),
+            }.into();
+        },
+
+        Range::AnonymousTag(params) => {
+            descriptor.range = zpm_primitives::RegistryTagRange {
+                ident: None,
+                tag: params.tag.clone(),
+            }.into();
+        },
+
+        _ => {},
+    }
+}
+
+/// Walks the dependency graph rooted at the given workspaces, resolving
+/// descriptors through the lockfile, and computes the per-workspace
+/// dependency tree hashes from it. Returns `None` when the lockfile and
+/// manifests can't produce a consistent graph (same conditions under
+/// which `is_lockfile_fresh` considers the install not fresh).
+pub(crate) fn compute_workspace_hashes_from_lockfile(
+    lockfile: &Lockfile,
+    workspaces: &[Workspace],
+    enable_transparent_workspaces: bool,
+) -> Option<BTreeMap<Ident, Hash64>> {
+    // Index maps rather than linear scans: this walk runs over every
+    // descriptor of every workspace, which would otherwise be
+    // quadratic on large monorepos.
+    let workspaces_by_ident: BTreeMap<&Ident, &Workspace>
+        = workspaces.iter()
+            .map(|workspace| (&workspace.name, workspace))
+            .collect();
+
+    let workspaces_by_rel_path: BTreeMap<&Path, &Workspace>
+        = workspaces.iter()
+            .map(|workspace| (&workspace.rel_path, workspace))
+            .collect();
+
+    let find_workspace_by_locator = |locator: &Locator| -> Option<&Workspace> {
+        match &locator.reference {
+            Reference::WorkspaceIdent(params) => {
+                workspaces_by_ident.get(&params.ident).copied()
+            },
+
+            Reference::WorkspacePath(params) => {
+                workspaces_by_rel_path.get(&params.path).copied()
+            },
+
+            _ => None,
+        }
+    };
+
+    let find_workspace_by_descriptor = |descriptor: &Descriptor| -> Option<&Workspace> {
+        match &descriptor.range {
+            Range::WorkspaceIdent(params) => {
+                workspaces_by_ident.get(&params.ident).copied()
+            },
+
+            Range::WorkspacePath(params) => {
+                workspaces_by_rel_path.get(&params.path).copied()
+            },
+
+            Range::WorkspaceSemver(_) | Range::WorkspaceMagic(_) => {
+                workspaces_by_ident.get(&descriptor.ident).copied()
+            },
+
+            Range::RegistryTag(_) if enable_transparent_workspaces => {
+                workspaces_by_ident.get(&descriptor.ident).copied()
+            },
+
+            Range::RegistrySemver(params) if enable_transparent_workspaces => {
+                let ident
+                    = params.ident.as_ref().unwrap_or(&descriptor.ident);
+
+                workspaces_by_ident.get(ident).copied()
+                    .filter(|workspace| params.range.check(&workspace.manifest.remote.version.clone().unwrap_or_default()))
+            },
+
+            _ => None,
+        }
+    };
+
+    let mut graph
+        = BTreeMap::<Locator, BTreeSet<Locator>>::new();
+
+    let mut process_queue: Vec<Locator>
+        = workspaces.iter()
+            .map(|workspace| workspace.locator())
+            .collect();
+
+    let mut processed_queue
+        = BTreeSet::new();
+
+    while let Some(locator) = process_queue.pop() {
+        if !processed_queue.insert(locator.clone()) {
+            continue;
+        }
+
+        let mut child_locators
+            = BTreeSet::new();
+
+        let dependency_descriptors
+            = if let Some(workspace) = find_workspace_by_locator(&locator) {
+                workspace.manifest.remote.dependencies.values()
+                    .chain(workspace.manifest.remote.optional_dependencies.values())
+                    .chain(workspace.manifest.dev_dependencies.values())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                let entry = lockfile.entries.get(&locator)?;
+
+                if entry.resolution.locator != locator {
+                    return None;
+                }
+
+                entry.resolution.dependencies.values()
+                    .chain(entry.resolution.variants.iter())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+
+        for mut descriptor in dependency_descriptors {
+            if let Some(workspace) = find_workspace_by_descriptor(&descriptor) {
+                let dependency_locator
+                    = workspace.locator();
+
+                child_locators.insert(dependency_locator.clone());
+                process_queue.push(dependency_locator);
+                continue;
+            }
+
+            let range_details
+                = descriptor.range.details();
+
+            if range_details.transient_resolution
+                || range_details.fetch_before_resolve
+                || matches!(descriptor.range, Range::Catalog(_))
+            {
+                return None;
+            }
+
+            normalize_lockfile_descriptor(&mut descriptor);
+
+            let Some(dependency_locator) = lockfile.resolutions.get(&descriptor) else {
+                return None;
+            };
+
+            let Some(entry) = lockfile.entries.get(dependency_locator) else {
+                return None;
+            };
+
+            if entry.resolution.locator != *dependency_locator {
+                return None;
+            }
+
+            child_locators.insert(dependency_locator.clone());
+            process_queue.push(dependency_locator.clone());
+        }
+
+        graph.insert(locator, child_locators);
+    }
+
+    let workspace_locators: Vec<(Ident, Locator)>
+        = workspaces.iter()
+            .map(|workspace| (workspace.name.clone(), workspace.locator()))
+            .collect();
+
+    Some(compute_workspace_hashes(&graph, &workspace_locators))
 }

@@ -1,11 +1,28 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::{Read, Write},
+    process::Stdio,
+    sync::Arc,
+};
 
 use itertools::Itertools;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
-use zpm_utils::Path;
+use zpm_utils::{Path, ToFileString};
 
-use crate::{error::Error, lockfile::Lockfile, project::{Project, LOCKFILE_NAME}, script::ScriptEnvironment};
+use crate::{
+    error::Error,
+    lockfile::Lockfile,
+    manifest::helpers::parse_manifest,
+    project::{
+        compute_workspace_hashes_from_lockfile,
+        Project,
+        Workspace,
+        WorkspaceInfo,
+        LOCKFILE_NAME,
+    },
+    script::ScriptEnvironment,
+};
 
 pub fn find_root(initial_cwd: &Path) -> Result<Path, Error> {
     // Note: We can't just use `git rev-parse --show-toplevel`, because on Windows
@@ -214,26 +231,213 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
             = fetch_lockfile_at_ref(project, &since_ref).await.ok();
 
         if let (Some(current), Some(old)) = (&current_lockfile, &old_lockfile) {
-            for workspace in &project.workspaces {
-                if changed_workspaces.contains_key(&workspace.name) {
-                    continue;
-                }
+            // Stored hashes are the fast path; when a side doesn't
+            // carry them (enableWorkspaceHashes off, or a lockfile
+            // predating them), compute them on demand. Both paths use
+            // the same deterministic function, so mixing a stored
+            // side with an on-demand side stays valid.
+            let current_hashes
+                = if current.workspaces.is_empty() {
+                    project.workspace_hashes_ondemand(current)
+                } else {
+                    Some(current.workspaces.clone())
+                };
 
-                let current_hash
-                    = current.workspaces.get(&workspace.name);
-                let old_hash
-                    = old.workspaces.get(&workspace.name);
+            let old_hashes
+                = if old.workspaces.is_empty() {
+                    // Hard timeout around the git archaeology: a wedged
+                    // fetch must degrade to pre-#256 attribution rather
+                    // than hang `foreach --since` forever.
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(60),
+                        fetch_workspaces_at_ref(project, &since_ref),
+                    ).await.ok()
+                        .and_then(|result| result.ok())
+                        .and_then(|old_workspaces| compute_workspace_hashes_from_lockfile(
+                            old,
+                            &old_workspaces,
+                            project.config.settings.enable_transparent_workspaces.value,
+                        ))
+                } else {
+                    Some(old.workspaces.clone())
+                };
 
-                if current_hash != old_hash {
-                    changed_workspaces.entry(workspace.name.clone())
-                        .or_default()
-                        .insert(lockfile_path.clone());
+            if let (Some(current_hashes), Some(old_hashes)) = (current_hashes, old_hashes) {
+                for workspace in &project.workspaces {
+                    if changed_workspaces.contains_key(&workspace.name) {
+                        continue;
+                    }
+
+                    // Only a difference between two present hashes marks
+                    // a workspace as changed; a hash missing on one side
+                    // (setting toggled between refs, untracked or renamed
+                    // old workspace) must never flag one by itself.
+                    if let (Some(current_hash), Some(old_hash)) = (
+                        current_hashes.get(&workspace.name),
+                        old_hashes.get(&workspace.name),
+                    ) {
+                        if current_hash != old_hash {
+                            changed_workspaces.entry(workspace.name.clone())
+                                .or_default()
+                                .insert(lockfile_path.clone());
+                        }
+                    }
                 }
             }
         }
     }
 
     Ok(changed_workspaces)
+}
+
+/// Fetches the workspace manifests at the given git ref in a single
+/// batched `git cat-file --batch` call and builds `Workspace`s from
+/// them. Workspaces whose manifest can't be fetched at the ref
+/// (untracked, renamed) are silently skipped, so the caller can
+/// degrade gracefully.
+///
+/// The request list and the response stream are piped concurrently:
+/// writing every request before reading anything deadlocks once the
+/// responses overflow the pipe buffer, so stdin is drained from a
+/// helper thread while the main thread reads stdout to EOF.
+async fn fetch_workspaces_at_ref(project: &Project, git_ref: &str) -> Result<Vec<Workspace>, Error> {
+    let manifest_paths: Vec<(Path, String)>
+        = project.workspaces.iter()
+        .map(|workspace| {
+            let git_path = if workspace.rel_path == Path::new() {
+                "package.json".to_string()
+            } else {
+                format!("{}/package.json", workspace.rel_path.to_file_string())
+            };
+
+            (workspace.rel_path.clone(), git_path)
+        })
+        .collect();
+
+    let batch_input
+        = manifest_paths.iter()
+            .map(|(_, git_path)| format!("{}:{}\n", git_ref, git_path))
+            .collect::<String>();
+
+    let cwd
+        = project.project_cwd.clone();
+
+    let stdout
+        = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
+            let spawn_error = |error: std::io::Error| Error::SpawnFailed {
+                name: "git".to_string(),
+                path: cwd.clone(),
+                error: Arc::new(Box::new(error)),
+            };
+
+            let mut child
+                = std::process::Command::new("git")
+                    .args(["cat-file", "--batch"])
+                    .current_dir(cwd.to_path_buf())
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(spawn_error)?;
+
+            let mut child_stdin
+                = child.stdin.take().unwrap();
+
+            let writer
+                = std::thread::spawn(move || {
+                    // The result doesn't matter: a failed write only
+                    // means git exited early, which the status check
+                    // below reports.
+                    let _ = child_stdin.write_all(batch_input.as_bytes());
+                });
+
+            let mut stdout
+                = Vec::new();
+
+            child.stdout.take().unwrap()
+                .read_to_end(&mut stdout)
+                .map_err(spawn_error)?;
+
+            // A failed stdin write only means git exited early; the
+            // truncated stream then degrades to per-workspace misses
+            // in the parser below.
+            let _ = writer.join();
+
+            if !child.wait().map_err(spawn_error)?.success() {
+                return Err(Error::ChildProcessFailed("git".to_string()));
+            }
+
+            Ok(stdout)
+        }).await.map_err(|_| Error::ChildProcessFailed("git".to_string()))??;
+
+    let manifest_contents
+        = parse_catfile_batch_output(&stdout, manifest_paths.len());
+
+    let mut workspaces = Vec::new();
+
+    for ((rel_path, _), manifest_content) in manifest_paths.iter().zip(manifest_contents) {
+        let Some(manifest_content) = manifest_content else {
+            continue;
+        };
+
+        let Ok(manifest) = parse_manifest(&String::from_utf8_lossy(&manifest_content)) else {
+            continue;
+        };
+
+        workspaces.push(Workspace::from_info(&project.project_cwd, WorkspaceInfo {
+            rel_path: rel_path.clone(),
+            manifest,
+            last_changed_at: 0,
+        })?);
+    }
+
+    Ok(workspaces)
+}
+
+/// Parses the object stream printed by `git cat-file --batch`: for
+/// each requested object either `<oid> <type> <size>\n<content>\n` or
+/// `<request> missing\n`. Missing or malformed entries yield `None`.
+fn parse_catfile_batch_output(stdout: &[u8], requested: usize) -> Vec<Option<Vec<u8>>> {
+    let mut contents = Vec::with_capacity(requested);
+
+    let mut offset = 0;
+
+    for _ in 0..requested {
+        let Some(header_end) = stdout[offset..].iter().position(|&byte| byte == b'\n') else {
+            contents.push(None);
+            continue;
+        };
+
+        let header
+            = String::from_utf8_lossy(&stdout[offset..offset + header_end]).to_string();
+
+        offset += header_end + 1;
+
+        if header.ends_with(" missing") {
+            contents.push(None);
+            continue;
+        }
+
+        let Some(size) = header.rsplit(' ').next().and_then(|field| field.parse::<usize>().ok()) else {
+            contents.push(None);
+            continue;
+        };
+
+        if offset + size > stdout.len() {
+            contents.push(None);
+            continue;
+        }
+
+        contents.push(Some(stdout[offset..offset + size].to_vec()));
+
+        offset += size;
+
+        if stdout.get(offset) == Some(&b'\n') {
+            offset += 1;
+        }
+    }
+
+    contents
 }
 
 /// Fetches and parses the lockfile at a specific git ref.

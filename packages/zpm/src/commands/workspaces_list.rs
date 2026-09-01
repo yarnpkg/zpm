@@ -172,6 +172,23 @@ impl WorkspacesList {
             }
         };
 
+        // When the lockfile doesn't carry stored workspace hashes
+        // (enableWorkspaceHashes off, or a lockfile from before they
+        // existed), compute them on demand from the current lockfile
+        // and manifests.
+        let stored_tree_hashes
+            = if self.json && self.tree_hash {
+            project.lockfile().ok().map(|lockfile| {
+                if lockfile.workspaces.is_empty() {
+                    project.workspace_hashes_ondemand(&lockfile).unwrap_or_default()
+                } else {
+                    lockfile.workspaces
+                }
+            })
+        } else {
+            None
+        };
+
         for workspace in workspaces {
             if workspace.manifest.private == Some(true) && !self.private {
                 continue;
@@ -249,13 +266,10 @@ impl WorkspacesList {
                     mismatched_workspace_dependencies = Some(mismatched_strs);
                 }
 
-                let tree_hash = if self.tree_hash {
-                    project.lockfile().ok()
-                        .and_then(|lockfile| lockfile.workspaces.get(&workspace.name).cloned())
-                        .map(|hash| hash.to_file_string())
-                } else {
-                    None
-                };
+                let tree_hash
+                    = stored_tree_hashes.as_ref()
+                        .and_then(|hashes| hashes.get(&workspace.name))
+                        .map(|hash| hash.to_file_string());
 
                 let payload = Payload {
                     location: workspace_printed_path,

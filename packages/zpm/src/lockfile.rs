@@ -310,6 +310,7 @@ struct LockfilePayload {
     metadata: LockfileMetadata,
 
     #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     workspaces: BTreeMap<Ident, Hash64>,
 
     #[serde(default)]
@@ -569,4 +570,54 @@ pub fn from_pnpm_node_modules(project_cwd: &Path, config: &Configuration) -> Res
     }
 
     Ok(lockfile)
+}
+
+#[cfg(test)]
+mod tests {
+    use zpm_primitives::Ident;
+
+    use super::*;
+
+    #[test]
+    fn test_lockfile_without_workspaces_key_parses() {
+        let data
+            = r#"{"__metadata":{"version":9}}"#;
+
+        let lockfile: Lockfile
+            = JsonDocument::hydrate_from_str(data).unwrap();
+
+        assert!(lockfile.workspaces.is_empty());
+    }
+
+    #[test]
+    fn test_empty_workspaces_map_serializes_without_key() {
+        let lockfile
+            = Lockfile::new();
+
+        let serialized
+            = JsonDocument::to_string_pretty(&lockfile).unwrap();
+
+        assert!(!serialized.contains("workspaces"));
+    }
+
+    #[test]
+    fn test_stored_workspaces_roundtrip() {
+        let mut lockfile
+            = Lockfile::new();
+
+        lockfile.workspaces.insert(
+            Ident::from_file_string("my-workspace").unwrap(),
+            Hash64::from_data(b"hash"),
+        );
+
+        let serialized
+            = JsonDocument::to_string_pretty(&lockfile).unwrap();
+
+        assert!(serialized.contains("workspaces"));
+
+        let parsed: Lockfile
+            = JsonDocument::hydrate_from_str(&serialized).unwrap();
+
+        assert_eq!(parsed.workspaces, lockfile.workspaces);
+    }
 }
