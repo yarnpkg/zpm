@@ -1,5 +1,7 @@
 import {PortablePath, xfs} from '@yarnpkg/fslib';
-import {exec, fs, tests}    from 'pkg-tests-core';
+import {exec, fs, tests}   from 'pkg-tests-core';
+
+import {RunFunction}       from '../../../pkg-tests-core/sources/utils/tests';
 
 async function readLockfile(path: PortablePath) {
   const raw = await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`);
@@ -13,7 +15,7 @@ const forEachVerboseDone = tests.FEATURE_CHECKS.forEachVerboseDone
 // A monorepo whose workspace-a depends on a registry package and
 // workspace-b depends on workspace-a, so each workspace has a
 // different dependency tree to hash.
-const makeHashesEnv = (fn: any) => makeTemporaryMonorepoEnv(
+const makeHashesEnv = (fn: RunFunction) => makeTemporaryMonorepoEnv(
   {
     private: true,
     workspaces: [`packages/*`],
@@ -52,8 +54,9 @@ describe(`Features`, () => {
           `workspace-b`,
         ]);
 
-        for (const hash of Object.values(lockfile.workspaces ?? {}))
+        for (const hash of Object.values(lockfile.workspaces ?? {})) {
           expect(hash).toMatch(/^[0-9a-f]+$/);
+        }
       }),
     );
 
