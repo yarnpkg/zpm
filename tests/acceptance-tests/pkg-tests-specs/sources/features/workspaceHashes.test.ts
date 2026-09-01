@@ -1,9 +1,14 @@
 import {PortablePath, xfs} from '@yarnpkg/fslib';
+import {exec, fs, tests}    from 'pkg-tests-core';
 
 async function readLockfile(path: PortablePath) {
   const raw = await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`);
   return JSON.parse(raw);
 }
+
+const forEachVerboseDone = tests.FEATURE_CHECKS.forEachVerboseDone
+  ? []
+  : [`Done\n`];
 
 // A monorepo whose workspace-a depends on a registry package and
 // workspace-b depends on workspace-a, so each workspace has a
@@ -85,6 +90,125 @@ describe(`Features`, () => {
           `workspace-b`,
         ]);
       }),
+    );
+
+    test(
+      `--since still attributes lockfile changes to the affected workspaces when enableWorkspaceHashes is false`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        async ({path, run}) => {
+          await fs.writeJson(`${path}/packages/workspace-a/package.json` as PortablePath, {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            scripts: {
+              print: `echo Test Workspace A`,
+            },
+            dependencies: {
+              [`one-range-dep`]: `1.0.0`,
+            },
+          });
+
+          await fs.writeJson(`${path}/packages/workspace-b/package.json` as PortablePath, {
+            name: `workspace-b`,
+            version: `1.0.0`,
+            scripts: {
+              print: `echo Test Workspace B`,
+            },
+          });
+
+          const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
+
+          // Install with only no-deps@1.0.0 visible, so one-range-dep
+          // resolves to no-deps@1.0.0.
+          await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
+            await run(`install`, {enableWorkspaceHashes: false});
+          });
+
+          await exec.execGitInit({cwd: path});
+          await git(`add`, `-A`);
+          await git(`commit`, `-m`, `First commit`);
+
+          // Now make no-deps@1.1.0 visible and upgrade; only the
+          // lockfile changes, and only workspace-a's dependency tree
+          // changed through it.
+          await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`, `1.1.0`])]]), async () => {
+            await run(`up`, `-R`, `no-deps`, {enableWorkspaceHashes: false});
+          });
+
+          await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`)).resolves.toEqual({
+            code: 0,
+            stderr: ``,
+            stdout: [
+              `Test Workspace A\n`,
+              ...forEachVerboseDone,
+            ].join(``),
+          });
+        },
+      ),
+    );
+
+    test(
+      `toggling the setting between git refs doesn't flag untouched workspaces`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        async ({path, run}) => {
+          await fs.writeJson(`${path}/packages/workspace-a/package.json` as PortablePath, {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            scripts: {
+              print: `echo Test Workspace A`,
+            },
+          });
+
+          await fs.writeJson(`${path}/packages/workspace-b/package.json` as PortablePath, {
+            name: `workspace-b`,
+            version: `1.0.0`,
+            scripts: {
+              print: `echo Test Workspace B`,
+            },
+          });
+
+          const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
+
+          // Install with the setting on: the lockfile stores hashes.
+          await run(`install`);
+
+          await exec.execGitInit({cwd: path});
+          await git(`add`, `-A`);
+          await git(`commit`, `-m`, `Hashes on`);
+
+          // Toggle off: the section disappears from the lockfile, but
+          // no workspace actually changed, so nothing must run.
+          await run(`install`, {enableWorkspaceHashes: false});
+
+          // `foreach` reinstalls with the setting off too, otherwise
+          // the default would restore the section before the check.
+          await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes: false})).resolves.toEqual({
+            code: 0,
+            stderr: ``,
+            stdout: forEachVerboseDone.join(``),
+          });
+
+          // Toggle on again after committing the hashes-off lockfile:
+          // the section comes back, still without flagging anything.
+          await git(`add`, `-A`);
+          await git(`commit`, `-m`, `Hashes off`);
+
+          await run(`install`);
+
+          await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`)).resolves.toEqual({
+            code: 0,
+            stderr: ``,
+            stdout: forEachVerboseDone.join(``),
+          });
+        },
+      ),
     );
   });
 });

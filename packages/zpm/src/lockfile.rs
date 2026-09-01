@@ -571,4 +571,3 @@ pub fn from_pnpm_node_modules(project_cwd: &Path, config: &Configuration) -> Res
 
     Ok(lockfile)
 }
-

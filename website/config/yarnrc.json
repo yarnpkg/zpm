@@ -162,6 +162,13 @@
       "type": "boolean",
       "default": true
     },
+    "enableWorkspaceHashes": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether per-workspace dependency tree hashes should be stored in the lockfile.",
+      "description": "If true, Yarn stores in the lockfile a hash of each workspace's resolved dependency tree, used to attribute lockfile changes to workspaces in commands like `yarn workspaces foreach --since`. If false, the `workspaces` section is omitted from the lockfile and the hashes are computed on demand when needed.",
+      "type": "boolean",
+      "default": true
+    },
     "globalFolder": {
       "_package": "@yarnpkg/core",
       "title": "Path where all files global to the system will be stored.",
