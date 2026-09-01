@@ -1,0 +1,5 @@
+Metadata-Version: 2.1
+Name: pypi_no_deps
+Version: 2.0.0rc1
+Summary: fixture prerelease wheel for integration tests
+

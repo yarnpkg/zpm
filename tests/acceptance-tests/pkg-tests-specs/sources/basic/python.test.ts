@@ -61,6 +61,63 @@ describe(`Protocols`, () => {
     );
 
     test(
+      `it should resolve dependencies from an authenticated Simple API registry`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`pypi-one-dep`]: `pypi:1.0.0`,
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+          const privateRegistryUrl = `${registryUrl}/private-pypi`;
+
+          await yarn.writeConfiguration(path, {
+            packageRules: [{
+              ecosystemFilter: `pypi`,
+              packageFilter: `pypi-*`,
+              pypiRegistryServer: privateRegistryUrl,
+            }],
+            sourceRules: [{
+              ecosystemFilter: `pypi`,
+              registryFilter: privateRegistryUrl,
+              pypiAuthIdent: tests.validLogins.fooUser.npmAuthIdent.decoded,
+            }],
+          });
+
+          await run(`install`);
+
+          const cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+          expect(cacheEntries.some(entry => entry.includes(`pypi-one-dep-pypi-1.0.0`))).toBe(true);
+          expect(cacheEntries.some(entry => entry.includes(`pypi-no-deps-pypi-1.1.0`))).toBe(true);
+        },
+      ),
+    );
+
+    test(
+      `it should only select a prerelease when the range opts into prereleases`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`pypi-no-deps`]: `pypi:>=2.0.0rc1`,
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
+          });
+
+          await run(`install`);
+
+          const cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+          expect(cacheEntries.some(entry => entry.includes(`pypi-no-deps-pypi-2.0.0rc1`))).toEqual(true);
+        },
+      ),
+    );
+
+    test(
       `it should resolve PyPI packages through package rules`,
       makeTemporaryEnv(
         {
@@ -298,7 +355,39 @@ describe(`Protocols`, () => {
     );
 
     test(
-      `it should resolve PyPI extras through venv islands`,
+      `it should keep lockfiles stable when the same PyPI version is requested with and without extras`,
+      makeTemporaryMonorepoEnv(
+        {workspaces: [`packages/*`]},
+        {
+          [`packages/base`]: {
+            name: `base`,
+            version: `1.0.0`,
+            dependencies: {
+              [`pypi-extra-provider`]: `pypi:1.0.0`,
+            },
+          },
+          [`packages/extra`]: {
+            name: `extra`,
+            version: `1.0.0`,
+            dependencies: {
+              [`pypi-extra-provider`]: `pypi:1.0.0#extras=feature`,
+            },
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+          await yarn.writeConfiguration(path, {
+            pypiRegistryServer: registryUrl,
+          });
+
+          await run(`install`);
+          await run(`install`, `--immutable`);
+        },
+      ),
+    );
+
+    test(
+      `it should resolve PyPI extras through target-qualified venv islands`,
       makeTemporaryMonorepoEnv(
         {
           workspaces: [`packages/*`],
@@ -317,6 +406,13 @@ describe(`Protocols`, () => {
 
           await yarn.writeConfiguration(path, {
             pypiRegistryServer: registryUrl,
+            supportedTargets: [{
+              os: process.platform,
+              cpu: process.arch,
+              python: {
+                version: `3.12`,
+              },
+            }],
             unstableIslands: {
               main: {
                 workspaces: [`island-ws`],
@@ -328,6 +424,15 @@ describe(`Protocols`, () => {
           await run(`install`);
 
           await expect(xfs.existsPromise(ppath.join(path, `packages/island-ws/.venv/lib/site-packages/pypi-no-deps/pypi_no_deps/__init__.py` as any))).resolves.toEqual(true);
+
+          const {stdout} = await run(
+            `python`,
+            `-c`,
+            `import pypi_no_deps; print(pypi_no_deps.VALUE)`,
+            {cwd: ppath.join(path, `packages/island-ws`)},
+          );
+
+          expect(stdout.trim()).toEqual(`1.1.0`);
         },
       ),
     );

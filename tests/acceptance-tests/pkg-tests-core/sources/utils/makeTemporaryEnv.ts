@@ -17,6 +17,8 @@ const baseEnv = (nativePath: string, nativeHomePath: string, registryUrl: string
   [`YARN_NPM_REGISTRY_SERVER`]: registryUrl,
   [`YARN_UNSAFE_HTTP_WHITELIST`]: new URL(registryUrl).hostname,
   [`YARN_NODE_DIST_URL`]: `${registryUrl}/node/dist`,
+  [`YARN_PYTHON_DIST_URL`]: `${registryUrl}/python/dist`,
+  [`YARN_PYTHON_DIST_METADATA_URL`]: `${registryUrl}/python/dist/index.json`,
   // Otherwise we'd send telemetry event when running tests
   [`YARN_ENABLE_TELEMETRY`]: `0`,
   // Otherwise snapshots relying on this would break each time it's bumped
