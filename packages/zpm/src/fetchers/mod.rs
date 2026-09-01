@@ -120,6 +120,15 @@ impl PackageData {
         }
     }
 
+    /** Whether this is a placeholder for an archive that wasn't
+     * materialized — a mock fetch (inactive Python fork, foreign
+     * architecture) or a zip simply absent from the cache. Placeholder
+     * data must never overwrite real data recorded for the same
+     * physical locator (see `record_fetch`). */
+    pub fn is_missing_zip(&self) -> bool {
+        matches!(self, PackageData::MissingZip {..})
+    }
+
     pub fn link_type(&self) -> PackageLinking {
         match self {
             PackageData::Abstract => panic!("Invalid package data"),

@@ -1,6 +1,6 @@
 {
   "__metadata": {
-    "version": 9
+    "version": 10
   },
   "workspaces": {
     "@yarnpkg/monorepo": "e537b0a7fa1ecc3f6ec4a5fd8fdaae1e45122965e971733a9766ed95ba4d59148b143e36302160003d14318320f997ad62ca3c603c516ff7ad80567083ed1275",

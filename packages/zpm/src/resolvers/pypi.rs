@@ -398,7 +398,11 @@ fn evaluate_marker(marker: &pep508_rs::MarkerTree, target: Option<&PythonTargetE
 
 fn project_pep440_to_semver(version: &zpm_primitives::PypiVersion) -> Result<zpm_semver::Version, Error> {
     // TODO: Replace this lossy projection once `Resolution.version` can represent
-    // non-semver registry versions without information loss.
+    // non-semver registry versions without information loss. Tracked schema
+    // debt: `Resolution.version` is serialized into published lockfiles, so
+    // every lockfile written in the meantime bakes in the projected form
+    // (epochs, post/dev segments, etc. are flattened) and the eventual fix
+    // needs a migration story, not just a type change.
     version.to_lossy_semver()
         .map_err(|err| Error::InvalidResolution(err.to_string()))
 }

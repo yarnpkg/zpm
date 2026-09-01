@@ -245,16 +245,9 @@ pub struct WheelMetadata {
     pub requires_dist: Vec<String>,
 }
 
-fn unfolded_metadata_headers(wheel: &[u8]) -> Result<Vec<String>, Error> {
-    let entries
-        = zpm_formats::zip::entries_from_zip(wheel)?;
-    let metadata
-        = entries.iter()
-            .find(|entry| entry.name.as_str().ends_with(".dist-info/METADATA"))
-            .ok_or_else(|| crate::error::Error::InvalidResolution("PyPI wheel is missing .dist-info/METADATA".to_string()))?;
-    let metadata
-        = std::str::from_utf8(&metadata.data)
-            .map_err(|error| crate::error::Error::InvalidResolution(format!("PyPI wheel METADATA is not UTF-8: {error}")))?;
+/** Unfolds RFC 822 continuation lines in a METADATA header block, stopping
+ * at the blank line separating headers from the body */
+pub fn unfold_metadata_headers(metadata: &str) -> Vec<String> {
     let mut unfolded
         = Vec::<String>::new();
     for line in metadata.lines() {
@@ -271,18 +264,35 @@ fn unfolded_metadata_headers(wheel: &[u8]) -> Result<Vec<String>, Error> {
         }
     }
 
-    Ok(unfolded)
+    unfolded
+}
+
+/** Case-insensitive lookup of one field in unfolded METADATA headers */
+pub fn metadata_header_field<'a>(headers: &'a [String], name: &str) -> Option<&'a str> {
+    headers.iter().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.eq_ignore_ascii_case(name).then(|| value.trim())
+    })
+}
+
+fn unfolded_metadata_headers(wheel: &[u8]) -> Result<Vec<String>, Error> {
+    let entries
+        = zpm_formats::zip::entries_from_zip(wheel)?;
+    let metadata
+        = entries.iter()
+            .find(|entry| entry.name.as_str().ends_with(".dist-info/METADATA"))
+            .ok_or_else(|| crate::error::Error::InvalidResolution("PyPI wheel is missing .dist-info/METADATA".to_string()))?;
+    let metadata
+        = std::str::from_utf8(&metadata.data)
+            .map_err(|error| crate::error::Error::InvalidResolution(format!("PyPI wheel METADATA is not UTF-8: {error}")))?;
+
+    Ok(unfold_metadata_headers(metadata))
 }
 
 pub fn metadata_from_wheel(wheel: &[u8]) -> Result<WheelMetadata, Error> {
     let headers
         = unfolded_metadata_headers(wheel)?;
-    let field = |name: &str| {
-        headers.iter().find_map(|line| {
-            let (key, value) = line.split_once(':')?;
-            key.eq_ignore_ascii_case(name).then(|| value.trim())
-        })
-    };
+    let field = |name: &str| metadata_header_field(&headers, name);
     let name
         = field("Name")
             .ok_or_else(|| Error::InvalidResolution("PyPI wheel METADATA has no Name field".to_string()))?;
@@ -661,6 +671,32 @@ fn cpython_exact_abis(major: u8, minor: u8) -> Vec<String> {
     } else {
         vec![plain]
     }
+}
+
+fn target_field_matches(target: &Option<String>, current: &Option<String>) -> bool {
+    target.is_none() || target == current
+}
+
+/** Whether a configured Python target environment describes the system the
+ * install is running on (fields the target leaves unset match anything) */
+pub fn target_matches_current_system(target: &PythonTargetEnv) -> Result<bool, Error> {
+    let current_target
+        = PythonTargetEnv::from_system(&zpm_utils::System::from_current(), zpm_primitives::PythonTargetInput {
+            version: Some(&target.python_version),
+            full_version: target.python_full_version.as_deref(),
+            implementation_name: target.implementation_name.as_deref(),
+            implementation_version: target.implementation_version.as_deref(),
+            platform_release: target.platform_release.as_deref(),
+            platform_version: target.platform_version.as_deref(),
+        }).map_err(|err| Error::InvalidResolution(format!("Invalid current Python target environment: {err}")))?;
+
+    Ok(
+        target_field_matches(&target.os_name, &current_target.os_name)
+            && target_field_matches(&target.sys_platform, &current_target.sys_platform)
+            && target_field_matches(&target.platform_machine, &current_target.platform_machine)
+            && target_field_matches(&target.platform_system, &current_target.platform_system)
+            && target_field_matches(&target.libc, &current_target.libc)
+    )
 }
 
 fn compatible_platform_tags(target: &PythonTargetEnv) -> Vec<String> {

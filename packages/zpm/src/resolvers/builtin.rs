@@ -9,7 +9,7 @@ pub async fn resolve_builtin_descriptor(context: &InstallContext<'_>, descriptor
         return builtins::node::resolve_nodejs_variant_descriptor(context, descriptor, &params.range).await;
     }
 
-    if descriptor.ident.as_str().starts_with("@yarnpkg/python-") {
+    if builtins::python::is_python_variant_ident(&descriptor.ident) {
         return builtins::python::resolve_python_variant_descriptor(context, descriptor, &params.range).await;
     }
 
@@ -17,7 +17,7 @@ pub async fn resolve_builtin_descriptor(context: &InstallContext<'_>, descriptor
         "@yarnpkg/node"
             => builtins::node::resolve_nodejs_descriptor(context, descriptor, params).await,
 
-        "@yarnpkg/python"
+        builtins::python::PYTHON_IDENT
             => builtins::python::resolve_python_descriptor(context, descriptor, params).await,
 
         _ => Err(Error::Unsupported)?,
@@ -29,7 +29,7 @@ pub async fn resolve_builtin_locator(context: &InstallContext<'_>, locator: &Loc
         return builtins::node::resolve_nodejs_variant_locator(context, locator, version).await;
     }
 
-    if locator.ident.as_str().starts_with("@yarnpkg/python-") {
+    if builtins::python::is_python_variant_ident(&locator.ident) {
         return builtins::python::resolve_python_variant_locator(context, locator, version).await;
     }
 
@@ -37,7 +37,7 @@ pub async fn resolve_builtin_locator(context: &InstallContext<'_>, locator: &Loc
         "@yarnpkg/node"
             => builtins::node::resolve_nodejs_locator(context, locator, version).await,
 
-        "@yarnpkg/python"
+        builtins::python::PYTHON_IDENT
             => builtins::python::resolve_python_locator(context, locator, version).await,
 
         _ => Err(Error::Unsupported)?,

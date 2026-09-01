@@ -594,22 +594,15 @@ fn run_pep517_build(
     )
 }
 
-fn metadata_field<'a>(metadata: &'a str, field: &str) -> Option<&'a str> {
-    metadata.lines().find_map(|line| {
-        let (key, value) = line.split_once(':')?;
-        key.eq_ignore_ascii_case(field).then(|| value.trim())
-    })
-}
-
 /// Parses a freshly-built wheel, checks that it carries Python distribution
 /// metadata and that its tags are installable on the selected target, and
-/// returns the METADATA contents. Errors are plain messages so each caller
-/// can wrap them with its own subject.
+/// returns the unfolded METADATA headers. Errors are plain messages so each
+/// caller can wrap them with its own subject.
 fn validate_built_wheel(
     wheel: &[u8],
     wheel_name: &str,
     target: Option<&PythonTargetEnv>,
-) -> Result<String, String> {
+) -> Result<Vec<String>, String> {
     let entries = zpm_formats::zip::entries_from_zip(wheel)
         .map_err(|error| format!("backend produced an invalid wheel: {error}"))?;
     let metadata_entry = entries.iter()
@@ -634,7 +627,7 @@ fn validate_built_wheel(
         }
     }
 
-    Ok(metadata.to_string())
+    Ok(crate::pypi::unfold_metadata_headers(metadata))
 }
 
 fn validate_wheel(
@@ -645,11 +638,10 @@ fn validate_wheel(
     target: Option<&PythonTargetEnv>,
     sdist_filename: &str,
 ) -> Result<(), Error> {
-    let metadata = validate_built_wheel(wheel, wheel_filename, target)
+    let headers = validate_built_wheel(wheel, wheel_filename, target)
         .map_err(|message| invalid_sdist(sdist_filename, message))?;
-    let metadata = metadata.as_str();
 
-    let name = metadata_field(metadata, "Name")
+    let name = crate::pypi::metadata_header_field(&headers, "Name")
         .ok_or_else(|| invalid_sdist(sdist_filename, "wheel METADATA has no Name field"))?;
     if canonicalize_pypi_name(name) != expected_ident.as_str() {
         return Err(invalid_sdist(sdist_filename, format!(
@@ -658,7 +650,7 @@ fn validate_wheel(
         )));
     }
 
-    let version = metadata_field(metadata, "Version")
+    let version = crate::pypi::metadata_header_field(&headers, "Version")
         .ok_or_else(|| invalid_sdist(sdist_filename, "wheel METADATA has no Version field"))?;
     let version = PypiVersion::from_file_string(version)
         .map_err(|_| invalid_sdist(sdist_filename, format!("wheel has invalid version `{version}`")))?;

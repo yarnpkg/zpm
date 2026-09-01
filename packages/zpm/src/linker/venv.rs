@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use zpm_primitives::{Ident, Locator, PythonTargetEnv, PythonTargetInput, Reference};
-use zpm_utils::{FromFileString, Hash64, Path, System, ToFileString, ToHumanString};
+use zpm_primitives::{Ident, Locator, PythonTargetEnv, Reference};
+use zpm_utils::{FromFileString, Hash64, Path, ToFileString, ToHumanString};
 
 use crate::{
     build::BuildRequests,
+    builtins::python::{is_python_ident as is_python_builtin_ident, is_python_variant_ident},
     content_flags::{self, Binary},
     error::Error,
     fetchers::PackageData,
@@ -21,15 +22,6 @@ const PYTHON_ENTRY_POINTS_MANIFEST: &str = ".zpm-python-entry-points";
 struct ActivePythonFork {
     id: Option<Hash64>,
     target: Option<PythonTargetEnv>,
-}
-
-fn is_python_builtin_ident(ident: &Ident) -> bool {
-    ident.as_str() == "@yarnpkg/python"
-        || ident.as_str().starts_with("@yarnpkg/python-")
-}
-
-fn is_python_variant_ident(ident: &Ident) -> bool {
-    ident.as_str().starts_with("@yarnpkg/python-")
 }
 
 fn collect_workspace_package_locators(
@@ -96,30 +88,6 @@ fn collect_workspace_package_locators(
     Ok((packages, workspaces))
 }
 
-fn target_field_matches(target: &Option<String>, current: &Option<String>) -> bool {
-    target.is_none() || target == current
-}
-
-pub(crate) fn target_matches_current_system(target: &PythonTargetEnv) -> Result<bool, Error> {
-    let current_target
-        = PythonTargetEnv::from_system(&System::from_current(), PythonTargetInput {
-            version: Some(&target.python_version),
-            full_version: target.python_full_version.as_deref(),
-            implementation_name: target.implementation_name.as_deref(),
-            implementation_version: target.implementation_version.as_deref(),
-            platform_release: target.platform_release.as_deref(),
-            platform_version: target.platform_version.as_deref(),
-        }).map_err(|err| Error::InvalidResolution(format!("Invalid current Python target environment: {err}")))?;
-
-    Ok(
-        target_field_matches(&target.os_name, &current_target.os_name)
-            && target_field_matches(&target.sys_platform, &current_target.sys_platform)
-            && target_field_matches(&target.platform_machine, &current_target.platform_machine)
-            && target_field_matches(&target.platform_system, &current_target.platform_system)
-            && target_field_matches(&target.libc, &current_target.libc)
-    )
-}
-
 fn target_matches_link_version(target: &PythonTargetEnv, link_version: &str) -> bool {
     target.python_version == link_version
         || target.python_full_version.as_deref() == Some(link_version)
@@ -148,7 +116,7 @@ fn select_active_fork(install: &Install, island: &crate::island::ResolvedIsland)
             continue;
         };
 
-        if !target_matches_current_system(target)? {
+        if !crate::pypi::target_matches_current_system(target)? {
             continue;
         }
 
@@ -771,6 +739,9 @@ pub async fn link_island_venv(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zpm_primitives::PythonTargetInput;
+    use zpm_utils::System;
+
     use crate::lockfile::{LockfileIsland, LockfileIslandFork};
 
     fn current_target(version: &'static str) -> PythonTargetEnv {

@@ -1,6 +1,8 @@
-use std::{borrow::Cow, collections::{btree_map::Entry as BTreeMapEntry, BTreeMap, HashMap}, iter::once, str::FromStr, sync::{Arc, Mutex, OnceLock}};
+use std::{borrow::Cow, collections::{btree_map::Entry as BTreeMapEntry, BTreeMap}, iter::once, str::FromStr, sync::{Arc, LazyLock}};
 
+use dashmap::DashMap;
 use itertools::Itertools;
+use tokio::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use zpm_formats::Entry;
 use zpm_parsers::JsonDocument;
@@ -10,6 +12,29 @@ use zpm_utils::{Cpu, FromFileString, Libc, Os, Path, RawPath, Sha256, System, To
 use crate::{
     error::Error, fetchers::PackageData, install::{FetchResult, InstallContext, IntoResolutionResult, ResolutionResult}, manifest::bin::BinField, npm::NpmEntryExt, resolvers::Resolution
 };
+
+/// Ident of the selector builtin that resolves to per-platform variants
+pub const PYTHON_IDENT: &str = "@yarnpkg/python";
+
+/// Prefix shared by every platform-variant ident (`@yarnpkg/python-<platform>`)
+pub const PYTHON_VARIANT_IDENT_PREFIX: &str = "@yarnpkg/python-";
+
+/// True for any managed-Python builtin ident, selector or platform variant.
+/// This module owns the managed-Python naming protocol: dispatch on these
+/// idents must go through these predicates, never through ad-hoc string
+/// comparisons.
+pub fn is_python_ident(ident: &Ident) -> bool {
+    ident.as_str() == PYTHON_IDENT || is_python_variant_ident(ident)
+}
+
+/// True for platform-variant idents only (`@yarnpkg/python-<platform>`)
+pub fn is_python_variant_ident(ident: &Ident) -> bool {
+    ident.as_str().starts_with(PYTHON_VARIANT_IDENT_PREFIX)
+}
+
+fn python_variant_ident(variant: &PythonPlatformVariant) -> String {
+    format!("{PYTHON_VARIANT_IDENT_PREFIX}{}", variant.file_name)
+}
 
 static PLATFORM_VARIANTS: &[PythonPlatformVariant] = &[
     PythonPlatformVariant {
@@ -145,8 +170,14 @@ struct StandaloneReleaseArtifact {
 /// Parsed release indexes, memoized by URL: the HTTP bytes are already
 /// cached, but the index is large (astral's full python-build-standalone
 /// NDJSON) and requested once per descriptor/locator/variant resolution,
-/// so re-parsing it each time is wasteful.
-static PYTHON_RELEASES_CACHE: OnceLock<Mutex<HashMap<String, Arc<Vec<PythonReleaseManifest>>>>> = OnceLock::new();
+/// so re-parsing it each time is wasteful. Same coalescing shape as
+/// `http_npm::METADATA_CACHE`: concurrent callers (e.g. Python target
+/// forks resolving in parallel) share a single parse, and errors aren't
+/// cached.
+type PythonReleasesCell = Arc<OnceCell<Arc<Vec<PythonReleaseManifest>>>>;
+
+static PYTHON_RELEASES_CACHE: LazyLock<DashMap<String, PythonReleasesCell>>
+    = LazyLock::new(DashMap::new);
 
 async fn fetch_python_releases(context: &InstallContext<'_>) -> Result<Arc<Vec<PythonReleaseManifest>>, Error> {
     let project = context.project
@@ -155,25 +186,22 @@ async fn fetch_python_releases(context: &InstallContext<'_>) -> Result<Arc<Vec<P
     let release_url
         = &project.config.settings.python_dist_metadata_url.value;
 
-    let cache
-        = PYTHON_RELEASES_CACHE.get_or_init(Default::default);
+    let cell
+        = PYTHON_RELEASES_CACHE
+            .entry(release_url.clone())
+            .or_default()
+            .clone();
 
-    if let Some(releases) = cache.lock().unwrap().get(release_url) {
-        return Ok(releases.clone());
-    }
+    let releases = cell.get_or_try_init(|| async {
+        let bytes
+            = project.http_client.cached_get(release_url).await?;
+        let text
+            = String::from_utf8_lossy(&bytes);
 
-    let bytes
-        = project.http_client.cached_get(release_url).await?;
-    let text
-        = String::from_utf8_lossy(&bytes);
+        parse_python_releases(&text).map(Arc::new)
+    }).await?;
 
-    let releases
-        = Arc::new(parse_python_releases(&text)?);
-
-    Ok(cache.lock().unwrap()
-        .entry(release_url.clone())
-        .or_insert(releases)
-        .clone())
+    Ok(releases.clone())
 }
 
 fn parse_python_releases(text: &str) -> Result<Vec<PythonReleaseManifest>, Error> {
@@ -460,7 +488,7 @@ pub async fn resolve_python_locator(context: &InstallContext<'_>, locator: &Loca
 fn build_python_parent_resolution(context: &InstallContext<'_>, locator: Locator, version: zpm_semver::Version) -> Result<ResolutionResult, Error> {
     let variants = PLATFORM_VARIANTS.iter().map(|variant| {
         let name
-            = format!("@yarnpkg/python-{}", variant.file_name);
+            = python_variant_ident(variant);
         let range
             = zpm_semver::Range::exact(version.clone());
 
@@ -483,7 +511,7 @@ fn build_python_parent_resolution(context: &InstallContext<'_>, locator: Locator
 pub async fn resolve_python_variant_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, range: &zpm_semver::Range) -> Result<ResolutionResult, Error> {
     let variant
         = PLATFORM_VARIANTS.iter()
-            .find(|variant| descriptor.ident.as_str() == &format!("@yarnpkg/python-{}", variant.file_name))
+            .find(|variant| descriptor.ident.as_str() == &python_variant_ident(variant))
             .ok_or(Error::Unsupported)?;
 
     let version
@@ -500,7 +528,7 @@ pub async fn resolve_python_variant_descriptor(context: &InstallContext<'_>, des
 pub async fn resolve_python_variant_locator(context: &InstallContext<'_>, locator: &Locator, version: &zpm_semver::Version) -> Result<ResolutionResult, Error> {
     let variant
         = PLATFORM_VARIANTS.iter()
-            .find(|variant| locator.ident.as_str() == &format!("@yarnpkg/python-{}", variant.file_name))
+            .find(|variant| locator.ident.as_str() == &python_variant_ident(variant))
             .ok_or(Error::Unsupported)?;
 
     build_python_variant_resolution(context, locator.clone(), version.clone(), variant)
@@ -628,7 +656,7 @@ fn make_python_shim(target: &Path) -> Result<Entry<'static>, Error> {
 pub async fn fetch_python_locator<'a>(context: &InstallContext<'a>, locator: &Locator, version: &zpm_semver::Version, is_mock_request: bool) -> Result<FetchResult, Error> {
     let variant
         = PLATFORM_VARIANTS.iter()
-            .find(|variant| locator.ident.as_str() == &format!("@yarnpkg/python-{}", variant.file_name))
+            .find(|variant| locator.ident.as_str() == &python_variant_ident(variant))
             .ok_or(Error::Unsupported)?;
 
     if is_mock_request {

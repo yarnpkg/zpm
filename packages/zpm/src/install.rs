@@ -418,7 +418,7 @@ fn resolve_descriptor_impl<'a>(
                     // apply the patch, so we re-fetch directly with is_mock_request
                     // =false, bypassing the shared map. The disk-level package cache
                     // still deduplicates the actual download.
-                    if matches!(fetch_result.package_data, PackageData::MissingZip {..}) {
+                    if fetch_result.package_data.is_missing_zip() {
                         fetch_result = fetch_locator_impl(inner_locator, false, ctx, maps).await?;
                     }
 
@@ -1390,10 +1390,18 @@ impl<'a> InstallManager<'a> {
                     crate::island::resolve_island(island, &self.context, &lockfile)
                 });
 
-                let (_, island_results) = futures::future::try_join(
-                    async { greedy_future.await; Ok::<(), Error>(()) },
-                    futures::future::try_join_all(island_futures),
-                ).await?;
+                // join (not try_join/try_join_all): resolve_island relies on
+                // its spawn_blocking handles being awaited to completion (see
+                // the transmute safety comment in resolve_island_once), so a
+                // sibling island's error must not drop in-flight island
+                // futures. Errors are propagated once everything has settled.
+                let (_, island_results) = futures::future::join(
+                    greedy_future,
+                    futures::future::join_all(island_futures),
+                ).await;
+
+                let island_results = island_results.into_iter()
+                    .collect::<Result<Vec<_>, Error>>()?;
 
                 // Merge island results into install state and fetch packages
                 let mut island_locators = Vec::new();
@@ -1405,13 +1413,13 @@ impl<'a> InstallManager<'a> {
 
                     for (fork_id, fork) in &island_result.lockfile_island.forks {
                         if let Some(target) = &fork.target {
-                            if !crate::linker::venv::target_matches_current_system(target)? {
+                            if !crate::pypi::target_matches_current_system(target)? {
                                 inactive_fork_ids.insert(fork_id.clone());
                             }
                         }
 
                         let runtime_locator = fork.resolutions.values().find(|locator| {
-                            locator.ident.as_str().starts_with("@yarnpkg/python-")
+                            crate::builtins::python::is_python_variant_ident(&locator.ident)
                                 && island_result.normalized_resolutions.get(*locator)
                                     .is_some_and(|resolution| resolution.requirements.validate_system(System::current()))
                         });
@@ -1807,9 +1815,9 @@ impl<'a> InstallManager<'a> {
             // order; a mock fetch (MissingZip, from an inactive fork) must
             // not clobber real data recorded under the physical key.
             let would_clobber_real_data
-                = matches!(package_data, PackageData::MissingZip {..})
+                = package_data.is_missing_zip()
                     && self.result.package_data.get(&physical_locator)
-                        .is_some_and(|existing| !matches!(existing, PackageData::MissingZip {..}));
+                        .is_some_and(|existing| !existing.is_missing_zip());
 
             if !would_clobber_real_data {
                 self.result.package_data.insert(physical_locator.clone(), package_data);

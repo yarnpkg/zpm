@@ -1027,3 +1027,61 @@ That gives us these properties:
 - Fetching remains deduplicated by physical locators.
 - The venv linker can select the active fork and install a normal concrete
   environment.
+
+## Implementation debt (post-review)
+
+Items surfaced by the design review of the initial implementation. Each either
+needs a maintainer decision or touches the lockfile schema, so they are
+recorded here rather than fixed opportunistically. File pointers reference the
+state at the time of the review.
+
+- **Step-wise PubGrub driver.** `resolve_island_once` bridges the synchronous
+  `pubgrub::resolve` to async fetching via `spawn_blocking` plus an `unsafe`
+  transmute of `InstallContext` to `'static` (`island.rs`). The transmute is
+  only sound while every caller polls the island futures to completion; the
+  awaits in `install.rs` and `island.rs` now use non-cancelling `join`/
+  `join_all` combinators and the invariant is documented at the transmute, but
+  the durable fix is the TODO already noted in `island.rs`: drive PubGrub
+  step-by-step (`unit_propagation`/`add_decision`) from an async loop that
+  owns its data, which also unlocks concurrent metadata prefetching.
+- **Placeholder fetches as a type, not a flag.** `is_mock_request` conflates
+  "foreign architecture" and "inactive Python fork", and placeholder-ness is
+  only visible as `PackageData::MissingZip` (see `is_missing_zip` and the
+  write guard in `record_fetch`). A `Materialized`/`Placeholder` split on
+  fetch results, with package data keyed by physical locator plus a
+  logical→physical alias table, would remove both the write-side guard and
+  the read-side re-fetch convention (`install.rs`, patch path).
+- **Checksum completeness for inactive forks.** The late-checksum pass only
+  hashes materialized zips, so lockfile entries for forks inactive on the
+  resolving host are written with `checksum: null` and get filled in later by
+  whichever teammate's host activates them — churning the lockfile and
+  conflicting with the universal-lockfile goal (and with the cross-host
+  stability test listed above). Options: carry the registry-declared artifact
+  hash through resolution so every fork entry is complete at resolve time, or
+  store checksums keyed by physical locator (see the first open question).
+- **One marker evaluator.** Live marker evaluation goes through `pep508_rs`
+  (`resolvers/pypi.rs`), while the owned `MarkerExpr` AST in
+  `zpm-primitives/src/pypi_marker.rs` — which this document assigns to the
+  lockfile fork representation — is constructed for `PythonFork.condition`
+  but never serialized or read. Either serialize `condition` into
+  `LockfileIslandFork` and route evaluation through `MarkerExpr`, or delete
+  the AST and canonicalize on `pep508_rs`; keeping both invites divergence.
+- **Post-solve fork coalescing.** Fork results are merged by map extension,
+  so every package appears once per fork even when all forks resolved
+  identically; lockfile size and diff noise scale with
+  `targets × packages`. Collapsing entries whose physical locator and
+  dependency set match across all forks requires no marker algebra and
+  should land before the format is widely adopted.
+- **Island lockfile fast-path.** Disabled (`island.rs` TODO); every install
+  re-runs PubGrub per fork with locked versions only as preferences. The
+  validation helpers (`is_island_lockfile_valid`,
+  `island_result_from_lockfile`) are `#[allow(dead_code)]` and should be
+  finished or removed before islands leave the unstable flag.
+- **Resolver-mode families.** The `resolve_*` / `*_requiring_python_target` /
+  `*_for_fork` function triplets in `resolvers/pypi.rs` should collapse into
+  single functions over a resolution-mode enum (the pattern already exists
+  internally as `LocalWheelResolutionTarget`).
+- **Lossy PEP 440 projection.** `Resolution.version` stores a lossy
+  semver projection of PEP 440 versions (`project_pep440_to_semver`); the
+  projected form is lockfile-visible, so the eventual fix needs a
+  migration story (comment at the projection site).

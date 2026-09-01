@@ -253,6 +253,15 @@ async fn resolve_island_once(
     // SAFETY: the JoinHandle is `.await`ed immediately below, so the closure
     // always completes before this function returns — the references in `ctx`
     // remain valid for the entire duration of the blocking task.
+    //
+    // CAUTION: this only holds while every caller polls this future to
+    // completion. tokio never cancels a spawn_blocking task, so if this
+    // future is dropped at the `.await` (a sibling erroring inside
+    // try_join_all, a select!/timeout wrapper), the solver keeps running
+    // with dangling `ctx` references. Callers must therefore await through
+    // non-cancelling combinators only (join/join_all — see resolve_island
+    // and the island await in install.rs), until the TODO below removes
+    // the transmute entirely.
     let handle = tokio::runtime::Handle::current();
     let island_id = island.id.clone();
     let enforced_resolutions = ctx.enforced_resolutions.clone();
