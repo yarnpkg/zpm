@@ -625,6 +625,16 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
       }],
     },
   },
+  [`pypi-private-build-sdist`]: {
+    [`1.0.0`]: {
+      files: [{
+        filename: `pypi_private_build_sdist-1.0.0.tar.gz`,
+        packagetype: `sdist`,
+        path: `/repositories/pypi/pypi_private_build_sdist-1.0.0.tar.gz`,
+        uploadTime: `2025-02-01T00:00:00Z`,
+      }],
+    },
+  },
   [`pypi-broken-sdist`]: {
     [`1.0.0`]: {
       files: [{
@@ -1410,6 +1420,11 @@ exit 0
         type: RequestType.Repository,
       };
     } else if ((match = url.match(/^\/private-pypi\/([^/]+)\/$/))) {
+      return {
+        type: RequestType.PypiSimple,
+        packageName: decodeURIComponent(match[1]!),
+      };
+    } else if ((match = url.match(/^\/([a-zA-Z0-9._-]+)\/$/))) {
       return {
         type: RequestType.PypiSimple,
         packageName: decodeURIComponent(match[1]!),

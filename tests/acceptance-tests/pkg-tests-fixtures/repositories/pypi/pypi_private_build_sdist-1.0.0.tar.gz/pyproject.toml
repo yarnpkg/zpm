@@ -1,0 +1,4 @@
+[build-system]
+requires = ["pypi-no-deps==1.0.0"]
+build-backend = "backend"
+backend-path = ["."]

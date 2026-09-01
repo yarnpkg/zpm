@@ -874,9 +874,9 @@ impl Settings {
                 .map(|target| {
                     let system = target.value.to_system();
                     SystemSet {
-                        arch: Some(system.arch.into_iter().collect()),
-                        os: Some(system.os.into_iter().collect()),
-                        libc: Some(system.libc.into_iter().collect()),
+                        arch: system.arch.map(|arch| vec![arch]),
+                        os: system.os.map(|os| vec![os]),
+                        libc: system.libc.map(|libc| vec![libc]),
                     }
                 })
                 .collect();
@@ -1543,6 +1543,37 @@ mod tests {
             arch: cpu(&["arm64", "x64"]),
             os: os(&["darwin", "linux"]),
             libc: libc(&["glibc"]),
+        }]);
+    }
+
+    #[test]
+    fn supported_targets_should_keep_omitted_system_fields_unrestricted() {
+        let sets = supported_systems(r#"
+            supportedTargets:
+              - python:
+                  version: "3.10"
+        "#);
+
+        assert_eq!(sets, vec![SystemSet {
+            arch: None,
+            os: None,
+            libc: None,
+        }]);
+    }
+
+    #[test]
+    fn supported_targets_should_only_constrain_explicit_system_fields() {
+        let sets = supported_systems(r#"
+            supportedTargets:
+              - os: linux
+                python:
+                  version: "3.12"
+        "#);
+
+        assert_eq!(sets, vec![SystemSet {
+            arch: None,
+            os: os(&["linux"]),
+            libc: None,
         }]);
     }
 

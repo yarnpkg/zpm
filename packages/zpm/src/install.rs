@@ -1401,8 +1401,15 @@ impl<'a> InstallManager<'a> {
 
                 for island_result in island_results {
                     let island_id = island_result.island_id.clone();
+                    let mut inactive_fork_ids = BTreeSet::new();
 
                     for (fork_id, fork) in &island_result.lockfile_island.forks {
+                        if let Some(target) = &fork.target {
+                            if !crate::linker::venv::target_matches_current_system(target)? {
+                                inactive_fork_ids.insert(fork_id.clone());
+                            }
+                        }
+
                         let runtime_locator = fork.resolutions.values().find(|locator| {
                             locator.ident.as_str().starts_with("@yarnpkg/python-")
                                 && island_result.normalized_resolutions.get(*locator)
@@ -1423,7 +1430,10 @@ impl<'a> InstallManager<'a> {
 
                     // Lockfile entries are shared (for checksum tracking etc.)
                     for (locator, resolution) in &island_result.normalized_resolutions {
-                        island_locators.push(locator.clone());
+                        let is_mock_request = crate::fetchers::pypi::environment_hash(&locator.reference)
+                            .is_some_and(|fork_id| inactive_fork_ids.contains(fork_id))
+                            || !resolution.requirements.validate_system(System::current());
+                        island_locators.push((locator.clone(), is_mock_request));
                         self.result.lockfile.entries
                             .entry(locator.clone())
                             .or_insert_with(|| LockfileEntry {
@@ -1463,8 +1473,8 @@ impl<'a> InstallManager<'a> {
 
                 // Fetch all island-resolved packages so package_data is
                 // available for checksum computation and linking.
-                let fetch_futures = island_locators.into_iter().map(|locator| {
-                    ensure_fetched(locator, false, &self.context, &maps)
+                let fetch_futures = island_locators.into_iter().map(|(locator, is_mock_request)| {
+                    ensure_fetched(locator, is_mock_request, &self.context, &maps)
                 });
                 futures::future::join_all(fetch_futures).await;
             } else {

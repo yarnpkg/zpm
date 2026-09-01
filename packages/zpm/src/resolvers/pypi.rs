@@ -9,7 +9,7 @@ use crate::{
     error::Error,
     install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
     prepare,
-    pypi::{PypiDistribution, encode_path_segment, format_local_wheel_url, format_python_git_url, get_artifact_authorization, get_authorization, get_registry, metadata_from_source_tree, metadata_from_wheel, parse_local_wheel_url, parse_python_git_url, parse_simple_project, python_git_project_path, requires_dist_from_wheel, resolve_local_wheel_path, select_best_artifact, select_best_wheel},
+    pypi::{PypiDistribution, encode_path_segment, format_local_wheel_url, format_python_git_url, get_artifact_authorization, get_authorization, get_build_registry, get_registry, metadata_from_source_tree, metadata_from_wheel, parse_local_wheel_url, parse_python_git_url, parse_simple_project, python_git_project_path, requires_dist_from_wheel, resolve_local_wheel_path, select_best_artifact, select_best_wheel},
     resolvers::Resolution,
 };
 
@@ -530,6 +530,10 @@ async fn resolve_git_descriptor_inner(
     let project
         = context.project
             .expect("The project is required for resolving Python Git dependencies");
+    let requested_ident
+        = canonicalize_pypi_ident(&descriptor.ident)?;
+    let build_registry
+        = get_build_registry(&project.config, &requested_ident)?;
     let commit
         = Box::pin(crate::git::resolve_git_treeish(
             &params.git,
@@ -547,7 +551,12 @@ async fn resolve_git_descriptor_inner(
         Ok(project_path) => match metadata_from_source_tree(&project_path) {
             Ok(metadata) => Ok(metadata),
             Err(_) => {
-                Box::pin(prepare::python::prepare_source_tree(&project_path, None, None)).await
+                Box::pin(prepare::python::prepare_source_tree(
+                    &project_path,
+                    None,
+                    None,
+                    &build_registry,
+                )).await
                     .and_then(|wheel| metadata_from_wheel(&wheel))
             },
         },
@@ -556,8 +565,6 @@ async fn resolve_git_descriptor_inner(
     let _ = repository_path.fs_rm();
     let metadata
         = metadata_result?;
-    let requested_ident
-        = canonicalize_pypi_ident(&descriptor.ident)?;
     if metadata.ident != requested_ident {
         return Err(Error::InvalidResolution(format!(
             "Python Git dependency contains package `{}`, but is required as `{}`",

@@ -65,7 +65,7 @@ pub fn get_registry(config: &Configuration, ident: &Ident) -> String {
     registry.trim_end_matches('/').to_string()
 }
 
-pub fn get_authorization(config: &Configuration, registry: &str, ident: &Ident) -> Option<String> {
+fn get_credentials(config: &Configuration, registry: &str, ident: &Ident) -> Option<String> {
     let mut auth_ident
         = config.settings.pypi_auth_ident.value.as_ref();
     let mut auth_token
@@ -93,14 +93,41 @@ pub fn get_authorization(config: &Configuration, registry: &str, ident: &Ident) 
         }
     }
 
-    let credentials = auth_token
+    auth_token
         .map(|token| format!("__token__:{}", token.value))
-        .or_else(|| auth_ident.map(|ident| ident.value.clone()))?;
+        .or_else(|| auth_ident.map(|ident| ident.value.clone()))
+}
+
+pub fn get_authorization(config: &Configuration, registry: &str, ident: &Ident) -> Option<String> {
+    let credentials = get_credentials(config, registry, ident)?;
 
     Some(format!(
         "Basic {}",
         base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes()),
     ))
+}
+
+pub fn get_build_registry(config: &Configuration, ident: &Ident) -> Result<String, Error> {
+    let registry = get_registry(config, ident);
+    let index = if registry == "https://pypi.org" {
+        "https://pypi.org/simple"
+    } else {
+        &registry
+    };
+    let mut url = url::Url::parse(index)?;
+
+    if let Some(credentials) = get_credentials(config, &registry, ident) {
+        let (username, password) = credentials.split_once(':')
+            .map_or((credentials.as_str(), None), |(username, password)| (username, Some(password)));
+        url.set_username(username).map_err(|()| {
+            Error::PythonPreparation(format!("Cannot add PyPI credentials to registry `{registry}`"))
+        })?;
+        url.set_password(password).map_err(|()| {
+            Error::PythonPreparation(format!("Cannot add PyPI credentials to registry `{registry}`"))
+        })?;
+    }
+
+    Ok(url.to_string())
 }
 
 pub fn get_artifact_authorization(config: &Configuration, registry: &str, ident: &Ident, artifact_url: &str) -> Option<String> {

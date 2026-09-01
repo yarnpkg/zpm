@@ -1,205 +1,104 @@
 use std::process::{Command, Output};
 
+use serde::Deserialize;
 use zpm_primitives::{Ident, PypiVersion, PythonTargetEnv, canonicalize_pypi_name};
 use zpm_utils::{FromFileString, Path, ToFileString};
 
 use crate::error::Error;
 use crate::fetchers::PackageData;
 
-const PEP517_RUNNER: &str = r#"
-import importlib
-import os
-import pathlib
-import subprocess
-import sys
-import venv
+const LEGACY_BUILD_BACKEND: &str = "setuptools.build_meta:__legacy__";
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+struct BuildSystem {
+    requires: Vec<String>,
 
-def fail(message):
-    print(message, file=sys.stderr)
-    raise SystemExit(1)
+    #[serde(default = "default_build_backend")]
+    build_backend: String,
 
+    #[serde(default)]
+    backend_path: Vec<String>,
+}
 
-def find_project_root(extraction_root):
-    markers = ("pyproject.toml", "setup.py", "setup.cfg")
-    if any((extraction_root / marker).is_file() for marker in markers):
-        return extraction_root
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct PyprojectDocument {
+    build_system: Option<BuildSystem>,
+}
 
-    children = [child for child in extraction_root.iterdir() if child.is_dir()]
-    candidates = [
-        child for child in children
-        if any((child / marker).is_file() for marker in markers)
-    ]
-    if len(candidates) != 1:
-        fail("sdist must contain exactly one Python project root")
-    return candidates[0]
+fn default_build_backend() -> String {
+    LEGACY_BUILD_BACKEND.to_string()
+}
 
+fn legacy_build_system() -> BuildSystem {
+    BuildSystem {
+        requires: vec!["setuptools>=40.8.0".to_string()],
+        build_backend: default_build_backend(),
+        backend_path: Vec::new(),
+    }
+}
 
-def read_build_system(project_root):
-    pyproject_path = project_root / "pyproject.toml"
-    if not pyproject_path.is_file():
-        return {
-            "requires": ["setuptools>=40.8.0"],
-            "build-backend": "setuptools.build_meta:__legacy__",
-            "backend-path": [],
-        }
+fn has_python_project_marker(path: &Path) -> bool {
+    ["pyproject.toml", "setup.py", "setup.cfg"]
+        .into_iter()
+        .any(|marker| path.with_join_str(marker).fs_is_file())
+}
 
-    try:
-        import tomllib
-    except ImportError:
-        fail("building sdists with pyproject.toml requires Python 3.11 or newer")
-
-    with pyproject_path.open("rb") as stream:
-        document = tomllib.load(stream)
-
-    build_system = document.get("build-system")
-    if build_system is None:
-        return {
-            "requires": ["setuptools>=40.8.0"],
-            "build-backend": "setuptools.build_meta:__legacy__",
-            "backend-path": [],
-        }
-    if not isinstance(build_system, dict):
-        fail("pyproject.toml [build-system] must be a table")
-
-    requires = build_system.get("requires")
-    backend = build_system.get("build-backend", "setuptools.build_meta:__legacy__")
-    backend_path = build_system.get("backend-path", [])
-    if not isinstance(requires, list) or not all(isinstance(item, str) for item in requires):
-        fail("build-system.requires must be an array of strings")
-    if not isinstance(backend, str) or not backend:
-        fail("build-system.build-backend must be a non-empty string")
-    if not isinstance(backend_path, list) or not all(isinstance(item, str) for item in backend_path):
-        fail("build-system.backend-path must be an array of strings")
-
-    return {
-        "requires": requires,
-        "build-backend": backend,
-        "backend-path": backend_path,
+fn find_project_root(extraction_root: &Path) -> Result<Path, Error> {
+    if has_python_project_marker(extraction_root) {
+        return Ok(extraction_root.clone());
     }
 
+    let mut candidates = Vec::new();
+    for entry in extraction_root.fs_read_dir()? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
 
-def build_environment_python(work_root, requirements):
-    environment_root = work_root / "build-environment"
-    venv.EnvBuilder(with_pip=True, clear=True).create(environment_root)
-    if os.name == "nt":
-        python = environment_root / "Scripts" / "python.exe"
-    else:
-        python = environment_root / "bin" / "python"
+        let path = Path::try_from(entry.path())?;
+        if has_python_project_marker(&path) {
+            candidates.push(path);
+        }
+    }
 
-    if requirements:
-        subprocess.run([
-            str(python), "-m", "pip", "install",
-            "--disable-pip-version-check", "--no-input",
-            *requirements,
-        ], check=True)
-    return python
+    if candidates.len() != 1 {
+        return Err(Error::PythonPreparation(
+            "source archive must contain exactly one Python project root".to_string(),
+        ));
+    }
 
+    Ok(candidates.remove(0))
+}
 
-def load_backend(project_root, build_system):
-    backend_paths = []
-    for raw_path in build_system["backend-path"]:
-        candidate = (project_root / raw_path).resolve()
-        try:
-            candidate.relative_to(project_root.resolve())
-        except ValueError:
-            fail("build-system.backend-path entries must stay within the source tree")
-        backend_paths.append(str(candidate))
+fn parse_build_system(contents: &str, pyproject_path: &Path) -> Result<BuildSystem, Error> {
+    let document: PyprojectDocument = toml::from_str(contents).map_err(|error| {
+        Error::PythonPreparation(format!(
+            "Cannot parse {}: {error}",
+            pyproject_path.to_file_string(),
+        ))
+    })?;
+    let build_system = document.build_system.unwrap_or_else(legacy_build_system);
 
-    sys.path[:0] = backend_paths
-    os.chdir(project_root)
+    if build_system.build_backend.is_empty() {
+        return Err(Error::PythonPreparation(format!(
+            "{} build-system.build-backend must be a non-empty string",
+            pyproject_path.to_file_string(),
+        )));
+    }
 
-    module_name, separator, object_path = build_system["build-backend"].partition(":")
-    backend = importlib.import_module(module_name)
-    if separator:
-        for component in object_path.split("."):
-            backend = getattr(backend, component)
+    Ok(build_system)
+}
 
-    return backend
+fn read_build_system(project_root: &Path) -> Result<BuildSystem, Error> {
+    let pyproject_path = project_root.with_join_str("pyproject.toml");
+    if !pyproject_path.fs_is_file() {
+        return Ok(legacy_build_system());
+    }
 
-
-def select_build_hook(backend, requested_hook):
-    hook = getattr(backend, requested_hook, None)
-    selected_hook = requested_hook
-    if hook is None and requested_hook == "build_editable":
-        selected_hook = "build_wheel"
-        hook = getattr(backend, selected_hook, None)
-    if hook is None:
-        fail(f"PEP 517 backend has no {requested_hook} hook")
-    return selected_hook, hook
-
-
-def install_dynamic_build_requirements(project_root, build_system, requested_hook):
-    backend = load_backend(project_root, build_system)
-    selected_hook, _ = select_build_hook(backend, requested_hook)
-    requirements_hook = getattr(backend, f"get_requires_for_{selected_hook}", None)
-    if requirements_hook is None:
-        return
-
-    requirements = requirements_hook({})
-    if not isinstance(requirements, list) or not all(isinstance(item, str) for item in requirements):
-        fail(f"PEP 517 get_requires_for_{selected_hook} must return an array of strings")
-    if requirements:
-        subprocess.run([
-            sys.executable, "-m", "pip", "install",
-            "--disable-pip-version-check", "--no-input",
-            *requirements,
-        ], check=True)
-
-
-def run_hook(project_root, output_root, build_system, requested_hook):
-    backend = load_backend(project_root, build_system)
-
-    _, hook = select_build_hook(backend, requested_hook)
-
-    wheel_name = hook(str(output_root), {}, None)
-    if not isinstance(wheel_name, str):
-        fail("PEP 517 build_wheel must return a wheel filename")
-
-    wheel_path = (output_root / wheel_name).resolve()
-    try:
-        wheel_path.relative_to(output_root.resolve())
-    except ValueError:
-        fail("PEP 517 backend returned a wheel outside the output directory")
-    if wheel_path.name != wheel_name or not wheel_name.endswith(".whl"):
-        fail("PEP 517 backend returned an invalid wheel filename")
-    if not wheel_path.is_file():
-        fail(f"PEP 517 backend did not create {wheel_name}")
-
-    print("ZPM_WHEEL=" + wheel_name)
-
-
-def main():
-    mode, requested_hook, extraction_root, output_root, work_root = sys.argv[1:]
-    extraction_root = pathlib.Path(extraction_root).resolve()
-    output_root = pathlib.Path(output_root).resolve()
-    work_root = pathlib.Path(work_root).resolve()
-    project_root = find_project_root(extraction_root)
-    build_system = read_build_system(project_root)
-
-    if mode == "prepare":
-        python = build_environment_python(work_root, build_system["requires"])
-        build_env = os.environ.copy()
-        build_env["PATH"] = str(python.parent) + os.pathsep + build_env.get("PATH", "")
-        subprocess.run([
-            str(python), __file__, "requirements", requested_hook,
-            str(extraction_root), str(output_root), str(work_root),
-        ], check=True, env=build_env)
-        subprocess.run([
-            str(python), __file__, "hook", requested_hook,
-            str(extraction_root), str(output_root), str(work_root),
-        ], check=True, env=build_env)
-    elif mode == "requirements":
-        install_dynamic_build_requirements(project_root, build_system, requested_hook)
-    elif mode == "hook":
-        run_hook(project_root, output_root, build_system, requested_hook)
-    else:
-        fail(f"unknown runner mode: {mode}")
-
-
-if __name__ == "__main__":
-    main()
-"#;
+    parse_build_system(&pyproject_path.fs_read_text()?, &pyproject_path)
+}
 
 fn invalid_sdist(filename: &str, message: impl AsRef<str>) -> Error {
     Error::PythonPreparation(format!("`{filename}`: {}", message.as_ref()))
@@ -307,15 +206,10 @@ pub fn find_python_executable_path(python_home: &Path, target: Option<&PythonTar
         .find(|candidate| candidate.fs_exists())
 }
 
-fn run_pep517_runner(
-    runner: &Path,
-    extraction_root: &Path,
-    output_root: &Path,
-    work_root: &Path,
-    requested_hook: &str,
+fn select_python(
     preferred_python: Option<&Path>,
     target: Option<&PythonTargetEnv>,
-) -> Result<Output, Error> {
+) -> Result<String, Error> {
     let mut last_candidate = None;
 
     let candidates = preferred_python
@@ -335,17 +229,9 @@ fn run_pep517_runner(
             }
         }
 
-        let output = Command::new(&python)
-            .arg(runner.to_path_buf())
-            .arg("prepare")
-            .arg(requested_hook)
-            .arg(extraction_root.to_path_buf())
-            .arg(output_root.to_path_buf())
-            .arg(work_root.to_path_buf())
-            .output();
-
-        match output {
-            Ok(output) => return Ok(output),
+        match Command::new(&python).arg("--version").output() {
+            Ok(output) if output.status.success() => return Ok(python),
+            Ok(_) => {},
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
             Err(error) => return Err(error.into()),
         }
@@ -360,23 +246,352 @@ fn run_pep517_runner(
     )))
 }
 
-fn wheel_name_from_output(output: &Output, filename: &str) -> Result<String, Error> {
+fn check_command_output(output: Output, subject: &str, fallback: &str) -> Result<(), Error> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = if stderr.trim().is_empty() {
-            "PEP 517 backend failed"
-        } else {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let detail = if !stderr.trim().is_empty() {
             stderr.trim()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim()
+        } else {
+            fallback
         };
-        return Err(invalid_sdist(filename, detail));
+        return Err(invalid_sdist(subject, detail));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout.lines()
-        .rev()
-        .find_map(|line| line.strip_prefix("ZPM_WHEEL="))
-        .map(|name| name.to_string())
-        .ok_or_else(|| invalid_sdist(filename, "PEP 517 backend did not report its wheel"))
+    Ok(())
+}
+
+fn configure_build_command(
+    command: &mut Command,
+    build_python: &Path,
+    build_environment: &Path,
+    build_index_url: &str,
+) -> Result<(), Error> {
+    let scripts_path = build_python.dirname().unwrap_or_else(|| build_environment.clone());
+    let mut paths = vec![scripts_path.to_path_buf()];
+    if let Some(path) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&path));
+    }
+    let path = std::env::join_paths(paths)
+        .map_err(|error| Error::PythonPreparation(format!("Cannot construct PEP 517 PATH: {error}")))?;
+
+    command
+        .current_dir(build_environment.to_path_buf())
+        .env("PATH", path)
+        .env("VIRTUAL_ENV", build_environment.to_path_buf())
+        .env("PIP_INDEX_URL", build_index_url)
+        .env_remove("PIP_EXTRA_INDEX_URL")
+        .env_remove("PIP_NO_INDEX");
+
+    Ok(())
+}
+
+fn create_build_environment(
+    python: &str,
+    work_root: &Path,
+    build_index_url: &str,
+    subject: &str,
+) -> Result<(Path, Path), Error> {
+    let build_environment = work_root.with_join_str("build-environment");
+    let mut command = Command::new(python);
+    command
+        .args(["-m", "venv", "--clear"])
+        .arg(build_environment.to_path_buf())
+        .env("PIP_INDEX_URL", build_index_url)
+        .env_remove("PIP_EXTRA_INDEX_URL")
+        .env_remove("PIP_NO_INDEX");
+    check_command_output(
+        command.output()?,
+        subject,
+        "unable to create the PEP 517 build environment",
+    )?;
+
+    let build_python = find_python_executable_path(&build_environment, None)
+        .ok_or_else(|| invalid_sdist(subject, "PEP 517 build environment contains no Python interpreter"))?;
+    Ok((build_environment, build_python))
+}
+
+fn install_build_requirements(
+    build_python: &Path,
+    build_environment: &Path,
+    requirements: &[String],
+    build_index_url: &str,
+    subject: &str,
+) -> Result<(), Error> {
+    if requirements.is_empty() {
+        return Ok(());
+    }
+
+    let mut command = Command::new(build_python.to_path_buf());
+    command.args([
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "--no-input",
+    ]);
+    command.args(requirements);
+    configure_build_command(
+        &mut command,
+        build_python,
+        build_environment,
+        build_index_url,
+    )?;
+    check_command_output(
+        command.output()?,
+        subject,
+        "unable to install PEP 517 build requirements",
+    )
+}
+
+fn resolve_backend_paths(project_root: &Path, build_system: &BuildSystem) -> Result<Vec<String>, Error> {
+    let canonical_root = project_root.fs_canonicalize()?;
+    let mut backend_paths = Vec::new();
+
+    for raw_path in &build_system.backend_path {
+        let relative = Path::from_file_string(raw_path).map_err(|_| {
+            Error::PythonPreparation(format!(
+                "build-system.backend-path entry `{raw_path}` is not a valid path",
+            ))
+        })?;
+        if !relative.is_forward() || relative.segments().any(|segment| segment == "..") {
+            return Err(Error::PythonPreparation(format!(
+                "build-system.backend-path entry `{raw_path}` must stay within the source tree",
+            )));
+        }
+
+        let candidate = project_root.with_join(&relative);
+        if !candidate.fs_is_dir() {
+            return Err(Error::PythonPreparation(format!(
+                "build-system.backend-path entry `{raw_path}` is not a directory",
+            )));
+        }
+        let candidate = candidate.fs_canonicalize()?;
+        if candidate.strip_prefix(&canonical_root).is_none() {
+            return Err(Error::PythonPreparation(format!(
+                "build-system.backend-path entry `{raw_path}` must stay within the source tree",
+            )));
+        }
+        backend_paths.push(candidate.to_file_string());
+    }
+
+    Ok(backend_paths)
+}
+
+fn backend_import_script(project_root: &Path, build_system: &BuildSystem) -> Result<String, Error> {
+    let backend = serde_json::to_string(&build_system.build_backend)
+        .map_err(|error| Error::SerializationError(error.to_string()))?;
+    let backend_paths = serde_json::to_string(&resolve_backend_paths(project_root, build_system)?)
+        .map_err(|error| Error::SerializationError(error.to_string()))?;
+
+    Ok(format!(r#"
+import importlib
+import sys
+
+if sys.path and sys.path[0] == "":
+    sys.path.pop(0)
+sys.path[:0] = {backend_paths}
+
+module_name, separator, object_path = {backend}.partition(":")
+backend = importlib.import_module(module_name)
+if separator:
+    for component in object_path.split("."):
+        backend = getattr(backend, component)
+"#))
+}
+
+fn hook_selection_script(requested_hook: &str) -> Result<String, Error> {
+    let requested_hook = serde_json::to_string(requested_hook)
+        .map_err(|error| Error::SerializationError(error.to_string()))?;
+
+    Ok(format!(r#"
+requested_hook = {requested_hook}
+selected_hook = requested_hook
+hook = getattr(backend, selected_hook, None)
+if hook is None and requested_hook == "build_editable":
+    selected_hook = "build_wheel"
+    hook = getattr(backend, selected_hook, None)
+if hook is None:
+    raise RuntimeError(f"PEP 517 backend has no {{requested_hook}} hook")
+"#))
+}
+
+fn run_backend_script(
+    build_python: &Path,
+    build_environment: &Path,
+    project_root: &Path,
+    script: &str,
+    build_index_url: &str,
+    subject: &str,
+) -> Result<(), Error> {
+    let mut command = Command::new(build_python.to_path_buf());
+    command.args(["-c", script]);
+    configure_build_command(
+        &mut command,
+        build_python,
+        build_environment,
+        build_index_url,
+    )?;
+    command.current_dir(project_root.to_path_buf());
+    check_command_output(command.output()?, subject, "PEP 517 backend failed")
+}
+
+fn get_dynamic_build_requirements(
+    build_python: &Path,
+    build_environment: &Path,
+    project_root: &Path,
+    work_root: &Path,
+    build_system: &BuildSystem,
+    requested_hook: &str,
+    build_index_url: &str,
+    subject: &str,
+) -> Result<Vec<String>, Error> {
+    let result_path = work_root.with_join_str("dynamic-build-requirements.json");
+    let result_path_literal = serde_json::to_string(&result_path.to_file_string())
+        .map_err(|error| Error::SerializationError(error.to_string()))?;
+    let script = format!(r#"
+{}
+{}
+import json
+
+requirements_hook = getattr(backend, f"get_requires_for_{{selected_hook}}", None)
+requirements = requirements_hook({{}}) if requirements_hook is not None else []
+with open({result_path_literal}, "w", encoding="utf-8") as stream:
+    json.dump(requirements, stream)
+"#,
+        backend_import_script(project_root, build_system)?,
+        hook_selection_script(requested_hook)?,
+    );
+
+    run_backend_script(
+        build_python,
+        build_environment,
+        project_root,
+        &script,
+        build_index_url,
+        subject,
+    )?;
+
+    serde_json::from_str(&result_path.fs_read_text()?).map_err(|_| {
+        invalid_sdist(
+            subject,
+            format!("PEP 517 get_requires_for_{requested_hook} must return an array of strings"),
+        )
+    })
+}
+
+fn run_build_hook(
+    build_python: &Path,
+    build_environment: &Path,
+    project_root: &Path,
+    output_root: &Path,
+    work_root: &Path,
+    build_system: &BuildSystem,
+    requested_hook: &str,
+    build_index_url: &str,
+    subject: &str,
+) -> Result<String, Error> {
+    let output_root_literal = serde_json::to_string(&output_root.to_file_string())
+        .map_err(|error| Error::SerializationError(error.to_string()))?;
+    let result_path = work_root.with_join_str("wheel-name.json");
+    let result_path_literal = serde_json::to_string(&result_path.to_file_string())
+        .map_err(|error| Error::SerializationError(error.to_string()))?;
+    let script = format!(r#"
+{}
+{}
+import json
+
+wheel_name = hook({output_root_literal}, {{}}, None)
+with open({result_path_literal}, "w", encoding="utf-8") as stream:
+    json.dump(wheel_name, stream)
+"#,
+        backend_import_script(project_root, build_system)?,
+        hook_selection_script(requested_hook)?,
+    );
+
+    run_backend_script(
+        build_python,
+        build_environment,
+        project_root,
+        &script,
+        build_index_url,
+        subject,
+    )?;
+
+    let wheel_name: String = serde_json::from_str(&result_path.fs_read_text()?)
+        .map_err(|_| invalid_sdist(subject, "PEP 517 build hook must return a wheel filename"))?;
+    if wheel_name.is_empty()
+        || !wheel_name.ends_with(".whl")
+        || wheel_name.contains('/')
+        || wheel_name.contains('\\')
+    {
+        return Err(invalid_sdist(subject, "PEP 517 backend returned an invalid wheel filename"));
+    }
+    if !output_root.with_join_str(&wheel_name).fs_is_file() {
+        return Err(invalid_sdist(
+            subject,
+            format!("PEP 517 backend did not create {wheel_name}"),
+        ));
+    }
+
+    Ok(wheel_name)
+}
+
+fn run_pep517_build(
+    project_root: &Path,
+    output_root: &Path,
+    work_root: &Path,
+    build_system: &BuildSystem,
+    requested_hook: &str,
+    preferred_python: Option<&Path>,
+    target: Option<&PythonTargetEnv>,
+    build_index_url: &str,
+    subject: &str,
+) -> Result<String, Error> {
+    let python = select_python(preferred_python, target)?;
+    let (build_environment, build_python) = create_build_environment(
+        &python,
+        work_root,
+        build_index_url,
+        subject,
+    )?;
+    install_build_requirements(
+        &build_python,
+        &build_environment,
+        &build_system.requires,
+        build_index_url,
+        subject,
+    )?;
+    let dynamic_requirements = get_dynamic_build_requirements(
+        &build_python,
+        &build_environment,
+        project_root,
+        work_root,
+        build_system,
+        requested_hook,
+        build_index_url,
+        subject,
+    )?;
+    install_build_requirements(
+        &build_python,
+        &build_environment,
+        &dynamic_requirements,
+        build_index_url,
+        subject,
+    )?;
+    run_build_hook(
+        &build_python,
+        &build_environment,
+        project_root,
+        output_root,
+        work_root,
+        build_system,
+        requested_hook,
+        build_index_url,
+        subject,
+    )
 }
 
 fn metadata_field<'a>(metadata: &'a str, field: &str) -> Option<&'a str> {
@@ -457,17 +672,18 @@ pub async fn prepare_sdist(
     expected_version: &PypiVersion,
     target: Option<&PythonTargetEnv>,
     managed_python: Option<&PackageData>,
+    build_index_url: &str,
 ) -> Result<Vec<u8>, Error> {
     let work_root = Path::temp_dir_pattern("zpm-python-sdist-<>")?;
     let extraction_root = work_root.with_join_str("source");
     let output_root = work_root.with_join_str("wheel");
-    let runner = work_root.with_join_str("pep517_runner.py");
 
     let result = async {
         extraction_root.fs_create_dir_all()?;
         output_root.fs_create_dir_all()?;
         unpack_sdist(source, filename, &extraction_root)?;
-        runner.fs_write_text(PEP517_RUNNER)?;
+        let project_root = find_project_root(&extraction_root)?;
+        let build_system = read_build_system(&project_root)?;
 
         let preferred_python = if let Some(managed_python) = managed_python {
             let python_root = work_root.with_join_str("python");
@@ -480,25 +696,28 @@ pub async fn prepare_sdist(
             None
         };
 
-        let runner_for_task = runner.clone();
-        let extraction_for_task = extraction_root.clone();
+        let project_for_task = project_root.clone();
         let output_for_task = output_root.clone();
         let work_for_task = work_root.clone();
+        let build_system_for_task = build_system;
         let python_for_task = preferred_python.clone();
         let target_for_task = target.cloned();
-        let output = tokio::task::spawn_blocking(move || {
-            run_pep517_runner(
-                &runner_for_task,
-                &extraction_for_task,
+        let build_index_for_task = build_index_url.to_string();
+        let subject_for_task = filename.to_string();
+        let wheel_name = tokio::task::spawn_blocking(move || {
+            run_pep517_build(
+                &project_for_task,
                 &output_for_task,
                 &work_for_task,
+                &build_system_for_task,
                 "build_wheel",
                 python_for_task.as_ref(),
                 target_for_task.as_ref(),
+                &build_index_for_task,
+                &subject_for_task,
             )
         }).await??;
 
-        let wheel_name = wheel_name_from_output(&output, filename)?;
         let wheel = output_root.with_join_str(&wheel_name).fs_read()?;
         validate_wheel(&wheel, &wheel_name, expected_ident, expected_version, target, filename)?;
         Ok(wheel)
@@ -516,44 +735,49 @@ pub async fn prepare_project(
     project_root: &Path,
     python: Option<&Path>,
     target: Option<&PythonTargetEnv>,
+    build_index_url: &str,
 ) -> Result<Vec<u8>, Error> {
     let work_root = Path::temp_dir_pattern("zpm-python-project-<>")?;
     let output_root = work_root.with_join_str("wheel");
-    let runner = work_root.with_join_str("pep517_runner.py");
 
     let result = async {
         output_root.fs_create_dir_all()?;
-        runner.fs_write_text(PEP517_RUNNER)?;
+        let project_root = find_project_root(project_root)?;
+        let build_system = read_build_system(&project_root)?;
+        let subject = project_root.to_file_string();
 
-        let runner_for_task = runner.clone();
         let project_for_task = project_root.clone();
         let output_for_task = output_root.clone();
         let work_for_task = work_root.clone();
+        let build_system_for_task = build_system;
         let python_for_task = python.cloned();
         let target_for_task = target.cloned();
-        let output = tokio::task::spawn_blocking(move || {
-            run_pep517_runner(
-                &runner_for_task,
+        let build_index_for_task = build_index_url.to_string();
+        let subject_for_task = subject.clone();
+        let wheel_name = tokio::task::spawn_blocking(move || {
+            run_pep517_build(
                 &project_for_task,
                 &output_for_task,
                 &work_for_task,
+                &build_system_for_task,
                 "build_editable",
                 python_for_task.as_ref(),
                 target_for_task.as_ref(),
+                &build_index_for_task,
+                &subject_for_task,
             )
         }).await??;
 
-        let wheel_name = wheel_name_from_output(&output, &project_root.to_file_string())?;
         let wheel = output_root.with_join_str(&wheel_name).fs_read()?;
 
         // Local projects don't need to match the JavaScript workspace name,
         // but the backend must still have emitted a valid, target-compatible
         // wheel with Python distribution metadata.
         let entries = zpm_formats::zip::entries_from_zip(&wheel)
-            .map_err(|error| invalid_sdist(&project_root.to_file_string(), format!("backend produced an invalid wheel: {error}")))?;
+            .map_err(|error| invalid_sdist(&subject, format!("backend produced an invalid wheel: {error}")))?;
         if !entries.iter().any(|entry| entry.name.as_str().ends_with(".dist-info/METADATA")) {
             return Err(invalid_sdist(
-                &project_root.to_file_string(),
+                &subject,
                 "backend produced a wheel without .dist-info/METADATA",
             ));
         }
@@ -569,7 +793,7 @@ pub async fn prepare_project(
             };
             if crate::pypi::select_best_wheel(&[distribution], Some(target)).is_none() {
                 return Err(invalid_sdist(
-                    &project_root.to_file_string(),
+                    &subject,
                     format!("backend produced wheel `{wheel_name}`, which is incompatible with the selected Python target"),
                 ));
             }
@@ -591,14 +815,16 @@ pub async fn prepare_source_tree(
     project_root: &Path,
     target: Option<&PythonTargetEnv>,
     managed_python: Option<&PackageData>,
+    build_index_url: &str,
 ) -> Result<Vec<u8>, Error> {
     let work_root = Path::temp_dir_pattern("zpm-python-source-<>")?;
     let output_root = work_root.with_join_str("wheel");
-    let runner = work_root.with_join_str("pep517_runner.py");
 
     let result = async {
         output_root.fs_create_dir_all()?;
-        runner.fs_write_text(PEP517_RUNNER)?;
+        let project_root = find_project_root(project_root)?;
+        let build_system = read_build_system(&project_root)?;
+        let subject = project_root.to_file_string();
 
         let preferred_python = if let Some(managed_python) = managed_python {
             let python_root = work_root.with_join_str("python");
@@ -611,25 +837,28 @@ pub async fn prepare_source_tree(
             None
         };
 
-        let runner_for_task = runner.clone();
         let project_for_task = project_root.clone();
         let output_for_task = output_root.clone();
         let work_for_task = work_root.clone();
+        let build_system_for_task = build_system;
         let python_for_task = preferred_python.clone();
         let target_for_task = target.cloned();
-        let output = tokio::task::spawn_blocking(move || {
-            run_pep517_runner(
-                &runner_for_task,
+        let build_index_for_task = build_index_url.to_string();
+        let subject_for_task = subject.clone();
+        let wheel_name = tokio::task::spawn_blocking(move || {
+            run_pep517_build(
                 &project_for_task,
                 &output_for_task,
                 &work_for_task,
+                &build_system_for_task,
                 "build_wheel",
                 python_for_task.as_ref(),
                 target_for_task.as_ref(),
+                &build_index_for_task,
+                &subject_for_task,
             )
         }).await??;
 
-        let wheel_name = wheel_name_from_output(&output, &project_root.to_file_string())?;
         let wheel = output_root.with_join_str(&wheel_name).fs_read()?;
         let entries = zpm_formats::zip::entries_from_zip(&wheel)
             .map_err(|error| Error::PythonPreparation(format!("source project produced an invalid wheel: {error}")))?;
@@ -677,5 +906,57 @@ mod tests {
 
         let error = validate_archive_entries("bad.tar.gz", &entries).unwrap_err();
         assert!(error.to_string().contains("escapes the source directory"));
+    }
+
+    #[test]
+    fn test_parse_build_system_reads_pep517_configuration() {
+        let path = Path::from_file_string("pyproject.toml").unwrap();
+        let build_system = parse_build_system(r#"
+            [build-system]
+            requires = ["hatchling>=1.0", "packaging"]
+            build-backend = "hatchling.build"
+            backend-path = ["backend"]
+        "#, &path).unwrap();
+
+        assert_eq!(build_system, BuildSystem {
+            requires: vec!["hatchling>=1.0".to_string(), "packaging".to_string()],
+            build_backend: "hatchling.build".to_string(),
+            backend_path: vec!["backend".to_string()],
+        });
+    }
+
+    #[test]
+    fn test_parse_build_system_uses_legacy_defaults_without_table() {
+        let path = Path::from_file_string("pyproject.toml").unwrap();
+        let build_system = parse_build_system("[project]\nname = \"demo\"", &path).unwrap();
+
+        assert_eq!(build_system, legacy_build_system());
+    }
+
+    #[test]
+    fn test_parse_build_system_rejects_invalid_requirements() {
+        let path = Path::from_file_string("pyproject.toml").unwrap();
+        let error = parse_build_system(r#"
+            [build-system]
+            requires = "setuptools"
+        "#, &path).unwrap_err();
+
+        assert!(error.to_string().contains("requires"));
+        assert!(error.to_string().contains("sequence"));
+    }
+
+    #[test]
+    fn test_resolve_backend_paths_rejects_paths_outside_source_tree() {
+        let project_root = Path::temp_dir_pattern("zpm-python-backend-path-<>").unwrap();
+        let build_system = BuildSystem {
+            requires: Vec::new(),
+            build_backend: "backend".to_string(),
+            backend_path: vec!["../backend".to_string()],
+        };
+
+        let error = resolve_backend_paths(&project_root, &build_system).unwrap_err();
+        let _ = project_root.fs_rm();
+
+        assert!(error.to_string().contains("must stay within the source tree"));
     }
 }

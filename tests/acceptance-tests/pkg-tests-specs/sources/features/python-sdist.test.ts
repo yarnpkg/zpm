@@ -227,6 +227,86 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should skip building sdists for inactive Python target forks`,
+      makeTemporaryMonorepoEnv(
+        {workspaces: [`packages/*`]},
+        {
+          [`packages/workspace-a`]: {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            dependencies: {
+              [`pypi-sdist`]: `pypi:1.0.0`,
+            },
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+          const pythonVersion = currentPythonVersion();
+          const inactiveOs = process.platform === `darwin` ? `linux` : `darwin`;
+          await configurePythonIsland(path, registryUrl, pythonVersion, {
+            supportedTargets: [{
+              os: process.platform,
+              cpu: process.arch,
+              python: {version: pythonVersion},
+            }, {
+              os: inactiveOs,
+              cpu: process.arch,
+              python: {version: pythonVersion},
+            }],
+          });
+
+          await run(`install`);
+
+          const {stdout} = await run(
+            `python`,
+            `-c`,
+            `import pypi_sdist; print(pypi_sdist.VALUE)`,
+            {cwd: `${path}/packages/workspace-a` as PortablePath},
+          );
+
+          expect(stdout.trim()).toBe(`built-from-sdist`);
+        },
+      ),
+    );
+
+    test(
+      `it should use the configured authenticated registry for build requirements`,
+      makeTemporaryMonorepoEnv(
+        {workspaces: [`packages/*`]},
+        {
+          [`packages/workspace-a`]: {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            dependencies: {
+              [`pypi-private-build-sdist`]: `pypi:1.0.0`,
+            },
+          },
+        },
+        async ({path, run}) => {
+          const registryUrl = await tests.startPackageServer();
+          await configurePythonIsland(path, registryUrl, currentPythonVersion(), {
+            sourceRules: [{
+              ecosystemFilter: `pypi`,
+              registryFilter: registryUrl,
+              pypiAuthIdent: tests.validLogins.fooUser.npmAuthIdent.decoded,
+            }],
+          });
+
+          await run(`install`);
+
+          const {stdout} = await run(
+            `python`,
+            `-c`,
+            `import pypi_private_build_sdist; print(pypi_private_build_sdist.VALUE)`,
+            {cwd: `${path}/packages/workspace-a` as PortablePath},
+          );
+
+          expect(stdout.trim()).toBe(`private-build-requirement`);
+        },
+      ),
+    );
+
+    test(
       `it should replace transitive Python constraints with root resolutions`,
       makeTemporaryMonorepoEnv(
         {

@@ -100,7 +100,7 @@ fn target_field_matches(target: &Option<String>, current: &Option<String>) -> bo
     target.is_none() || target == current
 }
 
-fn target_matches_current_system(target: &PythonTargetEnv) -> Result<bool, Error> {
+pub(crate) fn target_matches_current_system(target: &PythonTargetEnv) -> Result<bool, Error> {
     let current_target
         = PythonTargetEnv::from_system(&System::from_current(), PythonTargetInput {
             version: Some(&target.python_version),
@@ -525,6 +525,7 @@ async fn install_workspace_python_project(
     venv_path: &Path,
     site_packages_path: &Path,
     target: Option<&PythonTargetEnv>,
+    build_index_url: &str,
     installed_entry_points: &mut BTreeSet<String>,
 ) -> Result<(), Error> {
     if !is_python_project(workspace_path) {
@@ -532,7 +533,12 @@ async fn install_workspace_python_project(
     }
 
     let python = find_venv_python_path(venv_path, target);
-    let wheel = prepare::python::prepare_project(workspace_path, python.as_ref(), target).await?;
+    let wheel = prepare::python::prepare_project(
+        workspace_path,
+        python.as_ref(),
+        target,
+        build_index_url,
+    ).await?;
     let binaries
         = content_flags::extract_pypi_binaries(&wheel)?;
     let entries = zpm_formats::zip::entries_from_zip(&wheel)?;
@@ -727,20 +733,26 @@ pub async fn link_island_venv(
 
         for dependency_locator in workspace_locators {
             let dependency_workspace = project.workspace_by_locator(&dependency_locator)?;
+            let build_registry
+                = crate::pypi::get_build_registry(&project.config, &dependency_workspace.name)?;
             install_workspace_python_project(
                 &dependency_workspace.path,
                 &venv_path,
                 &site_packages_path,
                 active_fork.target.as_ref(),
+                &build_registry,
                 &mut installed_entry_points,
             ).await?;
         }
 
+        let build_registry
+            = crate::pypi::get_build_registry(&project.config, &workspace.name)?;
         install_workspace_python_project(
             &workspace_path,
             &venv_path,
             &site_packages_path,
             active_fork.target.as_ref(),
+            &build_registry,
             &mut installed_entry_points,
         ).await?;
 

@@ -7,7 +7,7 @@ use crate::{
     error::Error,
     install::{FetchResult, InstallContext},
     prepare,
-    pypi::{LocalWheelSource, PypiDistribution, encode_path_segment, get_artifact_authorization, get_authorization, get_registry, parse_local_wheel_url, parse_python_git_url, parse_simple_project, python_git_project_path, resolve_local_wheel_path, select_best_artifact},
+    pypi::{LocalWheelSource, PypiDistribution, encode_path_segment, get_artifact_authorization, get_authorization, get_build_registry, get_registry, parse_local_wheel_url, parse_python_git_url, parse_simple_project, python_git_project_path, resolve_local_wheel_path, select_best_artifact},
 };
 
 use super::PackageData;
@@ -61,6 +61,11 @@ pub async fn prepare_git_wheel(
         = python_git_cache_locator(ident, reference, environment);
     let managed_python
         = environment.and_then(|fork_id| context.python_build_runtimes.lock().unwrap().get(fork_id).cloned());
+    let project
+        = context.project
+            .expect("The project is required for preparing Python Git packages");
+    let build_registry
+        = get_build_registry(&project.config, ident)?;
     let reference
         = reference.clone();
     let target
@@ -78,7 +83,12 @@ pub async fn prepare_git_wheel(
                 },
             };
         let result
-            = Box::pin(prepare::python::prepare_source_tree(&project_path, target.as_ref(), managed_python.as_ref())).await;
+            = Box::pin(prepare::python::prepare_source_tree(
+                &project_path,
+                target.as_ref(),
+                managed_python.as_ref(),
+                &build_registry,
+            )).await;
         let _ = repository_path.fs_rm();
         result
     }).await
@@ -341,6 +351,8 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         = get_registry(&project.config, &params.ident);
     let authorization
         = get_artifact_authorization(&project.config, &registry, &params.ident, &artifact.url);
+    let build_registry
+        = get_build_registry(&project.config, &params.ident)?;
     let artifact_cache_locator
         = cache_locator(locator, artifact.kind);
     let local_wheel_path
@@ -404,6 +416,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
                     &expected_version,
                     target.as_ref(),
                     managed_python.as_ref(),
+                    &build_registry,
                 ).await
             }).await?.into_info()
         },
