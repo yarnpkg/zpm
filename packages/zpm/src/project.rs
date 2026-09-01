@@ -885,103 +885,19 @@ impl Project {
             return Ok(false);
         }
 
-        let mut graph
-            = BTreeMap::<Locator, BTreeSet<Locator>>::new();
+        let Some(walk) = walk_lockfile_workspaces(
+            &lockfile,
+            &self.workspaces,
+            self.config.settings.enable_transparent_workspaces.value,
+        ) else {
+            return Ok(false);
+        };
 
-        let mut used_resolutions
-            = BTreeMap::<Descriptor, Locator>::new();
-
-        let mut used_entries
-            = BTreeSet::<Locator>::new();
-
-        let mut process_queue
-            = self.workspaces.iter()
-                .map(|workspace| workspace.locator())
-                .collect::<Vec<_>>();
-
-        let mut processed_queue
-            = BTreeSet::new();
-
-        while let Some(locator) = process_queue.pop() {
-            if !processed_queue.insert(locator.clone()) {
-                continue;
-            }
-
-            let mut child_locators
-                = BTreeSet::new();
-
-            let dependency_descriptors
-                = if let Some(workspace) = self.try_workspace_by_locator(&locator)? {
-                    workspace.manifest.remote.dependencies.values()
-                        .chain(workspace.manifest.remote.optional_dependencies.values())
-                        .chain(workspace.manifest.dev_dependencies.values())
-                        .cloned()
-                        .collect::<Vec<_>>()
-                } else {
-                    let Some(entry) = lockfile.entries.get(&locator) else {
-                        return Ok(false);
-                    };
-
-                    if entry.resolution.locator != locator {
-                        return Ok(false);
-                    }
-
-                    used_entries.insert(locator.clone());
-
-                    entry.resolution.dependencies.values()
-                        .chain(entry.resolution.variants.iter())
-                        .cloned()
-                        .collect::<Vec<_>>()
-                };
-
-            for mut descriptor in dependency_descriptors {
-                if let Some(workspace) = self.try_workspace_by_descriptor(&descriptor)? {
-                    let dependency_locator
-                        = workspace.locator();
-
-                    child_locators.insert(dependency_locator.clone());
-                    process_queue.push(dependency_locator);
-                    continue;
-                }
-
-                let range_details
-                    = descriptor.range.details();
-
-                if range_details.transient_resolution
-                    || range_details.fetch_before_resolve
-                    || matches!(descriptor.range, Range::Catalog(_))
-                {
-                    return Ok(false);
-                }
-
-                normalize_lockfile_descriptor(&mut descriptor);
-
-                let Some(dependency_locator) = lockfile.resolutions.get(&descriptor) else {
-                    return Ok(false);
-                };
-
-                let Some(entry) = lockfile.entries.get(dependency_locator) else {
-                    return Ok(false);
-                };
-
-                if entry.resolution.locator != *dependency_locator {
-                    return Ok(false);
-                }
-
-                used_resolutions.insert(descriptor, dependency_locator.clone());
-                used_entries.insert(dependency_locator.clone());
-                child_locators.insert(dependency_locator.clone());
-                process_queue.push(dependency_locator.clone());
-            }
-
-            graph.insert(locator, child_locators);
-        }
-
-        if lockfile.resolutions != used_resolutions {
+        if lockfile.resolutions != walk.used_resolutions {
             return Ok(false);
         }
 
-        if lockfile.entries.keys().cloned().collect::<BTreeSet<_>>() != used_entries {
+        if lockfile.entries.keys().cloned().collect::<BTreeSet<_>>() != walk.used_entries {
             return Ok(false);
         }
 
@@ -990,16 +906,9 @@ impl Project {
         // stored map must not fail the freshness check (the
         // resolutions/entries equality checks above already cover
         // the same ground).
-        if self.config.settings.enable_workspace_hashes.value {
-            let workspace_locators
-                = self.workspaces.iter()
-                    .map(|workspace| (workspace.name.clone(), workspace.locator()))
-                    .collect::<Vec<_>>();
-
-            let workspace_hashes = compute_workspace_hashes(&graph, &workspace_locators);
-            if lockfile.workspaces != workspace_hashes {
-                return Ok(false);
-            }
+        if self.config.settings.enable_workspace_hashes.value
+            && lockfile.workspaces != walk.workspace_hashes {
+            return Ok(false);
         }
 
         Ok(true)
@@ -1014,11 +923,11 @@ impl Project {
         &self,
         lockfile: &Lockfile,
     ) -> Option<BTreeMap<Ident, Hash64>> {
-        compute_workspace_hashes_from_lockfile(
+        walk_lockfile_workspaces(
             lockfile,
             &self.workspaces,
             self.config.settings.enable_transparent_workspaces.value,
-        )
+        ).map(|walk| walk.workspace_hashes)
     }
 
     pub(crate) fn install_config_hash(&self) -> Hash64 {
@@ -2023,16 +1932,32 @@ fn normalize_lockfile_descriptor(descriptor: &mut Descriptor) {
     }
 }
 
+/// The result of walking a lockfile's workspace dependency graph.
+///
+/// `used_resolutions` and `used_entries` record everything the walk
+/// actually consumed, so freshness checks can verify the lockfile
+/// has nothing left over; `workspace_hashes` are the per-workspace
+/// dependency tree hashes computed from the walked graph (the same
+/// values installs store in the lockfile).
+pub(crate) struct LockfileWorkspaceWalk {
+    pub used_resolutions: BTreeMap<Descriptor, Locator>,
+    pub used_entries: BTreeSet<Locator>,
+    pub workspace_hashes: BTreeMap<Ident, Hash64>,
+}
+
 /// Walks the dependency graph rooted at the given workspaces, resolving
 /// descriptors through the lockfile, and computes the per-workspace
-/// dependency tree hashes from it. Returns `None` when the lockfile and
-/// manifests can't produce a consistent graph (same conditions under
-/// which `is_lockfile_fresh` considers the install not fresh).
-pub(crate) fn compute_workspace_hashes_from_lockfile(
+/// dependency tree hashes from it. The manifests come from the given
+/// workspaces - the current project for freshness checks and
+/// `--tree-hash`, workspaces rebuilt from a git ref for cross-history
+/// comparisons. Returns `None` when the lockfile and manifests can't
+/// produce a consistent graph (the same conditions under which
+/// `is_lockfile_fresh` considers the install not fresh).
+pub(crate) fn walk_lockfile_workspaces(
     lockfile: &Lockfile,
     workspaces: &[Workspace],
     enable_transparent_workspaces: bool,
-) -> Option<BTreeMap<Ident, Hash64>> {
+) -> Option<LockfileWorkspaceWalk> {
     // Index maps rather than linear scans: this walk runs over every
     // descriptor of every workspace, which would otherwise be
     // quadratic on large monorepos.
@@ -2093,6 +2018,12 @@ pub(crate) fn compute_workspace_hashes_from_lockfile(
     let mut graph
         = BTreeMap::<Locator, BTreeSet<Locator>>::new();
 
+    let mut used_resolutions
+        = BTreeMap::<Descriptor, Locator>::new();
+
+    let mut used_entries
+        = BTreeSet::<Locator>::new();
+
     let mut process_queue: Vec<Locator>
         = workspaces.iter()
             .map(|workspace| workspace.locator())
@@ -2122,6 +2053,8 @@ pub(crate) fn compute_workspace_hashes_from_lockfile(
                 if entry.resolution.locator != locator {
                     return None;
                 }
+
+                used_entries.insert(locator.clone());
 
                 entry.resolution.dependencies.values()
                     .chain(entry.resolution.variants.iter())
@@ -2163,6 +2096,8 @@ pub(crate) fn compute_workspace_hashes_from_lockfile(
                 return None;
             }
 
+            used_resolutions.insert(descriptor, dependency_locator.clone());
+            used_entries.insert(dependency_locator.clone());
             child_locators.insert(dependency_locator.clone());
             process_queue.push(dependency_locator.clone());
         }
@@ -2175,5 +2110,9 @@ pub(crate) fn compute_workspace_hashes_from_lockfile(
             .map(|workspace| (workspace.name.clone(), workspace.locator()))
             .collect();
 
-    Some(compute_workspace_hashes(&graph, &workspace_locators))
+    Some(LockfileWorkspaceWalk {
+        used_resolutions,
+        used_entries,
+        workspace_hashes: compute_workspace_hashes(&graph, &workspace_locators),
+    })
 }
