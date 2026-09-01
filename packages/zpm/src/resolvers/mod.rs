@@ -254,6 +254,12 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
             false => pypi::resolve_tag_descriptor(&context, &descriptor, params).await,
         },
 
+        Range::PypiFile(params)
+            => pypi::resolve_file_descriptor(&context, &descriptor, params),
+
+        Range::PypiGit(params)
+            => Box::pin(pypi::resolve_git_descriptor(&context, &descriptor, params)).await,
+
         Range::JsrSemver(params) => match params.ident.is_some() {
             true => jsr::resolve_aliased(&descriptor, dependencies),
             false => jsr::resolve_semver_descriptor(&context, &descriptor, params).await,
@@ -268,6 +274,7 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
             => workspace::resolve_path_descriptor(&context, &descriptor, params),
 
         Range::Catalog(_) |
+        Range::Env(_) |
         Range::MissingPeerDependency |
         Range::WorkspaceMagic(_) |
         Range::WorkspaceSemver(_) |
@@ -324,6 +331,7 @@ pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, depe
             => pypi::resolve_locator(&context, &locator, params).await,
 
         Reference::Virtual(_)
+        | Reference::Env(_)
             => Err(Error::Unsupported)?,
 
         Reference::WorkspaceIdent(params)
@@ -401,6 +409,10 @@ pub async fn resolve_versions(context: &InstallContext<'_>, registry: &Registry)
                 ident: workspace.name.clone(),
             }.into());
             Ok(vec![locator])
+        }
+
+        Registry::Pypi(ident) => {
+            pypi::resolve_versions(context, ident).await
         }
 
         Registry::None => Ok(vec![]),
