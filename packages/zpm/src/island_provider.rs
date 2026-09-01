@@ -4,11 +4,11 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use pubgrub::{DependencyProvider, Dependencies, PackageResolutionStatistics, VersionSet};
-use zpm_primitives::{Descriptor, Ident, Locator, PypiRegistryReference, PypiSpecifierRange, PypiTagRange, Range, Reference, Registry, RegistryReference};
+use zpm_primitives::{Descriptor, Ident, Locator, PypiRegistryReference, PypiSpecifierRange, PypiTagRange, Range, Reference, Registry, RegistryReference, PythonFork};
 
 use crate::error::Error;
 use crate::install::InstallContext;
-use crate::island_types::{ExactSet, IslandPackage, IslandVersion, IslandVersionSet};
+use crate::island_types::{ExactSet, IslandPackage, IslandPackageKey, IslandRegistry, IslandVersion, IslandVersionSet};
 use crate::resolvers;
 use crate::resolvers::Resolution;
 
@@ -58,7 +58,7 @@ pub enum IslandPriority {
 /// The pubgrub DependencyProvider for island resolution.
 pub struct IslandDependencyProvider<'a> {
     pub island_id: String,
-    pub locked_versions: BTreeMap<Ident, Locator>,
+    pub locked_versions: BTreeMap<IslandPackageKey, Locator>,
     pub enforced_resolutions: BTreeMap<Descriptor, Option<Locator>>,
     pub handle: tokio::runtime::Handle,
     /// The root dependencies: one entry per workspace as an exact singleton.
@@ -66,10 +66,16 @@ pub struct IslandDependencyProvider<'a> {
     /// Install context for resolving versions and dependencies from the registry.
     pub ctx: &'a InstallContext<'a>,
     /// Each workspace's manifest dependencies (regular + optionally dev).
-    pub workspace_deps: BTreeMap<Ident, BTreeMap<Ident, Descriptor>>,
+    pub workspace_deps: BTreeMap<IslandPackageKey, BTreeMap<Ident, Descriptor>>,
     /// Cache of full resolutions fetched during dependency resolution.
     /// Keyed by locator so convert_solution can retrieve them.
     pub resolution_cache: RefCell<BTreeMap<Locator, Resolution>>,
+    /// Optional Python target fork. When present, all descriptors and locators
+    /// produced by this provider are qualified with the fork id.
+    pub fork: Option<PythonFork>,
+    /// Whether marker-bearing PyPI metadata must fail instead of using the
+    /// legacy non-island behavior that ignores inactive markers.
+    pub requires_python_target: bool,
     /// Cache of extra-specific dependency resolutions. These are solver
     /// proxies only: their dependencies are merged back into the base package
     /// resolution after PubGrub completes.
@@ -77,18 +83,20 @@ pub struct IslandDependencyProvider<'a> {
     /// Monotonic counter for discovery order (breadth-first priority).
     discovery_counter: Cell<usize>,
     /// Maps package ident → discovery index (first time seen in prioritize).
-    discovery_order: RefCell<BTreeMap<Ident, usize>>,
+    discovery_order: RefCell<BTreeMap<IslandPackageKey, usize>>,
 }
 
 impl<'a> IslandDependencyProvider<'a> {
     pub fn new(
         island_id: String,
-        locked_versions: BTreeMap<Ident, Locator>,
+        locked_versions: BTreeMap<IslandPackageKey, Locator>,
         enforced_resolutions: BTreeMap<Descriptor, Option<Locator>>,
         handle: tokio::runtime::Handle,
         root_deps: BTreeMap<IslandPackage, IslandVersionSet>,
         ctx: &'a InstallContext<'a>,
-        workspace_deps: BTreeMap<Ident, BTreeMap<Ident, Descriptor>>,
+        workspace_deps: BTreeMap<IslandPackageKey, BTreeMap<Ident, Descriptor>>,
+        fork: Option<PythonFork>,
+        requires_python_target: bool,
     ) -> Self {
         Self {
             island_id,
@@ -99,22 +107,223 @@ impl<'a> IslandDependencyProvider<'a> {
             ctx,
             workspace_deps,
             resolution_cache: RefCell::new(BTreeMap::new()),
+            fork,
+            requires_python_target,
             extra_resolution_cache: RefCell::new(BTreeMap::new()),
             discovery_counter: Cell::new(0),
             discovery_order: RefCell::new(BTreeMap::new()),
         }
     }
 
+    fn qualify_descriptor(&self, descriptor: &Descriptor) -> Descriptor {
+        match &self.fork {
+            Some(fork) => descriptor.env_qualified_with_hash(fork.id.clone()),
+            None => descriptor.clone(),
+        }
+    }
+
+    fn qualify_locator(&self, locator: &Locator) -> Locator {
+        match &self.fork {
+            Some(fork) => locator.env_qualified_with_hash(fork.id.clone()),
+            None => locator.clone(),
+        }
+    }
+
+    fn qualify_resolution(&self, mut resolution: Resolution, locator: Locator) -> Resolution {
+        resolution.locator = locator;
+
+        if self.fork.is_some() {
+            resolution.dependencies = resolution.dependencies.into_iter()
+                .map(|(ident, descriptor)| (ident, self.qualify_descriptor(&descriptor)))
+                .collect();
+            resolution.variants = resolution.variants.into_iter()
+                .map(|descriptor| self.qualify_descriptor(&descriptor))
+                .collect();
+        }
+
+        resolution
+    }
+
     /// Fetch all available versions for a package from the registry,
     /// returning them as IslandVersions in descending order (newest first).
-    fn fetch_versions(&self, package: &Ident) -> Result<Vec<IslandVersion>, IslandResolutionError> {
-        let registry = Registry::Npm(package.clone());
+    fn fetch_versions(&self, package: &IslandPackageKey) -> Result<Vec<IslandVersion>, IslandResolutionError> {
+        if matches!(package.registry, IslandRegistry::Pypi) {
+            let target
+                = self.fork.as_ref()
+                    .and_then(|fork| fork.target.as_ref());
+            let versions = self.handle.block_on(
+                crate::resolvers::pypi::resolve_versions_for_target(self.ctx, &package.ident, target)
+            ).map_err(IslandResolutionError::from)?;
+
+            return Ok(versions.into_iter()
+                .rev()
+                .map(|locator| IslandVersion(self.qualify_locator(&locator)))
+                .collect());
+        }
+
+        let registry = match package.registry {
+            IslandRegistry::Npm => Registry::Npm(package.ident.clone()),
+            IslandRegistry::Workspace => Registry::Workspace(package.ident.clone()),
+            IslandRegistry::Other => Registry::None,
+            IslandRegistry::Pypi => unreachable!("PyPI versions are resolved with Python target filtering above"),
+        };
         let versions = self.handle.block_on(
             resolvers::resolve_versions(self.ctx, &registry)
         ).map_err(IslandResolutionError::from)?;
 
         // Reverse so newest versions come first (BTreeMap yields ascending order)
-        Ok(versions.into_iter().rev().map(IslandVersion).collect())
+        Ok(versions.into_iter()
+            .rev()
+            .map(|locator| IslandVersion(self.qualify_locator(&locator)))
+            .collect())
+    }
+
+    fn pypi_candidates_to_version_set(&self, descriptor: &Descriptor) -> Result<Option<IslandVersionSet>, IslandResolutionError> {
+        let physical_range
+            = descriptor.range.physical_range();
+
+        if let Range::PypiFile(params) = physical_range {
+            let physical_descriptor
+                = descriptor.physical_descriptor();
+            let result = match &self.fork {
+                Some(fork) => crate::resolvers::pypi::resolve_file_descriptor_for_fork(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                    fork,
+                ),
+                None if self.requires_python_target => crate::resolvers::pypi::resolve_file_descriptor_requiring_python_target(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                ),
+                None => crate::resolvers::pypi::resolve_file_descriptor(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                ),
+            }.map_err(IslandResolutionError::from)?;
+            let locator
+                = self.qualify_locator(&result.resolution.locator);
+            let resolution
+                = self.qualify_resolution(result.resolution, locator.clone());
+            self.resolution_cache.borrow_mut().insert(locator.clone(), resolution);
+
+            return Ok(Some(IslandVersionSet::exact_singleton(IslandVersion(locator))));
+        }
+
+        if let Range::PypiGit(params) = physical_range {
+            let physical_descriptor
+                = descriptor.physical_descriptor();
+            let result = match &self.fork {
+                Some(fork) => self.handle.block_on(crate::resolvers::pypi::resolve_git_descriptor_for_fork(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                    fork,
+                )),
+                None if self.requires_python_target => self.handle.block_on(crate::resolvers::pypi::resolve_git_descriptor_requiring_python_target(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                )),
+                None => self.handle.block_on(crate::resolvers::pypi::resolve_git_descriptor(
+                    self.ctx,
+                    &physical_descriptor,
+                    params,
+                )),
+            }.map_err(IslandResolutionError::from)?;
+            let locator
+                = self.qualify_locator(&result.resolution.locator);
+            let resolution
+                = self.qualify_resolution(result.resolution, locator.clone());
+            self.resolution_cache.borrow_mut().insert(locator.clone(), resolution);
+
+            return Ok(Some(IslandVersionSet::exact_singleton(IslandVersion(locator))));
+        }
+
+        let (package_ident, specifier, latest_only) = match physical_range {
+            Range::PypiSpecifier(params) => {
+                let package_ident
+                    = params.ident.as_ref()
+                        .unwrap_or(&descriptor.ident)
+                        .clone();
+                let package_ident
+                    = crate::resolvers::pypi::canonicalize_pypi_ident(&package_ident)
+                        .map_err(IslandResolutionError::from)?;
+
+                (package_ident, Some(params.specifier.clone()), false)
+            },
+
+            Range::PypiTag(params) if params.tag.as_str() == "latest" => {
+                let package_ident
+                    = params.ident.as_ref()
+                        .unwrap_or(&descriptor.ident)
+                        .clone();
+                let package_ident
+                    = crate::resolvers::pypi::canonicalize_pypi_ident(&package_ident)
+                        .map_err(IslandResolutionError::from)?;
+
+                (package_ident, None, true)
+            },
+
+            _ => return Ok(None),
+        };
+
+        let target
+            = self.fork.as_ref()
+                .and_then(|fork| fork.target.as_ref());
+        let versions
+            = self.handle.block_on(crate::resolvers::pypi::resolve_versions_for_target(self.ctx, &package_ident, target))
+                .map_err(IslandResolutionError::from)?;
+
+        let mut candidates
+            = Vec::new();
+
+        for locator in versions.into_iter().rev() {
+            let island_version
+                = IslandVersion(self.qualify_locator(&locator));
+
+            let include = match (&specifier, island_version.pypi_version()) {
+                (Some(specifier), Some(version)) => version.satisfies(specifier)
+                    .map_err(|err| IslandResolutionError {
+                        message: err.to_string(),
+                    })?,
+                (None, _) => true,
+                _ => false,
+            };
+
+            if include {
+                candidates.push(island_version);
+            }
+        }
+
+        let allows_prereleases = specifier.as_ref()
+            .map(|specifier| specifier.allows_prereleases())
+            .transpose()
+            .map_err(|err| IslandResolutionError {
+                message: err.to_string(),
+            })?
+            .unwrap_or(false);
+
+        if !allows_prereleases {
+            let stable_candidates = candidates.iter()
+                .filter_map(|candidate| candidate.pypi_version()
+                    .and_then(|version| version.is_stable().ok())
+                    .filter(|stable| *stable)
+                    .map(|_| candidate.clone()))
+                .collect::<Vec<_>>();
+
+            if !stable_candidates.is_empty() {
+                candidates = stable_candidates;
+            }
+        }
+
+        if latest_only {
+            candidates.truncate(1);
+        }
+
+        Ok(Some(IslandVersionSet::Exact(ExactSet::one_of(candidates))))
     }
 
     /// Convert a map of dependency descriptors into IslandVersionSets for pubgrub.
@@ -123,18 +332,31 @@ impl<'a> IslandDependencyProvider<'a> {
     /// on the spot via `resolve_descriptor` and injected as exact singletons.
     fn descriptors_to_deps(&self, descriptors: &BTreeMap<Ident, Descriptor>) -> Result<BTreeMap<IslandPackage, IslandVersionSet>, IslandResolutionError> {
         let mut deps = BTreeMap::new();
-        let mut non_semver: Vec<(Ident, Descriptor, Vec<String>)> = Vec::new();
+        let mut non_semver: Vec<(IslandPackageKey, Descriptor, Vec<String>)> = Vec::new();
 
-        for (ident, descriptor) in descriptors {
+        for (_, descriptor) in descriptors {
+            let descriptor
+                = crate::resolvers::pypi::canonicalize_pypi_descriptor(descriptor)
+                    .map(|(_, descriptor)| descriptor)
+                    .map_err(IslandResolutionError::from)?;
             let extras = pypi_extras(&descriptor.range);
-            let descriptor = descriptor_without_pypi_extras(descriptor);
+            let descriptor = descriptor_without_pypi_extras(&descriptor);
+            let descriptor
+                = self.qualify_descriptor(&descriptor);
+            let package
+                = IslandPackageKey::from_descriptor(&descriptor);
+
+            if let Some(vs) = self.pypi_candidates_to_version_set(&descriptor)? {
+                insert_dependency_packages(&mut deps, &package, extras, vs);
+                continue;
+            }
 
             match crate::island::range_to_version_set(&descriptor.range) {
                 Some(vs) => {
-                    insert_dependency_packages(&mut deps, ident, extras, vs);
+                    insert_dependency_packages(&mut deps, &package, extras, vs);
                 }
                 None => {
-                    non_semver.push((ident.clone(), descriptor, extras));
+                    non_semver.push((package, descriptor, extras));
                 }
             }
         }
@@ -142,22 +364,24 @@ impl<'a> IslandDependencyProvider<'a> {
         if !non_semver.is_empty() {
             // Resolve all non-semver deps in parallel.
             let futures = non_semver.iter().map(|(_, descriptor, _)| {
-                crate::resolvers::resolve_descriptor(self.ctx.clone(), descriptor.clone(), vec![])
+                crate::resolvers::resolve_descriptor(self.ctx.clone(), descriptor.physical_descriptor(), vec![])
             });
 
             let results = self.handle.block_on(
                 futures::future::try_join_all(futures)
             ).map_err(IslandResolutionError::from)?;
 
-            for ((ident, _, extras), result) in non_semver.into_iter().zip(results) {
-                let locator = result.resolution.locator.clone();
+            let mut cache = self.resolution_cache.borrow_mut();
+            for ((package, _, extras), result) in non_semver.into_iter().zip(results) {
+                let locator
+                    = self.qualify_locator(&result.resolution.locator);
+                let resolution
+                    = self.qualify_resolution(result.resolution, locator.clone());
 
-                self.resolution_cache.borrow_mut()
-                    .insert(locator.clone(), result.resolution);
-
+                cache.insert(locator.clone(), resolution);
                 insert_dependency_packages(
                     &mut deps,
-                    &ident,
+                    &package,
                     extras,
                     IslandVersionSet::exact_singleton(IslandVersion(locator)),
                 );
@@ -169,7 +393,14 @@ impl<'a> IslandDependencyProvider<'a> {
 
     /// Convert a Resolution's dependencies into IslandVersionSets for pubgrub.
     fn resolution_to_deps(&self, resolution: &Resolution) -> Result<BTreeMap<IslandPackage, IslandVersionSet>, IslandResolutionError> {
-        self.descriptors_to_deps(&resolution.dependencies)
+        let mut descriptors
+            = resolution.dependencies.clone();
+
+        for descriptor in &resolution.variants {
+            descriptors.insert(descriptor.ident.clone(), descriptor.clone());
+        }
+
+        self.descriptors_to_deps(&descriptors)
     }
 
     /// Fetch the dependencies of a specific package version from the registry.
@@ -188,41 +419,66 @@ impl<'a> IslandDependencyProvider<'a> {
             return self.resolution_to_deps(&resolution);
         }
 
-        let result = match &locator.reference {
+        let physical_locator
+            = locator.physical_locator();
+
+        let resolution = match &physical_locator.reference {
             Reference::Registry(params) => {
-                self.handle.block_on(
-                    crate::resolvers::npm::resolve_locator(self.ctx, locator, params)
-                ).map_err(IslandResolutionError::from)?
+                let result = self.handle.block_on(
+                    crate::resolvers::npm::resolve_locator(self.ctx, &physical_locator, params)
+                ).map_err(IslandResolutionError::from)?;
+
+                self.qualify_resolution(result.resolution, locator.clone())
             },
 
             Reference::Shorthand(params) => {
-                let params = RegistryReference {
-                    ident: locator.ident.clone(),
+                let registry_params = RegistryReference {
+                    ident: physical_locator.ident.clone(),
                     version: params.version.clone(),
                     url: None,
                 };
+                let result = self.handle.block_on(
+                    crate::resolvers::npm::resolve_locator(self.ctx, &physical_locator, &registry_params)
+                ).map_err(IslandResolutionError::from)?;
 
-                self.handle.block_on(
-                    crate::resolvers::npm::resolve_locator(self.ctx, locator, &params)
-                ).map_err(IslandResolutionError::from)?
+                self.qualify_resolution(result.resolution, locator.clone())
             },
 
             Reference::PypiRegistry(params) => {
-                self.handle.block_on(
-                    crate::resolvers::pypi::resolve_locator(self.ctx, locator, params)
-                ).map_err(IslandResolutionError::from)?
+                let result = match &self.fork {
+                    Some(fork) => self.handle.block_on(
+                        crate::resolvers::pypi::resolve_locator_for_fork(self.ctx, locator, params, fork)
+                    ),
+                    None if self.requires_python_target => self.handle.block_on(
+                        crate::resolvers::pypi::resolve_locator_requiring_python_target(self.ctx, &physical_locator, params)
+                    ),
+                    None => self.handle.block_on(
+                        crate::resolvers::pypi::resolve_locator(self.ctx, &physical_locator, params)
+                    ),
+                }.map_err(IslandResolutionError::from)?;
+
+                self.qualify_resolution(result.resolution, locator.clone())
             },
 
             Reference::PypiShorthand(params) => {
-                let params = PypiRegistryReference {
-                    ident: locator.ident.clone(),
+                let registry_params = PypiRegistryReference {
+                    ident: physical_locator.ident.clone(),
                     version: params.version.clone(),
                     url: params.url.clone(),
                 };
+                let result = match &self.fork {
+                    Some(fork) => self.handle.block_on(
+                        crate::resolvers::pypi::resolve_locator_for_fork(self.ctx, locator, &registry_params, fork)
+                    ),
+                    None if self.requires_python_target => self.handle.block_on(
+                        crate::resolvers::pypi::resolve_locator_requiring_python_target(self.ctx, &physical_locator, &registry_params)
+                    ),
+                    None => self.handle.block_on(
+                        crate::resolvers::pypi::resolve_locator(self.ctx, &physical_locator, &registry_params)
+                    ),
+                }.map_err(IslandResolutionError::from)?;
 
-                self.handle.block_on(
-                    crate::resolvers::pypi::resolve_locator(self.ctx, locator, &params)
-                ).map_err(IslandResolutionError::from)?
+                self.qualify_resolution(result.resolution, locator.clone())
             },
 
             _ => return Ok(BTreeMap::new()),
@@ -230,9 +486,9 @@ impl<'a> IslandDependencyProvider<'a> {
 
         // Cache the full resolution for convert_solution
         self.resolution_cache.borrow_mut()
-            .insert(locator.clone(), result.resolution.clone());
+            .insert(locator.clone(), resolution.clone());
 
-        self.resolution_to_deps(&result.resolution)
+        self.resolution_to_deps(&resolution)
     }
 
     fn fetch_extra_dependencies(&self, version: &IslandVersion, extra: &str) -> Result<BTreeMap<IslandPackage, IslandVersionSet>, IslandResolutionError> {
@@ -248,11 +504,16 @@ impl<'a> IslandDependencyProvider<'a> {
             return self.resolution_to_deps(&resolution);
         }
 
-        let result = match &locator.reference {
+        let physical_locator = locator.physical_locator();
+        let resolution = match &physical_locator.reference {
             Reference::PypiRegistry(params) => {
-                self.handle.block_on(
-                    crate::resolvers::pypi::resolve_locator_extra(self.ctx, locator, params, extra)
-                ).map_err(IslandResolutionError::from)?
+                let result = match &self.fork {
+                    Some(fork) => self.handle.block_on(crate::resolvers::pypi::resolve_locator_extra_for_fork(self.ctx, locator, params, extra, fork)),
+                    None if self.requires_python_target => self.handle.block_on(crate::resolvers::pypi::resolve_locator_extra_requiring_python_target(self.ctx, &physical_locator, params, extra)),
+                    None => self.handle.block_on(crate::resolvers::pypi::resolve_locator_extra(self.ctx, &physical_locator, params, extra)),
+                }.map_err(IslandResolutionError::from)?;
+
+                self.qualify_resolution(result.resolution, locator.clone())
             },
 
             Reference::PypiShorthand(params) => {
@@ -262,23 +523,27 @@ impl<'a> IslandDependencyProvider<'a> {
                     url: params.url.clone(),
                 };
 
-                self.handle.block_on(
-                    crate::resolvers::pypi::resolve_locator_extra(self.ctx, locator, &params, extra)
-                ).map_err(IslandResolutionError::from)?
+                let result = match &self.fork {
+                    Some(fork) => self.handle.block_on(crate::resolvers::pypi::resolve_locator_extra_for_fork(self.ctx, locator, &params, extra, fork)),
+                    None if self.requires_python_target => self.handle.block_on(crate::resolvers::pypi::resolve_locator_extra_requiring_python_target(self.ctx, &physical_locator, &params, extra)),
+                    None => self.handle.block_on(crate::resolvers::pypi::resolve_locator_extra(self.ctx, &physical_locator, &params, extra)),
+                }.map_err(IslandResolutionError::from)?;
+
+                self.qualify_resolution(result.resolution, locator.clone())
             },
 
             _ => return Ok(BTreeMap::new()),
         };
 
         self.extra_resolution_cache.borrow_mut()
-            .insert(cache_key, result.resolution.clone());
+            .insert(cache_key, resolution.clone());
 
-        self.resolution_to_deps(&result.resolution)
+        self.resolution_to_deps(&resolution)
     }
 }
 
 fn pypi_extras(range: &Range) -> Vec<String> {
-    match range {
+    match range.physical_range() {
         Range::PypiSpecifier(params) => params.parameters.iter()
             .flat_map(|parameters| parameters.extras.iter())
             .flat_map(|extras| extras.iter().map(|extra| extra.to_string()))
@@ -289,52 +554,80 @@ fn pypi_extras(range: &Range) -> Vec<String> {
             .flat_map(|extras| extras.iter().map(|extra| extra.to_string()))
             .collect(),
 
+        Range::PypiFile(params) => params.parameters.iter()
+            .flat_map(|parameters| parameters.extras.iter())
+            .flat_map(|extras| extras.iter().map(|extra| extra.to_string()))
+            .collect(),
+
         _ => Vec::new(),
     }
 }
 
 fn descriptor_without_pypi_extras(descriptor: &Descriptor) -> Descriptor {
-    let range = match &descriptor.range {
+    let range = descriptor.range.clone().map_physical(|range| match range {
         Range::PypiSpecifier(params) if params.parameters.as_ref().and_then(|parameters| parameters.extras.as_ref()).is_some() => {
             Range::PypiSpecifier(PypiSpecifierRange {
-                ident: params.ident.clone(),
-                specifier: params.specifier.clone(),
+                ident: params.ident,
+                specifier: params.specifier,
                 parameters: None,
             })
-        }
+        },
 
         Range::PypiTag(params) if params.parameters.as_ref().and_then(|parameters| parameters.extras.as_ref()).is_some() => {
             Range::PypiTag(PypiTagRange {
-                ident: params.ident.clone(),
-                tag: params.tag.clone(),
+                ident: params.ident,
+                tag: params.tag,
                 parameters: None,
             })
-        }
+        },
 
-        _ => descriptor.range.clone(),
-    };
+        Range::PypiFile(params) if params.parameters.as_ref().and_then(|parameters| parameters.extras.as_ref()).is_some() => {
+            Range::PypiFile(zpm_primitives::PypiFileRange {
+                path: params.path,
+                parameters: None,
+            })
+        },
+
+        range => range,
+    });
 
     Descriptor::new_bound(descriptor.ident.clone(), range, descriptor.parent.clone())
 }
 
 fn insert_dependency_packages(
     deps: &mut BTreeMap<IslandPackage, IslandVersionSet>,
-    ident: &Ident,
+    key: &IslandPackageKey,
     extras: Vec<String>,
     version_set: IslandVersionSet,
 ) {
     if extras.is_empty() {
-        deps.insert(IslandPackage::Named(ident.clone()), version_set);
+        insert_dependency_constraint(deps, IslandPackage::Named(key.clone()), version_set);
     } else {
         for extra in extras {
-            deps.insert(
+            insert_dependency_constraint(
+                deps,
                 IslandPackage::ExtraProxy {
-                    ident: ident.clone(),
+                    key: key.clone(),
                     extra,
                 },
                 version_set.clone(),
             );
         }
+    }
+}
+
+fn insert_dependency_constraint(
+    deps: &mut BTreeMap<IslandPackage, IslandVersionSet>,
+    package: IslandPackage,
+    incoming: IslandVersionSet,
+) {
+    match deps.get_mut(&package) {
+        Some(existing) => {
+            *existing = existing.intersection(&incoming);
+        },
+        None => {
+            deps.insert(package, incoming);
+        },
     }
 }
 
@@ -352,7 +645,7 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
         range: &IslandVersionSet,
         stats: &PackageResolutionStatistics,
     ) -> IslandPriority {
-        let Some(ident) = package.ident() else {
+        let Some(key) = package.key() else {
             return IslandPriority::Locked(Reverse(0));
         };
 
@@ -360,7 +653,7 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
         let discovery_idx = {
             let mut order = self.discovery_order.borrow_mut();
             let len = order.len();
-            *order.entry(ident.clone()).or_insert_with(|| {
+            *order.entry(key.clone()).or_insert_with(|| {
                 let idx = self.discovery_counter.get();
                 self.discovery_counter.set(idx + 1);
                 let _ = len; // suppress unused
@@ -368,7 +661,7 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
             })
         };
 
-        if self.locked_versions.contains_key(ident) {
+        if self.locked_versions.contains_key(key) {
             return IslandPriority::Locked(Reverse(discovery_idx));
         }
 
@@ -398,7 +691,7 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
         package: &IslandPackage,
         range: &IslandVersionSet,
     ) -> Result<Option<IslandVersion>, IslandResolutionError> {
-        let ident = match package {
+        let key = match package {
             IslandPackage::Root => {
                 let root_locator = Locator::new(
                     Ident::default(),
@@ -412,9 +705,9 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
                 }
                 return Ok(None);
             }
-            IslandPackage::Named(ident)
-            | IslandPackage::ExtraProxy { ident, .. }
-            | IslandPackage::ExtraFeature { ident, .. } => ident,
+            IslandPackage::Named(key)
+            | IslandPackage::ExtraProxy { key, .. }
+            | IslandPackage::ExtraFeature { key, .. } => key,
         };
 
         // Exact singletons (workspace packages, non-semver deps from
@@ -426,16 +719,22 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
         }
 
         // Check locked version first
-        if let Some(locked_locator) = self.locked_versions.get(ident) {
+        if let Some(locked_locator) = self.locked_versions.get(key) {
             let iv = IslandVersion(locked_locator.clone());
             if range.contains(&iv) {
                 return Ok(Some(iv));
             }
         }
 
+        if let IslandVersionSet::Exact(crate::island_types::ExactSet::OneOf(vs)) = range {
+            if let Some(version) = vs.first() {
+                return Ok(Some(version.clone()));
+            }
+        }
+
         // Fetch all available versions from the registry and pick the first
         // (newest) that satisfies the range.
-        let versions = self.fetch_versions(ident)?;
+        let versions = self.fetch_versions(key)?;
         for iv in versions {
             if range.contains(&iv) {
                 return Ok(Some(iv));
@@ -450,24 +749,24 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
         package: &IslandPackage,
         version: &IslandVersion,
     ) -> Result<Dependencies<IslandPackage, IslandVersionSet, String>, IslandResolutionError> {
-        let ident = match package {
+        let key = match package {
             IslandPackage::Root => {
                 let deps: pubgrub::DependencyConstraints<IslandPackage, IslandVersionSet> = self.root_deps.clone()
                     .into_iter()
                     .collect();
                 return Ok(Dependencies::Available(deps));
             }
-            IslandPackage::Named(ident) => ident,
+            IslandPackage::Named(key) => key,
 
-            IslandPackage::ExtraProxy { ident, extra } => {
+            IslandPackage::ExtraProxy { key, extra } => {
                 let deps = BTreeMap::from([
                     (
-                        IslandPackage::Named(ident.clone()),
+                        IslandPackage::Named(key.clone()),
                         IslandVersionSet::exact_singleton(version.clone()),
                     ),
                     (
                         IslandPackage::ExtraFeature {
-                            ident: ident.clone(),
+                            key: key.clone(),
                             extra: extra.clone(),
                         },
                         IslandVersionSet::exact_singleton(version.clone()),
@@ -484,7 +783,7 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
         };
 
         // Workspace packages: return their manifest dependencies
-        if let Some(ws_deps) = self.workspace_deps.get(ident) {
+        if let Some(ws_deps) = self.workspace_deps.get(key) {
             let deps = self.descriptors_to_deps(ws_deps)?;
             return Ok(Dependencies::Available(deps.into_iter().collect()));
         }
@@ -493,5 +792,96 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
         let deps = self.fetch_dependencies(version)?;
 
         Ok(Dependencies::Available(deps.into_iter().collect()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zpm_utils::{FromFileString, Hash64, ToFileString};
+
+    #[test]
+    fn test_pypi_extras_are_visible_through_env_ranges() {
+        let fork_id
+            = Hash64::from_data("python-fork");
+        let descriptor
+            = Descriptor::from_file_string("foo@pypi:>=1.0.0#extras=feature")
+                .unwrap()
+                .env_qualified_with_hash(fork_id.clone());
+
+        assert_eq!(vec!["feature"], pypi_extras(&descriptor.range));
+        assert_eq!(
+            format!("foo@env:{}#pypi:>=1.0.0", fork_id.to_file_string()),
+            descriptor_without_pypi_extras(&descriptor).to_file_string(),
+        );
+    }
+
+    #[test]
+    fn test_dependency_constraints_for_the_same_source_are_intersected() {
+        let key
+            = IslandPackageKey::new(Ident::new("foo"), IslandRegistry::Pypi);
+        let one
+            = IslandVersion(Locator::from_file_string("foo@pypi:foo@1.0.0").unwrap());
+        let two
+            = IslandVersion(Locator::from_file_string("foo@pypi:foo@2.0.0").unwrap());
+        let three
+            = IslandVersion(Locator::from_file_string("foo@pypi:foo@3.0.0").unwrap());
+        let mut deps
+            = BTreeMap::new();
+
+        insert_dependency_packages(
+            &mut deps,
+            &key,
+            Vec::new(),
+            IslandVersionSet::Exact(ExactSet::one_of([one.clone(), two.clone()])),
+        );
+        insert_dependency_packages(
+            &mut deps,
+            &key,
+            Vec::new(),
+            IslandVersionSet::Exact(ExactSet::one_of([two.clone(), three.clone()])),
+        );
+
+        let package
+            = IslandPackage::Named(key);
+        let range
+            = deps.get(&package).unwrap();
+
+        assert!(!range.contains(&one));
+        assert!(range.contains(&two));
+        assert!(!range.contains(&three));
+    }
+
+    #[test]
+    fn test_incompatible_constraints_for_the_same_source_are_empty() {
+        let key
+            = IslandPackageKey::new(Ident::new("foo"), IslandRegistry::Pypi);
+        let one
+            = IslandVersion(Locator::from_file_string("foo@pypi:foo@1.0.0").unwrap());
+        let two
+            = IslandVersion(Locator::from_file_string("foo@pypi:foo@2.0.0").unwrap());
+        let mut deps
+            = BTreeMap::new();
+
+        insert_dependency_packages(
+            &mut deps,
+            &key,
+            Vec::new(),
+            IslandVersionSet::exact_singleton(one),
+        );
+        insert_dependency_packages(
+            &mut deps,
+            &key,
+            Vec::new(),
+            IslandVersionSet::exact_singleton(two),
+        );
+
+        let package
+            = IslandPackage::Named(key);
+
+        assert!(matches!(
+            deps.get(&package),
+            Some(IslandVersionSet::Exact(ExactSet::OneOf(versions))) if versions.is_empty()
+        ));
     }
 }
