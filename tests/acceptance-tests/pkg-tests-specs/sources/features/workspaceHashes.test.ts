@@ -1,12 +1,30 @@
-import {PortablePath, xfs} from '@yarnpkg/fslib';
-import {exec, fs, tests}   from 'pkg-tests-core';
+import {PortablePath, xfs}     from '@yarnpkg/fslib';
+import http, {RequestListener} from 'http';
+import {exec, fs, tests}       from 'pkg-tests-core';
 
-import {RunFunction}       from '../../../pkg-tests-core/sources/utils/tests';
+import {RunFunction}           from '../../../pkg-tests-core/sources/utils/tests';
 
 async function readLockfile(path: PortablePath) {
   const raw = await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`);
   return JSON.parse(raw);
 }
+
+const startServer = async (listener: RequestListener) => {
+  const server = http.createServer(listener);
+  server.unref();
+
+  await new Promise<void>((resolve, reject) => {
+    server.once(`error`, reject);
+    server.listen(0, `127.0.0.1`, resolve);
+  });
+
+  return {
+    close: () => new Promise<void>((resolve, reject) => {
+      server.close(error => error ? reject(error) : resolve());
+    }),
+    url: `http://127.0.0.1:${(server.address() as any).port}`,
+  };
+};
 
 const forEachVerboseDone = tests.FEATURE_CHECKS.forEachVerboseDone
   ? []
@@ -294,7 +312,7 @@ describe(`Features`, () => {
     );
 
     test(
-      `a git dependency doesn't disable a workspace's on-demand tree hash`,
+      `git and url dependencies don't disable a workspace's on-demand tree hash`,
       makeTemporaryEnv(
         {
           private: true,
@@ -302,6 +320,23 @@ describe(`Features`, () => {
         },
         async ({path, run}) => {
           const gitUrl = await tests.startPackageServer().then(url => `${url}/repositories/no-prepack.git`);
+          const registryHost = new URL(await tests.startPackageServer()).hostname;
+
+          // workspace-b's url tarball dependency, served from a local
+          // http server.
+          const archive
+            = await xfs.readFilePromise(await tests.getPackageArchivePath(`has-bin-entries`, `1.0.0`));
+
+          const server = await startServer((_request, response) => {
+            response.writeHead(200, {
+              [`Connection`]: `close`,
+              [`Content-Length`]: archive.length,
+            });
+
+            response.end(archive);
+          });
+
+          const urlConfig = {unsafeHttpWhitelist: [registryHost, `127.0.0.1`]};
 
           await fs.writeJson(`${path}/packages/workspace-a/package.json` as PortablePath, {
             name: `workspace-a`,
@@ -321,51 +356,61 @@ describe(`Features`, () => {
             scripts: {
               print: `echo Test Workspace B`,
             },
+            dependencies: {
+              [`has-bin-entries`]: `${server.url}/package.tgz`,
+            },
           });
 
           const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
 
-          await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
-            await run(`install`, {enableWorkspaceHashes: false});
-          });
+          try {
+            await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
+              await run(`install`, {enableWorkspaceHashes: false, ...urlConfig});
+            });
 
-          // The git dependency is recorded in the lockfile, so the
-          // on-demand walk must resolve it like any other edge and
-          // still compute workspace-a's tree hash.
-          const printed = new Map();
-          for (const line of (await run(`workspaces`, `list`, `--json`, `--tree-hash`)).stdout.split(`\n`)) {
-            if (line !== ``) {
-              const payload = JSON.parse(line);
-              if (payload.name !== null) {
-                printed.set(payload.name, payload.treeHash);
+            // The git and url dependencies are recorded in the lockfile,
+            // so the on-demand walk must resolve them like any other edge
+            // and still compute both workspaces' tree hashes.
+            const printed = new Map();
+            for (const line of (await run(`workspaces`, `list`, `--json`, `--tree-hash`)).stdout.split(`\n`)) {
+              if (line !== ``) {
+                const payload = JSON.parse(line);
+                if (payload.name !== null) {
+                  printed.set(payload.name, payload.treeHash);
+                }
               }
             }
+
+            expect(printed.get(`workspace-a`)).toMatch(/^[0-9a-f]+$/);
+            expect(printed.get(`workspace-b`)).toMatch(/^[0-9a-f]+$/);
+
+            await exec.execGitInit({cwd: path});
+            await git(`add`, `-A`);
+            await git(`commit`, `-m`, `First commit`);
+
+            // Make no-deps@1.1.0 visible and upgrade; only the lockfile
+            // changes, and only workspace-a's dependency tree changed
+            // through it (via one-range-dep, next to its git dep).
+            await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`, `1.1.0`])]]), async () => {
+              await run(`up`, `-R`, `no-deps`, {enableWorkspaceHashes: false, ...urlConfig});
+            });
+
+            // The old-side walk must attribute the lockfile change to
+            // workspace-a even though its tree also contains the git
+            // dependency; workspace-b's tree (url dependency next to an
+            // exact-pinned transitive range) didn't change, so it must
+            // not run.
+            await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes: false, ...urlConfig})).resolves.toEqual({
+              code: 0,
+              stderr: ``,
+              stdout: [
+                `Test Workspace A\n`,
+                ...forEachVerboseDone,
+              ].join(``),
+            });
+          } finally {
+            await server.close();
           }
-
-          expect(printed.get(`workspace-a`)).toMatch(/^[0-9a-f]+$/);
-
-          await exec.execGitInit({cwd: path});
-          await git(`add`, `-A`);
-          await git(`commit`, `-m`, `First commit`);
-
-          // Make no-deps@1.1.0 visible and upgrade; only the lockfile
-          // changes, and only workspace-a's dependency tree changed
-          // through it (via one-range-dep, next to its git dep).
-          await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`, `1.1.0`])]]), async () => {
-            await run(`up`, `-R`, `no-deps`, {enableWorkspaceHashes: false});
-          });
-
-          // The old-side walk must attribute the lockfile change to
-          // workspace-a even though its tree also contains the git
-          // dependency.
-          await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes: false})).resolves.toEqual({
-            code: 0,
-            stderr: ``,
-            stdout: [
-              `Test Workspace A\n`,
-              ...forEachVerboseDone,
-            ].join(``),
-          });
         },
       ),
     );
