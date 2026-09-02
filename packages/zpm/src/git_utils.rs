@@ -1,8 +1,8 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader, Read, Write},
-    process::{Command, Stdio},
-    sync::Arc,
+    process::{Child, Command, Stdio},
+    sync::{Arc, Mutex},
 };
 
 use itertools::Itertools;
@@ -246,14 +246,11 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
 
             let old_hashes
                 = if old.workspaces.is_empty() {
-                    // Hard timeout around the git archaeology: a wedged
-                    // fetch must degrade to pre-#256 attribution rather
-                    // than hang `foreach --since` forever.
-                    tokio::time::timeout(
-                        std::time::Duration::from_secs(60),
-                        fetch_workspaces_at_ref(project, &since_ref),
-                    ).await.ok()
-                        .and_then(|result| result.ok())
+                    // A wedged fetch must degrade to pre-#256 attribution
+                    // rather than hang `foreach --since` forever; the
+                    // timeout lives inside the helper so it also kills
+                    // the git child it abandons.
+                    fetch_workspaces_at_ref(project, &since_ref).await.ok()
                         .and_then(|old_workspaces| walk_lockfile_workspaces(
                             old,
                             &old_workspaces,
@@ -300,6 +297,12 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
 /// neither pipe can ever overflow. Manifests missing at the ref
 /// (untracked, renamed workspaces) or failing to parse are silently
 /// skipped, so the caller can degrade gracefully.
+///
+/// The whole conversation runs under a hard timeout, and on timeout
+/// the git child is killed before the future is abandoned - dropping
+/// the await alone wouldn't stop it, and the runtime waits for
+/// blocking tasks on shutdown, so a wedged child would otherwise
+/// hang the entire command.
 async fn fetch_workspaces_at_ref(project: &Project, git_ref: &str) -> Result<Vec<Workspace>, Error> {
     let manifest_paths: Vec<(Path, String)>
         = project.workspaces.iter()
@@ -325,7 +328,16 @@ async fn fetch_workspaces_at_ref(project: &Project, git_ref: &str) -> Result<Vec
     let git_ref
         = git_ref.to_string();
 
-    let contents
+    // The git child lives in this slot so the timeout below can kill
+    // it: dropping the blocking task's await wouldn't, and the runtime
+    // waits for blocking tasks during shutdown.
+    let child_slot
+        = Arc::new(Mutex::new(None::<Child>));
+
+    let blocking_slot
+        = child_slot.clone();
+
+    let blocking
         = tokio::task::spawn_blocking(move || -> Result<Vec<Option<String>>, Error> {
             let spawn_error = |error: std::io::Error| Error::SpawnFailed {
                 name: "git".to_string(),
@@ -348,6 +360,8 @@ async fn fetch_workspaces_at_ref(project: &Project, git_ref: &str) -> Result<Vec
 
             let mut child_stdout
                 = BufReader::new(child.stdout.take().unwrap());
+
+            *blocking_slot.lock().unwrap() = Some(child);
 
             let mut contents
                 = Vec::with_capacity(manifest_paths.len());
@@ -389,12 +403,31 @@ async fn fetch_workspaces_at_ref(project: &Project, git_ref: &str) -> Result<Vec
 
             drop(child_stdin);
 
+            // Take the child back from the slot; if the timeout already
+            // took it for killing, the conversation is over anyway.
+            let Some(mut child) = blocking_slot.lock().unwrap().take() else {
+                return Err(Error::ChildProcessFailed("git".to_string()));
+            };
+
             if !child.wait().map_err(spawn_error)?.success() {
                 return Err(Error::ChildProcessFailed("git".to_string()));
             }
 
             Ok(contents)
-        }).await.map_err(|_| Error::ChildProcessFailed("git".to_string()))??;
+        });
+
+    let contents
+        = match tokio::time::timeout(std::time::Duration::from_secs(60), blocking).await {
+            Ok(result) => result.map_err(|_| Error::ChildProcessFailed("git".to_string()))??,
+
+            Err(_) => {
+                if let Some(mut child) = child_slot.lock().unwrap().take() {
+                    let _ = child.kill();
+                }
+
+                return Err(Error::ChildProcessFailed("git".to_string()));
+            },
+        };
 
     let mut workspaces = Vec::new();
 

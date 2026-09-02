@@ -292,5 +292,82 @@ describe(`Features`, () => {
         },
       ),
     );
+
+    test(
+      `a git dependency doesn't disable a workspace's on-demand tree hash`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        async ({path, run}) => {
+          const gitUrl = await tests.startPackageServer().then(url => `${url}/repositories/no-prepack.git`);
+
+          await fs.writeJson(`${path}/packages/workspace-a/package.json` as PortablePath, {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            scripts: {
+              print: `echo Test Workspace A`,
+            },
+            dependencies: {
+              [`no-prepack`]: gitUrl,
+              [`one-range-dep`]: `1.0.0`,
+            },
+          });
+
+          await fs.writeJson(`${path}/packages/workspace-b/package.json` as PortablePath, {
+            name: `workspace-b`,
+            version: `1.0.0`,
+            scripts: {
+              print: `echo Test Workspace B`,
+            },
+          });
+
+          const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
+
+          await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
+            await run(`install`, {enableWorkspaceHashes: false});
+          });
+
+          // The git dependency is recorded in the lockfile, so the
+          // on-demand walk must resolve it like any other edge and
+          // still compute workspace-a's tree hash.
+          const printed = new Map();
+          for (const line of (await run(`workspaces`, `list`, `--json`, `--tree-hash`)).stdout.split(`\n`)) {
+            if (line !== ``) {
+              const payload = JSON.parse(line);
+              if (payload.name !== null) {
+                printed.set(payload.name, payload.treeHash);
+              }
+            }
+          }
+
+          expect(printed.get(`workspace-a`)).toMatch(/^[0-9a-f]+$/);
+
+          await exec.execGitInit({cwd: path});
+          await git(`add`, `-A`);
+          await git(`commit`, `-m`, `First commit`);
+
+          // Make no-deps@1.1.0 visible and upgrade; only the lockfile
+          // changes, and only workspace-a's dependency tree changed
+          // through it (via one-range-dep, next to its git dep).
+          await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`, `1.1.0`])]]), async () => {
+            await run(`up`, `-R`, `no-deps`, {enableWorkspaceHashes: false});
+          });
+
+          // The old-side walk must attribute the lockfile change to
+          // workspace-a even though its tree also contains the git
+          // dependency.
+          await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes: false})).resolves.toEqual({
+            code: 0,
+            stderr: ``,
+            stdout: [
+              `Test Workspace A\n`,
+              ...forEachVerboseDone,
+            ].join(``),
+          });
+        },
+      ),
+    );
   });
 });

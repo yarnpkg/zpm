@@ -2135,9 +2135,17 @@ pub(crate) fn walk_lockfile_workspaces(
             let range_details
                 = descriptor.range.details();
 
-            if range_details.transient_resolution
-                || range_details.fetch_before_resolve
-                || matches!(descriptor.range, Range::Catalog(_))
+            // Under the freshness policy these ranges must abort the
+            // walk right away. Under the poisoning policy they fall
+            // through to the lockfile instead: git and url dependencies
+            // set `fetch_before_resolve` while their resolutions are
+            // serialized in the lockfile and fully reconstructable, so
+            // poisoning them before even consulting it would over-
+            // attribute the loss to the whole dependent subtree.
+            if abort_on_unresolved
+                && (range_details.transient_resolution
+                    || range_details.fetch_before_resolve
+                    || matches!(descriptor.range, Range::Catalog(_)))
             {
                 poison(&mut poisoned_locators, &mut child_locators, &poison_locator)?;
                 continue;
