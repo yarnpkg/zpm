@@ -453,6 +453,7 @@ impl DiskCache {
 
             let write_result
                 = atomic_path
+                    .fs_create_parent()?
                     .fs_write_atomic(|tmp_path| -> Result<(), PathError> {
                         tmp_path.fs_write(&data)?;
                         Ok(())

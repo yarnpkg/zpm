@@ -527,6 +527,14 @@ impl Project {
             }
         }
 
+        Ok(self.package_cache_handle())
+    }
+
+    pub(crate) fn package_cache_handle(&self) -> CompositeCache {
+        let global_cache_path
+            = self.global_cache_path();
+        let local_cache_path
+            = self.local_cache_path();
         let compression_algorithm
             = self.config.settings.compression_level.value;
 
@@ -552,11 +560,11 @@ impl Project {
         let local_cache = (!enable_global_cache)
             .then(|| DiskCache::new(local_cache_path, name_suffix, enable_immutable_cache, cleanable_local_cache));
 
-        Ok(CompositeCache::new(
+        CompositeCache::new(
             compression_algorithm,
             global_cache,
             local_cache,
-        ))
+        )
     }
 
     pub fn root_workspace(&self) -> &Workspace {
@@ -1005,6 +1013,10 @@ impl Project {
             return Ok(false);
         }
 
+        if !self.config.settings.enable_workspace_hashes.value {
+            return Ok(true);
+        }
+
         let workspace_locators
             = self.workspaces.iter()
                 .map(|workspace| (workspace.name.clone(), workspace.locator()))
@@ -1016,6 +1028,10 @@ impl Project {
         }
 
         Ok(true)
+    }
+
+    pub async fn workspace_hashes_ondemand(&self, lockfile: &Lockfile) -> Result<BTreeMap<Ident, Hash64>, Error> {
+        crate::install::workspace_hashes_from_lockfile(self, lockfile, None).await
     }
 
     pub(crate) fn install_config_hash(&self) -> Hash64 {

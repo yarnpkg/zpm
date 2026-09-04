@@ -35,6 +35,10 @@ pub struct InstallContext<'a> {
     /// call `drain` before returning so pending writes aren't dropped
     /// when the runtime shuts down.
     pub background_writes: Option<Arc<http_npm::BackgroundWrites>>,
+    /// Analysis may consume prepared artifacts, but must not execute generators.
+    pub allow_preparation: bool,
+    /// Original repository root and its historical checkout; affects I/O only.
+    pub source_roots: Option<(&'a Path, &'a Path)>,
 }
 
 /// Tracks `packageExtensions` rule behavior so we can warn about
@@ -88,11 +92,68 @@ impl<'a> Default for InstallContext<'a> {
             inline_builds: false,
             extension_tracking: Arc::new(Mutex::new(ExtensionTracking::default())),
             background_writes: None,
+            allow_preparation: true,
+            source_roots: None,
         }
     }
 }
 
 impl<'a> InstallContext<'a> {
+    /// Maps an explicitly absolute local source into the historical checkout
+    /// without changing the descriptor/locator text that participates in hashes.
+    pub fn absolute_source_path(&self, path: &Path) -> Result<Path, Error> {
+        let Some((original, snapshot)) = self.source_roots else {
+            return Ok(path.clone());
+        };
+
+        let relative = path.forward_relative_to(original).or_else(|| {
+            // Account for aliases such as /var -> /private/var, including a
+            // source deleted from the live tree: only its ancestor need exist.
+            let root = original.fs_canonicalize().ok()?;
+            let mut ancestor = path.clone();
+            let mut suffix = Path::new();
+
+            loop {
+                if let Ok(resolved) = ancestor.fs_canonicalize() {
+                    return resolved.with_join(&suffix).forward_relative_to(&root);
+                }
+
+                suffix = Path::try_from(ancestor.basename()?).ok()?.with_join(&suffix);
+                ancestor = ancestor.dirname()?;
+            }
+        }).ok_or_else(|| Error::HistoricalSourceUnavailable(path.clone()))?;
+        let source
+            = snapshot.with_join(&relative);
+        let resolved = source.fs_canonicalize()
+            .map_err(|_| Error::HistoricalSourceUnavailable(path.clone()))?;
+
+        if !snapshot.fs_canonicalize()?.contains(&resolved) {
+            return Err(Error::HistoricalSourceUnavailable(path.clone()));
+        }
+
+        Ok(source)
+    }
+
+    pub fn relative_source_path(&self, base: &Path, path: &str) -> Result<Path, Error> {
+        let source
+            = base.with_join_str(path);
+
+        if let Some((_, snapshot)) = self.source_roots {
+            // Cached archive parents are already immutable inputs. For parents
+            // in the checkout, don't follow symlinks/traversals into live data.
+            if snapshot.contains(base) {
+                let resolved = source.fs_canonicalize()
+                    .map_err(|_| Error::HistoricalSourceUnavailable(source.clone()))?;
+
+                if !snapshot.contains(&resolved) {
+                    return Err(Error::HistoricalSourceUnavailable(source));
+                }
+            }
+        }
+
+        Ok(source)
+    }
+
     pub fn with_package_cache(mut self, package_cache: Option<&'a CompositeCache>) -> Self {
         self.package_cache = package_cache;
         self
@@ -209,6 +270,7 @@ struct InstallMaps {
     resolution_map: Arc<WaitMap<Descriptor, ResolutionResult>>,
     fetch_map: Arc<WaitMap<Locator, FetchResult>>,
     resolution_tx: tokio::sync::mpsc::UnboundedSender<ResolutionEvent>,
+    fetch_packages: bool,
 }
 
 /// The work unlocked by resolving a descriptor. Child resolutions and the
@@ -283,12 +345,14 @@ async fn resolve_all<'a>(
         };
 
         if let Completed::ResolutionEvent(event) = completed {
-            fetching.push(ensure_fetched(
-                event.locator,
-                event.is_mock_request,
-                ctx,
-                maps,
-            ));
+            if maps.fetch_packages {
+                fetching.push(ensure_fetched(
+                    event.locator,
+                    event.is_mock_request,
+                    ctx,
+                    maps,
+                ));
+            }
 
             for child in event.children {
                 // Deduplicate at queue insertion time. Checking the OnceCell
@@ -360,6 +424,13 @@ fn resolve_descriptor_impl<'a>(
                     return Ok(result);
                 },
             }
+        }
+
+        // Analysis must not invent new registry resolutions for an old graph.
+        if !maps.fetch_packages && !descriptor.range.details().transient_resolution
+            && ctx.project.unwrap().try_workspace_by_descriptor(&descriptor)?.is_none()
+        {
+            return Err(Arc::new(Error::MissingResolution(descriptor)));
         }
 
         // Phase 2: Await prerequisites and build the dependencies vector
@@ -1043,18 +1114,33 @@ impl Install {
     pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
         self.report_package_extension_diagnostics(project).await;
 
-        let graph = build_locator_graph(
-            &self.install_state.normalized_resolutions,
-            &self.install_state.descriptor_to_locator,
-        );
+        let workspace_hashes
+            = if project.config.settings.enable_workspace_hashes.value {
+                let graph = build_locator_graph(
+                    &self.install_state.normalized_resolutions,
+                    &self.install_state.descriptor_to_locator,
+                );
 
-        let workspace_locators: Vec<(Ident, Locator)> = project.workspaces.iter()
-            .map(|w| (w.name.clone(), w.locator()))
-            .collect();
+                let workspace_locators: Vec<(Ident, Locator)> = project.workspaces.iter()
+                    .map(|w| (w.name.clone(), w.locator()))
+                    .collect();
+
+                Some((graph, workspace_locators))
+            } else {
+                None
+            };
 
         if self.skip_link_step {
             self.lockfile.workspaces
-                = compute_workspace_hashes(&graph, &workspace_locators);
+                = match workspace_hashes {
+                    Some((graph, workspace_locators)) => {
+                        compute_workspace_hashes(&graph, &workspace_locators)
+                    },
+
+                    None => {
+                        BTreeMap::new()
+                    },
+                };
 
             if !self.skip_lockfile_update {
                 project.write_lockfile(&self.lockfile)?;
@@ -1070,9 +1156,18 @@ impl Install {
                     zpm_config::NmMode::HardlinksGlobal => "hardlinks-global".to_string(),
                 });
 
-            let hash_handle = tokio::task::spawn_blocking(move || {
-                compute_workspace_hashes(&graph, &workspace_locators)
-            });
+            let hash_handle
+                = match workspace_hashes {
+                    Some((graph, workspace_locators)) => {
+                        Some(tokio::task::spawn_blocking(move || {
+                            compute_workspace_hashes(&graph, &workspace_locators)
+                        }))
+                    },
+
+                    None => {
+                        None
+                    },
+                };
 
             let link_future
                 = linker::link_project(project, &self);
@@ -1081,7 +1176,15 @@ impl Install {
                 = async_section("Linking the project", link_future).await?;
 
             self.lockfile.workspaces
-                = hash_handle.await?;
+                = match hash_handle {
+                    Some(handle) => {
+                        handle.await?
+                    },
+
+                    None => {
+                        BTreeMap::new()
+                    },
+                };
 
             for (location, locator) in &link_result.packages_by_location {
                 self.install_state.locations_by_package.insert(locator.clone(), location.clone());
@@ -1263,6 +1366,7 @@ impl<'a> InstallManager<'a> {
             resolution_map: Arc::new(WaitMap::new()),
             fetch_map: Arc::new(WaitMap::new()),
             resolution_tx,
+            fetch_packages: true,
         };
 
         let lockfile
@@ -1715,6 +1819,67 @@ pub(crate) fn compute_workspace_hashes(
             (name.clone(), hash)
         })
         .collect()
+}
+
+/// Reuses install resolution, fetching only prerequisites such as patch inputs.
+/// This does not link, build, write install state/lockfiles, or clean caches.
+pub(crate) async fn workspace_hashes_from_lockfile(project: &Project, lockfile: &Lockfile, source_roots: Option<(&Path, &Path)>) -> Result<BTreeMap<Ident, Hash64>, Error> {
+    let package_cache
+        = project.package_cache_handle();
+    let systems
+        = project.config.settings.supported_systems();
+    let context = InstallContext {
+        project: Some(project),
+        package_cache: Some(&package_cache),
+        systems: Some(&systems),
+        allow_preparation: false,
+        source_roots,
+        ..Default::default()
+    };
+    let (resolution_tx, resolution_rx)
+        = tokio::sync::mpsc::unbounded_channel();
+    let maps = InstallMaps {
+        resolution_map: Arc::new(WaitMap::new()),
+        fetch_map: Arc::new(WaitMap::new()),
+        resolution_tx,
+        fetch_packages: false,
+    };
+
+    // Match install's partition: island workspaces aren't in the greedy graph.
+    let island_workspaces = crate::island::resolve_islands(&project.config.settings.unstable_islands, &project.workspaces)?
+        .into_iter().flat_map(|island| island.workspace_idents).collect::<BTreeSet<_>>();
+    let roots = project.workspaces.iter()
+        .filter(|workspace| !island_workspaces.contains(&workspace.name))
+        .map(|workspace| workspace.descriptor());
+
+    resolve_all(roots, &context, lockfile, &maps, resolution_rx).await;
+
+    if let Some(error) = maps.resolution_map.collect_errors().first() {
+        return Err((**error).clone());
+    }
+
+    let resolution_map = Arc::try_unwrap(maps.resolution_map)
+        .unwrap_or_else(|_| panic!("resolution worklist should have finished"));
+    let mut descriptor_to_locator
+        = BTreeMap::new();
+    let mut resolutions
+        = BTreeMap::new();
+
+    for (descriptor, result) in resolution_map.into_results() {
+        let resolution
+            = result.map_err(|error| (*error).clone())?.resolution;
+
+        descriptor_to_locator.insert(descriptor, resolution.locator.clone());
+        resolutions.insert(resolution.locator.clone(), resolution);
+    }
+
+    let graph
+        = build_locator_graph(&resolutions, &descriptor_to_locator);
+    let workspace_locators = project.workspaces.iter()
+        .map(|workspace| (workspace.name.clone(), workspace.locator()))
+        .collect::<Vec<_>>();
+
+    Ok(compute_workspace_hashes(&graph, &workspace_locators))
 }
 
 fn build_locator_graph(

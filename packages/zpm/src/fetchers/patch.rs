@@ -58,13 +58,12 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         },
 
         path if path.starts_with("~/") => {
-            project.project_cwd
-                .with_join_str(&path[2..])
+            context.relative_source_path(&project.project_cwd, &path[2..])?
                 .fs_read_text_with_zip()?
         },
 
         path if Path::try_from(path).map(|path| path.is_absolute()).unwrap_or(false) => {
-            Path::try_from(path)?
+            context.absolute_source_path(&Path::try_from(path)?)?
                 .fs_read_text_with_zip()?
         },
 
@@ -72,8 +71,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
             let parent_data
                 = parent_data.expect("Expected parent data to be fetched when the patchfile is relative to the parent package");
 
-            parent_data.package_data.context_directory()
-                .with_join_str(path)
+            context.relative_source_path(parent_data.package_data.context_directory(), path)?
                 .fs_read_text_with_zip()?
         },
     };

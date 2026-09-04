@@ -19,17 +19,23 @@ pub fn compute_portal_manifest_hash(manifest_text: &str) -> Hash64 {
     writer.finalize()
 }
 
-fn portal_manifest_path(context_directory: &Path, portal_path: &str) -> Path {
-    context_directory
-        .with_join_str(portal_path)
-        .with_join_str("package.json")
+fn portal_manifest_path(context: &InstallContext<'_>, context_directory: &Path, portal_path: &str) -> Result<Path, Error> {
+    let path
+        = Path::try_from(portal_path)?;
+    let directory = if path.is_absolute() {
+        context.absolute_source_path(&path)?
+    } else {
+        context.relative_source_path(context_directory, portal_path)?
+    };
+
+    Ok(directory.with_join_str("package.json"))
 }
 
 pub fn resolve_descriptor(ctx: &InstallContext, descriptor: &Descriptor, params: &PortalRange, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
     let parent_data
         = dependencies[0].as_fetched();
 
-    let manifest_text = portal_manifest_path(parent_data.package_data.context_directory(), &params.path)
+    let manifest_text = portal_manifest_path(ctx, parent_data.package_data.context_directory(), &params.path)?
         .fs_read_text_with_zip()?;
 
     let reference = PortalReference {
@@ -51,7 +57,7 @@ pub fn resolve_locator(context: &InstallContext, locator: &Locator, params: &Por
     let parent_data
         = dependencies[0].as_fetched();
 
-    let manifest_text = portal_manifest_path(parent_data.package_data.context_directory(), &params.path)
+    let manifest_text = portal_manifest_path(context, parent_data.package_data.context_directory(), &params.path)?
         .fs_read_text_with_zip()?;
 
     let manifest
