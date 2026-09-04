@@ -165,7 +165,7 @@
     "enableWorkspaceHashes": {
       "_package": "@yarnpkg/core",
       "title": "Define whether per-workspace dependency tree hashes should be stored in the lockfile.",
-      "description": "If true, Yarn stores in the lockfile a hash of each workspace's resolved dependency tree, used to attribute lockfile changes to workspaces in commands like `yarn workspaces foreach --since`. If false, the `workspaces` section is omitted from the lockfile and the hashes are computed on demand when needed.",
+      "description": "If true, Yarn stores a hash of each workspace's resolved dependency tree in the lockfile. If false, the `workspaces` section is omitted and `workspaces list --tree-hash`, `workspaces foreach --since`, and `version check` resolve the hashes on demand using the same resolver as installation. Historical comparisons use a temporary checkout of the base ref, including its workspace manifests, configuration, patches, and local dependency files. This is slower than reading stored hashes and may fetch prerequisite archives. Hash queries do not run preparation scripts: generated packages must already be cached (run `yarn install --force` to populate missing artifacts).",
       "type": "boolean",
       "default": true
     },

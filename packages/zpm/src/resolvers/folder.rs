@@ -32,16 +32,14 @@ async fn compute_folder_hash(context: &InstallContext<'_>, descriptor: &Descript
         = Path::from_file_string(&range.path)?;
 
     let context_directory = if folder_relative_path.is_absolute() {
-        folder_relative_path
+        context.absolute_source_path(&folder_relative_path)?
     } else {
         let parent_data
             = dependencies.first()
                 .ok_or(Error::Unsupported)?
                 .as_fetched();
 
-        parent_data.package_data
-            .context_directory()
-            .with_join_str(&range.path)
+        context.relative_source_path(parent_data.package_data.context_directory(), &range.path)?
     };
 
     let cache_packer

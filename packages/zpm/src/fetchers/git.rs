@@ -32,6 +32,10 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         = package_subdir.clone();
 
     let pkg_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
+        if !context.allow_preparation {
+            return Err(Error::HashPrerequisiteUnavailable(locator.clone()));
+        }
+
         let repository_path
             = git::clone_repository(context, &params.git.repo, &params.git.commit).await?;
 

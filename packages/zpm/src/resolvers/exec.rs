@@ -11,7 +11,7 @@ pub async fn resolve_descriptor(context: &InstallContext<'_>, descriptor: &Descr
     validate_workspace_parent(context, descriptor)?;
 
     let hash
-        = compute_exec_hash(params, &dependencies)?;
+        = compute_exec_hash(context, params, &dependencies)?;
 
     let locator = descriptor.resolve_with(ExecReference {
         path: params.path.clone(),
@@ -42,7 +42,7 @@ fn validate_workspace_parent(context: &InstallContext<'_>, descriptor: &Descript
     Ok(())
 }
 
-fn compute_exec_hash(params: &ExecRange, dependencies: &[InstallOpResult]) -> Result<zpm_utils::Hash64, Error> {
+fn compute_exec_hash(context: &InstallContext<'_>, params: &ExecRange, dependencies: &[InstallOpResult]) -> Result<zpm_utils::Hash64, Error> {
     let script_relative_path
         = Path::from_file_string(&params.path)?;
 
@@ -54,9 +54,9 @@ fn compute_exec_hash(params: &ExecRange, dependencies: &[InstallOpResult]) -> Re
         .clone();
 
     let script_path = if script_relative_path.is_absolute() {
-        script_relative_path
+        context.absolute_source_path(&script_relative_path)?
     } else {
-        parent_context_directory.with_join_str(&params.path)
+        context.relative_source_path(&parent_context_directory, &params.path)?
     };
 
     let mut writer

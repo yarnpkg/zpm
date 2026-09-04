@@ -145,7 +145,7 @@
     },
     "enableWorkspaceHashes": {
       "type": "boolean",
-      "description": "Whether to compute and store per-workspace dependency tree hashes in the lockfile. When disabled, the `workspaces` section is omitted from the lockfile; features relying on it (e.g. `workspaces list --tree-hash`, lockfile-change attribution for `--since`) compute the hashes on demand.",
+      "description": "Whether to store per-workspace dependency tree hashes in the lockfile. When disabled, the `workspaces` section is omitted and commands such as `workspaces list --tree-hash` and `workspaces foreach --since` resolve hashes on demand. This may fetch dependency inputs; generated packages must already be cached, as hash queries do not execute preparation scripts.",
       "default": true
     },
     "enforceUnsafeHttp": {

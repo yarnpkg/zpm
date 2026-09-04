@@ -527,6 +527,14 @@ impl Project {
             }
         }
 
+        Ok(self.package_cache_handle())
+    }
+
+    pub(crate) fn package_cache_handle(&self) -> CompositeCache {
+        let global_cache_path
+            = self.global_cache_path();
+        let local_cache_path
+            = self.local_cache_path();
         let compression_algorithm
             = self.config.settings.compression_level.value;
 
@@ -552,11 +560,11 @@ impl Project {
         let local_cache = (!enable_global_cache)
             .then(|| DiskCache::new(local_cache_path, name_suffix, enable_immutable_cache, cleanable_local_cache));
 
-        Ok(CompositeCache::new(
+        CompositeCache::new(
             compression_algorithm,
             global_cache,
             local_cache,
-        ))
+        )
     }
 
     pub fn root_workspace(&self) -> &Workspace {
@@ -858,6 +866,26 @@ impl Project {
     }
 
     pub fn is_lockfile_fresh(&self) -> Result<bool, Error> {
+        fn normalize_lockfile_descriptor(descriptor: &mut Descriptor) {
+            match &descriptor.range {
+                Range::AnonymousSemver(params) => {
+                    descriptor.range = zpm_primitives::RegistrySemverRange {
+                        ident: None,
+                        range: params.range.clone(),
+                    }.into();
+                },
+
+                Range::AnonymousTag(params) => {
+                    descriptor.range = zpm_primitives::RegistryTagRange {
+                        ident: None,
+                        tag: params.tag.clone(),
+                    }.into();
+                },
+
+                _ => {},
+            }
+        }
+
         if self.config.settings.enable_hardened_mode.value {
             return Ok(false);
         }
@@ -885,47 +913,125 @@ impl Project {
             return Ok(false);
         }
 
-        let Some(walk) = walk_lockfile_workspaces(
-            &lockfile,
-            &self.workspaces,
-            self.config.settings.enable_transparent_workspaces.value,
-            UnresolvedDependencyPolicy::Abort,
-        ) else {
-            return Ok(false);
-        };
+        let mut graph
+            = BTreeMap::<Locator, BTreeSet<Locator>>::new();
 
-        if lockfile.resolutions != walk.used_resolutions {
+        let mut used_resolutions
+            = BTreeMap::<Descriptor, Locator>::new();
+
+        let mut used_entries
+            = BTreeSet::<Locator>::new();
+
+        let mut process_queue
+            = self.workspaces.iter()
+                .map(|workspace| workspace.locator())
+                .collect::<Vec<_>>();
+
+        let mut processed_queue
+            = BTreeSet::new();
+
+        while let Some(locator) = process_queue.pop() {
+            if !processed_queue.insert(locator.clone()) {
+                continue;
+            }
+
+            let mut child_locators
+                = BTreeSet::new();
+
+            let dependency_descriptors
+                = if let Some(workspace) = self.try_workspace_by_locator(&locator)? {
+                    workspace.manifest.remote.dependencies.values()
+                        .chain(workspace.manifest.remote.optional_dependencies.values())
+                        .chain(workspace.manifest.dev_dependencies.values())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                } else {
+                    let Some(entry) = lockfile.entries.get(&locator) else {
+                        return Ok(false);
+                    };
+
+                    if entry.resolution.locator != locator {
+                        return Ok(false);
+                    }
+
+                    used_entries.insert(locator.clone());
+
+                    entry.resolution.dependencies.values()
+                        .chain(entry.resolution.variants.iter())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                };
+
+            for mut descriptor in dependency_descriptors {
+                if let Some(workspace) = self.try_workspace_by_descriptor(&descriptor)? {
+                    let dependency_locator
+                        = workspace.locator();
+
+                    child_locators.insert(dependency_locator.clone());
+                    process_queue.push(dependency_locator);
+                    continue;
+                }
+
+                let range_details
+                    = descriptor.range.details();
+
+                if range_details.transient_resolution
+                    || range_details.fetch_before_resolve
+                    || matches!(descriptor.range, Range::Catalog(_))
+                {
+                    return Ok(false);
+                }
+
+                normalize_lockfile_descriptor(&mut descriptor);
+
+                let Some(dependency_locator) = lockfile.resolutions.get(&descriptor) else {
+                    return Ok(false);
+                };
+
+                let Some(entry) = lockfile.entries.get(dependency_locator) else {
+                    return Ok(false);
+                };
+
+                if entry.resolution.locator != *dependency_locator {
+                    return Ok(false);
+                }
+
+                used_resolutions.insert(descriptor, dependency_locator.clone());
+                used_entries.insert(dependency_locator.clone());
+                child_locators.insert(dependency_locator.clone());
+                process_queue.push(dependency_locator.clone());
+            }
+
+            graph.insert(locator, child_locators);
+        }
+
+        if lockfile.resolutions != used_resolutions {
             return Ok(false);
         }
 
-        if lockfile.entries.keys().cloned().collect::<BTreeSet<_>>() != walk.used_entries {
+        if lockfile.entries.keys().cloned().collect::<BTreeSet<_>>() != used_entries {
             return Ok(false);
         }
 
-        // With the setting off an empty stored map must not fail the
-        // check: the resolutions/entries equality comparisons above
-        // already cover the same ground.
-        if self.config.settings.enable_workspace_hashes.value
-            && lockfile.workspaces != walk.workspace_hashes {
+        if !self.config.settings.enable_workspace_hashes.value {
+            return Ok(true);
+        }
+
+        let workspace_locators
+            = self.workspaces.iter()
+                .map(|workspace| (workspace.name.clone(), workspace.locator()))
+                .collect::<Vec<_>>();
+
+        let workspace_hashes = compute_workspace_hashes(&graph, &workspace_locators);
+        if lockfile.workspaces != workspace_hashes {
             return Ok(false);
         }
 
         Ok(true)
     }
 
-    /// Computes the per-workspace dependency tree hashes on demand
-    /// from the given lockfile and the current workspace manifests,
-    /// for when the stored `workspaces` map is absent.
-    pub fn workspace_hashes_ondemand(
-        &self,
-        lockfile: &Lockfile,
-    ) -> Option<BTreeMap<Ident, Hash64>> {
-        walk_lockfile_workspaces(
-            lockfile,
-            &self.workspaces,
-            self.config.settings.enable_transparent_workspaces.value,
-            UnresolvedDependencyPolicy::PoisonSubtree,
-        ).map(|walk| walk.workspace_hashes)
+    pub async fn workspace_hashes_ondemand(&self, lockfile: &Lockfile) -> Result<BTreeMap<Ident, Hash64>, Error> {
+        crate::install::workspace_hashes_from_lockfile(self, lockfile, None).await
     }
 
     pub(crate) fn install_config_hash(&self) -> Hash64 {
@@ -1908,322 +2014,4 @@ impl Workspace {
 
         Ok(workspaces)
     }
-}
-
-fn normalize_lockfile_descriptor(descriptor: &mut Descriptor) {
-    match &descriptor.range {
-        Range::AnonymousSemver(params) => {
-            descriptor.range = zpm_primitives::RegistrySemverRange {
-                ident: None,
-                range: params.range.clone(),
-            }.into();
-        },
-
-        Range::AnonymousTag(params) => {
-            descriptor.range = zpm_primitives::RegistryTagRange {
-                ident: None,
-                tag: params.tag.clone(),
-            }.into();
-        },
-
-        _ => {},
-    }
-}
-
-/// Everything a lockfile workspace-graph walk consumed: the
-/// resolutions and entries it used (so freshness checks can verify
-/// the lockfile has nothing left over) and the per-workspace
-/// dependency tree hashes computed along the way (the same values
-/// installs store in the lockfile).
-pub(crate) struct LockfileWorkspaceWalk {
-    pub used_resolutions: BTreeMap<Descriptor, Locator>,
-    pub used_entries: BTreeSet<Locator>,
-    pub workspace_hashes: BTreeMap<Ident, Hash64>,
-}
-
-/// What to do when a dependency can't be resolved through the
-/// manifests or the lockfile.
-pub(crate) enum UnresolvedDependencyPolicy {
-    /// Abort the walk. Used by the freshness check, where an
-    /// unresolvable dependency must mean "not fresh".
-    Abort,
-
-    /// Poison only the subtrees that reach the unresolvable
-    /// dependency: those workspaces get no hash, every other
-    /// workspace stays attributable. Used by on-demand hash
-    /// computation, where one missing historical manifest (a
-    /// moved/renamed/untracked workspace) must not take down the
-    /// attribution of the whole project.
-    PoisonSubtree,
-}
-
-/// Walks the dependency graph rooted at the given workspaces,
-/// resolving descriptors through the lockfile, and computes the
-/// per-workspace dependency tree hashes from it. The manifests come
-/// from the given workspaces - the current project for freshness
-/// checks and `--tree-hash`, workspaces rebuilt from a git ref for
-/// cross-history comparisons. Returns `None` when the lockfile and
-/// manifests can't produce a consistent graph (the same conditions
-/// under which `is_lockfile_fresh` considers the install not fresh);
-/// under `PoisonSubtree` the walk keeps going and the poisoned
-/// workspaces are simply absent from the returned hashes.
-pub(crate) fn walk_lockfile_workspaces(
-    lockfile: &Lockfile,
-    workspaces: &[Workspace],
-    enable_transparent_workspaces: bool,
-    unresolved_policy: UnresolvedDependencyPolicy,
-) -> Option<LockfileWorkspaceWalk> {
-    let abort_on_unresolved = matches!(unresolved_policy, UnresolvedDependencyPolicy::Abort);
-
-    // Sentinel node standing in for any dependency the walk couldn't
-    // resolve; only reachable by poisoned subtrees, which get dropped
-    // from the hashes afterwards.
-    let poison_locator
-        = Locator::new(Ident::new("unresolved-dependency".to_string()), WorkspaceIdentReference {
-            ident: Ident::new("unresolved-dependency".to_string()),
-        }.into());
-
-    // Index maps rather than linear scans: the walk visits every
-    // descriptor of every workspace, which would otherwise be
-    // quadratic on large monorepos.
-    let workspaces_by_ident: BTreeMap<&Ident, &Workspace>
-        = workspaces.iter()
-            .map(|workspace| (&workspace.name, workspace))
-            .collect();
-
-    let workspaces_by_rel_path: BTreeMap<&Path, &Workspace>
-        = workspaces.iter()
-            .map(|workspace| (&workspace.rel_path, workspace))
-            .collect();
-
-    let find_workspace_by_locator = |locator: &Locator| -> Option<&Workspace> {
-        match &locator.reference {
-            Reference::WorkspaceIdent(params) => {
-                workspaces_by_ident.get(&params.ident).copied()
-            },
-
-            Reference::WorkspacePath(params) => {
-                workspaces_by_rel_path.get(&params.path).copied()
-            },
-
-            _ => None,
-        }
-    };
-
-    let find_workspace_by_descriptor = |descriptor: &Descriptor| -> Option<&Workspace> {
-        match &descriptor.range {
-            Range::WorkspaceIdent(params) => {
-                workspaces_by_ident.get(&params.ident).copied()
-            },
-
-            Range::WorkspacePath(params) => {
-                workspaces_by_rel_path.get(&params.path).copied()
-            },
-
-            Range::WorkspaceSemver(_) | Range::WorkspaceMagic(_) => {
-                workspaces_by_ident.get(&descriptor.ident).copied()
-            },
-
-            Range::RegistryTag(_) if enable_transparent_workspaces => {
-                workspaces_by_ident.get(&descriptor.ident).copied()
-            },
-
-            Range::RegistrySemver(params) if enable_transparent_workspaces => {
-                let ident
-                    = params.ident.as_ref().unwrap_or(&descriptor.ident);
-
-                workspaces_by_ident.get(ident).copied()
-                    .filter(|workspace| params.range.check(&workspace.manifest.remote.version.clone().unwrap_or_default()))
-            },
-
-            _ => None,
-        }
-    };
-
-    let mut graph
-        = BTreeMap::<Locator, BTreeSet<Locator>>::new();
-
-    let mut used_resolutions
-        = BTreeMap::<Descriptor, Locator>::new();
-
-    let mut used_entries
-        = BTreeSet::<Locator>::new();
-
-    let mut poisoned_locators
-        = BTreeSet::<Locator>::new();
-
-    // Records an unresolvable dependency: either the walk aborts
-    // (freshness) or the dependent subtree is poisoned and the walk
-    // continues.
-    let poison = |poisoned_locators: &mut BTreeSet<Locator>, child_locators: &mut BTreeSet<Locator>, poison_root: &Locator| -> Option<()> {
-        if abort_on_unresolved {
-            return None;
-        }
-
-        poisoned_locators.insert(poison_root.clone());
-        child_locators.insert(poison_root.clone());
-
-        Some(())
-    };
-
-    let mut process_queue: Vec<Locator>
-        = workspaces.iter()
-            .map(|workspace| workspace.locator())
-            .collect();
-
-    let mut processed_queue
-        = BTreeSet::new();
-
-    while let Some(locator) = process_queue.pop() {
-        if !processed_queue.insert(locator.clone()) {
-            continue;
-        }
-
-        let mut child_locators
-            = BTreeSet::new();
-
-        // The sentinel stands in for the unresolved dependency; only
-        // poisoned subtrees ever reach it.
-        let dependency_descriptors
-            = if let Some(workspace) = find_workspace_by_locator(&locator) {
-                workspace.manifest.remote.dependencies.values()
-                    .chain(workspace.manifest.remote.optional_dependencies.values())
-                    .chain(workspace.manifest.dev_dependencies.values())
-                    .cloned()
-                    .collect::<Vec<_>>()
-            } else {
-                // An unresolvable node poisons itself and isn't
-                // expanded: nothing below it can be hashed anyway.
-                let bail = |poisoned_locators: &mut BTreeSet<Locator>, locator: &Locator| -> Option<()> {
-                    if abort_on_unresolved {
-                        return None;
-                    }
-
-                    poisoned_locators.insert(locator.clone());
-
-                    Some(())
-                };
-
-                let Some(entry) = lockfile.entries.get(&locator) else {
-                    bail(&mut poisoned_locators, &locator)?;
-                    continue;
-                };
-
-                if entry.resolution.locator != locator {
-                    bail(&mut poisoned_locators, &locator)?;
-                    continue;
-                }
-
-                used_entries.insert(locator.clone());
-
-                entry.resolution.dependencies.values()
-                    .chain(entry.resolution.variants.iter())
-                    .cloned()
-                    .collect::<Vec<_>>()
-            };
-
-        for mut descriptor in dependency_descriptors {
-            if let Some(workspace) = find_workspace_by_descriptor(&descriptor) {
-                let dependency_locator
-                    = workspace.locator();
-
-                child_locators.insert(dependency_locator.clone());
-                process_queue.push(dependency_locator);
-                continue;
-            }
-
-            let range_details
-                = descriptor.range.details();
-
-            // Under the freshness policy these ranges must abort the
-            // walk right away. Under the poisoning policy they fall
-            // through to the lockfile instead: git and url dependencies
-            // set `fetch_before_resolve` while their resolutions are
-            // serialized in the lockfile and fully reconstructable, so
-            // poisoning them before even consulting it would over-
-            // attribute the loss to the whole dependent subtree.
-            if abort_on_unresolved
-                && (range_details.transient_resolution
-                    || range_details.fetch_before_resolve
-                    || matches!(descriptor.range, Range::Catalog(_)))
-            {
-                poison(&mut poisoned_locators, &mut child_locators, &poison_locator)?;
-                continue;
-            }
-
-            normalize_lockfile_descriptor(&mut descriptor);
-
-            let Some(dependency_locator) = lockfile.resolutions.get(&descriptor) else {
-                poison(&mut poisoned_locators, &mut child_locators, &poison_locator)?;
-                continue;
-            };
-
-            let Some(entry) = lockfile.entries.get(dependency_locator) else {
-                poison(&mut poisoned_locators, &mut child_locators, &poison_locator)?;
-                continue;
-            };
-
-            if entry.resolution.locator != *dependency_locator {
-                poison(&mut poisoned_locators, &mut child_locators, &poison_locator)?;
-                continue;
-            }
-
-            used_resolutions.insert(descriptor, dependency_locator.clone());
-            used_entries.insert(dependency_locator.clone());
-            child_locators.insert(dependency_locator.clone());
-            process_queue.push(dependency_locator.clone());
-        }
-
-        graph.insert(locator, child_locators);
-    }
-
-    let workspace_locators: Vec<(Ident, Locator)>
-        = workspaces.iter()
-            .map(|workspace| (workspace.name.clone(), workspace.locator()))
-            .collect();
-
-    let mut workspace_hashes
-        = compute_workspace_hashes(&graph, &workspace_locators);
-
-    // Drop the hashes of the workspaces whose trees reach a poisoned
-    // node: those are unattributable, but every other workspace keeps
-    // its hash.
-    if !poisoned_locators.is_empty() {
-        let mut reverse_graph: BTreeMap<&Locator, Vec<&Locator>>
-            = BTreeMap::new();
-
-        for (node, children) in &graph {
-            for child in children {
-                reverse_graph.entry(child).or_default().push(node);
-            }
-        }
-
-        let mut tainted_locators
-            = BTreeSet::new();
-
-        let mut taint_queue: Vec<&Locator>
-            = poisoned_locators.iter().collect();
-
-        while let Some(node) = taint_queue.pop() {
-            if !tainted_locators.insert(node.clone()) {
-                continue;
-            }
-
-            if let Some(parents) = reverse_graph.get(node) {
-                taint_queue.extend(parents.iter().copied());
-            }
-        }
-
-        workspace_hashes.retain(|name, _| {
-            workspaces.iter()
-                .find(|workspace| workspace.name == *name)
-                .map_or(false, |workspace| !tainted_locators.contains(&workspace.locator()))
-        });
-    }
-
-    Some(LockfileWorkspaceWalk {
-        used_resolutions,
-        used_entries,
-        workspace_hashes,
-    })
 }

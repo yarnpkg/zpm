@@ -176,15 +176,14 @@ impl WorkspacesList {
         // (enableWorkspaceHashes off, or a lockfile from before they
         // existed), compute them on demand from the current lockfile
         // and manifests.
-        let stored_tree_hashes
-            = if self.json && self.tree_hash {
-            project.lockfile().ok().map(|lockfile| {
-                if lockfile.workspaces.is_empty() {
-                    project.workspace_hashes_ondemand(&lockfile).unwrap_or_default()
-                } else {
-                    lockfile.workspaces
-                }
-            })
+        let stored_tree_hashes = if self.json && self.tree_hash {
+            match project.lockfile().ok() {
+                Some(lockfile) if lockfile.workspaces.is_empty() => {
+                    Some(project.workspace_hashes_ondemand(&lockfile).await?)
+                },
+                Some(lockfile) => Some(lockfile.workspaces),
+                None => None,
+            }
         } else {
             None
         };

@@ -43,9 +43,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .clone();
 
     let script_path = if script_relative_path.is_absolute() {
-        script_relative_path
+        context.absolute_source_path(&script_relative_path)?
     } else {
-        parent_context_directory.with_join_str(&params.path)
+        context.relative_source_path(&parent_context_directory, &params.path)?
     };
 
     let package_subdir
@@ -56,6 +56,10 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         = locator.to_file_string();
 
     let pkg_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
+        if !context.allow_preparation {
+            return Err(Error::HashPrerequisiteUnavailable(locator.clone()));
+        }
+
         if !is_exec_allowed(context, locator) {
             return Err(Error::ExecScriptsDisabled(locator.clone()));
         }

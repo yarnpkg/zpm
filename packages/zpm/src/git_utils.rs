@@ -1,25 +1,19 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::{BufRead, BufReader, Read, Write},
-    process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
 };
 
 use itertools::Itertools;
+use tokio::process::Command;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::{Hash64, IoResultExt, LastModifiedAt, Path, ToFileString};
 
 use crate::{
     error::Error,
     lockfile::Lockfile,
-    manifest::helpers::parse_manifest,
     project::{
-        walk_lockfile_workspaces,
-        UnresolvedDependencyPolicy,
         Project,
         Workspace,
-        WorkspaceInfo,
         LOCKFILE_NAME,
     },
     script::ScriptEnvironment,
@@ -191,6 +185,13 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
         None => fetch_branch_base(project).await?,
     };
 
+    let since_ref = ScriptEnvironment::new()?
+        .with_cwd(project.project_cwd.clone())
+        .run_exec("git", ["rev-parse", "--verify", "--end-of-options", &format!("{}^{{commit}}", since_ref)])
+        .await?
+        .ok()?
+        .stdout_text()?;
+
     let changed_files
         = fetch_changed_files(&project, Some(&since_ref)).await?;
 
@@ -200,8 +201,6 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
     let lockfile_path
         = project.project_cwd.with_join_str(LOCKFILE_NAME);
 
-    let lockfile_changed
-        = changed_files.contains(&lockfile_path);
 
     for file in &changed_files {
         // Skip the lockfile itself - we handle it separately via hash comparison
@@ -223,8 +222,9 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
         }
     }
 
-    // If the lockfile changed, compare workspace hashes to find affected workspaces
-    if lockfile_changed {
+    // Patch/local content and workspace-only edges can change a tree without
+    // changing yarn.lock when its workspace hashes are omitted.
+    if !changed_files.is_empty() {
         let current_lockfile
             = project.lockfile().ok();
 
@@ -239,29 +239,19 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
             // side with an on-demand side stays valid.
             let current_hashes
                 = if current.workspaces.is_empty() {
-                    project.workspace_hashes_ondemand(current)
+                    project.workspace_hashes_ondemand(current).await?
                 } else {
-                    Some(current.workspaces.clone())
+                    current.workspaces.clone()
                 };
 
             let old_hashes
                 = if old.workspaces.is_empty() {
-                    // A wedged fetch must degrade to pre-#256 attribution
-                    // rather than hang `foreach --since` forever; the
-                    // timeout lives inside the helper so it also kills
-                    // the git child it abandons.
-                    fetch_workspaces_at_ref(project, &since_ref).await.ok()
-                        .and_then(|old_workspaces| walk_lockfile_workspaces(
-                            old,
-                            &old_workspaces,
-                            project.config.settings.enable_transparent_workspaces.value,
-                            UnresolvedDependencyPolicy::PoisonSubtree,
-                        ).map(|walk| walk.workspace_hashes))
+                    Some(fetch_workspace_hashes_at_ref(project, &since_ref, old).await?)
                 } else {
                     Some(old.workspaces.clone())
                 };
 
-            if let (Some(current_hashes), Some(old_hashes)) = (current_hashes, old_hashes) {
+            if let Some(old_hashes) = old_hashes {
                 for workspace in &project.workspaces {
                     if changed_workspaces.contains_key(&workspace.name) {
                         continue;
@@ -278,7 +268,8 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
                         if current_hash != old_hash {
                             changed_workspaces.entry(workspace.name.clone())
                                 .or_default()
-                                .insert(lockfile_path.clone());
+                                .insert(changed_files.get(&lockfile_path)
+                                    .unwrap_or_else(|| changed_files.first().unwrap()).clone());
                         }
                     }
                 }
@@ -289,184 +280,111 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
     Ok(changed_workspaces)
 }
 
-/// Fetches the workspace manifests at the given git ref in a single
-/// `git cat-file --batch` conversation and rebuilds `Workspace`s
-/// from them, so the walk in `fetch_changed_workspaces` can hash the
-/// dependency trees as they were at the ref. Each request is written
-/// and its response fully read before the next request goes out, so
-/// neither pipe can ever overflow. Manifests missing at the ref
-/// (untracked, renamed workspaces) or failing to parse are silently
-/// skipped, so the caller can degrade gracefully.
-///
-/// The whole conversation runs under a hard timeout, and on timeout
-/// the git child is killed before the future is abandoned - dropping
-/// the await alone wouldn't stop it, and the runtime waits for
-/// blocking tasks on shutdown, so a wedged child would otherwise
-/// hang the entire command.
-async fn fetch_workspaces_at_ref(project: &Project, git_ref: &str) -> Result<Vec<Workspace>, Error> {
-    let manifest_paths: Vec<(Path, String)>
-        = project.workspaces.iter()
-            .map(|workspace| {
-                let git_path = if workspace.rel_path == Path::new() {
-                    "package.json".to_string()
-                } else {
-                    format!("{}/package.json", workspace.rel_path.to_file_string())
-                };
+/// Owns a private checkout and index; neither the user's index nor worktree is
+/// modified. Keeping the complete tree also covers patch and file: inputs without
+/// maintaining a second set of dependency-protocol rules here.
+struct GitSnapshot(Path);
 
-                (workspace.rel_path.clone(), git_path)
-            })
-            .collect();
+impl Drop for GitSnapshot {
+    fn drop(&mut self) {
+        let _ = self.0.fs_rm();
+    }
+}
 
-    let rel_paths: Vec<Path>
-        = manifest_paths.iter()
-            .map(|(rel_path, _)| rel_path.clone())
-            .collect();
+async fn fetch_workspace_hashes_at_ref(project: &Project, git_ref: &str, lockfile: &Lockfile) -> Result<BTreeMap<Ident, Hash64>, Error> {
+    let git_root
+        = find_root(&project.project_cwd)?;
+    let snapshot
+        = GitSnapshot(Path::temp_dir_pattern("yarn-hashes-<>")?);
 
-    let cwd
-        = project.project_cwd.clone();
-
-    let git_ref
-        = git_ref.to_string();
-
-    // The git child lives in this slot so the timeout below can kill
-    // it: dropping the blocking task's await wouldn't, and the runtime
-    // waits for blocking tasks during shutdown.
-    let child_slot
-        = Arc::new(Mutex::new(None::<Child>));
-
-    let blocking_slot
-        = child_slot.clone();
-
-    let blocking
-        = tokio::task::spawn_blocking(move || -> Result<Vec<Option<String>>, Error> {
-            let spawn_error = |error: std::io::Error| Error::SpawnFailed {
-                name: "git".to_string(),
-                path: cwd.clone(),
-                error: Arc::new(Box::new(error)),
-            };
-
-            let mut child
-                = Command::new("git")
-                    .args(["cat-file", "--batch"])
-                    .current_dir(cwd.to_path_buf())
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(spawn_error)?;
-
-            let mut child_stdin
-                = child.stdin.take().unwrap();
-
-            let mut child_stdout
-                = BufReader::new(child.stdout.take().unwrap());
-
-            *blocking_slot.lock().unwrap() = Some(child);
-
-            let mut contents
-                = Vec::with_capacity(manifest_paths.len());
-
-            for (_, git_path) in &manifest_paths {
-                let request
-                    = format!("{}:{}\n", git_ref, git_path);
-
-                child_stdin.write_all(request.as_bytes())
-                    .and_then(|_| child_stdin.flush())
-                    .map_err(spawn_error)?;
-
-                let mut header
-                    = String::new();
-
-                child_stdout.read_line(&mut header)
-                    .map_err(spawn_error)?;
-
-                // `<oid> <type> <size>` on success, `<request> missing`
-                // when the path doesn't exist at the ref.
-                let Some(size) = header.trim_end().rsplit(' ').next().and_then(|field| field.parse::<usize>().ok()) else {
-                    contents.push(None);
-                    continue;
-                };
-
-                let mut content
-                    = vec![0u8; size];
-
-                // Every object ends with a newline separator.
-                let mut separator
-                    = [0u8; 1];
-
-                child_stdout.read_exact(&mut content)
-                    .and_then(|_| child_stdout.read_exact(&mut separator))
-                    .map_err(spawn_error)?;
-
-                contents.push(Some(String::from_utf8_lossy(&content).to_string()));
-            }
-
-            drop(child_stdin);
-
-            // Take the child back from the slot; if the timeout already
-            // took it for killing, the conversation is over anyway.
-            let Some(mut child) = blocking_slot.lock().unwrap().take() else {
-                return Err(Error::ChildProcessFailed("git".to_string()));
-            };
-
-            if !child.wait().map_err(spawn_error)?.success() {
-                return Err(Error::ChildProcessFailed("git".to_string()));
-            }
-
-            Ok(contents)
-        });
-
-    let contents
-        = match tokio::time::timeout(std::time::Duration::from_secs(60), blocking).await {
-            Ok(result) => result.map_err(|_| Error::ChildProcessFailed("git".to_string()))??,
-
-            Err(_) => {
-                if let Some(mut child) = child_slot.lock().unwrap().take() {
-                    let _ = child.kill();
-                }
-
-                return Err(Error::ChildProcessFailed("git".to_string()));
-            },
-        };
-
-    let mut workspaces = Vec::new();
-
-    for (rel_path, manifest_content) in rel_paths.iter().zip(contents) {
-        let Some(manifest_content) = manifest_content else {
-            continue;
-        };
-
-        let Ok(manifest) = parse_manifest(&manifest_content) else {
-            continue;
-        };
-
-        workspaces.push(Workspace::from_info(&project.project_cwd, WorkspaceInfo {
-            rel_path: rel_path.clone(),
-            manifest,
-            last_changed_at: 0,
-        })?);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        snapshot.0.fs_set_permissions(std::fs::Permissions::from_mode(0o700))?;
     }
 
-    Ok(workspaces)
+    let checkout
+        = snapshot.0.with_join_str("tree");
+    let index
+        = snapshot.0.with_join_str("index");
+    checkout.fs_create_dir_all()?;
+    // Workspace discovery canonicalizes paths; use the same spelling for the
+    // source boundary (notably /var versus /private/var on macOS).
+    let checkout
+        = checkout.fs_canonicalize()?;
+
+    let prefix
+        = format!("--prefix={}/", checkout.to_file_string());
+
+    for args in [
+        vec!["-c", "core.sparseCheckout=false", "read-tree", git_ref],
+        vec!["checkout-index", "--all", &prefix],
+    ] {
+        let output = tokio::time::timeout(std::time::Duration::from_secs(120), Command::new("git")
+            .args(args)
+            .current_dir(git_root.to_path_buf())
+            .env("GIT_INDEX_FILE", index.to_path_buf())
+            .env("GIT_WORK_TREE", checkout.to_path_buf())
+            .kill_on_drop(true)
+            .output())
+            .await.map_err(|_| Error::TaskTimeout)??;
+
+        if !output.status.success() {
+            return Err(Error::ChildProcessFailed("git".to_string()));
+        }
+    }
+
+    let project_cwd
+        = checkout.with_join(&project.project_cwd.relative_to(&git_root));
+    let rc_path = project.config.project_config_path.as_ref()
+        .and_then(|path| path.forward_relative_to(&project.project_cwd))
+        .unwrap_or_else(|| Path::try_from(".yarnrc.yml").unwrap());
+    let rc_content = project_cwd.with_join(&rc_path)
+        .fs_read_text().ok_missing()?.unwrap_or_else(|| "{}".to_string());
+    let config
+        = project.config.with_historical_graph_settings(&rc_content).ok_or(Error::Unsupported)?;
+    let root
+        = Workspace::from_root_path(&project_cwd)?;
+    let mut workspaces
+        = root.workspaces().await?;
+    workspaces.insert(0, root);
+
+    let historical_project = Project {
+        workspaces_by_ident: workspaces.iter().enumerate()
+            .map(|(idx, workspace)| (workspace.name.clone(), idx)).collect(),
+        workspaces_by_rel_path: workspaces.iter().enumerate()
+            .map(|(idx, workspace)| (workspace.rel_path.clone(), idx)).collect(),
+        workspaces,
+        config,
+        project_cwd,
+        package_cwd: project.package_cwd.clone(),
+        shell_cwd: project.shell_cwd.clone(),
+        last_modified_at: LastModifiedAt::new(),
+        install_state: None,
+        http_client: project.http_client.clone(),
+        clone_limiter: project.clone_limiter.clone(),
+    };
+
+    crate::install::workspace_hashes_from_lockfile(&historical_project, lockfile, Some((&git_root, &checkout))).await
 }
 
 /// Fetches and parses the lockfile at a specific git ref.
 async fn fetch_lockfile_at_ref(project: &Project, git_ref: &str) -> Result<Lockfile, Error> {
+    let git_root
+        = find_root(&project.project_cwd)?;
+    let lockfile_path
+        = project.project_cwd.relative_to(&git_root).with_join_str(LOCKFILE_NAME);
     let lockfile_content
         = ScriptEnvironment::new()?
             .with_cwd(project.project_cwd.clone())
-            .run_exec("git", ["show", &format!("{}:{}", git_ref, LOCKFILE_NAME)])
+            .run_exec("git", ["show", &format!("{}:{}", git_ref, lockfile_path.to_file_string())])
             .await?
             .ok()?
             .stdout_text()?;
 
-    if lockfile_content.is_empty() {
-        return Ok(Lockfile::new());
-    }
-
-    // Legacy Berry lockfiles start with '#'
-    if lockfile_content.starts_with('#') {
-        return Ok(Lockfile::new());
+    // No native historical graph is available for empty or legacy Berry files.
+    if lockfile_content.is_empty() || lockfile_content.starts_with('#') {
+        return Err(Error::Unsupported);
     }
 
     let lockfile: Lockfile

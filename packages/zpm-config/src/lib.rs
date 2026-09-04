@@ -1331,6 +1331,76 @@ impl Configuration {
         Ok(env_vars)
     }
 
+    /// Restores committed graph inputs with the current user/environment layers.
+    /// Historical auth, dotenv files and project interpolation aren't evaluated.
+    pub fn with_historical_graph_settings(&self, text: &str) -> Option<Configuration> {
+        fn graph_settings(text: &str, historical: bool) -> Option<String> {
+            let mut value
+                = serde_yaml::from_str::<serde_yaml::Value>(text).ok()?;
+
+            if value.is_null() {
+                value = serde_yaml::Value::Mapping(Default::default());
+            }
+
+            value.as_mapping_mut()?.retain(|key, _| matches!(key.as_str(),
+                Some("onConflict" | "enableTransparentWorkspaces" | "catalog" | "catalogs" | "packageExtensions" | "workspaceProfiles" | "compressionLevel" | "unstableIslands")
+            ));
+
+            let text
+                = serde_yaml::to_string(&value).ok()?;
+
+            // Git cannot recover the environment used by an older project rc.
+            if historical && text.contains('$') {
+                return None;
+            }
+
+            Some(text)
+        }
+
+        let user_text = match &self.user_config_path {
+            Some(path) => path.fs_read_text().ok_missing().ok()?.unwrap_or_default(),
+            None => String::new(),
+        };
+        let user_rc = RcFile {
+            path: self.user_config_path.clone().unwrap_or_default(),
+            text: Some(graph_settings(&user_text, false)?),
+        };
+        let project_rc = RcFile {
+            path: self.project_config_path.clone().unwrap_or_default(),
+            text: Some(graph_settings(text, true)?),
+        };
+        let (user, project, _)
+            = deserialize_rc_pair(Some(&user_rc), Some(&project_rc)).ok()?;
+        let context
+            = self.context.clone();
+        // Environment overrides are applied by the generated root merge, not
+        // by the individual fields' MergeSettings implementations.
+        let graph = Settings::merge(&context, user, project, || panic!("No configuration found"));
+        let mut settings = Settings {
+            enable_transparent_workspaces: graph.enable_transparent_workspaces,
+            catalog: graph.catalog,
+            catalogs: graph.catalogs,
+            package_extensions: graph.package_extensions,
+            workspace_profiles: graph.workspace_profiles,
+            compression_level: graph.compression_level,
+            unstable_islands: graph.unstable_islands,
+            ..self.settings.clone()
+        };
+
+        settings.catalogs.entry("default".to_string())
+            .or_default()
+            .extend(std::mem::take(&mut settings.catalog));
+
+        Some(Configuration {
+            settings,
+            user_config_path: self.user_config_path.clone(),
+            project_config_path: self.project_config_path.clone(),
+            requires_trust: false,
+            env_files: BTreeMap::new(),
+            context,
+        })
+    }
+
     pub fn load(context: &ConfigurationContext, last_modified_at: &mut LastModifiedAt) -> Result<Configuration, ConfigurationError> {
         let project_cwd
             = context.project_cwd.as_ref();

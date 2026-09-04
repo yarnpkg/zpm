@@ -460,6 +460,12 @@ pub enum Error {
     #[error("{} can't be built with the exec: protocol because all scripts have been disabled.", .0.to_print_string())]
     ExecScriptsDisabled(Locator),
 
+    #[error("Computing workspace hashes requires a cached prepared artifact for {}; run yarn install --force first", .0.to_print_string())]
+    HashPrerequisiteUnavailable(Locator),
+
+    #[error("Historical source is not available inside the repository snapshot: {}", .0.to_print_string())]
+    HistoricalSourceUnavailable(Path),
+
     #[error("Invalid pack pattern ({0})")]
     InvalidPackPattern(String),
 
