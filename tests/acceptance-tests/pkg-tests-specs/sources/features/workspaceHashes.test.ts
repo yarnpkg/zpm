@@ -97,11 +97,13 @@ const makeHashesEnv = (fn: RunFunction) => makeTemporaryMonorepoEnv(
   {
     private: true,
     workspaces: [`packages/*`],
+    scripts: {print: `echo Root Workspace`},
   },
   {
     [`packages/workspace-a`]: {
       name: `workspace-a`,
       version: `1.0.0`,
+      scripts: {print: `echo Test Workspace A`},
       dependencies: {
         [`no-deps`]: `1.0.0`,
       },
@@ -109,6 +111,7 @@ const makeHashesEnv = (fn: RunFunction) => makeTemporaryMonorepoEnv(
     [`packages/workspace-b`]: {
       name: `workspace-b`,
       version: `1.0.0`,
+      scripts: {print: `echo Test Workspace B`},
       dependencies: {
         [`workspace-a`]: `workspace:*`,
       },
@@ -134,7 +137,10 @@ describe(`Features`, () => {
         ]);
         expect(lockfile.workspaces).toEqual(stored);
 
-        // On-demand computation against the same graph produces the exact same hashes.
+        // The query uses stored hashes whenever present, regardless of the flag.
+        // Remove them through install before testing on-demand computation.
+        await run(`install`, {enableWorkspaceHashes: false});
+        expect(`workspaces` in await readLockfile(path)).toBe(false);
         const onDemand = await readTreeHashes(run, false);
         expect(onDemand).toEqual(stored);
       }),
@@ -233,7 +239,7 @@ describe(`Features`, () => {
             await run(`up`, `-R`, `no-deps`, {enableWorkspaceHashes: false});
           });
 
-          await expectForEachSince(run, [`Test Workspace A`]);
+          await expectForEachSince(run, [`Test Workspace A`], {enableWorkspaceHashes: false});
         },
       ),
     );
@@ -259,6 +265,11 @@ describe(`Features`, () => {
           await git(`add`, `-A`);
           await git(`commit`, `-m`, `Hashes ${enableWorkspaceHashes ? `on` : `off`}`);
         }
+
+        // A positive control prevents an empty-output assertion from passing
+        // just because the fixture has no runnable workspace scripts.
+        await xfs.writeFilePromise(`${path}/packages/workspace-a/README.md` as PortablePath, `Changed\n`);
+        await expectForEachSince(run, [`Test Workspace A`], {enableWorkspaceHashes: true});
       }),
     );
 
@@ -331,6 +342,8 @@ describe(`Features`, () => {
             expect(Object.keys(stored).sort()).toEqual([`root-workspace`, `workspace-a`, `workspace-b`]);
             expect((await readLockfile(path)).workspaces).toEqual(stored);
 
+            await run(`install`, {enableWorkspaceHashes: false});
+            expect(`workspaces` in await readLockfile(path)).toBe(false);
             const onDemand = await readTreeHashes(run, false);
             expect(onDemand).toEqual(stored);
           },
@@ -574,13 +587,13 @@ describe(`Features`, () => {
             await yarn.writeConfiguration(homePath, {enableTransparentWorkspaces: true});
             await run(`install`, {enableWorkspaceHashes: true, env});
             await expect(source(`require('no-deps/package.json')`, {cwd: `${path}/packages/workspace-a`, env})).resolves.toEqual({name: `no-deps`, version: `1.0.0`});
-            const stored = await readTreeHashes(run, true, env);
+            const stored = await readTreeHashes(run, true, {env});
             const git = await gitInit(path, `Environment overrides user settings`);
 
             for (const enableWorkspaceHashes of [false, true]) {
               await run(`install`, {enableWorkspaceHashes, env});
               expect(`workspaces` in await readLockfile(path)).toBe(enableWorkspaceHashes);
-              expect(await readTreeHashes(run, enableWorkspaceHashes, env)).toEqual(stored);
+              expect(await readTreeHashes(run, enableWorkspaceHashes, {env})).toEqual(stored);
               await expectForEachSince(run, [], {enableWorkspaceHashes, env});
               await git(`add`, `-A`);
               await git(`commit`, `-m`, `Hashes ${enableWorkspaceHashes}`);
