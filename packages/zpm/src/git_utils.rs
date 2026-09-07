@@ -7,7 +7,7 @@ use itertools::Itertools;
 use tokio::process::Command;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
-use zpm_utils::{Hash64, IoResultExt, Path, ToFileString};
+use zpm_utils::{Hash64, Path, ToFileString};
 use serde::Deserialize;
 
 use crate::{
@@ -211,29 +211,13 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
 
     // Configuration changes intentionally invalidate every workspace. There is
     // no need to parse or replay historical configuration for this first version.
+    // Rely on the Git-aware changed_files set rather than comparing raw bytes,
+    // which can disagree when checkout filters such as core.autocrlf apply.
     let config_path
         = project.config.project_config_path.clone()
             .unwrap_or_else(|| project.project_cwd.with_join_str(".yarnrc.yml"));
-    let git_root
-        = find_root(&project.project_cwd)?;
-    let config_relative
-        = config_path.relative_to(&git_root);
-    let old_config
-        = ScriptEnvironment::new()?
-            .with_cwd(git_root)
-            .run_exec("git", ["show", &format!("{}:{}", since_ref, config_relative.to_file_string())])
-            .await?;
-    let old_hash
-        = if old_config.success() {
-            Some(Hash64::from_data(old_config.output().stdout))
-        } else {
-            None
-        };
-    let current_hash
-        = config_path.fs_read().ok_missing()?
-            .map(Hash64::from_data);
 
-    if current_hash != old_hash {
+    if changed_files.contains(&config_path) {
         return Ok(all_workspaces_changed(project, Arc::new(BTreeSet::from([config_path]))));
     }
 
