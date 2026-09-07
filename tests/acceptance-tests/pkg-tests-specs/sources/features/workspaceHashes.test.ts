@@ -9,16 +9,47 @@ async function readLockfile(path: PortablePath) {
   return JSON.parse(raw);
 }
 
-async function readTreeHashes(run: tests.Run, enableWorkspaceHashes: boolean, env?: Record<string, string>) {
-  const {stdout} = await run(`workspaces`, `list`, `--json`, `--tree-hash`, {enableWorkspaceHashes, env});
+async function readTreeHashes(run: tests.Run, enableWorkspaceHashes?: boolean, options?: Record<string, any>) {
+  const callOptions: Record<string, any> = {...options};
+  if (typeof enableWorkspaceHashes === `boolean`)
+    callOptions.enableWorkspaceHashes = enableWorkspaceHashes;
+
+  const {stdout} = await run(`workspaces`, `list`, `--json`, `--tree-hash`, callOptions);
   const workspaces = stdout.trim().split(`\n`).map(line => JSON.parse(line));
 
-  // Equality alone would also accept two missing hashes.
   for (const workspace of workspaces)
     expect(workspace.treeHash).toMatch(/^[0-9a-f]+$/);
 
-  return Object.fromEntries(workspaces.map(({name, treeHash}) => [name, treeHash]));
+  return Object.fromEntries(workspaces.map(({location, name, treeHash}) => [
+    name ?? (location === `.` ? `root-workspace` : location),
+    treeHash,
+  ]));
 }
+
+const forEachVerboseDone = tests.FEATURE_CHECKS.forEachVerboseDone
+  ? []
+  : [`Done\n`];
+
+const gitInit = async (path: PortablePath, message = `Initial commit`) => {
+  const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
+  await exec.execGitInit({cwd: path});
+  await git(`add`, `-A`);
+  await git(`commit`, `-m`, message);
+  return git;
+};
+
+const expectForEachSince = async (
+  run: tests.Run,
+  expectedWorkspaces: Array<string>,
+  options: Record<string, any> = {},
+) => {
+  const expectedStdout = [...expectedWorkspaces.map(name => `${name}\n`), ...forEachVerboseDone].join(``);
+  await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, options)).resolves.toEqual({
+    code: 0,
+    stderr: ``,
+    stdout: expectedStdout,
+  });
+};
 
 const startServer = async (listener: RequestListener) => {
   const server = http.createServer(listener);
@@ -59,10 +90,6 @@ const NO_DEPS_MANIFEST_PATCH = `diff --git a/package.json b/package.json
  }
 `;
 
-const forEachVerboseDone = tests.FEATURE_CHECKS.forEachVerboseDone
-  ? []
-  : [`Done\n`];
-
 // A monorepo whose workspace-a depends on a registry package and
 // workspace-b depends on workspace-a, so each workspace has a
 // different dependency tree to hash.
@@ -93,10 +120,11 @@ const makeHashesEnv = (fn: RunFunction) => makeTemporaryMonorepoEnv(
 describe(`Features`, () => {
   describe(`Workspace hashes`, () => {
     test(
-      `the lockfile stores one dependency tree hash per workspace by default`,
+      `the lockfile stores one dependency tree hash per workspace by default, matching on-demand hashes`,
       makeHashesEnv(async ({path, run}) => {
         await run(`install`);
 
+        const stored = await readTreeHashes(run);
         const lockfile = await readLockfile(path);
 
         expect(Object.keys(lockfile.workspaces ?? {}).sort()).toEqual([
@@ -104,10 +132,11 @@ describe(`Features`, () => {
           `workspace-a`,
           `workspace-b`,
         ]);
+        expect(lockfile.workspaces).toEqual(stored);
 
-        for (const hash of Object.values(lockfile.workspaces ?? {})) {
-          expect(hash).toMatch(/^[0-9a-f]+$/);
-        }
+        // On-demand computation against the same graph produces the exact same hashes.
+        const onDemand = await readTreeHashes(run, false);
+        expect(onDemand).toEqual(stored);
       }),
     );
 
@@ -171,85 +200,69 @@ describe(`Features`, () => {
     );
 
     test(
-      `--tree-hash returns the same hashes whether they are stored or computed on demand`,
-      makeHashesEnv(async ({path, run}) => {
-        // Setting off: no stored section, hashes computed on demand.
-        await run(`install`, {enableWorkspaceHashes: false});
-        const onDemand = await run(`workspaces`, `list`, `--json`, `--tree-hash`);
-
-        // Setting on: the section comes back storing the very same hashes.
-        await run(`install`);
-        const stored = await run(`workspaces`, `list`, `--json`, `--tree-hash`);
-
-        expect(stored.stdout).toEqual(onDemand.stdout);
-        expect(Object.keys((await readLockfile(path)).workspaces ?? {}).sort()).toEqual([
-          `root-workspace`,
-          `workspace-a`,
-          `workspace-b`,
-        ]);
-      }),
-    );
-
-    test(
       `--since still attributes lockfile changes to the affected workspaces when enableWorkspaceHashes is false`,
-      makeTemporaryEnv(
+      makeTemporaryMonorepoEnv(
         {
           private: true,
           workspaces: [`packages/*`],
         },
-        async ({path, run}) => {
-          await fs.writeJson(`${path}/packages/workspace-a/package.json` as PortablePath, {
+        {
+          [`packages/workspace-a`]: {
             name: `workspace-a`,
             version: `1.0.0`,
-            scripts: {
-              print: `echo Test Workspace A`,
-            },
-            dependencies: {
-              [`one-range-dep`]: `1.0.0`,
-            },
-          });
-
-          await fs.writeJson(`${path}/packages/workspace-b/package.json` as PortablePath, {
+            scripts: {print: `echo Test Workspace A`},
+            dependencies: {[`one-range-dep`]: `1.0.0`},
+          },
+          [`packages/workspace-b`]: {
             name: `workspace-b`,
             version: `1.0.0`,
-            scripts: {
-              print: `echo Test Workspace B`,
-            },
-          });
-
-          const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
-
-          // Install with only no-deps@1.0.0 visible, so one-range-dep
-          // resolves to no-deps@1.0.0.
+            scripts: {print: `echo Test Workspace B`},
+          },
+        },
+        async ({path, run}) => {
+          // Install with only no-deps@1.0.0 visible, so one-range-dep resolves to no-deps@1.0.0.
           await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
             await run(`install`, {enableWorkspaceHashes: false});
           });
 
-          await exec.execGitInit({cwd: path});
-          await git(`add`, `-A`);
-          await git(`commit`, `-m`, `First commit`);
+          await gitInit(path, `First commit`);
 
-          // Now make no-deps@1.1.0 visible and upgrade; only the
-          // lockfile changes, and only workspace-a's dependency tree
-          // changed through it.
+          // Now make no-deps@1.1.0 visible and upgrade; only the lockfile changes,
+          // and only workspace-a's dependency tree changed through it.
           await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`, `1.1.0`])]]), async () => {
             await run(`up`, `-R`, `no-deps`, {enableWorkspaceHashes: false});
           });
 
-          await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`)).resolves.toEqual({
-            code: 0,
-            stderr: ``,
-            stdout: [
-              `Test Workspace A\n`,
-              ...forEachVerboseDone,
-            ].join(``),
-          });
+          await expectForEachSince(run, [`Test Workspace A`]);
         },
       ),
     );
 
+    test(
+      `--since toggling hashes via environment overrides selects nothing across commits`,
+      makeHashesEnv(async ({path, run}) => {
+        await run(`install`, {enableWorkspaceHashes: true});
+        const stored = await readTreeHashes(run, true);
+        const git = await gitInit(path, `Hashes on`);
+
+        for (const enableWorkspaceHashes of [false, true]) {
+          await run(`install`, {enableWorkspaceHashes});
+          const lockfile = await readLockfile(path);
+          if (enableWorkspaceHashes)
+            expect(lockfile.workspaces).toEqual(stored);
+          else
+            expect(`workspaces` in lockfile).toBe(false);
+
+          expect(await readTreeHashes(run, enableWorkspaceHashes)).toEqual(stored);
+          await expectForEachSince(run, [], {enableWorkspaceHashes});
+
+          await git(`add`, `-A`);
+          await git(`commit`, `-m`, `Hashes ${enableWorkspaceHashes ? `on` : `off`}`);
+        }
+      }),
+    );
+
     for (const {name, manifest, rootManifest, configuration} of [
-      {name: `plain dependencies`, manifest: {}, rootManifest: {}, configuration: {}},
       {
         name: `default catalog`,
         manifest: {dependencies: {[`no-deps`]: `catalog:`}},
@@ -291,26 +304,23 @@ describe(`Features`, () => {
       },
     ]) {
       test(
-        `${name}: stored and on-demand hashes are present and equal, and toggling via environment overrides either way selects nothing`,
+        `${name}: stored and on-demand tree hashes match`,
         makeTemporaryMonorepoEnv(
           {
             name: `root-workspace`,
             private: true,
             workspaces: [`packages/*`],
-            scripts: {print: `echo Root Workspace`},
             ...rootManifest,
           },
           {
             [`packages/workspace-a`]: {
               name: `workspace-a`,
               version: `1.0.0`,
-              scripts: {print: `echo Test Workspace A`},
               ...manifest,
             },
             [`packages/workspace-b`]: {
               name: `workspace-b`,
               version: `1.0.0`,
-              scripts: {print: `echo Test Workspace B`},
               dependencies: {[`workspace-a`]: `workspace:*`},
             },
           },
@@ -321,32 +331,8 @@ describe(`Features`, () => {
             expect(Object.keys(stored).sort()).toEqual([`root-workspace`, `workspace-a`, `workspace-b`]);
             expect((await readLockfile(path)).workspaces).toEqual(stored);
 
-            const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
-            await exec.execGitInit({cwd: path});
-            await git(`add`, `-A`);
-            await git(`commit`, `-m`, `Hashes on`);
-
-            for (const enableWorkspaceHashes of [false, true]) {
-              // These options set environment overrides, leaving .yarnrc.yml unchanged.
-              // Keep the flag on foreach too: it may reinstall before checking --since.
-              await run(`install`, {enableWorkspaceHashes});
-              const lockfile = await readLockfile(path);
-              if (enableWorkspaceHashes)
-                expect(lockfile.workspaces).toEqual(stored);
-              else
-                expect(`workspaces` in lockfile).toBe(false);
-
-              expect(await readTreeHashes(run, enableWorkspaceHashes)).toEqual(stored);
-              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes})).resolves.toEqual({
-                code: 0,
-                stderr: ``,
-                stdout: forEachVerboseDone.join(``),
-              });
-
-              // The reverse toggle must compare against a hashes-off git ref.
-              await git(`add`, `-A`);
-              await git(`commit`, `-m`, `Hashes ${enableWorkspaceHashes ? `on` : `off`}`);
-            }
+            const onDemand = await readTreeHashes(run, false);
+            expect(onDemand).toEqual(stored);
           },
         ),
       );
@@ -395,74 +381,49 @@ describe(`Features`, () => {
 
     test(
       `--since keeps attributing unaffected workspaces when a historical workspace manifest went missing`,
-      makeTemporaryEnv(
+      makeTemporaryMonorepoEnv(
         {
           private: true,
           workspaces: [`packages/*`],
         },
-        async ({path, run}) => {
-          await fs.writeJson(`${path}/packages/workspace-a/package.json` as PortablePath, {
+        {
+          [`packages/workspace-a`]: {
             name: `workspace-a`,
             version: `1.0.0`,
-            scripts: {
-              print: `echo Test Workspace A`,
-            },
-            dependencies: {
-              [`workspace-c`]: `workspace:*`,
-            },
-          });
-
-          await fs.writeJson(`${path}/packages/workspace-b/package.json` as PortablePath, {
+            scripts: {print: `echo Test Workspace A`},
+            dependencies: {[`workspace-c`]: `workspace:*`},
+          },
+          [`packages/workspace-b`]: {
             name: `workspace-b`,
             version: `1.0.0`,
-            scripts: {
-              print: `echo Test Workspace B`,
-            },
-            dependencies: {
-              [`one-range-dep`]: `1.0.0`,
-            },
-          });
-
-          await fs.writeJson(`${path}/packages/workspace-c/package.json` as PortablePath, {
+            scripts: {print: `echo Test Workspace B`},
+            dependencies: {[`one-range-dep`]: `1.0.0`},
+          },
+          [`packages/workspace-c`]: {
             name: `workspace-c`,
             version: `1.0.0`,
-            scripts: {
-              print: `echo Test Workspace C`,
-            },
-          });
-
-          const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
-
-          // Install with only no-deps@1.0.0 visible, so one-range-dep
-          // resolves to no-deps@1.0.0.
+            scripts: {print: `echo Test Workspace C`},
+          },
+        },
+        async ({path, run}) => {
+          // Install with only no-deps@1.0.0 visible, so one-range-dep resolves to no-deps@1.0.0.
           await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
             await run(`install`, {enableWorkspaceHashes: false});
           });
 
-          await exec.execGitInit({cwd: path});
-          await git(`add`, `-A`);
-          await git(`commit`, `-m`, `First commit`);
+          const git = await gitInit(path, `First commit`);
 
           // The old-side walk must find workspace-c at its historical path.
           await git(`mv`, `${path}/packages/workspace-c`, `${path}/packages/workspace-c-renamed`);
 
           // Make no-deps@1.1.0 visible and upgrade; only the lockfile
-          // changes, and only workspace-b's dependency tree changed
-          // through it.
+          // changes, and only workspace-b's dependency tree changed through it.
           await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`, `1.1.0`])]]), async () => {
             await run(`up`, `-R`, `no-deps`, {enableWorkspaceHashes: false});
           });
 
           // B's tree changed, A's didn't, and C runs because its manifest moved.
-          await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes: false})).resolves.toEqual({
-            code: 0,
-            stderr: ``,
-            stdout: [
-              `Test Workspace B\n`,
-              `Test Workspace C\n`,
-              ...forEachVerboseDone,
-            ].join(``),
-          });
+          await expectForEachSince(run, [`Test Workspace B`, `Test Workspace C`], {enableWorkspaceHashes: false});
         },
       ),
     );
@@ -489,90 +450,84 @@ describe(`Features`, () => {
           `  linkType: hard`,
           ``,
         ].join(`\n`));
-        const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
-        await exec.execGitInit({cwd: path});
-        await git(`add`, `-A`);
-        await git(`commit`, `-m`, `Legacy Berry install`);
+        await gitInit(path, `Legacy Berry install`);
 
         const manifest = await yarn.readManifest(path);
         delete manifest.dependencies;
         await yarn.writeManifest(path, manifest);
         await run(`install`);
-        await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`)).resolves.toEqual({
-          code: 0,
-          stderr: ``,
-          stdout: [`Root Workspace\n`, ...forEachVerboseDone].join(``),
-        });
+        await expectForEachSince(run, [`Root Workspace`]);
       }),
     );
 
-    for (const enableWorkspaceHashes of [true, false]) {
-      const initialConfiguration = `enableWorkspaceHashes: ${enableWorkspaceHashes}\n`;
+    for (const {edit, initialHashes, initialConfiguration, modifiedConfiguration, storesHashesAfter} of [
+      {
+        edit: `comment-only`,
+        initialHashes: true,
+        initialConfiguration: `enableWorkspaceHashes: true\n`,
+        modifiedConfiguration: `enableWorkspaceHashes: true\n# No setting changed\n`,
+        storesHashesAfter: true,
+      },
+      {
+        edit: `whitespace-only`,
+        initialHashes: false,
+        initialConfiguration: `enableWorkspaceHashes: false\n`,
+        modifiedConfiguration: `enableWorkspaceHashes:   false\n\n`,
+        storesHashesAfter: false,
+      },
+      {
+        edit: `persisted toggle from true to false`,
+        initialHashes: true,
+        initialConfiguration: `enableWorkspaceHashes: true\n`,
+        modifiedConfiguration: `enableWorkspaceHashes: false\n`,
+        storesHashesAfter: false,
+      },
+      {
+        edit: `persisted toggle from false to true`,
+        initialHashes: false,
+        initialConfiguration: `enableWorkspaceHashes: false\n`,
+        modifiedConfiguration: `enableWorkspaceHashes: true\n`,
+        storesHashesAfter: true,
+      },
+    ]) {
+      test(
+        `--since marks all workspaces changed for a ${edit} in .yarnrc.yml`,
+        makeTemporaryMonorepoEnv(
+          {
+            name: `root-workspace`,
+            private: true,
+            workspaces: [`packages/*`],
+            scripts: {print: `echo Root Workspace`},
+          },
+          {
+            [`packages/workspace-a`]: {name: `workspace-a`, scripts: {print: `echo Test Workspace A`}},
+            [`packages/workspace-b`]: {name: `workspace-b`, scripts: {print: `echo Test Workspace B`}},
+          },
+          async ({path, run}) => {
+            const configPath = `${path}/.yarnrc.yml` as PortablePath;
+            await xfs.writeFilePromise(configPath, initialConfiguration);
+            await run(`install`);
+            expect(`workspaces` in await readLockfile(path)).toBe(initialHashes);
+            const {stdout: initialHashesStdout} = await run(`workspaces`, `list`, `--json`, `--tree-hash`);
 
-      for (const {edit, configuration, storesHashes} of [
-        {edit: `comment-only`, configuration: `${initialConfiguration}# No setting changed\n`, storesHashes: enableWorkspaceHashes},
-        {edit: `whitespace-only`, configuration: `enableWorkspaceHashes:    ${enableWorkspaceHashes}\n\n`, storesHashes: enableWorkspaceHashes},
-        {edit: `toggle to ${!enableWorkspaceHashes}`, configuration: `enableWorkspaceHashes: ${!enableWorkspaceHashes}\n`, storesHashes: !enableWorkspaceHashes},
-      ]) {
-        test(
-          `--since marks all workspaces changed for a ${edit} .yarnrc.yml edit (initial hashes ${enableWorkspaceHashes})`,
-          makeTemporaryMonorepoEnv(
-            {
-              name: `root-workspace`,
-              private: true,
-              workspaces: [`packages/*`],
-              scripts: {print: `echo Root Workspace`},
-            },
-            {
-              [`packages/workspace-a`]: {name: `workspace-a`, scripts: {print: `echo Test Workspace A`}},
-              [`packages/workspace-b`]: {name: `workspace-b`, scripts: {print: `echo Test Workspace B`}},
-            },
-            async ({path, run}) => {
-              const configPath = `${path}/.yarnrc.yml` as PortablePath;
-              await xfs.writeFilePromise(configPath, initialConfiguration);
-              // No per-command overrides: the persisted setting controls storage.
-              await run(`install`);
-              expect(`workspaces` in await readLockfile(path)).toBe(enableWorkspaceHashes);
-              const {stdout: initialHashes} = await run(`workspaces`, `list`, `--json`, `--tree-hash`);
-              for (const line of initialHashes.trim().split(`\n`))
-                expect(JSON.parse(line).treeHash).toMatch(/^[0-9a-f]+$/);
+            const git = await gitInit(path, `Initial configuration`);
+            await expectForEachSince(run, []);
 
-              const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
-              await exec.execGitInit({cwd: path});
-              await git(`add`, `-A`);
-              await git(`commit`, `-m`, `Persisted workspace hash setting`);
-              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`)).resolves.toEqual({
-                code: 0,
-                stderr: ``,
-                stdout: forEachVerboseDone.join(``),
-              });
+            await xfs.writeFilePromise(configPath, modifiedConfiguration);
+            await run(`install`);
+            expect(`workspaces` in await readLockfile(path)).toBe(storesHashesAfter);
 
-              await xfs.writeFilePromise(configPath, configuration);
-              expect((await git(`diff`, `HEAD`, `--name-only`)).stdout.trim()).toBe(`.yarnrc.yml`);
-              await run(`install`);
-              expect(`workspaces` in await readLockfile(path)).toBe(storesHashes);
-              expect((await git(`diff`, `HEAD`, `--name-only`)).stdout.trim().split(`\n`)).toEqual(
-                storesHashes === enableWorkspaceHashes ? [`.yarnrc.yml`] : [`.yarnrc.yml`, `yarn.lock`],
-              );
-              // Neither formatting nor hash storage changes the dependency trees.
-              await expect(run(`workspaces`, `list`, `--json`, `--tree-hash`)).resolves.toMatchObject({stdout: initialHashes});
-              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`)).resolves.toEqual({
-                code: 0,
-                stderr: ``,
-                stdout: [`Root Workspace\n`, `Test Workspace A\n`, `Test Workspace B\n`, ...forEachVerboseDone].join(``),
-              });
+            // Dependency trees are unchanged, but configuration edits conservatively invalidate all workspaces.
+            await expect(run(`workspaces`, `list`, `--json`, `--tree-hash`)).resolves.toMatchObject({stdout: initialHashesStdout});
+            await expectForEachSince(run, [`Root Workspace`, `Test Workspace A`, `Test Workspace B`]);
 
-              await xfs.writeFilePromise(configPath, initialConfiguration);
-              await run(`install`);
-              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`)).resolves.toEqual({
-                code: 0,
-                stderr: ``,
-                stdout: forEachVerboseDone.join(``),
-              });
-            },
-          ),
-        );
-      }
+            // Restoring the configuration returns to clean selection.
+            await xfs.writeFilePromise(configPath, initialConfiguration);
+            await run(`install`);
+            await expectForEachSince(run, []);
+          },
+        ),
+      );
     }
 
     test(
@@ -594,19 +549,12 @@ describe(`Features`, () => {
             await run(`install`, configuration);
             await expect(source(`require('workspace-b/package.json').name`, {cwd: `${path}/packages/workspace-a`, ...configuration})).resolves.toBe(`workspace-b`);
             expect(`workspaces` in await readLockfile(path)).toBe(false);
-            const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
-            await exec.execGitInit({cwd: path});
-            await git(`add`, `-A`);
-            await git(`commit`, `-m`, `User profile outside repository`);
+            await gitInit(path, `User profile outside repository`);
 
             await xfs.writeFilePromise(`${path}/README.md` as PortablePath, `After\n`);
             // Force a historical comparison without changing either dependency graph.
             await xfs.appendFilePromise(`${path}/yarn.lock` as PortablePath, `\n`);
-            await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, configuration)).resolves.toEqual({
-              code: 0,
-              stderr: ``,
-              stdout: forEachVerboseDone.join(``),
-            });
+            await expectForEachSince(run, [], configuration);
           });
         },
       ),
@@ -627,20 +575,13 @@ describe(`Features`, () => {
             await run(`install`, {enableWorkspaceHashes: true, env});
             await expect(source(`require('no-deps/package.json')`, {cwd: `${path}/packages/workspace-a`, env})).resolves.toEqual({name: `no-deps`, version: `1.0.0`});
             const stored = await readTreeHashes(run, true, env);
-            const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
-            await exec.execGitInit({cwd: path});
-            await git(`add`, `-A`);
-            await git(`commit`, `-m`, `Environment overrides user settings`);
+            const git = await gitInit(path, `Environment overrides user settings`);
 
             for (const enableWorkspaceHashes of [false, true]) {
               await run(`install`, {enableWorkspaceHashes, env});
               expect(`workspaces` in await readLockfile(path)).toBe(enableWorkspaceHashes);
               expect(await readTreeHashes(run, enableWorkspaceHashes, env)).toEqual(stored);
-              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes, env})).resolves.toEqual({
-                code: 0,
-                stderr: ``,
-                stdout: forEachVerboseDone.join(``),
-              });
+              await expectForEachSince(run, [], {enableWorkspaceHashes, env});
               await git(`add`, `-A`);
               await git(`commit`, `-m`, `Hashes ${enableWorkspaceHashes}`);
             }
@@ -674,18 +615,17 @@ describe(`Features`, () => {
             await runSwitch(`install`, {env});
             expect(`workspaces` in await readLockfile(path)).toBe(false);
 
-            const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
-            await exec.execGitInit({cwd: path});
-            await git(`add`, `-A`);
-            await git(`commit`, `-m`, `Trusted live configuration`);
+            await gitInit(path, `Trusted live configuration`);
             await xfs.writeFilePromise(`${path}/packages/workspace-a/README.md` as PortablePath, `Changed\n`);
 
             // Trust is scoped to the live project. The snapshot must not need its
             // own trust decision or silently fall back to selecting workspace-b.
-            await expect(runSwitch(`workspaces`, `foreach`, `--since`, `run`, `print`, {env})).resolves.toEqual({
+            const forEachOptions = {env};
+            const expectedStdout = [`Test Workspace A\n`, ...forEachVerboseDone].join(``);
+            await expect(runSwitch(`workspaces`, `foreach`, `--since`, `run`, `print`, forEachOptions)).resolves.toEqual({
               code: 0,
               stderr: ``,
-              stdout: [`Test Workspace A\n`, ...forEachVerboseDone].join(``),
+              stdout: expectedStdout,
             });
 
             // Reusing the configuration must not bypass its normal trust check.
@@ -718,10 +658,7 @@ describe(`Features`, () => {
             await yarn.writeManifest(workspacePath, manifest);
             await run(`install`, configuration);
 
-            const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
-            await exec.execGitInit({cwd: path});
-            await git(`add`, `-A`);
-            await git(`commit`, `-m`, `Absolute source requires conservative historical fallback`);
+            const git = await gitInit(path, `Absolute source requires conservative historical fallback`);
 
             const changedPath = `${workspacePath}/README.md` as PortablePath;
             await xfs.writeFilePromise(changedPath, `Changed without a version decision\n`);
@@ -753,32 +690,42 @@ describe(`Features`, () => {
 
     test(
       `--since marks all workspaces changed when a historical source escapes the snapshot`,
-      makeTemporaryEnv({
-        name: `root-workspace`,
-        dependencies: {[`no-deps`]: `file:./linked`},
-        scripts: {print: `echo Root Workspace`},
-      }, async ({path, run, source}) => {
-        await xfs.mktempPromise(async outsidePath => {
-          await xfs.copyPromise(outsidePath, npath.toPortablePath(await tests.getPackageDirectoryPath(`no-deps`, `1.0.0`)));
-          await xfs.symlinkPromise(ppath.relative(path, outsidePath), `${path}/linked` as PortablePath);
-          await run(`install`, {enableWorkspaceHashes: false});
-          await expect(source(`require('no-deps').version`, {enableWorkspaceHashes: false})).resolves.toBe(`1.0.0`);
-          expect(`workspaces` in await readLockfile(path)).toBe(false);
-          const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
-          await exec.execGitInit({cwd: path});
-          await git(`add`, `-A`);
-          await git(`commit`, `-m`, `Relative symlink to an external source`);
+      makeTemporaryMonorepoEnv(
+        {
+          name: `root-workspace`,
+          private: true,
+          workspaces: [`packages/*`],
+          scripts: {print: `echo Root Workspace`},
+        },
+        {
+          [`packages/workspace-a`]: {
+            name: `workspace-a`,
+            dependencies: {[`no-deps`]: `file:../../linked`},
+            scripts: {print: `echo Test Workspace A`},
+          },
+          [`packages/workspace-b`]: {
+            name: `workspace-b`,
+            scripts: {print: `echo Test Workspace B`},
+          },
+        },
+        async ({path, run, source}) => {
+          await xfs.mktempPromise(async outsidePath => {
+            await xfs.copyPromise(outsidePath, npath.toPortablePath(await tests.getPackageDirectoryPath(`no-deps`, `1.0.0`)));
+            await xfs.symlinkPromise(ppath.relative(path, outsidePath), `${path}/linked` as PortablePath);
+            await run(`install`, {enableWorkspaceHashes: false});
+            await expect(source(`require('no-deps').version`, {cwd: `${path}/packages/workspace-a`, enableWorkspaceHashes: false})).resolves.toBe(`1.0.0`);
+            expect(`workspaces` in await readLockfile(path)).toBe(false);
 
-          // The source exists for the live project, but is not part of Git history.
-          // Because the historical source cannot be checked out, all workspaces conservatively change.
-          await xfs.writeFilePromise(`${path}/README.md` as PortablePath, `Trigger historical comparison\n`);
-          await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes: false})).resolves.toEqual({
-            code: 0,
-            stderr: ``,
-            stdout: `Root Workspace\n`,
+            await gitInit(path, `Relative symlink to an external source`);
+
+            // The source exists for the live project, but is not part of Git history.
+            // Because the historical source cannot be checked out, all workspaces conservatively change,
+            // including untouched workspace-b.
+            await xfs.writeFilePromise(`${path}/README.md` as PortablePath, `Trigger historical comparison\n`);
+            await expectForEachSince(run, [`Root Workspace`, `Test Workspace A`, `Test Workspace B`], {enableWorkspaceHashes: false});
           });
-        });
-      }),
+        },
+      ),
     );
 
     test(
@@ -812,7 +759,7 @@ describe(`Features`, () => {
     );
 
     for (const enableWorkspaceHashes of [true, false]) {
-      for (const input of [`patch file`, `file: folder`, `absolute file: folder`, `aliased absolute file: folder`]) {
+      for (const input of [`patch file`, `file: folder`, `absolute file: folder`]) {
         test(
           `--since uses historical ${input} contents with unchanged manifests (hashes ${enableWorkspaceHashes})`,
           makeTemporaryMonorepoEnv(
@@ -829,18 +776,12 @@ describe(`Features`, () => {
               },
             },
             async ({path, run, source}) => {
-              const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
               const inputPath = input === `patch file` ? `no-deps.patch` : `vendor/no-deps/index.js`;
               const before = input === `patch file` ? NO_DEPS_PATCH : `module.exports = {hello: 'before'};\n`;
-              if (input.includes(`absolute file:`)) {
-                let sourceRoot = path;
-                if (input === `aliased absolute file: folder`) {
-                  sourceRoot = `${await xfs.mktempPromise()}/repo-alias` as PortablePath;
-                  await xfs.symlinkPromise(path, sourceRoot, `junction`);
-                }
+              if (input === `absolute file: folder`) {
                 const workspacePath = `${path}/packages/workspace-a` as PortablePath;
                 const manifest = await yarn.readManifest(workspacePath);
-                manifest.dependencies[`no-deps`] = `file:${sourceRoot}/vendor/no-deps`;
+                manifest.dependencies[`no-deps`] = `file:${path}/vendor/no-deps`;
                 await yarn.writeManifest(workspacePath, manifest);
               }
               if (input !== `patch file`)
@@ -848,9 +789,7 @@ describe(`Features`, () => {
               await xfs.writeFilePromise(`${path}/${inputPath}` as PortablePath, before);
               await run(`install`, {enableWorkspaceHashes});
               expect(`workspaces` in await readLockfile(path)).toBe(enableWorkspaceHashes);
-              await exec.execGitInit({cwd: path});
-              await git(`add`, `-A`);
-              await git(`commit`, `-m`, `Historical package contents`);
+              const git = await gitInit(path, `Historical package contents`);
 
               // Only package contents change, outside both workspace directories.
               // Reading the live file for the old graph would incorrectly select nothing.
@@ -860,27 +799,19 @@ describe(`Features`, () => {
               expect(`workspaces` in await readLockfile(path)).toBe(enableWorkspaceHashes);
               expect((await git(`diff`, `HEAD`, `--name-only`, `--`, `package.json`, `packages`, `vendor`, `no-deps.patch`)).stdout.trim()).toBe(inputPath);
               const expectedStdout = (!enableWorkspaceHashes && input.includes(`absolute file:`))
-                ? [`Test Workspace A\n`, `Test Workspace B\n`, ...forEachVerboseDone].join(``)
-                : [`Test Workspace A\n`, ...forEachVerboseDone].join(``);
-              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes})).resolves.toEqual({
-                code: 0,
-                stderr: ``,
-                stdout: expectedStdout,
-              });
+                ? [`Test Workspace A`, `Test Workspace B`]
+                : [`Test Workspace A`];
+              await expectForEachSince(run, expectedStdout, {enableWorkspaceHashes});
 
-              // Historical I/O rebasing must preserve locator/hash identity. Keep a
-              // root-file change so reinstall cannot erase the comparison trigger.
+              // Historical absolute sources cannot be replayed from checkout without hashes,
+              // so reinstall cannot erase the comparison trigger.
               await xfs.writeFilePromise(`${path}/${inputPath}` as PortablePath, before);
               await run(`install`, {enableWorkspaceHashes});
               await xfs.writeFilePromise(`${path}/README.md` as PortablePath, `Trigger historical comparison\n`);
               const expectedReadmeStdout = (!enableWorkspaceHashes && input.includes(`absolute file:`))
-                ? [`Test Workspace A\n`, `Test Workspace B\n`, ...forEachVerboseDone].join(``)
-                : forEachVerboseDone.join(``);
-              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes})).resolves.toEqual({
-                code: 0,
-                stderr: ``,
-                stdout: expectedReadmeStdout,
-              });
+                ? [`Test Workspace A`, `Test Workspace B`]
+                : [];
+              await expectForEachSince(run, expectedReadmeStdout, {enableWorkspaceHashes});
             },
           ),
         );
@@ -908,12 +839,9 @@ describe(`Features`, () => {
               },
             },
             async ({path, run}) => {
-              const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
               await run(`install`, {enableWorkspaceHashes});
               const lockfileBefore = await readLockfile(path);
-              await exec.execGitInit({cwd: path});
-              await git(`add`, `-A`);
-              await git(`commit`, `-m`, `Before move`);
+              const git = await gitInit(path, `Before move`);
 
               await git(`mv`, `packages/workspace-c`, `packages/workspace-c-renamed`);
               const manifestPath = `${path}/packages/workspace-c-renamed/package.json` as PortablePath;
@@ -930,77 +858,7 @@ describe(`Features`, () => {
               expect((await git(`diff`, `HEAD`, `--`, `packages/workspace-a/package.json`, `packages/workspace-b/package.json`)).stdout).toBe(``);
               // No --recursive: A must be selected by its changed dependency tree,
               // not merely because C's moved manifest was attributed to C.
-              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes})).resolves.toEqual({
-                code: 0,
-                stderr: ``,
-                stdout: [`Test Workspace A\n`, `Test Workspace C\n`, ...forEachVerboseDone].join(``),
-              });
-            },
-          ),
-        );
-      }
-
-      for (const feature of [`catalog`, `profile`]) {
-        test(
-          `--since marks all workspaces changed when ${feature} configuration changes (hashes ${enableWorkspaceHashes})`,
-          makeTemporaryMonorepoEnv(
-            {
-              private: true,
-              workspaces: [`packages/*`, `legacy/*`, `!legacy/zz-not-a-workspace`],
-            },
-            {
-              [`packages/workspace-a`]: {
-                name: `workspace-a`,
-                scripts: {print: `echo Test Workspace A`},
-                dependencies: {[`workspace-c`]: `workspace:*`},
-              },
-              [`packages/workspace-b`]: {
-                name: `workspace-b`,
-                scripts: {print: `echo Test Workspace B`},
-              },
-              [`legacy/workspace-c`]: {
-                name: `workspace-c`,
-                scripts: {print: `echo Test Workspace C`},
-                ...(feature === `catalog`
-                  ? {dependencies: {[`no-deps`]: `catalog:runtime`}}
-                  : {extends: [`application`]}),
-              },
-              // A decoy with the same name must never replace the real historical C.
-              [`legacy/zz-not-a-workspace`]: {
-                name: `workspace-c`,
-                dependencies: {[`no-deps`]: `2.0.0`},
-              },
-            },
-            async ({path, run}) => {
-              const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
-              const configuration = (version: string) => feature === `catalog`
-                ? {catalogs: {runtime: {[`no-deps`]: version}}}
-                : {workspaceProfiles: {
-                  base: {devDependencies: {[`no-deps`]: version}},
-                  application: {extends: [`base`]},
-                }};
-
-              await yarn.writeConfiguration(path, configuration(`1.0.0`));
-              await run(`install`, {enableWorkspaceHashes});
-              await exec.execGitInit({cwd: path});
-              await git(`add`, `-A`);
-              await git(`commit`, `-m`, `Historical workspace patterns and configuration`);
-
-              // Modifying configuration invalidates every workspace conservatively.
-              await git(`mv`, `legacy/workspace-c`, `packages/workspace-c`);
-              const manifestPath = `${path}/package.json` as PortablePath;
-              const manifest = await xfs.readJsonPromise(manifestPath);
-              manifest.workspaces = [`packages/*`];
-              await fs.writeJson(manifestPath, manifest);
-              await yarn.writeConfiguration(path, configuration(`2.0.0`));
-              await run(`install`, {enableWorkspaceHashes});
-
-              expect((await git(`diff`, `HEAD`, `--`, `packages/workspace-a/package.json`, `packages/workspace-b/package.json`)).stdout).toBe(``);
-              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes})).resolves.toEqual({
-                code: 0,
-                stderr: ``,
-                stdout: [`Test Workspace A\n`, `Test Workspace B\n`, `Test Workspace C\n`, ...forEachVerboseDone].join(``),
-              });
+              await expectForEachSince(run, [`Test Workspace A`, `Test Workspace C`], {enableWorkspaceHashes});
             },
           ),
         );
@@ -1035,12 +893,9 @@ describe(`Features`, () => {
             },
           },
           async ({path, run}) => {
-            const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
             await yarn.writeConfiguration(path, {catalogs: {runtime: {[`no-deps`]: `1.0.0`}}});
             await run(`install`, {enableWorkspaceHashes});
-            await exec.execGitInit({cwd: path});
-            await git(`add`, `-A`);
-            await git(`commit`, `-m`, `Historical workspace patterns`);
+            const git = await gitInit(path, `Historical workspace patterns`);
 
             // Move C to packages/* and change its dependency without changing .yarnrc.yml.
             await git(`mv`, `legacy/workspace-c`, `packages/workspace-c`);
@@ -1057,11 +912,7 @@ describe(`Features`, () => {
             await run(`install`, {enableWorkspaceHashes});
 
             expect((await git(`diff`, `HEAD`, `--`, `packages/workspace-a/package.json`, `packages/workspace-b/package.json`)).stdout).toBe(``);
-            await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes})).resolves.toEqual({
-              code: 0,
-              stderr: ``,
-              stdout: [`Test Workspace A\n`, `Test Workspace C\n`, ...forEachVerboseDone].join(``),
-            });
+            await expectForEachSince(run, [`Test Workspace A`, `Test Workspace C`], {enableWorkspaceHashes});
           },
         ),
       );
@@ -1084,11 +935,8 @@ describe(`Features`, () => {
             },
           },
           async ({path, run}) => {
-            const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
             await run(`install`, {enableWorkspaceHashes});
-            await exec.execGitInit({cwd: path});
-            await git(`add`, `-A`);
-            await git(`commit`, `-m`, `Initial commit`);
+            await gitInit(path, `Initial commit`);
 
             // workspace-b directory was already tracked in git, but wasn't a workspace.
             // Expand workspace patterns to include workspace-b.
@@ -1100,11 +948,7 @@ describe(`Features`, () => {
 
             // workspace-b must be marked changed because it is newly included as a workspace,
             // while workspace-a is unchanged.
-            await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes})).resolves.toEqual({
-              code: 0,
-              stderr: ``,
-              stdout: [`Test Workspace B\n`, ...forEachVerboseDone].join(``),
-            });
+            await expectForEachSince(run, [`Test Workspace B`], {enableWorkspaceHashes});
           },
         ),
       );
@@ -1112,55 +956,53 @@ describe(`Features`, () => {
 
     test(
       `git and url dependencies don't disable a workspace's on-demand tree hash`,
-      makeTemporaryEnv(
+      makeTemporaryMonorepoEnv(
         {
           private: true,
           workspaces: [`packages/*`],
+        },
+        {
+          [`packages/workspace-a`]: {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            scripts: {print: `echo Test Workspace A`},
+            dependencies: {
+              [`no-prepack`]: `__GIT_URL__`,
+              [`one-range-dep`]: `1.0.0`,
+            },
+          },
+          [`packages/workspace-b`]: {
+            name: `workspace-b`,
+            version: `1.0.0`,
+            scripts: {print: `echo Test Workspace B`},
+            dependencies: {
+              [`has-bin-entries`]: `__SERVER_URL__/package.tgz`,
+            },
+          },
         },
         async ({path, run}) => {
           const gitUrl = await tests.startPackageServer().then(url => `${url}/repositories/no-prepack.git`);
           const registryHost = new URL(await tests.startPackageServer()).hostname;
 
-          // workspace-b's url tarball dependency, served from a local
-          // http server.
-          const archive
-            = await xfs.readFilePromise(await tests.getPackageArchivePath(`has-bin-entries`, `1.0.0`));
-
+          const archive = await xfs.readFilePromise(await tests.getPackageArchivePath(`has-bin-entries`, `1.0.0`));
           const server = await startServer((_request, response) => {
             response.writeHead(200, {
               [`Connection`]: `close`,
               [`Content-Length`]: archive.length,
             });
-
             response.end(archive);
           });
 
           const urlConfig = {unsafeHttpWhitelist: [registryHost, `127.0.0.1`]};
 
-          await fs.writeJson(`${path}/packages/workspace-a/package.json` as PortablePath, {
-            name: `workspace-a`,
-            version: `1.0.0`,
-            scripts: {
-              print: `echo Test Workspace A`,
-            },
-            dependencies: {
-              [`no-prepack`]: gitUrl,
-              [`one-range-dep`]: `1.0.0`,
-            },
-          });
+          // Substitute URLs into manifests
+          const manifestA = await yarn.readManifest(`${path}/packages/workspace-a` as PortablePath);
+          manifestA.dependencies[`no-prepack`] = gitUrl;
+          await yarn.writeManifest(`${path}/packages/workspace-a` as PortablePath, manifestA);
 
-          await fs.writeJson(`${path}/packages/workspace-b/package.json` as PortablePath, {
-            name: `workspace-b`,
-            version: `1.0.0`,
-            scripts: {
-              print: `echo Test Workspace B`,
-            },
-            dependencies: {
-              [`has-bin-entries`]: `${server.url}/package.tgz`,
-            },
-          });
-
-          const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
+          const manifestB = await yarn.readManifest(`${path}/packages/workspace-b` as PortablePath);
+          manifestB.dependencies[`has-bin-entries`] = `${server.url}/package.tgz`;
+          await yarn.writeManifest(`${path}/packages/workspace-b` as PortablePath, manifestB);
 
           try {
             await tests.setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
@@ -1170,22 +1012,11 @@ describe(`Features`, () => {
             // The git and url dependencies are recorded in the lockfile,
             // so the on-demand walk must resolve them like any other edge
             // and still compute both workspaces' tree hashes.
-            const printed = new Map();
-            for (const line of (await run(`workspaces`, `list`, `--json`, `--tree-hash`)).stdout.split(`\n`)) {
-              if (line !== ``) {
-                const payload = JSON.parse(line);
-                if (payload.name !== null) {
-                  printed.set(payload.name, payload.treeHash);
-                }
-              }
-            }
+            const hashes = await readTreeHashes(run, false, urlConfig);
+            expect(hashes[`workspace-a`]).toMatch(/^[0-9a-f]+$/);
+            expect(hashes[`workspace-b`]).toMatch(/^[0-9a-f]+$/);
 
-            expect(printed.get(`workspace-a`)).toMatch(/^[0-9a-f]+$/);
-            expect(printed.get(`workspace-b`)).toMatch(/^[0-9a-f]+$/);
-
-            await exec.execGitInit({cwd: path});
-            await git(`add`, `-A`);
-            await git(`commit`, `-m`, `First commit`);
+            await gitInit(path, `First commit`);
 
             // Make no-deps@1.1.0 visible and upgrade; only the lockfile
             // changes, and only workspace-a's dependency tree changed
@@ -1196,17 +1027,8 @@ describe(`Features`, () => {
 
             // The old-side walk must attribute the lockfile change to
             // workspace-a even though its tree also contains the git
-            // dependency; workspace-b's tree (url dependency next to an
-            // exact-pinned transitive range) didn't change, so it must
-            // not run.
-            await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, {enableWorkspaceHashes: false, ...urlConfig})).resolves.toEqual({
-              code: 0,
-              stderr: ``,
-              stdout: [
-                `Test Workspace A\n`,
-                ...forEachVerboseDone,
-              ].join(``),
-            });
+            // dependency; workspace-b's tree didn't change, so it must not run.
+            await expectForEachSince(run, [`Test Workspace A`], {enableWorkspaceHashes: false, ...urlConfig});
           } finally {
             await server.close();
           }
