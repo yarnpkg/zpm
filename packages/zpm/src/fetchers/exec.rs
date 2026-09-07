@@ -43,9 +43,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         .clone();
 
     let script_path = if script_relative_path.is_absolute() {
-        context.absolute_source_path(&script_relative_path)?
+        script_relative_path
     } else {
-        context.relative_source_path(&parent_context_directory, &params.path)?
+        parent_context_directory.with_join_str(&params.path)
     };
 
     let package_subdir

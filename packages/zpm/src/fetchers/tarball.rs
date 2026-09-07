@@ -31,14 +31,16 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         = Path::from_file_string(&params.path)?;
 
     let tarball_path = if tarball_relative_path.is_absolute() {
-        context.absolute_source_path(&tarball_relative_path)?
+        tarball_relative_path
     } else {
         let parent_data
             = dependencies.first()
                 .ok_or(Error::Unsupported)?
                 .as_fetched();
 
-        context.relative_source_path(parent_data.package_data.context_directory(), &params.path)?
+        parent_data.package_data
+            .context_directory()
+            .with_join_str(&params.path)
     };
 
     let package_subdir

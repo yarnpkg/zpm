@@ -1031,7 +1031,7 @@ impl Project {
     }
 
     pub async fn workspace_hashes_ondemand(&self, lockfile: &Lockfile) -> Result<BTreeMap<Ident, Hash64>, Error> {
-        crate::install::workspace_hashes_from_lockfile(self, lockfile, None).await
+        crate::install::workspace_hashes_from_lockfile(self, lockfile).await
     }
 
     pub(crate) fn install_config_hash(&self) -> Hash64 {

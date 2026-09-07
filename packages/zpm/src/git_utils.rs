@@ -6,14 +6,15 @@ use itertools::Itertools;
 use tokio::process::Command;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
-use zpm_utils::{Hash64, IoResultExt, LastModifiedAt, Path, ToFileString};
+use zpm_utils::{Hash64, IoResultExt, Path, ToFileString};
+use serde::Deserialize;
 
 use crate::{
     error::Error,
     lockfile::Lockfile,
+    install::HASH_SNAPSHOT_ROOT_ENV,
     project::{
         Project,
-        Workspace,
         LOCKFILE_NAME,
     },
     script::ScriptEnvironment,
@@ -195,6 +196,34 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
     let changed_files
         = fetch_changed_files(&project, Some(&since_ref)).await?;
 
+    if changed_files.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    // Configuration changes intentionally invalidate every workspace. There is
+    // no need to parse or replay historical configuration for this first version.
+    let config_path = project.config.project_config_path.clone()
+        .unwrap_or_else(|| project.project_cwd.with_join_str(".yarnrc.yml"));
+    let git_root
+        = find_root(&project.project_cwd)?;
+    let config_relative
+        = config_path.relative_to(&git_root);
+    let old_config = ScriptEnvironment::new()?
+        .with_cwd(git_root)
+        .run_exec("git", ["show", &format!("{}:{}", since_ref, config_relative.to_file_string())])
+        .await?;
+    let old_hash = if old_config.success() {
+        Some(Hash64::from_data(old_config.output().stdout))
+    } else {
+        None
+    };
+    let current_hash = config_path.fs_read().ok_missing()?
+        .map(Hash64::from_data);
+
+    if current_hash != old_hash {
+        return Ok(all_workspaces_changed(project, &config_path));
+    }
+
     let mut changed_workspaces: BTreeMap<_, BTreeSet<_>>
         = BTreeMap::new();
 
@@ -244,40 +273,35 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
                     current.workspaces.clone()
                 };
 
-            let old_hashes
-                = if old.workspaces.is_empty() {
-                    Some(fetch_workspace_hashes_at_ref(project, &since_ref, old).await?)
-                } else {
-                    Some(old.workspaces.clone())
-                };
+            let change_path = changed_files.get(&lockfile_path)
+                .unwrap_or_else(|| changed_files.first().unwrap());
+            let old_hashes = if old.workspaces.is_empty() {
+                match fetch_workspace_hashes_at_ref(project, &since_ref).await {
+                    Ok(hashes) => hashes,
+                    Err(_) => return Ok(all_workspaces_changed(project, change_path)),
+                }
+            } else {
+                old.workspaces.clone()
+            };
 
-            if let Some(old_hashes) = old_hashes {
-                for workspace in &project.workspaces {
-                    if changed_workspaces.contains_key(&workspace.name) {
-                        continue;
-                    }
-
-                    // Only a difference between two present hashes marks
-                    // a workspace as changed; a hash missing on one side
-                    // (setting toggled between refs, untracked or renamed
-                    // old workspace) must never flag one by itself.
-                    if let (Some(current_hash), Some(old_hash)) = (
-                        current_hashes.get(&workspace.name),
-                        old_hashes.get(&workspace.name),
-                    ) {
-                        if current_hash != old_hash {
-                            changed_workspaces.entry(workspace.name.clone())
-                                .or_default()
-                                .insert(changed_files.get(&lockfile_path)
-                                    .unwrap_or_else(|| changed_files.first().unwrap()).clone());
-                        }
-                    }
+            for workspace in &project.workspaces {
+                // A missing entry in a reconstructed old map means this workspace
+                // is newly included, even if its files were already tracked.
+                if current_hashes.get(&workspace.name) != old_hashes.get(&workspace.name) {
+                    changed_workspaces.entry(workspace.name.clone())
+                        .or_default().insert(change_path.clone());
                 }
             }
         }
     }
 
     Ok(changed_workspaces)
+}
+
+fn all_workspaces_changed(project: &Project, path: &Path) -> BTreeMap<Ident, BTreeSet<Path>> {
+    project.workspaces.iter()
+        .map(|workspace| (workspace.name.clone(), BTreeSet::from([path.clone()])))
+        .collect()
 }
 
 /// Owns a private checkout and index; neither the user's index nor worktree is
@@ -291,7 +315,7 @@ impl Drop for GitSnapshot {
     }
 }
 
-async fn fetch_workspace_hashes_at_ref(project: &Project, git_ref: &str, lockfile: &Lockfile) -> Result<BTreeMap<Ident, Hash64>, Error> {
+async fn fetch_workspace_hashes_at_ref(project: &Project, git_ref: &str) -> Result<BTreeMap<Ident, Hash64>, Error> {
     let git_root
         = find_root(&project.project_cwd)?;
     let snapshot
@@ -336,36 +360,48 @@ async fn fetch_workspace_hashes_at_ref(project: &Project, git_ref: &str, lockfil
 
     let project_cwd
         = checkout.with_join(&project.project_cwd.relative_to(&git_root));
-    let rc_path = project.config.project_config_path.as_ref()
-        .and_then(|path| path.forward_relative_to(&project.project_cwd))
-        .unwrap_or_else(|| Path::try_from(".yarnrc.yml").unwrap());
-    let rc_content = project_cwd.with_join(&rc_path)
-        .fs_read_text().ok_missing()?.unwrap_or_else(|| "{}".to_string());
-    let config
-        = project.config.with_historical_graph_settings(&rc_content).ok_or(Error::Unsupported)?;
-    let root
-        = Workspace::from_root_path(&project_cwd)?;
-    let mut workspaces
-        = root.workspaces().await?;
-    workspaces.insert(0, root);
+    // Invoke this binary directly, not the switcher or a historical packageManager
+    // version. The standard command owns configuration and workspace discovery.
+    let output = tokio::time::timeout(std::time::Duration::from_secs(120), Command::new(Path::current_exe()?.to_path_buf())
+        .args(["workspaces", "list", "--json", "--tree-hash"])
+        .current_dir(project_cwd.to_path_buf())
+        .env("PWD", project_cwd.to_path_buf())
+        .env("YARN_CACHE_FOLDER", project.config.settings.cache_folder.value.to_path_buf())
+        .env("YARN_GLOBAL_FOLDER", project.config.settings.global_folder.value.to_path_buf())
+        .env(HASH_SNAPSHOT_ROOT_ENV, checkout.to_path_buf())
+        .kill_on_drop(true)
+        .output())
+        .await.map_err(|_| Error::TaskTimeout)??;
 
-    let historical_project = Project {
-        workspaces_by_ident: workspaces.iter().enumerate()
-            .map(|(idx, workspace)| (workspace.name.clone(), idx)).collect(),
-        workspaces_by_rel_path: workspaces.iter().enumerate()
-            .map(|(idx, workspace)| (workspace.rel_path.clone(), idx)).collect(),
-        workspaces,
-        config,
-        project_cwd,
-        package_cwd: project.package_cwd.clone(),
-        shell_cwd: project.shell_cwd.clone(),
-        last_modified_at: LastModifiedAt::new(),
-        install_state: None,
-        http_client: project.http_client.clone(),
-        clone_limiter: project.clone_limiter.clone(),
-    };
+    if !output.status.success() {
+        return Err(Error::ChildProcessFailed("yarn".to_string()));
+    }
 
-    crate::install::workspace_hashes_from_lockfile(&historical_project, lockfile, Some((&git_root, &checkout))).await
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct WorkspaceHash {
+        name: Option<Ident>,
+        location: Path,
+        tree_hash: Hash64,
+    }
+
+    String::from_utf8(output.stdout)?.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let workspace: WorkspaceHash
+                = JsonDocument::hydrate_from_str(line)?;
+            let name = workspace.name.unwrap_or_else(|| {
+                let name = if workspace.location == Path::new() {
+                    "root-workspace"
+                } else {
+                    workspace.location.basename().unwrap_or("unnamed-workspace")
+                };
+                Ident::new(name.to_string())
+            });
+            Ok((name, workspace.tree_hash))
+        })
+        .collect()
+
 }
 
 /// Fetches and parses the lockfile at a specific git ref.

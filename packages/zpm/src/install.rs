@@ -37,8 +37,6 @@ pub struct InstallContext<'a> {
     pub background_writes: Option<Arc<http_npm::BackgroundWrites>>,
     /// Analysis may consume prepared artifacts, but must not execute generators.
     pub allow_preparation: bool,
-    /// Original repository root and its historical checkout; affects I/O only.
-    pub source_roots: Option<(&'a Path, &'a Path)>,
 }
 
 /// Tracks `packageExtensions` rule behavior so we can warn about
@@ -93,67 +91,11 @@ impl<'a> Default for InstallContext<'a> {
             extension_tracking: Arc::new(Mutex::new(ExtensionTracking::default())),
             background_writes: None,
             allow_preparation: true,
-            source_roots: None,
         }
     }
 }
 
 impl<'a> InstallContext<'a> {
-    /// Maps an explicitly absolute local source into the historical checkout
-    /// without changing the descriptor/locator text that participates in hashes.
-    pub fn absolute_source_path(&self, path: &Path) -> Result<Path, Error> {
-        let Some((original, snapshot)) = self.source_roots else {
-            return Ok(path.clone());
-        };
-
-        let relative = path.forward_relative_to(original).or_else(|| {
-            // Account for aliases such as /var -> /private/var, including a
-            // source deleted from the live tree: only its ancestor need exist.
-            let root = original.fs_canonicalize().ok()?;
-            let mut ancestor = path.clone();
-            let mut suffix = Path::new();
-
-            loop {
-                if let Ok(resolved) = ancestor.fs_canonicalize() {
-                    return resolved.with_join(&suffix).forward_relative_to(&root);
-                }
-
-                suffix = Path::try_from(ancestor.basename()?).ok()?.with_join(&suffix);
-                ancestor = ancestor.dirname()?;
-            }
-        }).ok_or_else(|| Error::HistoricalSourceUnavailable(path.clone()))?;
-        let source
-            = snapshot.with_join(&relative);
-        let resolved = source.fs_canonicalize()
-            .map_err(|_| Error::HistoricalSourceUnavailable(path.clone()))?;
-
-        if !snapshot.fs_canonicalize()?.contains(&resolved) {
-            return Err(Error::HistoricalSourceUnavailable(path.clone()));
-        }
-
-        Ok(source)
-    }
-
-    pub fn relative_source_path(&self, base: &Path, path: &str) -> Result<Path, Error> {
-        let source
-            = base.with_join_str(path);
-
-        if let Some((_, snapshot)) = self.source_roots {
-            // Cached archive parents are already immutable inputs. For parents
-            // in the checkout, don't follow symlinks/traversals into live data.
-            if snapshot.contains(base) {
-                let resolved = source.fs_canonicalize()
-                    .map_err(|_| Error::HistoricalSourceUnavailable(source.clone()))?;
-
-                if !snapshot.contains(&resolved) {
-                    return Err(Error::HistoricalSourceUnavailable(source));
-                }
-            }
-        }
-
-        Ok(source)
-    }
-
     pub fn with_package_cache(mut self, package_cache: Option<&'a CompositeCache>) -> Self {
         self.package_cache = package_cache;
         self
@@ -271,6 +213,7 @@ struct InstallMaps {
     fetch_map: Arc<WaitMap<Locator, FetchResult>>,
     resolution_tx: tokio::sync::mpsc::UnboundedSender<ResolutionEvent>,
     fetch_packages: bool,
+    snapshot_root: Option<Path>,
 }
 
 /// The work unlocked by resolving a descriptor. Child resolutions and the
@@ -443,6 +386,10 @@ fn resolve_descriptor_impl<'a>(
                 = await_fetch(parent, maps, ctx).await?;
 
             dependencies.push(InstallOpResult::Fetched(parent_fetch));
+        }
+
+        if let Some(root) = &maps.snapshot_root {
+            check_snapshot_source(ctx, root, &descriptor, &dependencies)?;
         }
 
         // Inner descriptor resolution + maybe inner fetch
@@ -1367,6 +1314,7 @@ impl<'a> InstallManager<'a> {
             fetch_map: Arc::new(WaitMap::new()),
             resolution_tx,
             fetch_packages: true,
+            snapshot_root: None,
         };
 
         let lockfile
@@ -1821,9 +1769,51 @@ pub(crate) fn compute_workspace_hashes(
         .collect()
 }
 
+// Used only by the normal Yarn process launched inside a historical checkout.
+pub(crate) const HASH_SNAPSHOT_ROOT_ENV: &str = "YARN_INTERNAL_HASH_SNAPSHOT_ROOT";
+
+/// Don't reinterpret absolute paths or follow snapshot links into live sources.
+/// A source we cannot replay makes --since conservatively select all workspaces.
+fn check_snapshot_source(context: &InstallContext<'_>, root: &Path, descriptor: &Descriptor, dependencies: &[InstallOpResult]) -> Result<(), Error> {
+    let path = match &descriptor.range {
+        Range::Folder(params) => params.path.as_str(),
+        Range::Tarball(params) => params.path.as_str(),
+        Range::Portal(params) => params.path.as_str(),
+        Range::Link(params) => params.path.as_str(),
+        Range::Exec(params) => params.path.as_str(),
+        Range::Patch(params) if params.path != "<builtin>" => params.path.as_str(),
+        _ => return Ok(()),
+    };
+
+    if Path::try_from(path)?.is_absolute() {
+        return Err(Error::HistoricalSourceUnavailable(Path::try_from(path)?));
+    }
+
+    let source = if let Some(path) = path.strip_prefix("~/") {
+        context.project.unwrap().project_cwd.with_join_str(path)
+    } else {
+        let Some(InstallOpResult::Fetched(parent)) = dependencies.first() else {
+            return Err(Error::Unsupported);
+        };
+        let PackageData::Local {package_directory, ..} = &parent.package_data else {
+            // Relative sources in a fetched archive belong to that pinned archive.
+            return Ok(());
+        };
+        package_directory.with_join_str(path)
+    };
+    let resolved = source.fs_canonicalize()
+        .map_err(|_| Error::HistoricalSourceUnavailable(source.clone()))?;
+
+    if !root.contains(&resolved) {
+        return Err(Error::HistoricalSourceUnavailable(source));
+    }
+
+    Ok(())
+}
+
 /// Reuses install resolution, fetching only prerequisites such as patch inputs.
 /// This does not link, build, write install state/lockfiles, or clean caches.
-pub(crate) async fn workspace_hashes_from_lockfile(project: &Project, lockfile: &Lockfile, source_roots: Option<(&Path, &Path)>) -> Result<BTreeMap<Ident, Hash64>, Error> {
+pub(crate) async fn workspace_hashes_from_lockfile(project: &Project, lockfile: &Lockfile) -> Result<BTreeMap<Ident, Hash64>, Error> {
     let package_cache
         = project.package_cache_handle();
     let systems
@@ -1833,7 +1823,6 @@ pub(crate) async fn workspace_hashes_from_lockfile(project: &Project, lockfile: 
         package_cache: Some(&package_cache),
         systems: Some(&systems),
         allow_preparation: false,
-        source_roots,
         ..Default::default()
     };
     let (resolution_tx, resolution_rx)
@@ -1843,6 +1832,8 @@ pub(crate) async fn workspace_hashes_from_lockfile(project: &Project, lockfile: 
         fetch_map: Arc::new(WaitMap::new()),
         resolution_tx,
         fetch_packages: false,
+        snapshot_root: std::env::var_os(HASH_SNAPSHOT_ROOT_ENV)
+            .map(Path::try_from).transpose()?,
     };
 
     // Match install's partition: island workspaces aren't in the greedy graph.
