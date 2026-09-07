@@ -154,8 +154,10 @@ impl WorkspacesList {
     }
 
     pub async fn execute(&self) -> Result<(), Error> {
+        let config_cwd = std::env::var_os(git_utils::HASH_SNAPSHOT_CONFIG_CWD_ENV)
+            .map(Path::try_from).transpose()?;
         let mut project
-            = Project::new(None).await?;
+            = Project::new_with_config_cwd(None, config_cwd).await?;
 
         if self.recursive && self.since.is_some() {
             project

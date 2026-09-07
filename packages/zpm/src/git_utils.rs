@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    sync::Arc,
 };
 
 use itertools::Itertools;
@@ -19,6 +20,9 @@ use crate::{
     },
     script::ScriptEnvironment,
 };
+
+/// The internal hash replay reads configuration from the live project, not Git.
+pub(crate) const HASH_SNAPSHOT_CONFIG_CWD_ENV: &str = "YARN_INTERNAL_HASH_SNAPSHOT_CONFIG_CWD";
 
 pub fn find_root(initial_cwd: &Path) -> Result<Path, Error> {
     // Note: We can't just use `git rev-parse --show-toplevel`, because on Windows
@@ -180,7 +184,7 @@ pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error
     Ok(merge_base)
 }
 
-pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) -> Result<BTreeMap<Ident, BTreeSet<Path>>, Error> {
+pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) -> Result<BTreeMap<Ident, Arc<BTreeSet<Path>>>, Error> {
     let since_ref = match since {
         Some(since) => since.to_string(),
         None => fetch_branch_base(project).await?,
@@ -221,10 +225,10 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
         .map(Hash64::from_data);
 
     if current_hash != old_hash {
-        return Ok(all_workspaces_changed(project, &config_path));
+        return Ok(all_workspaces_changed(project, Arc::new(BTreeSet::from([config_path]))));
     }
 
-    let mut changed_workspaces: BTreeMap<_, BTreeSet<_>>
+    let mut changed_workspaces: BTreeMap<_, Arc<BTreeSet<_>>>
         = BTreeMap::new();
 
     let lockfile_path
@@ -247,7 +251,7 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
                 = changed_workspaces.entry(workspace.name.clone())
                     .or_default();
 
-            entry.insert(file.clone());
+            Arc::make_mut(entry).insert(file.clone());
         }
     }
 
@@ -273,12 +277,15 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
                     current.workspaces.clone()
                 };
 
-            let change_path = changed_files.get(&lockfile_path)
-                .unwrap_or_else(|| changed_files.first().unwrap());
+            // Consumers may filter bookkeeping paths (for example .yarn/versions).
+            // Choosing just one file could hide real changes after that filtering.
+            // Share all possible causes instead of copying a repository-wide set
+            // for each affected workspace in a large monorepo.
+            let change_paths = Arc::new(changed_files);
             let old_hashes = if old.workspaces.is_empty() {
                 match fetch_workspace_hashes_at_ref(project, &since_ref).await {
                     Ok(hashes) => hashes,
-                    Err(_) => return Ok(all_workspaces_changed(project, change_path)),
+                    Err(_) => return Ok(all_workspaces_changed(project, change_paths)),
                 }
             } else {
                 old.workspaces.clone()
@@ -288,8 +295,7 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
                 // A missing entry in a reconstructed old map means this workspace
                 // is newly included, even if its files were already tracked.
                 if current_hashes.get(&workspace.name) != old_hashes.get(&workspace.name) {
-                    changed_workspaces.entry(workspace.name.clone())
-                        .or_default().insert(change_path.clone());
+                    changed_workspaces.insert(workspace.name.clone(), change_paths.clone());
                 }
             }
         }
@@ -298,9 +304,9 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
     Ok(changed_workspaces)
 }
 
-fn all_workspaces_changed(project: &Project, path: &Path) -> BTreeMap<Ident, BTreeSet<Path>> {
+fn all_workspaces_changed(project: &Project, paths: Arc<BTreeSet<Path>>) -> BTreeMap<Ident, Arc<BTreeSet<Path>>> {
     project.workspaces.iter()
-        .map(|workspace| (workspace.name.clone(), BTreeSet::from([path.clone()])))
+        .map(|workspace| (workspace.name.clone(), paths.clone()))
         .collect()
 }
 
@@ -362,10 +368,13 @@ async fn fetch_workspace_hashes_at_ref(project: &Project, git_ref: &str) -> Resu
         = checkout.with_join(&project.project_cwd.relative_to(&git_root));
     // Invoke this binary directly, not the switcher or a historical packageManager
     // version. The standard command owns configuration and workspace discovery.
+    // Configuration was checked for changes above; load the live configuration
+    // (including dotenv files) and check trust at its real path. Never grant trust
+    // to historical configuration or persist a decision for the temporary tree.
     let output = tokio::time::timeout(std::time::Duration::from_secs(120), Command::new(Path::current_exe()?.to_path_buf())
         .args(["workspaces", "list", "--json", "--tree-hash"])
         .current_dir(project_cwd.to_path_buf())
-        .env("PWD", project_cwd.to_path_buf())
+        .env(HASH_SNAPSHOT_CONFIG_CWD_ENV, project.project_cwd.to_path_buf())
         .env("YARN_CACHE_FOLDER", project.config.settings.cache_folder.value.to_path_buf())
         .env("YARN_GLOBAL_FOLDER", project.config.settings.global_folder.value.to_path_buf())
         .env(HASH_SNAPSHOT_ROOT_ENV, checkout.to_path_buf())

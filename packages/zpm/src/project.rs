@@ -185,6 +185,13 @@ impl Project {
     }
 
     pub async fn new(cwd: Option<Path>) -> Result<Project, Error> {
+        Self::new_with_config_cwd(cwd, None).await
+    }
+
+    /// Historical hash queries discover workspaces in a checkout but reuse the
+    /// live project's configuration. Trust follows the configuration's source,
+    /// not the checkout, and historical dotenv files are never evaluated.
+    pub(crate) async fn new_with_config_cwd(cwd: Option<Path>, config_cwd: Option<Path>) -> Result<Project, Error> {
         let user_cwd
             = Path::home_dir()?;
 
@@ -198,11 +205,13 @@ impl Project {
         let mut last_modified_at
             = LastModifiedAt::new();
 
+        let config_cwd
+            = config_cwd.unwrap_or_else(|| project_cwd.clone());
         let configuration_context = ConfigurationContext {
             env: std::env::vars().collect(),
             user_cwd: user_cwd.clone(),
-            project_cwd: Some(project_cwd.clone()),
-            package_cwd: Some(package_cwd.clone()),
+            project_cwd: Some(config_cwd.clone()),
+            package_cwd: Some(config_cwd.with_join(&package_cwd.relative_to(&project_cwd))),
         };
 
         let mut config
@@ -210,7 +219,7 @@ impl Project {
                 .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
 
         if config.requires_trust {
-            ensure_project_trusted(&project_cwd, ProjectTrustReason::ConfigurationInterpolation).await?;
+            ensure_project_trusted(&config_cwd, ProjectTrustReason::ConfigurationInterpolation).await?;
         }
 
         if config.settings.enable_migration_mode.value {

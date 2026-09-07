@@ -579,6 +579,108 @@ describe(`Features`, () => {
       ),
     );
 
+    for (const environmentSource of [`process`, `dotenv`]) {
+      test(
+        `--since reuses live configuration trust during historical replay (${environmentSource})`,
+        makeTemporaryMonorepoEnv(
+          {private: true, workspaces: [`packages/*`]},
+          {
+            [`packages/workspace-a`]: {name: `workspace-a`, scripts: {print: `echo Test Workspace A`}},
+            [`packages/workspace-b`]: {name: `workspace-b`, scripts: {print: `echo Test Workspace B`}},
+          },
+          async ({path, runSwitch}) => {
+            const env = environmentSource === `process` ? {CONFIG_INIT_SCOPE: `acme`} : {};
+            await yarn.writeConfiguration(path, {
+              enableWorkspaceHashes: false,
+              initScope: `\${CONFIG_INIT_SCOPE}`,
+              ...(environmentSource === `dotenv` ? {injectEnvironmentFiles: [`.env.local`]} : {}),
+            });
+            if (environmentSource === `dotenv`) {
+              // This required file is available to the live project, not the checkout.
+              await xfs.writeFilePromise(`${path}/.env.local` as PortablePath, `CONFIG_INIT_SCOPE=acme\n`);
+              await xfs.appendFilePromise(`${path}/.gitignore` as PortablePath, `\n.env.local\n`);
+            }
+            await runSwitch(`switch`, `trust`, `--set`, `true`, path);
+            await runSwitch(`install`, {env});
+            expect(`workspaces` in await readLockfile(path)).toBe(false);
+
+            const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
+            await exec.execGitInit({cwd: path});
+            await git(`add`, `-A`);
+            await git(`commit`, `-m`, `Trusted live configuration`);
+            await xfs.writeFilePromise(`${path}/packages/workspace-a/README.md` as PortablePath, `Changed\n`);
+
+            // Trust is scoped to the live project. The snapshot must not need its
+            // own trust decision or silently fall back to selecting workspace-b.
+            await expect(runSwitch(`workspaces`, `foreach`, `--since`, `run`, `print`, {env})).resolves.toEqual({
+              code: 0,
+              stderr: ``,
+              stdout: [`Test Workspace A\n`, ...forEachVerboseDone].join(``),
+            });
+
+            // Reusing the configuration must not bypass its normal trust check.
+            await runSwitch(`switch`, `trust`, `--set`, `false`, path);
+            await expect(runSwitch(`workspaces`, `foreach`, `--since`, `run`, `print`, {env})).rejects.toMatchObject({
+              code: 1,
+              stdout: expect.stringContaining(`isn't trusted, so Yarn won't interpolate project configuration`),
+            });
+          },
+        ),
+      );
+    }
+
+    for (const versionFolder of [`.yarn/versions`, `.release-decisions`]) {
+      test(
+        `version check preserves real changes after historical replay fails (${versionFolder})`,
+        makeTemporaryMonorepoEnv(
+          {name: `root-workspace`, private: true, workspaces: [`packages/*`]},
+          {
+            [`packages/workspace-a`]: {name: `workspace-a`, version: `1.0.0`},
+            [`packages/workspace-b`]: {name: `workspace-b`, version: `1.0.0`},
+          },
+          async ({path, run}) => {
+            const configuration = {enableWorkspaceHashes: false, deferredVersionFolder: `${path}/${versionFolder}`};
+            const sourcePath = `${path}/vendor/no-deps` as PortablePath;
+            await xfs.copyPromise(sourcePath, npath.toPortablePath(await tests.getPackageDirectoryPath(`no-deps`, `1.0.0`)));
+            const workspacePath = `${path}/packages/workspace-a` as PortablePath;
+            const manifest = await yarn.readManifest(workspacePath);
+            manifest.dependencies = {[`no-deps`]: `file:${sourcePath}`};
+            await yarn.writeManifest(workspacePath, manifest);
+            await run(`install`, configuration);
+
+            const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
+            await exec.execGitInit({cwd: path});
+            await git(`add`, `-A`);
+            await git(`commit`, `-m`, `Absolute source requires conservative historical fallback`);
+
+            const changedPath = `${workspacePath}/README.md` as PortablePath;
+            await xfs.writeFilePromise(changedPath, `Changed without a version decision\n`);
+            await expect(run(`version`, `check`, configuration)).rejects.toMatchObject({
+              code: 1,
+              stdout: expect.stringContaining(`Couldn't auto-upgrade range * (in workspace-a)`),
+            });
+
+            const decisionPath = `${path}/${versionFolder}/unrelated.json` as PortablePath;
+            await xfs.mkdirpPromise(ppath.dirname(decisionPath));
+            await xfs.writeJsonPromise(decisionPath, {});
+            await git(`add`, `-f`, decisionPath);
+
+            // A bookkeeping file sorts before the source change. It must not
+            // replace the real evidence and make version check pass.
+            await expect(run(`version`, `check`, configuration)).rejects.toMatchObject({
+              code: 1,
+              stdout: expect.stringContaining(`Couldn't auto-upgrade range * (in workspace-a)`),
+            });
+
+            // Bookkeeping-only changes still don't require version decisions,
+            // even when an absolute source prevents historical replay.
+            await xfs.removePromise(changedPath);
+            await expect(run(`version`, `check`, configuration)).resolves.toMatchObject({code: 0});
+          },
+        ),
+      );
+    }
+
     test(
       `--since marks all workspaces changed when a historical source escapes the snapshot`,
       makeTemporaryEnv({
