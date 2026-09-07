@@ -543,6 +543,60 @@ describe(`Features`, () => {
       );
     }
 
+    for (const enableWorkspaceHashes of [true, false]) {
+      for (const conversion of [`CRLF`, `smudge filter`]) {
+        test(
+          `--since treats ${conversion} checkout conversion as unchanged configuration (hashes ${enableWorkspaceHashes})`,
+          makeTemporaryMonorepoEnv(
+            {
+              name: `root-workspace`,
+              private: true,
+              workspaces: [`packages/*`],
+              scripts: {print: `echo Root Workspace`},
+            },
+            {
+              [`packages/workspace-a`]: {name: `workspace-a`, scripts: {print: `echo Test Workspace A`}},
+              [`packages/workspace-b`]: {name: `workspace-b`, scripts: {print: `echo Test Workspace B`}},
+            },
+            async ({path, run}) => {
+              const configPath = `${path}/.yarnrc.yml` as PortablePath;
+              const initialConfiguration = `enableWorkspaceHashes: ${enableWorkspaceHashes}\n`;
+              await xfs.writeFilePromise(configPath, initialConfiguration);
+              await run(`install`);
+              expect(`workspaces` in await readLockfile(path)).toBe(enableWorkspaceHashes);
+
+              const git = await gitInit(path, `Configuration before checkout conversion`);
+              await git(`config`, `core.autocrlf`, String(conversion === `CRLF`));
+              if (conversion === `smudge filter`) {
+                await xfs.writeFilePromise(`${path}/.gitattributes` as PortablePath, `.yarnrc.yml filter=workspace-hashes text eol=lf\n`);
+                await git(`config`, `filter.workspace-hashes.clean`, `sed '/^# Git checkout conversion$/d'`);
+                await git(`config`, `filter.workspace-hashes.smudge`, `cat && printf '# Git checkout conversion\\n'`);
+                await git(`config`, `filter.workspace-hashes.required`, `true`);
+                await git(`add`, `.gitattributes`);
+                await git(`commit`, `-m`, `Configure checkout filter`);
+              }
+
+              await xfs.removePromise(configPath);
+              await git(`checkout`, `HEAD`, `--`, `.yarnrc.yml`);
+              const checkedOutConfiguration = await xfs.readFilePromise(configPath, `utf8`);
+              expect(checkedOutConfiguration).not.toEqual(initialConfiguration);
+              await expect(git(`show`, `HEAD:.yarnrc.yml`)).resolves.toMatchObject({stdout: initialConfiguration});
+              await expect(git(`diff`, `HEAD`, `--`, `.yarnrc.yml`)).resolves.toMatchObject({stdout: ``});
+
+              // Force comparison without a real config edit. The unrelated
+              // control and root must not be selected just because Git converted it.
+              await xfs.writeFilePromise(`${path}/packages/workspace-a/README.md` as PortablePath, `Changed\n`);
+              await expectForEachSince(run, [`Test Workspace A`]);
+
+              // Real configuration edits must still invalidate every workspace.
+              await xfs.writeFilePromise(configPath, `${checkedOutConfiguration}# Actual configuration edit\n`);
+              await expectForEachSince(run, [`Root Workspace`, `Test Workspace A`, `Test Workspace B`]);
+            },
+          ),
+        );
+      }
+    }
+
     test(
       `--since retains an isolated user rc workspace profile during historical replay`,
       makeTemporaryMonorepoEnv(

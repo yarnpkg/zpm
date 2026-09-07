@@ -218,10 +218,12 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
         = find_root(&project.project_cwd)?;
     let config_relative
         = config_path.relative_to(&git_root);
+    // Compare the same representation on both sides: the working tree may use
+    // CRLF or smudge filters even when Git considers the config unchanged.
     let old_config
         = ScriptEnvironment::new()?
             .with_cwd(git_root)
-            .run_exec("git", ["show", &format!("{}:{}", since_ref, config_relative.to_file_string())])
+            .run_exec("git", ["cat-file", "--filters", &format!("{}:{}", since_ref, config_relative.to_file_string())])
             .await?;
     let old_hash
         = if old_config.success() {
