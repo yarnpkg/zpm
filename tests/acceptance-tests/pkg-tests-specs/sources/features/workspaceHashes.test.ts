@@ -291,7 +291,7 @@ describe(`Features`, () => {
       },
     ]) {
       test(
-        `${name}: stored and on-demand hashes are present and equal, and toggling either way selects nothing`,
+        `${name}: stored and on-demand hashes are present and equal, and toggling via environment overrides either way selects nothing`,
         makeTemporaryMonorepoEnv(
           {
             name: `root-workspace`,
@@ -327,6 +327,7 @@ describe(`Features`, () => {
             await git(`commit`, `-m`, `Hashes on`);
 
             for (const enableWorkspaceHashes of [false, true]) {
+              // These options set environment overrides, leaving .yarnrc.yml unchanged.
               // Keep the flag on foreach too: it may reinstall before checking --since.
               await run(`install`, {enableWorkspaceHashes});
               const lockfile = await readLockfile(path);
@@ -505,6 +506,75 @@ describe(`Features`, () => {
       }),
     );
 
+    for (const enableWorkspaceHashes of [true, false]) {
+      const initialConfiguration = `enableWorkspaceHashes: ${enableWorkspaceHashes}\n`;
+
+      for (const {edit, configuration, storesHashes} of [
+        {edit: `comment-only`, configuration: `${initialConfiguration}# No setting changed\n`, storesHashes: enableWorkspaceHashes},
+        {edit: `whitespace-only`, configuration: `enableWorkspaceHashes:    ${enableWorkspaceHashes}\n\n`, storesHashes: enableWorkspaceHashes},
+        {edit: `toggle to ${!enableWorkspaceHashes}`, configuration: `enableWorkspaceHashes: ${!enableWorkspaceHashes}\n`, storesHashes: !enableWorkspaceHashes},
+      ]) {
+        test(
+          `--since marks all workspaces changed for a ${edit} .yarnrc.yml edit (initial hashes ${enableWorkspaceHashes})`,
+          makeTemporaryMonorepoEnv(
+            {
+              name: `root-workspace`,
+              private: true,
+              workspaces: [`packages/*`],
+              scripts: {print: `echo Root Workspace`},
+            },
+            {
+              [`packages/workspace-a`]: {name: `workspace-a`, scripts: {print: `echo Test Workspace A`}},
+              [`packages/workspace-b`]: {name: `workspace-b`, scripts: {print: `echo Test Workspace B`}},
+            },
+            async ({path, run}) => {
+              const configPath = `${path}/.yarnrc.yml` as PortablePath;
+              await xfs.writeFilePromise(configPath, initialConfiguration);
+              // No per-command overrides: the persisted setting controls storage.
+              await run(`install`);
+              expect(`workspaces` in await readLockfile(path)).toBe(enableWorkspaceHashes);
+              const {stdout: initialHashes} = await run(`workspaces`, `list`, `--json`, `--tree-hash`);
+              for (const line of initialHashes.trim().split(`\n`))
+                expect(JSON.parse(line).treeHash).toMatch(/^[0-9a-f]+$/);
+
+              const git = (...args: Array<string>) => exec.execFile(`git`, args, {cwd: path});
+              await exec.execGitInit({cwd: path});
+              await git(`add`, `-A`);
+              await git(`commit`, `-m`, `Persisted workspace hash setting`);
+              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`)).resolves.toEqual({
+                code: 0,
+                stderr: ``,
+                stdout: forEachVerboseDone.join(``),
+              });
+
+              await xfs.writeFilePromise(configPath, configuration);
+              expect((await git(`diff`, `HEAD`, `--name-only`)).stdout.trim()).toBe(`.yarnrc.yml`);
+              await run(`install`);
+              expect(`workspaces` in await readLockfile(path)).toBe(storesHashes);
+              expect((await git(`diff`, `HEAD`, `--name-only`)).stdout.trim().split(`\n`)).toEqual(
+                storesHashes === enableWorkspaceHashes ? [`.yarnrc.yml`] : [`.yarnrc.yml`, `yarn.lock`],
+              );
+              // Neither formatting nor hash storage changes the dependency trees.
+              await expect(run(`workspaces`, `list`, `--json`, `--tree-hash`)).resolves.toMatchObject({stdout: initialHashes});
+              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`)).resolves.toEqual({
+                code: 0,
+                stderr: ``,
+                stdout: [`Root Workspace\n`, `Test Workspace A\n`, `Test Workspace B\n`, ...forEachVerboseDone].join(``),
+              });
+
+              await xfs.writeFilePromise(configPath, initialConfiguration);
+              await run(`install`);
+              await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`)).resolves.toEqual({
+                code: 0,
+                stderr: ``,
+                stdout: forEachVerboseDone.join(``),
+              });
+            },
+          ),
+        );
+      }
+    }
+
     test(
       `--since retains an isolated user rc workspace profile during historical replay`,
       makeTemporaryMonorepoEnv(
@@ -543,7 +613,7 @@ describe(`Features`, () => {
     );
 
     test(
-      `--since preserves environment precedence over user transparent-workspace settings when toggling hashes`,
+      `--since preserves environment precedence over user transparent-workspace settings when toggling hashes via environment overrides`,
       makeTemporaryMonorepoEnv(
         {name: `root-workspace`, private: true, workspaces: [`packages/*`]},
         {

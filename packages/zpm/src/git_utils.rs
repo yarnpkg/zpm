@@ -185,17 +185,22 @@ pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error
 }
 
 pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) -> Result<BTreeMap<Ident, Arc<BTreeSet<Path>>>, Error> {
-    let since_ref = match since {
-        Some(since) => since.to_string(),
-        None => fetch_branch_base(project).await?,
-    };
+    let since_ref
+        = match since {
+            Some(since)
+                => since.to_string(),
 
-    let since_ref = ScriptEnvironment::new()?
-        .with_cwd(project.project_cwd.clone())
-        .run_exec("git", ["rev-parse", "--verify", "--end-of-options", &format!("{}^{{commit}}", since_ref)])
-        .await?
-        .ok()?
-        .stdout_text()?;
+            None
+                => fetch_branch_base(project).await?,
+        };
+
+    let since_ref
+        = ScriptEnvironment::new()?
+            .with_cwd(project.project_cwd.clone())
+            .run_exec("git", ["rev-parse", "--verify", "--end-of-options", &format!("{}^{{commit}}", since_ref)])
+            .await?
+            .ok()?
+            .stdout_text()?;
 
     let changed_files
         = fetch_changed_files(&project, Some(&since_ref)).await?;
@@ -206,23 +211,27 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
 
     // Configuration changes intentionally invalidate every workspace. There is
     // no need to parse or replay historical configuration for this first version.
-    let config_path = project.config.project_config_path.clone()
-        .unwrap_or_else(|| project.project_cwd.with_join_str(".yarnrc.yml"));
+    let config_path
+        = project.config.project_config_path.clone()
+            .unwrap_or_else(|| project.project_cwd.with_join_str(".yarnrc.yml"));
     let git_root
         = find_root(&project.project_cwd)?;
     let config_relative
         = config_path.relative_to(&git_root);
-    let old_config = ScriptEnvironment::new()?
-        .with_cwd(git_root)
-        .run_exec("git", ["show", &format!("{}:{}", since_ref, config_relative.to_file_string())])
-        .await?;
-    let old_hash = if old_config.success() {
-        Some(Hash64::from_data(old_config.output().stdout))
-    } else {
-        None
-    };
-    let current_hash = config_path.fs_read().ok_missing()?
-        .map(Hash64::from_data);
+    let old_config
+        = ScriptEnvironment::new()?
+            .with_cwd(git_root)
+            .run_exec("git", ["show", &format!("{}:{}", since_ref, config_relative.to_file_string())])
+            .await?;
+    let old_hash
+        = if old_config.success() {
+            Some(Hash64::from_data(old_config.output().stdout))
+        } else {
+            None
+        };
+    let current_hash
+        = config_path.fs_read().ok_missing()?
+            .map(Hash64::from_data);
 
     if current_hash != old_hash {
         return Ok(all_workspaces_changed(project, Arc::new(BTreeSet::from([config_path]))));
@@ -233,7 +242,6 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
 
     let lockfile_path
         = project.project_cwd.with_join_str(LOCKFILE_NAME);
-
 
     for file in &changed_files {
         // Skip the lockfile itself - we handle it separately via hash comparison
@@ -257,46 +265,49 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
 
     // Patch/local content and workspace-only edges can change a tree without
     // changing yarn.lock when its workspace hashes are omitted.
-    if !changed_files.is_empty() {
-        let current_lockfile
-            = project.lockfile().ok();
+    let current_lockfile
+        = project.lockfile().ok();
 
-        let old_lockfile
-            = fetch_lockfile_at_ref(project, &since_ref).await.ok();
+    let old_lockfile
+        = fetch_lockfile_at_ref(project, &since_ref).await.ok();
 
-        if let (Some(current), Some(old)) = (&current_lockfile, &old_lockfile) {
-            // Stored hashes are the fast path; when a side doesn't
-            // carry them (enableWorkspaceHashes off, or a lockfile
-            // predating them), compute them on demand. Both paths use
-            // the same deterministic function, so mixing a stored
-            // side with an on-demand side stays valid.
-            let current_hashes
-                = if current.workspaces.is_empty() {
-                    project.workspace_hashes_ondemand(current).await?
-                } else {
-                    current.workspaces.clone()
-                };
+    if let (Some(current), Some(old)) = (&current_lockfile, &old_lockfile) {
+        // Stored hashes are the fast path; when a side doesn't
+        // carry them (enableWorkspaceHashes off, or a lockfile
+        // predating them), compute them on demand. Both paths use
+        // the same deterministic function, so mixing a stored
+        // side with an on-demand side stays valid.
+        let current_hashes
+            = if current.workspaces.is_empty() {
+                project.workspace_hashes_ondemand(current).await?
+            } else {
+                current.workspaces.clone()
+            };
 
-            // Consumers may filter bookkeeping paths (for example .yarn/versions).
-            // Choosing just one file could hide real changes after that filtering.
-            // Share all possible causes instead of copying a repository-wide set
-            // for each affected workspace in a large monorepo.
-            let change_paths = Arc::new(changed_files);
-            let old_hashes = if old.workspaces.is_empty() {
+        // Consumers may filter bookkeeping paths (for example .yarn/versions).
+        // Choosing just one file could hide real changes after that filtering.
+        // Share all possible causes instead of copying a repository-wide set
+        // for each affected workspace in a large monorepo.
+        let change_paths
+            = Arc::new(changed_files);
+        let old_hashes
+            = if old.workspaces.is_empty() {
                 match fetch_workspace_hashes_at_ref(project, &since_ref).await {
-                    Ok(hashes) => hashes,
-                    Err(_) => return Ok(all_workspaces_changed(project, change_paths)),
+                    Ok(hashes)
+                        => hashes,
+
+                    Err(_)
+                        => return Ok(all_workspaces_changed(project, change_paths)),
                 }
             } else {
                 old.workspaces.clone()
             };
 
-            for workspace in &project.workspaces {
-                // A missing entry in a reconstructed old map means this workspace
-                // is newly included, even if its files were already tracked.
-                if current_hashes.get(&workspace.name) != old_hashes.get(&workspace.name) {
-                    changed_workspaces.insert(workspace.name.clone(), change_paths.clone());
-                }
+        for workspace in &project.workspaces {
+            // A missing entry in a reconstructed old map means this workspace
+            // is newly included, even if its files were already tracked.
+            if current_hashes.get(&workspace.name) != old_hashes.get(&workspace.name) {
+                changed_workspaces.insert(workspace.name.clone(), change_paths.clone());
             }
         }
     }
