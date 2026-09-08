@@ -185,7 +185,7 @@ pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error
 }
 
 pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) -> Result<BTreeMap<Ident, Arc<BTreeSet<Path>>>, Error> {
-    let since_ref
+    let base_ref
         = match since {
             Some(since)
                 => since.to_string(),
@@ -197,7 +197,7 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
     let since_ref
         = ScriptEnvironment::new()?
             .with_cwd(project.project_cwd.clone())
-            .run_exec("git", ["rev-parse", "--verify", "--end-of-options", &format!("{}^{{commit}}", since_ref)])
+            .run_exec("git", ["rev-parse", "--verify", "--end-of-options", &format!("{}^{{commit}}", base_ref)])
             .await?
             .ok()?
             .stdout_text()?;
