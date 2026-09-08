@@ -56,10 +56,6 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
         = locator.to_file_string();
 
     let pkg_blob = package_cache.upsert_blob(locator.clone(), ".zip", || async {
-        if !context.allow_preparation {
-            return Err(Error::HashPrerequisiteUnavailable(locator.clone()));
-        }
-
         if !is_exec_allowed(context, locator) {
             return Err(Error::ExecScriptsDisabled(locator.clone()));
         }

@@ -796,7 +796,7 @@ describe(`Features`, () => {
     );
 
     test(
-      `on-demand tree hashes reuse a cached exec artifact but never prepare a missing one`,
+      `on-demand tree hashes reuse a cached exec artifact and prepare a missing one on demand`,
       makeTemporaryEnv({
         name: `root-workspace`,
         dependencies: {[`dynamic-pkg`]: `exec:./genpkg.js`},
@@ -817,11 +817,11 @@ describe(`Features`, () => {
         expect(await xfs.existsPromise(markerPath)).toBe(false);
 
         // Leave the generator and manifests intact, but remove every artifact cache.
+        // On a cold cache, on-demand hash computation prepares the missing artifact.
         await xfs.removePromise(`${path}/.yarn/cache` as PortablePath);
         await xfs.removePromise(`${path}/.yarn/global` as PortablePath);
-        const result = await run(`workspaces`, `list`, `--json`, `--tree-hash`, {enableWorkspaceHashes: false}).catch(error => error);
-        expect(await xfs.existsPromise(markerPath)).toBe(false);
-        expect(result).toMatchObject({code: 1, stdout: expect.stringContaining(`cached prepared artifact`)});
+        expect(await readTreeHashes(run, false)).toEqual(stored);
+        expect(await xfs.existsPromise(markerPath)).toBe(true);
       }),
     );
 

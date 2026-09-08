@@ -35,8 +35,6 @@ pub struct InstallContext<'a> {
     /// call `drain` before returning so pending writes aren't dropped
     /// when the runtime shuts down.
     pub background_writes: Option<Arc<http_npm::BackgroundWrites>>,
-    /// Analysis may consume prepared artifacts, but must not execute generators.
-    pub allow_preparation: bool,
 }
 
 /// Tracks `packageExtensions` rule behavior so we can warn about
@@ -90,7 +88,6 @@ impl<'a> Default for InstallContext<'a> {
             inline_builds: false,
             extension_tracking: Arc::new(Mutex::new(ExtensionTracking::default())),
             background_writes: None,
-            allow_preparation: true,
         }
     }
 }
@@ -1822,7 +1819,6 @@ pub(crate) async fn workspace_hashes_from_lockfile(project: &Project, lockfile: 
         project: Some(project),
         package_cache: Some(&package_cache),
         systems: Some(&systems),
-        allow_preparation: false,
         ..Default::default()
     };
     let (resolution_tx, resolution_rx)
