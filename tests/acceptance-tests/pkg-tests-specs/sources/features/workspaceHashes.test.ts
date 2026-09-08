@@ -2,15 +2,19 @@ import {PortablePath, npath, ppath, xfs} from '@yarnpkg/fslib';
 import http, {RequestListener}           from 'http';
 import {exec, fs, tests, yarn}           from 'pkg-tests-core';
 
-import {RunFunction}                     from '../../../pkg-tests-core/sources/utils/tests';
+type HashRunOptions = {
+  enableWorkspaceHashes?: boolean;
+  env?: Record<string, string | undefined>;
+  unsafeHttpWhitelist?: Array<string>;
+};
 
 async function readLockfile(path: PortablePath) {
   const raw = await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`);
   return JSON.parse(raw);
 }
 
-async function readTreeHashes(run: tests.Run, enableWorkspaceHashes?: boolean, options?: Record<string, any>) {
-  const callOptions: Record<string, any> = {...options};
+async function readTreeHashes(run: tests.Run, enableWorkspaceHashes?: boolean, options?: HashRunOptions) {
+  const callOptions: HashRunOptions = {...options};
   if (typeof enableWorkspaceHashes === `boolean`)
     callOptions.enableWorkspaceHashes = enableWorkspaceHashes;
 
@@ -21,7 +25,7 @@ async function readTreeHashes(run: tests.Run, enableWorkspaceHashes?: boolean, o
     expect(workspace.treeHash).toMatch(/^[0-9a-f]+$/);
 
   return Object.fromEntries(workspaces.map(({location, name, treeHash}) => [
-    name ?? (location === `.` ? `root-workspace` : location),
+    name ?? (location === `.` ? `root-workspace` : ppath.basename(location as PortablePath)),
     treeHash,
   ]));
 }
@@ -41,7 +45,7 @@ const gitInit = async (path: PortablePath, message = `Initial commit`) => {
 const expectForEachSince = async (
   run: tests.Run,
   expectedWorkspaces: Array<string>,
-  options: Record<string, any> = {},
+  options: HashRunOptions = {},
 ) => {
   const expectedStdout = [...expectedWorkspaces.map(name => `${name}\n`), ...forEachVerboseDone].join(``);
   await expect(run(`workspaces`, `foreach`, `--since`, `run`, `print`, options)).resolves.toEqual({
@@ -93,7 +97,7 @@ const NO_DEPS_MANIFEST_PATCH = `diff --git a/package.json b/package.json
 // A monorepo whose workspace-a depends on a registry package and
 // workspace-b depends on workspace-a, so each workspace has a
 // different dependency tree to hash.
-const makeHashesEnv = (fn: RunFunction) => makeTemporaryMonorepoEnv(
+const makeHashesEnv = (fn: tests.RunFunction) => makeTemporaryMonorepoEnv(
   {
     private: true,
     workspaces: [`packages/*`],
@@ -473,6 +477,72 @@ describe(`Features`, () => {
       }),
     );
 
+    for (const historicalLockfile of [``, `{invalid native lockfile`]) {
+      test(
+        `--since retains direct attribution with ${historicalLockfile ? `invalid native` : `empty`} historical lockfile contents`,
+        makeHashesEnv(async ({path, run}) => {
+          await run(`install`, {enableWorkspaceHashes: false});
+          const lockfilePath = `${path}/yarn.lock` as PortablePath;
+          const currentLockfile = await xfs.readFilePromise(lockfilePath, `utf8`);
+          await xfs.writeFilePromise(lockfilePath, historicalLockfile);
+          await gitInit(path, `Unavailable historical graph`);
+          await xfs.writeFilePromise(lockfilePath, currentLockfile);
+
+          await expectForEachSince(run, [], {enableWorkspaceHashes: false});
+          await xfs.writeFilePromise(`${path}/packages/workspace-a/README.md` as PortablePath, `Changed\n`);
+          await expectForEachSince(run, [`Test Workspace A`], {enableWorkspaceHashes: false});
+        }),
+      );
+    }
+
+    test(
+      `--since propagates current hash errors rather than using historical fallback`,
+      makeHashesEnv(async ({path, run}) => {
+        await run(`install`, {enableWorkspaceHashes: false});
+        await gitInit(path, `Readable historical graph`);
+        const lockfile = await readLockfile(path);
+        lockfile.entries = {};
+        await fs.writeJson(`${path}/yarn.lock` as PortablePath, lockfile);
+
+        await expect(run(`debug`, `print-changed-workspaces`, `--since`, `HEAD`, {enableWorkspaceHashes: false})).rejects.toMatchObject({
+          code: 1,
+          stdout: expect.stringContaining(`Missing resolution for descriptor`),
+        });
+      }),
+    );
+
+    test(
+      `stored and historical hashes use the same fallback names for unnamed workspaces`,
+      makeTemporaryMonorepoEnv(
+        {private: true, workspaces: [`packages/*`], scripts: {print: `echo Root Workspace`}},
+        {
+          [`packages/anonymous`]: {version: `1.0.0`, scripts: {print: `echo Anonymous Workspace`}},
+          [`packages/control`]: {name: `control`, scripts: {print: `echo Control Workspace`}},
+        },
+        async ({path, run}) => {
+          await run(`install`, {enableWorkspaceHashes: true});
+          const stored = await readTreeHashes(run, true);
+          expect(Object.keys(stored).sort()).toEqual([`anonymous`, `control`, `root-workspace`]);
+          expect((await readLockfile(path)).workspaces).toEqual(stored);
+
+          await run(`install`, {enableWorkspaceHashes: false});
+          expect(`workspaces` in await readLockfile(path)).toBe(false);
+          expect(await readTreeHashes(run, false)).toEqual(stored);
+          await gitInit(path, `Unnamed workspaces without stored hashes`);
+
+          // Query directly so a lazy install cannot erase the edit that forces replay.
+          await xfs.appendFilePromise(`${path}/yarn.lock` as PortablePath, `\n`);
+          await expect(run(`debug`, `print-changed-workspaces`, `--since`, `HEAD`, {enableWorkspaceHashes: false})).resolves.toEqual({
+            code: 0,
+            stderr: ``,
+            stdout: ``,
+          });
+          await xfs.writeFilePromise(`${path}/packages/anonymous/README.md` as PortablePath, `Changed\n`);
+          await expectForEachSince(run, [`Anonymous Workspace`], {enableWorkspaceHashes: false});
+        },
+      ),
+    );
+
     for (const {edit, initialHashes, initialConfiguration, modifiedConfiguration, storesHashesAfter} of [
       {
         edit: `comment-only`,
@@ -523,7 +593,7 @@ describe(`Features`, () => {
             expect(`workspaces` in await readLockfile(path)).toBe(initialHashes);
             const {stdout: initialHashesStdout} = await run(`workspaces`, `list`, `--json`, `--tree-hash`);
 
-            const git = await gitInit(path, `Initial configuration`);
+            await gitInit(path, `Initial configuration`);
             await expectForEachSince(run, []);
 
             await xfs.writeFilePromise(configPath, modifiedConfiguration);

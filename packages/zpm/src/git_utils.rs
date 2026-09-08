@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    process::Output,
     sync::Arc,
 };
 
@@ -13,16 +14,16 @@ use serde::Deserialize;
 use crate::{
     error::Error,
     lockfile::Lockfile,
-    install::HASH_SNAPSHOT_ROOT_ENV,
     project::{
-        Project,
+        Project, Workspace,
         LOCKFILE_NAME,
     },
-    script::ScriptEnvironment,
+    script::{ScriptEnvironment, ScriptResult},
 };
 
-/// The internal hash replay reads configuration from the live project, not Git.
+/// Paths passed to the hash-query command running inside a historical checkout.
 pub(crate) const HASH_SNAPSHOT_CONFIG_CWD_ENV: &str = "YARN_INTERNAL_HASH_SNAPSHOT_CONFIG_CWD";
+pub(crate) const HASH_SNAPSHOT_ROOT_ENV: &str = "YARN_INTERNAL_HASH_SNAPSHOT_ROOT";
 
 pub fn find_root(initial_cwd: &Path) -> Result<Path, Error> {
     // Note: We can't just use `git rev-parse --show-toplevel`, because on Windows
@@ -209,33 +210,7 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
         return Ok(BTreeMap::new());
     }
 
-    // Configuration changes intentionally invalidate every workspace. There is
-    // no need to parse or replay historical configuration for this first version.
-    let config_path
-        = project.config.project_config_path.clone()
-            .unwrap_or_else(|| project.project_cwd.with_join_str(".yarnrc.yml"));
-    let git_root
-        = find_root(&project.project_cwd)?;
-    let config_relative
-        = config_path.relative_to(&git_root);
-    // Compare the same representation on both sides: the working tree may use
-    // CRLF or smudge filters even when Git considers the config unchanged.
-    let old_config
-        = ScriptEnvironment::new()?
-            .with_cwd(git_root)
-            .run_exec("git", ["cat-file", "--filters", &format!("{}:{}", since_ref, config_relative.to_file_string())])
-            .await?;
-    let old_hash
-        = if old_config.success() {
-            Some(Hash64::from_data(old_config.output().stdout))
-        } else {
-            None
-        };
-    let current_hash
-        = config_path.fs_read().ok_missing()?
-            .map(Hash64::from_data);
-
-    if current_hash != old_hash {
+    if let Some(config_path) = fetch_changed_project_config(project, &since_ref).await? {
         return Ok(all_workspaces_changed(project, Arc::new(BTreeSet::from([config_path]))));
     }
 
@@ -265,56 +240,88 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
         }
     }
 
-    // Patch/local content and workspace-only edges can change a tree without
-    // changing yarn.lock when its workspace hashes are omitted.
-    let current_lockfile
-        = project.lockfile().ok();
+    let current = match project.lockfile() {
+        Ok(lockfile)
+            => lockfile,
 
-    let old_lockfile
-        = fetch_lockfile_at_ref(project, &since_ref).await.ok();
+        // Preserve direct file attribution when the current lockfile cannot be read.
+        Err(_)
+            => return Ok(changed_workspaces),
+    };
+    let old = match fetch_lockfile_at_ref(project, &since_ref).await {
+        Ok(Some(lockfile))
+            => lockfile,
 
-    if let (Some(current), Some(old)) = (&current_lockfile, &old_lockfile) {
-        // Stored hashes are the fast path; when a side doesn't
-        // carry them (enableWorkspaceHashes off, or a lockfile
-        // predating them), compute them on demand. Both paths use
-        // the same deterministic function, so mixing a stored
-        // side with an on-demand side stays valid.
-        let current_hashes
-            = if current.workspaces.is_empty() {
-                project.workspace_hashes_ondemand(current).await?
-            } else {
-                current.workspaces.clone()
-            };
+        // Empty and legacy lockfiles have no comparable native graph.
+        Ok(None)
+            => return Ok(changed_workspaces),
 
-        // Consumers may filter bookkeeping paths (for example .yarn/versions).
-        // Choosing just one file could hide real changes after that filtering.
-        // Share all possible causes instead of copying a repository-wide set
-        // for each affected workspace in a large monorepo.
-        let change_paths
-            = Arc::new(changed_files);
-        let old_hashes
-            = if old.workspaces.is_empty() {
-                match fetch_workspace_hashes_at_ref(project, &since_ref).await {
-                    Ok(hashes)
-                        => hashes,
+        // Historical read/parse failures also retain direct attribution.
+        // This is distinct from a failure while replaying a readable graph below.
+        Err(_)
+            => return Ok(changed_workspaces),
+    };
 
-                    Err(_)
-                        => return Ok(all_workspaces_changed(project, change_paths)),
-                }
-            } else {
-                old.workspaces.clone()
-            };
+    // Compare even if yarn.lock is unchanged: local inputs and workspace-only
+    // edges can change a tree without changing a hashless lockfile.
+    // Errors computing the current graph propagate to the caller.
+    let current_hashes
+        = project.workspace_tree_hashes(current, None).await?;
 
-        for workspace in &project.workspaces {
-            // A missing entry in a reconstructed old map means this workspace
-            // is newly included, even if its files were already tracked.
-            if current_hashes.get(&workspace.name) != old_hashes.get(&workspace.name) {
-                changed_workspaces.insert(workspace.name.clone(), change_paths.clone());
+    // Keep all potential causes for consumers that filter bookkeeping paths.
+    let change_paths
+        = Arc::new(changed_files);
+    let old_hashes
+        = if old.workspaces.is_empty() {
+            match fetch_workspace_hashes_at_ref(project, &since_ref).await {
+                Ok(hashes)
+                    => hashes,
+
+                Err(_)
+                    => return Ok(all_workspaces_changed(project, change_paths)),
             }
+        } else {
+            old.workspaces
+        };
+
+    for workspace in &project.workspaces {
+        // A missing old entry marks newly included workspaces as changed.
+        if current_hashes.get(&workspace.name) != old_hashes.get(&workspace.name) {
+            changed_workspaces.insert(workspace.name.clone(), change_paths.clone());
         }
     }
 
     Ok(changed_workspaces)
+}
+
+/// Returns the config path when its contents differ from the base commit.
+async fn fetch_changed_project_config(project: &Project, git_ref: &str) -> Result<Option<Path>, Error> {
+    let config_path
+        = project.config.project_config_path.clone()
+            .unwrap_or_else(|| project.project_cwd.with_join_str(".yarnrc.yml"));
+    let git_root
+        = find_root(&project.project_cwd)?;
+    let config_relative
+        = config_path.relative_to(&git_root);
+
+    // Compare working-tree contents on both sides, including Git's CRLF and smudge conversions.
+    let old_config
+        = ScriptEnvironment::new()?
+            .with_cwd(git_root)
+            .run_exec("git", ["cat-file", "--filters", &format!("{}:{}", git_ref, config_relative.to_file_string())])
+            .await?;
+    let old_hash
+        = if old_config.success() {
+            Some(Hash64::from_data(old_config.output().stdout))
+        } else {
+            // A nonzero Git exit leaves no usable historical config for this comparison.
+            None
+        };
+    let current_hash
+        = config_path.fs_read().ok_missing()?
+            .map(Hash64::from_data);
+
+    Ok((current_hash != old_hash).then_some(config_path))
 }
 
 fn all_workspaces_changed(project: &Project, paths: Arc<BTreeSet<Path>>) -> BTreeMap<Ident, Arc<BTreeSet<Path>>> {
@@ -332,6 +339,15 @@ impl Drop for GitSnapshot {
     fn drop(&mut self) {
         let _ = self.0.fs_rm();
     }
+}
+
+/// Bounds each replay command and preserves failed-command output using the usual error logs.
+async fn run_snapshot_command(command: &mut Command) -> Result<Output, Error> {
+    let output
+        = tokio::time::timeout(std::time::Duration::from_secs(120), command.kill_on_drop(true).output())
+            .await.map_err(|_| Error::TaskTimeout)??;
+
+    Ok(ScriptResult::new(output, command.as_std()).ok()?.output())
 }
 
 async fn fetch_workspace_hashes_at_ref(project: &Project, git_ref: &str) -> Result<BTreeMap<Ident, Hash64>, Error> {
@@ -363,39 +379,27 @@ async fn fetch_workspace_hashes_at_ref(project: &Project, git_ref: &str) -> Resu
         vec!["-c", "core.sparseCheckout=false", "read-tree", git_ref],
         vec!["checkout-index", "--all", &prefix],
     ] {
-        let output = tokio::time::timeout(std::time::Duration::from_secs(120), Command::new("git")
+        run_snapshot_command(Command::new("git")
             .args(args)
             .current_dir(git_root.to_path_buf())
             .env("GIT_INDEX_FILE", index.to_path_buf())
-            .env("GIT_WORK_TREE", checkout.to_path_buf())
-            .kill_on_drop(true)
-            .output())
-            .await.map_err(|_| Error::TaskTimeout)??;
-
-        if !output.status.success() {
-            return Err(Error::ChildProcessFailed("git".to_string()));
-        }
+            .env("GIT_WORK_TREE", checkout.to_path_buf()))
+            .await?;
     }
 
     let project_cwd
         = checkout.with_join(&project.project_cwd.relative_to(&git_root));
-    // Run `workspaces list --tree-hash` inside the base commit checkout using this binary.
-    // We pass the live project's config directory and cache paths so the child process
-    // uses the current configuration and reuses existing package caches without trusting the snapshot.
-    let output = tokio::time::timeout(std::time::Duration::from_secs(120), Command::new(Path::current_exe()?.to_path_buf())
+    // Use this Yarn binary to hash the checkout with the live project's configuration.
+    // The child inherits the parent environment. Override only the config/cache paths
+    // and the boundary used to validate local dependency sources.
+    let output = run_snapshot_command(Command::new(Path::current_exe()?.to_path_buf())
         .args(["workspaces", "list", "--json", "--tree-hash"])
         .current_dir(project_cwd.to_path_buf())
         .env(HASH_SNAPSHOT_CONFIG_CWD_ENV, project.project_cwd.to_path_buf())
         .env("YARN_CACHE_FOLDER", project.config.settings.cache_folder.value.to_path_buf())
         .env("YARN_GLOBAL_FOLDER", project.config.settings.global_folder.value.to_path_buf())
-        .env(HASH_SNAPSHOT_ROOT_ENV, checkout.to_path_buf())
-        .kill_on_drop(true)
-        .output())
-        .await.map_err(|_| Error::TaskTimeout)??;
-
-    if !output.status.success() {
-        return Err(Error::ChildProcessFailed("yarn".to_string()));
-    }
+        .env(HASH_SNAPSHOT_ROOT_ENV, checkout.to_path_buf()))
+        .await?;
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -410,22 +414,15 @@ async fn fetch_workspace_hashes_at_ref(project: &Project, git_ref: &str) -> Resu
         .map(|line| {
             let workspace: WorkspaceHash
                 = JsonDocument::hydrate_from_str(line)?;
-            let name = workspace.name.unwrap_or_else(|| {
-                let name = if workspace.location == Path::new() {
-                    "root-workspace"
-                } else {
-                    workspace.location.basename().unwrap_or("unnamed-workspace")
-                };
-                Ident::new(name.to_string())
-            });
+            let name = workspace.name
+                .unwrap_or_else(|| Workspace::fallback_name(&workspace.location));
             Ok((name, workspace.tree_hash))
         })
         .collect()
-
 }
 
-/// Fetches and parses the lockfile at a specific git ref.
-async fn fetch_lockfile_at_ref(project: &Project, git_ref: &str) -> Result<Lockfile, Error> {
+/// Returns no graph for empty/legacy history, and an error for failed reads or invalid native data.
+async fn fetch_lockfile_at_ref(project: &Project, git_ref: &str) -> Result<Option<Lockfile>, Error> {
     let git_root
         = find_root(&project.project_cwd)?;
     let lockfile_path
@@ -440,14 +437,14 @@ async fn fetch_lockfile_at_ref(project: &Project, git_ref: &str) -> Result<Lockf
 
     // No native historical graph is available for empty or legacy Berry files.
     if lockfile_content.is_empty() || lockfile_content.starts_with('#') {
-        return Err(Error::Unsupported);
+        return Ok(None);
     }
 
     let lockfile: Lockfile
         = JsonDocument::hydrate_from_str(&lockfile_content)
             .map_err(|e| Error::LockfileParseError(e))?;
 
-    Ok(lockfile)
+    Ok(Some(lockfile))
 }
 
 pub async fn fetch_changed_files(project: &Project, since: Option<&str>) -> Result<BTreeSet<Path>, Error> {

@@ -1038,8 +1038,13 @@ impl Project {
         Ok(true)
     }
 
-    pub async fn workspace_hashes_ondemand(&self, lockfile: &Lockfile) -> Result<BTreeMap<Ident, Hash64>, Error> {
-        crate::install::workspace_hashes_from_lockfile(self, lockfile).await
+    /// Reuses stored hashes, or computes them from the locked dependency graph.
+    pub(crate) async fn workspace_tree_hashes(&self, lockfile: Lockfile, snapshot_root: Option<&Path>) -> Result<BTreeMap<Ident, Hash64>, Error> {
+        if !lockfile.workspaces.is_empty() {
+            return Ok(lockfile.workspaces);
+        }
+
+        crate::install::workspace_hashes_from_lockfile(self, &lockfile, snapshot_root).await
     }
 
     pub(crate) fn install_config_hash(&self) -> Hash64 {
@@ -1795,6 +1800,17 @@ pub struct WorkspaceInfo {
 }
 
 impl Workspace {
+    pub(crate) fn fallback_name(rel_path: &Path) -> Ident {
+        let name
+            = if rel_path == &Path::new() {
+                "root-workspace"
+            } else {
+                rel_path.basename().unwrap_or("unnamed-workspace")
+            };
+
+        Ident::new(name.to_string())
+    }
+
     pub fn from_root_path(root: &Path) -> Result<Workspace, Error> {
         let manifest_path = root
             .with_join_str(MANIFEST_NAME);
@@ -1822,13 +1838,8 @@ impl Workspace {
         let path = root
             .with_join(&info.rel_path);
 
-        let name = info.manifest.name.clone().unwrap_or_else(|| {
-            Ident::new(if info.rel_path == Path::new() {
-                "root-workspace".to_string()
-            } else {
-                info.rel_path.basename().map_or_else(|| "unnamed-workspace".to_string(), |b| b.to_string())
-            })
-        });
+        let name = info.manifest.name.clone()
+            .unwrap_or_else(|| Self::fallback_name(&info.rel_path));
 
         Ok(Workspace {
             name,

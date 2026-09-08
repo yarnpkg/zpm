@@ -154,8 +154,12 @@ impl WorkspacesList {
     }
 
     pub async fn execute(&self) -> Result<(), Error> {
-        let config_cwd = std::env::var_os(git_utils::HASH_SNAPSHOT_CONFIG_CWD_ENV)
-            .map(Path::try_from).transpose()?;
+        let config_cwd
+            = std::env::var_os(git_utils::HASH_SNAPSHOT_CONFIG_CWD_ENV)
+                .map(Path::try_from).transpose()?;
+        let snapshot_root
+            = std::env::var_os(git_utils::HASH_SNAPSHOT_ROOT_ENV)
+                .map(Path::try_from).transpose()?;
         let mut project
             = Project::new_with_config_cwd(None, config_cwd).await?;
 
@@ -174,17 +178,13 @@ impl WorkspacesList {
             }
         };
 
-        // When the lockfile doesn't carry stored workspace hashes
-        // (enableWorkspaceHashes off, or a lockfile from before they
-        // existed), compute them on demand from the current lockfile
-        // and manifests.
-        let stored_tree_hashes = if self.json && self.tree_hash {
-            match project.lockfile().ok() {
-                Some(lockfile) if lockfile.workspaces.is_empty() => {
-                    Some(project.workspace_hashes_ondemand(&lockfile).await?)
+        let tree_hashes = if self.json && self.tree_hash {
+            match project.lockfile() {
+                Ok(lockfile) => {
+                    Some(project.workspace_tree_hashes(lockfile, snapshot_root.as_ref()).await?)
                 },
-                Some(lockfile) => Some(lockfile.workspaces),
-                None => None,
+                // Without a readable lockfile, list workspaces without hashes.
+                Err(_) => None,
             }
         } else {
             None
@@ -268,7 +268,7 @@ impl WorkspacesList {
                 }
 
                 let tree_hash
-                    = stored_tree_hashes.as_ref()
+                    = tree_hashes.as_ref()
                         .and_then(|hashes| hashes.get(&workspace.name))
                         .map(|hash| hash.to_file_string());
 

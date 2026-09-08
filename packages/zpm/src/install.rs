@@ -204,12 +204,21 @@ impl IntoResolutionResult for FetchResult {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResolutionPurpose {
+    /// Fetch all resolved packages.
+    Install,
+
+    /// Require locked non-transient resolutions. Fetch or prepare prerequisites as needed.
+    HashQuery,
+}
+
 /// Shared context for the WaitMap-based resolution/fetch pipeline.
 struct InstallMaps {
     resolution_map: Arc<WaitMap<Descriptor, ResolutionResult>>,
     fetch_map: Arc<WaitMap<Locator, FetchResult>>,
     resolution_tx: tokio::sync::mpsc::UnboundedSender<ResolutionEvent>,
-    fetch_packages: bool,
+    purpose: ResolutionPurpose,
     snapshot_root: Option<Path>,
 }
 
@@ -285,7 +294,7 @@ async fn resolve_all<'a>(
         };
 
         if let Completed::ResolutionEvent(event) = completed {
-            if maps.fetch_packages {
+            if maps.purpose == ResolutionPurpose::Install {
                 fetching.push(ensure_fetched(
                     event.locator,
                     event.is_mock_request,
@@ -366,8 +375,8 @@ fn resolve_descriptor_impl<'a>(
             }
         }
 
-        // Analysis must not invent new registry resolutions for an old graph.
-        if !maps.fetch_packages && !descriptor.range.details().transient_resolution
+        // Hash queries use the locked graph rather than selecting new registry versions.
+        if maps.purpose == ResolutionPurpose::HashQuery && !descriptor.range.details().transient_resolution
             && ctx.project.unwrap().try_workspace_by_descriptor(&descriptor)?.is_none()
         {
             return Err(Arc::new(Error::MissingResolution(descriptor)));
@@ -1058,7 +1067,7 @@ impl Install {
     pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
         self.report_package_extension_diagnostics(project).await;
 
-        let workspace_hashes
+        let hash_inputs
             = if project.config.settings.enable_workspace_hashes.value {
                 let graph = build_locator_graph(
                     &self.install_state.normalized_resolutions,
@@ -1076,7 +1085,7 @@ impl Install {
 
         if self.skip_link_step {
             self.lockfile.workspaces
-                = match workspace_hashes {
+                = match hash_inputs {
                     Some((graph, workspace_locators)) => {
                         compute_workspace_hashes(&graph, &workspace_locators)
                     },
@@ -1101,7 +1110,7 @@ impl Install {
                 });
 
             let hash_handle
-                = match workspace_hashes {
+                = match hash_inputs {
                     Some((graph, workspace_locators)) => {
                         Some(tokio::task::spawn_blocking(move || {
                             compute_workspace_hashes(&graph, &workspace_locators)
@@ -1310,7 +1319,7 @@ impl<'a> InstallManager<'a> {
             resolution_map: Arc::new(WaitMap::new()),
             fetch_map: Arc::new(WaitMap::new()),
             resolution_tx,
-            fetch_packages: true,
+            purpose: ResolutionPurpose::Install,
             snapshot_root: None,
         };
 
@@ -1766,9 +1775,6 @@ pub(crate) fn compute_workspace_hashes(
         .collect()
 }
 
-// Used only by the normal Yarn process launched inside a historical checkout.
-pub(crate) const HASH_SNAPSHOT_ROOT_ENV: &str = "YARN_INTERNAL_HASH_SNAPSHOT_ROOT";
-
 /// Don't reinterpret absolute paths or follow snapshot links into live sources.
 /// A source we cannot replay makes --since conservatively select all workspaces.
 fn check_snapshot_source(context: &InstallContext<'_>, root: &Path, descriptor: &Descriptor, dependencies: &[InstallOpResult]) -> Result<(), Error> {
@@ -1810,7 +1816,7 @@ fn check_snapshot_source(context: &InstallContext<'_>, root: &Path, descriptor: 
 
 /// Reuses install resolution, fetching only prerequisites such as patch inputs.
 /// This does not link, build, write install state/lockfiles, or clean caches.
-pub(crate) async fn workspace_hashes_from_lockfile(project: &Project, lockfile: &Lockfile) -> Result<BTreeMap<Ident, Hash64>, Error> {
+pub(crate) async fn workspace_hashes_from_lockfile(project: &Project, lockfile: &Lockfile, snapshot_root: Option<&Path>) -> Result<BTreeMap<Ident, Hash64>, Error> {
     let package_cache
         = project.package_cache_handle();
     let systems
@@ -1827,9 +1833,8 @@ pub(crate) async fn workspace_hashes_from_lockfile(project: &Project, lockfile: 
         resolution_map: Arc::new(WaitMap::new()),
         fetch_map: Arc::new(WaitMap::new()),
         resolution_tx,
-        fetch_packages: false,
-        snapshot_root: std::env::var_os(HASH_SNAPSHOT_ROOT_ENV)
-            .map(Path::try_from).transpose()?,
+        purpose: ResolutionPurpose::HashQuery,
+        snapshot_root: snapshot_root.cloned(),
     };
 
     // Match install's partition: island workspaces aren't in the greedy graph.
