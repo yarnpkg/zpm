@@ -188,9 +188,8 @@ impl Project {
         Self::new_with_config_cwd(cwd, None).await
     }
 
-    /// Historical hash queries discover workspaces in a checkout but reuse the
-    /// live project's configuration. Trust follows the configuration's source,
-    /// not the checkout, and historical dotenv files are never evaluated.
+    /// Loads a project using workspaces from `cwd`, but configuration and trust settings from `config_cwd`.
+    /// Used during historical replay to inspect a past commit's workspaces with the current project's configuration.
     pub(crate) async fn new_with_config_cwd(cwd: Option<Path>, config_cwd: Option<Path>) -> Result<Project, Error> {
         let user_cwd
             = Path::home_dir()?;

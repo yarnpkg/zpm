@@ -379,11 +379,9 @@ async fn fetch_workspace_hashes_at_ref(project: &Project, git_ref: &str) -> Resu
 
     let project_cwd
         = checkout.with_join(&project.project_cwd.relative_to(&git_root));
-    // Invoke this binary directly, not the switcher or a historical packageManager
-    // version. The standard command owns configuration and workspace discovery.
-    // Configuration was checked for changes above; load the live configuration
-    // (including dotenv files) and check trust at its real path. Never grant trust
-    // to historical configuration or persist a decision for the temporary tree.
+    // Run `workspaces list --tree-hash` inside the base commit checkout using this binary.
+    // We pass the live project's config directory and cache paths so the child process
+    // uses the current configuration and reuses existing package caches without trusting the snapshot.
     let output = tokio::time::timeout(std::time::Duration::from_secs(120), Command::new(Path::current_exe()?.to_path_buf())
         .args(["workspaces", "list", "--json", "--tree-hash"])
         .current_dir(project_cwd.to_path_buf())
