@@ -154,8 +154,14 @@ impl WorkspacesList {
     }
 
     pub async fn execute(&self) -> Result<(), Error> {
+        let config_cwd
+            = std::env::var_os(git_utils::HASH_SNAPSHOT_CONFIG_CWD_ENV)
+                .map(Path::try_from).transpose()?;
+        let snapshot_root
+            = std::env::var_os(git_utils::HASH_SNAPSHOT_ROOT_ENV)
+                .map(Path::try_from).transpose()?;
         let mut project
-            = Project::new(None).await?;
+            = Project::new_with_config_cwd(None, config_cwd).await?;
 
         if self.recursive && self.since.is_some() {
             project
@@ -170,6 +176,18 @@ impl WorkspacesList {
             None => {
                 self.get_all_list(&project)
             }
+        };
+
+        let tree_hashes = if self.json && self.tree_hash {
+            match project.lockfile() {
+                Ok(lockfile) => {
+                    Some(project.workspace_tree_hashes(lockfile, snapshot_root.as_ref()).await?)
+                },
+                // Without a readable lockfile, list workspaces without hashes.
+                Err(_) => None,
+            }
+        } else {
+            None
         };
 
         for workspace in workspaces {
@@ -249,13 +267,10 @@ impl WorkspacesList {
                     mismatched_workspace_dependencies = Some(mismatched_strs);
                 }
 
-                let tree_hash = if self.tree_hash {
-                    project.lockfile().ok()
-                        .and_then(|lockfile| lockfile.workspaces.get(&workspace.name).cloned())
-                        .map(|hash| hash.to_file_string())
-                } else {
-                    None
-                };
+                let tree_hash
+                    = tree_hashes.as_ref()
+                        .and_then(|hashes| hashes.get(&workspace.name))
+                        .map(|hash| hash.to_file_string());
 
                 let payload = Payload {
                     location: workspace_printed_path,

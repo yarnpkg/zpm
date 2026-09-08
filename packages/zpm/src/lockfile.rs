@@ -310,6 +310,7 @@ struct LockfilePayload {
     metadata: LockfileMetadata,
 
     #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     workspaces: BTreeMap<Ident, Hash64>,
 
     #[serde(default)]

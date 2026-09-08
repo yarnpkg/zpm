@@ -185,6 +185,12 @@ impl Project {
     }
 
     pub async fn new(cwd: Option<Path>) -> Result<Project, Error> {
+        Self::new_with_config_cwd(cwd, None).await
+    }
+
+    /// Loads a project using workspaces from `cwd`, but configuration and trust settings from `config_cwd`.
+    /// Used during historical replay to inspect a past commit's workspaces with the current project's configuration.
+    pub(crate) async fn new_with_config_cwd(cwd: Option<Path>, config_cwd: Option<Path>) -> Result<Project, Error> {
         let user_cwd
             = Path::home_dir()?;
 
@@ -198,11 +204,13 @@ impl Project {
         let mut last_modified_at
             = LastModifiedAt::new();
 
+        let config_cwd
+            = config_cwd.unwrap_or_else(|| project_cwd.clone());
         let configuration_context = ConfigurationContext {
             env: std::env::vars().collect(),
             user_cwd: user_cwd.clone(),
-            project_cwd: Some(project_cwd.clone()),
-            package_cwd: Some(package_cwd.clone()),
+            project_cwd: Some(config_cwd.clone()),
+            package_cwd: Some(config_cwd.with_join(&package_cwd.relative_to(&project_cwd))),
         };
 
         let mut config
@@ -210,7 +218,7 @@ impl Project {
                 .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
 
         if config.requires_trust {
-            ensure_project_trusted(&project_cwd, ProjectTrustReason::ConfigurationInterpolation).await?;
+            ensure_project_trusted(&config_cwd, ProjectTrustReason::ConfigurationInterpolation).await?;
         }
 
         if config.settings.enable_migration_mode.value {
@@ -527,6 +535,14 @@ impl Project {
             }
         }
 
+        Ok(self.package_cache_handle())
+    }
+
+    pub(crate) fn package_cache_handle(&self) -> CompositeCache {
+        let global_cache_path
+            = self.global_cache_path();
+        let local_cache_path
+            = self.local_cache_path();
         let compression_algorithm
             = self.config.settings.compression_level.value;
 
@@ -552,11 +568,11 @@ impl Project {
         let local_cache = (!enable_global_cache)
             .then(|| DiskCache::new(local_cache_path, name_suffix, enable_immutable_cache, cleanable_local_cache));
 
-        Ok(CompositeCache::new(
+        CompositeCache::new(
             compression_algorithm,
             global_cache,
             local_cache,
-        ))
+        )
     }
 
     pub fn root_workspace(&self) -> &Workspace {
@@ -1005,6 +1021,10 @@ impl Project {
             return Ok(false);
         }
 
+        if !self.config.settings.enable_workspace_hashes.value {
+            return Ok(true);
+        }
+
         let workspace_locators
             = self.workspaces.iter()
                 .map(|workspace| (workspace.name.clone(), workspace.locator()))
@@ -1016,6 +1036,15 @@ impl Project {
         }
 
         Ok(true)
+    }
+
+    /// Reuses stored hashes, or computes them from the locked dependency graph.
+    pub(crate) async fn workspace_tree_hashes(&self, lockfile: Lockfile, snapshot_root: Option<&Path>) -> Result<BTreeMap<Ident, Hash64>, Error> {
+        if !lockfile.workspaces.is_empty() {
+            return Ok(lockfile.workspaces);
+        }
+
+        crate::install::workspace_hashes_from_lockfile(self, &lockfile, snapshot_root).await
     }
 
     pub(crate) fn install_config_hash(&self) -> Hash64 {
@@ -1771,6 +1800,17 @@ pub struct WorkspaceInfo {
 }
 
 impl Workspace {
+    pub(crate) fn fallback_name(rel_path: &Path) -> Ident {
+        let name
+            = if rel_path == &Path::new() {
+                "root-workspace"
+            } else {
+                rel_path.basename().unwrap_or("unnamed-workspace")
+            };
+
+        Ident::new(name.to_string())
+    }
+
     pub fn from_root_path(root: &Path) -> Result<Workspace, Error> {
         let manifest_path = root
             .with_join_str(MANIFEST_NAME);
@@ -1798,13 +1838,8 @@ impl Workspace {
         let path = root
             .with_join(&info.rel_path);
 
-        let name = info.manifest.name.clone().unwrap_or_else(|| {
-            Ident::new(if info.rel_path == Path::new() {
-                "root-workspace".to_string()
-            } else {
-                info.rel_path.basename().map_or_else(|| "unnamed-workspace".to_string(), |b| b.to_string())
-            })
-        });
+        let name = info.manifest.name.clone()
+            .unwrap_or_else(|| Self::fallback_name(&info.rel_path));
 
         Ok(Workspace {
             name,

@@ -204,11 +204,22 @@ impl IntoResolutionResult for FetchResult {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResolutionPurpose {
+    /// Fetch all resolved packages.
+    Install,
+
+    /// Require locked non-transient resolutions. Fetch or prepare prerequisites as needed.
+    HashQuery,
+}
+
 /// Shared context for the WaitMap-based resolution/fetch pipeline.
 struct InstallMaps {
     resolution_map: Arc<WaitMap<Descriptor, ResolutionResult>>,
     fetch_map: Arc<WaitMap<Locator, FetchResult>>,
     resolution_tx: tokio::sync::mpsc::UnboundedSender<ResolutionEvent>,
+    purpose: ResolutionPurpose,
+    snapshot_root: Option<Path>,
 }
 
 /// The work unlocked by resolving a descriptor. Child resolutions and the
@@ -283,12 +294,14 @@ async fn resolve_all<'a>(
         };
 
         if let Completed::ResolutionEvent(event) = completed {
-            fetching.push(ensure_fetched(
-                event.locator,
-                event.is_mock_request,
-                ctx,
-                maps,
-            ));
+            if maps.purpose == ResolutionPurpose::Install {
+                fetching.push(ensure_fetched(
+                    event.locator,
+                    event.is_mock_request,
+                    ctx,
+                    maps,
+                ));
+            }
 
             for child in event.children {
                 // Deduplicate at queue insertion time. Checking the OnceCell
@@ -362,6 +375,13 @@ fn resolve_descriptor_impl<'a>(
             }
         }
 
+        // Hash queries use the locked graph rather than selecting new registry versions.
+        if maps.purpose == ResolutionPurpose::HashQuery && !descriptor.range.details().transient_resolution
+            && ctx.project.unwrap().try_workspace_by_descriptor(&descriptor)?.is_none()
+        {
+            return Err(Arc::new(Error::MissingResolution(descriptor)));
+        }
+
         // Phase 2: Await prerequisites and build the dependencies vector
         let mut dependencies
             = vec![];
@@ -372,6 +392,10 @@ fn resolve_descriptor_impl<'a>(
                 = await_fetch(parent, maps, ctx).await?;
 
             dependencies.push(InstallOpResult::Fetched(parent_fetch));
+        }
+
+        if let Some(root) = &maps.snapshot_root {
+            check_snapshot_source(ctx, root, &descriptor, &dependencies)?;
         }
 
         // Inner descriptor resolution + maybe inner fetch
@@ -1043,18 +1067,33 @@ impl Install {
     pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
         self.report_package_extension_diagnostics(project).await;
 
-        let graph = build_locator_graph(
-            &self.install_state.normalized_resolutions,
-            &self.install_state.descriptor_to_locator,
-        );
+        let hash_inputs
+            = if project.config.settings.enable_workspace_hashes.value {
+                let graph = build_locator_graph(
+                    &self.install_state.normalized_resolutions,
+                    &self.install_state.descriptor_to_locator,
+                );
 
-        let workspace_locators: Vec<(Ident, Locator)> = project.workspaces.iter()
-            .map(|w| (w.name.clone(), w.locator()))
-            .collect();
+                let workspace_locators: Vec<(Ident, Locator)> = project.workspaces.iter()
+                    .map(|w| (w.name.clone(), w.locator()))
+                    .collect();
+
+                Some((graph, workspace_locators))
+            } else {
+                None
+            };
 
         if self.skip_link_step {
             self.lockfile.workspaces
-                = compute_workspace_hashes(&graph, &workspace_locators);
+                = match hash_inputs {
+                    Some((graph, workspace_locators)) => {
+                        compute_workspace_hashes(&graph, &workspace_locators)
+                    },
+
+                    None => {
+                        BTreeMap::new()
+                    },
+                };
 
             if !self.skip_lockfile_update {
                 project.write_lockfile(&self.lockfile)?;
@@ -1070,9 +1109,18 @@ impl Install {
                     zpm_config::NmMode::HardlinksGlobal => "hardlinks-global".to_string(),
                 });
 
-            let hash_handle = tokio::task::spawn_blocking(move || {
-                compute_workspace_hashes(&graph, &workspace_locators)
-            });
+            let hash_handle
+                = match hash_inputs {
+                    Some((graph, workspace_locators)) => {
+                        Some(tokio::task::spawn_blocking(move || {
+                            compute_workspace_hashes(&graph, &workspace_locators)
+                        }))
+                    },
+
+                    None => {
+                        None
+                    },
+                };
 
             let link_future
                 = linker::link_project(project, &self);
@@ -1081,7 +1129,15 @@ impl Install {
                 = async_section("Linking the project", link_future).await?;
 
             self.lockfile.workspaces
-                = hash_handle.await?;
+                = match hash_handle {
+                    Some(handle) => {
+                        handle.await?
+                    },
+
+                    None => {
+                        BTreeMap::new()
+                    },
+                };
 
             for (location, locator) in &link_result.packages_by_location {
                 self.install_state.locations_by_package.insert(locator.clone(), location.clone());
@@ -1263,6 +1319,8 @@ impl<'a> InstallManager<'a> {
             resolution_map: Arc::new(WaitMap::new()),
             fetch_map: Arc::new(WaitMap::new()),
             resolution_tx,
+            purpose: ResolutionPurpose::Install,
+            snapshot_root: None,
         };
 
         let lockfile
@@ -1715,6 +1773,105 @@ pub(crate) fn compute_workspace_hashes(
             (name.clone(), hash)
         })
         .collect()
+}
+
+/// Don't reinterpret absolute paths or follow snapshot links into live sources.
+/// A source we cannot replay makes --since conservatively select all workspaces.
+fn check_snapshot_source(context: &InstallContext<'_>, root: &Path, descriptor: &Descriptor, dependencies: &[InstallOpResult]) -> Result<(), Error> {
+    let path = match &descriptor.range {
+        Range::Folder(params) => params.path.as_str(),
+        Range::Tarball(params) => params.path.as_str(),
+        Range::Portal(params) => params.path.as_str(),
+        Range::Link(params) => params.path.as_str(),
+        Range::Exec(params) => params.path.as_str(),
+        Range::Patch(params) if params.path != "<builtin>" => params.path.as_str(),
+        _ => return Ok(()),
+    };
+
+    if Path::try_from(path)?.is_absolute() {
+        return Err(Error::HistoricalSourceUnavailable(Path::try_from(path)?));
+    }
+
+    let source = if let Some(path) = path.strip_prefix("~/") {
+        context.project.unwrap().project_cwd.with_join_str(path)
+    } else {
+        let Some(InstallOpResult::Fetched(parent)) = dependencies.first() else {
+            return Err(Error::Unsupported);
+        };
+        let PackageData::Local {package_directory, ..} = &parent.package_data else {
+            // Relative sources in a fetched archive belong to that pinned archive.
+            return Ok(());
+        };
+        package_directory.with_join_str(path)
+    };
+    let resolved = source.fs_canonicalize()
+        .map_err(|_| Error::HistoricalSourceUnavailable(source.clone()))?;
+
+    if !root.contains(&resolved) {
+        return Err(Error::HistoricalSourceUnavailable(source));
+    }
+
+    Ok(())
+}
+
+/// Reuses install resolution, fetching only prerequisites such as patch inputs.
+/// This does not link, build, write install state/lockfiles, or clean caches.
+pub(crate) async fn workspace_hashes_from_lockfile(project: &Project, lockfile: &Lockfile, snapshot_root: Option<&Path>) -> Result<BTreeMap<Ident, Hash64>, Error> {
+    let package_cache
+        = project.package_cache_handle();
+    let systems
+        = project.config.settings.supported_systems();
+    let context = InstallContext {
+        project: Some(project),
+        package_cache: Some(&package_cache),
+        systems: Some(&systems),
+        ..Default::default()
+    };
+    let (resolution_tx, resolution_rx)
+        = tokio::sync::mpsc::unbounded_channel();
+    let maps = InstallMaps {
+        resolution_map: Arc::new(WaitMap::new()),
+        fetch_map: Arc::new(WaitMap::new()),
+        resolution_tx,
+        purpose: ResolutionPurpose::HashQuery,
+        snapshot_root: snapshot_root.cloned(),
+    };
+
+    // Match install's partition: island workspaces aren't in the greedy graph.
+    let island_workspaces = crate::island::resolve_islands(&project.config.settings.unstable_islands, &project.workspaces)?
+        .into_iter().flat_map(|island| island.workspace_idents).collect::<BTreeSet<_>>();
+    let roots = project.workspaces.iter()
+        .filter(|workspace| !island_workspaces.contains(&workspace.name))
+        .map(|workspace| workspace.descriptor());
+
+    resolve_all(roots, &context, lockfile, &maps, resolution_rx).await;
+
+    if let Some(error) = maps.resolution_map.collect_errors().first() {
+        return Err((**error).clone());
+    }
+
+    let resolution_map = Arc::try_unwrap(maps.resolution_map)
+        .unwrap_or_else(|_| panic!("resolution worklist should have finished"));
+    let mut descriptor_to_locator
+        = BTreeMap::new();
+    let mut resolutions
+        = BTreeMap::new();
+
+    for (descriptor, result) in resolution_map.into_results() {
+        let resolution
+            = result.map_err(|error| (*error).clone())?.resolution;
+
+        descriptor_to_locator.insert(descriptor, resolution.locator.clone());
+        resolutions.insert(resolution.locator.clone(), resolution);
+    }
+
+    let graph
+        = build_locator_graph(&resolutions, &descriptor_to_locator);
+    let workspace_locators = project.workspaces.iter()
+        .map(|workspace| (workspace.name.clone(), workspace.locator()))
+        .collect::<Vec<_>>();
+
+    Ok(compute_workspace_hashes(&graph, &workspace_locators))
 }
 
 fn build_locator_graph(

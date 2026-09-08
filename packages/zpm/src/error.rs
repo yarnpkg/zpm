@@ -460,6 +460,9 @@ pub enum Error {
     #[error("{} can't be built with the exec: protocol because all scripts have been disabled.", .0.to_print_string())]
     ExecScriptsDisabled(Locator),
 
+    #[error("Historical source is not available inside the repository snapshot: {}", .0.to_print_string())]
+    HistoricalSourceUnavailable(Path),
+
     #[error("Invalid pack pattern ({0})")]
     InvalidPackPattern(String),
 
