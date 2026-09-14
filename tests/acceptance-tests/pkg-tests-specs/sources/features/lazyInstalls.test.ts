@@ -175,41 +175,43 @@ describe(`Features`, () => {
       }),
     );
 
-    test(
-      `it should extend a focused install when the active workspace is missing and the lockfile is fresh`,
-      makeTemporaryEnv({}, async ({path, run, source}) => {
-        await setupMonorepo(path);
-        await run(`install`);
+    for (const enableWorkspaceChecksums of [true, false]) {
+      test(
+        `it should extend a focused install when the active workspace is missing and the lockfile is fresh (enableWorkspaceChecksums=${enableWorkspaceChecksums})`,
+        makeTemporaryEnv({}, {enableWorkspaceChecksums}, async ({path, run, source}) => {
+          await setupMonorepo(path);
+          await run(`install`);
 
-        const cacheFolder = ppath.join(path, `.yarn/cache` as PortablePath);
-        await xfs.removePromise(cacheFolder);
+          const cacheFolder = ppath.join(path, `.yarn/cache` as PortablePath);
+          await xfs.removePromise(cacheFolder);
 
-        await run(`workspaces`, `focus`, `foo`, {cwd: ppath.join(path, `packages/foo` as PortablePath)});
+          await run(`workspaces`, `focus`, `foo`, {cwd: ppath.join(path, `packages/foo` as PortablePath)});
 
-        await run(`node`, `-e`, `require('no-deps')`, {
-          cwd: ppath.join(path, `packages/bar` as PortablePath),
-        });
+          await run(`node`, `-e`, `require('no-deps')`, {
+            cwd: ppath.join(path, `packages/bar` as PortablePath),
+          });
 
-        await expect(source(`require('no-deps')`, {
-          cwd: ppath.join(path, `packages/foo` as PortablePath),
-        })).resolves.toMatchObject({
-          name: `no-deps`,
-          version: `1.0.0`,
-        });
+          await expect(source(`require('no-deps')`, {
+            cwd: ppath.join(path, `packages/foo` as PortablePath),
+          })).resolves.toMatchObject({
+            name: `no-deps`,
+            version: `1.0.0`,
+          });
 
-        await expect(source(`require('no-deps')`, {
-          cwd: ppath.join(path, `packages/bar` as PortablePath),
-        })).resolves.toMatchObject({
-          name: `no-deps`,
-          version: `2.0.0`,
-        });
+          await expect(source(`require('no-deps')`, {
+            cwd: ppath.join(path, `packages/bar` as PortablePath),
+          })).resolves.toMatchObject({
+            name: `no-deps`,
+            version: `2.0.0`,
+          });
 
-        await expect(getCacheContent(cacheFolder)).resolves.toEqual([
-          expect.stringContaining(`no-deps-npm-1.0.0-`),
-          expect.stringContaining(`no-deps-npm-2.0.0-`),
-        ]);
-      }),
-    );
+          await expect(getCacheContent(cacheFolder)).resolves.toEqual([
+            expect.stringContaining(`no-deps-npm-1.0.0-`),
+            expect.stringContaining(`no-deps-npm-2.0.0-`),
+          ]);
+        }),
+      );
+    }
 
     test(
       `it should run a full lazy install by default`,

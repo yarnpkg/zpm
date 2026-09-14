@@ -143,6 +143,11 @@
       "description": "Whether to allow workspaces to depend on other workspaces through classic semver ranges",
       "default": true
     },
+    "enableWorkspaceChecksums": {
+      "type": "boolean",
+      "description": "Whether to store workspace dependency checksums in the lockfile",
+      "default": true
+    },
     "enforceUnsafeHttp": {
       "type": "boolean",
       "description": "Whether to enforce using unsafe HTTP requests over HTTPS",

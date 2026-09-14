@@ -1005,12 +1005,17 @@ impl Project {
             return Ok(false);
         }
 
-        let workspace_locators
-            = self.workspaces.iter()
-                .map(|workspace| (workspace.name.clone(), workspace.locator()))
-                .collect::<Vec<_>>();
+        let workspace_hashes = if self.config.settings.enable_workspace_checksums.value {
+            let workspace_locators
+                = self.workspaces.iter()
+                    .map(|workspace| (workspace.name.clone(), workspace.locator()))
+                    .collect::<Vec<_>>();
 
-        let workspace_hashes = compute_workspace_hashes(&graph, &workspace_locators);
+            compute_workspace_hashes(&graph, &workspace_locators)
+        } else {
+            BTreeMap::new()
+        };
+
         if lockfile.workspaces != workspace_hashes {
             return Ok(false);
         }

@@ -162,6 +162,13 @@
       "type": "boolean",
       "default": true
     },
+    "enableWorkspaceChecksums": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether workspace dependency checksums should be stored in the lockfile.",
+      "description": "If false, Yarn will omit the `workspaces` field from the lockfile.",
+      "type": "boolean",
+      "default": true
+    },
     "globalFolder": {
       "_package": "@yarnpkg/core",
       "title": "Path where all files global to the system will be stored.",

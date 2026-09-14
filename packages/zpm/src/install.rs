@@ -1043,18 +1043,22 @@ impl Install {
     pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
         self.report_package_extension_diagnostics(project).await;
 
-        let graph = build_locator_graph(
-            &self.install_state.normalized_resolutions,
-            &self.install_state.descriptor_to_locator,
-        );
+        let compute_hashes = project.config.settings.enable_workspace_checksums.value.then(|| {
+            let graph = build_locator_graph(
+                &self.install_state.normalized_resolutions,
+                &self.install_state.descriptor_to_locator,
+            );
 
-        let workspace_locators: Vec<(Ident, Locator)> = project.workspaces.iter()
-            .map(|w| (w.name.clone(), w.locator()))
-            .collect();
+            let workspace_locators: Vec<(Ident, Locator)> = project.workspaces.iter()
+                .map(|w| (w.name.clone(), w.locator()))
+                .collect();
+
+            move || compute_workspace_hashes(&graph, &workspace_locators)
+        });
 
         if self.skip_link_step {
             self.lockfile.workspaces
-                = compute_workspace_hashes(&graph, &workspace_locators);
+                = compute_hashes.map(|compute| compute()).unwrap_or_default();
 
             if !self.skip_lockfile_update {
                 project.write_lockfile(&self.lockfile)?;
@@ -1070,9 +1074,8 @@ impl Install {
                     zpm_config::NmMode::HardlinksGlobal => "hardlinks-global".to_string(),
                 });
 
-            let hash_handle = tokio::task::spawn_blocking(move || {
-                compute_workspace_hashes(&graph, &workspace_locators)
-            });
+            let hash_handle
+                = compute_hashes.map(tokio::task::spawn_blocking);
 
             let link_future
                 = linker::link_project(project, &self);
@@ -1080,8 +1083,10 @@ impl Install {
             let link_result
                 = async_section("Linking the project", link_future).await?;
 
-            self.lockfile.workspaces
-                = hash_handle.await?;
+            self.lockfile.workspaces = match hash_handle {
+                Some(handle) => handle.await?,
+                None => BTreeMap::new(),
+            };
 
             for (location, locator) in &link_result.packages_by_location {
                 self.install_state.locations_by_package.insert(locator.clone(), location.clone());
