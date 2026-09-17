@@ -5,7 +5,7 @@ use zpm_parsers::JsonDocument;
 use zpm_primitives::Ident;
 use zpm_utils::Path;
 
-use crate::{error::Error, lockfile::Lockfile, project::{Project, LOCKFILE_NAME}, script::ScriptEnvironment};
+use crate::{error::Error, lockfile::Lockfile, lockfile_tree::find_changed_workspaces, project::{Project, LOCKFILE_NAME}, script::ScriptEnvironment};
 
 pub fn find_root(initial_cwd: &Path) -> Result<Path, Error> {
     // Note: We can't just use `git rev-parse --show-toplevel`, because on Windows
@@ -205,7 +205,7 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
         }
     }
 
-    // If the lockfile changed, compare workspace hashes to find affected workspaces
+    // If the lockfile changed, compare the dependency trees to find affected workspaces
     if lockfile_changed {
         let current_lockfile
             = project.lockfile().ok();
@@ -214,21 +214,10 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
             = fetch_lockfile_at_ref(project, &since_ref).await.ok();
 
         if let (Some(current), Some(old)) = (&current_lockfile, &old_lockfile) {
-            for workspace in &project.workspaces {
-                if changed_workspaces.contains_key(&workspace.name) {
-                    continue;
-                }
-
-                let current_hash
-                    = current.workspaces.get(&workspace.name);
-                let old_hash
-                    = old.workspaces.get(&workspace.name);
-
-                if current_hash != old_hash {
-                    changed_workspaces.entry(workspace.name.clone())
-                        .or_default()
-                        .insert(lockfile_path.clone());
-                }
+            for ident in find_changed_workspaces(project, old, current) {
+                changed_workspaces.entry(ident)
+                    .or_default()
+                    .insert(lockfile_path.clone());
             }
         }
     }

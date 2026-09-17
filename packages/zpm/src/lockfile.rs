@@ -1,18 +1,209 @@
-use std::{collections::BTreeMap, fmt::{self, Debug, Display}, hash::Hash, marker::PhantomData, sync::Arc};
+use std::{collections::BTreeMap, fmt::{self, Debug, Display}, hash::Hash, marker::PhantomData, sync::{Arc, Mutex}};
 
 use rkyv::Archive;
-use itertools::Itertools;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
+use serde_with::{serde_as, DefaultOnError};
 use zpm_config::Configuration;
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, RegistryReference, RegistrySemverRange};
-use zpm_utils::{FromFileString, Hash64, Path, ToFileString, UrlEncoded};
+use zpm_primitives::{Descriptor, Ident, Locator, PeerRange, Range, Reference, RegistryReference, RegistrySemverRange, SemverDescriptor};
+use zpm_utils::{FromFileString, Hash64, Hash64Writer, Path, ToFileString, UrlEncoded};
 
 use crate::{
-    error::Error, http_npm, npm, primitives_exts::RangeExt, resolvers::Resolution
+    error::Error, http_npm, install::{DependencyNormalizer, InstallContext, RuleUsage, normalize_resolutions_with}, manifest::resolutions::ResolutionsField, npm, primitives_exts::RangeExt, project::Project, resolvers::Resolution
 };
 
 const LOCKFILE_VERSION: u64 = 9;
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LockfilePeerDependencyMeta {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub optional: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LockfilePackageExtension {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub dependencies: BTreeMap<Ident, Range>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub peer_dependencies: BTreeMap<Ident, PeerRange>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub peer_dependencies_meta: BTreeMap<Ident, LockfilePeerDependencyMeta>,
+}
+
+impl LockfilePackageExtension {
+    pub fn from_config(extension: &zpm_config::PackageExtension) -> Self {
+        Self {
+            dependencies: extension.dependencies.iter()
+                .map(|(ident, range)| (ident.clone(), range.value.clone()))
+                .collect(),
+            peer_dependencies: extension.peer_dependencies.iter()
+                .map(|(ident, range)| (ident.clone(), range.value.clone()))
+                .collect(),
+            peer_dependencies_meta: extension.peer_dependencies_meta.iter()
+                .map(|(ident, meta)| (ident.clone(), LockfilePeerDependencyMeta {optional: meta.optional.value}))
+                .collect(),
+        }
+    }
+}
+
+pub type LockfileCatalogs = BTreeMap<String, BTreeMap<Ident, Range>>;
+
+pub fn catalogs_from_config(catalogs: &BTreeMap<String, BTreeMap<Ident, zpm_config::Setting<Range>>>) -> LockfileCatalogs {
+    catalogs.iter()
+        .map(|(name, catalog)| {
+            let entries = catalog.iter()
+                .map(|(ident, range)| (ident.clone(), range.value.clone()))
+                .collect();
+
+            (name.clone(), entries)
+        })
+        .collect()
+}
+
+/**
+ * Project-level information that, together with the lockfile entries, is
+ * enough to reconstruct the dependency tree without having to look at the
+ * project the lockfile was generated from (which may not be around anymore,
+ * typically when the lockfile is read from a past commit).
+ */
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LockfileProject {
+    /**
+     * Hash of the normalized dependencies of each workspace. It only covers
+     * the dependencies the workspace itself declares, not their own
+     * dependencies; those must be obtained by walking the lockfile.
+     */
+    #[serde(default)]
+    pub workspaces: BTreeMap<Ident, Hash64>,
+
+    /**
+     * The entries from the `catalog` and `catalogs` settings that are
+     * referenced by the project; the former is stored under the `default`
+     * key, just like it is in the configuration.
+     */
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub catalogs: LockfileCatalogs,
+
+    /**
+     * The entries from the `resolutions` field of the root manifest that
+     * apply to at least one dependency.
+     */
+    #[serde(default)]
+    #[serde(skip_serializing_if = "ResolutionsField::is_empty")]
+    pub dependency_overrides: ResolutionsField,
+
+    /**
+     * The entries from the `packageExtensions` setting that match at least
+     * one package.
+     */
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub package_extensions: BTreeMap<SemverDescriptor, LockfilePackageExtension>,
+}
+
+impl LockfileProject {
+    /**
+     * Snapshots the rules the given project applies on its dependency tree.
+     * We only keep those that have an actual effect on the given packages, so
+     * that the lockfile doesn't change when unrelated settings are modified.
+     */
+    pub fn from_project<'a>(project: &Project, resolutions: impl IntoIterator<Item = &'a Resolution>) -> Result<Self, Error> {
+        let rule_usage
+            = Arc::new(Mutex::new(RuleUsage::default()));
+
+        let context
+            = InstallContext::default()
+                .with_project(Some(project))
+                .with_rule_usage(Some(rule_usage.clone()));
+
+        let mut workspaces
+            = BTreeMap::new();
+
+        for (ident, dependencies) in project.workspace_dependencies_with(&context) {
+            workspaces.insert(ident, hash_workspace_dependencies(&dependencies?));
+        }
+
+        let all_overrides
+            = &project.root_workspace().manifest.resolutions;
+
+        // Finding out which rules are used requires to normalize all the
+        // packages once more; no need to pay for it if there's no rule.
+        let has_rules
+            = !all_overrides.is_empty()
+                || !context.package_extensions.is_empty()
+                || context.catalogs.values().any(|catalog| !catalog.is_empty());
+
+        if has_rules {
+            let normalizer
+                = DependencyNormalizer::from_context(&context);
+
+            // The workspaces have already been accounted for when we retrieved their dependencies
+            let package_resolutions = resolutions.into_iter()
+                .filter(|resolution| !resolution.locator.reference.is_workspace_reference());
+
+            for resolution in package_resolutions {
+                normalize_resolutions_with(&normalizer, resolution)?;
+            }
+        }
+
+        let rule_usage
+            = rule_usage.lock().unwrap();
+
+        let mut catalogs
+            = LockfileCatalogs::new();
+
+        for (catalog_name, idents) in &rule_usage.catalog_entries {
+            let entries = idents.iter()
+                .filter_map(|ident| Some((ident.clone(), context.catalogs.get(catalog_name)?.get(ident)?.clone())))
+                .collect();
+
+            catalogs.insert(catalog_name.clone(), entries);
+        }
+
+        let dependency_overrides = all_overrides.iter()
+            .filter(|(selector, _)| rule_usage.dependency_overrides.contains(selector))
+            .map(|(selector, range)| (selector.clone(), range.clone()));
+
+        let package_extensions = context.package_extensions.iter()
+            .filter(|(descriptor, _)| rule_usage.package_extensions.contains(descriptor))
+            .map(|(descriptor, extension)| (descriptor.clone(), extension.clone()))
+            .collect();
+
+        Ok(Self {
+            workspaces,
+            catalogs,
+            dependency_overrides: ResolutionsField::from_entries(dependency_overrides),
+            package_extensions,
+        })
+    }
+}
+
+/**
+ * Hashes the dependencies of a workspace. They're expected to be normalized
+ * (ie. to be the descriptors that get resolved rather than the ones found
+ * in the manifest), so that the hash changes should a catalog be updated.
+ */
+pub fn hash_workspace_dependencies(dependencies: &BTreeMap<Ident, Descriptor>) -> Hash64 {
+    let mut writer
+        = Hash64Writer::new();
+
+    for descriptor in dependencies.values() {
+        writer.update(descriptor.to_file_string());
+        writer.update([0]);
+    }
+
+    writer.finalize()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
@@ -23,15 +214,22 @@ pub struct LockfileEntry {
     pub resolution: Resolution,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
-#[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, <__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
-#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext + rkyv::validation::SharedContext, <__C as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Lockfile {
     pub metadata: LockfileMetadata,
+    pub project: LockfileProject,
     pub resolutions: BTreeMap<Descriptor, Locator>,
     pub entries: BTreeMap<Locator, LockfileEntry>,
-    pub workspaces: BTreeMap<Ident, Hash64>,
+
+    /**
+     * Transient resolutions are recomputed by every install, so they're kept
+     * out of the regular resolution tables to guarantee that nothing ever
+     * reuses them. They're only stored in the lockfile so that the dependency
+     * tree can be reconstructed from the lockfile alone.
+     */
+    pub transient_resolutions: BTreeMap<Descriptor, Locator>,
+    pub transient_entries: BTreeMap<Locator, LockfileEntry>,
+
     pub islands: BTreeMap<String, BTreeMap<Descriptor, Locator>>,
 }
 
@@ -39,11 +237,27 @@ impl Lockfile {
     pub fn new() -> Self {
         Self {
             metadata: LockfileMetadata::new(),
+            project: LockfileProject::default(),
             resolutions: BTreeMap::new(),
             entries: BTreeMap::new(),
-            workspaces: BTreeMap::new(),
+            transient_resolutions: BTreeMap::new(),
+            transient_entries: BTreeMap::new(),
             islands: BTreeMap::new(),
         }
+    }
+
+    /**
+     * Returns the locator a descriptor resolved to when the lockfile was
+     * generated, regardless of whether an install would reuse it or not.
+     */
+    pub fn recorded_resolution(&self, descriptor: &Descriptor) -> Option<&Locator> {
+        self.resolutions.get(descriptor)
+            .or_else(|| self.transient_resolutions.get(descriptor))
+    }
+
+    pub fn recorded_entry(&self, locator: &Locator) -> Option<&LockfileEntry> {
+        self.entries.get(locator)
+            .or_else(|| self.transient_entries.get(locator))
     }
 }
 
@@ -54,14 +268,35 @@ impl<'de> Deserialize<'de> for Lockfile {
         let mut lockfile = Lockfile::new();
 
         lockfile.metadata = payload.metadata;
-        lockfile.workspaces = payload.workspaces;
+        lockfile.project = payload.project;
 
         for (key, entry) in payload.entries {
-            for descriptor in key.0 {
-                lockfile.resolutions.insert(descriptor, entry.resolution.locator.clone());
+            // Workspaces are always resolved from the project itself. We don't
+            // write them in the lockfile, but older versions used to when a
+            // registry range happened to be fulfilled by a workspace.
+            if entry.resolution.locator.reference.is_workspace_reference() {
+                continue;
             }
 
-            lockfile.entries.insert(entry.resolution.locator.clone(), entry);
+            let (transient_descriptors, descriptors): (Vec<_>, Vec<_>)
+                = key.0.into_iter()
+                    .partition(|descriptor| descriptor.range.details().transient_resolution);
+
+            if !transient_descriptors.is_empty() {
+                for descriptor in transient_descriptors {
+                    lockfile.transient_resolutions.insert(descriptor, entry.resolution.locator.clone());
+                }
+
+                lockfile.transient_entries.insert(entry.resolution.locator.clone(), entry.clone());
+            }
+
+            if !descriptors.is_empty() {
+                for descriptor in descriptors {
+                    lockfile.resolutions.insert(descriptor, entry.resolution.locator.clone());
+                }
+
+                lockfile.entries.insert(entry.resolution.locator.clone(), entry);
+            }
         }
 
         // Deserialize island entries
@@ -87,14 +322,20 @@ impl Serialize for Lockfile {
             inner: LockfileEntry,
         }
 
+        let recorded_resolutions: BTreeMap<&Descriptor, &Locator>
+            = self.transient_resolutions.iter()
+                .chain(self.resolutions.iter())
+                .collect();
+
         let mut descriptors_to_resolutions: BTreeMap<Locator, MultiKeyLockfileEntry> = BTreeMap::new();
-        for (descriptor, locator) in self.resolutions.iter().sorted_by_key(|(descriptor, _)| (*descriptor).clone()) {
-            // Skip descriptors with transient_resolution set to true
-            if descriptor.range.details().transient_resolution {
+        for (descriptor, locator) in recorded_resolutions {
+            // Workspaces are always resolved from the project itself; we
+            // only keep track of the hash of their dependencies.
+            if locator.reference.is_workspace_reference() {
                 continue;
             }
 
-            let entry = self.entries.get(locator)
+            let entry = self.recorded_entry(locator)
                 .expect("Expected a matching resolution to be found in the lockfile for any resolved locator.");
 
             descriptors_to_resolutions.entry(entry.resolution.locator.clone())
@@ -112,7 +353,7 @@ impl Serialize for Lockfile {
         let mut islands_payload: BTreeMap<String, BTreeMap<MultiKey<Descriptor>, LockfileEntry>> = BTreeMap::new();
         for (island_id, island_resolutions) in &self.islands {
             let mut island_entries_map: BTreeMap<Locator, MultiKeyLockfileEntry> = BTreeMap::new();
-            for (descriptor, locator) in island_resolutions.iter().sorted_by_key(|(descriptor, _)| (*descriptor).clone()) {
+            for (descriptor, locator) in island_resolutions {
                 if descriptor.range.details().transient_resolution {
                     continue;
                 }
@@ -135,8 +376,8 @@ impl Serialize for Lockfile {
 
         let payload = LockfilePayload {
             metadata: self.metadata.clone(),
+            project: self.project.clone(),
             entries,
-            workspaces: self.workspaces.clone(),
             islands: islands_payload,
         };
 
@@ -303,14 +544,18 @@ impl Default for LockfileMetadata {
     }
 }
 
+#[serde_as]
 #[derive(Deserialize, Serialize)]
 struct LockfilePayload {
     #[serde(rename = "__metadata")]
     #[serde(default)]
     metadata: LockfileMetadata,
 
+    // The project section is only informative; should we fail to make sense
+    // of it, the next install will regenerate it anyway.
     #[serde(default)]
-    workspaces: BTreeMap<Ident, Hash64>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    project: LockfileProject,
 
     #[serde(default)]
     entries: BTreeMap<MultiKey<Descriptor>, LockfileEntry>,
@@ -569,4 +814,199 @@ pub fn from_pnpm_node_modules(project_cwd: &Path, config: &Configuration) -> Res
     }
 
     Ok(lockfile)
+}
+
+#[cfg(test)]
+mod tests {
+    use zpm_parsers::JsonDocument;
+    use zpm_primitives::{Descriptor, Ident, Locator};
+    use zpm_utils::FromFileString;
+
+    use super::Lockfile;
+
+    fn descriptor(src: &str) -> Descriptor {
+        Descriptor::from_file_string(src).unwrap()
+    }
+
+    fn locator(src: &str) -> Locator {
+        Locator::from_file_string(src).unwrap()
+    }
+
+    const LOCKFILE: &str = r#"{
+  "__metadata": {
+    "version": 9
+  },
+  "project": {
+    "workspaces": {
+      "root": "786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce"
+    },
+    "catalogs": {
+      "default": {
+        "bar": "npm:^2.0.0"
+      },
+      "legacy": {
+        "bar": "npm:^1.0.0"
+      }
+    },
+    "dependencyOverrides": {
+      "foo/bar": "catalog:legacy",
+      "bar": "catalog:",
+      "qux@^1.0.0": "npm:1.2.3"
+    },
+    "packageExtensions": {
+      "foo@*": {
+        "dependencies": {
+          "bar": "^1.0.0"
+        },
+        "peerDependenciesMeta": {
+          "baz": {
+            "optional": true
+          }
+        }
+      }
+    }
+  },
+  "entries": {
+    "foo@npm:^1.0.0, foo-alias@npm:foo@^1.0.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "foo@npm:1.0.0",
+        "version": "1.0.0"
+      }
+    },
+    "linked@link:./linked::parent=root@workspace:root": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "linked@link:./linked::parent=root@workspace:root",
+        "version": "0.0.0"
+      }
+    },
+    "typescript@npm:^5.0.0": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "typescript@npm:5.9.3",
+        "version": "5.9.3"
+      }
+    },
+    "typescript@patch:typescript%40npm%3A%5E5.0.0#<builtin>": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "typescript@patch:typescript%40npm%3A5.9.3#<builtin>&checksum=85eaa72caadee6a5622c928b1473f16d3507770cd417f35e56c48bcc9b50a1d71dfd49ad5a227767d79fdf331a578e26ef8045e83e3f7356f72a1412ae2be199",
+        "version": "5.9.3"
+      }
+    }
+  }
+}"#;
+
+    #[test]
+    fn should_keep_transient_resolutions_out_of_the_resolution_tables() {
+        let lockfile: Lockfile
+            = JsonDocument::hydrate_from_str(LOCKFILE).unwrap();
+
+        assert_eq!(lockfile.resolutions.keys().cloned().collect::<Vec<_>>(), vec![
+            descriptor("foo@npm:^1.0.0"),
+            descriptor("typescript@npm:^5.0.0"),
+        ]);
+
+        assert_eq!(lockfile.entries.keys().cloned().collect::<Vec<_>>(), vec![
+            locator("foo@npm:1.0.0"),
+            locator("typescript@npm:5.9.3"),
+        ]);
+
+        assert_eq!(lockfile.transient_resolutions.keys().cloned().collect::<Vec<_>>(), vec![
+            descriptor("foo-alias@npm:foo@^1.0.0"),
+            descriptor("linked@link:./linked::parent=root@workspace:root"),
+            descriptor("typescript@patch:typescript%40npm%3A%5E5.0.0#<builtin>"),
+        ]);
+
+        // Transient resolutions remain available to those who explicitly ask for them
+        assert_eq!(
+            lockfile.recorded_resolution(&descriptor("foo-alias@npm:foo@^1.0.0")),
+            Some(&locator("foo@npm:1.0.0")),
+        );
+
+        assert!(lockfile.recorded_entry(&locator("linked@link:./linked::parent=root@workspace:root")).is_some());
+    }
+
+    #[test]
+    fn should_be_stable_once_serialized_again() {
+        let lockfile: Lockfile
+            = JsonDocument::hydrate_from_str(LOCKFILE).unwrap();
+
+        assert_eq!(JsonDocument::to_string_pretty(&lockfile).unwrap(), LOCKFILE);
+    }
+
+    #[test]
+    fn should_preserve_the_dependency_overrides_order() {
+        let lockfile: Lockfile
+            = JsonDocument::hydrate_from_str(LOCKFILE).unwrap();
+
+        // The first matching override wins, so the order matters
+        let selectors = lockfile.project.dependency_overrides.iter()
+            .map(|(selector, _)| zpm_utils::ToFileString::to_file_string(selector))
+            .collect::<Vec<_>>();
+
+        assert_eq!(selectors, vec!["foo/bar", "bar", "qux@^1.0.0"]);
+
+        // The overrides are stored verbatim; the catalogs they reference are kept on the side
+        let ranges = lockfile.project.dependency_overrides.iter()
+            .map(|(_, range)| zpm_utils::ToFileString::to_file_string(range))
+            .collect::<Vec<_>>();
+
+        assert_eq!(ranges, vec!["catalog:legacy", "catalog:", "npm:1.2.3"]);
+
+        assert_eq!(
+            lockfile.project.catalogs["legacy"][&Ident::new("bar")],
+            zpm_primitives::Range::from_file_string("npm:^1.0.0").unwrap(),
+        );
+
+        let extension
+            = lockfile.project.package_extensions.values().next().unwrap();
+
+        assert_eq!(extension.dependencies.keys().cloned().collect::<Vec<_>>(), vec![Ident::new("bar")]);
+        assert_eq!(extension.peer_dependencies_meta[&Ident::new("baz")].optional, Some(true));
+    }
+
+    #[test]
+    fn should_discard_the_workspaces_stored_by_older_versions() {
+        let lockfile: Lockfile = JsonDocument::hydrate_from_str(r#"{
+            "__metadata": {"version": 9},
+            "workspaces": {
+                "root": "786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce"
+            },
+            "entries": {
+                "lib@npm:^1.0.0": {
+                    "checksum": null,
+                    "resolution": {"resolution": "lib@workspace:lib", "version": "1.0.0"}
+                }
+            }
+        }"#).unwrap();
+
+        // The hashes older versions stored at the top-level covered the whole
+        // dependency tree, so they can't be compared with the current ones.
+        assert!(lockfile.project.workspaces.is_empty());
+
+        assert!(lockfile.resolutions.is_empty());
+        assert!(lockfile.entries.is_empty());
+    }
+
+    #[test]
+    fn should_tolerate_project_sections_it_cannot_understand() {
+        let lockfile: Lockfile = JsonDocument::hydrate_from_str(r#"{
+            "__metadata": {"version": 9},
+            "project": {
+                "workspaces": {"root": "786a02f742015903"},
+                "dependencyOverrides": {"this is not/a valid@selector/at all": 42}
+            },
+            "entries": {
+                "foo@npm:^1.0.0": {
+                    "checksum": null,
+                    "resolution": {"resolution": "foo@npm:1.0.0", "version": "1.0.0"}
+                }
+            }
+        }"#).unwrap();
+
+        assert_eq!(lockfile.project, Default::default());
+        assert_eq!(lockfile.resolutions.len(), 1);
+    }
 }

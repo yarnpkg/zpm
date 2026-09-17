@@ -212,6 +212,49 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should consider the lockfile fresh regardless of the rules that aren't used by the project`,
+      makeTemporaryEnv({}, async ({path, run}) => {
+        await setupMonorepo(path);
+
+        // The lockfile only stores the rules that are used; should the freshness check
+        // disagree with the install about which ones they are, we'd get a full install.
+        await yarn.writeConfiguration(path, {
+          lazyInstallMode: `focused`,
+          catalog: {
+            [`left-pad`]: `1.0.0`,
+          },
+          packageExtensions: {
+            [`left-pad@*`]: {
+              dependencies: {[`no-deps`]: `1.0.0`},
+            },
+            [`no-deps@*`]: {
+              peerDependenciesMeta: {[`left-pad`]: {optional: true}},
+            },
+          },
+        });
+
+        await run(`install`);
+
+        const lockfile = await xfs.readJsonPromise(ppath.join(path, Filename.lockfile));
+        expect(Object.keys(lockfile.project.packageExtensions)).toEqual([`no-deps@*`]);
+
+        const cacheFolder = ppath.join(path, `.yarn/cache` as PortablePath);
+        await xfs.removePromise(cacheFolder);
+
+        await run(`workspaces`, `focus`, `foo`, {cwd: ppath.join(path, `packages/foo` as PortablePath)});
+
+        await run(`node`, `-e`, `require('no-deps')`, {
+          cwd: ppath.join(path, `packages/bar` as PortablePath),
+        });
+
+        await expect(getCacheContent(cacheFolder)).resolves.toEqual([
+          expect.stringContaining(`no-deps-npm-1.0.0-`),
+          expect.stringContaining(`no-deps-npm-2.0.0-`),
+        ]);
+      }),
+    );
+
+    test(
       `it should run a full lazy install by default`,
       makeTemporaryEnv({}, async ({path, run}) => {
         await setupMonorepo(path, false);
