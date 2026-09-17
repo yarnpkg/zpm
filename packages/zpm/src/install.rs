@@ -1749,6 +1749,20 @@ impl<'a> DependencyNormalizer<'a> {
 }
 
 fn normalize_resolution(normalizer: &DependencyNormalizer<'_>, descriptor: &mut Descriptor, resolution: &Resolution, apply_overrides: bool) -> Result<(), Error> {
+    let mut expanded_catalog_entries
+        = BTreeSet::new();
+
+    normalize_resolution_rec(normalizer, descriptor, resolution, apply_overrides, &mut expanded_catalog_entries)
+}
+
+/**
+ * Catalog entries are allowed to expand into ranges that themselves go
+ * through a catalog (directly, or as the inner descriptor of a patch), so
+ * we keep track of the entries we already expanded: without that, an entry
+ * that ends up referencing itself recurses until the stack overflows, and
+ * those entries can come straight from a lockfile.
+ */
+fn normalize_resolution_rec(normalizer: &DependencyNormalizer<'_>, descriptor: &mut Descriptor, resolution: &Resolution, apply_overrides: bool, expanded_catalog_entries: &mut BTreeSet<(String, Ident)>) -> Result<(), Error> {
     if apply_overrides {
         let candidate_resolutions = normalizer.dependency_overrides
             .get_by_ident(&descriptor.ident);
@@ -1791,6 +1805,13 @@ fn normalize_resolution(normalizer: &DependencyNormalizer<'_>, descriptor: &mut 
 
     match &mut descriptor.range {
         Range::Catalog(params) => {
+            if !expanded_catalog_entries.insert((catalog_name(params).to_string(), descriptor.ident.clone())) {
+                return Err(Error::CatalogCycle {
+                    catalog: catalog_name(params).to_string(),
+                    ident: descriptor.ident.clone(),
+                });
+            }
+
             let catalog_range
                 = lookup_catalog_entry_in(normalizer.catalogs, params, &descriptor.ident)?;
 
@@ -1816,11 +1837,11 @@ fn normalize_resolution(normalizer: &DependencyNormalizer<'_>, descriptor: &mut 
                 descriptor.parent = None;
             }
 
-            normalize_resolution(normalizer, descriptor, resolution, false)?;
+            normalize_resolution_rec(normalizer, descriptor, resolution, false, expanded_catalog_entries)?;
         },
 
         Range::Patch(params) => {
-            normalize_resolution(normalizer, &mut params.inner.as_mut().0, resolution, false)?;
+            normalize_resolution_rec(normalizer, &mut params.inner.as_mut().0, resolution, false, expanded_catalog_entries)?;
         },
 
         Range::AnonymousSemver(params) => {

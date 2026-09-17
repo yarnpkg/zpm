@@ -168,6 +168,9 @@ pub enum Error {
     #[error("Catalog entry not found ({catalog}:{})", ident.to_print_string())]
     CatalogEntryNotFound { catalog: String, ident: Ident },
 
+    #[error("Catalog entry references itself ({catalog}:{})", ident.to_print_string())]
+    CatalogCycle { catalog: String, ident: Ident },
+
     #[error("Package manifest not found ({})", .0.to_print_string())]
     ManifestNotFound(Path),
 

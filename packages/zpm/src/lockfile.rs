@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::{self, Debug, Display}, hash::Hash, marker::PhantomData, sync::{Arc, Mutex}};
+use std::{collections::{BTreeMap, BTreeSet}, fmt::{self, Debug, Display}, hash::Hash, marker::PhantomData, sync::{Arc, Mutex}};
 
 use rkyv::Archive;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
@@ -170,8 +170,16 @@ impl LockfileProject {
             catalogs.insert(catalog_name.clone(), entries);
         }
 
+        // Two entries can share a selector (`**/foo` and `foo` both parse
+        // into the same one), in which case only the first can ever match.
+        // Keeping both would write the same JSON key twice, and the value
+        // any other tool would read back is the one we never applied.
+        let mut stored_selectors
+            = BTreeSet::new();
+
         let dependency_overrides = all_overrides.iter()
             .filter(|(selector, _)| rule_usage.dependency_overrides.contains(selector))
+            .filter(|(selector, _)| stored_selectors.insert((*selector).clone()))
             .map(|(selector, range)| (selector.clone(), range.clone()));
 
         let package_extensions = context.package_extensions.iter()
@@ -345,7 +353,17 @@ impl Serialize for Lockfile {
         }
 
         let mut entries = BTreeMap::new();
-        for entry in descriptors_to_resolutions.into_values() {
+        for mut entry in descriptors_to_resolutions.into_values() {
+            // The checksum of a transient package is the hash of an archive
+            // we generate locally, so it depends on the working tree rather
+            // than on anything the lockfile pins. Nothing ever reads it back
+            // either: keys that are entirely transient are hydrated into the
+            // side tables, which installs never look at. Keys shared with a
+            // regular descriptor (an alias and its inner package) keep theirs.
+            if entry.key.0.iter().all(|descriptor| descriptor.range.details().transient_resolution) {
+                entry.inner.checksum = None;
+            }
+
             entries.insert(entry.key, entry.inner);
         }
 

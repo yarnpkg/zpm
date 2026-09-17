@@ -10,8 +10,12 @@ use crate::{PeerRange, PypiRangeParameters, PypiSpecifierSet, SemverPeerRange};
 
 use super::{Descriptor, Ident, Registry};
 
+/// Paths that are unambiguous on their own, ie. that the `Folder` and
+/// `Tarball` patterns accept without a `file:` prefix. The dot must be
+/// escaped: `ui/kit` would otherwise be serialized as-is and parse back as
+/// a Git range.
 pub static EXPLICIT_PATH_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^.{0,2}/").unwrap()
+    Regex::new(r"^\.{0,2}/").unwrap()
 });
 
 fn format_registry_semver(ident: &Option<Ident>, range: &zpm_semver::Range) -> String {
@@ -430,5 +434,61 @@ impl Range {
                 Err(RangeError::PeerRangeError(self.to_file_string()))
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use zpm_utils::FromFileString;
+
+    use super::*;
+
+    /// Serializing a range and parsing the result back must give the very
+    /// same range - in particular, a `file:` range whose path can't stand on
+    /// its own has to keep its protocol, or it parses back as a Git range.
+    #[rstest]
+    #[case("file:ui/kit")]
+    #[case("file:lib/kit")]
+    #[case("file:a/b.tgz")]
+    #[case("file:C:/x/kit")]
+    #[case("./kit")]
+    #[case("../kit")]
+    #[case("/abs/kit")]
+    #[case("./kit.tgz")]
+    #[case("../kit.tgz")]
+    #[case("npm:^1.0.0")]
+    #[case("portal:./vendor/kit")]
+    #[case("link:./vendor/kit")]
+    fn test_range_value_roundtrip(#[case] str: &str) {
+        let range
+            = Range::from_file_string(str).unwrap();
+
+        let reparsed
+            = Range::from_file_string(&range.to_file_string()).unwrap();
+
+        assert_eq!(range, reparsed, "{str} became {}", range.to_file_string());
+    }
+
+    #[rstest]
+    #[case("file:ui/kit", "file:ui/kit")]
+    #[case("file:a/b.tgz", "file:a/b.tgz")]
+    #[case("file:./kit", "./kit")]
+    #[case("file:../kit", "../kit")]
+    #[case("file:/abs/kit", "/abs/kit")]
+    fn test_path_range_serialization(#[case] str: &str, #[case] expected: &str) {
+        assert_eq!(Range::from_file_string(str).unwrap().to_file_string(), expected);
+    }
+
+    #[rstest]
+    #[case("file:ui/kit")]
+    #[case("file:lib/kit")]
+    #[case("./kit")]
+    fn test_folder_ranges_stay_folders(#[case] str: &str) {
+        let range
+            = Range::from_file_string(str).unwrap();
+
+        assert!(matches!(range, Range::Folder(_)), "{str} parsed as {range:?}");
+        assert!(matches!(Range::from_file_string(&range.to_file_string()).unwrap(), Range::Folder(_)));
     }
 }

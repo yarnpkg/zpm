@@ -356,5 +356,52 @@ describe(`Features`, () => {
         },
       ),
     );
+
+    test(
+      `it should report a catalog entry that references itself`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `catalog:`,
+          },
+        },
+        async ({path, run}) => {
+          await yarn.writeConfiguration(path, {
+            catalog: {
+              [`no-deps`]: `catalog:`,
+            },
+          });
+
+          // Expanding the entry used to recurse until the stack overflowed,
+          // which aborts the process rather than reporting anything
+          await expect(run(`install`)).rejects.toThrow(/references itself/);
+        },
+      ),
+    );
+
+    test(
+      `it should report catalog entries that reference each other`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `catalog:`,
+          },
+        },
+        async ({path, run}) => {
+          await yarn.writeConfiguration(path, {
+            catalogs: {
+              default: {
+                [`no-deps`]: `catalog:other`,
+              },
+              other: {
+                [`no-deps`]: `catalog:`,
+              },
+            },
+          });
+
+          await expect(run(`install`)).rejects.toThrow(/references itself/);
+        },
+      ),
+    );
   });
 });

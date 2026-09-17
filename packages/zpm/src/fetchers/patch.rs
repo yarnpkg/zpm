@@ -20,6 +20,19 @@ pub fn has_builtin_patch(ident: &Ident) -> bool {
         .any(|(name, _)| *name == ident.as_str())
 }
 
+/**
+ * Checksum of a patch file, as stored in the `&checksum=` segment of patch
+ * locators; shared with the up-to-date fast path, which re-derives it to
+ * detect changes.
+ *
+ * The patch parser treats `\r\n`, `\r` and `\n` alike, so a patch checked
+ * out with either line-ending convention applies the same way and must
+ * hash the same way as well.
+ */
+pub fn compute_patch_checksum(patch_content: &str) -> Hash64 {
+    Hash64::from_data(zpm_utils::normalize_line_endings(patch_content.as_bytes()))
+}
+
 pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &PatchReference, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     let package_cache = context.package_cache
         .expect("The package cache is required to fetch a patch package");
@@ -79,7 +92,7 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
     };
 
     let patch_checksum
-        = Hash64::from_string(&patch_content);
+        = compute_patch_checksum(&patch_content);
 
     let reference = PatchReference {
         inner: params.inner.clone(),

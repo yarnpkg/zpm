@@ -207,18 +207,23 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
 
     // If the lockfile changed, compare the dependency trees to find affected workspaces
     if lockfile_changed {
+        // If we can't make sense of the lockfile from the working tree then
+        // nothing else will; better to report it than to silently skip the
+        // workspaces whose dependencies changed.
         let current_lockfile
-            = project.lockfile().ok();
+            = project.lockfile()?;
 
+        // A base we can't read (the lockfile may simply not have existed
+        // back then) can't vouch for anything; an empty lockfile makes all
+        // the workspaces count as changed, which is the safe answer.
         let old_lockfile
-            = fetch_lockfile_at_ref(project, &since_ref).await.ok();
+            = fetch_lockfile_at_ref(project, &since_ref).await
+                .unwrap_or_else(|_| Lockfile::new());
 
-        if let (Some(current), Some(old)) = (&current_lockfile, &old_lockfile) {
-            for ident in find_changed_workspaces(project, old, current) {
-                changed_workspaces.entry(ident)
-                    .or_default()
-                    .insert(lockfile_path.clone());
-            }
+        for ident in find_changed_workspaces(project, &old_lockfile, &current_lockfile) {
+            changed_workspaces.entry(ident)
+                .or_default()
+                .insert(lockfile_path.clone());
         }
     }
 
@@ -230,7 +235,9 @@ async fn fetch_lockfile_at_ref(project: &Project, git_ref: &str) -> Result<Lockf
     let lockfile_content
         = ScriptEnvironment::new()?
             .with_cwd(project.project_cwd.clone())
-            .run_exec("git", ["show", &format!("{}:{}", git_ref, LOCKFILE_NAME)])
+            // The leading `./` makes the path relative to the cwd rather than
+            // to the repository root
+            .run_exec("git", ["show", &format!("{}:./{}", git_ref, LOCKFILE_NAME)])
             .await?
             .ok()?
             .stdout_text()?;
@@ -259,7 +266,10 @@ pub async fn fetch_changed_files(project: &Project, since: Option<&str>) -> Resu
 
     let local_stdout = ScriptEnvironment::new()?
         .with_cwd(project.project_cwd.clone())
-        .run_exec("git", ["diff", "--name-only", &since])
+        // --relative makes git print the paths relative to the cwd (and skip
+        // the changes located outside of it), which is exactly the project's
+        // scope; without it a project in a subdirectory gets bogus paths.
+        .run_exec("git", ["diff", "--name-only", "--relative", &since])
         .await?
         .ok()?
         .stdout_text()?

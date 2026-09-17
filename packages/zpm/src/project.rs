@@ -973,6 +973,12 @@ impl Project {
                 };
 
             for mut descriptor in dependency_descriptors {
+                // Installs resolve normalized descriptors, so the workspace
+                // lookup has to happen on the normalized form as well: plain
+                // semver ranges only match a workspace once they became
+                // registry ranges (and workspaces aren't in the lockfile).
+                normalize_lockfile_descriptor(&mut descriptor);
+
                 if let Some(workspace) = self.try_workspace_by_descriptor(&descriptor)? {
                     process_queue.push(workspace.locator());
                     continue;
@@ -987,8 +993,6 @@ impl Project {
                 {
                     return Ok(false);
                 }
-
-                normalize_lockfile_descriptor(&mut descriptor);
 
                 let Some(dependency_locator) = lockfile.resolutions.get(&descriptor) else {
                     return Ok(false);
@@ -1142,12 +1146,8 @@ impl Project {
 
                     match script_path.fs_read() {
                         Ok(data) => {
-                            // Mirrors `resolvers::exec::compute_exec_hash`.
-                            let mut writer = Hash64Writer::new();
-                            writer.update(b"exec-v2");
-                            writer.update(data);
-
-                            reference_params.hash == Some(writer.finalize())
+                            reference_params.hash
+                                == Some(crate::resolvers::exec::compute_exec_script_hash(&data))
                         },
                         Err(_) => false,
                     }
@@ -1209,7 +1209,10 @@ impl Project {
                     };
 
                     match patch_path.fs_read_text() {
-                        Ok(patch_content) => reference_params.checksum == Some(Hash64::from_string(&patch_content)),
+                        Ok(patch_content) => {
+                            reference_params.checksum
+                                == Some(crate::fetchers::patch::compute_patch_checksum(&patch_content))
+                        },
                         Err(_) => false,
                     }
                 },

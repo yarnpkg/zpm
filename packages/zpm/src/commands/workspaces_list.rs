@@ -173,10 +173,13 @@ impl WorkspacesList {
             }
         };
 
-        let tree_hashes = (self.json && self.tree_hash)
-            .then(|| project.lockfile().ok())
-            .flatten()
-            .map(|lockfile| compute_workspace_tree_hashes(&project, &lockfile));
+        // Without a lockfile there's no dependency tree to describe, and a
+        // lockfile we can't read is worth reporting rather than silently
+        // turning into a set of hashes computed from nothing.
+        let tree_hashes = match self.json && self.tree_hash && project.lockfile_path().fs_exists() {
+            true => Some(compute_workspace_tree_hashes(&project, &project.lockfile()?)),
+            false => None,
+        };
 
         for workspace in workspaces {
             if workspace.manifest.private == Some(true) && !self.private {

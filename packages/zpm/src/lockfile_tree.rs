@@ -331,6 +331,11 @@ pub fn compute_workspace_tree_hashes(project: &Project, lockfile: &Lockfile) -> 
     let mut dependencies_by_node: Vec<Vec<usize>>
         = Vec::new();
 
+    // Nodes whose subtree the lockfile can't describe; they get no hash at
+    // all rather than one computed from partial data
+    let mut incomplete: Vec<bool>
+        = Vec::new();
+
     // Some nodes have more to them than what the graph can express
     let mut extra_hash_segments: HashMap<usize, BTreeSet<String>>
         = HashMap::new();
@@ -346,6 +351,13 @@ pub fn compute_workspace_tree_hashes(project: &Project, lockfile: &Lockfile) -> 
             = table.register(TreeNode::Workspace(ident));
 
         dependencies_by_node.push(Vec::new());
+        incomplete.push(false);
+
+        // A workspace whose dependencies we can't even normalize (a missing
+        // catalog entry, say) has no tree we could describe
+        if dependencies.is_err() {
+            incomplete[id] = true;
+        }
 
         let mut dependencies = dependencies.as_ref()
             .map_or_else(|_| vec![], |dependencies| dependencies.values().cloned().collect_vec());
@@ -380,10 +392,14 @@ pub fn compute_workspace_tree_hashes(project: &Project, lockfile: &Lockfile) -> 
 
                         if is_new {
                             dependencies_by_node.push(Vec::new());
+                            incomplete.push(false);
 
                             // All the workspaces have been queued upfront
                             if let TreeNode::Package(locator) = node {
-                                queue.push((dependency, tree.package_dependencies(locator).unwrap_or_default()));
+                                match tree.package_dependencies(locator) {
+                                    Some(dependencies) => queue.push((dependency, dependencies)),
+                                    None => incomplete[dependency] = true,
+                                }
                             }
                         }
 
@@ -398,24 +414,35 @@ pub fn compute_workspace_tree_hashes(project: &Project, lockfile: &Lockfile) -> 
             match dependency {
                 Some(dependency) => {
                     dependencies_by_node[id].push(dependency);
-                },
 
-                // Descriptors that can't be found in the lockfile still contribute to the
-                // hash of the nodes that depend on them, so that they don't go unnoticed.
-                None => {
+                    // The graph records which nodes are reachable, not the
+                    // name they're reachable under; without this, replacing
+                    // an alias by the package it points at (or having two
+                    // dependencies trade targets) wouldn't change anything.
                     extra_hash_segments.entry(id)
                         .or_default()
-                        .insert(descriptor.to_file_string());
+                        .insert(format!("{} -> {}", descriptor.ident.to_file_string(), table.nodes[dependency].to_file_string()));
+                },
+
+                // A descriptor we can't resolve means we don't know what this
+                // node's tree looks like
+                None => {
+                    incomplete[id] = true;
                 },
             }
         }
     }
 
     let hashes
-        = compute_node_hashes(&table.nodes, &dependencies_by_node, &extra_hash_segments);
+        = compute_node_hashes(&table.nodes, &dependencies_by_node, &extra_hash_segments, &incomplete);
 
     workspace_dependencies.keys()
-        .filter_map(|ident| Some((ident.clone(), hashes[*table.ids.get(&TreeNode::Workspace(ident))?].clone())))
+        .filter_map(|ident| {
+            let hash
+                = hashes[*table.ids.get(&TreeNode::Workspace(ident))?].clone();
+
+            Some((ident.clone(), hash?))
+        })
         .collect()
 }
 
@@ -434,11 +461,20 @@ fn workspace_islands(project: &Project) -> BTreeMap<Ident, String> {
     islands
 }
 
+/**
+ * Hashes each node, mixing in the hashes of everything it depends on.
+ *
+ * Nodes flagged as incomplete (and, transitively, everyone depending on
+ * them) get `None` rather than a hash: a hash computed from a tree we can
+ * only partially describe looks just as authoritative as a real one, and
+ * whoever keys a cache on it would never know.
+ */
 fn compute_node_hashes(
     nodes: &[TreeNode<'_>],
     dependencies_by_node: &[Vec<usize>],
     extra_hash_segments: &HashMap<usize, BTreeSet<String>>,
-) -> Vec<Hash64> {
+    incomplete: &[bool],
+) -> Vec<Option<Hash64>> {
     let sccs
         = scc_tarjan_pearce_core(dependencies_by_node);
 
@@ -451,7 +487,7 @@ fn compute_node_hashes(
         }
     }
 
-    let mut scc_hashes: Vec<Hash64>
+    let mut scc_hashes: Vec<Option<Hash64>>
         = Vec::with_capacity(sccs.len());
 
     // The components are returned in reverse topological order, so by the
@@ -483,9 +519,19 @@ fn compute_node_hashes(
         external_sccs.sort();
         external_sccs.dedup();
 
+        // The components are processed dependencies-first, so anything this
+        // one depends on already knows whether it could be described
+        let is_incomplete = scc.iter().any(|id| incomplete[*id])
+            || external_sccs.iter().any(|dependency_scc_id| scc_hashes.get(*dependency_scc_id).is_none_or(Option::is_none));
+
+        if is_incomplete {
+            scc_hashes.push(None);
+            continue;
+        }
+
         let mut external_hashes
             = external_sccs.into_iter()
-                .filter_map(|dependency_scc_id| scc_hashes.get(dependency_scc_id))
+                .filter_map(|dependency_scc_id| scc_hashes.get(dependency_scc_id)?.as_ref())
                 .collect_vec();
 
         external_hashes.sort();
@@ -506,7 +552,7 @@ fn compute_node_hashes(
             hash_writer.update(h.to_file_string());
         }
 
-        scc_hashes.push(hash_writer.finalize());
+        scc_hashes.push(Some(hash_writer.finalize()));
     }
 
     scc_by_node.into_iter()
