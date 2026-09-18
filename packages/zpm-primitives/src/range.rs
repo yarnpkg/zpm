@@ -10,10 +10,6 @@ use crate::{PeerRange, PypiRangeParameters, PypiSpecifierSet, SemverPeerRange};
 
 use super::{Descriptor, Ident, Registry};
 
-/// Paths that are unambiguous on their own, ie. that the `Folder` and
-/// `Tarball` patterns accept without a `file:` prefix. The dot must be
-/// escaped: `ui/kit` would otherwise be serialized as-is and parse back as
-/// a Git range.
 pub static EXPLICIT_PATH_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\.{0,2}/").unwrap()
 });

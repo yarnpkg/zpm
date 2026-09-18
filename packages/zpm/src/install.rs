@@ -32,8 +32,10 @@ pub struct InstallContext<'a> {
     pub extension_tracking: Arc<Mutex<ExtensionTracking>>,
     /// Only set by those who need to know which rules the normalization relied on
     pub rule_usage: Option<Arc<Mutex<RuleUsage>>>,
-    /// The `catalogs` and `packageExtensions` settings, as consumed by the normalization
+    /// The `catalogs`, `resolutions` and `packageExtensions` settings, as
+    /// consumed by the normalization
     pub catalogs: Arc<LockfileCatalogs>,
+    pub dependency_overrides: Arc<ResolutionsField>,
     pub package_extensions: Arc<BTreeMap<SemverDescriptor, LockfilePackageExtension>>,
     /// Off-thread tracker for metadata cache writes. The owner must
     /// call `drain` before returning so pending writes aren't dropped
@@ -57,7 +59,6 @@ pub struct ExtensionTracking {
 pub struct RuleUsage {
     pub catalog_entries: BTreeMap<String, BTreeSet<Ident>>,
     pub dependency_overrides: BTreeSet<ResolutionSelector>,
-    pub package_extensions: BTreeSet<SemverDescriptor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -102,6 +103,7 @@ impl<'a> Default for InstallContext<'a> {
             extension_tracking: Arc::new(Mutex::new(ExtensionTracking::default())),
             rule_usage: None,
             catalogs: Arc::new(BTreeMap::new()),
+            dependency_overrides: Arc::default(),
             package_extensions: Arc::new(BTreeMap::new()),
             background_writes: None,
         }
@@ -124,8 +126,13 @@ impl<'a> InstallContext<'a> {
             .map(|(descriptor, extension)| (descriptor.clone(), LockfilePackageExtension::from_config(extension)))
             .collect();
 
+        let dependency_overrides = project
+            .map(|project| project.root_workspace().manifest.resolutions.clone())
+            .unwrap_or_default();
+
         self.project = project;
         self.catalogs = Arc::new(catalogs);
+        self.dependency_overrides = Arc::new(dependency_overrides);
         self.package_extensions = Arc::new(package_extensions);
         self
     }
@@ -1728,7 +1735,7 @@ impl<'a> DependencyNormalizer<'a> {
 
         Self {
             catalogs: &context.catalogs,
-            dependency_overrides: &project.root_workspace().manifest.resolutions,
+            dependency_overrides: &context.dependency_overrides,
             package_extensions: &context.package_extensions,
             root_workspace: project.root_workspace().locator(),
             extension_tracking: Some(&context.extension_tracking),
@@ -1937,14 +1944,6 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
             let tracking = tracking.as_deref_mut().unwrap_or(&mut untracked);
 
             tracking.matched.insert(descriptor.clone());
-
-            if let Some(rule_usage) = normalizer.rule_usage {
-                let mut rule_usage = rule_usage.lock().unwrap();
-
-                if !rule_usage.package_extensions.contains(descriptor) {
-                    rule_usage.package_extensions.insert(descriptor.clone());
-                }
-            }
 
             for (dependency, range) in extension.dependencies.iter() {
                 let key = ExtensionFieldKey::Dependency(dependency.clone());

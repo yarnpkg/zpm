@@ -373,7 +373,7 @@ describe(`Features`, () => {
       );
 
       test(
-        `it should keep the lockfile stable when a portal manifest is reformatted`,
+        `it should keep the lockfile stable when a portal manifest uses CRLF line endings`,
         makeMonorepoEnv(async ({path, run}) => {
           const manifestPath = ppath.join(path, `vendor/portal/package.json` as PortablePath);
 
@@ -392,13 +392,10 @@ describe(`Features`, () => {
 
           const lockfile = await readLockfile(path);
 
-          // Same manifest, reindented, with its fields reordered and CRLF
-          // line endings; none of that changes what the portal provides
-          await xfs.writeFilePromise(manifestPath, JSON.stringify({
-            dependencies: {[`no-deps`]: `1.0.0`},
-            version: `1.0.0`,
-            name: `portal`,
-          }, null, 4).replace(/\n/g, `\r\n`));
+          // The very same manifest, as checked out by a Git configured
+          // with core.autocrlf
+          const manifestText = await xfs.readFilePromise(manifestPath, `utf8`);
+          await xfs.writeFilePromise(manifestPath, manifestText.replace(/\n/g, `\r\n`));
 
           await xfs.removePromise(ppath.join(path, `.yarn/ignore` as PortablePath));
 

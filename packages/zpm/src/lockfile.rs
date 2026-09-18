@@ -134,7 +134,7 @@ impl LockfileProject {
         }
 
         let all_overrides
-            = &project.root_workspace().manifest.resolutions;
+            = &context.dependency_overrides;
 
         // Finding out which rules are used requires to normalize all the
         // packages once more; no need to pay for it if there's no rule.
@@ -155,6 +155,10 @@ impl LockfileProject {
                 normalize_resolutions_with(&normalizer, resolution)?;
             }
         }
+
+        // Which extensions matched is already tracked for the diagnostics
+        let matched_extensions
+            = context.extension_tracking.lock().unwrap().matched.clone();
 
         let rule_usage
             = rule_usage.lock().unwrap();
@@ -183,7 +187,7 @@ impl LockfileProject {
             .map(|(selector, range)| (selector.clone(), range.clone()));
 
         let package_extensions = context.package_extensions.iter()
-            .filter(|(descriptor, _)| rule_usage.package_extensions.contains(descriptor))
+            .filter(|(descriptor, _)| matched_extensions.contains(descriptor))
             .map(|(descriptor, extension)| (descriptor.clone(), extension.clone()))
             .collect();
 
