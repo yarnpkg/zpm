@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, fmt::{self, Debug, Display}, hash::Hash, marker::PhantomData, sync::{Arc, Mutex}};
+use std::{collections::{BTreeMap, BTreeSet}, fmt::{self, Debug, Display}, hash::Hash, marker::PhantomData, sync::Arc};
 
 use rkyv::Archive;
 use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize, Serializer};
@@ -9,7 +9,7 @@ use zpm_primitives::{Descriptor, Ident, Locator, PeerRange, Range, Reference, Re
 use zpm_utils::{FromFileString, Hash64, Hash64Writer, Path, ToFileString, UrlEncoded};
 
 use crate::{
-    error::Error, http_npm, install::{DependencyNormalizer, InstallContext, RuleUsage, normalize_resolutions_with}, manifest::resolutions::ResolutionsField, npm, primitives_exts::RangeExt, project::Project, resolvers::Resolution
+    error::Error, http_npm, install::{DependencyNormalizer, InstallContext, normalize_resolutions_with}, manifest::resolutions::ResolutionsField, npm, primitives_exts::RangeExt, project::Project, resolvers::Resolution
 };
 
 const LOCKFILE_VERSION: u64 = 9;
@@ -118,13 +118,9 @@ impl LockfileProject {
      * that the lockfile doesn't change when unrelated settings are modified.
      */
     pub fn from_project<'a>(project: &Project, resolutions: impl IntoIterator<Item = &'a Resolution>) -> Result<Self, Error> {
-        let rule_usage
-            = Arc::new(Mutex::new(RuleUsage::default()));
-
         let context
             = InstallContext::default()
-                .with_project(Some(project))
-                .with_rule_usage(Some(rule_usage.clone()));
+                .with_project(Some(project));
 
         let mut workspaces
             = BTreeMap::new();
@@ -156,12 +152,8 @@ impl LockfileProject {
             }
         }
 
-        // Which extensions matched is already tracked for the diagnostics
-        let matched_extensions
-            = context.extension_tracking.lock().unwrap().matched.clone();
-
         let rule_usage
-            = rule_usage.lock().unwrap();
+            = context.rule_usage.lock().unwrap();
 
         let mut catalogs
             = LockfileCatalogs::new();
@@ -187,7 +179,7 @@ impl LockfileProject {
             .map(|(selector, range)| (selector.clone(), range.clone()));
 
         let package_extensions = context.package_extensions.iter()
-            .filter(|(descriptor, _)| matched_extensions.contains(descriptor))
+            .filter(|(descriptor, _)| rule_usage.package_extensions.contains_key(descriptor))
             .map(|(descriptor, extension)| (descriptor.clone(), extension.clone()))
             .collect();
 

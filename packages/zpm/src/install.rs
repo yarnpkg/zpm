@@ -29,9 +29,9 @@ pub struct InstallContext<'a> {
     pub install_time: DateTime<Utc>,
     pub mode: Option<InstallMode>,
     pub inline_builds: bool,
-    pub extension_tracking: Arc<Mutex<ExtensionTracking>>,
-    /// Only set by those who need to know which rules the normalization relied on
-    pub rule_usage: Option<Arc<Mutex<RuleUsage>>>,
+    /// What the normalization made of each rule; the install reports on it,
+    /// and `LockfileProject` stores the rules that turned out to matter
+    pub rule_usage: Arc<Mutex<RuleUsage>>,
     /// The `catalogs`, `resolutions` and `packageExtensions` settings, as
     /// consumed by the normalization
     pub catalogs: Arc<LockfileCatalogs>,
@@ -43,22 +43,40 @@ pub struct InstallContext<'a> {
     pub background_writes: Option<Arc<http_npm::BackgroundWrites>>,
 }
 
-/// Tracks `packageExtensions` rule behavior so we can warn about
-/// rules that never matched, or whose added field was already present
-/// upstream (redundant).
-#[derive(Debug, Default)]
-pub struct ExtensionTracking {
-    pub matched: BTreeSet<SemverDescriptor>,
-    pub applied: BTreeSet<(SemverDescriptor, ExtensionFieldKey)>,
-    pub redundant: BTreeSet<(SemverDescriptor, ExtensionFieldKey)>,
+/// What one field of a `packageExtensions` rule did to the packages the
+/// rule matched. A rule that matched nothing at all has no entry, which is
+/// the third state the diagnostics care about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RuleEffect {
+    /// The package already had that field; the rule changed nothing
+    Redundant,
+    /// The rule actually added something
+    Used,
 }
 
 /// Tracks the rules that got applied while normalizing dependencies, so
-/// that the lockfile only has to remember the ones that matter.
+/// that the lockfile only has to remember the ones that matter, and so
+/// that we can warn about the extensions that never matched or whose
+/// fields were already present upstream.
 #[derive(Debug, Default)]
 pub struct RuleUsage {
     pub catalog_entries: BTreeMap<String, BTreeSet<Ident>>,
     pub dependency_overrides: BTreeSet<ResolutionSelector>,
+    pub package_extensions: BTreeMap<SemverDescriptor, BTreeMap<ExtensionFieldKey, RuleEffect>>,
+}
+
+impl RuleUsage {
+    /// A rule matching several packages can be redundant on one and useful
+    /// on another; what matters is whether it ever did anything.
+    fn record_extension(&mut self, descriptor: &SemverDescriptor, key: ExtensionFieldKey, effect: RuleEffect) {
+        let entry = self.package_extensions
+            .entry(descriptor.clone())
+            .or_default()
+            .entry(key)
+            .or_insert(effect);
+
+        *entry = (*entry).max(effect);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -100,8 +118,7 @@ impl<'a> Default for InstallContext<'a> {
             install_time: Utc::now(),
             mode: None,
             inline_builds: false,
-            extension_tracking: Arc::new(Mutex::new(ExtensionTracking::default())),
-            rule_usage: None,
+            rule_usage: Arc::new(Mutex::new(RuleUsage::default())),
             catalogs: Arc::new(BTreeMap::new()),
             dependency_overrides: Arc::default(),
             package_extensions: Arc::new(BTreeMap::new()),
@@ -174,11 +191,6 @@ impl<'a> InstallContext<'a> {
 
     pub fn with_systems(mut self, systems: Option<&'a Vec<SystemSet>>) -> Self {
         self.systems = systems;
-        self
-    }
-
-    pub fn with_rule_usage(mut self, rule_usage: Option<Arc<Mutex<RuleUsage>>>) -> Self {
-        self.rule_usage = rule_usage;
         self
     }
 
@@ -940,7 +952,7 @@ pub struct Install {
     pub constraints_check: bool,
     pub inline_builds: bool,
     pub force: bool,
-    pub extension_tracking: Arc<Mutex<ExtensionTracking>>,
+    pub rule_usage: Arc<Mutex<RuleUsage>>,
 }
 
 #[derive(Debug)]
@@ -1028,15 +1040,15 @@ impl Install {
             return;
         };
 
-        let tracking
-            = self.extension_tracking.lock().unwrap();
+        let usage
+            = self.rule_usage.lock().unwrap();
 
         let mut warnings
             = vec![];
 
         for (descriptor, extension) in project.config.settings.package_extensions.iter() {
-            let matched
-                = tracking.matched.contains(descriptor);
+            let effects
+                = usage.package_extensions.get(descriptor);
             let parent
                 = descriptor.ident.to_print_string();
 
@@ -1049,16 +1061,17 @@ impl Install {
                     .map(|(ident, _)| ExtensionFieldKey::PeerDependencyMetaOptional(ident.clone())));
 
             for key in entries {
-                let rule_key
-                    = (descriptor.clone(), key.clone());
-
-                if !matched {
+                let Some(effects) = effects else {
                     warnings.push(format!(
                         "{} ➤ {}: No matching package in the dependency tree; you may not need this rule anymore.",
                         parent,
                         key.render(),
                     ));
-                } else if tracking.redundant.contains(&rule_key) && !tracking.applied.contains(&rule_key) {
+
+                    continue;
+                };
+
+                if effects.get(&key) == Some(&RuleEffect::Redundant) {
                     warnings.push(format!(
                         "{} ➤ {}: This rule seems redundant when applied on the original package; the extension may have been applied upstream.",
                         parent,
@@ -1639,7 +1652,7 @@ impl<'a> InstallManager<'a> {
 
         self.result.skip_build = self.context.mode == Some(InstallMode::SkipBuild);
 
-        self.result.extension_tracking = self.context.extension_tracking.clone();
+        self.result.rule_usage = self.context.rule_usage.clone();
         self.result.inline_builds = self.context.inline_builds;
 
         self.result.report_peer_diagnostics(self.context.project.unwrap());
@@ -1724,7 +1737,6 @@ pub struct DependencyNormalizer<'a> {
     pub dependency_overrides: &'a ResolutionsField,
     pub package_extensions: &'a BTreeMap<SemverDescriptor, LockfilePackageExtension>,
     pub root_workspace: Locator,
-    pub extension_tracking: Option<&'a Mutex<ExtensionTracking>>,
     pub rule_usage: Option<&'a Mutex<RuleUsage>>,
 }
 
@@ -1738,8 +1750,7 @@ impl<'a> DependencyNormalizer<'a> {
             dependency_overrides: &context.dependency_overrides,
             package_extensions: &context.package_extensions,
             root_workspace: project.root_workspace().locator(),
-            extension_tracking: Some(&context.extension_tracking),
-            rule_usage: context.rule_usage.as_deref(),
+            rule_usage: Some(&context.rule_usage),
         }
     }
 
@@ -1749,7 +1760,6 @@ impl<'a> DependencyNormalizer<'a> {
             dependency_overrides: &lockfile.project.dependency_overrides,
             package_extensions: &lockfile.project.package_extensions,
             root_workspace,
-            extension_tracking: None,
             rule_usage: None,
         }
     }
@@ -1938,30 +1948,32 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
 
     for (descriptor, extension) in normalizer.package_extensions.iter() {
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
-            // Nobody's interested in the diagnostics when there's no tracker
-            let mut untracked = ExtensionTracking::default();
-            let mut tracking = normalizer.extension_tracking.map(|tracking| tracking.lock().unwrap());
-            let tracking = tracking.as_deref_mut().unwrap_or(&mut untracked);
+            // Nobody's interested in any of this when there's no tracker
+            let mut untracked = RuleUsage::default();
+            let mut usage = normalizer.rule_usage.map(|usage| usage.lock().unwrap());
+            let usage = usage.as_deref_mut().unwrap_or(&mut untracked);
 
-            tracking.matched.insert(descriptor.clone());
+            // Matching at all is what makes a rule worth storing, even when
+            // none of its fields end up doing anything
+            usage.package_extensions.entry(descriptor.clone()).or_default();
 
             for (dependency, range) in extension.dependencies.iter() {
                 let key = ExtensionFieldKey::Dependency(dependency.clone());
                 if dependencies.contains_key(dependency) {
-                    tracking.redundant.insert((descriptor.clone(), key));
+                    usage.record_extension(descriptor, key, RuleEffect::Redundant);
                 } else {
                     dependencies.insert(dependency.clone(), Descriptor::new_bound(dependency.clone(), range.clone(), None));
-                    tracking.applied.insert((descriptor.clone(), key));
+                    usage.record_extension(descriptor, key, RuleEffect::Used);
                 }
             }
 
             for (peer_dependency, range) in extension.peer_dependencies.iter() {
                 let key = ExtensionFieldKey::PeerDependency(peer_dependency.clone());
                 if peer_dependencies.contains_key(peer_dependency) {
-                    tracking.redundant.insert((descriptor.clone(), key));
+                    usage.record_extension(descriptor, key, RuleEffect::Redundant);
                 } else {
                     peer_dependencies.insert(peer_dependency.clone(), range.clone());
-                    tracking.applied.insert((descriptor.clone(), key));
+                    usage.record_extension(descriptor, key, RuleEffect::Used);
                 }
             }
 
@@ -1969,11 +1981,11 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
                 if meta.optional == Some(true) {
                     let key = ExtensionFieldKey::PeerDependencyMetaOptional(peer_dependency.clone());
                     if resolution.optional_peer_dependencies.contains(peer_dependency) {
-                        tracking.redundant.insert((descriptor.clone(), key));
+                        usage.record_extension(descriptor, key, RuleEffect::Redundant);
                     } else {
                         // Flag-only: `optional_peer_dependencies` comes
                         // from the original manifest and isn't mutated here.
-                        tracking.applied.insert((descriptor.clone(), key));
+                        usage.record_extension(descriptor, key, RuleEffect::Used);
                     }
                 }
             }
