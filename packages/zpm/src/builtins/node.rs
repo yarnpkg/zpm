@@ -29,8 +29,12 @@ pub async fn resolve_nodejs_version(context: &InstallContext<'_>, range: &zpm_se
     let release_url
         = format!("{}/index.json", project.config.settings.node_dist_url.value);
 
-    let text
-        = project.http_client.get(&release_url)?.send_text().await?;
+    let node_dist_auth_header = project.config.settings.node_dist_auth_header.value.as_ref()
+        .map(|header| header.value.as_str());
+
+    let text = project.http_client.get(&release_url)?
+        .header("authorization", node_dist_auth_header)
+        .send_text().await?;
 
     #[derive(Deserialize)]
     struct NodejsManifest {
@@ -154,6 +158,9 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
     let url
         = format!("{}/v{}/node-v{}-{}.tar.gz", project.config.settings.node_dist_url.value, version_str, version_str, file_name);
 
+    let node_dist_auth_header = project.config.settings.node_dist_auth_header.value.as_ref()
+        .map(|header| header.value.as_str());
+
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching npm packages");
     let cache_packer
@@ -175,6 +182,7 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
     let cached_blob = package_cache.ensure_blob(locator.clone(), ".zip", || async move {
         let (_, bytes)
             = project.http_client.get(&url)?
+                .header("authorization", node_dist_auth_header)
                 .send_bytes().await?;
 
         let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
