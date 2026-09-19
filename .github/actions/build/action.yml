@@ -15,7 +15,7 @@ inputs:
   browserpod-version:
     description: 'The Browserpod runtime/toolchain version'
     required: false
-    default: '3.0.1'
+    default: '3.1.0'
 
 outputs:
   version:

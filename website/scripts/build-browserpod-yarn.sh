@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version=3.0.1
+version=3.1.0
 toolchain=browserpod-$version
 base_url=https://rt.browserpod.io/$version/rust
 tarball=browserpod-rust-$version.tar.gz
