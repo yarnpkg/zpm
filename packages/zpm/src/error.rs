@@ -63,6 +63,9 @@ pub enum Error {
     #[error("Invalid publish access: {0}")]
     InvalidNpmPublishAccess(String),
 
+    #[error("Invalid npm stage ID ({0}); expected a UUID in the form xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")]
+    InvalidNpmStageId(String),
+
     #[error("Missing environment variable when creating the provenance payload: {0}")]
     MissingEnvironmentVariableForProvenancePayload(String),
 

@@ -80,6 +80,9 @@ pub enum YarnCli {
     LogoutAll(npm::logout_all::LogoutAll),
     Logout(npm::logout::Logout),
     Publish(npm::publish::Publish),
+    NpmStageList(npm::stage::list::List),
+    NpmStageApprove(npm::stage::approve::Approve),
+    NpmStageReject(npm::stage::reject::Reject),
     Whoami(npm::whoami::Whoami),
 
     VersionApply(version::apply::VersionApply),
