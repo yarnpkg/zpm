@@ -1,20 +1,19 @@
-use std::{collections::{BTreeMap, BTreeSet, HashMap, HashSet}, sync::{Arc, LazyLock, Mutex}};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, sync::{Arc, LazyLock, Mutex}};
 
 use chrono::{DateTime, Utc};
 use colored::Colorize;
 use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
-use zpm_utils::{DataType, Hash64, Hash64Writer, IoResultExt, Path, SystemSet, ToHumanString, UrlEncoded, scc_tarjan_pearce};
+use zpm_utils::{DataType, Hash64, IoResultExt, Path, SystemSet, ToHumanString, UrlEncoded};
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
-    build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync}, graph::WaitMap, http_npm, linker, lockfile::{Lockfile, LockfileEntry, LockfileMetadata}, primitives_exts::{InnerDependencyKind, RangeExt}, project::{InstallMode, Project}, report::{self, ReportContext, async_section, current_report, with_context_result}, resolvers::{Resolution, SyncResolutionAttempt, catalog::lookup_catalog_entry, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync}, tree_resolver::{ResolutionTree, TreeResolver}
+    build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync}, graph::WaitMap, http_npm, linker, lockfile::{Lockfile, LockfileCatalogs, LockfileEntry, LockfileMetadata, LockfilePackageExtension, LockfileProject, catalogs_from_config}, manifest::resolutions::{ResolutionSelector, ResolutionsField}, primitives_exts::{InnerDependencyKind, RangeExt}, project::{InstallMode, Project}, report::{self, ReportContext, async_section, current_report, with_context_result}, resolvers::{Resolution, SyncResolutionAttempt, catalog::{catalog_name, lookup_catalog_entry_in}, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync}, tree_resolver::{ResolutionTree, TreeResolver}
 };
 
 #[derive(Clone)]
@@ -30,21 +29,54 @@ pub struct InstallContext<'a> {
     pub install_time: DateTime<Utc>,
     pub mode: Option<InstallMode>,
     pub inline_builds: bool,
-    pub extension_tracking: Arc<Mutex<ExtensionTracking>>,
+    /// What the normalization made of each rule; the install reports on it,
+    /// and `LockfileProject` stores the rules that turned out to matter
+    pub rule_usage: Arc<Mutex<RuleUsage>>,
+    /// The `catalogs`, `resolutions` and `packageExtensions` settings, as
+    /// consumed by the normalization
+    pub catalogs: Arc<LockfileCatalogs>,
+    pub dependency_overrides: Arc<ResolutionsField>,
+    pub package_extensions: Arc<BTreeMap<SemverDescriptor, LockfilePackageExtension>>,
     /// Off-thread tracker for metadata cache writes. The owner must
     /// call `drain` before returning so pending writes aren't dropped
     /// when the runtime shuts down.
     pub background_writes: Option<Arc<http_npm::BackgroundWrites>>,
 }
 
-/// Tracks `packageExtensions` rule behavior so we can warn about
-/// rules that never matched, or whose added field was already present
-/// upstream (redundant).
+/// What one field of a `packageExtensions` rule did to the packages the
+/// rule matched. A rule that matched nothing at all has no entry, which is
+/// the third state the diagnostics care about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RuleEffect {
+    /// The package already had that field; the rule changed nothing
+    Redundant,
+    /// The rule actually added something
+    Used,
+}
+
+/// Tracks the rules that got applied while normalizing dependencies, so
+/// that the lockfile only has to remember the ones that matter, and so
+/// that we can warn about the extensions that never matched or whose
+/// fields were already present upstream.
 #[derive(Debug, Default)]
-pub struct ExtensionTracking {
-    pub matched: BTreeSet<SemverDescriptor>,
-    pub applied: BTreeSet<(SemverDescriptor, ExtensionFieldKey)>,
-    pub redundant: BTreeSet<(SemverDescriptor, ExtensionFieldKey)>,
+pub struct RuleUsage {
+    pub catalog_entries: BTreeMap<String, BTreeSet<Ident>>,
+    pub dependency_overrides: BTreeSet<ResolutionSelector>,
+    pub package_extensions: BTreeMap<SemverDescriptor, BTreeMap<ExtensionFieldKey, RuleEffect>>,
+}
+
+impl RuleUsage {
+    /// A rule matching several packages can be redundant on one and useful
+    /// on another; what matters is whether it ever did anything.
+    fn record_extension(&mut self, descriptor: &SemverDescriptor, key: ExtensionFieldKey, effect: RuleEffect) {
+        let entry = self.package_extensions
+            .entry(descriptor.clone())
+            .or_default()
+            .entry(key)
+            .or_insert(effect);
+
+        *entry = (*entry).max(effect);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -86,7 +118,10 @@ impl<'a> Default for InstallContext<'a> {
             install_time: Utc::now(),
             mode: None,
             inline_builds: false,
-            extension_tracking: Arc::new(Mutex::new(ExtensionTracking::default())),
+            rule_usage: Arc::new(Mutex::new(RuleUsage::default())),
+            catalogs: Arc::new(BTreeMap::new()),
+            dependency_overrides: Arc::default(),
+            package_extensions: Arc::new(BTreeMap::new()),
             background_writes: None,
         }
     }
@@ -99,7 +134,23 @@ impl<'a> InstallContext<'a> {
     }
 
     pub fn with_project(mut self, project: Option<&'a Project>) -> Self {
+        let catalogs = project
+            .map(|project| catalogs_from_config(&project.config.settings.catalogs))
+            .unwrap_or_default();
+
+        let package_extensions = project.into_iter()
+            .flat_map(|project| project.config.settings.package_extensions.iter())
+            .map(|(descriptor, extension)| (descriptor.clone(), LockfilePackageExtension::from_config(extension)))
+            .collect();
+
+        let dependency_overrides = project
+            .map(|project| project.root_workspace().manifest.resolutions.clone())
+            .unwrap_or_default();
+
         self.project = project;
+        self.catalogs = Arc::new(catalogs);
+        self.dependency_overrides = Arc::new(dependency_overrides);
+        self.package_extensions = Arc::new(package_extensions);
         self
     }
 
@@ -901,7 +952,7 @@ pub struct Install {
     pub constraints_check: bool,
     pub inline_builds: bool,
     pub force: bool,
-    pub extension_tracking: Arc<Mutex<ExtensionTracking>>,
+    pub rule_usage: Arc<Mutex<RuleUsage>>,
 }
 
 #[derive(Debug)]
@@ -989,15 +1040,15 @@ impl Install {
             return;
         };
 
-        let tracking
-            = self.extension_tracking.lock().unwrap();
+        let usage
+            = self.rule_usage.lock().unwrap();
 
         let mut warnings
             = vec![];
 
         for (descriptor, extension) in project.config.settings.package_extensions.iter() {
-            let matched
-                = tracking.matched.contains(descriptor);
+            let effects
+                = usage.package_extensions.get(descriptor);
             let parent
                 = descriptor.ident.to_print_string();
 
@@ -1010,16 +1061,17 @@ impl Install {
                     .map(|(ident, _)| ExtensionFieldKey::PeerDependencyMetaOptional(ident.clone())));
 
             for key in entries {
-                let rule_key
-                    = (descriptor.clone(), key.clone());
-
-                if !matched {
+                let Some(effects) = effects else {
                     warnings.push(format!(
                         "{} ➤ {}: No matching package in the dependency tree; you may not need this rule anymore.",
                         parent,
                         key.render(),
                     ));
-                } else if tracking.redundant.contains(&rule_key) && !tracking.applied.contains(&rule_key) {
+
+                    continue;
+                };
+
+                if effects.get(&key) == Some(&RuleEffect::Redundant) {
                     warnings.push(format!(
                         "{} ➤ {}: This rule seems redundant when applied on the original package; the extension may have been applied upstream.",
                         parent,
@@ -1043,19 +1095,16 @@ impl Install {
     pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
         self.report_package_extension_diagnostics(project).await;
 
-        let graph = build_locator_graph(
-            &self.install_state.normalized_resolutions,
-            &self.install_state.descriptor_to_locator,
-        );
+        if !self.skip_lockfile_update {
+            let resolutions
+                = self.lockfile.entries.values()
+                    .map(|entry| &entry.resolution);
 
-        let workspace_locators: Vec<(Ident, Locator)> = project.workspaces.iter()
-            .map(|w| (w.name.clone(), w.locator()))
-            .collect();
+            self.lockfile.project
+                = LockfileProject::from_project(project, resolutions)?;
+        }
 
         if self.skip_link_step {
-            self.lockfile.workspaces
-                = compute_workspace_hashes(&graph, &workspace_locators);
-
             if !self.skip_lockfile_update {
                 project.write_lockfile(&self.lockfile)?;
             }
@@ -1070,18 +1119,11 @@ impl Install {
                     zpm_config::NmMode::HardlinksGlobal => "hardlinks-global".to_string(),
                 });
 
-            let hash_handle = tokio::task::spawn_blocking(move || {
-                compute_workspace_hashes(&graph, &workspace_locators)
-            });
-
             let link_future
                 = linker::link_project(project, &self);
 
             let link_result
                 = async_section("Linking the project", link_future).await?;
-
-            self.lockfile.workspaces
-                = hash_handle.await?;
 
             for (location, locator) in &link_result.packages_by_location {
                 self.install_state.locations_by_package.insert(locator.clone(), location.clone());
@@ -1610,7 +1652,7 @@ impl<'a> InstallManager<'a> {
 
         self.result.skip_build = self.context.mode == Some(InstallMode::SkipBuild);
 
-        self.result.extension_tracking = self.context.extension_tracking.clone();
+        self.result.rule_usage = self.context.rule_usage.clone();
         self.result.inline_builds = self.context.inline_builds;
 
         self.result.report_peer_diagnostics(self.context.project.unwrap());
@@ -1684,163 +1726,85 @@ impl<'a> InstallManager<'a> {
 
 }
 
-fn dep_locators<'a>(
-    locator: &Locator,
-    resolutions: &'a BTreeMap<Locator, Resolution>,
-    d2l: &'a BTreeMap<Descriptor, Locator>,
-) -> Vec<&'a Locator> {
-    let Some(resolution) = resolutions.get(locator) else {
-        return Vec::new();
-    };
-
-    resolution.dependencies.values()
-        .filter_map(|desc| d2l.get(desc))
-        .chain(resolution.variants.iter().filter_map(|desc| d2l.get(desc)))
-        .collect()
+/**
+ * Rules turning the dependencies declared by a package into the descriptors
+ * that actually get resolved. They can either come from the project (when
+ * running an install), or from a lockfile (when reconstructing the dependency
+ * tree it describes).
+ */
+pub struct DependencyNormalizer<'a> {
+    pub catalogs: &'a LockfileCatalogs,
+    pub dependency_overrides: &'a ResolutionsField,
+    pub package_extensions: &'a BTreeMap<SemverDescriptor, LockfilePackageExtension>,
+    pub root_workspace: Locator,
+    pub rule_usage: Option<&'a Mutex<RuleUsage>>,
 }
 
-pub(crate) fn compute_workspace_hashes(
-    graph: &BTreeMap<Locator, BTreeSet<Locator>>,
-    workspace_locators: &[(Ident, Locator)],
-) -> BTreeMap<Ident, Hash64> {
-    let cache
-        = compute_all_locator_hashes(graph);
+impl<'a> DependencyNormalizer<'a> {
+    pub fn from_context(context: &'a InstallContext<'_>) -> Self {
+        let project
+            = context.project.expect("The project is required to normalize resolutions");
 
-    workspace_locators.iter()
-        .map(|(name, locator)| {
-            let hash = cache.get(locator)
-                .cloned()
-                .unwrap_or_else(|| Hash64::from_data(locator.to_file_string()));
-
-            (name.clone(), hash)
-        })
-        .collect()
-}
-
-fn build_locator_graph(
-    resolutions: &BTreeMap<Locator, Resolution>,
-    descriptor_to_locator: &BTreeMap<Descriptor, Locator>,
-) -> BTreeMap<Locator, BTreeSet<Locator>> {
-    resolutions.keys()
-        .map(|locator| {
-            let deps
-                = dep_locators(locator, resolutions, descriptor_to_locator)
-                    .into_iter()
-                    .cloned()
-                    .collect();
-            (locator.clone(), deps)
-        })
-        .collect()
-}
-
-fn compute_all_locator_hashes(
-    graph: &BTreeMap<Locator, BTreeSet<Locator>>,
-) -> HashMap<Locator, Hash64> {
-    let sccs
-        = scc_tarjan_pearce(graph);
-
-    let mut cache: HashMap<Locator, Hash64>
-        = HashMap::with_capacity(graph.len());
-
-    for scc in &sccs {
-        if scc.len() == 1 {
-            let locator = &scc[0];
-
-            let mut hash_writer
-                = Hash64Writer::new();
-
-            hash_writer.update(locator.to_file_string());
-
-            let mut child_hashes
-                = graph.get(locator)
-                    .into_iter()
-                    .flat_map(|deps| deps.iter())
-                    .filter_map(|dep| cache.get(dep))
-                    .collect_vec();
-
-            child_hashes.sort();
-            for h in child_hashes {
-                hash_writer.update(h.to_file_string());
-            }
-
-            cache.insert(locator.clone(), hash_writer.finalize());
-        } else {
-            let scc_set: BTreeSet<_>
-                = scc.iter()
-                    .collect();
-
-            let mut member_strings
-                = scc.iter()
-                    .map(|l| l.to_file_string())
-                    .collect_vec();
-
-            member_strings.sort();
-
-            let mut external_hashes
-                = Vec::new();
-
-            for locator in scc {
-                if let Some(deps) = graph.get(locator) {
-                    for dep in deps {
-                        if !scc_set.contains(dep) {
-                            if let Some(h) = cache.get(dep) {
-                                external_hashes.push(h);
-                            }
-                        }
-                    }
-                }
-            }
-
-            external_hashes.sort();
-            external_hashes.dedup();
-
-            let mut hash_writer
-                = Hash64Writer::new();
-
-            for s in &member_strings {
-                hash_writer.update(s);
-            }
-            for h in external_hashes {
-                hash_writer.update(h.to_file_string());
-            }
-
-            let scc_hash
-                = hash_writer.finalize();
-
-            for locator in scc {
-                cache.insert(locator.clone(), scc_hash.clone());
-            }
+        Self {
+            catalogs: &context.catalogs,
+            dependency_overrides: &context.dependency_overrides,
+            package_extensions: &context.package_extensions,
+            root_workspace: project.root_workspace().locator(),
+            rule_usage: Some(&context.rule_usage),
         }
     }
 
-    cache
+    pub fn from_lockfile(lockfile: &'a Lockfile, root_workspace: Locator) -> Self {
+        Self {
+            catalogs: &lockfile.project.catalogs,
+            dependency_overrides: &lockfile.project.dependency_overrides,
+            package_extensions: &lockfile.project.package_extensions,
+            root_workspace,
+            rule_usage: None,
+        }
+    }
 }
 
-fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descriptor, resolution: &Resolution, apply_overrides: bool) -> Result<(), Error> {
+fn normalize_resolution(normalizer: &DependencyNormalizer<'_>, descriptor: &mut Descriptor, resolution: &Resolution, apply_overrides: bool) -> Result<(), Error> {
+    let mut expanded_catalog_entries
+        = BTreeSet::new();
+
+    normalize_resolution_rec(normalizer, descriptor, resolution, apply_overrides, &mut expanded_catalog_entries)
+}
+
+/**
+ * Catalog entries are allowed to expand into ranges that themselves go
+ * through a catalog (directly, or as the inner descriptor of a patch), so
+ * we keep track of the entries we already expanded: without that, an entry
+ * that ends up referencing itself recurses until the stack overflows, and
+ * those entries can come straight from a lockfile.
+ */
+fn normalize_resolution_rec(normalizer: &DependencyNormalizer<'_>, descriptor: &mut Descriptor, resolution: &Resolution, apply_overrides: bool, expanded_catalog_entries: &mut BTreeSet<(String, Ident)>) -> Result<(), Error> {
     if apply_overrides {
-        let candidate_resolutions = context.project
-            .expect("The project is required to normalize resolutions, as it may be impacted by the project's overrides")
-            .root_workspace()
-            .manifest
-            .resolutions
+        let candidate_resolutions = normalizer.dependency_overrides
             .get_by_ident(&descriptor.ident);
 
         let resolution_override = candidate_resolutions
             .and_then(|overrides| {
                 overrides.iter().find_map(|(rule, range)| {
                     rule.apply(&resolution.locator, &resolution.version, descriptor, range)
+                        .map(|replacement_range| (rule, replacement_range))
                 })
             });
 
-        if let Some(replacement_range) = resolution_override {
+        if let Some((rule, replacement_range)) = resolution_override {
+            if let Some(rule_usage) = normalizer.rule_usage {
+                let mut rule_usage = rule_usage.lock().unwrap();
+
+                if !rule_usage.dependency_overrides.contains(rule) {
+                    rule_usage.dependency_overrides.insert(rule.clone());
+                }
+            }
+
             descriptor.range = replacement_range;
 
             if descriptor.range.details().require_binding {
-                let root_workspace = context.project
-                    .expect("The project is required to bind a parent to a descriptor")
-                    .root_workspace();
-
-                descriptor.parent = Some(root_workspace.locator());
+                descriptor.parent = Some(normalizer.root_workspace.clone());
             } else {
                 descriptor.parent = None;
             }
@@ -1858,24 +1822,43 @@ fn normalize_resolution(context: &InstallContext<'_>, descriptor: &mut Descripto
 
     match &mut descriptor.range {
         Range::Catalog(params) => {
-            let project
-                = context.project
-                    .expect("The project is required to normalize catalog resolutions");
+            if !expanded_catalog_entries.insert((catalog_name(params).to_string(), descriptor.ident.clone())) {
+                return Err(Error::CatalogCycle {
+                    catalog: catalog_name(params).to_string(),
+                    ident: descriptor.ident.clone(),
+                });
+            }
+
+            let catalog_range
+                = lookup_catalog_entry_in(normalizer.catalogs, params, &descriptor.ident)?;
+
+            if let Some(rule_usage) = normalizer.rule_usage {
+                let mut rule_usage = rule_usage.lock().unwrap();
+
+                let catalog_usage = match rule_usage.catalog_entries.get_mut(catalog_name(params)) {
+                    Some(catalog_usage) => catalog_usage,
+                    None => rule_usage.catalog_entries.entry(catalog_name(params).to_string()).or_default(),
+                };
+
+                if !catalog_usage.contains(&descriptor.ident) {
+                    catalog_usage.insert(descriptor.ident.clone());
+                }
+            }
 
             descriptor.range
-                = lookup_catalog_entry(project, params, &descriptor.ident)?;
+                = catalog_range;
 
             if descriptor.range.details().require_binding {
-                descriptor.parent = Some(project.root_workspace().locator());
+                descriptor.parent = Some(normalizer.root_workspace.clone());
             } else {
                 descriptor.parent = None;
             }
 
-            normalize_resolution(context, descriptor, resolution, false)?;
+            normalize_resolution_rec(normalizer, descriptor, resolution, false, expanded_catalog_entries)?;
         },
 
         Range::Patch(params) => {
-            normalize_resolution(context, &mut params.inner.as_mut().0, resolution, false)?;
+            normalize_resolution_rec(normalizer, &mut params.inner.as_mut().0, resolution, false, expanded_catalog_entries)?;
         },
 
         Range::AnonymousSemver(params) => {
@@ -1913,9 +1896,10 @@ static BUILTIN_EXTENSIONS: LazyLock<BTreeMap<SemverDescriptor, PackageExtension>
 });
 
 pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resolution) -> Result<(BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>), Error> {
-    let project
-        = context.project.expect("The project is required to normalize resolutions");
+    normalize_resolutions_with(&DependencyNormalizer::from_context(context), resolution)
+}
 
+pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolution: &Resolution) -> Result<(BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>), Error> {
     let mut dependencies
         = resolution.dependencies.clone();
 
@@ -1962,40 +1946,46 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
         }
     }
 
-    for (descriptor, extension) in project.config.settings.package_extensions.iter() {
+    for (descriptor, extension) in normalizer.package_extensions.iter() {
         if descriptor.ident == resolution.locator.ident && descriptor.range.check(&resolution.version) {
-            let mut tracking = context.extension_tracking.lock().unwrap();
-            tracking.matched.insert(descriptor.clone());
+            // Nobody's interested in any of this when there's no tracker
+            let mut untracked = RuleUsage::default();
+            let mut usage = normalizer.rule_usage.map(|usage| usage.lock().unwrap());
+            let usage = usage.as_deref_mut().unwrap_or(&mut untracked);
+
+            // Matching at all is what makes a rule worth storing, even when
+            // none of its fields end up doing anything
+            usage.package_extensions.entry(descriptor.clone()).or_default();
 
             for (dependency, range) in extension.dependencies.iter() {
                 let key = ExtensionFieldKey::Dependency(dependency.clone());
                 if dependencies.contains_key(dependency) {
-                    tracking.redundant.insert((descriptor.clone(), key));
+                    usage.record_extension(descriptor, key, RuleEffect::Redundant);
                 } else {
-                    dependencies.insert(dependency.clone(), Descriptor::new_bound(dependency.clone(), range.value.clone(), None));
-                    tracking.applied.insert((descriptor.clone(), key));
+                    dependencies.insert(dependency.clone(), Descriptor::new_bound(dependency.clone(), range.clone(), None));
+                    usage.record_extension(descriptor, key, RuleEffect::Used);
                 }
             }
 
             for (peer_dependency, range) in extension.peer_dependencies.iter() {
                 let key = ExtensionFieldKey::PeerDependency(peer_dependency.clone());
                 if peer_dependencies.contains_key(peer_dependency) {
-                    tracking.redundant.insert((descriptor.clone(), key));
+                    usage.record_extension(descriptor, key, RuleEffect::Redundant);
                 } else {
-                    peer_dependencies.insert(peer_dependency.clone(), range.value.clone());
-                    tracking.applied.insert((descriptor.clone(), key));
+                    peer_dependencies.insert(peer_dependency.clone(), range.clone());
+                    usage.record_extension(descriptor, key, RuleEffect::Used);
                 }
             }
 
             for (peer_dependency, meta) in extension.peer_dependencies_meta.iter() {
-                if meta.optional.value == Some(true) {
+                if meta.optional == Some(true) {
                     let key = ExtensionFieldKey::PeerDependencyMetaOptional(peer_dependency.clone());
                     if resolution.optional_peer_dependencies.contains(peer_dependency) {
-                        tracking.redundant.insert((descriptor.clone(), key));
+                        usage.record_extension(descriptor, key, RuleEffect::Redundant);
                     } else {
                         // Flag-only: `optional_peer_dependencies` comes
                         // from the original manifest and isn't mutated here.
-                        tracking.applied.insert((descriptor.clone(), key));
+                        usage.record_extension(descriptor, key, RuleEffect::Used);
                     }
                 }
             }
@@ -2027,7 +2017,7 @@ pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resoluti
     // independently from any other.
     //
     for descriptor in dependencies.values_mut() {
-        normalize_resolution(context, descriptor, resolution, true)?;
+        normalize_resolution(normalizer, descriptor, resolution, true)?;
     }
 
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {

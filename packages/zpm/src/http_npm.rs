@@ -17,6 +17,7 @@ use zpm_utils::{DataType, Path};
 use crate::{
     error::Error,
     http::{HttpClient, HttpRequest, HttpResponse},
+    manifest::Manifest,
     npm,
     report::{current_report, PromptType},
 };
@@ -132,6 +133,13 @@ pub fn get_registry_for_ident<'a>(config: &'a Configuration, ident: Option<&Iden
         = get_registry_raw(config, ident, publish)?;
 
     Ok(normalize_registry_url(registry))
+}
+
+pub fn get_publish_registry<'a>(config: &'a Configuration, manifest: &'a Manifest) -> Result<&'a str, Error> {
+    match manifest.publish_config.registry.as_deref() {
+        Some(registry) => Ok(normalize_registry_url(registry)),
+        None => get_registry_for_ident(config, manifest.name.as_ref(), true),
+    }
 }
 
 pub fn get_registry<'a>(config: &'a Configuration, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
@@ -852,6 +860,37 @@ pub async fn post(params: &NpmHttpParams<'_>, body: String) -> Result<HttpRespon
             .header("content-type", Some("application/json"))
             .header("authorization", params.authorization)
             .body(body);
+
+    let mut response
+        = request
+            .try_clone()
+            .expect("Failed to clone request")
+            .send()
+            .await?;
+
+    if is_otp_error(&response) {
+        let otp
+            = ask_for_otp(params, &response).await?;
+
+        request = inject_otp_headers(request, otp);
+        drop(response);
+        response = request.send().await?;
+    }
+
+    let response
+        = handle_invalid_authentication_error(params, response).await?;
+
+    Ok(response.error_for_status()?)
+}
+
+pub async fn delete(params: &NpmHttpParams<'_>) -> Result<HttpResponse, Error> {
+    let url
+        = format!("{}{}", params.registry, params.path);
+
+    let mut request
+        = params.http_client.request(url, reqwest::Method::DELETE)?
+            .enable_status_check(false)
+            .header("authorization", params.authorization);
 
     let mut response
         = request

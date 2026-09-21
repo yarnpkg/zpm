@@ -42,6 +42,24 @@ fn validate_workspace_parent(context: &InstallContext<'_>, descriptor: &Descript
     Ok(())
 }
 
+/**
+ * Domain-separated hash of an `exec:` generator script; shared with the
+ * up-to-date fast path, which re-derives it to detect changes.
+ *
+ * The script is normalized before being hashed: it generates the same
+ * package whichever line endings it was checked out with, so it must not
+ * produce two different locators.
+ */
+pub fn compute_exec_script_hash(script: &[u8]) -> zpm_utils::Hash64 {
+    let mut writer
+        = Hash64Writer::new();
+
+    writer.update(b"exec-v2");
+    writer.update(zpm_utils::normalize_line_endings(script));
+
+    writer.finalize()
+}
+
 fn compute_exec_hash(params: &ExecRange, dependencies: &[InstallOpResult]) -> Result<zpm_utils::Hash64, Error> {
     let script_relative_path
         = Path::from_file_string(&params.path)?;
@@ -59,12 +77,7 @@ fn compute_exec_hash(params: &ExecRange, dependencies: &[InstallOpResult]) -> Re
         parent_context_directory.with_join_str(&params.path)
     };
 
-    let mut writer
-        = Hash64Writer::new();
-    writer.update(b"exec-v2");
-    writer.update(script_path.fs_read()?);
-
-    Ok(writer.finalize())
+    Ok(compute_exec_script_hash(&script_path.fs_read()?))
 }
 
 pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, _params: &ExecReference, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {

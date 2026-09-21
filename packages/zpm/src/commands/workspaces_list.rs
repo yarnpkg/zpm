@@ -8,6 +8,7 @@ use zpm_utils::{Path, ToFileString};
 use crate::{
     error::Error,
     git_utils,
+    lockfile_tree::compute_workspace_tree_hashes,
     project::{Project, Workspace},
 };
 
@@ -172,6 +173,14 @@ impl WorkspacesList {
             }
         };
 
+        // Without a lockfile there's no dependency tree to describe, and a
+        // lockfile we can't read is worth reporting rather than silently
+        // turning into a set of hashes computed from nothing.
+        let tree_hashes = match self.json && self.tree_hash && project.lockfile_path().fs_exists() {
+            true => Some(compute_workspace_tree_hashes(&project, &project.lockfile()?)),
+            false => None,
+        };
+
         for workspace in workspaces {
             if workspace.manifest.private == Some(true) && !self.private {
                 continue;
@@ -249,13 +258,9 @@ impl WorkspacesList {
                     mismatched_workspace_dependencies = Some(mismatched_strs);
                 }
 
-                let tree_hash = if self.tree_hash {
-                    project.lockfile().ok()
-                        .and_then(|lockfile| lockfile.workspaces.get(&workspace.name).cloned())
-                        .map(|hash| hash.to_file_string())
-                } else {
-                    None
-                };
+                let tree_hash = tree_hashes.as_ref()
+                    .and_then(|tree_hashes| tree_hashes.get(&workspace.name))
+                    .map(|hash| hash.to_file_string());
 
                 let payload = Payload {
                     location: workspace_printed_path,

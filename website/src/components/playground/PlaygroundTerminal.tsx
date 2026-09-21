@@ -57,7 +57,7 @@ const red = `\x1b[38;2;252;165;165m`;
 const reset = `\x1b[0m`;
 
 const PROJECT_PATH = `/home/user/yarn-playground`;
-const BROWSERPOD_RUNTIME_URL = `https://rt.browserpod.io/3.0.1/browserpod.js`;
+const BROWSERPOD_RUNTIME_URL = `https://rt.browserpod.io/3.1.0/browserpod.js`;
 const YARN_BIN_DIR = `/home/user/.local/bin`;
 const YARN_BIN_PATH = `${YARN_BIN_DIR}/yarn`;
 const YARN_BIN_ASSET = `/browserpod/yarn-bin.wasm`;
@@ -187,6 +187,8 @@ async function writeShellConfig(pod: BrowserPodInstance) {
   const podFile = await pod.createFile(BASHRC_PATH, `utf-8`);
 
   await podFile.write([
+    // BrowserPod 3.1+ creates files as 0644 and its JS API has no chmod.
+    `chmod +x ${YARN_BIN_PATH}`,
     `export PATH="${YARN_BIN_DIR}:$PATH"`,
     `export npm_config_user_agent="yarn-playground"`,
     `export PS1="\\[\\e[38;2;134;239;172m\\]yarn-playground\\[\\e[0m\\] \\[\\e[38;2;148;163;184m\\]\\w\\[\\e[0m\\] $ "`,

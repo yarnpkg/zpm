@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, env::VarError};
 
 use clipanion::cli;
 use http::StatusCode;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::{JsonDocument, RawJsonOwnedValue};
 use zpm_utils::{DataType, IoResultExt, Provider, Sha1, Sha512, ToFileString, ToHumanString, is_ci};
@@ -35,6 +35,9 @@ enum NpmPublishAccess {
 /// By default, attempting to publish a version that already exists on the registry is an error. Use `--tolerate-republish` to check first and skip
 /// the upload when the same version is already known by the registry.
 ///
+/// With `--staged`, the package is staged for later approval without requiring two-factor authentication. Use
+/// `yarn npm stage list`, `yarn npm stage approve`, and `yarn npm stage reject` to manage staged packages.
+///
 #[cli::command]
 #[cli::path("npm", "publish")]
 #[cli::category("Npm-related commands")]
@@ -62,6 +65,10 @@ pub struct Publish {
     /// Print what would be published without uploading anything
     #[cli::option("--dry-run", default = false)]
     dry_run: bool,
+
+    /// Stage the package for later approval instead of publishing it immediately
+    #[cli::option("--staged", default = false)]
+    staged: bool,
 
     /// Output the result as JSON
     #[cli::option("--json", default = false)]
@@ -109,10 +116,7 @@ impl Publish {
         };
 
         let registry_base
-            = match pack_result.pack_manifest.publish_config.registry.as_deref() {
-                Some(registry) => registry.strip_suffix('/').unwrap_or(registry).to_string(),
-                None => http_npm::get_registry_for_ident(&project.config, Some(ident), true)?.to_string(),
-            };
+            = http_npm::get_publish_registry(&project.config, &pack_result.pack_manifest)?.to_string();
         let manifest_access
             = pack_result.pack_manifest.publish_config.access.map(NpmPublishAccess::from);
         let configured_access
@@ -121,6 +125,10 @@ impl Publish {
             = self.access.as_ref()
                 .or(manifest_access.as_ref())
                 .or(configured_access.as_ref());
+
+        if self.staged && !self.json {
+            println!("Staging to {} with tag {}", DataType::Url.colorize(registry_base.as_str()), DataType::Code.colorize(&self.tag));
+        }
 
         if self.tolerate_republish {
             let check_url
@@ -296,6 +304,8 @@ impl Publish {
         let registry_url
             = npm::registry_url_for_all_versions(&ident);
 
+        let mut stage_id = None;
+
         if !self.dry_run {
             let authorization
                 = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
@@ -307,16 +317,44 @@ impl Publish {
                     allow_oidc: true,
                 }).await?;
 
-            http_npm::put(&NpmHttpParams {
-                http_client: &project.http_client,
-                registry: registry_base.as_str(),
-                path: &registry_url,
-                authorization: authorization.as_deref(),
-                otp: self.otp.as_ref().map(|s| s.as_str()),
-            }, publish_body).await?;
+            if self.staged {
+                let response = http_npm::post(&NpmHttpParams {
+                    http_client: &project.http_client,
+                    registry: registry_base.as_str(),
+                    path: &format!("/-/stage/package{}", registry_url),
+                    authorization: authorization.as_deref(),
+                    otp: None,
+                }, publish_body).await?;
+
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct StageResponse {
+                    stage_id: Option<String>,
+                }
+
+                let response: StageResponse
+                    = JsonDocument::hydrate_from_slice(&response.bytes().await?)?;
+
+                stage_id = response.stage_id;
+            } else {
+                http_npm::put(&NpmHttpParams {
+                    http_client: &project.http_client,
+                    registry: registry_base.as_str(),
+                    path: &registry_url,
+                    authorization: authorization.as_deref(),
+                    otp: self.otp.as_deref(),
+                }, publish_body).await?;
+            }
         }
 
-        let message = if self.dry_run {
+        let message = if self.staged && self.dry_run {
+            "Package archive not staged (dry run)".to_string()
+        } else if self.staged {
+            match stage_id.as_deref() {
+                Some(stage_id) => format!("Package archive staged for approval (run {} to approve)", DataType::Code.colorize(&format!("yarn npm stage approve {}", stage_id))),
+                None => "Package archive staged for approval".to_string(),
+            }
+        } else if self.dry_run {
             format!("Package would be published to {} with tag {}", DataType::Url.colorize(registry_base.as_str()), DataType::Code.colorize(&self.tag))
         } else {
             format!("Published package to {} with tag {}", DataType::Url.colorize(registry_base.as_str()), DataType::Code.colorize(&self.tag))
@@ -333,7 +371,10 @@ impl Publish {
                 files: Vec<String>,
                 access: Option<&'a NpmPublishAccess>,
                 dry_run: bool,
+                staged: bool,
                 published: bool,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                stage_id: Option<&'a str>,
                 message: String,
                 provenance: bool,
             }
@@ -346,7 +387,9 @@ impl Publish {
                 files: pack_result.pack_list.iter().map(|p| p.to_file_string()).collect(),
                 access: publish_access,
                 dry_run: self.dry_run,
-                published: !self.dry_run,
+                staged: self.staged,
+                published: !self.dry_run && !self.staged,
+                stage_id: stage_id.as_deref(),
                 message: message.clone(),
                 provenance: provenance,
             };

@@ -20,13 +20,14 @@ use crate::{
     git::{GitOperation, detect_git_operation},
     http::HttpClient,
     http_npm,
-    install::{InstallContext, InstallManager, InstallResult, InstallState, compute_workspace_hashes},
-    lockfile::{Lockfile, LockfileMetadata, from_legacy_berry_lockfile, from_pnpm_node_modules},
+    install::{InstallContext, InstallManager, InstallResult, InstallState},
+    lockfile::{Lockfile, LockfileMetadata, LockfileProject, from_legacy_berry_lockfile, from_pnpm_node_modules},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
     npm::NpmEntryExt,
     primitives_exts::RangeExt,
     report::{StreamReport, StreamReportConfig, async_section, current_report, with_report_result},
+    resolvers::workspace::resolve_locator_ident,
     script::{Binary, ScriptEnvironment},
     tasks::TASK_FILE_NAME,
     trust::{ensure_project_trusted, ProjectTrustReason},
@@ -766,6 +767,29 @@ impl Project {
         Ok(processed_queue)
     }
 
+    /// Returns the dependencies of each workspace the way installs resolve
+    /// them, ie. after the workspace profiles, catalogs, overrides, and the
+    /// likes have all been applied.
+    pub fn workspace_dependencies(&self) -> BTreeMap<Ident, Result<BTreeMap<Ident, Descriptor>, Error>> {
+        let context
+            = InstallContext::default()
+                .with_project(Some(self));
+
+        self.workspace_dependencies_with(&context)
+    }
+
+    pub fn workspace_dependencies_with(&self, context: &InstallContext<'_>) -> BTreeMap<Ident, Result<BTreeMap<Ident, Descriptor>, Error>> {
+        self.workspaces.iter()
+            .map(|workspace| {
+                let dependencies
+                    = resolve_locator_ident(context, &workspace.locator(), &WorkspaceIdentReference {ident: workspace.name.clone()})
+                        .map(|result| result.resolution.dependencies);
+
+                (workspace.name.clone(), dependencies)
+            })
+            .collect()
+    }
+
     pub fn try_workspace_by_file_path(&self, rel_path: &Path) -> Result<Option<&Workspace>, Error> {
         let workspace
             = self.workspaces.iter()
@@ -905,9 +929,6 @@ impl Project {
             return Ok(false);
         }
 
-        let mut graph
-            = BTreeMap::<Locator, BTreeSet<Locator>>::new();
-
         let mut used_resolutions
             = BTreeMap::<Descriptor, Locator>::new();
 
@@ -926,9 +947,6 @@ impl Project {
             if !processed_queue.insert(locator.clone()) {
                 continue;
             }
-
-            let mut child_locators
-                = BTreeSet::new();
 
             let dependency_descriptors
                 = if let Some(workspace) = self.try_workspace_by_locator(&locator)? {
@@ -955,12 +973,14 @@ impl Project {
                 };
 
             for mut descriptor in dependency_descriptors {
-                if let Some(workspace) = self.try_workspace_by_descriptor(&descriptor)? {
-                    let dependency_locator
-                        = workspace.locator();
+                // Installs resolve normalized descriptors, so the workspace
+                // lookup has to happen on the normalized form as well: plain
+                // semver ranges only match a workspace once they became
+                // registry ranges (and workspaces aren't in the lockfile).
+                normalize_lockfile_descriptor(&mut descriptor);
 
-                    child_locators.insert(dependency_locator.clone());
-                    process_queue.push(dependency_locator);
+                if let Some(workspace) = self.try_workspace_by_descriptor(&descriptor)? {
+                    process_queue.push(workspace.locator());
                     continue;
                 }
 
@@ -973,8 +993,6 @@ impl Project {
                 {
                     return Ok(false);
                 }
-
-                normalize_lockfile_descriptor(&mut descriptor);
 
                 let Some(dependency_locator) = lockfile.resolutions.get(&descriptor) else {
                     return Ok(false);
@@ -990,11 +1008,8 @@ impl Project {
 
                 used_resolutions.insert(descriptor, dependency_locator.clone());
                 used_entries.insert(dependency_locator.clone());
-                child_locators.insert(dependency_locator.clone());
                 process_queue.push(dependency_locator.clone());
             }
-
-            graph.insert(locator, child_locators);
         }
 
         if lockfile.resolutions != used_resolutions {
@@ -1005,13 +1020,18 @@ impl Project {
             return Ok(false);
         }
 
-        let workspace_locators
-            = self.workspaces.iter()
-                .map(|workspace| (workspace.name.clone(), workspace.locator()))
-                .collect::<Vec<_>>();
+        // If we can't compute the project section the install won't go
+        // well either, but it'll be in a better position to report it.
+        let resolutions
+            = lockfile.entries.values()
+                .chain(lockfile.transient_entries.values())
+                .map(|entry| &entry.resolution);
 
-        let workspace_hashes = compute_workspace_hashes(&graph, &workspace_locators);
-        if lockfile.workspaces != workspace_hashes {
+        let Ok(project_section) = LockfileProject::from_project(self, resolutions) else {
+            return Ok(false);
+        };
+
+        if lockfile.project != project_section {
             return Ok(false);
         }
 
@@ -1126,12 +1146,8 @@ impl Project {
 
                     match script_path.fs_read() {
                         Ok(data) => {
-                            // Mirrors `resolvers::exec::compute_exec_hash`.
-                            let mut writer = Hash64Writer::new();
-                            writer.update(b"exec-v2");
-                            writer.update(data);
-
-                            reference_params.hash == Some(writer.finalize())
+                            reference_params.hash
+                                == Some(crate::resolvers::exec::compute_exec_script_hash(&data))
                         },
                         Err(_) => false,
                     }
@@ -1193,7 +1209,10 @@ impl Project {
                     };
 
                     match patch_path.fs_read_text() {
-                        Ok(patch_content) => reference_params.checksum == Some(Hash64::from_string(&patch_content)),
+                        Ok(patch_content) => {
+                            reference_params.checksum
+                                == Some(crate::fetchers::patch::compute_patch_checksum(&patch_content))
+                        },
                         Err(_) => false,
                     }
                 },

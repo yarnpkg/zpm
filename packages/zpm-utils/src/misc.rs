@@ -1,9 +1,45 @@
-use std::{convert::Infallible, future::Future};
+use std::{borrow::Cow, convert::Infallible, future::Future};
 
 use crate::PathError;
 
 pub fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
+}
+
+/**
+ * Turns CRLF sequences (and lone CR) into LF.
+ *
+ * Text whose hash ends up inside a locator has to go through this first:
+ * the same file checked out on Windows (`core.autocrlf` is on by default
+ * there) would otherwise hash differently than on Unix, and the lockfile
+ * would flip-flop between contributors without the installed packages
+ * changing at all.
+ */
+pub fn normalize_line_endings(data: &[u8]) -> Cow<'_, [u8]> {
+    if !data.contains(&b'\r') {
+        return Cow::Borrowed(data);
+    }
+
+    let mut normalized
+        = Vec::with_capacity(data.len());
+
+    let mut index = 0;
+    while index < data.len() {
+        if data[index] == b'\r' {
+            normalized.push(b'\n');
+
+            // A CRLF pair only stands for a single line break
+            if data.get(index + 1) == Some(&b'\n') {
+                index += 1;
+            }
+        } else {
+            normalized.push(data[index]);
+        }
+
+        index += 1;
+    }
+
+    Cow::Owned(normalized)
 }
 
 pub trait UnwrapInfallible<T> {
@@ -105,4 +141,32 @@ pub async fn repeat_until_ok<I, T, E, A, F>(values: Vec<I>, f: F) -> Result<T, E
     }
 
     Err(last_error.unwrap())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_line_endings_borrows_lf_only_text() {
+        let normalized
+            = normalize_line_endings(b"one\ntwo\n");
+
+        assert!(matches!(normalized, Cow::Borrowed(_)));
+        assert_eq!(normalized.as_ref(), b"one\ntwo\n");
+    }
+
+    #[test]
+    fn normalize_line_endings_rewrites_crlf_and_lone_cr() {
+        assert_eq!(normalize_line_endings(b"one\r\ntwo\r\n").as_ref(), b"one\ntwo\n");
+        assert_eq!(normalize_line_endings(b"one\rtwo\r").as_ref(), b"one\ntwo\n");
+        assert_eq!(normalize_line_endings(b"one\r\ntwo\nthree\r").as_ref(), b"one\ntwo\nthree\n");
+    }
+
+    #[test]
+    fn normalize_line_endings_keeps_the_rest_of_the_content() {
+        assert_eq!(normalize_line_endings(b"").as_ref(), b"");
+        assert_eq!(normalize_line_endings(b"no newline").as_ref(), b"no newline");
+        assert_eq!(normalize_line_endings(&[0xff, b'\r', b'\n', 0x00]).as_ref(), &[0xff, b'\n', 0x00]);
+    }
 }

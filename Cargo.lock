@@ -5366,7 +5366,7 @@ dependencies = [
 
 [[package]]
 name = "zpm-switch"
-version = "6.0.0-rc.20"
+version = "6.0.0-rc.21"
 dependencies = [
  "assert_cmd",
  "base64",

@@ -63,6 +63,9 @@ pub enum Error {
     #[error("Invalid publish access: {0}")]
     InvalidNpmPublishAccess(String),
 
+    #[error("Invalid npm stage ID ({0}); expected a UUID in the form xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")]
+    InvalidNpmStageId(String),
+
     #[error("Missing environment variable when creating the provenance payload: {0}")]
     MissingEnvironmentVariableForProvenancePayload(String),
 
@@ -167,6 +170,9 @@ pub enum Error {
 
     #[error("Catalog entry not found ({catalog}:{})", ident.to_print_string())]
     CatalogEntryNotFound { catalog: String, ident: Ident },
+
+    #[error("Catalog entry references itself ({catalog}:{})", ident.to_print_string())]
+    CatalogCycle { catalog: String, ident: Ident },
 
     #[error("Package manifest not found ({})", .0.to_print_string())]
     ManifestNotFound(Path),
