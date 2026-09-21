@@ -33,15 +33,18 @@ impl FromStr for StageId {
 }
 
 async fn registry_auth(project: &Project) -> Result<(String, Option<String>), Error> {
+    let workspace
+        = project.active_workspace()?;
+
     let registry
-        = http_npm::get_registry(&project.config, None, true)?.to_string();
+        = http_npm::get_publish_registry(&project.config, &workspace.manifest)?.to_string();
 
     let authorization
         = http_npm::get_authorization(&GetAuthorizationOptions {
             configuration: &project.config,
             http_client: &project.http_client,
             registry: &registry,
-            ident: None,
+            ident: workspace.manifest.name.as_ref(),
             auth_mode: AuthorizationMode::AlwaysAuthenticate,
             allow_oidc: false,
         }).await?;

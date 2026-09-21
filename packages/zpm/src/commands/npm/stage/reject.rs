@@ -12,7 +12,7 @@ use super::{registry_auth, StageId};
 
 /// Reject a staged package version.
 ///
-/// This command permanently removes a package version from the configured npm publish registry's staging area.
+/// This command permanently removes a package version from the active workspace's publish registry's staging area.
 /// If the registry requires two-factor authentication, use `--otp` or enter the code when prompted.
 ///
 #[cli::command]

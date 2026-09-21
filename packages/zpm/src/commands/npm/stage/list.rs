@@ -15,7 +15,8 @@ use super::registry_auth;
 
 /// List staged package versions awaiting approval.
 ///
-/// This command lists all staged versions on the configured npm publish registry.
+/// This command lists all staged versions on the active workspace's publish registry, honoring `publishConfig.registry`,
+/// scoped registry settings, and matching package rules, just like `yarn npm publish --staged`.
 /// When a package name is provided, only staged versions of that package are listed.
 ///
 #[cli::command]

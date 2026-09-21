@@ -10,9 +10,11 @@ use crate::{
 
 use super::{registry_auth, StageId};
 
-/// Approve a staged package version for publishing.
+/// Approve staged package versions for publishing.
 ///
-/// This command approves a staged package version, publishing it to the configured npm publish registry.
+/// This command approves one or more staged package versions on the active workspace's publish registry.
+/// Pass multiple stage IDs to approve them in order. All IDs are validated before any requests are sent.
+/// If an approval fails, the command stops; earlier successful approvals remain published.
 /// If the registry requires two-factor authentication, use `--otp` or enter the code when prompted.
 ///
 #[cli::command]
@@ -21,6 +23,9 @@ use super::{registry_auth, StageId};
 pub struct Approve {
     /// The UUID of the staged package version
     stage_id: StageId,
+
+    /// Additional staged package version UUIDs to approve
+    additional_stage_ids: Vec<StageId>,
 
     /// One-time password to use when the registry requires two-factor authentication
     #[cli::option("--otp")]
@@ -39,20 +44,22 @@ impl Approve {
             let (registry, authorization)
                 = registry_auth(&project).await?;
 
-            let pretty_stage_id
-                = DataType::Code.colorize(&self.stage_id.0);
+            for stage_id in std::iter::once(&self.stage_id).chain(&self.additional_stage_ids) {
+                let pretty_stage_id
+                    = DataType::Code.colorize(&stage_id.0);
 
-            println!("Approving staged package {}...", pretty_stage_id);
+                println!("Approving staged package {}...", pretty_stage_id);
 
-            http_npm::post(&NpmHttpParams {
-                http_client: &project.http_client,
-                registry: &registry,
-                path: &format!("/-/stage/{}/approve", self.stage_id.0),
-                authorization: authorization.as_deref(),
-                otp: self.otp.as_deref(),
-            }, "null".to_string()).await?;
+                http_npm::post(&NpmHttpParams {
+                    http_client: &project.http_client,
+                    registry: &registry,
+                    path: &format!("/-/stage/{}/approve", stage_id.0),
+                    authorization: authorization.as_deref(),
+                    otp: self.otp.as_deref(),
+                }, "null".to_string()).await?;
 
-            println!("Staged package {} approved and published successfully.", pretty_stage_id);
+                println!("Staged package {} approved and published successfully.", pretty_stage_id);
+            }
 
             Ok(())
         }).await

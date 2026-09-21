@@ -17,6 +17,7 @@ use zpm_utils::{DataType, Path};
 use crate::{
     error::Error,
     http::{HttpClient, HttpRequest, HttpResponse},
+    manifest::Manifest,
     npm,
     report::{current_report, PromptType},
 };
@@ -132,6 +133,13 @@ pub fn get_registry_for_ident<'a>(config: &'a Configuration, ident: Option<&Iden
         = get_registry_raw(config, ident, publish)?;
 
     Ok(normalize_registry_url(registry))
+}
+
+pub fn get_publish_registry<'a>(config: &'a Configuration, manifest: &'a Manifest) -> Result<&'a str, Error> {
+    match manifest.publish_config.registry.as_deref() {
+        Some(registry) => Ok(normalize_registry_url(registry)),
+        None => get_registry_for_ident(config, manifest.name.as_ref(), true),
+    }
 }
 
 pub fn get_registry<'a>(config: &'a Configuration, scope: Option<&str>, publish: bool) -> Result<&'a str, Error> {
