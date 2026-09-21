@@ -219,7 +219,7 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
 
     project.pnp_data_path()
         .fs_create_parent()?
-        .fs_change(JsonDocument::to_string(&state)?, false)?;
+        .fs_change(format!("{}\n", JsonDocument::to_string(&state)?), false)?;
 
     Ok(())
 }
