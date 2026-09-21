@@ -3,23 +3,21 @@
 exports[`Features Merge Conflict Resolution it shouldn't re-fetch the lockfile metadata when performing simple merge conflict resolutions 1`] = `
 "{
   "__metadata": {
-    "version": 9
+    "version": 10
   },
-  "workspaces": {
-<<<<<<< HEAD
-    "root-workspace": "fd5839f7e4bbb273ec994595b9a8fbf9cbd9991c7c2cfc142b86d8c51769654c1c1bf7b519e687f10b875a8ec846ecd92f3617c611c4e1b5330dae8f02212984"
+  "project": {
+    "workspaces": {
+      "root-workspace": "2dc22dc5f4eab1edd2a586c64072bf4556f23967e94c2c39afc5ece5e8082324df4fd7bb44f7c6e64724489225972de1188de42277160aa8ca241107b4a0a8b0"
+    }
   },
   "entries": {
     "no-deps@npm:*": {
+<<<<<<< HEAD
       "checksum": "583decd8f422f80938a0e7192d4143868d7a4747a3183a05590c8566db79b88de4d6af6dbe28f4709c8a960c1069a94ec47445e8ae77e4d18c52ba48a2d95637",
       "resolution": {
         "resolution": "no-deps@npm:1.0.0",
         "version": "1.0.0"
 =======
-    "root-workspace": "3c8c034e77a0341955745ca1caff0daaf3f368c5e25410ad940c7a13bc55f9018cb96f0260b5cf615ac564abe6a8678a0146a9ce30819426521fcaf2ec5c3ac9"
-  },
-  "entries": {
-    "no-deps@npm:*": {
       "checksum": "75c36f67f401f0e21e752afba2643c47dd181fe3e6ab9017c8601afc6e5a33ab7b525af4fc3cc81aa93be6b91a3903465deb0567188a09c4319e9c1adbdf3ba8",
       "resolution": {
         "resolution": "no-deps@npm:2.0.0",

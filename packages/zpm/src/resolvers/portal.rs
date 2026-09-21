@@ -9,12 +9,17 @@ use crate::{
     resolvers::Resolution,
 };
 
-/// Domain-separated hash of the portal target's manifest; shared with
-/// the up-to-date fast path, which re-derives it to detect changes.
+/**
+ * Domain-separated hash of the portal target's manifest; shared with
+ * the up-to-date fast path, which re-derives it to detect changes.
+ *
+ * The hash ends up in the locator, hence in the lockfile, so the line
+ * endings the manifest happens to be checked out with mustn't change it.
+ */
 pub fn compute_portal_manifest_hash(manifest_text: &str) -> Hash64 {
     let mut writer = zpm_utils::Hash64Writer::new();
     writer.update(b"portal-manifest-v1");
-    writer.update(manifest_text.as_bytes());
+    writer.update(zpm_utils::normalize_line_endings(manifest_text.as_bytes()));
 
     writer.finalize()
 }
@@ -61,4 +66,34 @@ pub fn resolve_locator(context: &InstallContext, locator: &Locator, params: &Por
         = Resolution::from_remote_manifest(locator.clone(), manifest.remote);
 
     resolution.into_resolution_result(context)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MANIFEST: &str = "{\n  \"name\": \"portal\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\"a\": \"1.0.0\", \"b\": \"2.0.0\"}\n}\n";
+
+    #[test]
+    fn portal_manifest_hash_ignores_line_endings() {
+        assert_eq!(
+            compute_portal_manifest_hash(&MANIFEST.replace('\n', "\r\n")),
+            compute_portal_manifest_hash(MANIFEST),
+        );
+    }
+
+    #[test]
+    fn portal_manifest_hash_follows_the_content() {
+        let reference
+            = compute_portal_manifest_hash(MANIFEST);
+
+        for changed in [
+            r#"{"name": "portal", "version": "1.0.1", "dependencies": {"a": "1.0.0", "b": "2.0.0"}}"#,
+            r#"{"name": "portal", "version": "1.0.0", "dependencies": {"a": "1.0.1", "b": "2.0.0"}}"#,
+            r#"{"name": "portal", "version": "1.0.0", "dependencies": {"a": "1.0.0"}}"#,
+            r#"{"name": "portal", "version": "1.0.0", "scripts": {"postinstall": "true"}, "dependencies": {"a": "1.0.0", "b": "2.0.0"}}"#,
+        ] {
+            assert_ne!(compute_portal_manifest_hash(changed), reference, "{changed}");
+        }
+    }
 }

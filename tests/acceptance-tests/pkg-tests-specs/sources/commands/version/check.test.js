@@ -1,6 +1,7 @@
 const {
   fs: {writeFile, writeJson},
   exec: {execFile},
+  tests: {setPackageWhitelist},
 } = require(`pkg-tests-core`);
 
 describe(`Commands`, () => {
@@ -125,6 +126,39 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should require a decision from the root workspace when the lockfile changes its dependency tree`,
+      makeVersionCheckEnv(async ({path, run, git}) => {
+        await git(`checkout`, `-b`, `my-feature`);
+
+        // The bump decision for pkg-c is stored inside the root workspace
+        // (that's where the deferred version folder lives), which is what
+        // used to mask the lockfile change below
+        await writeJson(`${path}/packages/pkg-c/wip.json`, {});
+        await run(`packages/pkg-c`, `version`, `patch`, `--deferred`);
+
+        await setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`, `1.1.0`])]]), async () => {
+          await run(`up`, `-R`, `no-deps`);
+        });
+
+        // The root's own dependency tree changed, so it needs a decision too
+        await expect(run(`version`, `check`)).rejects.toThrow();
+
+        await run(`version`, `decline`, `--deferred`);
+        await run(`version`, `check`);
+      }, {
+        // A *transitive* dependency, so that `yarn up` has no range to
+        // rewrite in the root manifest: the lockfile is the only thing
+        // that changes
+        rootManifest: {dependencies: {[`one-range-dep`]: `1.0.0`}},
+        packageWhitelist: new Map([[`no-deps`, new Set([`1.0.0`])]]),
+        // Install artifacts live in the root workspace; were they visible to
+        // git, they'd flag the root on their own and the test would prove
+        // nothing. The deferred version files must stay visible, though.
+        gitignore: [`.yarn/*`, `!.yarn/versions`, `.pnp.*`, `node_modules`],
+      }),
+    );
+
+    test(
       `it shouldn't throw if changes were reverted`,
       makeVersionCheckEnv(async ({path, run, source, git}) => {
         await writeFile(`${path}/packages/pkg-a/state`, `Initial`);
@@ -145,10 +179,11 @@ describe(`Commands`, () => {
   });
 });
 
-function makeVersionCheckEnv(cb) {
+function makeVersionCheckEnv(cb, {rootManifest = {}, packageWhitelist = null, gitignore = null} = {}) {
   return makeTemporaryEnv({
     private: true,
     workspaces: [`packages/*`],
+    ...rootManifest,
   }, async ({path, run, ...rest}) => {
     const git = (...args) => execFile(`git`, args, {cwd: path});
 
@@ -171,7 +206,16 @@ function makeVersionCheckEnv(cb) {
       },
     });
 
-    await run(`install`);
+    if (packageWhitelist !== null) {
+      await setPackageWhitelist(packageWhitelist, async () => {
+        await run(`install`);
+      });
+    } else {
+      await run(`install`);
+    }
+
+    if (gitignore !== null)
+      await writeFile(`${path}/.gitignore`, `${gitignore.join(`\n`)}\n`);
 
     await git(`init`, `--initial-branch=master`);
 

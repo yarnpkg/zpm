@@ -167,5 +167,34 @@ describe(`Features`, () => {
         },
       ),
     );
+
+    test(
+      `it shouldn't warn when a rule is redundant on one matched package but not on another`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            // dragon-test-1-b declares dragon-test-1-a in 1.0.0, but not in 2.0.0
+            [`dragon-test-1-b`]: `1.0.0`,
+            [`aliased`]: `npm:dragon-test-1-b@2.0.0`,
+          },
+        },
+        async ({path, run}) => {
+          await yarn.writeConfiguration(path, {
+            packageExtensions: {
+              [`dragon-test-1-b@*`]: {
+                dependencies: {
+                  [`dragon-test-1-a`]: `1.0.0`,
+                },
+              },
+            },
+          });
+
+          // The rule did something for 2.0.0, so it isn't redundant
+          await expect(run(`install`)).resolves.toMatchObject({
+            stdout: expect.not.stringContaining(`seems redundant`),
+          });
+        },
+      ),
+    );
   });
 });

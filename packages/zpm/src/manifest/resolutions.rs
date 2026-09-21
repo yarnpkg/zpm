@@ -126,6 +126,17 @@ impl ResolutionsField {
         }
     }
 
+    pub fn from_entries(entries: impl IntoIterator<Item = (ResolutionSelector, Range)>) -> Self {
+        let mut field
+            = Self::new();
+
+        for (selector, range) in entries {
+            field.add_entry(selector, range);
+        }
+
+        field
+    }
+
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

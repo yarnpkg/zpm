@@ -61,11 +61,11 @@ describe(`Features`, () => {
 
       const file = parseSyml(await xfs.readFilePromise(ppath.join(path, Filename.lockfile), `utf8`));
 
-      // zpm splits workspace identifiers into a separate top-level
-      // `workspaces` map (keyed by ident, not by descriptor), so we
-      // merge both maps for the comparison.
+      // zpm splits workspace identifiers into a separate
+      // `project.workspaces` map (keyed by ident, not by descriptor),
+      // so we merge both maps for the comparison.
       const dependencies = tests.FEATURE_CHECKS.jsonLockfile
-        ? {...file.entries, ...file.workspaces}
+        ? {...file.entries, ...file.project.workspaces}
         : file;
 
       delete dependencies.__metadata;

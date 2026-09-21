@@ -46,6 +46,31 @@ async function setupMonorepo(path: PortablePath, configureFocusedMode = true) {
   });
 }
 
+/**
+ * Same shape as `setupMonorepo`, except that `bar` depends on the `foo`
+ * workspace through a registry range rather than a `workspace:` one (which
+ * `enableTransparentWorkspaces` resolves to the workspace itself).
+ */
+async function setupMonorepoWithTransparentWorkspace(path: PortablePath, range: string) {
+  await setupMonorepo(path);
+
+  await xfs.writeJsonPromise(ppath.join(path, `packages/foo/package.json` as PortablePath), {
+    name: `foo`,
+    version: `1.0.0`,
+    dependencies: {
+      [`no-deps`]: `1.0.0`,
+    },
+  });
+
+  await xfs.writeJsonPromise(ppath.join(path, `packages/bar/package.json` as PortablePath), {
+    name: `bar`,
+    dependencies: {
+      [`foo`]: range,
+      [`no-deps`]: `2.0.0`,
+    },
+  });
+}
+
 describe(`Features`, () => {
   describe(`Lazy installs`, () => {
     test(
@@ -202,6 +227,94 @@ describe(`Features`, () => {
         })).resolves.toMatchObject({
           name: `no-deps`,
           version: `2.0.0`,
+        });
+
+        await expect(getCacheContent(cacheFolder)).resolves.toEqual([
+          expect.stringContaining(`no-deps-npm-1.0.0-`),
+          expect.stringContaining(`no-deps-npm-2.0.0-`),
+        ]);
+      }),
+    );
+
+    test(
+      `it should extend a focused install when a workspace is reached through a semver range`,
+      makeTemporaryEnv({}, async ({path, run}) => {
+        await setupMonorepoWithTransparentWorkspace(path, `^1.0.0`);
+        await run(`install`);
+
+        const cacheFolder = ppath.join(path, `.yarn/cache` as PortablePath);
+        await xfs.removePromise(cacheFolder);
+
+        await run(`workspaces`, `focus`, `foo`, {cwd: ppath.join(path, `packages/foo` as PortablePath)});
+
+        await run(`node`, `-e`, `require('no-deps')`, {
+          cwd: ppath.join(path, `packages/bar` as PortablePath),
+        });
+
+        // A full install would have fetched baz's dependencies as well
+        await expect(getCacheContent(cacheFolder)).resolves.toEqual([
+          expect.stringContaining(`no-deps-npm-1.0.0-`),
+          expect.stringContaining(`no-deps-npm-2.0.0-`),
+        ]);
+      }),
+    );
+
+    test(
+      `it should extend a focused install when a workspace is reached through a tag`,
+      makeTemporaryEnv({}, async ({path, run}) => {
+        await setupMonorepoWithTransparentWorkspace(path, `latest`);
+        await run(`install`);
+
+        const cacheFolder = ppath.join(path, `.yarn/cache` as PortablePath);
+        await xfs.removePromise(cacheFolder);
+
+        await run(`workspaces`, `focus`, `foo`, {cwd: ppath.join(path, `packages/foo` as PortablePath)});
+
+        await run(`node`, `-e`, `require('no-deps')`, {
+          cwd: ppath.join(path, `packages/bar` as PortablePath),
+        });
+
+        await expect(getCacheContent(cacheFolder)).resolves.toEqual([
+          expect.stringContaining(`no-deps-npm-1.0.0-`),
+          expect.stringContaining(`no-deps-npm-2.0.0-`),
+        ]);
+      }),
+    );
+
+    test(
+      `it should consider the lockfile fresh regardless of the rules that aren't used by the project`,
+      makeTemporaryEnv({}, async ({path, run}) => {
+        await setupMonorepo(path);
+
+        // The lockfile only stores the rules that are used; should the freshness check
+        // disagree with the install about which ones they are, we'd get a full install.
+        await yarn.writeConfiguration(path, {
+          lazyInstallMode: `focused`,
+          catalog: {
+            [`left-pad`]: `1.0.0`,
+          },
+          packageExtensions: {
+            [`left-pad@*`]: {
+              dependencies: {[`no-deps`]: `1.0.0`},
+            },
+            [`no-deps@*`]: {
+              peerDependenciesMeta: {[`left-pad`]: {optional: true}},
+            },
+          },
+        });
+
+        await run(`install`);
+
+        const lockfile = await xfs.readJsonPromise(ppath.join(path, Filename.lockfile));
+        expect(Object.keys(lockfile.project.packageExtensions)).toEqual([`no-deps@*`]);
+
+        const cacheFolder = ppath.join(path, `.yarn/cache` as PortablePath);
+        await xfs.removePromise(cacheFolder);
+
+        await run(`workspaces`, `focus`, `foo`, {cwd: ppath.join(path, `packages/foo` as PortablePath)});
+
+        await run(`node`, `-e`, `require('no-deps')`, {
+          cwd: ppath.join(path, `packages/bar` as PortablePath),
         });
 
         await expect(getCacheContent(cacheFolder)).resolves.toEqual([
