@@ -481,7 +481,7 @@ impl Project {
             = self.lockfile_path();
 
         let contents
-            = JsonDocument::to_string_pretty(lockfile)?;
+            = format!("{}\n", JsonDocument::to_string_pretty(lockfile)?);
 
         if self.config.settings.enable_immutable_installs.value {
             let current_content = lockfile_path

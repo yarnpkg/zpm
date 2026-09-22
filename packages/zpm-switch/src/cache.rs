@@ -173,7 +173,7 @@ pub async fn ensure<R: Future<Output = Result<(), Error>>, F: FnOnce(Path) -> R>
                 f(temp_dir.clone()).await?;
 
                 let meta_content
-                    = JsonDocument::to_string(&key_data)?;
+                    = format!("{}\n", JsonDocument::to_string(&key_data)?);
 
                 temp_dir
                     .with_join_str("meta.json")
