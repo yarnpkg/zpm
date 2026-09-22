@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::Range, str::FromStr};
+use std::{collections::BTreeMap, io::Write, ops::Range, str::FromStr};
 
 use itertools::Itertools;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -94,6 +94,22 @@ impl JsonDocument {
 
     pub fn to_string_pretty<T: Serialize>(input: &T) -> Result<String, Error> {
         Ok(json_provider::to_string_pretty(input)?)
+    }
+
+    pub fn write_to<W: Write, T: Serialize + ?Sized>(writer: W, input: &T) -> Result<(), Error> {
+        #[cfg(not(sonic_rs))]
+        return Ok(json_provider::to_writer(writer, input)?);
+
+        #[cfg(sonic_rs)]
+        return Ok(json_provider::to_writer(json_provider::writer::BufferedWriter::new(writer), input)?);
+    }
+
+    pub fn write_to_pretty<W: Write, T: Serialize>(writer: W, input: &T) -> Result<(), Error> {
+        #[cfg(not(sonic_rs))]
+        return Ok(json_provider::to_writer_pretty(writer, input)?);
+
+        #[cfg(sonic_rs)]
+        return Ok(json_provider::to_writer_pretty(json_provider::writer::BufferedWriter::new(writer), input)?);
     }
 
     pub fn new(input: Vec<u8>) -> Result<Self, Error> {
