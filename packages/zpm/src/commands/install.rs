@@ -134,6 +134,7 @@ impl Install {
         // fast path so that a manually damaged project (say, a deleted
         // package folder) heals when the user reaches for `yarn install`.
         if !self.force
+            && !project.config.settings.enable_auto_dedupe.value
             && !self.check_resolutions
             && !self.check_checksums
             && !refresh_lockfile
