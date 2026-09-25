@@ -125,6 +125,7 @@ pub struct RunInstallOptions {
     pub refresh_lockfile: bool,
     pub roots: Option<BTreeSet<Ident>>,
     pub silent_or_error: bool,
+    pub skip_auto_dedupe: bool,
     pub json: bool,
     pub inline_builds: bool,
     pub force: bool,
@@ -1536,6 +1537,7 @@ impl Project {
             prune_dev_dependencies: false,
             refresh_lockfile: false,
             silent_or_error: true,
+            skip_auto_dedupe: true,
             mode: None,
             roots: install_roots,
             ..Default::default()
@@ -1648,7 +1650,7 @@ impl Project {
                 }
             }
 
-            let install_context
+            let mut install_context
                 = InstallContext::default()
                     .with_package_cache(Some(&package_cache))
                     .with_project(Some(self))
@@ -1662,25 +1664,45 @@ impl Project {
                     .with_systems(Some(&systems))
                     .with_background_writes(Some(background_writes.clone()));
 
-            let roots
+            let roots: BTreeSet<_>
                 = self.workspaces.iter()
                     .filter(|w| options.roots.as_ref().map_or(true, |r| r.contains(&w.name)))
                     .map(|w| w.descriptor())
                     .collect();
 
-            let install_result
-                = InstallManager::new()
-                    .with_context(install_context)
-                    .with_lockfile(lockfile?)
+            let make_manager = |context, lockfile| {
+                InstallManager::new()
+                    .with_context(context)
+                    .with_lockfile(lockfile)
                     .with_previous_state(self.install_state.as_ref())
-                    .with_roots(roots)
+                    .with_roots(roots.clone())
                     .with_installed_workspaces(options.roots.clone())
                     .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
                     .with_skip_link_step(options.mode == Some(InstallMode::UpdateLockfile))
                     .with_skip_lockfile_update(options.roots.is_some())
                     .with_force(options.force)
-                    .resolve_and_fetch().await?
-                    .link_and_build(self).await?;
+            };
+
+            let mut install = make_manager(install_context.clone(), lockfile?)
+                .resolve_and_fetch().await?;
+
+            // Use the freshly resolved graph so versions introduced by this
+            // install can be reused. Lazy and focused installs preserve the
+            // lockfile's resolutions.
+            if self.config.settings.enable_auto_dedupe.value && !options.skip_auto_dedupe && options.roots.is_none() {
+                let dedupe_resolutions = crate::dedupe::prepare_highest_dedupe(&install.install_state, &[]);
+
+                if !dedupe_resolutions.is_empty() {
+                    install_context.enforced_resolutions = dedupe_resolutions.into_iter()
+                        .map(|(descriptor, locator)| (descriptor, Some(locator)))
+                        .collect();
+
+                    install = make_manager(install_context, install.lockfile)
+                        .resolve_and_fetch().await?;
+                }
+            }
+
+            let install_result = install.link_and_build(self).await?;
 
             Ok(install_result)
         }).await;
