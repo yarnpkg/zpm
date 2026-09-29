@@ -267,6 +267,10 @@
       "description": "The URL to use for downloading Node.js distributions",
       "default": "https://nodejs.org/dist"
     },
+    "nodeDistAuthHeader": {
+      "type": ["zpm_utils::Secret<String>", "null"],
+      "description": "The Authorization header to send when downloading Node.js distributions"
+    },
     "nodeLinker": {
       "type": "crate::NodeLinker",
       "description": "The linker to use for node_modules",

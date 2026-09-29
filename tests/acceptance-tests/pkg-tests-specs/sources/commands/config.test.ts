@@ -74,11 +74,15 @@ const options = {
 describe(`Commands`, () => {
   describe(`config`, () => {
     test(`should redact secrets by default`, makeTemporaryEnv({}, async ({path, run}) => {
-      await xfs.writeFilePromise(ppath.join(path, RC_FILENAME), `npmAuthToken: super-secret-token\n`);
+      await xfs.writeFilePromise(ppath.join(path, RC_FILENAME), [
+        `npmAuthToken: super-secret-token`,
+        `nodeDistAuthHeader: Bearer super-secret-header`,
+      ].join(`\n`));
 
       const {stdout} = await run(`config`, `--json`);
       expect(stdout).toContain(`<redacted>`);
       expect(stdout).not.toContain(`super-secret-token`);
+      expect(stdout).not.toContain(`super-secret-header`);
     }));
 
     test(`should reveal secrets when --no-redacted is passed`, makeTemporaryEnv({}, async ({path, run}) => {
@@ -86,10 +90,14 @@ describe(`Commands`, () => {
       // previously the flag was a silent no-op and the token stayed
       // `<redacted>` even when the user explicitly opted out of
       // redaction.
-      await xfs.writeFilePromise(ppath.join(path, RC_FILENAME), `npmAuthToken: super-secret-token\n`);
+      await xfs.writeFilePromise(ppath.join(path, RC_FILENAME), [
+        `npmAuthToken: super-secret-token`,
+        `nodeDistAuthHeader: Bearer super-secret-header`,
+      ].join(`\n`));
 
       const {stdout} = await run(`config`, `--no-redacted`, `--json`);
       expect(stdout).toContain(`super-secret-token`);
+      expect(stdout).toContain(`super-secret-header`);
       expect(stdout).not.toContain(`<redacted>`);
     }));
 
