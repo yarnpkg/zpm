@@ -97,6 +97,27 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should skip the caller's constraints for temporary installs while checking normal installs`,
+      makeTemporaryEnv({}, async ({path, run}) => {
+        await yarn.writeConfiguration(path, {
+          enableConstraintsChecks: true,
+        });
+
+        await writeFile(`${path}/yarn.config.cjs`, [
+          `exports.constraints = ({ Yarn }) => {`,
+          `  for (const workspace of Yarn.workspaces()) {`,
+          `    workspace.set('foo', 'bar');`,
+          `  }`,
+          `};`,
+        ].join(`\n`));
+
+        await expect(run(`dlx`, `has-bin-entries`)).resolves.toBeDefined();
+
+        await expect(run(`install`)).rejects.toThrow(/Constraint check failed; run yarn constraints for more details/);
+      }),
+    );
+
+    test(
       `it shouldn't warn on unused package extensions in projects created by dlx (dependencies)`,
       makeTemporaryEnv(
         {

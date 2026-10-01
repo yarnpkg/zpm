@@ -125,6 +125,8 @@ pub struct RunInstallOptions {
     pub refresh_lockfile: bool,
     pub roots: Option<BTreeSet<Ident>>,
     pub silent_or_error: bool,
+    /// Temporary installs have no constraints configuration to check.
+    pub skip_constraints_check: bool,
     pub json: bool,
     pub inline_builds: bool,
     pub force: bool,
@@ -1675,7 +1677,7 @@ impl Project {
                     .with_previous_state(self.install_state.as_ref())
                     .with_roots(roots)
                     .with_installed_workspaces(options.roots.clone())
-                    .with_constraints_check(!options.silent_or_error && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
+                    .with_constraints_check(!options.silent_or_error && !options.skip_constraints_check && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
                     .with_skip_link_step(options.mode == Some(InstallMode::UpdateLockfile))
                     .with_skip_lockfile_update(options.roots.is_some())
                     .with_force(options.force)
