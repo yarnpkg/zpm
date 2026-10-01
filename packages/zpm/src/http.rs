@@ -111,6 +111,7 @@ fn new_resolver() -> TokioResolver {
 
     builder.options_mut().ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
     builder.build()
+        .expect("Failed to build a DNS resolver")
 }
 
 pub struct HttpClient {

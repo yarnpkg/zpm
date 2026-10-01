@@ -39,7 +39,7 @@ libc = "0.2"
 reqwest = { workspace = true, default-features = false, features = ["default-tls"] }
 
 [target.'cfg(not(all(target_arch = "wasm64", target_vendor = "browserpod")))'.dependencies]
-reqwest = { workspace = true, default-features = false, features = ["rustls-tls"] }
+reqwest = { workspace = true, default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
