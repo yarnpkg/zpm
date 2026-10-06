@@ -97,6 +97,30 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should write a stable lockfile with a final newline`,
+      makeTemporaryEnv({}, async ({path, run}) => {
+        const lockfilePath = ppath.join(path, Filename.lockfile);
+
+        await run(`install`);
+        const lockfileContent = await xfs.readFilePromise(lockfilePath, `utf8`);
+        expect(lockfileContent).toMatch(/[^\n]\n$/);
+
+        await run(`install`, `--force`);
+        await run(`install`, `--immutable`);
+        expect(await xfs.readFilePromise(lockfilePath, `utf8`)).toEqual(lockfileContent);
+
+        const unterminatedContent = lockfileContent.slice(0, -1);
+        await xfs.writeFilePromise(lockfilePath, unterminatedContent);
+
+        await expect(run(`install`, `--immutable`)).rejects.toThrow(/The lockfile would have been modified by this install/);
+        expect(await xfs.readFilePromise(lockfilePath, `utf8`)).toEqual(unterminatedContent);
+
+        await run(`install`);
+        expect(await xfs.readFilePromise(lockfilePath, `utf8`)).toEqual(lockfileContent);
+      }),
+    );
+
+    test(
       `it should refuse to create a lockfile when using --immutable`,
       makeTemporaryEnv({
         dependencies: {

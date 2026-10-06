@@ -46,7 +46,7 @@ pub fn register_daemon(entry: &DaemonEntry) -> Result<(), Error> {
         .fs_create_parent()?;
 
     let data
-        = JsonDocument::to_string(entry)?;
+        = format!("{}\n", JsonDocument::to_string(entry)?);
 
     daemon_path.fs_write_atomic(move |tmp_path| {
         use std::os::unix::fs::OpenOptionsExt;

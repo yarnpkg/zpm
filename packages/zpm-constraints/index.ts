@@ -350,7 +350,7 @@ async function main() {
 
   const output = applyEngineReport(FIX);
 
-  writeFileSync(RESULT_PATH, JSON.stringify(output, null, 2));
+  writeFileSync(RESULT_PATH, `${JSON.stringify(output, null, 2)}\n`);
 }
 
 main();

@@ -99,7 +99,7 @@ fn save_config(config: &FolderConfig) -> Result<(), Error> {
 
     config_path
         .fs_create_parent()?
-        .fs_write(JsonDocument::to_string(config)?)?;
+        .fs_write(format!("{}\n", JsonDocument::to_string(config)?))?;
 
     Ok(())
 }

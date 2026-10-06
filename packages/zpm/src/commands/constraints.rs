@@ -83,7 +83,7 @@ impl Constraints {
 
             if should_break {
                 if self.json {
-                    println!("{}", String::from_utf8_lossy(&output.raw_json));
+                    print!("{}", String::from_utf8_lossy(&output.raw_json));
                 }
 
                 if !output.all_workspace_errors.is_empty() {

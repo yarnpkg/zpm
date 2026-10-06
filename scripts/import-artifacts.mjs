@@ -72,7 +72,7 @@ runExit(class ImportArtifactsCommand extends Command {
     });
 
     const entries = JSON.parse(dump);
-    const serialized = JSON.stringify(entries);
+    const serialized = `${JSON.stringify(entries)}\n`;
 
     await fs.writeFile(outputPath, serialized);
 
