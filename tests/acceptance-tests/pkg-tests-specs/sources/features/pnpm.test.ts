@@ -130,6 +130,47 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should replace leftover workspace node_modules directories when switching from the node-modules linker`,
+      makeTemporaryMonorepoEnv(
+        {
+          workspaces: [`packages/*`],
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        },
+        {
+          [`packages/pkg-a`]: {
+            name: `pkg-a`,
+            version: `1.0.0`,
+            dependencies: {
+              [`no-deps`]: `2.0.0`,
+            },
+          },
+        },
+        async ({path, run}) => {
+          // Install with the node-modules linker first. The version conflict
+          // forces no-deps@2.0.0 to live as a real directory inside the
+          // workspace's own node_modules rather than being hoisted to the root.
+          await run(`config`, `set`, `nodeLinker`, `node-modules`);
+          await run(`install`);
+
+          const workspaceDep = npath.toPortablePath(`${path}/packages/pkg-a/node_modules/no-deps`);
+          const beforeStat = await xfs.lstatPromise(workspaceDep);
+          expect(beforeStat.isSymbolicLink()).toBeFalsy();
+          expect(beforeStat.isDirectory()).toBeTruthy();
+
+          // Switching to the pnpm linker must overwrite that leftover real
+          // directory with a symlink rather than failing to unlink it.
+          await run(`config`, `set`, `nodeLinker`, `pnpm`);
+          await run(`install`);
+
+          const afterStat = await xfs.lstatPromise(workspaceDep);
+          expect(afterStat.isSymbolicLink()).toBeTruthy();
+        },
+      ),
+    );
+
+    test(
       `pnpmHoistPatterns should hoist matching packages to store node_modules`,
       makeTemporaryEnv(
         {
