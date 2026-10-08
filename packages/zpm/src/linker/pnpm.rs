@@ -99,9 +99,10 @@ fn collect_hoistable_packages<'a>(tree: &'a ResolutionTree, patterns: &[IdentGlo
 
 /// Removes links in a `node_modules` folder that the new layout doesn't
 /// create anymore (removed dependencies, unhoisted packages). Dot-entries
-/// such as `.pnpm` or `.bin` are left alone; scoped folders are pruned
-/// one level deeper.
-fn prune_node_modules(nm_path: &Path, expected: &BTreeSet<Ident>) -> Result<(), Error> {
+/// such as `.pnpm` are left alone, but `.bin` is removed since the pnpm
+/// linker doesn't currently create bin links. Scoped folders are pruned
+/// one level deeper. The store folder is also protected from deletion.
+fn prune_node_modules(nm_path: &Path, expected: &BTreeSet<Ident>, store_folder_name: &str) -> Result<(), Error> {
     let mut top_level
         = BTreeSet::new();
     let mut by_scope: BTreeMap<String, BTreeSet<String>>
@@ -128,7 +129,12 @@ fn prune_node_modules(nm_path: &Path, expected: &BTreeSet<Ident>) -> Result<(), 
         let name
             = entry.file_name().to_string_lossy().to_string();
 
-        if name.starts_with('.') {
+        // Skip dot-entries (except .bin) and the store folder
+        if name.starts_with('.') && name != ".bin" {
+            continue;
+        }
+
+        if name == store_folder_name {
             continue;
         }
 
@@ -289,7 +295,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
     // Store entries whose locator is gone from the tree are leftovers from a
     // previous install; dot-entries (.ready, .modules.yaml, ...) are kept.
     let mut kept_store_entries
-        = store_slugs;
+        = store_slugs.clone();
     kept_store_entries.insert("node_modules".to_string());
     kept_store_entries.insert("lock.yaml".to_string());
 
@@ -412,6 +418,101 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         ensure_symlink(&link_abs_path, &symlink_target)?;
     }
 
+    // Prune stale symlinks inside each store slug's node_modules folder.
+    // When a dependency is hoisted and matches, we skip creating a link for it,
+    // but if there was a previous link from when it wasn't hoisted, that link
+    // needs to be removed.
+    for slug in &store_slugs {
+        let slug_nm_path = store_path
+            .with_join_str(slug)
+            .with_join_str("node_modules");
+
+        if !slug_nm_path.fs_exists() {
+            continue;
+        }
+
+        let Some(entries) = slug_nm_path.fs_read_dir().ok_missing()? else {
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let entry_path = slug_nm_path.with_join_str(&name);
+
+            // Skip the package's own folder (the extracted package itself)
+            if let Some(locator) = packages_by_location.get(&entry_path.relative_to(&project.project_cwd)) {
+                if locator.slug() == *slug {
+                    continue;
+                }
+            }
+
+            // This is a symlink that should be a dependency link; we'll
+            // recreate it if needed in the next pass, so remove any stale version
+            if entry_path.fs_is_symlink() || entry_path.fs_is_file() {
+                entry_path.fs_rm_file()?;
+            } else if entry_path.fs_is_dir() {
+                entry_path.fs_rm()?;
+            }
+        }
+    }
+
+    // Prune the hoist directory (store_path/node_modules) to remove packages
+    // that are no longer hoisted or have been removed from the tree.
+    let hoist_nm_path = store_path.with_join_str("node_modules");
+    if hoist_nm_path.fs_exists() {
+        let mut expected_hoisted: BTreeSet<String> = BTreeSet::new();
+
+        // Collect which packages should be in the hoist directory
+        for ident in hoisted_packages.keys() {
+            match ident.scope() {
+                Some(scope) => {
+                    expected_hoisted.insert(scope.to_string());
+                },
+                None => {
+                    expected_hoisted.insert(ident.as_str().to_string());
+                },
+            }
+        }
+
+        if let Some(entries) = hoist_nm_path.fs_read_dir().ok_missing()? {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+
+                if name.starts_with('.') {
+                    continue;
+                }
+
+                let entry_path = hoist_nm_path.with_join_str(&name);
+
+                // Check if this is a scope directory
+                if name.starts_with('@') {
+                    if !expected_hoisted.contains(&name) {
+                        if entry_path.fs_is_symlink() || entry_path.fs_is_file() {
+                            entry_path.fs_rm_file()?;
+                        } else if entry_path.fs_is_dir() {
+                            entry_path.fs_rm()?;
+                        }
+                    } else {
+                        // Prune inside the scope
+                        let mut expected_scoped: BTreeSet<String> = BTreeSet::new();
+                        for ident in hoisted_packages.keys() {
+                            if ident.scope() == Some(name.as_str()) {
+                                expected_scoped.insert(ident.name().to_string());
+                            }
+                        }
+                        prune_dir_entries(&entry_path, &expected_scoped)?;
+                    }
+                } else if !expected_hoisted.contains(&name) {
+                    if entry_path.fs_is_symlink() || entry_path.fs_is_file() {
+                        entry_path.fs_rm_file()?;
+                    } else if entry_path.fs_is_dir() {
+                        entry_path.fs_rm()?;
+                    }
+                }
+            }
+        }
+    }
+
     // Second pass: create symlinks in node_modules directories
     for (locator, resolution) in &tree.locator_resolutions {
         let workspace
@@ -494,11 +595,16 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
 
     // Every workspace gets its node_modules pruned, including those whose
     // dependencies were all removed (absent from `expected_nm_entries`).
+    let store_folder_name = store_path
+        .basename()
+        .unwrap_or("node_modules")
+        .to_string();
+
     for workspace in &project.workspaces {
         let workspace_nm_path
             = workspace.path.with_join_str("node_modules");
 
-        prune_node_modules(&workspace_nm_path, expected_nm_entries.get(&workspace_nm_path).unwrap_or(&BTreeSet::new()))?;
+        prune_node_modules(&workspace_nm_path, expected_nm_entries.get(&workspace_nm_path).unwrap_or(&BTreeSet::new()), &store_folder_name)?;
     }
 
     persist_package_map(project, &package_map_builder.build()?)?;
