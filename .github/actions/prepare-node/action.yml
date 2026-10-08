@@ -8,10 +8,6 @@ inputs:
   switch:
     description: 'Path to a locally built yarn-switch binary to use in place of the released one'
     required: false
-  install-args:
-    description: 'Extra arguments to pass to yarn install'
-    required: false
-    default: ''
 
 runs:
   using: composite
@@ -46,4 +42,4 @@ runs:
     - name: Install dependencies
       shell: bash
       run: |
-        yarn install ${{inputs.install-args}}
+        yarn install

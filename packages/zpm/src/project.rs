@@ -482,14 +482,21 @@ impl Project {
         let lockfile_path
             = self.lockfile_path();
 
+        let current_content = lockfile_path
+            .fs_read()
+            .ok_missing()?;
+
         let contents
             = JsonDocument::to_string_pretty(lockfile)?;
 
-        if self.config.settings.enable_immutable_installs.value {
-            let current_content = lockfile_path
-                .fs_read()
-                .ok_missing()?;
+        // Lockfiles checked out on Windows often use CRLF line endings (Git's
+        // default); we preserve them rather than reporting them as changes.
+        let contents = match &current_content {
+            Some(current) if current.windows(2).any(|w| w == b"\r\n") => contents.replace('\n', "\r\n"),
+            _ => contents,
+        };
 
+        if self.config.settings.enable_immutable_installs.value {
             if current_content.as_ref().is_some_and(|current| current.as_slice() == contents.as_bytes()) {
                 return Ok(());
             }
