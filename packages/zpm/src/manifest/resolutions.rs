@@ -77,6 +77,10 @@ impl ResolutionSelector {
                     return None;
                 }
 
+                if params.parent_descriptor.ident != parent.ident {
+                    return None;
+                }
+
                 if let Range::AnonymousSemver(parent_params) = &params.parent_descriptor.range {
                     if !parent_params.range.check(parent_version) {
                         return None;
@@ -302,5 +306,27 @@ impl<'de> Visitor<'de> for ResolutionsFieldVisitor {
         }
 
         Ok(field)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parent_descriptor_requires_matching_name_and_version() {
+        let selector = parse_selector("parent@^1.0.0/child").unwrap();
+        let dependency = Descriptor::from_file_string("child@^1.0.0").unwrap();
+        let replacement = Range::from_file_string("2.0.0").unwrap();
+
+        for (parent, version, matches) in [
+            ("parent@npm:1.2.0", "1.2.0", true),
+            ("unrelated@npm:1.2.0", "1.2.0", false),
+            ("parent@npm:2.0.0", "2.0.0", false),
+        ] {
+            let parent = Locator::from_file_string(parent).unwrap();
+            let version = zpm_semver::Version::from_file_string(version).unwrap();
+            assert_eq!(selector.apply(&parent, &version, &dependency, &replacement).is_some(), matches);
+        }
     }
 }
