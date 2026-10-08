@@ -1752,6 +1752,14 @@ impl Project {
 
     /// Resolve a task and all its dependencies.
     pub fn resolve_task(&self, root_task: &TaskId) -> Result<ResolveTaskResult, Error> {
+        self.resolve_tasks(std::slice::from_ref(root_task), None)
+    }
+
+    /// Resolve multiple tasks (typically the same task across many
+    /// workspaces) into a single deduplicated graph. When `workspace_filter`
+    /// is set, cross-workspace dependencies (`^build`, `pkg:build`) pointing
+    /// outside of it are ignored (turbo's `--only`).
+    pub fn resolve_tasks(&self, root_tasks: &[TaskId], workspace_filter: Option<&BTreeSet<Ident>>) -> Result<ResolveTaskResult, Error> {
         let source_files
             = std::cell::RefCell::new(Vec::<Path>::new());
 
@@ -1794,6 +1802,7 @@ impl Project {
                     glob.check(&ws.name)
                         && (context_ws.manifest.remote.dependencies.contains_key(&ws.name)
                             || context_ws.manifest.dev_dependencies.contains_key(&ws.name))
+                        && workspace_filter.map_or(true, |filter| filter.contains(&ws.name))
                 })
                 .map(|ws| ws.name.clone())
                 .collect()
@@ -1809,7 +1818,7 @@ impl Project {
                 || ws.manifest.dev_dependencies.contains_key(include_ident)
         };
 
-        let resolved = zpm_tasks::resolve(root_task, get_task_file, resolve_ident_glob, is_dependency)
+        let resolved = zpm_tasks::resolve_many(root_tasks, get_task_file, resolve_ident_glob, is_dependency)
             .map_err(Error::TaskResolveError)?;
 
         let mut source_files
@@ -1822,6 +1831,42 @@ impl Project {
             resolved,
             source_files,
         })
+    }
+
+    /// Return the definition of a task as seen from a workspace (local
+    /// taskfile, then root defaults, then includes), without resolving
+    /// its dependencies.
+    pub fn find_workspace_task(&self, workspace: &Workspace, task_name: &TaskName, defaults: &BTreeMap<TaskName, Task>) -> Option<Task> {
+        let (task_file, _)
+            = self.load_workspace_taskfile(workspace, defaults);
+
+        let task_file
+            = task_file?;
+
+        if let Some(task) = task_file.tasks.get(task_name.as_str()) {
+            return Some(task.clone());
+        }
+
+        for include in &task_file.includes {
+            let Ok(inc_ws) = self.workspace_by_ident(&include.ident) else {
+                continue;
+            };
+
+            let inc_path = match &include.path {
+                Some(p) => inc_ws.path.with_join_str(p),
+                None => inc_ws.taskfile_path(),
+            };
+
+            let included
+                = inc_path.fs_read_text().ok()
+                    .and_then(|content| parse_taskfile(&content).ok());
+
+            if let Some(task) = included.and_then(|tf| tf.tasks.get(task_name.as_str()).cloned()) {
+                return Some(task);
+            }
+        }
+
+        None
     }
 
     /// Get the effective taskfile (including root defaults) and its source

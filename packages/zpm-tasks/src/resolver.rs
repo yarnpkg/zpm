@@ -32,6 +32,22 @@ where
     G: Fn(&IdentGlob, &Ident) -> Vec<Ident>,
     D: Fn(&Ident, &Ident) -> bool,
 {
+    resolve_many(std::slice::from_ref(root_task), get_task_file, resolve_ident_glob, is_dependency)
+}
+
+/// Resolve multiple root tasks at once into a single deduplicated graph
+/// (used when running a task across many workspaces).
+pub fn resolve_many<F, G, D>(
+    root_tasks: &[TaskId],
+    get_task_file: F,
+    resolve_ident_glob: G,
+    is_dependency: D,
+) -> Result<ResolvedTasks, Error>
+where
+    F: Fn(&Ident, Option<&str>) -> Option<TaskFile>,
+    G: Fn(&IdentGlob, &Ident) -> Vec<Ident>,
+    D: Fn(&Ident, &Ident) -> bool,
+{
     let load_task_file_with_includes = |workspace: &Ident, task_files_cache: &mut BTreeMap<Ident, TaskFile>| -> Result<(), Error> {
         if task_files_cache.contains_key(workspace) {
             return Ok(());
@@ -80,7 +96,7 @@ where
     let mut task_files: BTreeMap<Ident, TaskFile>
         = BTreeMap::new();
 
-    to_visit.push(root_task.clone());
+    to_visit.extend(root_tasks.iter().rev().cloned());
 
     while let Some(task_id) = to_visit.pop() {
         if visited.contains(&task_id) {

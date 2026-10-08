@@ -1,17 +1,15 @@
-use std::{io::Write, process::ExitStatus};
+use std::io::Write;
 
 use async_trait::async_trait;
-use clipanion::cli;
 use serde_json::json;
 
 use super::helpers::{format_task_id, format_timestamp};
-use super::runner::{run_task, TaskRunConfig, TaskRunContext, TaskRunHandler};
+use super::runner::{TaskRunConfig, TaskRunContext, TaskRunHandler};
 use crate::daemon::{ContextualTaskId, SubscriptionScope};
-use crate::error::Error;
 
-struct InterlacedHandler {
-    timestamps: bool,
-    json: bool,
+pub(super) struct InterlacedHandler {
+    pub timestamps: bool,
+    pub json: bool,
 }
 
 #[async_trait]
@@ -125,56 +123,4 @@ impl TaskRunHandler for InterlacedHandler {
     }
 
     fn on_ctrl_c(&mut self) {}
-}
-
-/// Run a task with interlaced output (default)
-///
-/// This command runs a task with interlaced output mode. In this mode, output
-/// from the task and its dependencies is displayed in real-time as it is
-/// produced. Lines from different tasks may be interleaved.
-///
-/// This is the default mode for running tasks and provides the most responsive
-/// feedback during execution.
-#[cli::command(proxy)]
-#[cli::path("tasks", "run")]
-#[cli::category("Task management commands")]
-pub struct TaskRunInterlaced {
-    /// Increase the verbosity level (can be repeated)
-    #[cli::option("-v,--verbose", default = if zpm_utils::is_terminal() {2} else {0}, counter)]
-    verbose_level: u8,
-
-    /// Prefix each output line with a timestamp
-    #[cli::option("--timestamps", default = false)]
-    timestamps: bool,
-
-    /// Output JSON objects (one per line) for each task event
-    #[cli::option("--json", default = false)]
-    json: bool,
-
-    /// Run the task without connecting to the daemon
-    #[cli::option("--standalone", default = false)]
-    standalone: bool,
-
-    /// Name of the task to run
-    name: String,
-
-    /// Arguments to pass to the task
-    args: Vec<String>,
-}
-
-impl TaskRunInterlaced {
-    pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let mut handler = InterlacedHandler {
-            timestamps: self.timestamps,
-            json: self.json,
-        };
-
-        run_task(
-            &mut handler,
-            &self.name,
-            &self.args,
-            self.standalone,
-            self.verbose_level,
-        ).await
-    }
 }
