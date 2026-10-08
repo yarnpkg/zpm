@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
+    preferred_versions::PreferredVersions,
     build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync}, graph::WaitMap, http_npm, linker, lockfile::{Lockfile, LockfileCatalogs, LockfileEntry, LockfileMetadata, LockfilePackageExtension, LockfileProject, catalogs_from_config}, manifest::resolutions::{ResolutionSelector, ResolutionsField}, primitives_exts::{InnerDependencyKind, RangeExt}, project::{InstallMode, Project}, report::{self, ReportContext, async_section, current_report, with_context_result}, resolvers::{Resolution, SyncResolutionAttempt, catalog::{catalog_name, lookup_catalog_entry_in}, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync}, tree_resolver::{ResolutionTree, TreeResolver}
 };
 
@@ -41,6 +42,9 @@ pub struct InstallContext<'a> {
     /// call `drain` before returning so pending writes aren't dropped
     /// when the runtime shuts down.
     pub background_writes: Option<Arc<http_npm::BackgroundWrites>>,
+    /// Versions locked by the package manager the project is migrating
+    /// from; the npm resolver prefers them over the latest ones
+    pub preferred_versions: Option<Arc<PreferredVersions>>,
 }
 
 /// What one field of a `packageExtensions` rule did to the packages the
@@ -123,6 +127,7 @@ impl<'a> Default for InstallContext<'a> {
             dependency_overrides: Arc::default(),
             package_extensions: Arc::new(BTreeMap::new()),
             background_writes: None,
+            preferred_versions: None,
         }
     }
 }
@@ -196,6 +201,11 @@ impl<'a> InstallContext<'a> {
 
     pub fn with_background_writes(mut self, background_writes: Option<Arc<http_npm::BackgroundWrites>>) -> Self {
         self.background_writes = background_writes;
+        self
+    }
+
+    pub fn with_preferred_versions(mut self, preferred_versions: Option<Arc<PreferredVersions>>) -> Self {
+        self.preferred_versions = preferred_versions;
         self
     }
 }

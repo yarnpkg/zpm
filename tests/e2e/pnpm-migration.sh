@@ -37,7 +37,8 @@ pnpm ls -r --json --depth=Infinity \
   | jq -r '.. | objects | select(.version? and .from?) | "\(.from)@\(.version)"' \
   | sort -u > "${TEMP_DIR}/pnpm-versions.txt"
 
-rm -f pnpm-lock.yaml
+# Remove pnpm's install so that Yarn has to rely on pnpm-lock.yaml alone
+rm -rf node_modules packages/*/node_modules
 
 yarn install
 

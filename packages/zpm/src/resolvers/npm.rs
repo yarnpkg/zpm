@@ -255,6 +255,23 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         is_package_approved(context, package_ident, version, time, minimal_age_gate)
     };
 
+    // When migrating from another package manager, the versions it locked
+    // take precedence. They bypass `npmMinimalAgeGate`: the gate guards
+    // against adopting versions nobody vetted yet, whereas those versions
+    // are already installed in the project we're migrating; blocking them
+    // would upgrade (or downgrade) the very packages we want to keep.
+    if let Some(preferred_versions) = &context.preferred_versions {
+        let preferred_version
+            = preferred_versions.pick(context, package_ident, &params.range, |version| registry_data.versions.contains_key(version)).await;
+
+        if let Some(version) = preferred_version {
+            let manifest
+                = JsonDocument::hydrate_from_value(&registry_data.versions[&version])?;
+
+            return build_resolution_result(context, descriptor, package_ident, version, manifest);
+        }
+    }
+
     // Iterate in reverse order as we assume that users will most likely use newer versions.
     let mut in_range = registry_data.versions.iter().rev()
         .filter(|(version, _)| params.range.check(version))
@@ -282,6 +299,92 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     }
 
     Err(Error::NoCandidatesFound(descriptor.range.clone()))
+}
+
+/**
+ * Returns the dependencies a given package version declares, as written in
+ * its manifest. Used to find out which ranges led a foreign lockfile to
+ * lock the versions it did.
+ */
+pub async fn fetch_declared_dependencies(context: &InstallContext<'_>, package_ident: &Ident, version: &zpm_semver::Version) -> Result<BTreeMap<String, String>, Error> {
+    let project = context.project
+        .expect("The project is required for fetching package metadata");
+
+    let registry_base
+        = http_npm::get_registry_for_ident(&project.config, Some(package_ident), false)?;
+
+    let authorization
+        = http_npm::get_authorization(&http_npm::GetAuthorizationOptions {
+            configuration: &project.config,
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: Some(package_ident),
+            auth_mode: http_npm::AuthorizationMode::RespectConfiguration,
+            allow_oidc: false,
+        }).await?;
+
+    let bytes
+        = http_npm::get_package_metadata(&http_npm::GetPackageMetadataParams {
+            http_client: &project.http_client,
+            registry: &registry_base,
+            ident: package_ident,
+            authorization: authorization.as_deref(),
+            global_folder: &project.config.settings.global_folder.value,
+            refresh_lockfile: context.refresh_lockfile,
+            background_writes: context.background_writes.as_deref(),
+        }).await?;
+
+    #[derive(Deserialize)]
+    struct RegistryMetadata<'a> {
+        #[serde(borrow)]
+        versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DeclaredDependencies {
+        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_string_map")]
+        dependencies: BTreeMap<String, String>,
+
+        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_string_map")]
+        optional_dependencies: BTreeMap<String, String>,
+    }
+
+    let registry_data: RegistryMetadata<'_>
+        = JsonDocument::hydrate_from_slice(&bytes[..])?;
+
+    let manifest
+        = registry_data.versions.get(version)
+            .ok_or_else(|| Error::NoCandidatesFound(AnonymousSemverRange {range: zpm_semver::Range::exact(version.clone())}.into()))?;
+
+    let declared: DeclaredDependencies
+        = JsonDocument::hydrate_from_value(manifest)?;
+
+    let mut dependencies
+        = declared.dependencies;
+
+    dependencies.extend(declared.optional_dependencies);
+
+    Ok(dependencies)
+}
+
+/**
+ * Some manifests contain garbage in their dependency fields (arrays, or
+ * non-string values); we only care about the string entries.
+ */
+fn deserialize_string_map<'de, D>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error> where D: serde::Deserializer<'de> {
+    let value
+        = serde_json::Value::deserialize(deserializer)?;
+
+    let serde_json::Value::Object(entries) = value else {
+        return Ok(BTreeMap::new());
+    };
+
+    Ok(entries.into_iter()
+        .filter_map(|(name, range)| Some((name, range.as_str()?.to_string())))
+        .collect())
 }
 
 pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &RegistryTagRange) -> Result<ResolutionResult, Error> {
