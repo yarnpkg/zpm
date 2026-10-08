@@ -1013,6 +1013,8 @@ impl Path {
     pub fn fs_clonefile(&self, new_path: &Path) -> Result<&Self, PathError> {
         #[cfg(target_os = "macos")]
         {
+            use std::os::unix::ffi::OsStrExt;
+
             let source = std::ffi::CString::new(self.to_path_buf().as_os_str().as_bytes())
                 .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
             let target = std::ffi::CString::new(new_path.to_path_buf().as_os_str().as_bytes())
