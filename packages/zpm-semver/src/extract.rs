@@ -288,7 +288,15 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                                     0 => Token::Operation(OperatorType::LessThanOrEqual, other_version),
                                     1 => Token::Operation(OperatorType::LessThan, other_version.next_minor_rc()),
                                     2 => Token::Operation(OperatorType::LessThan, other_version.next_major_rc()),
-                                    _ => Token::Operation(OperatorType::GreaterThanOrEqual, Version::new_from_components(0, 0, 0, None)),
+
+                                    _ => {
+                                        return EvoVec::from([
+                                            Token::Operation(
+                                                OperatorType::GreaterThanOrEqual,
+                                                version,
+                                            ),
+                                        ]);
+                                    },
                                 };
 
                                 EcoVec::from([
