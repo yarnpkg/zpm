@@ -95,10 +95,18 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
+            # The lockfile can't list the Windows builds of the builtin Node.js
+            # yet, as the Yarn release we pin doesn't know about them
+            install-args: --refresh-lockfile
+            timeout: 60
 
     name: "Testing ${{matrix.target}}"
     needs: [build]
     runs-on: ${{matrix.os}}
+    timeout-minutes: ${{matrix.timeout || 360}}
 
     steps:
       - name: Checkout the repo
@@ -115,17 +123,21 @@ jobs:
       - name: Prepare Node
         uses: ./.github/actions/prepare-node
         with:
-          link: artifacts/yarn-bin
-          switch: artifacts/yarn
+          link: artifacts/yarn-bin${{matrix.ext}}
+          switch: artifacts/yarn${{matrix.ext}}
+          install-args: ${{matrix.install-args}}
 
       - name: Generate the test report
         run: |
-          chmod +x artifacts/{yarn,yarn-bin}
+          chmod +x artifacts/{yarn,yarn-bin}${{matrix.ext}}
 
-          export TEST_BINARY=$(pwd)/artifacts/yarn-bin
-          export TEST_SWITCH_BINARY=$(pwd)/artifacts/yarn
+          # Git Bash reports POSIX paths, but the tests need native ones
+          root=$(pwd -W 2>/dev/null || pwd)
 
-          yarn ./tests/acceptance-tests jest --json --outputFile=$(pwd)/report.json || true
+          export TEST_BINARY=$root/artifacts/yarn-bin${{matrix.ext}}
+          export TEST_SWITCH_BINARY=$root/artifacts/yarn${{matrix.ext}}
+
+          yarn ./tests/acceptance-tests jest --json --outputFile=$root/report.json || true
 
       - name: Upload test report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
