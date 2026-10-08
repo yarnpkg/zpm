@@ -171,6 +171,80 @@ Running `yarn build` in `pkg-c` will:
 
 The dependency resolution computes the full transitive closure, so `pkg-c:build` knows it must wait for both `pkg-a:build` and `pkg-b:build`.
 
+## Running a task across workspaces
+
+When a cross-workspace dependency uses a glob matching every dependency, you can write it with the `^` shorthand: `^build` is equivalent to `*:build`, meaning "the `build` task of every workspace listed in my `dependencies` or `devDependencies`". Workspaces that don't declare the task are skipped.
+
+```
+# In packages/app/taskfile
+build: ^build
+  tsc -b
+```
+
+## Root defaults
+
+Declaring the same task in every workspace quickly becomes repetitive. Tasks tagged with the `@workspaces` attribute in the root workspace's `taskfile` act as defaults for every other workspace of the project:
+
+```
+# taskfile (at the root of the project)
+@workspaces
+build: ^build
+
+@workspaces
+test:ci: ^build ^test:ci
+
+@workspaces
+check: test:ci
+
+@workspaces
+@long-lived
+dev: ^build
+```
+
+- A default task without a script body runs the `package.json` script of the same name (`yarn run <name>`, forwarding the extra arguments) in each workspace that defines it.
+- In a workspace without the matching script, the task is a no-op that still propagates ordering: if `app` depends on `lib` which depends on `utils`, and only `app` and `utils` have a `build` script, `utils:build` still runs before `app:build`.
+- A workspace can override a default by declaring a task with the same name in its own `taskfile`.
+- Defaults apply to every workspace except the root workspace itself, which only runs the tasks it declares without the attribute.
+
+Running `yarn run build` (or `yarn build`) still runs the `package.json` script directly; use `yarn tasks run` to go through the task graph.
+
+## Selecting workspaces
+
+By default `yarn tasks run <name>` runs the task (and its dependencies) in the current workspace. The following options select other workspaces; the selected tasks are resolved into a single graph in which each task runs at most once:
+
+| Option | Selection |
+| --- | --- |
+| `-A,--all` | Every workspace declaring the task |
+| `--from <glob>` | Workspaces matching an ident glob (`@scope/*`) or a path glob (`packages/*` or `./packages/*`); repeatable |
+| `--affected` | Workspaces changed since the base refs (`changesetBaseRefs`), and all their dependents |
+| `--since <ref>` | Same as `--affected`, against an explicit ref |
+| `--with-dependencies` | Adds the workspace dependencies of the selection (alias: `--recursive`) |
+| `--dependencies-only` | Replaces the selection by its workspace dependencies |
+| `--with-dependents` | Adds the workspaces depending on the selection |
+| `--include <glob>` / `--exclude <glob>` | Filter the final selection |
+
+When `--with-dependents` and `--with-dependencies` are combined, dependencies are followed from the dependents too, so the selection contains everything needed to build each dependent.
+
+Options must be placed before the task name (everything after it is forwarded to the task). Several tasks can be run together by separating them with commas:
+
+```bash
+yarn tasks run -A build,typecheck
+yarn tasks run --from my-app --dependencies-only build
+yarn tasks run --affected check
+```
+
+Other options:
+
+- `--only` ignores cross-workspace dependencies pointing outside of the selection (for example to only build the selected workspaces without their dependencies).
+- `-j,--concurrency <n>` limits the number of processes running at the same time (defaults to the number of CPUs when running across workspaces).
+- `--continue` keeps running the independent tasks after a failure; by default the first failure cancels the run when running across workspaces. The exit code is the one of the first failing task.
+- `--errors-only` only prints the output of the tasks that failed, followed by a summary.
+- `--standalone` runs the tasks in an in-process daemon rather than the background one. It's enabled by default on CI (when the `CI` environment variable is set); use `--no-standalone` to opt out.
+
+## Long-lived tasks
+
+Tasks marked with `@long-lived` (dev servers, watchers) unblock their dependents after a warm-up period rather than when they exit. Combined with `^build`, `yarn tasks run --from my-app dev` first builds the dependencies of `my-app`, then starts its dev server and keeps it running. When connected to the background daemon, pressing Ctrl-C detaches from the server (`yarn tasks stop dev` stops it); with `--standalone`, Ctrl-C and SIGTERM stop it.
+
 ## Including tasks from other workspaces
 
 You can include task definitions from dependency workspaces using the `include` directive. This allows you to reuse common task definitions across multiple workspaces without duplicating them.
