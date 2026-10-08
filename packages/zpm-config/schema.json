@@ -622,7 +622,7 @@
     "pnpmStoreFolder": {
       "type": "string",
       "description": "The folder to use for the Pnpm store",
-      "default": "node_modules/.pnpm"
+      "default": "node_modules/.yarn/store"
     },
     "preferDeferredVersions": {
       "type": "boolean",

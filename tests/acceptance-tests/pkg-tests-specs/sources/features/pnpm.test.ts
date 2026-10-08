@@ -142,7 +142,7 @@ describe(`Features`, () => {
       }, async ({path, run, source}) => {
         await run(`install`);
 
-        const store = ppath.join(path, `node_modules/.pnpm`);
+        const store = ppath.join(path, `node_modules/.yarn/store`);
         const [entry] = (await xfs.readdirPromise(store)).filter(name => name.startsWith(`one-range-dep-`));
 
         await expect(source(`require('one-range-dep')`)).resolves.toMatchObject({dependencies: {[`no-deps`]: {version: `1.0.0`}}});
@@ -172,7 +172,7 @@ describe(`Features`, () => {
       }, async ({path, run}) => {
         await run(`install`);
 
-        const hoisted = ppath.join(path, `node_modules/.pnpm/node_modules`);
+        const hoisted = ppath.join(path, `node_modules/.yarn/store/node_modules`);
         expect(xfs.existsSync(ppath.join(hoisted, `no-deps`))).toEqual(true);
 
         await run(`install`, {env: {YARN_PNPM_HOIST_PATTERNS: ``}});
@@ -234,13 +234,13 @@ describe(`Features`, () => {
 
         await xfs.mkdirPromise(ppath.join(path, `node_modules/.cache`), {recursive: true});
         await xfs.writeFilePromise(ppath.join(path, `node_modules/.cache/file`), ``);
-        await xfs.writeFilePromise(ppath.join(path, `node_modules/.pnpm/.modules.yaml`), ``);
+        await xfs.writeFilePromise(ppath.join(path, `node_modules/.yarn/store/.modules.yaml`), ``);
 
         await xfs.writeJsonPromise(ppath.join(path, `package.json`), {dependencies: {}});
         await run(`install`);
 
         expect(xfs.existsSync(ppath.join(path, `node_modules/.cache/file`))).toEqual(true);
-        expect(xfs.existsSync(ppath.join(path, `node_modules/.pnpm/.modules.yaml`))).toEqual(true);
+        expect(xfs.existsSync(ppath.join(path, `node_modules/.yarn/store/.modules.yaml`))).toEqual(true);
       }),
     );
 
@@ -379,7 +379,7 @@ describe(`Features`, () => {
           await run(`install`);
 
           // The transitive dependency 'no-deps' should be hoisted to the store's node_modules
-          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules/no-deps`);
+          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.yarn/store/node_modules/no-deps`);
           const hoistedStat = await xfs.lstatPromise(hoistedPath);
           expect(hoistedStat.isSymbolicLink()).toBeTruthy();
         },
@@ -402,7 +402,7 @@ describe(`Features`, () => {
           await run(`install`);
 
           // The store's shared node_modules should not exist or be empty
-          const storeNmPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules`);
+          const storeNmPath = npath.toPortablePath(`${path}/node_modules/.yarn/store/node_modules`);
           await expect(xfs.existsPromise(storeNmPath)).resolves.toBeFalsy();
         },
       ),
@@ -425,12 +425,12 @@ describe(`Features`, () => {
           await run(`install`);
 
           // one-fixed-dep should be hoisted
-          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules/one-fixed-dep`);
+          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.yarn/store/node_modules/one-fixed-dep`);
           const hoistedStat = await xfs.lstatPromise(hoistedPath);
           expect(hoistedStat.isSymbolicLink()).toBeTruthy();
 
           // no-deps should NOT be hoisted (doesn't match pattern)
-          const notHoistedPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules/no-deps`);
+          const notHoistedPath = npath.toPortablePath(`${path}/node_modules/.yarn/store/node_modules/no-deps`);
           await expect(xfs.existsPromise(notHoistedPath)).resolves.toBeFalsy();
         },
       ),
@@ -519,7 +519,7 @@ describe(`Features`, () => {
           // Same as pnpm, which hoists breadth-first: the direct dependency's
           // version wins over the transitive no-deps@1.0.0, whatever the
           // locator order
-          const hoisted = await xfs.readJsonPromise(ppath.join(path, `node_modules/.pnpm/node_modules/no-deps/package.json`));
+          const hoisted = await xfs.readJsonPromise(ppath.join(path, `node_modules/.yarn/store/node_modules/no-deps/package.json`));
           expect(hoisted.version).toEqual(`2.0.0`);
         },
       ),
