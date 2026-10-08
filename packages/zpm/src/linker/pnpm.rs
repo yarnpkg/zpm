@@ -259,9 +259,6 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         let physical_package_data = install.package_data.get(&locator.physical_locator())
             .unwrap_or_else(|| panic!("Failed to find physical package data for {}", locator.physical_locator().to_print_string()));
 
-        let is_local
-            = matches!(physical_package_data, PackageData::Local {..});
-
         let mut has_explicit_self_dependency
             = false;
 
@@ -276,16 +273,6 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                     .expect("Failed to find dependency resolution");
 
             package_map_builder.register_dependency(locator, dep_name, dep_locator)?;
-
-            if !is_local && !locator.reference.is_workspace_reference() {
-                if let Some(hoisted_locator) = hoisted_packages.get(dep_name) {
-                    // If the exact same version is hoisted, skip creating the symlink
-                    // The package will resolve it through the store's shared node_modules
-                    if *hoisted_locator == dep_locator {
-                        continue;
-                    }
-                }
-            }
 
             // node_modules/.pnpm/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
             let dep_rel_location
