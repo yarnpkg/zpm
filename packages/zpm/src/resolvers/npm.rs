@@ -443,6 +443,20 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let time
         = registry_data.time;
 
+    // When migrating from another package manager, the versions it locked
+    // take precedence, even for tag descriptors like "latest" or "next".
+    if let Some(preferred_versions) = &context.preferred_versions {
+        let preferred_version
+            = preferred_versions.pick(context, package_ident, &zpm_semver::Range::any(), |version| registry_data.versions.contains_key(version)).await;
+
+        if let Some(version) = preferred_version {
+            let manifest
+                = JsonDocument::hydrate_from_value(&registry_data.versions[&version])?;
+
+            return build_resolution_result(context, descriptor, package_ident, version, manifest);
+        }
+    }
+
     let metadata_url
         = url::Url::parse(&format!("{}{}", registry_base, npm::registry_url_for_all_versions(package_ident)))?;
     let is_offline
