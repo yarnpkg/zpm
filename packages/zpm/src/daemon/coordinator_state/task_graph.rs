@@ -16,9 +16,13 @@ use zpm_utils::Path;
 use crate::{
     error::Error,
     project::Project,
+    task_cache::{
+        CacheTaskInfo,
+        tasks_needing_fingerprint,
+    },
 };
 
-pub const LONG_LIVED_ATTRIBUTE: &str = "long-lived";
+pub use zpm_tasks::LONG_LIVED_ATTRIBUTE;
 
 /// Core task execution state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +86,8 @@ pub struct TaskGraph {
     pub parents: HashMap<ContextualTaskId, HashSet<ContextualTaskId>>,
     /// Prepared task execution info
     pub prepared: BTreeMap<ContextualTaskId, PreparedTask>,
+    /// Fingerprints of the completed tasks (task cache)
+    pub fingerprints: HashMap<ContextualTaskId, zpm_utils::Hash64>,
     /// Maximum number of concurrently running processes, per context
     pub concurrency_limits: HashMap<String, usize>,
 }
@@ -97,6 +103,7 @@ impl TaskGraph {
             subtasks: HashMap::new(),
             parents: HashMap::new(),
             prepared: BTreeMap::new(),
+            fingerprints: HashMap::new(),
             concurrency_limits: HashMap::new(),
         }
     }
@@ -284,6 +291,9 @@ impl TaskGraph {
         let mut color_index = self.prepared.len();
         let mut new_count = 0;
 
+        let needs_fingerprint
+            = tasks_needing_fingerprint(&self.resolved, tasks_to_prepare.iter().map(|ctx_task_id| &ctx_task_id.task_id))?;
+
         for ctx_task_id in tasks_to_prepare {
             if self.prepared.contains_key(ctx_task_id) {
                 continue;
@@ -320,7 +330,12 @@ impl TaskGraph {
                 task_id.task_name.as_str()
             ));
 
-            let is_long_lived = task.attributes.iter().any(|attr| attr.name == LONG_LIVED_ATTRIBUTE);
+            let is_long_lived = task.is_long_lived();
+
+            let cache = match needs_fingerprint.contains(task_id) {
+                true => Some(CacheTaskInfo::new(project, workspace, task_id.clone(), script.clone(), task.cache_spec().ok().flatten())),
+                false => None,
+            };
 
             self.prepared.insert(
                 ctx_task_id.clone(),
@@ -331,6 +346,7 @@ impl TaskGraph {
                     prefix,
                     args: vec![],
                     is_long_lived,
+                    cache,
                 },
             );
 
@@ -343,6 +359,7 @@ impl TaskGraph {
 
     pub fn clear_task_state(&mut self, task_id: &ContextualTaskId) {
         self.tasks.remove(task_id);
+        self.fingerprints.remove(task_id);
         // Remove forward subtask links and their reverse parent entries
         if let Some(children) = self.subtasks.remove(task_id) {
             for child in &children {
@@ -490,6 +507,7 @@ impl TaskGraph {
     /// Remove all state for a closed task (used by output buffer eviction).
     pub fn evict_closed_task(&mut self, task_id: &ContextualTaskId) {
         self.tasks.remove(task_id);
+        self.fingerprints.remove(task_id);
         self.prepared.remove(task_id);
         if let Some(children) = self.subtasks.remove(task_id) {
             for child in &children {

@@ -122,5 +122,20 @@ impl TaskRunHandler for InterlacedHandler {
         }
     }
 
+    async fn on_task_cache_hit(&mut self, ctx: &mut TaskRunContext, task_id: &ContextualTaskId, _is_target: bool) {
+        if self.json {
+            let mut stdout
+                = std::io::stdout().lock();
+
+            writeln!(stdout, "{}", json!({
+                "type": "task-cache-hit",
+                "taskId": format_task_id(task_id),
+            })).ok();
+            return;
+        }
+
+        super::runner::print_cache_hit(ctx, task_id);
+    }
+
     fn on_ctrl_c(&mut self) {}
 }

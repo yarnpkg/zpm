@@ -2,6 +2,8 @@ mod helpers;
 mod runner;
 mod selection;
 
+pub mod cache_clean;
+pub mod hash;
 pub mod history;
 pub mod list;
 pub mod push;

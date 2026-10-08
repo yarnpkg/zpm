@@ -43,6 +43,7 @@ pub mod report;
 pub mod script;
 pub mod scratchpad;
 pub mod tasks;
+pub mod task_cache;
 pub mod tree_resolver;
 pub mod trust;
 pub mod versioning;

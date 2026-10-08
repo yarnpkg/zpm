@@ -31,6 +31,8 @@ pub struct PushTasksOptions {
     pub only: bool,
     /// Maximum number of concurrent processes in the context
     pub concurrency: Option<usize>,
+    /// Task cache settings for the context
+    pub cache: Option<super::ipc::TaskCacheOptions>,
 }
 
 /// Result of pushing tasks to the daemon
@@ -401,6 +403,7 @@ impl DaemonClient {
                 context_id,
                 only: options.only.then_some(true),
                 concurrency: options.concurrency,
+                cache: options.cache,
             };
 
         match self.send_request(request).await? {

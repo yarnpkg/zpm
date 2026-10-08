@@ -61,6 +61,7 @@ function instanceBadge(state: TaskEventState): {label: string, className: string
     case `completed`: return {label: `OK`, className: `bg-green-100 text-green-700`};
     case `failed`: return {label: `Fail`, className: `bg-red-100 text-red-700`};
     case `cancelled`: return {label: `Cancel`, className: `bg-slate-100 text-slate-500`};
+    case `cache-hit`: return {label: `Cached`, className: `bg-purple-100 text-purple-700`};
     default: throw new Error(`Unknown state: ${(state as any).type}`);
   }
 }

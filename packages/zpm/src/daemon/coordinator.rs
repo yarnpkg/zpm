@@ -12,9 +12,9 @@ use super::{
         PushTasksResult, StatsResult, StopTaskResult, TaskCompletionResult,
     },
     coordinator_state::{
-        now_ms, ContextualTaskId, CoordinatorState, TaskGraph, TaskfileWatcher, TransitionEffects, LONG_LIVED_ATTRIBUTE,
+        now_ms, ContextualTaskId, CoordinatorState, PreparedTask, TaskGraph, TaskfileWatcher, TransitionEffects, LONG_LIVED_ATTRIBUTE,
     },
-    executor::ExecutorPool,
+    executor::{CacheJob, ExecutorPool},
     ipc::{daemon_url, AttachedLongLivedTask, BufferedOutputLine, DaemonNotification, DeclaredTaskInfo, TaskEvent, TaskEventState, TaskSubscription, LONG_LIVED_CONTEXT_ID},
     platform,
     scheduler::dependencies,
@@ -23,6 +23,11 @@ use super::{
 use crate::{
     error::Error,
     project::Project,
+    task_cache::{
+        CacheRunOptions,
+        TaskCache,
+        dependency_fingerprints,
+    },
 };
 
 /// Handles needed to trigger a graceful shutdown from outside.
@@ -212,41 +217,67 @@ async fn run_coordinator_loop(
     let mut executor_pool
         = ExecutorPool::new(daemon_url, command_tx.clone());
 
-    while let Some(cmd) = command_rx.recv().await {
-        // Commands that can't change task states don't need a scheduling
-        // pass; output lines are by far the most frequent commands.
-        let needs_scheduling = !matches!(cmd,
-            CoordinatorCommand::TaskOutput { .. }
-            | CoordinatorCommand::GetTaskOutput { .. }
-            | CoordinatorCommand::RegisterPid { .. }
-            | CoordinatorCommand::ListLongLivedTasks { .. }
-            | CoordinatorCommand::GetStats { .. }
-            | CoordinatorCommand::GetTaskHistory { .. }
-            | CoordinatorCommand::CreateSubscription { .. }
-            | CoordinatorCommand::AddTasksToSubscription { .. }
-            | CoordinatorCommand::RemoveSubscription { .. }
-            | CoordinatorCommand::ListDeclaredTasks { .. }
-            | CoordinatorCommand::SubscribeGlobal { .. }
-            | CoordinatorCommand::ReadFile { .. }
-            | CoordinatorCommand::WatchFile { .. }
-            | CoordinatorCommand::NotifyFileEvent { .. }
-        );
+    // Loaded lazily, on the first push that enables caching
+    let mut task_cache: Option<Arc<TaskCache>>
+        = None;
 
-        let should_shutdown = handle_command(
-            cmd,
-            &mut state,
-            &mut executor_pool,
-            &project,
-            &command_tx,
-            default_warmup_period,
-        ).await;
+    while let Some(first_cmd) = command_rx.recv().await {
+        // Commands tend to arrive in bursts (output lines, completions of
+        // tasks restored from the cache, ...); we process all the queued
+        // ones before looking for ready tasks, since that's a scan of the
+        // whole graph.
+        let mut next_cmd
+            = Some(first_cmd);
+
+        let mut should_shutdown
+            = false;
+
+        let mut may_unblock_tasks
+            = false;
+
+        while let Some(cmd) = next_cmd.take() {
+            may_unblock_tasks |= cmd.may_unblock_tasks();
+
+            should_shutdown = handle_command(
+                cmd,
+                &mut state,
+                &mut executor_pool,
+                &project,
+                &command_tx,
+                default_warmup_period,
+            ).await;
+
+            if should_shutdown {
+                break;
+            }
+
+            next_cmd = command_rx.try_recv().ok();
+        }
 
         if should_shutdown {
+            if let Some(task_cache) = &task_cache {
+                task_cache.save_state();
+            }
+
             break;
         }
 
-        if needs_scheduling {
-            drain_ready_tasks(&mut state, &mut executor_pool);
+        if !may_unblock_tasks {
+            continue;
+        }
+
+        if task_cache.is_none() && !state.cache_contexts.is_empty() {
+            task_cache = Some(Arc::new(TaskCache::new(&project)));
+        }
+
+        drain_ready_tasks(&mut state, &mut executor_pool, task_cache.as_ref());
+
+        // Persist the memoized file hashes once the daemon is idle (it's
+        // a no-op when nothing changed)
+        if let Some(task_cache) = &task_cache {
+            if executor_pool.running_tasks().next().is_none() {
+                task_cache.save_state();
+            }
         }
     }
 }
@@ -255,12 +286,12 @@ async fn run_coordinator_loop(
 /// enough when tasks reach a terminal state synchronously (script-less tasks,
 /// cancellations): their dependents only become ready on the next pass, and
 /// no further command would come in to trigger it.
-fn drain_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool) {
+fn drain_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool, task_cache: Option<&Arc<TaskCache>>) {
     loop {
         let closed_before
             = state.closed_tasks_counter;
 
-        process_ready_tasks(state, executor_pool);
+        process_ready_tasks(state, executor_pool, task_cache);
 
         if state.closed_tasks_counter == closed_before {
             break;
@@ -341,10 +372,31 @@ async fn handle_command(
             only,
             concurrency,
             subscription_id,
+            cache,
             response_tx,
         } => {
             if let (Some(ctx), Some(limit)) = (context_id.as_ref(), concurrency) {
                 state.graph.concurrency_limits.insert(ctx.clone(), limit.max(1));
+            }
+
+            // Subtasks inherit the cache settings of their context
+            if let (Some(cache), Some(context_id)) = (&cache, &context_id) {
+                match CacheRunOptions::from_ipc(cache) {
+                    Ok(options) => {
+                        state.cache_contexts.insert(context_id.clone(), Arc::new(options));
+                    },
+
+                    Err(err) => {
+                        let _ = response_tx.send(PushTasksResult {
+                            task_ids: vec![],
+                            dependency_ids: vec![],
+                            attached_long_lived: vec![],
+                            error: Some(err.to_string()),
+                        });
+
+                        return false;
+                    },
+                }
             }
 
             let result = execute_push_tasks(
@@ -486,11 +538,33 @@ async fn handle_command(
                     eprintln!("Task execution error: {}", e);
                     (1, None)
                 }
+                TaskCompletionResult::Cached => {
+                    (0, None)
+                }
             };
 
             let effects
                 = state.task_script_finished(&task_id, exit_code, signal);
             dispatch_effects(effects, state);
+        }
+
+        CoordinatorCommand::TaskFingerprint { task_id, fingerprint } => {
+            if !state.graph.is_terminal(&task_id) {
+                state.graph.fingerprints.insert(task_id, fingerprint);
+            }
+        }
+
+        CoordinatorCommand::TaskCacheHit { task_id, fingerprint } => {
+            state.event_history.push(TaskEvent {
+                date: now_ms(),
+                contextual_task_id: task_id.clone(),
+                state: TaskEventState::CacheHit,
+            });
+
+            state.subscriptions.broadcast(DaemonNotification::TaskCacheHit {
+                task_id,
+                fingerprint: fingerprint.to_file_string(),
+            });
         }
 
         CoordinatorCommand::WarmUpComplete { task_id, base_task_id } => {
@@ -663,7 +737,46 @@ async fn handle_command(
     false
 }
 
-fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool) {
+/// Builds the cache job of a task about to run, if its context has caching
+/// enabled and the task needs a fingerprint. Returns `None` when the task
+/// must run without caching.
+fn build_cache_job(
+    state: &CoordinatorState,
+    task_cache: Option<&Arc<TaskCache>>,
+    task_id: &ContextualTaskId,
+    prepared: &PreparedTask,
+) -> Option<CacheJob> {
+    let task_cache
+        = task_cache?;
+    let options
+        = state.cache_contexts.get(&task_id.context_id)?;
+    let info
+        = prepared.cache.as_ref()?;
+
+    let prerequisites = state.graph.resolved.tasks.get(&task_id.task_id)
+        .map(|prerequisites| prerequisites.as_slice())
+        .unwrap_or_default();
+
+    // If any prerequisite has no fingerprint (because it's long-lived, or
+    // ran in a context without caching), we can't vouch for its outputs
+    let dependencies = dependency_fingerprints(prerequisites, |prerequisite| {
+        state.graph.fingerprints.get(&ContextualTaskId::new(prerequisite.clone(), task_id.context_id.clone())).cloned()
+    })?;
+
+    let mut info
+        = info.clone();
+
+    info.args = prepared.args.clone();
+
+    Some(CacheJob {
+        info,
+        options: options.clone(),
+        task_cache: task_cache.clone(),
+        dependencies,
+    })
+}
+
+fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool, task_cache: Option<&Arc<TaskCache>>) {
     let running: HashSet<_>
         = executor_pool.running_tasks().cloned().collect();
 
@@ -697,16 +810,37 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
         }
 
         if prepared.script.is_empty() {
-            // No script - complete immediately
+            // No script - complete immediately; aggregators still get a
+            // fingerprint so that cached tasks depending on them cascade
+            if let (Some(task_cache), Some(_), true) = (task_cache, &prepared.cache, state.cache_contexts.contains_key(&task_id.context_id)) {
+                let prerequisites = state.graph.resolved.tasks.get(&task_id.task_id)
+                    .cloned()
+                    .unwrap_or_default();
+
+                let dependencies = dependency_fingerprints(&prerequisites, |prerequisite| {
+                    state.graph.fingerprints.get(&ContextualTaskId::new(prerequisite.clone(), task_id.context_id.clone())).cloned()
+                });
+
+                if let Some(dependencies) = dependencies {
+                    let fingerprint
+                        = task_cache.aggregate_fingerprint(&task_id.task_id, &dependencies);
+
+                    state.graph.fingerprints.insert(task_id.clone(), fingerprint);
+                }
+            }
+
             let effects
                 = state.complete_no_script(&task_id);
             dispatch_effects(effects, state);
         } else {
+            let cache_job
+                = build_cache_job(state, task_cache, &task_id, &prepared);
+
             // Mark as spawning BEFORE spawn
             state.processes.mark_spawning(task_id.clone());
 
             // Spawn task
-            executor_pool.spawn(task_id, prepared);
+            executor_pool.spawn(task_id, prepared, cache_job);
         }
     }
 }
