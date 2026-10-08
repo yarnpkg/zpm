@@ -301,7 +301,7 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                                     2 => Token::Operation(OperatorType::LessThan, other_version.next_major_rc()),
 
                                     _ => {
-                                        return EvoVec::from([
+                                        return EcoVec::from([
                                             Token::Operation(
                                                 OperatorType::GreaterThanOrEqual,
                                                 version,
