@@ -64,6 +64,8 @@ impl TaskRunHandler for ErrorsOnlyHandler {
         self.cancelled += 1;
     }
 
+    async fn on_task_cache_hit(&mut self, _ctx: &mut TaskRunContext, _task_id: &ContextualTaskId, _is_target: bool) {}
+
     fn on_ctrl_c(&mut self) {}
 
     fn on_nothing_to_run(&mut self) {

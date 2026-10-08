@@ -55,8 +55,9 @@ pub async fn dispatch_request(
             context_id,
             only,
             concurrency,
+            cache,
         } => {
-            handle_push_tasks(tasks, parent_task_id, workspace, context_id, only.unwrap_or(false), concurrency, subscription_id, command_tx).await
+            handle_push_tasks(tasks, parent_task_id, workspace, context_id, only.unwrap_or(false), concurrency, subscription_id, cache, command_tx).await
         }
 
         DaemonRequest::GetTaskOutput { task_id } => {
@@ -113,6 +114,7 @@ async fn handle_push_tasks(
     only: bool,
     concurrency: Option<usize>,
     subscription_id: Option<SubscriptionId>,
+    cache: Option<super::ipc::TaskCacheOptions>,
     command_tx: &CommandSender,
 ) -> DaemonResponse {
     let (response_tx, response_rx) = oneshot::channel();
@@ -126,6 +128,7 @@ async fn handle_push_tasks(
             only,
             concurrency,
             subscription_id,
+            cache,
             response_tx,
         })
         .is_err()

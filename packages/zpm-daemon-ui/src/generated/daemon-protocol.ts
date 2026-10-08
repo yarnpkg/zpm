@@ -5,13 +5,38 @@ export type TaskSubscription = { name: string, args: Array<string>, };
 
 export type SubscriptionScope = "none" | "targetOnly" | "fullTree";
 
+export type TaskCacheOptions = { 
+/**
+ * When false, existing cache entries are ignored (new ones are still
+ * written).
+ */
+read: boolean, 
+/**
+ * Absolute path of the folder storing the cache entries.
+ */
+cacheFolder: string, 
+/**
+ * Glob patterns (relative to the project root) of the files part of
+ * every fingerprint.
+ */
+globalInputs: Array<string>, 
+/**
+ * Hash of each workspace's dependency closure, as described by the
+ * lockfile; keyed by workspace ident.
+ */
+treeHashes: { [key in string]: string }, };
+
 export type DaemonRequestEnvelope = { requestId: number, request: DaemonRequest, };
 
 export type DaemonRequest = { "type": "ping" } | { "type": "getMeta" } | { "type": "pushTasks", tasks: Array<TaskSubscription>, parentTaskId: string | null, workspace: string | null, outputSubscription: SubscriptionScope, statusSubscription: SubscriptionScope, 
 /**
  * Context ID for task execution. Required for new tasks, inherited from parent for subtasks.
  */
-contextId: string | null, } | { "type": "getTaskOutput", taskId: string, } | { "type": "stopTask", taskName: string, workspace: string | null, } | { "type": "listLongLivedTasks" } | { "type": "listDeclaredTasks" } | { "type": "cancelContext", contextId: string, } | { "type": "getStats" } | { "type": "getTaskHistory" } | { "type": "getAuthUrl" } | { "type": "shutdown" } | { "type": "readFile", path: string, } | { "type": "watchFile", path: string, };
+contextId: string | null, 
+/**
+ * Task cache settings for the context; subtasks inherit them.
+ */
+cache?: TaskCacheOptions, } | { "type": "getTaskOutput", taskId: string, } | { "type": "stopTask", taskName: string, workspace: string | null, } | { "type": "listLongLivedTasks" } | { "type": "listDeclaredTasks" } | { "type": "cancelContext", contextId: string, } | { "type": "getStats" } | { "type": "getTaskHistory" } | { "type": "getAuthUrl" } | { "type": "shutdown" } | { "type": "readFile", path: string, } | { "type": "watchFile", path: string, };
 
 export type BufferedOutputLine = { line: string, stream: string, };
 
@@ -21,7 +46,7 @@ export type DaemonMeta = { version: string, cwd: string, };
 
 export type LongLivedTaskStatus = "stopped" | { "running": { started_at_ms: number, process_id: number | null, } };
 
-export type TaskEventState = { "type": "scheduled" } | { "type": "started", pid: number, } | { "type": "warm-up", pid: number, } | { "type": "live", pid: number, } | { "type": "completed" } | { "type": "failed", exit_code: number | null, signal: number | null, } | { "type": "cancelled" };
+export type TaskEventState = { "type": "scheduled" } | { "type": "started", pid: number, } | { "type": "warm-up", pid: number, } | { "type": "live", pid: number, } | { "type": "completed" } | { "type": "failed", exit_code: number | null, signal: number | null, } | { "type": "cancelled" } | { "type": "cache-hit" };
 
 export type TaskEvent = { 
 /**
@@ -93,7 +118,7 @@ closedTasksCount: number,
  */
 watchedFilesCount: number, } | { "type": "authUrl", url: string, } | { "type": "shuttingDown" } | { "type": "fileContent", path: string, content: string | null, encoding: string, } | { "type": "fileWatched" } | { "type": "error", message: string, };
 
-export type DaemonNotification = { "type": "taskOutputLine", taskId: string, line: string, stream: string, } | { "type": "taskStarted", taskId: string, } | { "type": "taskCompleted", taskId: string, exitCode: number, signal: number | null, } | { "type": "taskCancelled", taskId: string, } | { "type": "taskWarmUpComplete", taskId: string, } | { "type": "declaredTasksChanged", tasks: Array<DeclaredTaskInfo>, errors: Array<TaskfileError>, } | { "type": "fileChanged", path: string, };
+export type DaemonNotification = { "type": "taskOutputLine", taskId: string, line: string, stream: string, } | { "type": "taskStarted", taskId: string, } | { "type": "taskCompleted", taskId: string, exitCode: number, signal: number | null, } | { "type": "taskCancelled", taskId: string, } | { "type": "taskWarmUpComplete", taskId: string, } | { "type": "taskCacheHit", taskId: string, fingerprint: string, } | { "type": "declaredTasksChanged", tasks: Array<DeclaredTaskInfo>, errors: Array<TaskfileError>, } | { "type": "fileChanged", path: string, };
 
 export type DaemonMessage = { "kind": "response", requestId: number, response: DaemonResponse, } | { "kind": "notification", notification: DaemonNotification, };
 

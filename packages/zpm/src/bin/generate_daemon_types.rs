@@ -4,7 +4,7 @@ use ts_rs::{Config, TS};
 use zpm::daemon::{
     AttachedLongLivedTask, BufferedOutputLine, DaemonMessage, DaemonMeta, DaemonNotification,
     DaemonRequest, DaemonRequestEnvelope, DaemonResponse, DeclaredTaskInfo, LongLivedTaskInfo,
-    LongLivedTaskStatus, SubscriptionScope, TaskEvent, TaskEventState, TaskSubscription,
+    LongLivedTaskStatus, SubscriptionScope, TaskCacheOptions, TaskEvent, TaskEventState, TaskSubscription,
     TaskfileError,
 };
 
@@ -76,6 +76,7 @@ fn render() -> String {
     for decl in [
         to_exported_declaration::<TaskSubscription>(&config),
         to_exported_declaration::<SubscriptionScope>(&config),
+        to_exported_declaration::<TaskCacheOptions>(&config),
         to_exported_declaration::<DaemonRequestEnvelope>(&config),
         to_exported_declaration::<DaemonRequest>(&config),
         to_exported_declaration::<BufferedOutputLine>(&config),

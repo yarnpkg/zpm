@@ -35,6 +35,7 @@ impl SubscriptionFilter {
             DaemonNotification::TaskCompleted { task_id, .. } => (task_id, self.status_scope),
             DaemonNotification::TaskCancelled { task_id } => (task_id, self.status_scope),
             DaemonNotification::TaskWarmUpComplete { task_id } => (task_id, self.status_scope),
+            DaemonNotification::TaskCacheHit { task_id, .. } => (task_id, self.status_scope),
             // Global notifications are always delivered.
             DaemonNotification::DeclaredTasksChanged { .. }
             | DaemonNotification::FileChanged { .. } => return true,

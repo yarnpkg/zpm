@@ -69,4 +69,7 @@ pub struct PreparedTask {
     pub prefix: String,
     pub args: Vec<String>,
     pub is_long_lived: bool,
+    /// Set when the task's fingerprint may be needed (because it's cached,
+    /// or because a cached task depends on it).
+    pub cache: Option<crate::task_cache::CacheTaskInfo>,
 }

@@ -51,6 +51,10 @@ use crate::workspace_glob::WorkspaceGlob;
 /// Output modes: interlaced (default), `--buffered`, `--silent-dependencies`,
 /// `--errors-only` (only print the logs of failed tasks), and `--json`.
 ///
+/// Tasks declaring `@cache` are restored from the task cache when their
+/// inputs didn't change; `--no-cache` (alias `--force`) ignores the existing
+/// entries (successful runs are still stored).
+///
 /// By default the tasks run through the background daemon; on CI (when the
 /// `CI` environment variable is set) they run in an in-process daemon instead
 /// (`--standalone`), which can be toggled with `--standalone`/`--no-standalone`.
@@ -134,6 +138,10 @@ pub struct TaskRun {
     #[cli::option("--standalone")]
     standalone: Option<bool>,
 
+    /// Ignore the task cache entries (results of successful runs are still stored)
+    #[cli::option("--no-cache,--force", default = false)]
+    no_cache: bool,
+
     /// Name of the task to run (comma-separated for multiple tasks)
     name: String,
 
@@ -191,6 +199,7 @@ impl TaskRun {
             only: self.only,
             concurrency,
             continue_on_error: self.continue_on_error,
+            no_cache: self.no_cache,
         };
 
         if self.errors_only {

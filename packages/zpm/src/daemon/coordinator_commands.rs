@@ -21,6 +21,7 @@ pub enum CoordinatorCommand {
         only: bool,
         concurrency: Option<usize>,
         subscription_id: Option<SubscriptionId>,
+        cache: Option<super::ipc::TaskCacheOptions>,
         response_tx: oneshot::Sender<PushTasksResult>,
     },
 
@@ -67,6 +68,19 @@ pub enum CoordinatorCommand {
     TaskCompleted {
         task_id: ContextualTaskId,
         result: TaskCompletionResult,
+    },
+
+    /// The fingerprint of a task got computed (task cache). Always sent
+    /// before the task's TaskCompleted.
+    TaskFingerprint {
+        task_id: ContextualTaskId,
+        fingerprint: zpm_utils::Hash64,
+    },
+
+    /// The results of a task got restored from the task cache.
+    TaskCacheHit {
+        task_id: ContextualTaskId,
+        fingerprint: zpm_utils::Hash64,
     },
 
     /// Long-lived task warm-up period elapsed.
@@ -156,6 +170,35 @@ pub enum CoordinatorCommand {
     },
 }
 
+impl CoordinatorCommand {
+    /// Whether handling the command may make tasks ready to run (or to be
+    /// cancelled). Commands that can't are processed without rescanning
+    /// the task graph afterwards.
+    pub fn may_unblock_tasks(&self) -> bool {
+        !matches!(
+            self,
+            CoordinatorCommand::RegisterPid { .. }
+                | CoordinatorCommand::UnregisterPid { .. }
+                | CoordinatorCommand::TaskStarted { .. }
+                | CoordinatorCommand::TaskOutput { .. }
+                | CoordinatorCommand::TaskFingerprint { .. }
+                | CoordinatorCommand::TaskCacheHit { .. }
+                | CoordinatorCommand::GetTaskOutput { .. }
+                | CoordinatorCommand::ListLongLivedTasks { .. }
+                | CoordinatorCommand::GetStats { .. }
+                | CoordinatorCommand::GetTaskHistory { .. }
+                | CoordinatorCommand::CreateSubscription { .. }
+                | CoordinatorCommand::AddTasksToSubscription { .. }
+                | CoordinatorCommand::RemoveSubscription { .. }
+                | CoordinatorCommand::ReadFile { .. }
+                | CoordinatorCommand::WatchFile { .. }
+                | CoordinatorCommand::NotifyFileEvent { .. }
+                | CoordinatorCommand::ListDeclaredTasks { .. }
+                | CoordinatorCommand::SubscribeGlobal { .. }
+        )
+    }
+}
+
 /// Result of a task completion from the executor.
 #[derive(Debug)]
 pub enum TaskCompletionResult {
@@ -163,6 +206,8 @@ pub enum TaskCompletionResult {
     Exited(std::process::ExitStatus),
     /// Task failed to execute
     Error(String),
+    /// Task results got restored from the cache
+    Cached,
 }
 
 /// Result of pushing tasks to the scheduler.

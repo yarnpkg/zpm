@@ -354,3 +354,74 @@ c: a
 ```
 
 Running any of these tasks will result in an error indicating the cycle: `a -> b -> c -> a`.
+
+## Caching
+
+Tasks can opt into result caching with the `@cache` attribute. When a cached task is about to run, Yarn computes a fingerprint of everything that may influence its result. If a previous successful run had the same fingerprint, Yarn restores the files it produced, replays its output, and skips the script entirely:
+
+```
+@cache
+@inputs(src/** tsconfig.json)
+@outputs(dist/**)
+@env(NODE_ENV API_URL)
+build: pkg-utils:build
+  tsc -p tsconfig.build.json
+```
+
+```
+$ yarn build
+[my-app:build]: Cache hit, replaying output
+...
+```
+
+The cache hit marker is printed on stderr (or inline with `-v`), so the standard output of a task is identical whether it ran or got restored.
+
+### Attributes
+
+| Attribute | Description |
+| --- | --- |
+| `@cache` | Enables caching for the task. Required by the other attributes. |
+| `@inputs(globs...)` | Files (relative to the workspace) whose content is part of the fingerprint. Defaults to all the files of the workspace not ignored by git. |
+| `@outputs(globs...)` | Files (relative to the workspace) stored after a successful run and restored on cache hits. Defaults to nothing (the task is only cached for its output and to skip work). |
+| `@env(names...)` | Environment variables whose values are part of the fingerprint. A trailing `*` matches all the variables with that prefix (`NEXT_PUBLIC_*`). |
+
+Values are space-separated lists; attributes can be repeated, in which case the lists are concatenated. In `@inputs`, the `@default` token stands for the default input set, so `@inputs(@default ../../specs/**)` adds files from outside the workspace without having to list its own files (like Turborepo's `$TURBO_DEFAULT$`); exclusions apply to it as well. Patterns starting with `!` exclude files, and a pattern matching a folder matches its whole content (`dist` is equivalent to `dist/**`). `@inputs()` declares a task without file inputs.
+
+Long-lived tasks (`@long-lived`) cannot be cached.
+
+### What's in the fingerprint
+
+The fingerprint of a task covers:
+
+- the task name, workspace, script, and arguments;
+- the content and executable bit of its input files. When `@inputs` is omitted, all the files of the workspace are used, except those ignored by git (`.gitignore`, `.git/info/exclude`, and the global excludes file, when inside a git repository), the declared outputs, the `taskfile`, nested workspaces, and the `node_modules` and `.yarn` folders. The workspace `package.json` is always an input;
+- the fingerprints of all the tasks it depends on, cached or not. Changing anything in `pkg-utils:build` (its inputs, script, or dependencies) thus invalidates `my-app:build`;
+- the hash of the workspace's resolved dependency tree, as described by the lockfile. Upgrading a dependency of a workspace (directly or transitively) invalidates its tasks, but not those of the workspaces whose dependency tree didn't change;
+- the values of the declared environment variables (unset and empty are different);
+- the platform (OS and architecture), the Node.js version, and the Yarn version;
+- the content of the files matching the `taskCacheGlobalInputs` setting, which is useful for repository-wide files such as `.nvmrc`:
+
+```yaml
+taskCacheGlobalInputs:
+  - .nvmrc
+  - patches/**
+```
+
+Undeclared environment variables are **not** part of the fingerprint; declare everything your task reads that may change its outputs.
+
+Use `yarn tasks hash <task>` to print the fingerprint of a task along with everything that went into it (environment variable values are printed as hashes). Add `--json` and diff two outputs to find out why a task wasn't restored.
+
+### Outputs
+
+On a cache hit, Yarn first removes the files currently matching the `@outputs` globs (so stale files from previous runs don't linger), then restores the stored ones with their permissions. Symbolic links are preserved as such. If the files on disk already match the stored ones, nothing is written.
+
+Failed runs (non-zero exit code) are never cached. Successful runs whose output globs match nothing are cached nonetheless, which is useful for checks like linting.
+
+### Managing the cache
+
+- `yarn tasks run --no-cache <task>` (alias `--force`) ignores the existing entries; the results of successful runs are still stored.
+- `yarn tasks cache clean` removes all the entries.
+- The `enableTaskCache` setting (default `true`) disables caching entirely when set to `false`.
+- The `taskCacheFolder` setting (default `.yarn/ignore/task-cache`) controls where the entries are stored. Each entry is a zip archive named after its fingerprint, written atomically, so several processes can safely share the same folder.
+
+Yarn also memoizes the hashes of the files it reads (keyed by their path, size, modification time, and inode) in `.yarn/ignore/task-cache-files`, so that checking an unchanged task only requires a `stat` call per input file.

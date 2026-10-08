@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use uuid::Uuid;
 use zpm_utils::ToFileString;
 
-use super::helpers::{is_long_lived_task, print_attach_header, print_detach_footer};
+use super::helpers::{format_task_id, is_long_lived_task, print_attach_header, print_detach_footer};
 use super::selection::TaskSelection;
 use crate::daemon::{
     ContextualTaskId, DaemonClient, DaemonNotification, PushTasksOptions, PushTasksResult, StandaloneDaemonHandle,
@@ -18,6 +18,7 @@ use crate::daemon::{
 };
 use crate::error::Error;
 use crate::project::Project;
+use crate::task_cache::CacheRunOptions;
 
 pub struct TaskRunConfig {
     pub output_subscription: SubscriptionScope,
@@ -101,6 +102,13 @@ pub trait TaskRunHandler: Send {
         let _ = (ctx, task_id, is_target);
     }
 
+    /// Called when the task results got restored from the cache; its
+    /// logs are replayed afterwards through the regular output callbacks.
+    async fn on_task_cache_hit(&mut self, ctx: &mut TaskRunContext, task_id: &ContextualTaskId, is_target: bool) {
+        let _ = is_target;
+        print_cache_hit(ctx, task_id);
+    }
+
     fn on_ctrl_c(&mut self);
 
     /// Called when the selection didn't match any task.
@@ -111,6 +119,20 @@ pub trait TaskRunHandler: Send {
     /// Called once all target tasks have completed.
     fn on_finished(&mut self, ctx: &TaskRunContext) {
         let _ = ctx;
+    }
+}
+
+/// Prints the cache hit marker. At verbosity 0 it goes to stderr so that
+/// stdout stays the same regardless of whether the task ran or not.
+pub fn print_cache_hit(ctx: &mut TaskRunContext, task_id: &ContextualTaskId) {
+    if ctx.verbose_level >= 1 {
+        let mut stdout
+            = std::io::stdout().lock();
+
+        ctx.emit_first_line_separator(&mut stdout);
+        writeln!(stdout, "[{}]: Cache hit, replaying output", format_task_id(task_id)).ok();
+    } else {
+        eprintln!("[{}]: Cache hit, replaying output", format_task_id(task_id));
     }
 }
 
@@ -138,6 +160,8 @@ pub struct TaskRunOptions<'a> {
     pub only: bool,
     pub concurrency: Option<usize>,
     pub continue_on_error: bool,
+    /// Ignore the existing task cache entries (they're still written)
+    pub no_cache: bool,
 }
 
 pub async fn run_tasks(
@@ -150,6 +174,11 @@ pub async fn run_tasks(
         = Project::new(None).await?;
 
     project.lazy_install().await?;
+
+    let cache_options = match project.config.settings.enable_task_cache.value {
+        true => Some(CacheRunOptions::from_project(&project, !options.no_cache)?.to_ipc()),
+        false => None,
+    };
 
     let workspace
         = project.active_workspace()?;
@@ -215,6 +244,7 @@ pub async fn run_tasks(
     let push_options = PushTasksOptions {
         only: options.only,
         concurrency: options.concurrency,
+        cache: cache_options,
     };
 
     let mut ctx = TaskRunContext {
@@ -399,6 +429,13 @@ pub async fn run_tasks(
                 if ctx.all_completed() {
                     break;
                 }
+            }
+
+            DaemonNotification::TaskCacheHit { task_id, .. } => {
+                let is_target
+                    = ctx.is_target(&task_id);
+
+                handler.on_task_cache_hit(&mut ctx, &task_id, is_target).await;
             }
 
             DaemonNotification::TaskWarmUpComplete { .. } => {}

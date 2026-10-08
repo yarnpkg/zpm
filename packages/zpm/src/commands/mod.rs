@@ -125,6 +125,8 @@ pub enum YarnCli {
     Remove(remove::Remove),
     RunList(run::RunList),
     Run(run::Run),
+    TaskCacheClean(tasks::cache_clean::TaskCacheClean),
+    TaskHash(tasks::hash::TaskHash),
     TaskHistory(tasks::history::TaskHistory),
     TaskList(tasks::list::TaskList),
     TaskPush(tasks::push::TaskPush),

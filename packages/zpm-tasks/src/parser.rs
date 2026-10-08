@@ -160,10 +160,9 @@ fn strip_indent(line: &str) -> &str {
 }
 
 fn parse_attribute_line(input: &str) -> Result<Attribute, String> {
-    let mut input = input;
     parse_attribute
-        .parse_next(&mut input)
-        .map_err(|e| e.to_string())
+        .parse(input.trim_end())
+        .map_err(|e| format!("Invalid attribute syntax: {}", e.input()))
 }
 
 fn parse_attribute(input: &mut &str) -> winnow::ModalResult<Attribute> {
@@ -174,7 +173,7 @@ fn parse_attribute(input: &mut &str) -> winnow::ModalResult<Attribute> {
             .parse_next(input)?;
 
     let value: Option<&str>
-        = opt(delimited('(', take_till(1.., ')'), ')'))
+        = opt(delimited('(', take_till(0.., ')'), ')'))
             .parse_next(input)?;
 
     Ok(Attribute {
@@ -358,6 +357,20 @@ mod tests {
         assert_eq!(result.tasks["build"].attributes[0].value, None);
         assert_eq!(result.tasks["build"].attributes[1].name, "timeout");
         assert_eq!(result.tasks["build"].attributes[1].value, Some("30s".to_string()));
+    }
+
+    #[test]
+    fn test_parse_attribute_with_list_value() {
+        let input = "@inputs(src/** !src/**/*.test.ts)\n@outputs()\nbuild:\n  tsc";
+        let result = parse(input).unwrap();
+        assert_eq!(result.tasks["build"].attributes[0].value, Some("src/** !src/**/*.test.ts".to_string()));
+        assert_eq!(result.tasks["build"].attributes[1].value, Some("".to_string()));
+    }
+
+    #[test]
+    fn test_parse_attribute_trailing_garbage() {
+        let input = "@outputs(dist/**) oops\nbuild:\n  tsc";
+        assert!(matches!(parse(input), Err(Error::ParseError { line: 1, .. })));
     }
 
     #[test]

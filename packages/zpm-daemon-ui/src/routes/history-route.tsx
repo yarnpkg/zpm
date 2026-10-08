@@ -23,6 +23,8 @@ function stateBadge(state: TaskEventState): {label: string, className: string} {
     }
     case `cancelled`:
       return {label: `Cancelled`, className: `bg-slate-100 text-slate-600`};
+    case `cache-hit`:
+      return {label: `Cache hit`, className: `bg-purple-100 text-purple-800`};
     default:
       throw new Error(`Unknown state: ${(state as any).type}`);
   }
