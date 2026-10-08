@@ -5,7 +5,7 @@ use zpm_parsers::JsonDocument;
 use zpm_utils::Path;
 use clipanion::cli;
 
-use crate::{commands::tasks::run_silent_dependencies::TaskRunSilentDependencies, error::Error, project, script::ScriptEnvironment};
+use crate::{commands::tasks::run::run_silent_dependencies, error::Error, project, script::ScriptEnvironment};
 use super::tasks as task_run;
 
 /// List scripts from the current workspace
@@ -228,10 +228,7 @@ impl Run {
 
             Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_)) => {
                 if task_run::task_exists(&project, name) {
-                    let task_run_silent_dependencies
-                        = TaskRunSilentDependencies::new(&self.cli_environment, name.to_string(), self.args.clone());
-
-                    return task_run_silent_dependencies.execute().await;
+                    return run_silent_dependencies(name, &self.args).await;
                 }
 
                 execute_binary(true).await

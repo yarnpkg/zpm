@@ -1,12 +1,15 @@
 mod helpers;
 mod runner;
+mod selection;
 
 pub mod history;
 pub mod list;
 pub mod push;
-pub mod run_buffered;
-pub mod run_interlaced;
-pub mod run_silent_dependencies;
+pub mod run;
+mod run_buffered;
+mod run_errors_only;
+mod run_interlaced;
+mod run_silent_dependencies;
 pub mod stats;
 pub mod stop;
 

@@ -26,13 +26,32 @@ pub enum WorkspaceGlob {
 }
 
 impl WorkspaceGlob {
+    /// Workspace paths are stored without a `./` prefix (and the root
+    /// workspace has an empty path), but path globs are commonly written as
+    /// `./packages/*` (as in turbo's `--filter`); match both forms.
+    fn check_path(glob: &zpm_utils::Glob, workspace: &Workspace) -> bool {
+        let rel_path
+            = workspace.rel_path.as_str();
+
+        if glob.is_match(rel_path) {
+            return true;
+        }
+
+        let dotted_path = match rel_path.is_empty() {
+            true => ".".to_string(),
+            false => format!("./{}", rel_path),
+        };
+
+        glob.is_match(&dotted_path)
+    }
+
     pub fn check(&self, workspace: &Workspace) -> bool {
         match self {
             WorkspaceGlob::Ident(params)
                 => params.ident.check(&workspace.name),
 
             WorkspaceGlob::Path(params)
-                => params.path.is_match(&workspace.rel_path.as_str()),
+                => Self::check_path(&params.path, workspace),
         }
     }
 }

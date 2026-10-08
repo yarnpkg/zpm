@@ -294,3 +294,16 @@ pub async fn fetch_changed_files(project: &Project, since: Option<&str>) -> Resu
 
     Ok(changed_files)
 }
+
+/// Workspaces affected by the changes since `since` (or the configured base
+/// refs): the changed workspaces (lockfile-aware) and, transitively, every
+/// workspace depending on them. Equivalent to `turbo ls --affected`.
+pub async fn fetch_affected_workspaces(project: &Project, since: Option<&str>) -> Result<BTreeSet<Ident>, Error> {
+    let changed_workspaces
+        = fetch_changed_workspaces(project, since).await?;
+
+    let changed: BTreeSet<Ident>
+        = changed_workspaces.into_keys().collect();
+
+    Ok(project.workspaces_with_dependents(&changed))
+}

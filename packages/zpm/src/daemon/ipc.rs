@@ -13,6 +13,10 @@ pub const LONG_LIVED_CONTEXT_ID: &str = "4d84fea4-e0d4-4df6-8190-f312b86968b3";
 pub struct TaskSubscription {
     pub name: String,
     pub args: Vec<String>,
+    /// Workspace in which to run the task; defaults to the request's workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace: Option<String>,
 }
 
 /// Defines the scope of subscription for notifications
@@ -49,6 +53,14 @@ pub enum DaemonRequest {
         status_subscription: SubscriptionScope,
         /// Context ID for task execution. Required for new tasks, inherited from parent for subtasks.
         context_id: Option<String>,
+        /// Skip cross-workspace dependencies pointing outside of the workspaces of the pushed tasks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        only: Option<bool>,
+        /// Maximum number of processes running at the same time in this context.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional, type = "number")]
+        concurrency: Option<usize>,
     },
     GetTaskOutput {
         #[ts(type = "string")]

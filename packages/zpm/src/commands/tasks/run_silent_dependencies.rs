@@ -1,16 +1,14 @@
-use std::{io::Write, process::ExitStatus, sync::Arc};
+use std::{io::Write, sync::Arc};
 
 use async_trait::async_trait;
-use clipanion::{Environment, cli};
 use zpm_utils::{is_terminal, start_progress, ProgressHandle};
 
 use super::helpers::format_task_id;
-use super::runner::{run_task, TaskRunConfig, TaskRunContext, TaskRunHandler};
+use super::runner::{TaskRunConfig, TaskRunContext, TaskRunHandler};
 use crate::daemon::{ContextualTaskId, ProgressState, SubscriptionScope};
-use crate::error::Error;
 
-struct SilentDependenciesHandler {
-    progress_handle: Option<(ProgressHandle, Arc<ProgressState>)>,
+pub(super) struct SilentDependenciesHandler {
+    pub progress_handle: Option<(ProgressHandle, Arc<ProgressState>)>,
 }
 
 impl SilentDependenciesHandler {
@@ -121,65 +119,5 @@ impl TaskRunHandler for SilentDependenciesHandler {
 
     fn on_ctrl_c(&mut self) {
         self.stop_progress();
-    }
-}
-
-/// Run a task with silent dependency output
-///
-/// This command runs a task while suppressing output from dependency tasks.
-/// Only the output from the target task itself is shown, with a progress
-/// indicator displayed while dependencies are running.
-///
-/// If a dependency task fails, its output will be displayed to help diagnose
-/// the failure. This mode is useful when you're primarily interested in the
-/// output of the main task and dependencies are expected to succeed silently.
-#[cli::command(proxy)]
-#[cli::path("tasks", "run")]
-#[cli::category("Task management commands")]
-pub struct TaskRunSilentDependencies {
-    /// Enable silent dependencies mode
-    #[cli::option("--silent-dependencies")]
-    _silent_dependencies: bool,
-
-    /// Increase the verbosity level (can be repeated)
-    #[cli::option("-v,--verbose", default = if zpm_utils::is_terminal() {2} else {0}, counter)]
-    verbose_level: u8,
-
-    /// Run the task without connecting to the daemon
-    #[cli::option("--standalone", default = false)]
-    standalone: bool,
-
-    /// Name of the task to run
-    name: String,
-
-    /// Arguments to pass to the task
-    args: Vec<String>,
-}
-
-impl TaskRunSilentDependencies {
-    pub fn new(cli_environment: &Environment, name: String, args: Vec<String>) -> Self {
-        Self {
-            cli_environment: cli_environment.clone(),
-            cli_path: vec!["tasks".to_string(), "run".to_string()],
-            _silent_dependencies: true,
-            verbose_level: 0,
-            standalone: false,
-            name,
-            args,
-        }
-    }
-
-    pub async fn execute(&self) -> Result<ExitStatus, Error> {
-        let mut handler = SilentDependenciesHandler {
-            progress_handle: None,
-        };
-
-        run_task(
-            &mut handler,
-            &self.name,
-            &self.args,
-            self.standalone,
-            self.verbose_level,
-        ).await
     }
 }
