@@ -9,6 +9,59 @@ const {
 describe(`Features`, () => {
   describe(`Pnpm Mode `, () => {
     test(
+      `it should share one instance of a package whose dependents provide compatible subsets of its optional peers`,
+      makeTemporaryMonorepoEnv({
+        workspaces: [`packages/*`],
+      }, {
+        [`packages/with-peer`]: {name: `with-peer`, dependencies: {[`optional-peer-deps`]: `1.0.0`, [`no-deps`]: `1.0.0`}},
+        [`packages/without-peer`]: {name: `without-peer`, dependencies: {[`optional-peer-deps`]: `1.0.0`}},
+      }, async ({path, run, source}) => {
+        await xfs.writeFilePromise(ppath.join(path, `.yarnrc.yml`), `nodeLinker: pnpm\n`);
+        await run(`install`);
+
+        // Same module instance from both workspaces (pnpm's
+        // dedupe-peer-dependents); it gets the peer one of them provides
+        const sameInstance = await source(`require(require.resolve('optional-peer-deps', {paths: ['${npath.fromPortablePath(path)}/packages/with-peer']})) === require(require.resolve('optional-peer-deps', {paths: ['${npath.fromPortablePath(path)}/packages/without-peer']}))`);
+        expect(sameInstance).toEqual(true);
+
+        const instances = (await xfs.readdirPromise(ppath.join(path, `node_modules/.pnpm`))).filter(entry => entry.startsWith(`optional-peer-deps-`));
+        expect(instances).toHaveLength(1);
+      }),
+    );
+
+    test(
+      `it should keep separate instances when dependents provide conflicting peers`,
+      makeTemporaryMonorepoEnv({
+        workspaces: [`packages/*`],
+      }, {
+        [`packages/one`]: {name: `one`, dependencies: {[`optional-peer-deps`]: `1.0.0`, [`no-deps`]: `1.0.0`}},
+        [`packages/two`]: {name: `two`, dependencies: {[`optional-peer-deps`]: `1.0.0`, [`no-deps`]: `2.0.0`}},
+      }, async ({path, run}) => {
+        await xfs.writeFilePromise(ppath.join(path, `.yarnrc.yml`), `nodeLinker: pnpm\n`);
+        await run(`install`);
+
+        const instances = (await xfs.readdirPromise(ppath.join(path, `node_modules/.pnpm`))).filter(entry => entry.startsWith(`optional-peer-deps-`));
+        expect(instances).toHaveLength(2);
+      }),
+    );
+
+    test(
+      `it should keep one instance per set of peers when dedupePeerDependents is disabled`,
+      makeTemporaryMonorepoEnv({
+        workspaces: [`packages/*`],
+      }, {
+        [`packages/with-peer`]: {name: `with-peer`, dependencies: {[`optional-peer-deps`]: `1.0.0`, [`no-deps`]: `1.0.0`}},
+        [`packages/without-peer`]: {name: `without-peer`, dependencies: {[`optional-peer-deps`]: `1.0.0`}},
+      }, async ({path, run}) => {
+        await xfs.writeFilePromise(ppath.join(path, `.yarnrc.yml`), `nodeLinker: pnpm\ndedupePeerDependents: false\n`);
+        await run(`install`);
+
+        const instances = (await xfs.readdirPromise(ppath.join(path, `node_modules/.pnpm`))).filter(entry => entry.startsWith(`optional-peer-deps-`));
+        expect(instances).toHaveLength(2);
+      }),
+    );
+
+    test(
       `it shouldn't crash if we recursively traverse a node_modules`,
       makeTemporaryEnv({
         dependencies: {
