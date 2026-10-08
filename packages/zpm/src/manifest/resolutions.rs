@@ -54,53 +54,58 @@ impl ResolutionSelector {
         }
     }
 
-    pub fn apply(&self, parent: &Locator, parent_version: &zpm_semver::Version, descriptor: &Descriptor, replacement_range: &Range) -> Option<Range> {
+    pub fn matches(&self, parent: &Locator, parent_version: &zpm_semver::Version, descriptor: &Descriptor) -> bool {
         match self {
             ResolutionSelector::Descriptor(params) => {
                 if params.descriptor != *descriptor {
-                    return None;
+                    return false;
                 }
 
-                Some(replacement_range.clone())
+                true
             },
 
             ResolutionSelector::Ident(params) => {
                 if params.ident != descriptor.ident {
-                    return None;
+                    return false;
                 }
 
-                Some(replacement_range.clone())
+                true
             },
 
             ResolutionSelector::DescriptorIdent(params) => {
                 if params.ident != descriptor.ident {
-                    return None;
+                    return false;
                 }
 
                 if let Range::AnonymousSemver(parent_params) = &params.parent_descriptor.range {
                     if !parent_params.range.check(parent_version) {
-                        return None;
+                        return false;
                     }
                 } else {
-                    return None;
+                    return false;
                 }
 
-                Some(replacement_range.clone())
+                true
             },
 
             ResolutionSelector::IdentIdent(params) => {
                 if params.ident != descriptor.ident {
-                    return None;
+                    return false;
                 }
 
                 if params.parent_ident != parent.ident {
-                    return None;
+                    return false;
                 }
 
-                Some(replacement_range.clone())
+                true
             },
         }
     }
+
+    pub fn apply(&self, parent: &Locator, parent_version: &zpm_semver::Version, descriptor: &Descriptor, replacement_range: &Range) -> Option<Range> {
+        self.matches(parent, parent_version, descriptor).then(|| replacement_range.clone())
+    }
+
 }
 
 
@@ -112,8 +117,8 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct ResolutionsField {
-    pub entries: Vec<(ResolutionSelector, Range)>,
-    pub by_ident: BTreeMap<Ident, Vec<(ResolutionSelector, Range)>>,
+    pub entries: Vec<(ResolutionSelector, Option<Range>)>,
+    pub by_ident: BTreeMap<Ident, Vec<(ResolutionSelector, Option<Range>)>>,
     pub legacy_glob_keys: Vec<String>,
 }
 
@@ -126,7 +131,7 @@ impl ResolutionsField {
         }
     }
 
-    pub fn from_entries(entries: impl IntoIterator<Item = (ResolutionSelector, Range)>) -> Self {
+    pub fn from_entries(entries: impl IntoIterator<Item = (ResolutionSelector, Option<Range>)>) -> Self {
         let mut field
             = Self::new();
 
@@ -141,15 +146,15 @@ impl ResolutionsField {
         self.entries.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&ResolutionSelector, &Range)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&ResolutionSelector, &Option<Range>)> {
         self.entries.iter().map(|(k, v)| (k, v))
     }
 
-    pub fn get_by_ident(&self, ident: &Ident) -> Option<&Vec<(ResolutionSelector, Range)>> {
+    pub fn get_by_ident(&self, ident: &Ident) -> Option<&Vec<(ResolutionSelector, Option<Range>)>> {
         self.by_ident.get(ident)
     }
 
-    fn add_entry(&mut self, selector: ResolutionSelector, range: Range) {
+    fn add_entry(&mut self, selector: ResolutionSelector, range: Option<Range>) {
         let target_ident
             = selector.target_ident();
 
@@ -177,7 +182,7 @@ impl Serialize for ResolutionsField {
     {
         let mut map = serializer.serialize_map(Some(self.entries.len()))?;
         for (key, value) in &self.entries {
-            map.serialize_entry(&key.to_file_string(), &value.to_file_string())?;
+            map.serialize_entry(&key.to_file_string(), &value.as_ref().map(ToFileString::to_file_string).unwrap_or_else(|| "-".to_string()))?;
         }
         map.end()
     }
@@ -273,8 +278,8 @@ impl<'de> Visitor<'de> for ResolutionsFieldVisitor {
             let selector = parse_selector(&effective_key)
                 .ok_or_else(|| de::Error::custom("invalid resolution selector"))?;
 
-            let value_str: String = map.next_value()?;
-            let range = Range::from_file_string(&value_str)
+            let value_str: Option<String> = map.next_value()?;
+            let range = value_str.as_deref().filter(|value| *value != "-").map(Range::from_file_string).transpose()
                 .map_err(|_| de::Error::custom("invalid range"))?;
 
             // TODO: Remove this in a future major version; we're keeping it for backwards compatibility with

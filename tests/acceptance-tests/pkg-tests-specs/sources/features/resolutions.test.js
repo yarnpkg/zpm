@@ -7,6 +7,21 @@ const {
 
 describe(`Features`, () => {
   describe(`Resolutions`, () => {
+    test(`removal resolutions should remove dependencies and refresh when restored`, makeTemporaryEnv({
+      dependencies: {[`one-fixed-dep`]: `1.0.0`},
+      resolutions: {[`one-fixed-dep/no-deps`]: `-`},
+    }, async ({path, run, source}) => {
+      await run(`install`);
+      await expect(source(`require('one-fixed-dep')`)).rejects.toMatchObject({externalException: {code: `MODULE_NOT_FOUND`}});
+      await run(`install`, `--immutable`);
+      const manifestPath = ppath.join(path, `package.json`);
+      const manifest = await xfs.readJsonPromise(manifestPath);
+      manifest.resolutions[`one-fixed-dep/no-deps`] = `2.0.0`;
+      await xfs.writeJsonPromise(manifestPath, manifest);
+      await run(`install`);
+      await expect(source(`require('one-fixed-dep')`)).resolves.toMatchObject({dependencies: {[`no-deps`]: {version: `2.0.0`}}});
+    }));
+
     test(
       `it should support overriding a packages with another`,
       makeTemporaryEnv(
