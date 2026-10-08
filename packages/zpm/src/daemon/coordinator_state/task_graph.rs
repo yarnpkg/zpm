@@ -109,6 +109,7 @@ impl TaskGraph {
         args: Vec<String>,
         workspace_override: Option<&str>,
         context_id: Option<&str>,
+        only: bool,
         context_registry: &mut ContextRegistry,
     ) -> Result<(ContextualTaskId, Vec<ContextualTaskId>, Vec<Path>), Error> {
         let task_name = TaskName::new(task_name)
@@ -161,7 +162,17 @@ impl TaskGraph {
             return Ok((ctx_task_id, vec![], vec![]));
         }
 
-        let resolve_result = project.resolve_task(&task_id)?;
+        let workspace_filter: Option<BTreeSet<Ident>>
+            = only.then(|| {
+                let mut set = BTreeSet::new();
+                set.insert(task_id.workspace.clone());
+                set
+            });
+
+        let resolve_result = project.resolve_tasks(
+            std::slice::from_ref(&task_id),
+            workspace_filter.as_ref()
+        )?;
         let new_resolved = resolve_result.resolved;
         let source_files = resolve_result.source_files;
 
@@ -240,7 +251,7 @@ impl TaskGraph {
             }
 
             resolved_ctx_task_ids.push(ctx_tid);
-            self.resolved.tasks.insert(tid, prereqs);
+            self.resolved.tasks.entry(tid).or_insert(prereqs);
         }
 
         for (ident, tf) in resolve_result.resolved.task_files {

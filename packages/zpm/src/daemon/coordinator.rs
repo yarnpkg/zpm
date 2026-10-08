@@ -757,6 +757,7 @@ fn execute_push_tasks(
             task_sub.args.clone(),
             task_workspace,
             effective_context_id,
+            only,
             &mut state.contexts,
         ) {
             Ok((ctx_task_id, resolved_ctx_task_ids, source_files)) => {

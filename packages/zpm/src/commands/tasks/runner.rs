@@ -335,6 +335,11 @@ pub async fn run_tasks(
                     .on_task_completed(&mut ctx, &task_id, exit_code, is_target)
                     .await;
 
+                // Record the first non-zero exit code (from target or dependency)
+                if exit_code != 0 && ctx.exit_code == 0 {
+                    ctx.exit_code = exit_code;
+                }
+
                 // Turbo semantics: by default the first failure stops the
                 // run (running tasks are killed, pending ones cancelled);
                 // `--continue` lets independent tasks finish.
