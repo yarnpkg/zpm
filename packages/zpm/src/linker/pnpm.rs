@@ -1,17 +1,69 @@
 use std::collections::{BTreeMap, BTreeSet};
 use itertools::Itertools;
+use rayon::prelude::*;
 use zpm_primitives::{Ident, IdentGlob, Locator};
-use zpm_utils::{IoResultExt, Path, ToHumanString};
+use zpm_utils::{Hash64, IoResultExt, Path, ToHumanString};
 
 use crate::{
     build,
     error::Error,
     fetchers::PackageData,
     install::Install,
-    linker::{self, LinkResult, package_map::{PnpmPackageMapBuilder, persist_package_map}},
+    linker::{self, LinkResult, package_map::{self, PackageMap, PnpmPackageMapBuilder, persist_package_map}},
     project::Project,
     tree_resolver::ResolutionTree,
 };
+
+/// Creates (or repairs) a symlink at `link_abs_path` pointing at
+/// `symlink_target`. Links that already point at the right place are
+/// left untouched, which keeps warm installs from rewriting tens of
+/// thousands of symlinks.
+fn ensure_symlink(link_abs_path: &Path, symlink_target: &Path) -> Result<(), Error> {
+    if link_abs_path.fs_read_link().ok().as_ref() == Some(symlink_target) {
+        return Ok(());
+    }
+
+    if link_abs_path.fs_is_symlink() || link_abs_path.fs_is_file() {
+        link_abs_path.fs_rm_file()?;
+    } else if link_abs_path.fs_exists() {
+        link_abs_path.fs_rm()?;
+    }
+
+    link_abs_path
+        .fs_create_parent()?
+        .fs_symlink(symlink_target)?;
+
+    Ok(())
+}
+
+/// Removes the entries of `dir_path` that aren't listed in `keep`. Used to
+/// prune store entries and top-level links left by a previous install
+/// without wiping (and re-extracting) everything else.
+fn prune_dir_entries(dir_path: &Path, keep: &BTreeSet<String>) -> Result<(), Error> {
+    let Some(entries) = dir_path.fs_read_dir().ok_missing()? else {
+        return Ok(());
+    };
+
+    for entry in entries.flatten() {
+        let name
+            = entry.file_name().to_string_lossy().to_string();
+
+        if keep.contains(&name) {
+            continue;
+        }
+
+        let entry_path
+            = dir_path.with_join_str(&name);
+
+        if entry_path.fs_is_symlink() || entry_path.fs_is_file() {
+            entry_path.fs_rm_file()?;
+        } else {
+            entry_path.fs_rm()?;
+        }
+    }
+
+    Ok(())
+}
 
 /// Check if an ident matches any of the given glob patterns.
 fn matches_patterns(ident: &Ident, patterns: &[IdentGlob]) -> bool {
@@ -45,6 +97,58 @@ fn collect_hoistable_packages<'a>(tree: &'a ResolutionTree, patterns: &[IdentGlo
     hoistable
 }
 
+/// Removes links in a `node_modules` folder that the new layout doesn't
+/// create anymore (removed dependencies, unhoisted packages). Dot-entries
+/// such as `.pnpm` or `.bin` are left alone; scoped folders are pruned
+/// one level deeper.
+fn prune_node_modules(nm_path: &Path, expected: &BTreeSet<Ident>) -> Result<(), Error> {
+    let mut top_level
+        = BTreeSet::new();
+    let mut by_scope: BTreeMap<String, BTreeSet<String>>
+        = BTreeMap::new();
+
+    for ident in expected {
+        match ident.scope() {
+            Some(scope) => {
+                top_level.insert(scope.to_string());
+                by_scope.entry(scope.to_string()).or_default().insert(ident.name().to_string());
+            },
+
+            None => {
+                top_level.insert(ident.as_str().to_string());
+            },
+        }
+    }
+
+    let Some(entries) = nm_path.fs_read_dir().ok_missing()? else {
+        return Ok(());
+    };
+
+    for entry in entries.flatten() {
+        let name
+            = entry.file_name().to_string_lossy().to_string();
+
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let entry_path
+            = nm_path.with_join_str(&name);
+
+        if let Some(scoped_names) = by_scope.get(&name) {
+            prune_dir_entries(&entry_path, scoped_names)?;
+        } else if !top_level.contains(&name) {
+            if entry_path.fs_is_symlink() || entry_path.fs_is_file() {
+                entry_path.fs_rm_file()?;
+            } else {
+                entry_path.fs_rm()?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -> Result<LinkResult, Error> {
     let tree
         = &install.install_state.resolution_tree;
@@ -57,15 +161,20 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
     let cas_index_root = project.config.settings.global_folder.value
         .with_join_str("index");
 
-    // Remove existing node_modules
-    linker::helpers::fs_remove_nm(nm_path)?;
+    // The previous package map records which locator and archive checksum
+    // each store folder was materialized from. Store folders are keyed by
+    // locator slug, so a matching entry means the folder can be kept as-is.
+    let previous_map: Option<PackageMap>
+        = (!install.force)
+            .then(|| package_map::load_package_map(&project.package_map_path(None)))
+            .flatten();
 
     let mut packages_by_location
         = BTreeMap::new();
     let mut locations_by_package
         = BTreeMap::new();
     let mut package_map_builder
-        = PnpmPackageMapBuilder::new(project);
+        = PnpmPackageMapBuilder::new(project, install);
 
     let mut all_build_entries
         = Vec::new();
@@ -75,6 +184,13 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
     // Get dependencies meta from package.json
     let dependencies_meta
         = linker::helpers::TopLevelConfiguration::from_project(project);
+
+    let mut store_slugs
+        = BTreeSet::new();
+    let mut expected_nm_entries: BTreeMap<Path, BTreeSet<Ident>>
+        = BTreeMap::new();
+    let mut extractions
+        = Vec::new();
 
     // First pass: copy all packages to store
     for (locator, resolution) in &tree.locator_resolutions {
@@ -94,11 +210,25 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 let package_store_path = package_base_path
                     .with_join(&locator.ident.nm_subdir());
 
-                linker::helpers::fs_extract_archive_with_cas(
-                    &package_store_path,
-                    physical_package_data,
-                    &cas_index_root,
-                )?;
+                store_slugs.insert(locator.slug());
+
+                let physical_locator
+                    = locator.physical_locator();
+
+                let checksum: Option<&Hash64> = install.lockfile.entries
+                    .get(&physical_locator)
+                    .and_then(|entry| entry.checksum.as_ref())
+                    .or_else(|| install.install_state.cache_checksums.get(&physical_locator));
+
+                let package_id
+                    = package_map::get_package_id(&nm_path, &package_store_path.without_trailing_separators());
+
+                let assume_up_to_date = package_store_path.with_join_str(".ready").fs_exists()
+                    && previous_map.as_ref().is_some_and(|previous_map| previous_map.matches_package(&package_id, locator, checksum));
+
+                if !assume_up_to_date {
+                    extractions.push((package_store_path.clone(), physical_locator));
+                }
 
                 package_store_path
             },
@@ -156,6 +286,42 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         }
     }
 
+    // Store entries whose locator is gone from the tree are leftovers from a
+    // previous install; dot-entries (.ready, .modules.yaml, ...) are kept.
+    let mut kept_store_entries
+        = store_slugs;
+    kept_store_entries.insert("node_modules".to_string());
+    kept_store_entries.insert("lock.yaml".to_string());
+
+    if let Some(store_entries) = store_path.fs_read_dir().ok_missing()? {
+        for entry in store_entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') {
+                kept_store_entries.insert(name);
+            }
+        }
+    }
+
+    prune_dir_entries(&store_path, &kept_store_entries)?;
+
+    tokio::task::block_in_place(|| {
+        extractions.par_iter().try_for_each(|(package_store_path, physical_locator)| -> Result<(), Error> {
+            let package_data = install.package_data
+                .get(physical_locator)
+                .unwrap_or_else(|| panic!("Expected package data for {}", physical_locator.to_print_string()));
+
+            // A folder that doesn't match the previous map may hold stale
+            // files from another archive; start from a clean slate.
+            if package_store_path.fs_exists() {
+                package_store_path.fs_rm()?;
+            }
+
+            linker::helpers::fs_extract_archive_with_cas(package_store_path, package_data, &cas_index_root)?;
+
+            Ok(())
+        })
+    })?;
+
     let hoist_patterns
         = project.config.settings.pnpm_hoist_patterns
             .iter()
@@ -197,12 +363,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         let symlink_target = package_abs_path
             .relative_to(&link_abs_dirname);
 
-        link_abs_path
-            .fs_rm_file()
-            .ok_missing()?
-            .unwrap_or(&link_abs_path)
-            .fs_create_parent()?
-            .fs_symlink(&symlink_target)?;
+        ensure_symlink(&link_abs_path, &symlink_target)?;
     }
 
     // Track which packages are direct dependencies of workspaces
@@ -234,6 +395,11 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             = project.project_cwd
                 .with_join(&ident.nm_subdir());
 
+        expected_nm_entries
+            .entry(nm_path.clone())
+            .or_default()
+            .insert((*ident).clone());
+
         let link_abs_dirname
             = link_abs_path
                 .dirname()
@@ -243,12 +409,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             = package_abs_path
                 .relative_to(&link_abs_dirname);
 
-        link_abs_path
-            .fs_rm_file()
-            .ok_missing()?
-            .unwrap_or(&link_abs_path)
-            .fs_create_parent()?
-            .fs_symlink(&symlink_target)?;
+        ensure_symlink(&link_abs_path, &symlink_target)?;
     }
 
     // Second pass: create symlinks in node_modules directories
@@ -299,6 +460,13 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                     .with_join(dep_rel_location);
 
             // /path/to/project/node_modules/@types/no-deps
+            if let Some(workspace) = workspace {
+                expected_nm_entries
+                    .entry(workspace.path.with_join_str("node_modules"))
+                    .or_default()
+                    .insert(dep_name.clone());
+            }
+
             let link_abs_path = match workspace {
                 Some(workspace) => workspace.path.with_join(&dep_name.nm_subdir()),
                 None if dep_name == &locator.ident => store_path.with_join_str(&locator.slug()).with_join(&locator.ident.nm_subdir()).with_join(&dep_name.nm_subdir()),
@@ -316,17 +484,21 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 = dep_abs_path
                     .relative_to(&link_abs_dirname);
 
-            link_abs_path
-                .fs_rm_file()
-                .ok_missing()?
-                .unwrap_or(&link_abs_path)
-                .fs_create_parent()?
-                .fs_symlink(&symlink_target)?;
+            ensure_symlink(&link_abs_path, &symlink_target)?;
         }
 
         if !has_explicit_self_dependency && !locator.reference.is_workspace_reference() {
             package_map_builder.register_dependency(locator, &locator.ident, locator)?;
         }
+    }
+
+    // Every workspace gets its node_modules pruned, including those whose
+    // dependencies were all removed (absent from `expected_nm_entries`).
+    for workspace in &project.workspaces {
+        let workspace_nm_path
+            = workspace.path.with_join_str("node_modules");
+
+        prune_node_modules(&workspace_nm_path, expected_nm_entries.get(&workspace_nm_path).unwrap_or(&BTreeSet::new()))?;
     }
 
     persist_package_map(project, &package_map_builder.build()?)?;

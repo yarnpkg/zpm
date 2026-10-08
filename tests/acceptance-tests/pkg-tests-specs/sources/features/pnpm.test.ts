@@ -39,6 +39,94 @@ describe(`Features`, () => {
       }),
     );
 
+    test(
+      `it should keep unchanged store folders across installs`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+          [`one-fixed-dep`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+      }, async ({path, run}) => {
+        await run(`install`);
+
+        const noDepsPath = ppath.join(path, `node_modules/no-deps/package.json`);
+        const marker = ppath.join(ppath.dirname(await xfs.realpathPromise(noDepsPath)), `marker`);
+
+        // A file Yarn doesn't know about survives only if the folder isn't re-extracted
+        await xfs.writeFilePromise(marker, ``);
+
+        // Changing an unrelated dependency relinks the project
+        await xfs.writeJsonPromise(ppath.join(path, `package.json`), {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+            [`one-fixed-dep`]: `2.0.0`,
+          },
+        });
+
+        await run(`install`);
+        expect(xfs.existsSync(marker)).toEqual(true);
+
+        // --force is the escape hatch to heal a damaged store
+        await run(`install`, `--force`);
+        expect(xfs.existsSync(marker)).toEqual(false);
+      }),
+    );
+
+    test(
+      `it should re-extract store folders whose patch changed`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `patch:no-deps@npm%3A1.0.0#./my.patch`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+      }, async ({path, run}) => {
+        const makePatch = (value: string) => [
+          `diff --git a/index.js b/index.js`,
+          `--- a/index.js`,
+          `+++ b/index.js`,
+          `@@ -1,0 +1,1 @@`,
+          `+module.exports.patched = ${JSON.stringify(value)};`,
+          ``,
+        ].join(`\n`);
+
+        await xfs.writeFilePromise(ppath.join(path, `my.patch`), makePatch(`first`));
+        await run(`install`);
+
+        await xfs.writeFilePromise(ppath.join(path, `my.patch`), makePatch(`second`));
+        await run(`install`);
+
+        const content = await xfs.readFilePromise(ppath.join(path, `node_modules/no-deps/index.js`), `utf8`);
+        expect(content).toContain(`"second"`);
+        expect(content).not.toContain(`"first"`);
+      }),
+    );
+
+    test(
+      `it should remove links to dependencies that were removed`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+          [`@types/no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+      }, async ({path, run}) => {
+        await run(`install`);
+
+        expect(xfs.existsSync(ppath.join(path, `node_modules/no-deps`))).toEqual(true);
+        expect(xfs.existsSync(ppath.join(path, `node_modules/@types/no-deps`))).toEqual(true);
+
+        await xfs.writeJsonPromise(ppath.join(path, `package.json`), {dependencies: {}});
+        await run(`install`);
+
+        expect(xfs.existsSync(ppath.join(path, `node_modules/no-deps`))).toEqual(false);
+        expect(xfs.existsSync(ppath.join(path, `node_modules/@types/no-deps`))).toEqual(false);
+      }),
+    );
+
     testIf(() => process.platform === `win32`,
       `'winLinkType: symlinks' on Windows should use symlinks in node_modules directories`,
       makeTemporaryEnv(
