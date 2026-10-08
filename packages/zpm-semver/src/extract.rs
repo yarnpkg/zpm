@@ -161,10 +161,14 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                     // Skip all whitespaces
                 }
 
-                if let Some((version, _)) = extract_version(str) {
-                    let upper_bound = match (version.major, version.minor) {
-                        (0, 0) => version.next_patch_rc(),
-                        (0, _) => version.next_minor_rc(),
+                if let Some((version, missing)) = extract_version(str) {
+                    // Missing components are wildcards, so `^0` and `^0.0`
+                    // respectively mean `0.x` and `0.0.x`
+                    let upper_bound = match (version.major, version.minor, missing) {
+                        (_, _, 2..) => version.next_major_rc(),
+                        (0, 0, 1) => version.next_minor_rc(),
+                        (0, 0, _) => version.next_patch_rc(),
+                        (0, _, _) => version.next_minor_rc(),
                         _ => version.next_major_rc(),
                     };
 
@@ -191,9 +195,12 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                     // Skip all whitespaces
                 }
 
-                if let Some((version, _)) = extract_version(str) {
-                    let next_minor
-                        = version.next_minor_rc();
+                if let Some((version, missing)) = extract_version(str) {
+                    // `~1` only fixes the major, so it means `1.x`
+                    let upper_bound = match missing {
+                        2.. => version.next_major_rc(),
+                        _ => version.next_minor_rc(),
+                    };
 
                     Some(EcoVec::from([
                         Token::Operation(
@@ -203,7 +210,7 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                         Token::Syntax(TokenType::SAnd),
                         Token::Operation(
                             OperatorType::LessThan,
-                            next_minor,
+                            upper_bound,
                         ),
                     ]))
                 } else {
