@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, str::FromStr};
 
 use pubgrub::{Ranges, VersionSet};
 use smallvec::SmallVec;
@@ -69,6 +69,19 @@ impl IslandVersion {
         match &self.0.reference {
             Reference::Shorthand(params) => Some(params.version.clone()),
             Reference::Registry(params) => Some(params.version.clone()),
+            _ => None,
+        }
+    }
+
+    /// The PEP 440 version of PyPI references without a pinned artifact.
+    pub fn pypi_version(&self) -> Option<pep440_rs::Version> {
+        match &self.0.reference {
+            Reference::PypiShorthand(params) if params.url.is_none()
+                => pep440_rs::Version::from_str(params.version.as_str()).ok(),
+
+            Reference::PypiRegistry(params) if params.url.is_none()
+                => pep440_rs::Version::from_str(params.version.as_str()).ok(),
+
             _ => None,
         }
     }
@@ -183,6 +196,7 @@ impl fmt::Display for ExactSet {
 #[derive(Clone, Debug)]
 pub enum IslandVersionSet {
     Semver(Ranges<PubgrubVersion>),
+    Pypi(Ranges<pep440_rs::Version>),
     Exact(ExactSet),
 }
 
@@ -194,6 +208,26 @@ impl IslandVersionSet {
 
     pub fn exact_singleton(v: IslandVersion) -> IslandVersionSet {
         IslandVersionSet::Exact(ExactSet::OneOf(SmallVec::from_elem(v, 1)))
+    }
+
+    pub fn from_pypi_specifier(specifier: &zpm_primitives::PypiSpecifierSet) -> Option<IslandVersionSet> {
+        if specifier.is_any() {
+            return Some(IslandVersionSet::Pypi(Ranges::full()));
+        }
+
+        let specifiers
+            = pep440_rs::VersionSpecifiers::from_str(specifier.as_str()).ok()
+                .or_else(|| pep440_rs::VersionSpecifiers::from_str(&format!("=={}", specifier.as_str())).ok())?;
+
+        Some(IslandVersionSet::Pypi(Ranges::from(specifiers)))
+    }
+
+    fn is_pypi_empty(&self) -> bool {
+        matches!(self, IslandVersionSet::Pypi(r) if r.is_empty())
+    }
+
+    fn is_pypi_full(&self) -> bool {
+        matches!(self, IslandVersionSet::Pypi(r) if *r == Ranges::full())
     }
 
     fn is_semver_empty(&self) -> bool {
@@ -213,11 +247,11 @@ impl IslandVersionSet {
     }
 
     fn is_logically_empty(&self) -> bool {
-        self.is_semver_empty() || self.is_exact_empty()
+        self.is_semver_empty() || self.is_exact_empty() || self.is_pypi_empty()
     }
 
     fn is_logically_full(&self) -> bool {
-        self.is_semver_full() || self.is_exact_full()
+        self.is_semver_full() || self.is_exact_full() || self.is_pypi_full()
     }
 }
 
@@ -225,6 +259,7 @@ impl PartialEq for IslandVersionSet {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (IslandVersionSet::Semver(a), IslandVersionSet::Semver(b)) => a == b,
+            (IslandVersionSet::Pypi(a), IslandVersionSet::Pypi(b)) => a == b,
             (IslandVersionSet::Exact(a), IslandVersionSet::Exact(b)) => a == b,
             // Cross-variant: only equal if both logically empty or both logically full
             _ => {
@@ -241,6 +276,7 @@ impl fmt::Display for IslandVersionSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             IslandVersionSet::Semver(r) => write!(f, "{}", r),
+            IslandVersionSet::Pypi(r) => write!(f, "{}", r),
             IslandVersionSet::Exact(e) => write!(f, "{}", e),
         }
     }
@@ -254,6 +290,10 @@ impl VersionSet for IslandVersionSet {
     }
 
     fn singleton(v: Self::V) -> Self {
+        if let Some(version) = v.pypi_version() {
+            return IslandVersionSet::Pypi(Ranges::singleton(version));
+        }
+
         match v.version() {
             Some(version) => {
                 IslandVersionSet::Semver(Ranges::singleton(PubgrubVersion::new(version)))
@@ -267,6 +307,7 @@ impl VersionSet for IslandVersionSet {
     fn complement(&self) -> Self {
         match self {
             IslandVersionSet::Semver(r) => IslandVersionSet::Semver(r.complement()),
+            IslandVersionSet::Pypi(r) => IslandVersionSet::Pypi(r.complement()),
             IslandVersionSet::Exact(e) => IslandVersionSet::Exact(e.complement()),
         }
     }
@@ -275,6 +316,9 @@ impl VersionSet for IslandVersionSet {
         match (self, other) {
             (IslandVersionSet::Semver(a), IslandVersionSet::Semver(b)) => {
                 IslandVersionSet::Semver(a.intersection(b))
+            }
+            (IslandVersionSet::Pypi(a), IslandVersionSet::Pypi(b)) => {
+                IslandVersionSet::Pypi(a.intersection(b))
             }
             (IslandVersionSet::Exact(a), IslandVersionSet::Exact(b)) => {
                 IslandVersionSet::Exact(a.intersection(b))
@@ -297,7 +341,17 @@ impl VersionSet for IslandVersionSet {
     }
 
     fn contains(&self, v: &Self::V) -> bool {
+        if self.is_logically_full() {
+            return true;
+        }
+
         match self {
+            IslandVersionSet::Pypi(r) => {
+                match v.pypi_version() {
+                    Some(version) => r.contains(&version),
+                    None => false,
+                }
+            }
             IslandVersionSet::Semver(r) => {
                 match v.version() {
                     Some(version) => r.contains(&PubgrubVersion::new(version)),
@@ -315,22 +369,24 @@ impl VersionSet for IslandVersionSet {
     fn is_disjoint(&self, other: &Self) -> bool {
         match (self, other) {
             (IslandVersionSet::Semver(a), IslandVersionSet::Semver(b)) => a.is_disjoint(b),
+            (IslandVersionSet::Pypi(a), IslandVersionSet::Pypi(b)) => a.is_disjoint(b),
             (IslandVersionSet::Exact(a), IslandVersionSet::Exact(b)) => {
                 a.intersection(b).is_empty()
             }
-            // Cross-variant: semver and exact never share values
-            _ => true,
+            // Cross-variant: disjoint unless one side is the full set
+            _ => self.is_logically_empty() || other.is_logically_empty() || !(self.is_logically_full() || other.is_logically_full()),
         }
     }
 
     fn subset_of(&self, other: &Self) -> bool {
         match (self, other) {
             (IslandVersionSet::Semver(a), IslandVersionSet::Semver(b)) => a.subset_of(b),
+            (IslandVersionSet::Pypi(a), IslandVersionSet::Pypi(b)) => a.subset_of(b),
             (IslandVersionSet::Exact(a), IslandVersionSet::Exact(b)) => {
                 *a == a.intersection(b)
             }
-            // Cross-variant: only if self is empty
-            _ => self.is_logically_empty(),
+            // Cross-variant: only if self is empty or other is full
+            _ => self.is_logically_empty() || other.is_logically_full(),
         }
     }
 }

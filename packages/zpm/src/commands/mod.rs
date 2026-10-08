@@ -23,6 +23,7 @@ mod dedupe;
 mod dlx;
 mod exec;
 mod explain;
+mod import_uv;
 mod info;
 mod init;
 mod install;
@@ -108,6 +109,7 @@ pub enum YarnCli {
     Dlx(dlx::Dlx),
     Exec(exec::Exec),
     ExplainPeerRequirements(explain::peer_requirements::ExplainPeerRequirements),
+    ImportUv(import_uv::ImportUv),
     Info(info::Info),
     InitWithTemplate(init::InitWithTemplate),
     Init(init::Init),

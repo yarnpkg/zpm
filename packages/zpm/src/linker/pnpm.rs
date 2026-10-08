@@ -216,7 +216,9 @@ fn locator_depths(tree: &ResolutionTree) -> BTreeMap<&Locator, usize> {
 
 pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -> Result<LinkResult, Error> {
     let tree
-        = &install.install_state.resolution_tree;
+        = linker::helpers::main_linker_tree(install);
+    let tree
+        = tree.as_ref();
 
     let nm_path = project.project_cwd
         .with_join_str("node_modules");

@@ -32,6 +32,8 @@ version-ranges = { workspace = true }
 rayon = { workspace = true }
 rkyv = { workspace = true, features = ["bytecheck"] }
 pep-508 = { workspace = true }
+pep440_rs = { workspace = true }
+toml_edit = "0.25"
 reqwest = { workspace = true, default-features = false, features = ["gzip", "http2", "hickory-dns"] }
 regex = { workspace = true }
 rust-ini = { workspace = true }

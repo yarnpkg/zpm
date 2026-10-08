@@ -450,6 +450,7 @@ pub struct ScriptEnvironment {
     signal_delegation: bool,
     trust_check_enabled: bool,
     trust_check_project_cwd: Option<Path>,
+    venv_bin: Option<Path>,
 }
 
 impl ScriptEnvironment {
@@ -464,6 +465,7 @@ impl ScriptEnvironment {
             signal_delegation: false,
             trust_check_enabled: false,
             trust_check_project_cwd: None,
+            venv_bin: None,
         };
 
         if let Ok(val) = std::env::var("YARNSW_DETECTED_ROOT") {
@@ -716,6 +718,7 @@ impl ScriptEnvironment {
 
         self.attach_package_variables(project, locator)?;
         self.refresh_package_map(project);
+        self.attach_venv(project, package_cwd_rel);
 
         let binaries
             = project.package_visible_binaries(locator)?;
@@ -724,6 +727,24 @@ impl ScriptEnvironment {
             .with_package(&binaries, &project.project_cwd)?;
 
         Ok(self)
+    }
+
+    /// Workspaces of venv islands run their scripts within their venv, so
+    /// `python`, `pytest`, etc. resolve to the venv's binaries.
+    fn attach_venv(&mut self, project: &Project, package_cwd_rel: &Path) {
+        let Some(workspace) = project.try_island_by_rel_path(package_cwd_rel, zpm_config::IslandLinker::Venv) else {
+            return;
+        };
+
+        let venv
+            = crate::linker::venv::workspace_venv_path(&workspace.path);
+
+        if !venv.with_join_str("bin").fs_exists() {
+            return;
+        }
+
+        self.env.insert("VIRTUAL_ENV".to_string(), Some(venv.to_native_string()));
+        self.venv_bin = Some(venv.with_join_str("bin"));
     }
 
     pub fn with_cwd(mut self, cwd: Path) -> Self {
@@ -774,10 +795,14 @@ impl ScriptEnvironment {
             .unwrap_or_else(|| std::env::var("PATH").ok())
             .unwrap_or_default();
 
-        let next_env_path = match env_path.is_empty() {
+        let mut next_env_path = match env_path.is_empty() {
             true => bin_dir_str.clone(),
             false => format!("{}{}{}", bin_dir_str, PATH_LIST_SEPARATOR, env_path),
         };
+
+        if let Some(venv_bin) = &self.venv_bin {
+            next_env_path = format!("{}{}{}", venv_bin.to_native_string(), PATH_LIST_SEPARATOR, next_env_path);
+        }
 
         // Rust only looks for `.exe` files when resolving programs on Windows,
         // so we resolve them ourselves to also find `.cmd` files (our shims,

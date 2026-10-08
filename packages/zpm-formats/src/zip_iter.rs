@@ -42,6 +42,12 @@ impl<'a> ZipIterator<'a> {
         let central_directory_record_offset
             = end_of_central_directory_record.offset_of_central_directory.get() as usize;
 
+        // Anything else than a zip (a gzipped sdist, say) lands here with a
+        // garbage offset
+        if central_directory_record_offset > end_of_central_directory_record_offset {
+            return Err(Error::InvalidZipFile("Central directory offset out of bounds".to_string()));
+        }
+
         Ok(ZipIterator {
             buffer,
 
@@ -56,15 +62,20 @@ impl<'a> ZipIterator<'a> {
         let data_offset
             = name_offset + general_record.header.file_name_length.get() as usize + general_record.header.extra_field_length.get() as usize;
 
+        let name_bytes
+            = self.buffer.get(name_offset..name_offset + general_record.header.file_name_length.get() as usize)
+                .ok_or_else(|| Error::InvalidZipFile("File name out of bounds".to_string()))?;
+
         let name_str
-            = std::str::from_utf8(&self.buffer[name_offset..name_offset + general_record.header.file_name_length.get() as usize])?;
+            = std::str::from_utf8(name_bytes)?;
         let name
             = Path::try_from(name_str)?;
 
         let data_size
             = central_directory_record.header.compressed_size.get() as usize;
         let data
-            = &self.buffer[data_offset..data_offset + data_size];
+            = self.buffer.get(data_offset..data_offset + data_size)
+                .ok_or_else(|| Error::InvalidZipFile("File data out of bounds".to_string()))?;
 
         let mut entry = Entry {
             name,
@@ -105,7 +116,11 @@ impl<'a> Iterator for ZipIterator<'a> {
 
         let offset = self.central_directory_record_offset;
 
-        let central_directory_record = match CentralDirectoryRecord::ref_from_prefix(&self.buffer[offset..]) {
+        let Some(record_bytes) = self.buffer.get(offset..) else {
+            return Some(Err(Error::InvalidZipFile("Central directory record out of bounds".to_string())));
+        };
+
+        let central_directory_record = match CentralDirectoryRecord::ref_from_prefix(record_bytes) {
             Ok((record, _)) => record,
             Err(_) => return Some(Err(Error::InvalidZipFile("Failed to parse central directory record".to_string()))),
         };
@@ -113,7 +128,11 @@ impl<'a> Iterator for ZipIterator<'a> {
         let local_file_header_offset
             = central_directory_record.relative_offset_of_local_header.get() as usize;
 
-        let general_record = match GeneralRecord::ref_from_prefix(&self.buffer[local_file_header_offset..]) {
+        let Some(header_bytes) = self.buffer.get(local_file_header_offset..) else {
+            return Some(Err(Error::InvalidZipFile("Local file header out of bounds".to_string())));
+        };
+
+        let general_record = match GeneralRecord::ref_from_prefix(header_bytes) {
             Ok((record, _)) => record,
             Err(_) => return Some(Err(Error::InvalidZipFile("Failed to parse general record".to_string()))),
         };
@@ -124,5 +143,17 @@ impl<'a> Iterator for ZipIterator<'a> {
             + central_directory_record.file_comment_length.get() as usize;
 
         Some(self.parse_entry_at(local_file_header_offset, central_directory_record, general_record))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_non_zip_input_is_an_error_not_a_panic() {
+        // A gzipped tarball (a PyPI sdist) handed to the zip reader
+        let mut tarball = vec![0x1f, 0x8b, 0x08, 0x00];
+        tarball.extend(std::iter::repeat(0xff).take(4096));
+
+        assert!(crate::zip::entries_from_zip(&tarball).is_err());
     }
 }
