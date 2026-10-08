@@ -66,7 +66,11 @@ impl<'a> TaskSelection<'a> {
         }
 
         if let Some(since) = &self.since {
-            seeds.extend(git_utils::fetch_affected_workspaces(project, since.as_deref()).await?);
+            let range
+                = git_utils::ChangesetRange::since(since.as_deref())
+                    .with_env_defaults();
+
+            seeds.extend(git_utils::fetch_affected_workspaces(project, &range).await?);
         }
 
         if !has_explicit_seeds {

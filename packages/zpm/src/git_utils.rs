@@ -174,7 +174,14 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
     };
 
     let changed_files
-        = fetch_changed_files(&project, Some(&since_ref)).await?;
+        = fetch_changed_files_between(project, &since_ref, None).await?;
+
+    changed_workspaces_from_files(project, &since_ref, None, &changed_files).await
+}
+
+/// Map changed files to the workspaces containing them; when the lockfile
+/// changed, the workspaces whose dependency tree changed are added too.
+async fn changed_workspaces_from_files(project: &Project, since_ref: &str, head: Option<&str>, changed_files: &BTreeSet<Path>) -> Result<BTreeMap<Ident, BTreeSet<Path>>, Error> {
 
     let mut changed_workspaces: BTreeMap<_, BTreeSet<_>>
         = BTreeMap::new();
@@ -185,7 +192,7 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
     let lockfile_changed
         = changed_files.contains(&lockfile_path);
 
-    for file in &changed_files {
+    for file in changed_files {
         // Skip the lockfile itself - we handle it separately via hash comparison
         if file == &lockfile_path {
             continue;
@@ -210,14 +217,16 @@ pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) ->
         // If we can't make sense of the lockfile from the working tree then
         // nothing else will; better to report it than to silently skip the
         // workspaces whose dependencies changed.
-        let current_lockfile
-            = project.lockfile()?;
+        let current_lockfile = match head {
+            Some(head) => fetch_lockfile_at_ref(project, head).await?,
+            None => project.lockfile()?,
+        };
 
         // A base we can't read (the lockfile may simply not have existed
         // back then) can't vouch for anything; an empty lockfile makes all
         // the workspaces count as changed, which is the safe answer.
         let old_lockfile
-            = fetch_lockfile_at_ref(project, &since_ref).await
+            = fetch_lockfile_at_ref(project, since_ref).await
                 .unwrap_or_else(|_| Lockfile::new());
 
         for ident in find_changed_workspaces(project, &old_lockfile, &current_lockfile) {
@@ -264,6 +273,31 @@ pub async fn fetch_changed_files(project: &Project, since: Option<&str>) -> Resu
         None => fetch_branch_base(project).await?,
     };
 
+    fetch_changed_files_between(project, &since, None).await
+}
+
+/// Files changed between `base` and `head`. Without `head` the comparison
+/// is made against the working tree (including untracked files); with a
+/// `head` ref only the committed changes between the two refs are listed
+/// (same as `TURBO_SCM_BASE`/`TURBO_SCM_HEAD`).
+pub async fn fetch_changed_files_between(project: &Project, since: &str, head: Option<&str>) -> Result<BTreeSet<Path>, Error> {
+    let since = since.to_string();
+
+    if let Some(head) = head {
+        let changed_files = ScriptEnvironment::new()?
+            .with_cwd(project.project_cwd.clone())
+            .run_exec("git", ["diff", "--name-only", "--relative", &since, head])
+            .await?
+            .ok()?
+            .stdout_text()?
+            .lines()
+            .filter(|s| !s.is_empty())
+            .map(|s| project.project_cwd.with_join_str(s))
+            .collect::<BTreeSet<_>>();
+
+        return Ok(changed_files);
+    }
+
     let local_stdout = ScriptEnvironment::new()?
         .with_cwd(project.project_cwd.clone())
         // --relative makes git print the paths relative to the cwd (and skip
@@ -295,15 +329,89 @@ pub async fn fetch_changed_files(project: &Project, since: Option<&str>) -> Resu
     Ok(changed_files)
 }
 
-/// Workspaces affected by the changes since `since` (or the configured base
-/// refs): the changed workspaces (lockfile-aware) and, transitively, every
-/// workspace depending on them. Equivalent to `turbo ls --affected`.
-pub async fn fetch_affected_workspaces(project: &Project, since: Option<&str>) -> Result<BTreeSet<Ident>, Error> {
-    let changed_workspaces
-        = fetch_changed_workspaces(project, since).await?;
+/// Range of changes to consider for change detection.
+#[derive(Debug, Clone, Default)]
+pub struct ChangesetRange {
+    /// Base ref; defaults to the merge base with `changesetBaseRefs`
+    pub base: Option<String>,
+    /// Head ref; defaults to the working tree (including uncommitted and untracked files)
+    pub head: Option<String>,
+}
 
-    let changed: BTreeSet<Ident>
-        = changed_workspaces.into_keys().collect();
+impl ChangesetRange {
+    pub fn since(base: Option<&str>) -> Self {
+        Self {
+            base: base.map(|base| base.to_string()),
+            head: None,
+        }
+    }
+
+    /// Fill the unset bounds from `YARN_CHANGESET_BASE`/`YARN_CHANGESET_HEAD`
+    /// (falling back to turbo's `TURBO_SCM_BASE`/`TURBO_SCM_HEAD` to ease
+    /// migrations).
+    pub fn with_env_defaults(mut self) -> Self {
+        let read = |names: [&str; 2]| names.iter()
+            .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()));
+
+        if self.base.is_none() {
+            self.base = read(["YARN_CHANGESET_BASE", "TURBO_SCM_BASE"]);
+        }
+
+        if self.head.is_none() {
+            self.head = read(["YARN_CHANGESET_HEAD", "TURBO_SCM_HEAD"]);
+        }
+
+        self
+    }
+}
+
+/// Changed workspaces in the given range. If any changed file matches the
+/// `changesetGlobalFiles` setting, every workspace is considered changed
+/// (turbo's `globalDependencies`).
+pub async fn fetch_changed_workspaces_in_range(project: &Project, range: &ChangesetRange) -> Result<BTreeSet<Ident>, Error> {
+    let since_ref = match &range.base {
+        Some(base) => base.clone(),
+        None => fetch_branch_base(project).await?,
+    };
+
+    let changed_files
+        = fetch_changed_files_between(project, &since_ref, range.head.as_deref()).await?;
+
+    if touches_global_files(project, &changed_files) {
+        return Ok(project.workspaces.iter().map(|w| w.name.clone()).collect());
+    }
+
+    let changed_workspaces
+        = changed_workspaces_from_files(project, &since_ref, range.head.as_deref(), &changed_files).await?;
+
+    Ok(changed_workspaces.into_keys().collect())
+}
+
+fn touches_global_files(project: &Project, changed_files: &BTreeSet<Path>) -> bool {
+    let patterns: Vec<zpm_utils::Glob>
+        = project.config.settings.changeset_global_files.iter()
+            .filter_map(|pattern| zpm_utils::Glob::parse(pattern.value.as_str()).ok())
+            .collect();
+
+    if patterns.is_empty() {
+        return false;
+    }
+
+    changed_files.iter().any(|file| {
+        let Some(rel_path) = file.forward_relative_to(&project.project_cwd) else {
+            return false;
+        };
+
+        patterns.iter().any(|pattern| pattern.is_match(rel_path.as_str()))
+    })
+}
+
+/// Workspaces affected by the changes in the range: the changed workspaces
+/// (lockfile-aware, global files included) and, transitively, every
+/// workspace depending on them. Equivalent to `turbo ls --affected`.
+pub async fn fetch_affected_workspaces(project: &Project, range: &ChangesetRange) -> Result<BTreeSet<Ident>, Error> {
+    let changed
+        = fetch_changed_workspaces_in_range(project, range).await?;
 
     Ok(project.workspaces_with_dependents(&changed))
 }
