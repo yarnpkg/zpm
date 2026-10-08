@@ -156,6 +156,12 @@ impl PythonVersion {
         format!("{}.{}.{}", self.major, self.minor, self.patch.unwrap_or(0))
     }
 
+    /// Version string for marker evaluation. When the exact patch is unknown,
+    /// assumes a recent patch (999) to avoid incorrectly filtering dependencies.
+    pub fn full_for_markers(&self) -> String {
+        format!("{}.{}.{}", self.major, self.minor, self.patch.unwrap_or(999))
+    }
+
     pub fn pep440(&self) -> pep440_rs::Version {
         pep440_rs::Version::from_str(&self.full()).unwrap()
     }
@@ -340,8 +346,8 @@ enum MarkerKind {
 fn variable_value(variable: &pep_508::Variable<'_>, env: &PythonEnv, extra: Option<&str>) -> (String, Option<MarkerKind>) {
     match variable {
         pep_508::Variable::PythonVersion => (env.python.short(), Some(MarkerKind::Version)),
-        pep_508::Variable::PythonFullVersion => (env.python.full(), Some(MarkerKind::Version)),
-        pep_508::Variable::ImplementationVersion => (env.python.full(), Some(MarkerKind::Version)),
+        pep_508::Variable::PythonFullVersion => (env.python.full_for_markers(), Some(MarkerKind::Version)),
+        pep_508::Variable::ImplementationVersion => (env.python.full_for_markers(), Some(MarkerKind::Version)),
         pep_508::Variable::OsName => (env.platform.os_name().to_string(), Some(MarkerKind::String)),
         pep_508::Variable::SysPlatform => (env.platform.sys_platform().to_string(), Some(MarkerKind::String)),
         pep_508::Variable::PlatformSystem => (env.platform.platform_system().to_string(), Some(MarkerKind::String)),

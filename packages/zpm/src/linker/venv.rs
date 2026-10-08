@@ -218,7 +218,8 @@ fn ensure_unpacked(project: &Project, interpreter: &Interpreter, locator: &Locat
         = Hash64::from_data(locator.to_file_string().as_bytes());
 
     // Source distributions are built into a wheel first (once per machine)
-    let archive_path = if archive_path.to_file_string().ends_with(".tar.gz") {
+    let is_wheel = archive_path.to_file_string().ends_with(".whl");
+    let archive_path = if !is_wheel {
         crate::python_build::build_wheel_from_sdist(project, interpreter, locator, archive_path, &key)?
     } else {
         archive_path.clone()
@@ -612,11 +613,14 @@ pub async fn link_island_venv(project: &Project, install: &Install, island: &cra
     let targets
         = PythonTargets::from_config(&project.config, Some(&python_version));
 
-    let env
-        = targets.current_env();
-
     let interpreter
         = ensure_interpreter(&project.config, &project.http_client, &python_version).await?;
+
+    // Use the interpreter's actual version (including patch) for marker evaluation
+    let env = PythonEnv {
+        python: interpreter.version.clone(),
+        platform: targets.current_env().platform,
+    };
 
     let use_clone
         = crate::linker::helpers::clonefile_supported(&store_root(project), &project.project_cwd);

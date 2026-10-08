@@ -555,11 +555,21 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
             }
         }
 
-        // Check locked version first
+        // Check locked version first, ensuring it also satisfies constraints
         if let Some(locked_locator) = self.locked_versions.get(ident) {
             let iv = IslandVersion(locked_locator.clone());
             if range.contains(&iv) {
-                return Ok(Some(iv));
+                // For PyPI packages, verify the locked version isn't excluded by constraints
+                let is_pypi = matches!(range, IslandVersionSet::Pypi(_)) || self.pypi_idents.borrow().contains(ident);
+                if is_pypi {
+                    let versions = self.fetch_pypi_versions(ident)?;
+                    if versions.iter().any(|v| &v.0 == locked_locator) {
+                        return Ok(Some(iv));
+                    }
+                    // Locked version is constrained out; continue to select a new one
+                } else {
+                    return Ok(Some(iv));
+                }
             }
         }
 

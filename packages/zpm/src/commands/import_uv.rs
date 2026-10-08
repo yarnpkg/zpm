@@ -160,7 +160,9 @@ fn python_version_for(requires_python: Option<&str>) -> Option<String> {
 
     candidates.iter()
         .find(|candidate| {
-            let version = pep440_rs::Version::from_str_lossy(&format!("{}.0", candidate));
+            // Test if this minor version can satisfy the requirement.
+            // Use a high patch version to handle specs like >=3.12.1
+            let version = pep440_rs::Version::from_str_lossy(&format!("{}.999", candidate));
             version.map_or(false, |version| specifiers.contains(&version))
         })
         .map(|candidate| candidate.to_string())

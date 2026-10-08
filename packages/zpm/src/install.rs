@@ -1429,12 +1429,24 @@ impl<'a> InstallManager<'a> {
                     for (locator, resolution) in &island_result.normalized_resolutions {
                         island_locators.push(locator.clone());
 
+                        let is_new = !self.result.lockfile.entries.contains_key(locator);
                         let entry = self.result.lockfile.entries
                             .entry(locator.clone())
                             .or_insert_with(|| LockfileEntry {
                                 checksum: None,
                                 resolution: resolution.clone(),
                             });
+
+                        // Islands targeting different Python versions may have
+                        // different marker-evaluated dependencies; merge them
+                        // so no island loses its required deps
+                        if !is_new {
+                            for (ident, descriptor) in &resolution.dependencies {
+                                entry.resolution.dependencies
+                                    .entry(ident.clone())
+                                    .or_insert_with(|| descriptor.clone());
+                            }
+                        }
 
                         // Islands targeting different Python versions list
                         // different variants for the same release; the

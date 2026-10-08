@@ -23,12 +23,17 @@ use zpm_utils::{Hash64, Path, ToFileString, ToHumanString};
 use crate::{
     error::Error,
     project::Project,
-    pypi::get_registry,
+    pypi,
     python_interpreter::Interpreter,
 };
 
 const BUILD_DRIVER: &str = r#"
-import importlib, os, sys, tomllib
+import importlib, os, sys
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 
 source, out, mode, result_path = sys.argv[1:5]
 sys.argv = sys.argv[:1]
@@ -98,11 +103,21 @@ fn run(command: &mut Command, what: &str) -> Result<String, Error> {
 /// The index URL handed to pip, with the credentials Yarn would use.
 fn pip_index_url(project: &Project, locator: &Locator) -> String {
     let registry
-        = get_registry(&project.config, &locator.ident);
+        = pypi::get_registry(&project.config, &locator.ident);
 
-    let token
-        = project.config.settings.pypi_auth_ident.value.as_ref().map(|secret| secret.value.clone())
-            .or_else(|| project.config.settings.pypi_auth_token.value.as_ref().map(|secret| format!("__token__:{}", secret.value)));
+    let auth_header
+        = pypi::get_authorization(&project.config, &registry, Some(&locator.ident));
+
+    let token = match auth_header {
+        Some(header) if header.starts_with("Bearer ") => Some(header.trim_start_matches("Bearer ").to_string()),
+        Some(header) if header.starts_with("Basic ") => {
+            let encoded = header.trim_start_matches("Basic ");
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+        },
+        _ => None,
+    };
 
     match (token, url::Url::parse(&registry)) {
         (Some(token), Ok(mut url)) => {
@@ -187,6 +202,11 @@ pub fn build_wheel_from_source(project: &Project, interpreter: &Interpreter, loc
 
             Ok(())
         };
+
+        // Install tomli for Python < 3.11 (tomllib is stdlib in 3.11+)
+        if interpreter.version.major == 3 && interpreter.version.minor < 11 {
+            pip_install(&[String::from("tomli")])?;
+        }
 
         pip_install(&requires)?;
 
