@@ -517,8 +517,11 @@ impl<'de, T: FromFileString> Deserialize<'de> for MultiKey<T> where <T as FromFi
 
                 chunks.push(current);
 
+                // Only the space following the separator is formatting;
+                // trailing whitespace can be part of the descriptor itself
+                // (`dir-compare@4.2.0` depends on `p-limit@^3.1.0 `)
                 let result = chunks.into_iter()
-                    .map(|s| T::from_file_string(s.trim()))
+                    .map(|s| T::from_file_string(s.trim_start()))
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(de::Error::custom)?;
 
@@ -888,6 +891,13 @@ mod tests {
         "version": "1.0.0"
       }
     },
+    "left-pad@npm:^1.3.0, left-pad@npm:^1.3.0 ": {
+      "checksum": null,
+      "resolution": {
+        "resolution": "left-pad@npm:1.3.0",
+        "version": "1.3.0"
+      }
+    },
     "linked@link:./linked::parent=root@workspace:root": {
       "checksum": null,
       "resolution": {
@@ -917,13 +927,18 @@ mod tests {
         let lockfile: Lockfile
             = JsonDocument::hydrate_from_str(LOCKFILE).unwrap();
 
+        // Ranges can end with whitespace (some published manifests do), so
+        // it must survive a lockfile round-trip
         assert_eq!(lockfile.resolutions.keys().cloned().collect::<Vec<_>>(), vec![
             descriptor("foo@npm:^1.0.0"),
+            descriptor("left-pad@npm:^1.3.0"),
+            descriptor("left-pad@npm:^1.3.0 "),
             descriptor("typescript@npm:^5.0.0"),
         ]);
 
         assert_eq!(lockfile.entries.keys().cloned().collect::<Vec<_>>(), vec![
             locator("foo@npm:1.0.0"),
+            locator("left-pad@npm:1.3.0"),
             locator("typescript@npm:5.9.3"),
         ]);
 
