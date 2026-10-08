@@ -7,7 +7,7 @@ use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
 use zpm_switch::get_bin_version;
-use zpm_tasks::{parse as parse_taskfile, ResolvedTasks, TaskFile, TaskId};
+use zpm_tasks::{apply_workspace_defaults, extract_workspace_defaults, parse as parse_taskfile, strip_workspace_defaults, ResolvedTasks, Task, TaskFile, TaskId, TaskName};
 use zpm_utils::{DataType, Glob, Hash64, Hash64Writer, IoResultExt, LastModifiedAt, Path, ToFileString, ToHumanString, is_terminal, start_progress};
 use serde::Deserialize;
 use zpm_formats::zip::ZipSupport;
@@ -1693,21 +1693,92 @@ impl Project {
         install_outcome
     }
 
+    /// Parse the `@workspaces` default tasks declared in the root taskfile.
+    pub fn workspace_task_defaults(&self) -> BTreeMap<TaskName, Task> {
+        let root_task_file_path
+            = self.root_workspace().taskfile_path();
+
+        let Ok(content) = root_task_file_path.fs_read_text() else {
+            return BTreeMap::new();
+        };
+
+        let Ok(root_task_file) = parse_taskfile(&content) else {
+            return BTreeMap::new();
+        };
+
+        extract_workspace_defaults(&root_task_file)
+    }
+
+    /// Load the effective taskfile of a workspace: its own `taskfile` layered
+    /// over the `@workspaces` defaults of the root taskfile. Returns the paths
+    /// of the files that were read so callers can watch them.
+    pub fn load_workspace_taskfile(&self, workspace: &Workspace, defaults: &BTreeMap<TaskName, Task>) -> (Option<TaskFile>, Vec<Path>) {
+        let task_file_path
+            = workspace.taskfile_path();
+
+        let local_task_file
+            = task_file_path.fs_read_text().ok()
+                .and_then(|content| parse_taskfile(&content).ok());
+
+        let mut sources
+            = Vec::new();
+
+        if local_task_file.is_some() {
+            sources.push(task_file_path);
+        }
+
+        // The defaults are templates for the other workspaces; like with
+        // turbo, the root workspace only runs the tasks it declares itself.
+        if workspace.rel_path == Path::new() {
+            let task_file = local_task_file.map(|mut task_file| {
+                strip_workspace_defaults(&mut task_file);
+                task_file
+            });
+
+            return (task_file, sources);
+        }
+
+        if !defaults.is_empty() {
+            sources.push(self.root_workspace().taskfile_path());
+        }
+
+        let task_file
+            = apply_workspace_defaults(local_task_file, defaults, |name| {
+                workspace.manifest.scripts.contains_key(name)
+            });
+
+        (task_file, sources)
+    }
+
     /// Resolve a task and all its dependencies.
     pub fn resolve_task(&self, root_task: &TaskId) -> Result<ResolveTaskResult, Error> {
         let source_files
             = std::cell::RefCell::new(Vec::<Path>::new());
 
+        let defaults
+            = self.workspace_task_defaults();
+
         let get_task_file = |ident: &Ident, path: Option<&str>| {
-            let workspace = self.workspace_by_ident(ident).ok()?;
-            let task_file_path = match path {
-                Some(custom_path) => workspace.path.with_join_str(custom_path),
-                None => workspace.taskfile_path(),
-            };
-            let content = task_file_path.fs_read_text().ok()?;
-            let task_file = parse_taskfile(&content).ok()?;
-            source_files.borrow_mut().push(task_file_path);
-            Some(task_file)
+            let workspace
+                = self.workspace_by_ident(ident).ok()?;
+
+            if let Some(custom_path) = path {
+                let task_file_path
+                    = workspace.path.with_join_str(custom_path);
+                let content
+                    = task_file_path.fs_read_text().ok()?;
+                let task_file
+                    = parse_taskfile(&content).ok()?;
+
+                source_files.borrow_mut().push(task_file_path);
+                return Some(task_file);
+            }
+
+            let (task_file, sources)
+                = self.load_workspace_taskfile(workspace, &defaults);
+
+            source_files.borrow_mut().extend(sources);
+            task_file
         };
 
         let resolve_ident_glob = |glob: &zpm_primitives::IdentGlob, context: &Ident| {
@@ -1741,20 +1812,29 @@ impl Project {
         let resolved = zpm_tasks::resolve(root_task, get_task_file, resolve_ident_glob, is_dependency)
             .map_err(Error::TaskResolveError)?;
 
+        let mut source_files
+            = source_files.into_inner();
+
+        source_files.sort();
+        source_files.dedup();
+
         Ok(ResolveTaskResult {
             resolved,
-            source_files: source_files.into_inner(),
+            source_files,
         })
     }
 
-    /// Get the parsed taskfile and its source file paths for a workspace.
-    /// Returns `None` if the taskfile doesn't exist or fails to parse.
+    /// Get the effective taskfile (including root defaults) and its source
+    /// file paths for a workspace. Returns `None` if the workspace has no tasks.
     pub fn get_workspace_taskfile(&self, workspace: &Workspace) -> Option<(TaskFile, Vec<Path>)> {
-        let task_file_path = workspace.taskfile_path();
-        let content = task_file_path.fs_read_text().ok()?;
-        let task_file = parse_taskfile(&content).ok()?;
+        let defaults
+            = self.workspace_task_defaults();
 
-        let mut sources = vec![task_file_path];
+        let (task_file, mut sources)
+            = self.load_workspace_taskfile(workspace, &defaults);
+
+        let task_file
+            = task_file?;
 
         for include in &task_file.includes {
             if let Ok(inc_ws) = self.workspace_by_ident(&include.ident) {

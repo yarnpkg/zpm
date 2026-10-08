@@ -269,6 +269,25 @@ fn parse_dependency(token: &str) -> Result<Dependency, String> {
             (token, false)
         };
 
+    // `^name` is the turbo-style shorthand for "the `name` task of every
+    // workspace listed in the dependencies"; it's sugar for `*:name` (globs
+    // only ever match the dependencies of the current workspace).
+    if let Some(task_name_str) = token.strip_prefix('^') {
+        let ident_glob
+            = IdentGlob::new("*")
+                .map_err(|e| format!("Invalid ident glob '*': {}", e))?;
+
+        let task_name
+            = TaskName::new(task_name_str)
+                .map_err(|e| format!("Invalid task name '{}': {}", task_name_str, e))?;
+
+        return Ok(Dependency::External {
+            ident_glob,
+            task_name,
+            parallel,
+        });
+    }
+
     if let Some(colon_pos) = token.rfind(':') {
         let ident_glob_str
             = &token[..colon_pos];
@@ -566,6 +585,28 @@ mod tests {
         match &result.tasks["lint:fix"].dependencies[0] {
             Dependency::Local { name, .. } => assert_eq!(name, "typecheck"),
             _ => panic!("Expected local dependency"),
+        }
+    }
+
+    #[test]
+    fn test_parse_caret_dependency() {
+        let input = "test:ci: ^build& ^test:ci\n  vitest";
+        let result = parse(input).unwrap();
+        assert_eq!(result.tasks["test:ci"].dependencies.len(), 2);
+        match &result.tasks["test:ci"].dependencies[0] {
+            Dependency::External { ident_glob, task_name, parallel } => {
+                assert_eq!(task_name, "build");
+                assert!(ident_glob.check(&"@my-lib/foo".parse().unwrap()));
+                assert!(parallel);
+            }
+            _ => panic!("Expected external dependency"),
+        }
+        match &result.tasks["test:ci"].dependencies[1] {
+            Dependency::External { task_name, parallel, .. } => {
+                assert_eq!(task_name, "test:ci");
+                assert!(!parallel);
+            }
+            _ => panic!("Expected external dependency"),
         }
     }
 

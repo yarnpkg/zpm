@@ -210,7 +210,24 @@ async fn run_coordinator_loop(
             break;
         }
 
-        process_ready_tasks(&mut state, &mut executor_pool);
+        drain_ready_tasks(&mut state, &mut executor_pool);
+    }
+}
+
+/// Run scheduling passes until no more progress is made. A single pass isn't
+/// enough when tasks reach a terminal state synchronously (script-less tasks,
+/// cancellations): their dependents only become ready on the next pass, and
+/// no further command would come in to trigger it.
+fn drain_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool) {
+    loop {
+        let closed_before
+            = state.closed_tasks_counter;
+
+        process_ready_tasks(state, executor_pool);
+
+        if state.closed_tasks_counter == closed_before {
+            break;
+        }
     }
 }
 
@@ -892,8 +909,12 @@ fn initialize_taskfile_watcher(watcher: &mut TaskfileWatcher, project: &Project)
         let mut sources = vec![task_file_path];
 
         if let Some((task_file, extra_sources)) = project.get_workspace_taskfile(workspace) {
-            // Replace sources with the full list (main + includes)
-            sources = extra_sources;
+            // Extend sources with the full list (main + root defaults + includes)
+            for source in extra_sources {
+                if !sources.contains(&source) {
+                    sources.push(source);
+                }
+            }
             watcher.update_cached_taskfile(workspace.name.clone(), task_file);
         }
 
@@ -949,10 +970,15 @@ fn reload_taskfile(
     };
 
     let task_file_path = workspace.taskfile_path();
-    let content = match task_file_path.fs_read_text() {
-        Ok(c) => c,
-        Err(_) => {
-            // File deleted: treat as empty taskfile — purge all tasks
+
+    let new_taskfile = match project.get_workspace_taskfile(workspace) {
+        Some((tf, _)) => tf,
+        None => {
+            if task_file_path.fs_exists() {
+                return; // Parse error: keep old version
+            }
+
+            // File deleted (and no root defaults): treat as empty taskfile — purge all tasks
             if let Some(old_taskfile) = state.taskfile_watcher.cached_taskfiles().get(workspace_ident).cloned() {
                 for task_name in old_taskfile.tasks.keys() {
                     purge_task_from_graph(workspace_ident, task_name.as_str(), state);
@@ -962,11 +988,6 @@ fn reload_taskfile(
             }
             return;
         }
-    };
-
-    let new_taskfile = match parse_taskfile(&content) {
-        Ok(tf) => tf,
-        Err(_) => return, // Parse error: keep old version
     };
 
     // Determine removed tasks by comparing with old cached taskfile
@@ -993,6 +1014,12 @@ fn reload_taskfile(
 
     // Re-register source files (includes may have changed)
     let mut sources = vec![task_file_path];
+    if workspace.rel_path != Path::new() {
+        let root_task_file_path = project.root_workspace().taskfile_path();
+        if root_task_file_path.fs_exists() {
+            sources.push(root_task_file_path);
+        }
+    }
     for include in &new_taskfile.includes {
         if let Ok(inc_ws) = project.workspace_by_ident(&include.ident) {
             let inc_path = match &include.path {
@@ -1058,26 +1085,38 @@ fn build_declared_tasks_list(project: &Project) -> (Vec<DeclaredTaskInfo>, Vec<s
 
     for workspace in &project.workspaces {
         let task_file_path = workspace.taskfile_path();
-        let Ok(content) = task_file_path.fs_read_text() else { continue };
+        let local_content = task_file_path.fs_read_text().ok();
 
-        match parse_taskfile(&content) {
-            Ok(task_file) => {
-                for (task_name, task) in &task_file.tasks {
-                    let is_long_lived = task.attributes.iter()
-                        .any(|attr| attr.name == LONG_LIVED_ATTRIBUTE);
-                    tasks.push(DeclaredTaskInfo {
-                        workspace: workspace.name.to_file_string(),
-                        task_name: task_name.to_file_string(),
-                        is_long_lived,
-                    });
-                }
+        // Local taskfile syntax errors must still be reported
+        if let Some(Err(e)) = local_content.as_deref().map(parse_taskfile) {
+            errors.push(super::ipc::TaskfileError {
+                workspace: workspace.name.to_file_string(),
+                message: e.to_string(),
+            });
+            continue;
+        }
+
+        let task_file = project.get_workspace_taskfile(workspace)
+            .map(|(task_file, _)| task_file);
+
+        let Some(task_file) = task_file else {
+            continue;
+        };
+
+        for (task_name, task) in &task_file.tasks {
+            // Root defaults that resolve to a no-op in this workspace (no
+            // matching package.json script) aren't worth listing.
+            if task.script.is_empty() && zpm_tasks::is_workspace_default(task) {
+                continue;
             }
-            Err(e) => {
-                errors.push(super::ipc::TaskfileError {
-                    workspace: workspace.name.to_file_string(),
-                    message: e.to_string(),
-                });
-            }
+
+            let is_long_lived = task.attributes.iter()
+                .any(|attr| attr.name == LONG_LIVED_ATTRIBUTE);
+            tasks.push(DeclaredTaskInfo {
+                workspace: workspace.name.to_file_string(),
+                task_name: task_name.to_file_string(),
+                is_long_lived,
+            });
         }
     }
 
