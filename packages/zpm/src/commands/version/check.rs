@@ -95,7 +95,7 @@ async fn collect_versioning_state(project: &Project) -> Result<VersioningState, 
 
     // Only branch-local versioning files count — base-branch entries
     // can't satisfy bumps required by this branch.
-    let base = match fetch_branch_base(project).await {
+    let base = match fetch_branch_base(project, None).await {
         Ok(base) => base,
         Err(_) => return Ok(VersioningState { releases, declined }),
     };

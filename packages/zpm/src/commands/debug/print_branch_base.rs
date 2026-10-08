@@ -14,7 +14,7 @@ impl PrintBranchBase {
             = project::Project::new(None).await?;
 
         let branch_base
-            = fetch_branch_base(&project).await?;
+            = fetch_branch_base(&project, None).await?;
 
         println!("{}", branch_base);
 

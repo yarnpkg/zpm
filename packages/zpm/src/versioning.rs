@@ -207,7 +207,7 @@ impl<'a> Versioning<'a> {
     }
 
     pub async fn versioning_path(&self) -> Result<Path, Error> {
-        let Some(base) = fetch_branch_base(self.project).await.ok() else {
+        let Some(base) = fetch_branch_base(self.project, None).await.ok() else {
             return self.create_versioning_path();
         };
 

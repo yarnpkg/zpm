@@ -64,7 +64,7 @@ pub async fn fetch_remotes(root: &Path) -> Result<Vec<String>, Error> {
     Ok(remotes)
 }
 
-pub async fn fetch_branch_base(project: &Project) -> Result<String, Error> {
+pub async fn fetch_branch_base(project: &Project, head: Option<&str>) -> Result<String, Error> {
     let base_refs
         = project.config.settings.changeset_base_refs.iter()
             .map(|s| s.value.to_string())
@@ -88,7 +88,7 @@ pub async fn fetch_branch_base(project: &Project) -> Result<String, Error> {
         }
 
         let mut args
-            = vec!["merge-base".to_string(), "HEAD".to_string()];
+            = vec!["merge-base".to_string(), head.unwrap_or("HEAD").to_string()];
 
         args.extend(branches.clone());
 
@@ -128,6 +128,28 @@ fn parse_invalid_object_name(stderr: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Returns true if the file is a generated Yarn file that should be ignored
+/// during change detection (PnP artifacts and zero-installs cache).
+fn should_ignore_generated_yarn_file(project_root: &Path, file: &Path) -> bool {
+    let Some(rel_path) = file.forward_relative_to(project_root) else {
+        return false;
+    };
+
+    let rel_str = rel_path.as_str();
+
+    // Skip PnP files at the root
+    if rel_str == ".pnp.cjs" || rel_str == ".pnp.loader.mjs" {
+        return true;
+    }
+
+    // Skip the .yarn directory (zero-installs cache and other artifacts)
+    if rel_str == ".yarn" || rel_str.starts_with(".yarn/") {
+        return true;
+    }
+
+    false
 }
 
 pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error> {
@@ -170,7 +192,7 @@ pub async fn fetch_base(root: &Path, base_refs: &[&str]) -> Result<String, Error
 pub async fn fetch_changed_workspaces(project: &Project, since: Option<&str>) -> Result<BTreeMap<Ident, BTreeSet<Path>>, Error> {
     let since_ref = match since {
         Some(since) => since.to_string(),
-        None => fetch_branch_base(project).await?,
+        None => fetch_branch_base(project, None).await?,
     };
 
     let changed_files
@@ -195,6 +217,11 @@ async fn changed_workspaces_from_files(project: &Project, since_ref: &str, head:
     for file in changed_files {
         // Skip the lockfile itself - we handle it separately via hash comparison
         if file == &lockfile_path {
+            continue;
+        }
+
+        // Skip generated Yarn files (PnP and zero-installs cache)
+        if should_ignore_generated_yarn_file(&project.project_cwd, file) {
             continue;
         }
 
@@ -229,7 +256,7 @@ async fn changed_workspaces_from_files(project: &Project, since_ref: &str, head:
             = fetch_lockfile_at_ref(project, since_ref).await
                 .unwrap_or_else(|_| Lockfile::new());
 
-        for ident in find_changed_workspaces(project, &old_lockfile, &current_lockfile) {
+        for ident in find_changed_workspaces(project, &old_lockfile, &current_lockfile, head.is_some()) {
             changed_workspaces.entry(ident)
                 .or_default()
                 .insert(lockfile_path.clone());
@@ -270,7 +297,7 @@ async fn fetch_lockfile_at_ref(project: &Project, git_ref: &str) -> Result<Lockf
 pub async fn fetch_changed_files(project: &Project, since: Option<&str>) -> Result<BTreeSet<Path>, Error> {
     let since = match since {
         Some(since) => since.to_string(),
-        None => fetch_branch_base(project).await?,
+        None => fetch_branch_base(project, None).await?,
     };
 
     fetch_changed_files_between(project, &since, None).await
@@ -371,7 +398,7 @@ impl ChangesetRange {
 pub async fn fetch_changed_workspaces_in_range(project: &Project, range: &ChangesetRange) -> Result<BTreeSet<Ident>, Error> {
     let since_ref = match &range.base {
         Some(base) => base.clone(),
-        None => fetch_branch_base(project).await?,
+        None => fetch_branch_base(project, range.head.as_deref()).await?,
     };
 
     let changed_files

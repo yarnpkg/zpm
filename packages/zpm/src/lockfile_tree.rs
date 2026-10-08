@@ -229,7 +229,7 @@ impl<'a> TreeComparison<'a> {
  * workspaces have the same dependencies on both sides, so we walk the two
  * trees side by side until we find a descriptor that resolves differently.
  */
-pub fn find_changed_workspaces(project: &Project, base: &Lockfile, current: &Lockfile) -> BTreeSet<Ident> {
+pub fn find_changed_workspaces(project: &Project, base: &Lockfile, current: &Lockfile, trust_current_lockfile: bool) -> BTreeSet<Ident> {
     let islands
         = workspace_islands(project);
     let workspace_dependencies
@@ -250,12 +250,14 @@ pub fn find_changed_workspaces(project: &Project, base: &Lockfile, current: &Loc
 
         // The lockfile from the working tree may be stale, so we also check
         // that its hash matches the dependencies we're about to walk.
+        // When comparing two refs (trust_current_lockfile=true), we trust
+        // the current lockfile's hash without verifying against the working tree.
         let dependencies = dependencies.as_ref().ok().filter(|dependencies| {
             let hash
                 = hash_workspace_dependencies(dependencies);
 
             base.project.workspaces.get(ident) == Some(&hash)
-                && current.project.workspaces.get(ident) == Some(&hash)
+                && (trust_current_lockfile || current.project.workspaces.get(ident) == Some(&hash))
         });
 
         let Some(dependencies) = dependencies else {
