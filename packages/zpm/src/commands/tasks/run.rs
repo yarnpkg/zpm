@@ -32,8 +32,10 @@ use crate::workspace_glob::WorkspaceGlob;
 /// - `--with-dependencies` (alias `--recursive`) adds the transitive workspace
 ///   dependencies of the selection (`--filter pkg...`), `--dependencies-only`
 ///   replaces the selection by its dependencies (`--filter pkg^...`), and
-///   `--with-dependents` adds its dependents (`--filter ...pkg`). Without
-///   `-A`/`--from`/`--since`, they apply to the current workspace.
+///   `--with-dependents` adds its dependents (`--filter ...pkg`). When
+///   combined with `--with-dependencies`, dependencies are followed from the
+///   dependents too (`--filter ...pkg...`). Without `-A`/`--from`/`--since`,
+///   they apply to the current workspace.
 ///
 /// - `--include`/`--exclude <glob>` filter the final selection.
 ///
