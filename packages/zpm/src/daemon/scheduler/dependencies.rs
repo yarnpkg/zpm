@@ -22,6 +22,18 @@ pub fn find_ready_tasks(
 
     // For each context, check which tasks are ready
     for context_id in active_contexts {
+        // Contexts may carry a concurrency limit (`yarn tasks run -j`); tasks
+        // without a script don't spawn a process and aren't counted.
+        let mut available_slots: Option<usize>
+            = graph.concurrency_limits.get(context_id).map(|limit| {
+                let running_in_context
+                    = running.iter()
+                        .filter(|id| &id.context_id == context_id)
+                        .count();
+
+                limit.saturating_sub(running_in_context)
+            });
+
         for (task_id, prerequisites) in &graph.resolved.tasks {
             let ctx_task_id = ContextualTaskId::new(task_id.clone(), context_id.clone());
 
@@ -65,9 +77,25 @@ pub fn find_ready_tasks(
                 false
             });
 
-            if all_prereqs_ready {
-                ready.push(ctx_task_id);
+            if !all_prereqs_ready {
+                continue;
             }
+
+            if let Some(slots) = available_slots.as_mut() {
+                let spawns_process
+                    = graph.prepared.get(&ctx_task_id)
+                        .map_or(false, |prepared| !prepared.script.is_empty());
+
+                if spawns_process {
+                    if *slots == 0 {
+                        continue;
+                    }
+
+                    *slots -= 1;
+                }
+            }
+
+            ready.push(ctx_task_id);
         }
     }
 

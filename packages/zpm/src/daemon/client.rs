@@ -24,6 +24,15 @@ use crate::{
 type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<DaemonResponse>>>>;
 
 
+/// Scheduling options attached to a push request
+#[derive(Debug, Clone, Default)]
+pub struct PushTasksOptions {
+    /// Skip cross-workspace dependencies outside of the pushed workspaces
+    pub only: bool,
+    /// Maximum number of concurrent processes in the context
+    pub concurrency: Option<usize>,
+}
+
 /// Result of pushing tasks to the daemon
 pub struct PushTasksResult {
     /// The directly requested task IDs
@@ -367,6 +376,7 @@ impl DaemonClient {
             SubscriptionScope::None,
             SubscriptionScope::None,
             context_id,
+            PushTasksOptions::default(),
         )
         .await
     }
@@ -379,6 +389,7 @@ impl DaemonClient {
         output_subscription: SubscriptionScope,
         status_subscription: SubscriptionScope,
         context_id: Option<String>,
+        options: PushTasksOptions,
     ) -> Result<PushTasksResult, Error> {
         let request
             = DaemonRequest::PushTasks {
@@ -388,6 +399,8 @@ impl DaemonClient {
                 output_subscription,
                 status_subscription,
                 context_id,
+                only: options.only.then_some(true),
+                concurrency: options.concurrency,
             };
 
         match self.send_request(request).await? {

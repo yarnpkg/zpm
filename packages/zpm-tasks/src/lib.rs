@@ -8,4 +8,4 @@ pub use ast::*;
 pub use defaults::*;
 pub use error::Error;
 pub use parser::parse;
-pub use resolver::{resolve, ResolvedTasks};
+pub use resolver::{resolve, resolve_many, ResolvedTasks};
