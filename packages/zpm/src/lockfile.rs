@@ -673,11 +673,11 @@ struct PnpmListDependency {
 /// 3. For each package, read its package.json to get the original dependency ranges
 /// 4. Build descriptor -> locator mappings
 pub fn from_pnpm_node_modules(project_cwd: &Path, config: &Configuration) -> Result<Lockfile, Error> {
-    let pnpm_dir
+    let pnpm_state_path
         = project_cwd
-            .with_join_str("node_modules/.pnpm");
+            .with_join_str("node_modules/.modules.yaml");
 
-    if !pnpm_dir.fs_exists() {
+    if !pnpm_state_path.fs_exists() {
         return Ok(Lockfile::new());
     }
 

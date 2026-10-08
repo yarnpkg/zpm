@@ -385,12 +385,15 @@ impl Project {
 
     fn lockfile_from(lockfile_path: &Path, config: &Configuration) -> Result<Lockfile, Error> {
         if !lockfile_path.fs_exists() {
-            // Check for pnpm node_modules in the same directory
+            // Check for pnpm node_modules in the same directory. Our own
+            // pnpm linker also creates `node_modules/.pnpm` (a focused
+            // install doesn't write the lockfile), so only trust the folder
+            // when it holds the state file pnpm writes.
             if let Some(project_cwd) = lockfile_path.dirname() {
-                let pnpm_dir
-                    = project_cwd.with_join_str("node_modules/.pnpm");
+                let pnpm_state_path
+                    = project_cwd.with_join_str("node_modules/.modules.yaml");
 
-                if pnpm_dir.fs_exists() {
+                if pnpm_state_path.fs_exists() {
                     return from_pnpm_node_modules(&project_cwd, config);
                 }
             }
