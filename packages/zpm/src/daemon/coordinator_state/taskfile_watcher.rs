@@ -18,6 +18,9 @@ pub struct TaskfileWatcher {
 
     /// Cached parsed taskfiles per workspace (the raw parse, not resolved).
     cached_taskfiles: BTreeMap<Ident, TaskFile>,
+
+    /// When disabled (one-shot standalone daemons), sources aren't watched.
+    enabled: bool,
 }
 
 impl TaskfileWatcher {
@@ -34,12 +37,21 @@ impl TaskfileWatcher {
             workspace_sources: BTreeMap::new(),
             file_to_workspaces: HashMap::new(),
             cached_taskfiles: BTreeMap::new(),
+            enabled: true,
         }
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
     }
 
     /// Register the source files for a workspace's taskfile.
     /// Replaces any previous registration for this workspace.
     pub fn register_sources(&mut self, workspace: Ident, sources: Vec<Path>) {
+        if !self.enabled {
+            return;
+        }
+
         // Remove old entries from the reverse index
         if let Some(old_sources) = self.workspace_sources.get(&workspace) {
             for path in old_sources {
