@@ -42,6 +42,11 @@ pub struct InstallContext<'a> {
     /// call `drain` before returning so pending writes aren't dropped
     /// when the runtime shuts down.
     pub background_writes: Option<Arc<http_npm::BackgroundWrites>>,
+    /// The Python version PyPI packages are resolved for; set by islands
+    /// overriding the global `pythonVersion` setting.
+    pub python_version: Option<String>,
+    /// PEP 508 requirements restricting the versions candidates may have.
+    pub pypi_constraints: Vec<String>,
     /// Versions locked by the package manager the project is migrating
     /// from; the npm resolver prefers them over the latest ones
     pub preferred_versions: Option<Arc<PreferredVersions>>,
@@ -127,6 +132,8 @@ impl<'a> Default for InstallContext<'a> {
             dependency_overrides: Arc::default(),
             package_extensions: Arc::new(BTreeMap::new()),
             background_writes: None,
+            python_version: None,
+            pypi_constraints: Vec::new(),
             preferred_versions: None,
         }
     }
@@ -275,6 +282,7 @@ struct InstallMaps {
 /// The work unlocked by resolving a descriptor. Child resolutions and the
 /// package fetch can be scheduled independently.
 struct ResolutionEvent {
+    has_variants: bool,
     children: Vec<Descriptor>,
     locator: Locator,
     is_mock_request: bool,
@@ -344,12 +352,20 @@ async fn resolve_all<'a>(
         };
 
         if let Completed::ResolutionEvent(event) = completed {
-            fetching.push(ensure_fetched(
-                event.locator,
-                event.is_mock_request,
-                ctx,
-                maps,
-            ));
+            // Packages with per-platform variants (PyPI releases shipping
+            // platform wheels) have no artifact of their own; the variants
+            // are fetched instead, as in island resolutions
+            if event.has_variants {
+                let _ = maps.fetch_map.entry(event.locator.clone())
+                    .set(Ok(FetchResult::new(PackageData::Abstract)));
+            } else {
+                fetching.push(ensure_fetched(
+                    event.locator,
+                    event.is_mock_request,
+                    ctx,
+                    maps,
+                ));
+            }
 
             for child in event.children {
                 // Deduplicate at queue insertion time. Checking the OnceCell
@@ -544,8 +560,11 @@ fn enqueue_resolution(
             .cloned()
             .collect();
 
+    let has_variants
+        = !result.resolution.variants.is_empty();
+
     maps.resolution_tx
-        .send(ResolutionEvent {children, locator, is_mock_request})
+        .send(ResolutionEvent {children, locator, is_mock_request, has_variants})
         .expect("resolution receiver cannot close during resolution");
 }
 
@@ -1409,12 +1428,30 @@ impl<'a> InstallManager<'a> {
                     // Lockfile entries are shared (for checksum tracking etc.)
                     for (locator, resolution) in &island_result.normalized_resolutions {
                         island_locators.push(locator.clone());
-                        self.result.lockfile.entries
+
+                        let entry = self.result.lockfile.entries
                             .entry(locator.clone())
                             .or_insert_with(|| LockfileEntry {
                                 checksum: None,
                                 resolution: resolution.clone(),
                             });
+
+                        // Islands targeting different Python versions list
+                        // different variants for the same release; the
+                        // lockfile keeps all of them, and each island only
+                        // resolves (and selects) its own.
+                        for variant in &resolution.variants {
+                            if !entry.resolution.variants.contains(variant) {
+                                entry.resolution.variants.push(variant.clone());
+                            }
+                        }
+
+                        entry.resolution.variants.sort();
+                    }
+
+                    if let Some(input_hash) = &island_result.input_hash {
+                        self.result.lockfile.island_hashes
+                            .insert(island_id.clone(), input_hash.clone());
                     }
 
                     // Store island descriptor→locator in lockfile
@@ -1423,10 +1460,40 @@ impl<'a> InstallManager<'a> {
                 }
 
                 // Fetch all island-resolved packages so package_data is
-                // available for checksum computation and linking.
-                let fetch_futures = island_locators.into_iter().map(|locator| {
-                    ensure_fetched(locator, false, &self.context, &maps)
-                });
+                // available for checksum computation and linking. Packages
+                // with per-platform variants have no artifact of their own,
+                // and variants for other platforms are only mocked.
+                let systems
+                    = self.context.systems.unwrap();
+
+                let mut fetch_futures
+                    = vec![];
+
+                for locator in island_locators {
+                    let resolution
+                        = &self.result.lockfile.entries[&locator].resolution;
+
+                    if !resolution.variants.is_empty() {
+                        let _ = maps.fetch_map.entry(locator.clone())
+                            .set(Ok(FetchResult::new(PackageData::Abstract)));
+
+                        continue;
+                    }
+
+                    let is_mock_request
+                        = !resolution.requirements.validate_any(systems);
+
+                    if resolution.requirements.is_conditional() {
+                        self.result.install_state.conditional_locators.insert(locator.clone());
+
+                        if !resolution.requirements.validate_any(systems) {
+                            self.result.install_state.disabled_locators.insert(locator.clone());
+                        }
+                    }
+
+                    fetch_futures.push(ensure_fetched(locator, is_mock_request, &self.context, &maps));
+                }
+
                 futures::future::join_all(fetch_futures).await;
             } else {
                 greedy_future.await;

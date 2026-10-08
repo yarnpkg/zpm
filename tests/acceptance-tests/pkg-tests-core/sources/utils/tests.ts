@@ -94,28 +94,100 @@ function buildZipFromEntries(entries: Array<ZipEntry>) {
   }
 }
 
+function findPypiFixtureFile(filename: string) {
+  for (const [name, releases] of Object.entries(PYPI_FIXTURES)) {
+    for (const [version, release] of Object.entries(releases)) {
+      for (const file of release.files) {
+        if (file.filename === filename) {
+          return {name, version, release, file};
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function generatePypiMetadata(name: string, version: string, release: PypiFixtureRelease) {
+  const lines = [`Metadata-Version: 2.1`, `Name: ${name}`, `Version: ${version}`];
+
+  if (release.requiresPython)
+    lines.push(`Requires-Python: ${release.requiresPython}`);
+
+  for (const requirement of release.requiresDist ?? [])
+    lines.push(`Requires-Dist: ${requirement}`);
+
+  return `${lines.join(`\n`)}\n`;
+}
+
+// Wheels are generated on the fly: the files from the fixture folder of the
+// same name when it exists (or a minimal module exposing VALUE otherwise),
+// with a METADATA file generated from PYPI_FIXTURES.
+async function buildPypiWheel(filename: string): Promise<Buffer | null> {
+  const fixture = findPypiFixtureFile(filename);
+  if (fixture === null)
+    return null;
+
+  const {name, version, release, file} = fixture;
+  const moduleName = name.replace(/-/g, `_`);
+  const distInfo = `${moduleName}-${version}.dist-info`;
+
+  const wheelDir = ppath.join(pypiRepositoryDir, filename as Filename);
+
+  let entries: Array<ZipEntry> = [];
+  if (await xfs.existsPromise(wheelDir))
+    entries = await collectWheelEntries(wheelDir);
+
+  if (!entries.some(entry => entry.name.endsWith(`.py`))) {
+    const tag = filename.replace(/\.whl$/, ``).split(`-`).slice(2).join(`-`);
+    entries.push({name: `${moduleName}/__init__.py` as PortablePath, data: Buffer.from(`VALUE = '${version}'\nTAG = '${tag}'\n`), mode: 0o644});
+  }
+
+  entries = entries.filter(entry => !entry.name.endsWith(`.dist-info/METADATA`));
+  entries.push({name: `${distInfo}/METADATA` as PortablePath, data: Buffer.from(generatePypiMetadata(name, version, release)), mode: 0o644});
+
+  if (!entries.some(entry => entry.name.endsWith(`.dist-info/WHEEL`)))
+    entries.push({name: `${distInfo}/WHEEL` as PortablePath, data: Buffer.from(`Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: ${file.filename.replace(/\.whl$/, ``).split(`-`).slice(2).join(`-`)}\n`), mode: 0o644});
+
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+
+  return buildZipFromEntries(entries);
+}
+
 async function serveDynamicPypiWheel(request: IncomingMessage, response: ServerResponse) {
   const pathname = new URL(request.url ?? `/`, `http://localhost`).pathname;
-  const match = pathname.match(/^\/repositories\/pypi\/([^/]+\.whl)$/);
+  const match = pathname.match(/^(\/auth)?\/repositories\/pypi\/([^/]+\.whl)(\.metadata)?$/);
 
   if (match === null)
     return false;
 
-  const wheelFileName = decodeURIComponent(match[1]!);
+  if (match[1] && request.headers.authorization !== `Bearer ${PYPI_AUTH_TOKEN}`) {
+    response.writeHead(401, {[`Content-Type`]: `text/plain`});
+    response.end(`Unauthorized`);
+    return true;
+  }
+
+  const wheelFileName = decodeURIComponent(match[2]!);
   if (wheelFileName.includes(`/`) || wheelFileName.includes(`\\`))
     return false;
 
-  const wheelDir = ppath.join(pypiRepositoryDir, wheelFileName as Filename);
+  if (match[3]) {
+    const fixture = findPypiFixtureFile(wheelFileName);
+    if (fixture === null)
+      return false;
 
-  if (!await xfs.existsPromise(wheelDir))
+    pypiMetadataRequests.push(wheelFileName);
+
+    response.writeHead(200, {[`Content-Type`]: `text/plain`});
+    response.end(generatePypiMetadata(fixture.name, fixture.version, fixture.release));
+    return true;
+  }
+
+  const wheel = await buildPypiWheel(wheelFileName);
+  if (wheel === null)
     return false;
 
-  const stat = await xfs.lstatPromise(wheelDir);
-  if (!stat.isDirectory())
-    return false;
-
-  const entries = await collectWheelEntries(wheelDir);
-  const wheel = buildZipFromEntries(entries);
+  pypiWheelRequests.push(wheelFileName);
 
   response.writeHead(200, {
     [`Content-Type`]: `application/octet-stream`,
@@ -126,6 +198,9 @@ async function serveDynamicPypiWheel(request: IncomingMessage, response: ServerR
 
   return true;
 }
+
+export const pypiWheelRequests: Array<string> = [];
+export const pypiMetadataRequests: Array<string> = [];
 
 const TEST_MAJOR = process.env.TEST_MAJOR
   ? parseInt(process.env.TEST_MAJOR, 10)
@@ -172,6 +247,7 @@ export enum RequestType {
   PackageVersion = `packageVersion`,
   PypiProjectInfo = `pypiProjectInfo`,
   PypiVersionInfo = `pypiVersionInfo`,
+  PypiSimpleProject = `pypiSimpleProject`,
   Whoami = `whoami`,
   Repository = `repository`,
   Publish = `publish`,
@@ -215,6 +291,10 @@ export type Request = {
   type: RequestType.PypiVersionInfo;
   packageName: string;
   version: string;
+} | {
+  type: RequestType.PypiSimpleProject;
+  flavor: string;
+  packageName: string;
 } | {
   registry?: string;
   type: RequestType.Whoami;
@@ -358,10 +438,15 @@ type PypiFixtureDistribution = {
   packagetype: `bdist_wheel` | `sdist`;
   path: string;
   uploadTime: string;
+  requiresPython?: string;
+  yanked?: boolean;
 };
+
+export const PYPI_AUTH_TOKEN = `pypi-secret-token`;
 
 type PypiFixtureRelease = {
   requiresDist?: Array<string>;
+  requiresPython?: string;
   files: Array<PypiFixtureDistribution>;
 };
 
@@ -394,7 +479,7 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
     [`1.0.0`]: {
       requiresDist: [
         `pypi-no-deps (>=1.0.0)`,
-        `marker-only-dep (>=1.0.0); python_version < "3.12"`,
+        `marker-only-dep (>=1.0.0); python_version < "3.0"`,
       ],
       files: [{
         filename: `pypi_one_dep-1.0.0-py3-none-any.whl`,
@@ -511,6 +596,97 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
         path: `/repositories/pypi/pypi_extra_with_base-1.0.0-py3-none-any.whl`,
         uploadTime: `2024-08-04T00:00:00Z`,
       }],
+    },
+  },
+  [`pypi-platform-specific`]: {
+    [`1.0.0`]: {
+      files: [`cp312-cp312-macosx_11_0_arm64`, `cp312-cp312-macosx_10_12_x86_64`, `cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64`, `cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64`, `cp311-cp311-macosx_11_0_arm64`, `cp311-cp311-manylinux_2_17_x86_64`, `cp313-cp313-macosx_11_0_arm64`, `cp313-cp313-manylinux_2_17_x86_64`].map(tag => ({
+        filename: `pypi_platform_specific-1.0.0-${tag}.whl`,
+        packagetype: `bdist_wheel` as const,
+        path: `/repositories/pypi/pypi_platform_specific-1.0.0-${tag}.whl`,
+        uploadTime: `2024-01-01T00:00:00Z`,
+      })),
+    },
+  },
+  // Like charset-normalizer: one macOS wheel serving both arm64 and x64
+  [`pypi-universal2`]: {
+    [`1.0.0`]: {
+      files: [`cp38-abi3-macosx_10_9_universal2`, `cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64`, `cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64`, `cp38-abi3-win_amd64`].map(tag => ({
+        filename: `pypi_universal2-1.0.0-${tag}.whl`,
+        packagetype: `bdist_wheel` as const,
+        path: `/repositories/pypi/pypi_universal2-1.0.0-${tag}.whl`,
+        uploadTime: `2024-01-01T00:00:00Z`,
+      })),
+    },
+  },
+  // Like pywin32: only Windows wheels, required behind a win32 marker
+  [`pypi-windows-only`]: {
+    [`1.0.0`]: {
+      files: [`cp38-abi3-win_amd64`].map(tag => ({
+        filename: `pypi_windows_only-1.0.0-${tag}.whl`,
+        packagetype: `bdist_wheel` as const,
+        path: `/repositories/pypi/pypi_windows_only-1.0.0-${tag}.whl`,
+        uploadTime: `2024-01-01T00:00:00Z`,
+      })),
+    },
+  },
+  [`pypi-windows-dep`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-windows-only (>=1.0.0); sys_platform == "win32"`,
+        `pypi-no-deps (>=1.0.0)`,
+      ],
+      files: [{
+        filename: `pypi_windows_dep-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_windows_dep-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-01-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-marker-deps`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-no-deps (==1.0.0); sys_platform == "darwin"`,
+        `pypi-entry-points; sys_platform == "linux"`,
+        `pypi-never (>=1.0.0); sys_platform == "win32"`,
+        `pypi-old-python; python_version < "3.0"`,
+      ],
+      files: [{
+        filename: `pypi_marker_deps-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_marker_deps-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-01-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-age-gated`]: Object.fromEntries([[`1.0.0`, 30], [`1.1.0`, 10], [`1.2.0`, 0]].map(([version, days]) => [version, {
+    files: [{
+      filename: `pypi_age_gated-${version}-py3-none-any.whl`,
+      packagetype: `bdist_wheel` as const,
+      path: `/repositories/pypi/pypi_age_gated-${version}-py3-none-any.whl`,
+      uploadTime: new Date(Date.now() - (days as number) * 24 * 3600 * 1000).toISOString(),
+    }],
+  }])),
+  [`pypi-yanked`]: {
+    [`1.0.0`]: {
+      files: [{filename: `pypi_yanked-1.0.0-py3-none-any.whl`, packagetype: `bdist_wheel`, path: `/repositories/pypi/pypi_yanked-1.0.0-py3-none-any.whl`, uploadTime: `2024-01-01T00:00:00Z`}],
+    },
+    [`1.1.0`]: {
+      files: [{filename: `pypi_yanked-1.1.0-py3-none-any.whl`, packagetype: `bdist_wheel`, path: `/repositories/pypi/pypi_yanked-1.1.0-py3-none-any.whl`, uploadTime: `2024-01-01T00:00:00Z`, yanked: true}],
+    },
+    [`2.0.0`]: {
+      files: [{filename: `pypi_yanked-2.0.0-py3-none-any.whl`, packagetype: `bdist_wheel`, path: `/repositories/pypi/pypi_yanked-2.0.0-py3-none-any.whl`, uploadTime: `2024-01-01T00:00:00Z`, requiresPython: `<3.0`}],
+    },
+  },
+  [`pypi-conflict-a`]: {
+    [`1.0.0`]: {
+      requiresDist: [`pypi-no-deps (==1.0.0)`],
+      files: [{filename: `pypi_conflict_a-1.0.0-py3-none-any.whl`, packagetype: `bdist_wheel`, path: `/repositories/pypi/pypi_conflict_a-1.0.0-py3-none-any.whl`, uploadTime: `2024-01-01T00:00:00Z`}],
+    },
+    [`2.0.0`]: {
+      requiresDist: [`pypi-no-deps (==1.1.0)`],
+      files: [{filename: `pypi_conflict_a-2.0.0-py3-none-any.whl`, packagetype: `bdist_wheel`, path: `/repositories/pypi/pypi_conflict_a-2.0.0-py3-none-any.whl`, uploadTime: `2024-01-01T00:00:00Z`}],
     },
   },
   [`pypi-entry-points`]: {
@@ -853,6 +1029,72 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
 
       response.writeHead(200, {[`Content-Type`]: `application/json`});
       response.end(data);
+    },
+
+    async [RequestType.PypiSimpleProject](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.PypiSimpleProject)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      if (parsedRequest.flavor === `simple-auth` && request.headers.authorization !== `Bearer ${PYPI_AUTH_TOKEN}`) {
+        processError(response, 401, `Unauthorized`);
+        return;
+      }
+
+      const name = parsedRequest.packageName.toLowerCase().replace(/[-_.]+/g, `-`);
+      const project = PYPI_FIXTURES[name];
+      if (!project) {
+        processError(response, 404, `PyPI package not found: ${name}`);
+        return;
+      }
+
+      const serverUrl = await startPackageServer();
+      const authPrefix = parsedRequest.flavor === `simple-auth` ? `/auth` : ``;
+      const withMetadata = parsedRequest.flavor !== `simple-nometa`;
+
+      const files = Object.values(project).flatMap(release => release.files.map(file => ({
+        filename: file.filename,
+        url: `${serverUrl}${authPrefix}${file.path}`,
+        requiresPython: file.requiresPython ?? null,
+        uploadTime: file.uploadTime,
+        yanked: file.yanked ?? false,
+        metadata: withMetadata && file.packagetype === `bdist_wheel`,
+      })));
+
+      const accept = request.headers.accept ?? ``;
+
+      if (parsedRequest.flavor !== `simple-html` && accept.includes(`application/vnd.pypi.simple.v1+json`)) {
+        response.writeHead(200, {[`Content-Type`]: `application/vnd.pypi.simple.v1+json`});
+        response.end(JSON.stringify({
+          meta: {[`api-version`]: `1.1`},
+          name,
+          files: files.map(file => ({
+            filename: file.filename,
+            url: file.url,
+            hashes: {},
+            [`requires-python`]: file.requiresPython,
+            [`upload-time`]: file.uploadTime,
+            yanked: file.yanked,
+            [`core-metadata`]: file.metadata ? {} : false,
+          })),
+        }));
+        return;
+      }
+
+      const escape = (value: string) => value.replace(/&/g, `&amp;`).replace(/</g, `&lt;`).replace(/>/g, `&gt;`).replace(/"/g, `&quot;`);
+
+      const anchors = files.map(file => {
+        const attributes = [`href="${escape(file.url)}"`];
+        if (file.requiresPython)
+          attributes.push(`data-requires-python="${escape(file.requiresPython)}"`);
+        if (file.yanked)
+          attributes.push(`data-yanked=""`);
+        if (file.metadata)
+          attributes.push(`data-core-metadata="true"`);
+        return `<a ${attributes.join(` `)}>${escape(file.filename)}</a><br/>`;
+      });
+
+      response.writeHead(200, {[`Content-Type`]: `text/html`});
+      response.end(`<!DOCTYPE html><html><body><h1>Links for ${name}</h1>${anchors.join(`\n`)}</body></html>`);
     },
 
     async [RequestType.PypiProjectInfo](parsedRequest, request, response) {
@@ -1316,7 +1558,7 @@ exit 0
 
     url = url.replace(/%2f/gi, `/`);
 
-    if ((match = url.match(/^\/repositories\//))) {
+    if ((match = url.match(/^(\/auth)?\/repositories\//))) {
       return {
         type: RequestType.Repository,
       };
@@ -1345,6 +1587,12 @@ exit 0
       return {
         type: RequestType.YarnSwitchInfo,
         platform: match[1]!,
+      };
+    } else if ((match = url.match(/^\/(simple|simple-html|simple-auth|simple-nometa)\/([^/]+)\/?$/))) {
+      return {
+        type: RequestType.PypiSimpleProject,
+        flavor: match[1]!,
+        packageName: decodeURIComponent(match[2]!),
       };
     } else if ((match = url.match(/^\/pypi\/([^/]+)\/([^/]+)\/json$/))) {
       return {
@@ -1506,7 +1754,10 @@ exit 0
             recording.push(parsedRequest);
 
           const {authorization} = req.headers;
-          if (authorization != null) {
+          const isPypiRequest = parsedRequest.type === RequestType.PypiSimpleProject
+            || (parsedRequest.type === RequestType.Repository && req.url!.startsWith(`/auth/`));
+
+          if (authorization != null && !isPypiRequest) {
             const user = validAuthorizations.get(authorization);
             if (!user) {
               sendError(res, 401, `Invalid token`);

@@ -1,71 +1,71 @@
-use serde::Deserialize;
-use zpm_parsers::JsonDocument;
 use zpm_primitives::{Locator, PypiRegistryReference};
 use zpm_utils::ToFileString;
 
 use crate::{
     error::Error,
     install::{FetchResult, InstallContext},
-    pypi::{PypiDistribution, get_registry, encode_path_segment, select_best_wheel},
+    pypi,
+    resolvers::pypi::{context_targets, fetch_project, version_files},
 };
 
 use super::PackageData;
 
-#[derive(Clone, Debug, Deserialize)]
-struct PypiVersionMetadata {
-    #[serde(default)]
-    urls: Vec<PypiDistribution>,
-}
-
+/// Finds the artifact to download. Locators produced by the platform
+/// variants embed the artifact URL; parent locators pick the artifact
+/// matching the current environment.
 async fn resolve_artifact_url(context: &InstallContext<'_>, params: &PypiRegistryReference) -> Result<String, Error> {
     if let Some(url) = &params.url {
         return Ok(url.0.clone());
     }
 
-    let project
-        = context.project
-        .expect("The project is required for fetching PyPI packages");
+    let index_project
+        = fetch_project(context, &params.ident, Some(&params.version)).await?;
 
-    let metadata_url
-        = format!(
-            "{}/pypi/{}/{}/json",
-            get_registry(&project.config, &params.ident),
-            encode_path_segment(params.ident.as_str()),
-            encode_path_segment(&params.version.to_file_string()),
-        );
+    let files
+        = version_files(&index_project, &params.ident, &params.version)?;
 
-    let bytes
-        = project.http_client.cached_get(&metadata_url).await?;
-    let metadata: PypiVersionMetadata
-        = JsonDocument::hydrate_from_slice(&bytes[..])?;
+    let targets
+        = context_targets(context);
 
-    let wheel
-        = select_best_wheel(&metadata.urls)
+    let file
+        = pypi::select_pinned_file(files, &targets.current_env(), &targets)
             .ok_or_else(|| Error::InvalidResolution(format!(
-                "No wheel artifact found for {}@{}",
-                params.ident.to_file_string(),
+                "No artifact of {}@{} is compatible with the current platform",
+                params.ident.as_str(),
                 params.version.to_file_string(),
             )))?;
 
-    Ok(wheel.url.clone())
+    Ok(file.url.clone())
 }
 
-pub fn try_fetch_locator_sync(context: &InstallContext<'_>, locator: &Locator, _params: &PypiRegistryReference, is_mock_request: bool) -> Result<Option<FetchResult>, Error> {
+fn archive_extension(url: &str) -> &'static str {
+    let path
+        = url.split('#').next().unwrap();
+
+    if path.ends_with(".tar.gz") || path.ends_with(".tgz") {
+        ".tar.gz"
+    } else {
+        ".zip"
+    }
+}
+
+pub fn try_fetch_locator_sync(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, is_mock_request: bool) -> Result<Option<FetchResult>, Error> {
     let package_cache
         = context.package_cache
-        .expect("The package cache is required for fetching PyPI packages");
+            .expect("The package cache is required for fetching PyPI packages");
+
+    let ext
+        = params.url.as_ref().map_or(".zip", |url| archive_extension(&url.0));
 
     if is_mock_request {
         let archive_path
-            = package_cache
-            .key_path(locator, ".zip");
+            = package_cache.key_path(locator, ext);
 
         return Ok(Some(FetchResult::new_mock(archive_path.clone(), archive_path)));
     }
 
     let cache_entry
-        = package_cache
-        .check_cache_entry(locator.clone(), ".zip")?;
+        = package_cache.check_cache_entry(locator.clone(), ext)?;
 
     Ok(cache_entry.map(|cache_entry| FetchResult::new(PackageData::Zip {
         archive_path: cache_entry.path.clone(),
@@ -78,27 +78,36 @@ pub fn try_fetch_locator_sync(context: &InstallContext<'_>, locator: &Locator, _
 pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &PypiRegistryReference, is_mock_request: bool) -> Result<FetchResult, Error> {
     let package_cache
         = context.package_cache
-        .expect("The package cache is required for fetching PyPI packages");
-
-    if is_mock_request {
-        let archive_path
-            = package_cache
-            .key_path(locator, ".zip");
-
-        return Ok(FetchResult::new_mock(archive_path.clone(), archive_path));
-    }
+            .expect("The package cache is required for fetching PyPI packages");
 
     let project
         = context.project
-        .expect("The project is required for fetching PyPI packages");
+            .expect("The project is required for fetching PyPI packages");
 
     let artifact_url
         = resolve_artifact_url(context, params).await?;
 
+    let ext
+        = archive_extension(&artifact_url);
+
+    if is_mock_request {
+        let archive_path
+            = package_cache.key_path(locator, ext);
+
+        return Ok(FetchResult::new_mock(archive_path.clone(), archive_path));
+    }
+
+    let authorization
+        = pypi::get_artifact_authorization(&project.config, &params.ident, &artifact_url);
+
+    let download_url
+        = artifact_url.split('#').next().unwrap().to_string();
+
     let cached_blob
-        = package_cache.ensure_blob(locator.clone(), ".zip", || async {
+        = package_cache.ensure_blob(locator.clone(), ext, || async {
             let (_, bytes)
-                = project.http_client.get(&artifact_url)?
+                = project.http_client.get(&download_url)?
+                    .header("authorization", authorization.as_deref())
                     .send_bytes()
                     .await?;
 
