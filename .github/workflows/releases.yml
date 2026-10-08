@@ -54,6 +54,8 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-apple-darwin
             os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
 
     name: 'Building ${{matrix.target}}'
     runs-on: ${{matrix.os}}
@@ -70,8 +72,17 @@ jobs:
           version: ${{needs.check.outputs.version}}
 
       - name: Generate the archive files
+        if: matrix.os != 'windows-latest'
         run: |
           zip -jX yarn-${{matrix.target}}.zip target/${{matrix.target}}/release-lto-nodebug/{yarn-bin,yarn,LICENSE.md}
+
+      # The Windows runners don't ship with the zip command
+      - name: Generate the archive files (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $dir = "target/${{matrix.target}}/release-lto-nodebug"
+          Compress-Archive -Path "$dir/yarn-bin.exe", "$dir/yarn.exe", "$dir/LICENSE.md" -DestinationPath "yarn-${{matrix.target}}.zip"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -190,6 +201,7 @@ jobs:
               const os = findFirst(targetName, {
                 linux: `linux`,
                 darwin: `darwin`,
+                win32: `windows`,
               });
 
               fs.writeFileSync(path.join(destinationPath, `package.json`), `${JSON.stringify({
