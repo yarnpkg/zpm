@@ -64,6 +64,10 @@ pub enum Limit {
 ///
 /// By default commands run sequentially. Use `-p,--parallel` to run them concurrently, and `--topological` to respect workspace dependency order.
 ///
+/// When both `--follow-dependents` and `--follow-dependencies` are set, the dependents are added first and the dependencies are then
+/// followed from the whole resulting set, so the selection contains everything needed to build each dependent (equivalent to pnpm's
+/// `--filter '...{pkg}...'`).
+///
 #[cli::command(proxy)]
 #[cli::path("workspaces", "foreach")]
 #[cli::category("Workspace commands")]
@@ -417,13 +421,19 @@ impl WorkspacesForeach {
             return Err(Error::ReplaceMe);
         };
 
-        let dependencies
-            = self.select_dependencies(project, &selection)?;
+        // Dependents are expanded first, then dependencies are followed from
+        // the selection *and* its dependents: `--follow-dependents
+        // --follow-dependencies` thus yields the full closure needed to
+        // build every consumer of the selection (pnpm's `...{pkg}...`).
         let dependents
             = self.select_dependents(project, &selection)?;
 
-        selection.extend(dependencies);
         selection.extend(dependents);
+
+        let dependencies
+            = self.select_dependencies(project, &selection)?;
+
+        selection.extend(dependencies);
 
         selection.retain(|ident| {
             let workspace
