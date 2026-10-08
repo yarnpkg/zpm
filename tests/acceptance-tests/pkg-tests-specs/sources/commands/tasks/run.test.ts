@@ -65,6 +65,24 @@ function spawnYarnBin(testPath: PortablePath, args: Array<string>, env: Record<s
 describe(`Commands`, () => {
   describe(`tasks run`, () => {
     test(
+      `it should report why the daemon failed to start`,
+      makeTemporaryEnv({
+        name: `test-package`,
+        packageManager: `yarn@99.0.0-missing`,
+      }, async ({path, run}) => {
+        await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+          `build:`,
+          `  echo "building"`,
+        ].join(`\n`));
+
+        await expect(run(`tasks`, `run`, `build`)).rejects.toMatchObject({
+          code: 1,
+          stdout: expect.stringMatching(/Failed to start daemon: .*99\.0\.0-missing/),
+        });
+      }),
+    );
+
+    test(
       `it should run a simple task`,
       makeTemporaryEnv({
         name: `test-package`,

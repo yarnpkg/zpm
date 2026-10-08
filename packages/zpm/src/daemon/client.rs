@@ -541,5 +541,16 @@ async fn start_daemon(project_root: &Path) -> Result<String, Error> {
 
     let _ = child.wait().await;
 
-    Ok(url.trim().to_string())
+    let url
+        = url.trim();
+
+    // Switch prints its errors on stdout too; don't try to connect to them
+    if !url.starts_with("ws://") && !url.starts_with("wss://") {
+        let message
+            = url.strip_prefix("Error: ").unwrap_or(url);
+
+        return Err(Error::IpcError(format!("Failed to start daemon: {}", message)));
+    }
+
+    Ok(url.to_string())
 }
