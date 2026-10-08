@@ -1,9 +1,10 @@
 use clipanion::cli;
+use zpm_config::Source;
 use zpm_primitives::Ident;
 
 use crate::{
     error::Error,
-    project::{Project, RunInstallOptions},
+    project::{InstallMode, Project, RunInstallOptions},
 };
 
 /// Install a focused set of workspaces
@@ -16,6 +17,8 @@ use crate::{
 ///
 /// If the `-A,--all` flag is set, the entire project will be installed. Combine with `--production` to replicate the old `yarn install --production`.
 ///
+/// `--immutable` and `--mode=skip-build` behave as they do for `yarn install`.
+///
 #[cli::command]
 #[cli::path("workspaces", "focus")]
 #[cli::category("Workspace commands")]
@@ -27,6 +30,14 @@ pub struct WorkspacesFocus {
     /// Exclude development dependencies from the focused install
     #[cli::option("--production", default = false)]
     production: bool,
+
+    /// Abort if the lockfile would be modified
+    #[cli::option("--immutable,--frozen-lockfile")]
+    immutable: Option<bool>,
+
+    /// Change which artifacts are generated (`skip-build` doesn't run build scripts)
+    #[cli::option("--mode")]
+    mode: Option<InstallMode>,
 
     /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
@@ -54,12 +65,24 @@ impl WorkspacesFocus {
                 .collect::<Vec<_>>()
         };
 
+        // A focused install never writes a partial lockfile, so only the
+        // modes that link something make sense here
+        if self.mode == Some(InstallMode::UpdateLockfile) {
+            return Err(Error::FocusWithUpdateLockfile);
+        }
+
+        if let Some(immutable) = self.immutable {
+            project.config.settings.enable_immutable_installs.force(immutable, Source::Cli);
+        }
+
         let focused_workspaces
             = project.workspace_dependency_closure(roots, !self.production)?;
 
         project.run_install(RunInstallOptions {
             prune_dev_dependencies: self.production,
             roots: Some(focused_workspaces),
+            mode: self.mode,
+            json: self.json,
             ..Default::default()
         }).await?;
 
