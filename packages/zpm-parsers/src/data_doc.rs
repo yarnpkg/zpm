@@ -132,13 +132,29 @@ impl DataDocument {
     /// This is a convenience method that creates a DataDocument, updates the path,
     /// and returns the modified document as a string.
     pub fn update_document_field(document: &str, path: Path, value: Value) -> Result<String, Error> {
+        // The YAML editor only understands LF line endings, but files checked
+        // out on Windows often use CRLF; we restore them after the edit.
+        let uses_crlf
+            = document.contains("\r\n");
+
+        let normalized_document = match uses_crlf {
+            true => std::borrow::Cow::Owned(document.replace("\r\n", "\n")),
+            false => std::borrow::Cow::Borrowed(document),
+        };
+
         let mut doc
-            = DataDocument::new(document.as_bytes().to_vec())?;
+            = DataDocument::new(normalized_document.as_bytes().to_vec())?;
 
         doc.set_path(&path, value)?;
 
-        Ok(String::from_utf8(doc.input().to_vec())
-            .map_err(|e| Error::InvalidSyntax(e.to_string()))?)
+        let updated_document
+            = String::from_utf8(doc.input().to_vec())
+                .map_err(|e| Error::InvalidSyntax(e.to_string()))?;
+
+        Ok(match uses_crlf {
+            true => updated_document.replace('\n', "\r\n"),
+            false => updated_document,
+        })
     }
 }
 
@@ -321,6 +337,20 @@ mod tests {
         assert_eq!(
             String::from_utf8(doc.input().to_vec()).unwrap(),
             "test: new\n"
+        );
+    }
+
+    #[test]
+    fn test_update_document_field_preserves_crlf() {
+        let updated = DataDocument::update_document_field(
+            "nodeLinker: pnp\r\npackageExtensions:\r\n  foo@*:\r\n    dependencies:\r\n      bar: '*'\r\n",
+            Path::from_segments(vec!["enableScripts".to_string()]),
+            Value::Bool(false),
+        ).unwrap();
+
+        assert_eq!(
+            updated,
+            "enableScripts: false\r\nnodeLinker: pnp\r\npackageExtensions:\r\n  foo@*:\r\n    dependencies:\r\n      bar: '*'\r\n"
         );
     }
 }
