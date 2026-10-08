@@ -201,6 +201,29 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should not run install after an immutable install`,
+      makeTemporaryEnv({}, async ({path, run}) => {
+        await setupMonorepo(path);
+        await run(`install`);
+        await run(`install`, `--immutable`);
+
+        const installStatePath = ppath.join(path, `.yarn/ignore/install` as PortablePath);
+        const stateBefore = await xfs.statPromise(installStatePath);
+
+        await new Promise(resolve => setTimeout(resolve, 10));
+
+        // --immutable only validates the install, so it mustn't make the
+        // configuration look different to the next command
+        await run(`node`, `-e`, `require('no-deps')`, {
+          cwd: ppath.join(path, `packages/foo` as PortablePath),
+        });
+
+        const stateAfter = await xfs.statPromise(installStatePath);
+        expect(stateAfter.mtimeMs).toEqual(stateBefore.mtimeMs);
+      }),
+    );
+
+    test(
       `it should extend a focused install when the active workspace is missing and the lockfile is fresh`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         await setupMonorepo(path);

@@ -132,6 +132,19 @@ pub struct RunInstallOptions {
     pub force: bool,
 }
 
+/// Settings that never influence the installed tree (see `install_config_hash`)
+const INSTALL_IRRELEVANT_SETTINGS: &[&str] = &[
+    "changesetBaseRefs",
+    "daemonDefaultWarmupPeriod",
+    "daemonMaxClosedTasks",
+    "daemonOutputBufferMaxLines",
+    "enableImmutableInstalls",
+    "enableProgressBars",
+    "enableTimers",
+    "immutablePatterns",
+    "lazyInstallMode",
+];
+
 pub struct Project {
     pub project_cwd: Path,
     pub package_cwd: Path,
@@ -1050,7 +1063,21 @@ impl Project {
         // in ways the other freshness checks can't see.
         writer.update(get_bin_version().as_bytes());
 
-        writer.update(serde_json::to_vec(&self.config.settings)
+        let mut settings
+            = serde_json::to_value(&self.config.settings)
+                .expect("configuration settings should always be serializable");
+
+        // Settings that only validate an install or shape the output can't
+        // change what gets installed. Hashing them would make every
+        // `--immutable` install (which forces enableImmutableInstalls)
+        // invalidate the next lazy install.
+        if let Some(settings) = settings.as_object_mut() {
+            for key in INSTALL_IRRELEVANT_SETTINGS {
+                settings.remove(*key);
+            }
+        }
+
+        writer.update(serde_json::to_vec(&settings)
             .expect("configuration settings should always be serializable"));
 
         writer.finalize()
