@@ -334,6 +334,36 @@ describe(`Commands`, () => {
         },
       ),
     );
+
+    test(
+      `should run scripts after a focused pnpm-linker install without a lockfile`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        {
+          nodeLinker: `pnpm`,
+        },
+        async ({path, run}) => {
+          await setupProject(path);
+          await xfs.writeJsonPromise(ppath.join(path, `packages/bar/package.json`), {
+            name: `bar`,
+            dependencies: {[`no-deps`]: `2.0.0`},
+            scripts: {hello: `echo hello`},
+          });
+
+          // Our own linker creates node_modules/.pnpm; it mustn't be mistaken
+          // for a pnpm install to import
+          await run(`workspaces`, `focus`, `bar`);
+
+          await expect(xfs.existsSync(ppath.join(path, `yarn.lock`))).toBeFalsy();
+          await expect(run(`workspace`, `bar`, `run`, `hello`)).resolves.toMatchObject({
+            stdout: expect.stringContaining(`hello`),
+          });
+        },
+      ),
+    );
   });
 });
 
