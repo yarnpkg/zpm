@@ -52,7 +52,7 @@ now() {
 }
 
 measure() {
-  local label=$1; shift
+  local label="$1"; shift
 
   for _ in $(seq "$RUNS"); do
     local start; start=$(now)
