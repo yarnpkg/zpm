@@ -284,21 +284,47 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                             // The upper bound is inclusive, and its missing
                             // components are wildcards (`1 - 2` is `<3.0.0-0`)
                             return extract_version(str).map(|(other_version, other_missing)| {
-                                let upper_bound = match other_missing {
-                                    0 => Token::Operation(OperatorType::LessThanOrEqual, other_version),
-                                    1 => Token::Operation(OperatorType::LessThan, other_version.next_minor_rc()),
-                                    2 => Token::Operation(OperatorType::LessThan, other_version.next_major_rc()),
-                                    _ => Token::Operation(OperatorType::GreaterThanOrEqual, Version::new_from_components(0, 0, 0, None)),
-                                };
-
-                                EcoVec::from([
-                                    Token::Operation(
-                                        OperatorType::GreaterThanOrEqual,
-                                        version,
-                                    ),
-                                    Token::Syntax(TokenType::SAnd),
-                                    upper_bound,
-                                ])
+                                match other_missing {
+                                    0 => {
+                                        EcoVec::from([
+                                            Token::Operation(
+                                                OperatorType::GreaterThanOrEqual,
+                                                version,
+                                            ),
+                                            Token::Syntax(TokenType::SAnd),
+                                            Token::Operation(OperatorType::LessThanOrEqual, other_version),
+                                        ])
+                                    }
+                                    1 => {
+                                        EcoVec::from([
+                                            Token::Operation(
+                                                OperatorType::GreaterThanOrEqual,
+                                                version,
+                                            ),
+                                            Token::Syntax(TokenType::SAnd),
+                                            Token::Operation(OperatorType::LessThan, other_version.next_minor_rc()),
+                                        ])
+                                    }
+                                    2 => {
+                                        EcoVec::from([
+                                            Token::Operation(
+                                                OperatorType::GreaterThanOrEqual,
+                                                version,
+                                            ),
+                                            Token::Syntax(TokenType::SAnd),
+                                            Token::Operation(OperatorType::LessThan, other_version.next_major_rc()),
+                                        ])
+                                    }
+                                    _ => {
+                                        // Wildcard upper bound: no upper limit
+                                        EcoVec::from([
+                                            Token::Operation(
+                                                OperatorType::GreaterThanOrEqual,
+                                                version,
+                                            ),
+                                        ])
+                                    }
+                                }
                             })
                         }
                     }
