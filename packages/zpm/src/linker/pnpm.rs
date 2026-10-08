@@ -19,9 +19,15 @@ fn matches_patterns(ident: &Ident, patterns: &[IdentGlob]) -> bool {
 }
 
 /// Collect all packages that should be hoisted based on patterns.
-/// Returns a map from ident to the locator that should be hoisted (picks the first one found for conflicts).
+/// When several versions match, the one closest to the workspaces wins
+/// (then the lowest locator), like pnpm which hoists in depth order: the
+/// version the workspaces use directly is the one their transitive
+/// dependencies most likely expect to find.
 fn collect_hoistable_packages<'a>(tree: &'a ResolutionTree, patterns: &[IdentGlob], locations_by_package: &BTreeMap<Locator, Path>) -> BTreeMap<Ident, &'a Locator> {
-    let mut hoistable
+    let depths
+        = locator_depths(tree);
+
+    let mut hoistable: BTreeMap<Ident, (usize, &'a Locator)>
         = BTreeMap::new();
 
     for locator in tree.locator_resolutions.keys() {
@@ -30,19 +36,65 @@ fn collect_hoistable_packages<'a>(tree: &'a ResolutionTree, patterns: &[IdentGlo
             continue;
         }
 
-        // Check if this package matches any hoist pattern
-        if matches_patterns(&locator.ident, patterns) {
-            // Only hoist if we haven't seen this ident yet (first wins for conflicts)
-            if !hoistable.contains_key(&locator.ident) {
-                // Only hoist packages that have a location in the store
-                if locations_by_package.contains_key(locator) {
-                    hoistable.insert(locator.ident.clone(), locator);
+        if !matches_patterns(&locator.ident, patterns) {
+            continue;
+        }
+
+        // Only hoist packages that have a location in the store
+        if !locations_by_package.contains_key(locator) {
+            continue;
+        }
+
+        let depth
+            = depths.get(locator).copied().unwrap_or(usize::MAX);
+
+        let is_better = match hoistable.get(&locator.ident) {
+            Some((existing_depth, existing_locator)) => (depth, locator) < (*existing_depth, *existing_locator),
+            None => true,
+        };
+
+        if is_better {
+            hoistable.insert(locator.ident.clone(), (depth, locator));
+        }
+    }
+
+    hoistable.into_iter()
+        .map(|(ident, (_, locator))| (ident, locator))
+        .collect()
+}
+
+/// The distance of each package from the closest workspace (breadth-first).
+fn locator_depths(tree: &ResolutionTree) -> BTreeMap<&Locator, usize> {
+    let mut depths
+        = BTreeMap::new();
+
+    let mut queue: std::collections::VecDeque<(&Locator, usize)>
+        = tree.locator_resolutions.keys()
+            .filter(|locator| locator.reference.is_workspace_reference())
+            .map(|locator| (locator, 0))
+            .collect();
+
+    while let Some((locator, depth)) = queue.pop_front() {
+        if depths.contains_key(locator) {
+            continue;
+        }
+
+        depths.insert(locator, depth);
+
+        let Some(resolution) = tree.locator_resolutions.get(locator) else {
+            continue;
+        };
+
+        for descriptor in resolution.dependencies.values() {
+            if let Some((dependency_locator, _)) = tree.descriptor_to_locator.get(descriptor).and_then(|locator| tree.locator_resolutions.get_key_value(locator)) {
+                if !depths.contains_key(dependency_locator) {
+                    queue.push_back((dependency_locator, depth + 1));
                 }
             }
         }
     }
 
-    hoistable
+    depths
 }
 
 pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -> Result<LinkResult, Error> {
@@ -205,19 +257,18 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             .fs_symlink(&symlink_target)?;
     }
 
-    // Track which packages are direct dependencies of workspaces
-    let mut direct_dependency_idents: BTreeSet<Ident> = BTreeSet::new();
-    for (locator, resolution) in &tree.locator_resolutions {
-        if locator.reference.is_workspace_reference() {
-            for dep_ident in resolution.dependencies.keys() {
-                direct_dependency_idents.insert(dep_ident.clone());
-            }
-        }
-    }
+    // Public hoisting targets the root node_modules, so only the root
+    // workspace's own dependencies take precedence over it (as with pnpm);
+    // other workspaces declaring the package get their own links, but
+    // packages resolving from the root (for example a workspace importing
+    // it through another workspace) still need the hoisted one
+    let root_dependency_idents: BTreeSet<Ident>
+        = tree.locator_resolutions.get(&project.root_workspace().locator())
+            .map(|resolution| resolution.dependencies.keys().cloned().collect())
+            .unwrap_or_default();
 
     for (ident, locator) in &public_hoisted_packages {
-        // Skip if this is already a direct dependency (will be linked separately)
-        if direct_dependency_idents.contains(ident) {
+        if root_dependency_idents.contains(ident) {
             continue;
         }
 
