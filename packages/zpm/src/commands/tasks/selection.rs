@@ -93,17 +93,23 @@ impl<'a> TaskSelection<'a> {
         // dependents too (`--with-dependents --with-dependencies` gives the
         // full closure needed to build every consumer, like pnpm's
         // `...{pkg}...`).
-        if self.with_dependents {
+        let dependents: BTreeSet<Ident> = if self.with_dependents {
             let dependent_map
                 = invert(&dependency_map);
 
-            base.extend(traverse(&seeds, &dependent_map));
-        }
+            let deps = traverse(&seeds, &dependent_map);
+            base.extend(deps.iter().cloned());
+            deps
+        } else {
+            BTreeSet::new()
+        };
 
         let mut selection: BTreeSet<Ident>
-            = match self.dependencies_only {
-                true => BTreeSet::new(),
-                false => base.clone(),
+            = if self.dependencies_only {
+                // When combined with --with-dependents, include the dependents but not the original seeds
+                dependents.difference(&seeds).cloned().collect()
+            } else {
+                base.clone()
             };
 
         if self.with_dependencies || self.dependencies_only {
@@ -113,7 +119,7 @@ impl<'a> TaskSelection<'a> {
             selection.extend(dependencies.into_iter().filter(|ident| {
                 // A workspace that's both a seed and a dependency of another
                 // seed is still a dependency.
-                !self.dependencies_only || !base.contains(ident) || is_reachable_from_others(ident, &base, &dependency_map)
+                !self.dependencies_only || !seeds.contains(ident) || is_reachable_from_others(ident, &seeds, &dependency_map)
             }));
         }
 
