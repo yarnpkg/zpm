@@ -67,8 +67,12 @@ pub fn extract_alnum_hyphen(str: &mut std::iter::Peekable<std::str::Chars>) -> O
 pub fn extract_rc_segment(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<VersionRc> {
     let curr = str.clone();
 
+    // A segment is numeric only if it's entirely made of digits; anything that
+    // can't continue an identifier (separators, spaces, range operators, ...)
+    // ends it. Checking for an explicit list of terminators instead used to
+    // turn `41` into a string in `>=1.0.0-beta.41 <1.0.0-c`, breaking ordering.
     if let Some(n) = extract_number(str) {
-        if let Some('.' | '+') | None = str.peek() {
+        if !matches!(str.peek(), Some(&c) if c.is_alphanumeric() || c == '-') {
             return Some(VersionRc::Number(n));
         }
     }

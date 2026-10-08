@@ -80,6 +80,13 @@ use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 #[case("1.2.*", "1.2.0", true)]
 #[case("1.2.x", "1.2.0", true)]
 #[case("1.2.X", "1.2.0", true)]
+
+// Numeric prerelease segments followed by a space must stay numeric
+#[case(">=1.0.0-beta.41 <1.0.0-c", "1.0.0-beta.45", true)]
+#[case(">=1.0.0-beta.41 <1.0.0-c", "1.0.0-beta.5", false)]
+#[case(">=1.0.0-beta.41 <1.0.0-c || ^1.0.0", "1.0.0-beta.45", true)]
+#[case(">=1.0.0-beta.41 <1.0.0-c || ^1.0.0", "1.0.0", true)]
+#[case(">=1.0.0-rc.2 <1.0.0", "1.0.0-rc.10", true)]
 fn test_range_check(#[case] range: Range, #[case] version: Version, #[case] expected: bool) {
     assert_eq!(range.check(&version), expected);
 }
