@@ -303,6 +303,12 @@ impl PypiExtras {
     }
 }
 
+/// PEP 503 name normalization: lowercase, with runs of `-`, `_` and `.`
+/// collapsed into a single `-`.
+pub fn canonicalize_pypi_name(name: &str) -> String {
+    normalize_pypi_extra(name.trim())
+}
+
 pub fn normalize_pypi_extra(extra: &str) -> String {
     let mut normalized
         = String::with_capacity(extra.len());
@@ -375,6 +381,17 @@ impl_file_string_serialization!(PypiExtras);
 #[rkyv(derive(PartialEq, Eq, PartialOrd, Ord, Hash))]
 pub struct PypiRangeParameters {
     pub extras: Option<PypiExtras>,
+
+    /// PEP 508 environment marker guarding this dependency edge. Only set
+    /// when the marker is true for some (but not all) of the environments
+    /// the island targets; the venv linker evaluates it against the
+    /// current environment and skips the edge when it's false.
+    pub marker: Option<String>,
+
+    /// Selects the artifact of an exact version built for a given platform
+    /// (`darwin-arm64`, `linux-x64-glibc`, ...). Used by the per-platform
+    /// variants of packages shipping platform-specific wheels.
+    pub platform: Option<String>,
 }
 
 impl PypiRangeParameters {
@@ -385,11 +402,25 @@ impl PypiRangeParameters {
     pub fn from_extras(extras: PypiExtras) -> Self {
         Self {
             extras: (!extras.is_empty()).then_some(extras),
+            marker: None,
+            platform: None,
         }
+    }
+
+    pub fn new(extras: PypiExtras, marker: Option<String>) -> Option<Self> {
+        let parameters = Self {
+            extras: (!extras.is_empty()).then_some(extras),
+            marker,
+            platform: None,
+        };
+
+        (!parameters.is_empty()).then_some(parameters)
     }
 
     pub fn is_empty(&self) -> bool {
         self.extras.as_ref().map(|extras| extras.is_empty()).unwrap_or(true)
+            && self.marker.is_none()
+            && self.platform.is_none()
     }
 
     pub fn merge(&self, other: &Self) -> Result<Self, PypiError> {
@@ -400,8 +431,17 @@ impl PypiRangeParameters {
             (None, None) => None,
         };
 
+        let marker = match (&self.marker, &other.marker) {
+            (Some(left), Some(right)) if left != right => Some(format!("({}) or ({})", left, right)),
+            (Some(left), _) => Some(left.clone()),
+            (None, Some(right)) => Some(right.clone()),
+            (None, None) => None,
+        };
+
         Ok(Self {
             extras,
+            marker,
+            platform: self.platform.clone().or_else(|| other.platform.clone()),
         })
     }
 }
@@ -427,6 +467,14 @@ impl FromFileString for PypiRangeParameters {
                     return Err(PypiError::InvalidRangeParameter(key));
                 },
 
+                ("marker", QueryStringValue::String(value)) => {
+                    parameters.marker = Some(value);
+                },
+
+                ("platform", QueryStringValue::String(value)) => {
+                    parameters.platform = Some(value);
+                },
+
                 _ => {
                     return Err(PypiError::InvalidRangeParameter(key));
                 },
@@ -446,6 +494,14 @@ impl ToFileString for PypiRangeParameters {
             if !extras.is_empty() {
                 parameters.push(format!("extras={}", extras.to_file_string()));
             }
+        }
+
+        if let Some(marker) = &self.marker {
+            parameters.push(format!("marker={}", QueryString::encode(marker)));
+        }
+
+        if let Some(platform) = &self.platform {
+            parameters.push(format!("platform={}", QueryString::encode(platform)));
         }
 
         parameters.join("&")

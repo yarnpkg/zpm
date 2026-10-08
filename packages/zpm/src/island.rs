@@ -27,6 +27,7 @@ pub struct ResolvedIsland {
 #[derive(Clone, Debug)]
 pub struct IslandResolutionResult {
     pub island_id: String,
+    pub input_hash: Option<zpm_utils::Hash64>,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
     pub normalized_resolutions: BTreeMap<Locator, Resolution>,
 }
@@ -89,8 +90,17 @@ pub async fn resolve_island(
     ctx: &InstallContext<'_>,
     lockfile: &Lockfile,
 ) -> Result<IslandResolutionResult, Error> {
-    // Phase 2: Build locked_versions map (preferred locators from lockfile)
-    let locked_versions = build_locked_versions(island, lockfile);
+    // Phase 2: Build locked_versions map (preferred locators from lockfile,
+    // or from the uv.lock the island was imported from)
+    let mut locked_versions = build_locked_versions(island, lockfile);
+
+    // The seed fills the gaps of the lockfile rather than only replacing a
+    // missing one: packages added since the last install (say, new extras
+    // requested from the workspace) keep the version uv had locked instead
+    // of jumping to the latest release
+    for (ident, locator) in seed_locked_versions(ctx, island) {
+        locked_versions.entry(ident).or_insert(locator);
+    }
 
     // Phase 3: Build root_deps (workspace singletons) and workspace_deps
     let project = ctx.project
@@ -135,10 +145,63 @@ pub async fn resolve_island(
         workspace_deps.insert(workspace.name.clone(), deps);
     }
 
-    // TODO: Phase 1 — lockfile fast-path. Currently disabled; always
-    // re-resolve to avoid stale lockfile issues when deps change.
-    // Future optimisation: compare root_deps against locked island
-    // descriptors and reuse the lockfile when they match exactly.
+    // Phase 1: lockfile fast path. The island is reused as-is when none of
+    // its inputs changed since it was locked.
+    let input_hash
+        = island_input_hash(&island_context(ctx, island), island, &workspace_deps);
+
+    if !ctx.refresh_lockfile && lockfile.island_hashes.get(&island.id) == Some(&input_hash) {
+        if let Some(locked_island) = lockfile.islands.get(&island.id) {
+            let is_complete
+                = locked_island.values().all(|locator| lockfile.entries.contains_key(locator));
+
+            if is_complete {
+                let mut result
+                    = island_result_from_lockfile(&island.id, locked_island, lockfile)?;
+
+                // Workspaces aren't stored in the lockfile; the island's own
+                // workspaces and the ones they depend on are added back
+                let mut workspace_queue
+                    = workspace_deps.keys().cloned().collect::<Vec<_>>();
+
+                let mut seen_workspaces
+                    = BTreeSet::new();
+
+                while let Some(ident) = workspace_queue.pop() {
+                    if !seen_workspaces.insert(ident.clone()) {
+                        continue;
+                    }
+
+                    let deps = match workspace_deps.get(&ident) {
+                        Some(deps) => deps.clone(),
+                        None => match project.workspace_by_ident(&ident) {
+                            Ok(workspace) => workspace.manifest.remote.dependencies.clone(),
+                            Err(_) => continue,
+                        },
+                    };
+
+                    let locator = Locator::new(ident.clone(), WorkspaceIdentReference {ident: ident.clone()}.into());
+                    let descriptor = Descriptor::new(ident.clone(), zpm_primitives::WorkspaceMagicRange {magic: zpm_semver::RangeKind::Caret}.into());
+
+                    for dependency in deps.values() {
+                        if dependency.range.is_workspace() || project.try_workspace_by_descriptor(dependency).ok().flatten().is_some() {
+                            result.descriptor_to_locator.insert(dependency.clone(), Locator::new(dependency.ident.clone(), WorkspaceIdentReference {ident: dependency.ident.clone()}.into()));
+                            workspace_queue.push(dependency.ident.clone());
+                        }
+                    }
+
+                    let mut resolution = Resolution::new_empty(locator.clone(), zpm_semver::Version::default());
+                    resolution.dependencies = deps;
+
+                    result.descriptor_to_locator.insert(descriptor, locator.clone());
+                    result.normalized_resolutions.insert(locator, resolution);
+                }
+
+                result.input_hash = Some(input_hash);
+                return Ok(result);
+            }
+        }
+    }
 
     // Phase 4: Run pubgrub on a blocking thread.
     //
@@ -153,6 +216,11 @@ pub async fn resolve_island(
     let handle = tokio::runtime::Handle::current();
     let island_id = island.id.clone();
     let enforced_resolutions = ctx.enforced_resolutions.clone();
+
+    let island_ctx
+        = island_context(ctx, island);
+
+    let ctx = &island_ctx;
 
     // SAFETY: see comment above — the references are valid for the lifetime
     // of the spawn_blocking task because we .await the result immediately.
@@ -202,64 +270,160 @@ pub async fn resolve_island(
     })??;
 
     // Phase 5: Convert pubgrub solution to descriptor_to_locator + resolutions
-    convert_solution(&island.id, solution, &resolution_cache, &extra_resolution_cache, &workspace_deps)
+    // Workspaces from other islands appear in the solution with their
+    // regular dependencies only
+    let mut all_workspace_deps
+        = workspace_deps.clone();
+
+    for workspace in &project.workspaces {
+        all_workspace_deps.entry(workspace.name.clone())
+            .or_insert_with(|| workspace.manifest.remote.dependencies.clone());
+    }
+
+    let mut result
+        = convert_solution(&island.id, solution, &resolution_cache, &extra_resolution_cache, &all_workspace_deps)?;
+
+    resolve_variants(ctx, &mut result).await?;
+
+    result.input_hash = Some(input_hash);
+
+    Ok(result)
 }
 
-#[allow(dead_code)]
-/// Check if the lockfile has a valid and complete resolution for this island.
-/// Validates both that all entries exist and that the locked descriptors
-/// match the current workspace dependencies.
-fn is_island_lockfile_valid(
-    locked_island: &BTreeMap<Descriptor, Locator>,
-    lockfile: &Lockfile,
-    current_root_deps: &BTreeMap<Ident, IslandVersionSet>,
-) -> bool {
-    if locked_island.is_empty() && current_root_deps.is_empty() {
-        return true;
-    }
+/// Hash of everything an island's resolution depends on, besides the
+/// registry content itself.
+fn island_input_hash(ctx: &InstallContext<'_>, island: &ResolvedIsland, workspace_deps: &BTreeMap<Ident, BTreeMap<Ident, Descriptor>>) -> zpm_utils::Hash64 {
+    use zpm_utils::ToFileString;
 
-    if locked_island.is_empty() {
-        return false;
-    }
+    let mut parts
+        = vec!["island-v1".to_string(), island.id.clone()];
 
-    // Verify all locked entries are present in the lockfile
-    for locator in locked_island.values() {
-        if !lockfile.entries.contains_key(locator) {
-            return false;
+    for (ident, deps) in workspace_deps {
+        parts.push(format!("ws:{}", ident.to_file_string()));
+
+        for descriptor in deps.values() {
+            parts.push(descriptor.to_file_string());
         }
     }
 
-    // Verify the locked island covers exactly the current root deps.
-    // If a dep was added or removed, re-resolve.
-    let locked_root_idents: BTreeSet<&Ident> = locked_island.keys()
-        .map(|d| &d.ident)
-        .collect();
-
-    let current_idents: BTreeSet<&Ident> = current_root_deps.keys()
-        .collect();
-
-    // Every current dep must be present, and the locked island shouldn't
-    // have root idents that are no longer requested. We use subset checks
-    // in both directions — but locked_root_idents includes transitive deps
-    // too, so we only check that current is a subset and that removing a
-    // current dep invalidates the lockfile.
-    if !current_idents.is_subset(&locked_root_idents) {
-        // A new dependency was added
-        return false;
+    for (selector, range) in ctx.dependency_overrides.iter() {
+        parts.push(format!("override:{}={}", selector.to_file_string(), range.as_ref().map(|range| range.to_file_string()).unwrap_or_default()));
     }
 
-    // Check that there are no locked root idents that are not in current
-    // deps or in transitive deps. Since we can't easily distinguish root
-    // from transitive in the lockfile, we use a simpler heuristic: if
-    // current_root_deps is empty but locked_island is not, it's stale.
-    if current_root_deps.is_empty() && !locked_island.is_empty() {
-        return false;
+    for constraint in &ctx.pypi_constraints {
+        parts.push(format!("constraint:{}", constraint));
     }
 
-    true
+    if let Some(project) = ctx.project {
+        let targets
+            = crate::python_env::PythonTargets::from_config(&project.config, ctx.python_version.as_deref());
+
+        parts.push(targets.fingerprint());
+        parts.push(format!("registry:{}", project.config.settings.pypi_registry_server.value));
+        parts.push(format!("age-gate:{:?}", project.config.settings.pypi_minimal_age_gate.value));
+
+        for rule in &project.config.settings.package_rules {
+            parts.push(format!("rule:{:?}:{:?}", rule.package_filter.value.as_ref().map(|filter| filter.to_file_string()), rule.pypi_registry_server.value));
+        }
+    }
+
+    zpm_utils::Hash64::from_data(parts.join("\n").as_bytes())
 }
 
-#[allow(dead_code)]
+/// The install context used to resolve an island:
+///
+/// - `pythonVersion` can be overridden per island;
+/// - the `resolutions` of the island's workspaces apply to the island (on
+///   top of the root workspace's), which lets each Python project keep its
+///   own overrides (uv's `override-dependencies`);
+/// - `pypiConstraints` restrict the candidate versions of the packages
+///   they mention (uv's `constraint-dependencies`).
+fn island_context<'a>(ctx: &InstallContext<'a>, island: &ResolvedIsland) -> InstallContext<'a> {
+    let mut island_ctx
+        = ctx.clone();
+
+    let Some(project) = ctx.project else {
+        return island_ctx;
+    };
+
+    let definition
+        = project.config.settings.unstable_islands.get(&island.id);
+
+    island_ctx.python_version = definition
+        .and_then(|definition| definition.python_version.value.clone());
+
+    island_ctx.pypi_constraints = definition
+        .map(|definition| definition.pypi_constraints.iter().map(|constraint| constraint.value.clone()).collect())
+        .unwrap_or_default();
+
+    let root_ident
+        = project.root_workspace().name.clone();
+
+    let island_overrides
+        = project.workspaces.iter()
+            .filter(|workspace| workspace.name != root_ident && island.workspace_idents.contains(&workspace.name))
+            .flat_map(|workspace| workspace.manifest.resolutions.iter().map(|(selector, range)| (selector.clone(), range.clone())))
+            .collect::<Vec<_>>();
+
+    if !island_overrides.is_empty() {
+        // Island rules come first so they take precedence over the root ones
+        let entries
+            = island_overrides.into_iter()
+                .chain(ctx.dependency_overrides.iter().map(|(selector, range)| (selector.clone(), range.clone())));
+
+        island_ctx.dependency_overrides
+            = std::sync::Arc::new(crate::manifest::resolutions::ResolutionsField::from_entries(entries));
+    }
+
+    island_ctx
+}
+
+/// Platform variants (packages with per-platform artifacts) aren't part
+/// of the solver's graph; they're resolved once the solution is known.
+async fn resolve_variants(ctx: &InstallContext<'_>, result: &mut IslandResolutionResult) -> Result<(), Error> {
+    let variants
+        = result.normalized_resolutions.values()
+            .flat_map(|resolution| resolution.variants.iter().map(move |variant| (variant.clone(), resolution.dependencies.clone())))
+            .collect::<BTreeMap<_, _>>();
+
+    let futures = variants.keys().map(|descriptor| {
+        crate::resolvers::resolve_descriptor(ctx.clone(), descriptor.clone(), vec![])
+    });
+
+    let resolved
+        = futures::future::try_join_all(futures).await?;
+
+    // The tree resolver substitutes the variant to its parent, so the
+    // variant must carry the dependencies the solver picked for the parent
+    for ((descriptor, dependencies), resolution) in variants.into_iter().zip(resolved) {
+        let mut resolution
+            = resolution.resolution;
+
+        resolution.dependencies = dependencies;
+
+        let locator
+            = resolution.locator.clone();
+
+        result.descriptor_to_locator.insert(descriptor, locator.clone());
+
+        // Variants for several platforms can resolve to the same artifact
+        // (a macOS universal2 wheel serves both arm64 and x64); they share a
+        // locator, which must then accept every one of these platforms
+        if let Some(existing) = result.normalized_resolutions.get_mut(&locator) {
+            if !existing.variants.is_empty() || existing.requirements == resolution.requirements {
+                continue;
+            }
+
+            existing.requirements.extend(&resolution.requirements);
+            continue;
+        }
+
+        result.normalized_resolutions.insert(locator, resolution);
+    }
+
+    Ok(())
+}
+
 /// Build an IslandResolutionResult from cached lockfile data.
 fn island_result_from_lockfile(
     island_id: &str,
@@ -270,15 +434,76 @@ fn island_result_from_lockfile(
 
     for locator in locked_island.values() {
         if let Some(entry) = lockfile.entries.get(locator) {
-            normalized_resolutions.insert(locator.clone(), entry.resolution.clone());
+            let mut resolution
+                = entry.resolution.clone();
+
+            // Only keep the variants this island resolved
+            resolution.variants.retain(|variant| locked_island.contains_key(variant));
+
+            normalized_resolutions.insert(locator.clone(), resolution);
         }
     }
 
     Ok(IslandResolutionResult {
         island_id: island_id.to_string(),
+        input_hash: None,
         descriptor_to_locator: locked_island.clone(),
         normalized_resolutions,
     })
+}
+
+/// Reads the versions pinned by the island's seed uv.lock (`pypiSeedLockfile`)
+/// as preferred versions. Only registry packages are taken into account.
+fn seed_locked_versions(ctx: &InstallContext<'_>, island: &ResolvedIsland) -> BTreeMap<Ident, Locator> {
+    let mut locked
+        = BTreeMap::new();
+
+    let Some(project) = ctx.project else {
+        return locked;
+    };
+
+    let Some(seed) = project.config.settings.unstable_islands.get(&island.id).and_then(|definition| definition.pypi_seed_lockfile.value.clone()) else {
+        return locked;
+    };
+
+    let Ok(text) = project.project_cwd.with_join_str(&seed).fs_read_text() else {
+        return locked;
+    };
+
+    let Ok(document) = text.parse::<toml_edit::DocumentMut>() else {
+        return locked;
+    };
+
+    let Some(packages) = document.get("package").and_then(|packages| packages.as_array_of_tables()) else {
+        return locked;
+    };
+
+    for package in packages.iter() {
+        let is_registry
+            = package.get("source").and_then(|source| source.as_inline_table()).map_or(false, |source| source.contains_key("registry"));
+
+        if !is_registry {
+            continue;
+        }
+
+        let (Some(name), Some(version)) = (package.get("name").and_then(|v| v.as_str()), package.get("version").and_then(|v| v.as_str())) else {
+            continue;
+        };
+
+        let Ok(ident) = Ident::from_file_string(&zpm_primitives::canonicalize_pypi_name(name)) else {
+            continue;
+        };
+
+        let Ok(version) = zpm_primitives::PypiVersion::from_file_string(version) else {
+            continue;
+        };
+
+        // A package can appear multiple times in forked uv locks; the first
+        // (highest Python) entry wins
+        locked.entry(ident.clone()).or_insert_with(|| Locator::new(ident, zpm_primitives::PypiShorthandReference {version, url: None}.into()));
+    }
+
+    locked
 }
 
 /// Extract locked locators from the previous lockfile's island data.
@@ -455,6 +680,7 @@ fn convert_solution(
 
     Ok(IslandResolutionResult {
         island_id: island_id.to_string(),
+        input_hash: None,
         descriptor_to_locator,
         normalized_resolutions,
     })

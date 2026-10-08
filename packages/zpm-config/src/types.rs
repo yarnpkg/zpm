@@ -172,6 +172,16 @@ pub enum IslandLinker {
 
 #[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PythonPreference {
+    #[literal("managed")]
+    Managed,
+
+    #[literal("system")]
+    System,
+}
+
+#[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PnpFallbackMode {
     #[literal("none")]
     None,

@@ -1342,7 +1342,14 @@ impl Project {
             return Ok(false);
         }
 
-        if !self.config.settings.unstable_islands.is_empty() {
+        // Islands are covered by the same checks as the rest of the project
+        // (manifests, configuration, lockfile); we only need to make sure
+        // their venvs haven't been removed.
+        let venvs_missing = self.workspaces.iter()
+            .filter(|workspace| self.try_island_by_rel_path(&workspace.rel_path, IslandLinker::Venv).is_some())
+            .any(|workspace| !workspace.path.with_join_str(".venv/bin/python").fs_exists());
+
+        if venvs_missing {
             return Ok(false);
         }
 
@@ -1698,6 +1705,14 @@ impl Project {
 
                 for workspace in self.workspaces.iter().skip(1) {
                     if workspace.manifest.resolutions.is_empty() {
+                        continue;
+                    }
+
+                    // Island workspaces apply their resolutions to their island
+                    let in_island = self.config.settings.unstable_islands.values()
+                        .any(|island| island.workspaces.iter().any(|glob| glob.value.check(&workspace.name)));
+
+                    if in_island {
                         continue;
                     }
 

@@ -1708,6 +1708,7 @@ merge_settings!(crate::types::ArchitectureFilter<zpm_utils::Os>, |s: &str| FromF
 merge_settings!(crate::types::NodeLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::NodePackageMapType, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::IslandLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::PythonPreference, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::LazyInstallMode, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::NmHoistingLimits, |s: &str| FromFileString::from_file_string(s).unwrap());

@@ -24,6 +24,7 @@ mod dlx;
 mod exec;
 mod import_pnpm;
 mod explain;
+mod import_uv;
 mod info;
 mod init;
 mod install;
@@ -109,6 +110,7 @@ pub enum YarnCli {
     Dlx(dlx::Dlx),
     Exec(exec::Exec),
     ExplainPeerRequirements(explain::peer_requirements::ExplainPeerRequirements),
+    ImportUv(import_uv::ImportUv),
     ImportPnpm(import_pnpm::ImportPnpm),
     Info(info::Info),
     InitWithTemplate(init::InitWithTemplate),

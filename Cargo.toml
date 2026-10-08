@@ -90,7 +90,7 @@ regex = "1.10.6"
 ring = "0.17.14"
 rust-ini = "0.21.3"
 rstest = "0.26.1"
-pep440_rs = "0.7.3"
+pep440_rs = { version = "0.7.3", features = ["version-ranges"] }
 serde_plain = "1.0.2"
 serde_with = "3.9.0"
 serde_yaml = "0.9.34"
