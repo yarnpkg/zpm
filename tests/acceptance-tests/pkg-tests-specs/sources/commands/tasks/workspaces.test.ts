@@ -35,6 +35,30 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should not deadlock when ^ dependencies form a diamond`,
+      makeTemporaryMonorepoEnv({
+        name: `root`,
+        workspaces: [`packages/*`],
+      }, {
+        // top depends on both mid and base, and mid depends on base: expanding
+        // `^build` must not order base and mid against each other arbitrarily
+        [`packages/base`]: {name: `base`, scripts: {build: `echo build-base`}},
+        [`packages/mid`]: {name: `mid`, scripts: {build: `echo build-mid`}, dependencies: {[`base`]: `workspace:*`}},
+        [`packages/top`]: {name: `top`, scripts: {build: `echo build-top`}, dependencies: {[`base`]: `workspace:*`, [`mid`]: `workspace:*`}},
+      }, async ({path, run, runSwitch}) => {
+        await writeTaskfile(path, `taskfile`, [
+          `@workspaces`,
+          `build: ^build`,
+        ]);
+
+        await run(`install`);
+
+        const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `build`, {cwd: ppath.join(path, `packages/top` as PortablePath)});
+        expect(stdout).toEqual(`build-base\nbuild-mid\nbuild-top\n`);
+      }),
+    );
+
+    test(
       `it should treat workspaces without the matching script as no-ops that still propagate ordering`,
       makeTemporaryMonorepoEnv({
         name: `root`,

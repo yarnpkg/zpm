@@ -224,7 +224,7 @@ describe(`Commands`, () => {
         await xfs.writeFilePromise(ppath.join(path, `.gitignore` as PortablePath), `.yarn\n`);
         const sh = async (...args: Array<string>) => {
           const {execFileSync} = require(`child_process`);
-          execFileSync(`git`, args, {cwd: path, env: {...process.env, GIT_AUTHOR_NAME: `a`, GIT_AUTHOR_EMAIL: `a@b`, GIT_COMMITTER_NAME: `a`, GIT_COMMITTER_EMAIL: `a@b`}});
+          execFileSync(`git`, [`-c`, `commit.gpgsign=false`, ...args], {cwd: path, env: {...process.env, GIT_AUTHOR_NAME: `a`, GIT_AUTHOR_EMAIL: `a@b`, GIT_COMMITTER_NAME: `a`, GIT_COMMITTER_EMAIL: `a@b`}});
         };
 
         await sh(`init`, `-q`, `-b`, `main`);
