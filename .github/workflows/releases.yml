@@ -184,7 +184,7 @@ jobs:
               const ext = includes(targetName, `windows`) ? `.exe` : ``;
 
               // We don't need to distribute Yarn Switch itself
-              fs.unlinkSync(path.join(destinationPath, `yarn`));
+              fs.unlinkSync(path.join(destinationPath, `yarn${ext}`));
 
               // Rename the binary to `yarn`
               fs.renameSync(path.join(destinationPath, `yarn-bin${ext}`), path.join(destinationPath, `yarn${ext}`));
