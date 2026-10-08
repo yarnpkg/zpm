@@ -7,6 +7,15 @@ const {
 
 describe(`Features`, () => {
   describe(`Resolutions`, () => {
+    test(`intersection selectors should override ranges that are not textually equal`, makeTemporaryEnv({
+      dependencies: {[`one-range-dep`]: `1.0.0`},
+      resolutions: {[`no-deps@intersects:1.0.0`]: `2.0.0`},
+    }, async ({run, source}) => {
+      await run(`install`);
+      await expect(source(`require('one-range-dep')`)).resolves.toMatchObject({dependencies: {[`no-deps`]: {version: `2.0.0`}}});
+      await run(`install`, `--immutable`);
+    }));
+
     test(`removal resolutions should remove dependencies and refresh when restored`, makeTemporaryEnv({
       dependencies: {[`one-fixed-dep`]: `1.0.0`},
       resolutions: {[`one-fixed-dep/no-deps`]: `-`},
