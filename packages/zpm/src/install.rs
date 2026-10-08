@@ -1639,6 +1639,7 @@ impl<'a> InstallManager<'a> {
                 let island_tree = TreeResolver::default()
                     .with_resolutions(island_d2l, &island_resolutions)?
                     .with_roots(island_roots)
+                    .with_peer_dedupe(dedupe_peer_dependents)
                     .run();
 
                 // Merge island tree into the combined tree
