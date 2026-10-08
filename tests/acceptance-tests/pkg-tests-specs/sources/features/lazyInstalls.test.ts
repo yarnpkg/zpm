@@ -201,6 +201,39 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should not run install after a production focused install`,
+      makeTemporaryEnv({}, async ({path, run}) => {
+        await setupMonorepo(path);
+
+        // A devDependency on another workspace: production installs leave it out
+        await xfs.writeJsonPromise(ppath.join(path, `packages/foo/package.json` as PortablePath), {
+          name: `foo`,
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+          devDependencies: {
+            [`bar`]: `workspace:*`,
+          },
+        });
+
+        await run(`install`);
+        await run(`workspaces`, `focus`, `foo`, `--production`, {cwd: ppath.join(path, `packages/foo` as PortablePath)});
+
+        const installStatePath = ppath.join(path, `.yarn/ignore/install` as PortablePath);
+        const stateBefore = await xfs.statPromise(installStatePath);
+
+        await new Promise(resolve => setTimeout(resolve, 10));
+
+        await run(`node`, `-e`, `require('no-deps')`, {
+          cwd: ppath.join(path, `packages/foo` as PortablePath),
+        });
+
+        const stateAfter = await xfs.statPromise(installStatePath);
+        expect(stateAfter.mtimeMs).toEqual(stateBefore.mtimeMs);
+      }),
+    );
+
+    test(
       `it should extend a focused install when the active workspace is missing and the lockfile is fresh`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         await setupMonorepo(path);

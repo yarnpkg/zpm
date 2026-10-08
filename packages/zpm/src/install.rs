@@ -879,6 +879,12 @@ impl InstallOpResult {
 pub struct InstallState {
     pub last_installed_at: u128,
     pub installed_workspaces: Option<BTreeSet<Ident>>,
+
+    /// Whether the installed workspaces were installed without their
+    /// devDependencies (`yarn workspaces focus --production`); their
+    /// coverage then only includes production dependencies.
+    pub production: bool,
+
     pub install_config_hash: Option<Hash64>,
     pub content_flags: BTreeMap<Locator, ContentFlags>,
     pub resolution_tree: ResolutionTree,
@@ -918,6 +924,7 @@ impl Default for InstallState {
         Self {
             last_installed_at: 0,
             installed_workspaces: Some(BTreeSet::new()),
+            production: false,
             install_config_hash: None,
             content_flags: BTreeMap::new(),
             resolution_tree: ResolutionTree::default(),
@@ -945,6 +952,7 @@ pub struct Install {
     pub install_state: InstallState,
     pub roots: BTreeSet<Descriptor>,
     pub installed_workspaces: Option<BTreeSet<Ident>>,
+    pub production: bool,
     pub resolved_islands: Vec<crate::island::ResolvedIsland>,
     pub skip_build: bool,
     pub skip_link_step: bool,
@@ -1135,6 +1143,9 @@ impl Install {
             self.install_state.installed_workspaces
                 = self.installed_workspaces.clone();
 
+            self.install_state.production
+                = self.production;
+
             self.install_state.install_config_hash
                 = Some(project.install_config_hash());
 
@@ -1253,6 +1264,7 @@ impl<'a> InstallManager<'a> {
     }
 
     pub fn with_context(mut self, context: InstallContext<'a>) -> Self {
+        self.result.production = context.prune_dev_dependencies;
         self.context = context;
         self
     }
