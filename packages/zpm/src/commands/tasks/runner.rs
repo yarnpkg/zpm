@@ -262,23 +262,39 @@ pub async fn run_tasks(
     let mut sigint
         = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
 
+    // CI runners (and `timeout`) stop jobs with SIGTERM; treat it like an
+    // interrupt that always cancels the run, even for long-lived targets,
+    // so no task process outlives the job.
+    #[cfg(unix)]
+    let mut sigterm
+        = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+
+    let is_standalone
+        = options.standalone;
+
     loop {
         let notification
             = tokio::select! {
                 biased;
 
-                _ = async {
+                is_sigterm = async {
                     #[cfg(unix)]
                     {
-                        sigint.recv().await;
+                        tokio::select! {
+                            _ = sigint.recv() => false,
+                            _ = sigterm.recv() => true,
+                        }
                     }
 
                     #[cfg(not(unix))]
                     {
                         tokio::signal::ctrl_c().await.ok();
+                        false
                     }
                 } => {
-                    if ctx.has_long_lived_target() {
+                    // Standalone daemons die with this process, so long-lived
+                    // tasks can't be detached from; stop them instead.
+                    if ctx.has_long_lived_target() && !is_standalone && !is_sigterm {
                         handler.on_ctrl_c();
 
                         println!();
@@ -302,14 +318,27 @@ pub async fn run_tasks(
 
                         let _ = ctx.client.cancel_context(&context_id_for_cancel).await;
 
+                        // Long-lived tasks live in their own context; stop
+                        // the ones we started (the standalone daemon shutdown
+                        // below kills them anyway).
+                        let long_lived_targets: Vec<ContextualTaskId>
+                            = ctx.target_task_ids.iter()
+                                .filter(|id| is_long_lived_task(id))
+                                .cloned()
+                                .collect();
+
+                        for target in long_lived_targets {
+                            let _ = ctx.client.stop_task(target.task_id.task_name.as_str(), Some(target.task_id.workspace.to_file_string())).await;
+                        }
+
                         ctx.client.close();
 
                         if let Some(mut handle) = daemon_handle {
                             handle.shutdown().await;
                         }
 
-                        // Exit with SIGINT code (130 = 128 + 2)
-                        return Ok(exit_status_from_code(130));
+                        // Exit with the signal code (128 + SIGINT/SIGTERM)
+                        return Ok(exit_status_from_code(if is_sigterm {143} else {130}));
                     }
                 }
                 n = ctx.client.recv_notification() => n?,
