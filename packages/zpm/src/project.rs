@@ -1526,7 +1526,7 @@ impl Project {
                             .chain(required_workspaces.iter())
                             .cloned();
 
-                        Some(self.workspace_dependency_closure(roots, true)?)
+                        Some(self.workspace_dependency_closure(roots, include_dev_dependencies)?)
                     } else {
                         None
                     }
@@ -1536,11 +1536,14 @@ impl Project {
             None
         };
 
+        let prune_dev_dependencies
+            = self.install_state.as_ref().is_some_and(|install_state| install_state.production);
+
         let install = self.run_install(RunInstallOptions {
             check_checksums: false,
             check_resolutions: false,
             enforced_resolutions: BTreeMap::new(),
-            prune_dev_dependencies: false,
+            prune_dev_dependencies,
             refresh_lockfile: false,
             silent_or_error: true,
             mode: None,
