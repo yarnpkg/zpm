@@ -288,7 +288,18 @@ pub fn list_files(base: &Path, patterns: Option<&PatternSet>, excluded: Option<&
             continue;
         };
 
-        if !metadata.is_dir() {
+        if !metadata.is_dir() && !metadata.file_type().is_symlink() {
+            files.push(root.clone());
+            continue;
+        }
+
+        let is_dir = if metadata.file_type().is_symlink() {
+            root_path.fs_metadata().ok().map_or(false, |m| m.is_dir())
+        } else {
+            true
+        };
+
+        if !is_dir {
             files.push(root.clone());
             continue;
         }

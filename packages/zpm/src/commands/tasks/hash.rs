@@ -112,7 +112,23 @@ impl TaskHash {
                 = task.script.join("\n");
 
             if script.is_empty() {
-                fingerprints.insert(task_id.clone(), task_cache.aggregate_fingerprint(&task_id, &dependencies));
+                let fingerprint = task_cache.aggregate_fingerprint(&task_id, &dependencies);
+                fingerprints.insert(task_id.clone(), fingerprint.clone());
+                
+                outputs.push(TaskHashOutput {
+                    is_cached: false,
+                    has_entry: false,
+                    details: FingerprintDetails {
+                        task: task_id.to_file_string(),
+                        fingerprint: fingerprint.to_file_string(),
+                        components: BTreeMap::new(),
+                        env: BTreeMap::new(),
+                        global_inputs: BTreeMap::new(),
+                        inputs: BTreeMap::new(),
+                        dependencies: dependencies.iter().map(|(task, hash)| (task.clone(), hash.short())).collect(),
+                    },
+                });
+                
                 continue;
             }
 
@@ -152,6 +168,13 @@ impl TaskHash {
         println!("Task:        {}", root.details.task);
         println!("Fingerprint: {}", root.details.fingerprint);
         println!("Cached:      {}", if !root.is_cached {"no (missing @cache)"} else if root.has_entry {"yes (entry found)"} else {"yes (no entry yet)"});
+        
+        if !zpm_utils::is_ci().is_some() {
+            println!();
+            println!("Note: This fingerprint uses the current shell's environment and PATH.");
+            println!("      In background daemon mode, the daemon's environment may differ.");
+        }
+        
         println!();
 
         for (label, value) in &root.details.components {

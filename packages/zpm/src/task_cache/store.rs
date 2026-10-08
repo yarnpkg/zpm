@@ -244,14 +244,6 @@ impl CachedEntry {
     /// Removes the stale outputs (the files currently matching the output
     /// globs) and replaces them by the ones stored in the entry.
     pub fn restore(&self, base: &Path, current: &[String], file_state: &FileHashState) -> Result<(), Error> {
-        for rel_path in current {
-            base.with_join_str(rel_path)
-                .fs_rm_file()
-                .ok_missing()?;
-        }
-
-        prune_empty_parents(base, current);
-
         let entries
             = entries_from_zip(&self.data)?;
 
@@ -300,6 +292,14 @@ impl CachedEntry {
                 file_state.record(abs_path.as_str().to_string(), FileStamp::from_metadata(&metadata), hash_content(kind, &entry.data), now);
             }
         }
+
+        for rel_path in current {
+            base.with_join_str(rel_path)
+                .fs_rm_file()
+                .ok_missing()?;
+        }
+
+        prune_empty_parents(base, current);
 
         Ok(())
     }
