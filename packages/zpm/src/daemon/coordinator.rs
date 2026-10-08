@@ -908,6 +908,16 @@ fn initialize_taskfile_watcher(watcher: &mut TaskfileWatcher, project: &Project)
         // Always watch the default taskfile path, even if it doesn't exist yet
         let mut sources = vec![task_file_path];
 
+        // Non-root workspaces always watch the root taskfile if it exists,
+        // even when it has no defaults yet (ensures child workspaces reload
+        // when @workspaces defaults are added later).
+        if workspace.rel_path != Path::new() {
+            let root_task_file_path = project.root_workspace().taskfile_path();
+            if root_task_file_path.fs_exists() {
+                sources.push(root_task_file_path);
+            }
+        }
+
         if let Some((task_file, extra_sources)) = project.get_workspace_taskfile(workspace) {
             // Extend sources with the full list (main + root defaults + includes)
             for source in extra_sources {
@@ -1014,12 +1024,17 @@ fn reload_taskfile(
 
     // Re-register source files (includes may have changed)
     let mut sources = vec![task_file_path];
+    
+    // Non-root workspaces always watch the root taskfile if it exists,
+    // even when it has no defaults yet (ensures child workspaces reload
+    // when @workspaces defaults are added or removed later).
     if workspace.rel_path != Path::new() {
         let root_task_file_path = project.root_workspace().taskfile_path();
         if root_task_file_path.fs_exists() {
             sources.push(root_task_file_path);
         }
     }
+    
     for include in &new_taskfile.includes {
         if let Ok(inc_ws) = project.workspace_by_ident(&include.ident) {
             let inc_path = match &include.path {

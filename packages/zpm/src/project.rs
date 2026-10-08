@@ -1694,37 +1694,36 @@ impl Project {
     }
 
     /// Parse the `@workspaces` default tasks declared in the root taskfile.
-    pub fn workspace_task_defaults(&self) -> BTreeMap<TaskName, Task> {
+    /// Returns `None` when the root taskfile doesn't exist or can't be parsed,
+    /// allowing callers to distinguish "no defaults" from "parse error".
+    pub fn workspace_task_defaults(&self) -> Option<BTreeMap<TaskName, Task>> {
         let root_task_file_path
             = self.root_workspace().taskfile_path();
 
-        let Ok(content) = root_task_file_path.fs_read_text() else {
-            return BTreeMap::new();
-        };
+        let content = root_task_file_path.fs_read_text().ok()?;
 
-        let Ok(root_task_file) = parse_taskfile(&content) else {
-            return BTreeMap::new();
-        };
+        let root_task_file = parse_taskfile(&content).ok()?;
 
-        extract_workspace_defaults(&root_task_file)
+        Some(extract_workspace_defaults(&root_task_file))
     }
 
     /// Load the effective taskfile of a workspace: its own `taskfile` layered
     /// over the `@workspaces` defaults of the root taskfile. Returns the paths
     /// of the files that were read so callers can watch them.
-    pub fn load_workspace_taskfile(&self, workspace: &Workspace, defaults: &BTreeMap<TaskName, Task>) -> (Option<TaskFile>, Vec<Path>) {
+    pub fn load_workspace_taskfile(&self, workspace: &Workspace, defaults: &Option<BTreeMap<TaskName, Task>>) -> (Option<TaskFile>, Vec<Path>) {
         let task_file_path
             = workspace.taskfile_path();
 
-        let local_task_file
-            = task_file_path.fs_read_text().ok()
-                .and_then(|content| parse_taskfile(&content).ok());
+        let local_content = task_file_path.fs_read_text().ok();
+        let local_task_file = local_content.as_deref()
+            .and_then(|content| parse_taskfile(content).ok());
 
         let mut sources
             = Vec::new();
 
-        if local_task_file.is_some() {
-            sources.push(task_file_path);
+        // If local file exists, add it to sources even if it didn't parse
+        if local_content.is_some() {
+            sources.push(task_file_path.clone());
         }
 
         // The defaults are templates for the other workspaces; like with
@@ -1738,14 +1737,28 @@ impl Project {
             return (task_file, sources);
         }
 
-        if !defaults.is_empty() {
-            sources.push(self.root_workspace().taskfile_path());
+        // Non-root workspaces always watch the root taskfile if it exists,
+        // even when it has no defaults yet (fixes missing watchers when
+        // @workspaces tasks are added later).
+        let root_task_file_path = self.root_workspace().taskfile_path();
+        if root_task_file_path.fs_exists() {
+            sources.push(root_task_file_path);
         }
 
-        let task_file
-            = apply_workspace_defaults(local_task_file, defaults, |name| {
+        // When local_content is Some but local_task_file is None, the
+        // local file exists but failed to parse. Return None so the
+        // caller can keep the previous taskfile instead of applying
+        // defaults over nothing.
+        if local_content.is_some() && local_task_file.is_none() {
+            return (None, sources);
+        }
+
+        let task_file = match defaults {
+            Some(defs) => apply_workspace_defaults(local_task_file, defs, |name| {
                 workspace.manifest.scripts.contains_key(name)
-            });
+            }),
+            None => local_task_file,
+        };
 
         (task_file, sources)
     }
