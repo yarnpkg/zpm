@@ -3,6 +3,7 @@ use serde::{Deserialize, Deserializer};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, RegistrySemverRange};
 use zpm_utils::{FromFileString, ToFileString};
+use zpm_semver::pubgrub::ToRanges;
 
 use crate::{
     error::Error,
@@ -42,6 +43,14 @@ pub enum ResolutionSelector {
         parent_ident: Ident,
         ident: Ident,
     },
+
+    #[pattern(r"^(?<ident>.*)@intersects:(?<range>.*)$")]
+    #[to_file_string(|params| format!("{}@intersects:{}", params.ident.to_file_string(), params.range.to_file_string()))]
+    #[to_print_string(|params| format!("{}@intersects:{}", params.ident.to_print_string(), params.range.to_print_string()))]
+    Intersecting {
+        ident: Ident,
+        range: zpm_semver::Range,
+    },
 }
 
 impl ResolutionSelector {
@@ -51,11 +60,23 @@ impl ResolutionSelector {
             ResolutionSelector::Ident(params) => &params.ident,
             ResolutionSelector::DescriptorIdent(params) => &params.ident,
             ResolutionSelector::IdentIdent(params) => &params.ident,
+            ResolutionSelector::Intersecting(params) => &params.ident,
         }
     }
 
     pub fn matches(&self, parent: &Locator, parent_version: &zpm_semver::Version, descriptor: &Descriptor) -> bool {
         match self {
+            ResolutionSelector::Intersecting(params) => {
+                if params.ident != descriptor.ident {
+                    return false;
+                }
+                let range = match &descriptor.range {
+                    Range::AnonymousSemver(params) => &params.range,
+                    Range::RegistrySemver(params) if params.ident.is_none() => &params.range,
+                    _ => return false,
+                };
+                !params.range.to_ranges().intersection(&range.to_ranges()).is_empty()
+            },
             ResolutionSelector::Descriptor(params) => {
                 if params.descriptor != *descriptor {
                     return false;
@@ -193,6 +214,13 @@ impl Serialize for ResolutionsField {
 fn parse_selector(key: &str) -> Option<ResolutionSelector> {
     use zpm_primitives::AnonymousSemverRange;
 
+    if let Some((ident, range)) = key.split_once("@intersects:") {
+        return Some(ResolutionSelector::Intersecting(IntersectingResolutionSelector {
+            ident: Ident::from_file_string(ident).ok()?,
+            range: zpm_semver::Range::from_file_string(range).ok()?,
+        }));
+    }
+
     // Skip the `@scope/` slash when locating the parent/child split.
     let slash_search_start = if key.starts_with('@') {
         key.find('/').map_or(0, |idx| idx + 1)
@@ -293,6 +321,7 @@ impl<'de> Visitor<'de> for ResolutionsFieldVisitor {
                 | ResolutionSelector::DescriptorIdent(DescriptorIdentResolutionSelector {parent_descriptor: Descriptor {range: Range::AnonymousSemver(_), ..}, ..})
                 | ResolutionSelector::Ident(_)
                 | ResolutionSelector::IdentIdent(_)
+                | ResolutionSelector::Intersecting(_)
             );
 
             if !is_valid_resolution_descriptor {
@@ -307,5 +336,25 @@ impl<'de> Visitor<'de> for ResolutionsFieldVisitor {
         }
 
         Ok(field)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn intersection_selectors_match_overlapping_ranges_without_changing_exact_selectors() {
+        let intersection = parse_selector("child@intersects:1.0.0").unwrap();
+        let exact = parse_selector("child@1.0.0").unwrap();
+        let parent = Locator::from_file_string("parent@npm:1.0.0").unwrap();
+        let version = zpm_semver::Version::from_file_string("1.0.0").unwrap();
+        for (range, intersects, equals) in [("^1.0.0", true, false), ("1.0.0", true, true), ("^2.0.0", false, false), ("npm:other@^1.0.0", false, false)] {
+            let descriptor = Descriptor::from_file_string(&format!("child@{range}")).unwrap();
+            assert_eq!(intersection.matches(&parent, &version, &descriptor), intersects);
+            assert_eq!(exact.matches(&parent, &version, &descriptor), equals);
+        }
+        let field: ResolutionsField = serde_json::from_str(r#"{"child@intersects:1.0.0":"2.0.0"}"#).unwrap();
+        assert_eq!(serde_json::to_string(&field).unwrap(), r#"{"child@intersects:1.0.0":"2.0.0"}"#);
     }
 }
