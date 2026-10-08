@@ -964,7 +964,7 @@ mod tests {
 
         // The overrides are stored verbatim; the catalogs they reference are kept on the side
         let ranges = lockfile.project.dependency_overrides.iter()
-            .map(|(_, range)| zpm_utils::ToFileString::to_file_string(range))
+            .map(|(_, range)| zpm_utils::ToFileString::to_file_string(range.as_ref().unwrap()))
             .collect::<Vec<_>>();
 
         assert_eq!(ranges, vec!["catalog:legacy", "catalog:", "npm:1.2.3"]);

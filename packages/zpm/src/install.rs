@@ -1796,10 +1796,8 @@ fn normalize_resolution_rec(normalizer: &DependencyNormalizer<'_>, descriptor: &
 
         let resolution_override = candidate_resolutions
             .and_then(|overrides| {
-                overrides.iter().find_map(|(rule, range)| {
-                    rule.apply(&resolution.locator, &resolution.version, descriptor, range)
-                        .map(|replacement_range| (rule, replacement_range))
-                })
+                overrides.iter().find(|(rule, _)| rule.matches(&resolution.locator, &resolution.version, descriptor))
+                    .and_then(|(rule, range)| range.as_ref().map(|range| (rule, range.clone())))
             });
 
         if let Some((rule, replacement_range)) = resolution_override {
@@ -1907,6 +1905,18 @@ static BUILTIN_EXTENSIONS: LazyLock<BTreeMap<SemverDescriptor, PackageExtension>
 
 pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resolution) -> Result<(BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>), Error> {
     normalize_resolutions_with(&DependencyNormalizer::from_context(context), resolution)
+}
+
+fn is_removed_dependency(normalizer: &DependencyNormalizer<'_>, resolution: &Resolution, descriptor: &Descriptor) -> bool {
+    let matching = normalizer.dependency_overrides.get_by_ident(&descriptor.ident)
+        .and_then(|rules| rules.iter().find(|(rule, _)| rule.matches(&resolution.locator, &resolution.version, descriptor)));
+    let Some((rule, None)) = matching else {
+        return false;
+    };
+    if let Some(usage) = normalizer.rule_usage {
+        usage.lock().unwrap().dependency_overrides.insert(rule.clone());
+    }
+    true
 }
 
 pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolution: &Resolution) -> Result<(BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>), Error> {
@@ -2018,6 +2028,8 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
         }
     }
 
+    dependencies.retain(|_, descriptor| !is_removed_dependency(normalizer, resolution, descriptor));
+
     // Some protocols need to know about the package that declares the
     // dependency (for example the `portal:` protocol, which always points
     // to a location relative to the parent package. We mutate the
@@ -2029,6 +2041,12 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
     for descriptor in dependencies.values_mut() {
         normalize_resolution(normalizer, descriptor, resolution, true)?;
     }
+
+    let mut retain_peer = |ident: &Ident, range: &mut PeerRange| {
+        let descriptor = Descriptor::new(ident.clone(), range.to_range());
+        !is_removed_dependency(normalizer, resolution, &descriptor)
+    };
+    peer_dependencies.retain(&mut retain_peer);
 
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
         let types_ident
@@ -2042,5 +2060,52 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
             .or_insert(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}.into());
     }
 
+    peer_dependencies.retain(&mut retain_peer);
+
     Ok((dependencies, peer_dependencies))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resolution(locator: &str, dependencies: &[&str]) -> Resolution {
+        let mut resolution
+            = Resolution::new_empty(Locator::from_file_string(locator).unwrap(), zpm_semver::Version::from_file_string("1.0.0").unwrap());
+
+        for descriptor in dependencies {
+            let descriptor
+                = Descriptor::from_file_string(descriptor).unwrap();
+
+            resolution.dependencies.insert(descriptor.ident.clone(), descriptor);
+        }
+
+        resolution
+    }
+
+    #[test]
+    fn removal_resolutions_remove_dependencies_and_synthesized_peers() {
+        let mut package = resolution("parent@npm:1.0.0", &["child@^1", "keep@^1"]);
+        package.peer_dependencies.insert(Ident::new("react-native"), PeerRange::from_file_string("*").unwrap());
+        package.peer_dependencies.insert(Ident::new("peer"), PeerRange::from_file_string("*").unwrap());
+        let overrides = serde_json::from_str(r#"{"parent/child":null,"parent/peer":null,"@types/react-native":null}"#).unwrap();
+        let normalizer = DependencyNormalizer {
+            catalogs: &BTreeMap::new(),
+            dependency_overrides: &overrides,
+            package_extensions: &BTreeMap::new(),
+            root_workspace: Locator::from_file_string("root@workspace:.").unwrap(),
+            rule_usage: None,
+        };
+        let (dependencies, peers) = normalize_resolutions_with(&normalizer, &package).unwrap();
+        assert!(!dependencies.contains_key(&Ident::new("child")));
+        assert!(dependencies.contains_key(&Ident::new("keep")));
+        assert!(!peers.contains_key(&Ident::new("peer")));
+        assert!(!peers.contains_key(&Ident::new("@types/peer")));
+        assert!(!peers.contains_key(&Ident::new("@types/react-native")));
+        assert!(peers.contains_key(&Ident::new("react-native")));
+        package.locator = Locator::from_file_string("unrelated@npm:1.0.0").unwrap();
+        assert!(normalize_resolutions_with(&normalizer, &package).unwrap().0.contains_key(&Ident::new("child")));
+        let serialized = serde_json::to_string(&overrides).unwrap();
+        assert_eq!(serialized, r#"{"parent/child":"-","parent/peer":"-","@types/react-native":"-"}"#);
+    }
 }
