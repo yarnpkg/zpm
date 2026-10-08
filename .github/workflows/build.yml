@@ -98,6 +98,9 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             ext: .exe
+            # The lockfile can't list the Windows builds of the builtin Node.js
+            # yet, as the Yarn release we pin doesn't know about them
+            install-args: --refresh-lockfile
             timeout: 60
 
     name: "Testing ${{matrix.target}}"
@@ -122,6 +125,7 @@ jobs:
         with:
           link: artifacts/yarn-bin${{matrix.ext}}
           switch: artifacts/yarn${{matrix.ext}}
+          install-args: ${{matrix.install-args}}
 
       - name: Generate the test report
         run: |
