@@ -1,7 +1,7 @@
-use std::{borrow::Cow, os::unix::fs::PermissionsExt};
+use std::borrow::Cow;
 
 use libdeflater::{CompressionLvl, Compressor};
-use zpm_utils::{FromFileString, impl_file_string_from_str, Path, ToFileString, ToHumanString};
+use zpm_utils::{FromFileString, impl_file_string_from_str, metadata_is_executable, Path, ToFileString, ToHumanString};
 
 pub(crate) mod zip_structs;
 
@@ -192,7 +192,7 @@ pub fn entries_from_folder<'a>(path: &Path) -> Result<Vec<Entry<'a>>, Error> {
             let data = entry_path.fs_read()?;
             let metadata = entry_path.fs_metadata()?;
 
-            let is_exec = metadata.permissions().mode() & 0o111 != 0;
+            let is_exec = metadata_is_executable(&metadata);
             let mode = if is_exec { 0o755 } else { 0o644 };
 
             entries.push(Entry {
@@ -218,7 +218,7 @@ pub fn entries_from_files<'a>(base: &Path, files: &[Path]) -> Result<Vec<Entry<'
         let data = abs_path.fs_read()?;
         let metadata = abs_path.fs_metadata()?;
 
-        let is_exec = metadata.permissions().mode() & 0o111 != 0;
+        let is_exec = metadata_is_executable(&metadata);
         let mode = if is_exec { 0o755 } else { 0o644 };
 
         entries.push(Entry {

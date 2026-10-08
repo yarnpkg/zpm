@@ -299,7 +299,7 @@
     },
     "winLinkType": {
       "type": "crate::WinLinkType",
-      "description": "On Windows, choose between true symlinks and NTFS junctions for node_modules; a no-op on every other platform",
+      "description": "On Windows, choose between true symlinks and NTFS junctions for node_modules (symlinks fall back to junctions when the user lacks the privilege to create them, which requires Developer Mode); a no-op on every other platform",
       "default": "symlinks"
     },
     "npmAlwaysAuth": {

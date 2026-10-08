@@ -4,6 +4,9 @@ use std::process::ExitCode;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    #[cfg(windows)]
+    zpm_utils::windows_disable_std_handles_inheritance();
+
     env_logger::init();
     let otel_guard = zpm::otel::init();
 

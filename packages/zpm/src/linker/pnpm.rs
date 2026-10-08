@@ -202,7 +202,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             .ok_missing()?
             .unwrap_or(&link_abs_path)
             .fs_create_parent()?
-            .fs_symlink(&symlink_target)?;
+            .fs_symlink_with(&symlink_target, project.config.settings.win_link_type.value.into())?;
     }
 
     // Track which packages are direct dependencies of workspaces
@@ -248,7 +248,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             .ok_missing()?
             .unwrap_or(&link_abs_path)
             .fs_create_parent()?
-            .fs_symlink(&symlink_target)?;
+            .fs_symlink_with(&symlink_target, project.config.settings.win_link_type.value.into())?;
     }
 
     // Second pass: create symlinks in node_modules directories
@@ -321,7 +321,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 .ok_missing()?
                 .unwrap_or(&link_abs_path)
                 .fs_create_parent()?
-                .fs_symlink(&symlink_target)?;
+                .fs_symlink_with(&symlink_target, project.config.settings.win_link_type.value.into())?;
         }
 
         if !has_explicit_self_dependency && !locator.reference.is_workspace_reference() {

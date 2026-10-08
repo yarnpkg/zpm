@@ -1,9 +1,9 @@
-use std::{borrow::Cow, collections::BTreeMap, os::unix::fs::PermissionsExt, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
 use itertools::Itertools;
 use serde::Deserialize;
 use zpm_formats::{Entry, iter_ext::IterExt};
-use zpm_utils::{IoResultExt, Path, PathError, Serialized, ToHumanString};
+use zpm_utils::{IoResultExt, LinkType, Path, PathError, Serialized, ToHumanString};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type")]
@@ -80,6 +80,7 @@ pub struct SyncCheck {
 
 pub struct SyncTree<'a> {
     pub dry_run: bool,
+    pub link_type: LinkType,
     nodes: Vec<SyncNode<'a>>,
 }
 
@@ -119,6 +120,7 @@ impl<'a> SyncTree<'a> {
     pub fn new() -> Self {
         Self {
             dry_run: true,
+            link_type: LinkType::default(),
             nodes: vec![SyncNode::Folder {
                 template: None,
                 assume_up_to_date: false,
@@ -320,12 +322,13 @@ impl<'a> SyncTree<'a> {
             },
 
             SyncNode::File {data, is_exec} => {
-                let expected_x
-                    = if *is_exec {0o111} else {0o000};
+                // Windows doesn't track executability in the permissions
+                let is_mode_up_to_date
+                    = cfg!(windows) || zpm_utils::metadata_is_executable(&metadata) == *is_exec;
 
                 let is_file_up_to_date
                     = metadata.is_file()
-                        && (metadata.permissions().mode() & 0o111) == expected_x
+                        && is_mode_up_to_date
                         && metadata.len() == data.len() as u64
                         && data == &path.fs_read_with_size(metadata.len())?;
 
@@ -337,13 +340,8 @@ impl<'a> SyncTree<'a> {
             },
 
             SyncNode::Symlink {target_path} => {
-                let symlink_target
-                    = metadata.is_symlink()
-                        .then(|| path.fs_read_link())
-                        .transpose()?;
-
                 let is_symlink_up_to_date
-                    = symlink_target.as_ref() == Some(target_path);
+                    = metadata.is_symlink() && path.fs_is_symlink_to(target_path)?;
 
                 Ok(SyncCheck {
                     must_remove: !is_symlink_up_to_date,
@@ -410,6 +408,7 @@ impl<'a> SyncTree<'a> {
                                 = SyncTree::from_entries(&zip_entries)?;
 
                             template_tree.dry_run = self.dry_run;
+                            template_tree.link_type = self.link_type;
 
                             // We must instruct the template tree to ignore the entries
                             // that our side of the tree expects to handle
@@ -468,7 +467,7 @@ impl<'a> SyncTree<'a> {
                         path.fs_write(data)?;
 
                         if *is_exec {
-                            path.fs_set_permissions(std::fs::Permissions::from_mode(0o755))?;
+                            path.fs_set_mode(0o755)?;
                         }
                     }
                 }
@@ -481,7 +480,7 @@ impl<'a> SyncTree<'a> {
                     if self.dry_run {
                         file_ops.push(FileOp::CreateSymlink(path.clone(), target_path.clone()));
                     } else {
-                        path.fs_symlink(target_path)?;
+                        path.fs_symlink_with(target_path, self.link_type)?;
                     }
                 }
 

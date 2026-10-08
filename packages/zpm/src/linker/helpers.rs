@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs::Permissions, os::unix::fs::PermissionsExt, vec};
+use std::{collections::{BTreeMap, BTreeSet}, vec};
 
 use zpm_formats::iter_ext::IterExt;
 use zpm_parsers::JsonDocument;
@@ -196,7 +196,7 @@ fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mode:
             ExtractMode::Classic => {
                 target_path
                     .fs_write(&entry.data)?
-                    .fs_set_permissions(Permissions::from_mode(entry.mode as u32))?;
+                    .fs_set_mode(entry.mode as u32)?;
             },
         }
     }
@@ -212,17 +212,7 @@ fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mode:
 /// Ensures `target` is a hardlink to `source` (no-op if they already
 /// share an inode). `source` must exist.
 fn ensure_hardlink(target: &Path, source: &Path) -> Result<(), Error> {
-    use std::os::unix::fs::MetadataExt;
-
-    let dest_meta = target.fs_symlink_metadata().ok();
-    let source_meta = source.fs_metadata().ok();
-
-    let already_linked = match (&dest_meta, &source_meta) {
-        (Some(d), Some(s)) => d.dev() == s.dev() && d.ino() == s.ino(),
-        _ => false,
-    };
-
-    if already_linked {
+    if is_same_file(target, source) {
         return Ok(());
     }
 
@@ -236,6 +226,30 @@ fn ensure_hardlink(target: &Path, source: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// Whether `target` (not following symlinks) and `source` are the same
+/// file on disk.
+fn is_same_file(target: &Path, source: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        let dest_meta = target.fs_symlink_metadata().ok();
+        let source_meta = source.fs_metadata().ok();
+
+        match (&dest_meta, &source_meta) {
+            (Some(d), Some(s)) => d.dev() == s.dev() && d.ino() == s.ino(),
+            _ => false,
+        }
+    }
+
+    // The volume serial number and file index aren't exposed by the stable
+    // std APIs on Windows, so we go through same-file (which compares them).
+    #[cfg(windows)]
+    {
+        !target.fs_is_symlink() && same_file::is_same_file(target.to_path_buf(), source.to_path_buf()).unwrap_or(false)
+    }
+}
+
 /// Writes `data` at `target` with `mode_bits` permissions, overwriting
 /// if present.
 fn write_canonical(target: &Path, data: &[u8], mode_bits: u32) -> Result<(), Error> {
@@ -245,7 +259,7 @@ fn write_canonical(target: &Path, data: &[u8], mode_bits: u32) -> Result<(), Err
 
     target
         .fs_write(data)?
-        .fs_set_permissions(Permissions::from_mode(mode_bits))?;
+        .fs_set_mode(mode_bits)?;
 
     Ok(())
 }
@@ -307,7 +321,7 @@ pub(crate) fn extract_zip_entries_to(destination: &Path, package_data: &PackageD
 
         target_path
             .fs_write(&entry.data)?
-            .fs_set_permissions(Permissions::from_mode(entry.mode as u32))?;
+            .fs_set_mode(entry.mode as u32)?;
     }
 
     Ok(())
@@ -426,7 +440,6 @@ const CAS_DEFAULT_MODE: u32 = 0o644;
 
 fn link_into_cas(target_path: &Path, data: &[u8], mode: u32, index_root: &Path) -> Result<(), Error> {
     use sha1::{Digest, Sha1};
-    use std::os::unix::fs::MetadataExt;
 
     let mode_bits = mode & 0o777;
 
@@ -460,7 +473,11 @@ fn link_into_cas(target_path: &Path, data: &[u8], mode: u32, index_root: &Path) 
     if !needs_rewrite {
         // mtime != SAFE_TIME ⇒ external write since the last install.
         if let Ok(metadata) = index_path.fs_metadata() {
-            if metadata.mtime() != CAS_SAFE_TIME_SECS {
+            let mtime_secs = metadata.modified().ok()
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs() as i64);
+
+            if mtime_secs != Some(CAS_SAFE_TIME_SECS) {
                 needs_rewrite = true;
             }
         }
@@ -470,7 +487,7 @@ fn link_into_cas(target_path: &Path, data: &[u8], mode: u32, index_root: &Path) 
         // Write through the existing path: cross-project hardlinks
         // inherit the repair without losing inode identity.
         index_path.fs_write(data)?;
-        index_path.fs_set_permissions(Permissions::from_mode(mode_bits))?;
+        index_path.fs_set_mode(mode_bits)?;
         set_safe_mtime(&index_path)?;
     }
 

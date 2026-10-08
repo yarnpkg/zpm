@@ -18,5 +18,8 @@ mod yarn;
 
 #[tokio::main()]
 async fn main() -> ExitCode {
+    #[cfg(windows)]
+    zpm_utils::windows_disable_std_handles_inheritance();
+
     commands::run_default().await
 }

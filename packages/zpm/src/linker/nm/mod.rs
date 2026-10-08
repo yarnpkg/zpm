@@ -5,7 +5,7 @@ use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
 use zpm_utils::{FromFileString, IoResultExt, Path, ToHumanString};
 
 use crate::{
-    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{self, NodeModulesPackageMapBuilder, PackageMap, persist_package_map, persist_package_map_at}}, project::Project
+    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{self, NodeModulesPackageMapBuilder, PackageMap, persist_package_map, persist_package_map_at}}, project::Project, shims::{make_relative_cmd_shim, make_relative_sh_shim, RelativeShimTarget}
 };
 
 pub mod hoist;
@@ -72,6 +72,36 @@ fn collect_workspace_binaries(install: &Install, workspace_node: &hoist::WorkNod
     binaries
 }
 
+/// Registers the `.bin` entry for a binary located at `target_path`
+/// (relative to the `.bin` folder). It's a symlink on Unix; Windows ignores
+/// shebangs (and restricts symlinks), so we instead generate a `.cmd` shim
+/// for cmd and PowerShell, plus a shell shim for Git Bash, like npm does.
+fn register_bin_entry(workspace_nm_tree: &mut SyncTree, bin_rel_path: Path, target_path: Path) -> Result<(), Error> {
+    if !cfg!(windows) {
+        workspace_nm_tree.register_entry(bin_rel_path, SyncItem::Symlink {
+            target_path,
+        })?;
+
+        return Ok(());
+    }
+
+    let cmd_rel_path
+        = bin_rel_path.dirname().unwrap_or_default()
+            .with_join_str(format!("{}.cmd", bin_rel_path.basename().unwrap_or_default()));
+
+    workspace_nm_tree.register_entry(cmd_rel_path, SyncItem::File {
+        data: make_relative_cmd_shim(&target_path, &RelativeShimTarget::Node).into_bytes().into(),
+        is_exec: true,
+    })?;
+
+    workspace_nm_tree.register_entry(bin_rel_path, SyncItem::File {
+        data: make_relative_sh_shim(&target_path, &RelativeShimTarget::Node).into_bytes().into(),
+        is_exec: true,
+    })?;
+
+    Ok(())
+}
+
 /// Registers bin symlinks in the sync tree for a given node_modules subfolder.
 /// `node_rel_path` is the path within node_modules where dependencies are located
 /// (e.g., "" for top-level, or "foo/node_modules" for nested).
@@ -88,9 +118,7 @@ fn register_bin_symlinks_at_path(workspace_nm_tree: &mut SyncTree, node_rel_path
             .with_join_str(&dep_ident.as_str())
             .with_join(bin_path);
 
-        workspace_nm_tree.register_entry(bin_symlink_path, SyncItem::Symlink {
-            target_path,
-        })?;
+        register_bin_entry(workspace_nm_tree, bin_symlink_path, target_path)?;
     }
 
     Ok(())
@@ -205,9 +233,7 @@ fn register_workspace_bin_symlinks(workspace_nm_tree: &mut SyncTree, workspace_p
             .with_join_str("..")
             .with_join(bin_path);
 
-        workspace_nm_tree.register_entry(bin_symlink_path, SyncItem::Symlink {
-            target_path,
-        })?;
+        register_bin_entry(workspace_nm_tree, bin_symlink_path, target_path)?;
     }
 
     Ok(())
@@ -314,6 +340,7 @@ fn generate_workspace_node_modules(
         = SyncTree::new();
 
     workspace_nm_tree.dry_run = false;
+    workspace_nm_tree.link_type = project.config.settings.win_link_type.value.into();
 
     let workspace_binaries
         = collect_workspace_binaries(install, &work_tree.nodes[workspace_node_idx]);
@@ -524,7 +551,7 @@ fn generate_workspace_node_modules(
                 },
 
                 None => match &child_node.locator.reference {
-                    Reference::Link(params) if params.path.starts_with('/') => {
+                    Reference::Link(params) if Path::from_file_string(&params.path).is_ok_and(|path| path.is_absolute()) => {
                         let target_path
                             = Path::from_file_string(&params.path)?;
 

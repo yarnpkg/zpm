@@ -1640,7 +1640,7 @@ impl Project {
 
                     ScriptEnvironment::new()?
                         .with_cwd(self.project_cwd.clone())
-                        .run_exec("git", vec!["checkout", git_operation.true_theirs(), lockfile_path.as_str()])
+                        .run_exec("git", vec!["checkout", git_operation.true_theirs(), &lockfile_path.to_native_string()])
                         .await?
                         .ok()
                         .map_err(|e| Error::LockfileAutofixGitError(e.to_string()))?;
