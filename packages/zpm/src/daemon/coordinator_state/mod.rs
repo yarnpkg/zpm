@@ -93,6 +93,7 @@ impl CoordinatorState {
         self.contexts.decrement(&task_id.context_id);
         if !self.contexts.is_active(&task_id.context_id) {
             self.graph.concurrency_limits.remove(&task_id.context_id);
+            self.graph.context_prerequisites.remove(&task_id.context_id);
         }
 
         // 2. Output buffer: mark closed, may trigger eviction of old closed tasks

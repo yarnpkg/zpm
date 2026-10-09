@@ -340,6 +340,13 @@ pub async fn run_tasks(
                 // `--continue` lets independent tasks finish.
                 if exit_code != 0 && fail_fast && !has_cancelled_context {
                     has_cancelled_context = true;
+
+                    // The failing task may be a dependency rather than a
+                    // target; its exit code is still the one to report
+                    if ctx.exit_code == 0 {
+                        ctx.exit_code = exit_code;
+                    }
+
                     let _ = ctx.client.cancel_context(&context_id_for_cancel).await;
                 }
 

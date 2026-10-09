@@ -170,6 +170,19 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should report the exit code of a failing dependency`,
+      monorepo({
+        [`packages/pkg-a`]: {name: `pkg-a`, scripts: {build: `exit 3`}},
+      })(async ({path, run, runSwitch}) => {
+        await setup(path, run);
+
+        // pkg-a:build only runs as a dependency of pkg-b:build
+        const {code} = await runJson(runSwitch, [`--from`, `pkg-b`, `--from`, `pkg-d`, `build`]);
+        expect(code).toEqual(3);
+      }),
+    );
+
+    test(
       `--continue should keep running independent tasks after a failure`,
       monorepo({
         [`packages/pkg-a`]: {name: `pkg-a`, scripts: {build: `exit 3`}},
@@ -239,6 +252,50 @@ describe(`Commands`, () => {
         // --affected uses the configured base refs (main/master)
         const {events: affected} = await runJson(runSwitch, [`--affected`, `--only`, `build`]);
         expect(eventsOf(affected, `task-started`)).toEqual([`pkg-b:build`, `pkg-c:build`]);
+      }),
+    );
+
+    test(
+      `--only runs shouldn't change the dependencies of concurrent runs`,
+      monorepo({
+        [`packages/pkg-a`]: {name: `pkg-a`, scripts: {build: `sleep 2 && echo build-a`}},
+      })(async ({path, run, runSwitch}) => {
+        await setup(path, run);
+
+        try {
+          // pkg-a:build takes a while; meanwhile an --only run resolves
+          // pkg-b:build without its ^build dependency
+          const full = runSwitch(`tasks`, `run`, `--no-standalone`, `--json`, `--from`, `pkg-b`, `build`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          await runSwitch(`tasks`, `run`, `--no-standalone`, `--json`, `--from`, `pkg-b`, `--only`, `build`);
+
+          const events = parseEvents((await full).stdout);
+          const order = events
+            .filter(event => event.type === `task-started` || event.type === `task-completed`)
+            .map(event => `${event.type}:${event.taskId}`);
+
+          expect(order.indexOf(`task-completed:pkg-a:build`)).toBeGreaterThanOrEqual(0);
+          expect(order.indexOf(`task-completed:pkg-a:build`)).toBeLessThan(order.indexOf(`task-started:pkg-b:build`));
+        } finally {
+          await runSwitch(`switch`, `daemon`, `--kill-all`);
+        }
+      }),
+    );
+
+    test(
+      `--only should apply to long-lived targets`,
+      monorepo({
+        [`packages/pkg-a`]: {name: `pkg-a`, scripts: {build: `touch ../../built-a`}},
+      })(async ({path, run, runSwitch}) => {
+        await setup(path, run);
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-b/taskfile` as PortablePath), [
+          `@long-lived`,
+          `dev: ^build`,
+          `  echo dev-b`,
+        ].join(`\n`));
+
+        await runJson(runSwitch, [`--from`, `pkg-b`, `--only`, `dev`]);
+        expect(xfs.existsSync(ppath.join(path, `built-a` as PortablePath))).toEqual(false);
       }),
     );
 
