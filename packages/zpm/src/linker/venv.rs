@@ -218,7 +218,12 @@ fn ensure_unpacked(project: &Project, interpreter: &Interpreter, locator: &Locat
         = Hash64::from_data(locator.to_file_string().as_bytes());
 
     // Source distributions are built into a wheel first (once per machine)
-    let archive_path = if archive_path.to_file_string().ends_with(".tar.gz") {
+    let is_sdist = {
+        let archive_path = archive_path.to_file_string();
+        archive_path.ends_with(".tar.gz") || archive_path.ends_with(".src.zip")
+    };
+
+    let archive_path = if is_sdist {
         crate::python_build::build_wheel_from_sdist(project, interpreter, locator, archive_path, &key)?
     } else {
         archive_path.clone()

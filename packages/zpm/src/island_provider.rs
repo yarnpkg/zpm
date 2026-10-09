@@ -116,6 +116,16 @@ impl<'a> IslandDependencyProvider<'a> {
     }
 
     /// Candidate versions of a PyPI package, highest first.
+    fn satisfies_constraints(&self, ident: &Ident, version: &IslandVersion) -> bool {
+        let pypi_version = match &version.0.reference {
+            zpm_primitives::Reference::PypiShorthand(params) if params.url.is_none() => &params.version,
+            zpm_primitives::Reference::PypiRegistry(params) if params.url.is_none() => &params.version,
+            _ => return true,
+        };
+
+        crate::resolvers::pypi::satisfies_constraints(self.ctx, ident, pypi_version)
+    }
+
     fn fetch_pypi_versions(&self, package: &Ident) -> Result<Vec<IslandVersion>, IslandResolutionError> {
         if let Some(versions) = self.pypi_candidates.borrow().get(package) {
             return Ok(versions.clone());
@@ -555,10 +565,11 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
             }
         }
 
-        // Check locked version first
+        // Check locked version first; constraints added since it got locked
+        // (uv's constraint-dependencies) may exclude it
         if let Some(locked_locator) = self.locked_versions.get(ident) {
             let iv = IslandVersion(locked_locator.clone());
-            if range.contains(&iv) {
+            if range.contains(&iv) && self.satisfies_constraints(ident, &iv) {
                 return Ok(Some(iv));
             }
         }

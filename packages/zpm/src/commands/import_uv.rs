@@ -158,10 +158,14 @@ fn python_version_for(requires_python: Option<&str>) -> Option<String> {
     let candidates
         = ["3.12", "3.13", "3.11", "3.14", "3.10", "3.9"];
 
+    // A minor is compatible when one of its releases is (`>=3.12.1` still
+    // allows Python 3.12, from its 3.12.1 patch release)
     candidates.iter()
         .find(|candidate| {
-            let version = pep440_rs::Version::from_str_lossy(&format!("{}.0", candidate));
-            version.map_or(false, |version| specifiers.contains(&version))
+            (0..=50).any(|patch| {
+                let version = pep440_rs::Version::from_str_lossy(&format!("{}.{}", candidate, patch));
+                version.map_or(false, |version| specifiers.contains(&version))
+            })
         })
         .map(|candidate| candidate.to_string())
 }
@@ -1000,5 +1004,18 @@ impl ImportUv {
         println!("Imported {} project(s); run `yarn install` to create their venvs", imported.len());
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn python_version_accepts_patch_level_bounds() {
+        assert_eq!(python_version_for(Some(">=3.12.1")), Some("3.12".to_string()));
+        assert_eq!(python_version_for(Some(">=3.10")), Some("3.12".to_string()));
+        assert_eq!(python_version_for(Some(">=3.13.2,<3.14")), Some("3.13".to_string()));
+        assert_eq!(python_version_for(Some("<3.10")), Some("3.9".to_string()));
     }
 }

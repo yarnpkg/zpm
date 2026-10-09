@@ -38,12 +38,17 @@ async fn resolve_artifact_url(context: &InstallContext<'_>, params: &PypiRegistr
     Ok(file.url.clone())
 }
 
+/// The cache extension of an artifact. Zip source distributions get their
+/// own extension so that the linker doesn't take them for wheels (which are
+/// zips too).
 fn archive_extension(url: &str) -> &'static str {
     let path
         = url.split('#').next().unwrap();
 
     if path.ends_with(".tar.gz") || path.ends_with(".tgz") {
         ".tar.gz"
+    } else if path.ends_with(".zip") {
+        ".src.zip"
     } else {
         ".zip"
     }

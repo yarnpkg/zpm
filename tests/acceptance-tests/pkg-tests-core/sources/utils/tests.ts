@@ -644,6 +644,19 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
       }],
     },
   },
+  [`pypi-python-dep`]: {
+    [`1.0.0`]: {
+      requiresDist: [
+        `pypi-no-deps (==1.0.0); python_version >= "3.13"`,
+      ],
+      files: [{
+        filename: `pypi_python_dep-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_python_dep-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-01-01T00:00:00Z`,
+      }],
+    },
+  },
   [`pypi-marker-deps`]: {
     [`1.0.0`]: {
       requiresDist: [

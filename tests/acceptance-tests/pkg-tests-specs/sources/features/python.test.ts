@@ -372,6 +372,41 @@ describe(`Features`, () => {
       await run(`install`);
       await expect(pythonEval(run, path, `import pypi_no_deps; print(pypi_no_deps.VALUE)`)).resolves.toEqual(`1.1.0`);
     }));
+    test(`it should keep islands correct when they resolve a package's dependencies differently`, makeTemporaryMonorepoEnv({
+      workspaces: [`a`, `b`],
+    }, {
+      [`a`]: {name: `a`, version: `1.0.0`, dependencies: {[`pypi-python-dep`]: `pypi:1.0.0`}},
+      [`b`]: {name: `b`, version: `1.0.0`, dependencies: {[`pypi-python-dep`]: `pypi:1.0.0`}},
+    }, async ({path, run}) => {
+      const registryUrl = await tests.startPackageServer();
+
+      // pypi-python-dep only depends on pypi-no-deps on Python 3.13+, so the
+      // two islands get different dependencies for the same locator
+      await yarn.writeConfiguration(path, {
+        pypiRegistryServer: `${registryUrl}/simple/`,
+        unstableIslands: {
+          a: {workspaces: [`a`], linker: `venv`, pythonVersion: `3.12`},
+          b: {workspaces: [`b`], linker: `venv`, pythonVersion: `3.13`},
+        },
+      });
+
+      await run(`install`, `--mode=update-lockfile`);
+
+      // Whichever island stored the shared entry first, the other one
+      // resolved different dependencies for it: rebuilding that island from
+      // the lockfile would be wrong, so it must not get a fast-path hash
+      const lockfile = JSON.parse(await xfs.readFilePromise(ppath.join(path, `yarn.lock`), `utf8`));
+      expect(Object.keys(lockfile.__islandHashes ?? {})).toHaveLength(1);
+
+      // Reinstalling solves it again and keeps each island's dependencies
+      await run(`install`, `--mode=update-lockfile`);
+      const relocked = JSON.parse(await xfs.readFilePromise(ppath.join(path, `yarn.lock`), `utf8`));
+
+      const islandHas = (lock: any, island: string, ident: string) => JSON.stringify(lock.islands[island]).includes(`"${ident}@`);
+      expect(islandHas(relocked, `b`, `pypi-no-deps`)).toEqual(true);
+      expect(islandHas(relocked, `a`, `pypi-no-deps`)).toEqual(false);
+    }));
+
     test(`it should resolve platform wheels per island Python version`, makeTemporaryMonorepoEnv({
       workspaces: [`a`, `b`],
     }, {

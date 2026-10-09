@@ -23,22 +23,19 @@ use zpm_utils::{Hash64, Path, ToFileString, ToHumanString};
 use crate::{
     error::Error,
     project::Project,
-    pypi::get_registry,
+    pypi::{self, get_registry},
     python_interpreter::Interpreter,
 };
 
 const BUILD_DRIVER: &str = r#"
-import importlib, os, sys, tomllib
+import importlib, json, os, sys
 
-source, out, mode, result_path = sys.argv[1:5]
+# The build-system table comes from Yarn, as JSON: tomllib only exists
+# on Python 3.11+
+source, out, mode, result_path, build_system = sys.argv[1:6]
+build_system = json.loads(build_system)
 sys.argv = sys.argv[:1]
 os.chdir(source)
-
-try:
-    with open("pyproject.toml", "rb") as f:
-        build_system = tomllib.load(f).get("build-system", {})
-except FileNotFoundError:
-    build_system = {}
 
 backend_name = build_system.get("build-backend", "setuptools.build_meta:__legacy__")
 for path in reversed(build_system.get("backend-path", [])):
@@ -58,6 +55,43 @@ else:
 with open(result_path, "w") as f:
     f.write(result)
 "#;
+
+/// The `[build-system]` table of a source tree, as JSON (empty when
+/// missing), for the build driver.
+fn read_build_system(source: &Path) -> String {
+    let Ok(text) = source.with_join_str("pyproject.toml").fs_read_text() else {
+        return "{}".to_string();
+    };
+
+    let Ok(document) = text.parse::<toml_edit::DocumentMut>() else {
+        return "{}".to_string();
+    };
+
+    let build_system
+        = document.get("build-system").and_then(|item| item.as_table_like());
+
+    let Some(build_system) = build_system else {
+        return "{}".to_string();
+    };
+
+    let mut json
+        = serde_json::Map::new();
+
+    if let Some(backend) = build_system.get("build-backend").and_then(|value| value.as_str()) {
+        json.insert("build-backend".to_string(), serde_json::Value::String(backend.to_string()));
+    }
+
+    if let Some(paths) = build_system.get("backend-path").and_then(|value| value.as_array()) {
+        let paths
+            = paths.iter()
+                .filter_map(|value| value.as_str().map(|value| serde_json::Value::String(value.to_string())))
+                .collect();
+
+        json.insert("backend-path".to_string(), serde_json::Value::Array(paths));
+    }
+
+    serde_json::Value::Object(json).to_string()
+}
 
 fn read_build_requires(source: &Path) -> Vec<String> {
     let Ok(text) = source.with_join_str("pyproject.toml").fs_read_text() else {
@@ -100,9 +134,13 @@ fn pip_index_url(project: &Project, locator: &Locator) -> String {
     let registry
         = get_registry(&project.config, &locator.ident);
 
-    let token
-        = project.config.settings.pypi_auth_ident.value.as_ref().map(|secret| secret.value.clone())
-            .or_else(|| project.config.settings.pypi_auth_token.value.as_ref().map(|secret| format!("__token__:{}", secret.value)));
+    // Same credentials as the ones Yarn uses for this index and package
+    // (including `sourceRules` and `packageRules`)
+    let token = match pypi::get_credentials(&project.config, &registry, Some(&locator.ident)) {
+        Some(pypi::PypiCredentials::Ident(auth_ident)) => Some(auth_ident),
+        Some(pypi::PypiCredentials::Token(token)) => Some(format!("__token__:{}", token)),
+        None => None,
+    };
 
     match (token, url::Url::parse(&registry)) {
         (Some(token), Ok(mut url)) => {
@@ -124,7 +162,7 @@ fn extract_sdist(archive: &Path, destination: &Path) -> Result<Path, Error> {
 
     command.arg("-xzf").arg(archive.to_path_buf()).arg("-C").arg(destination.to_path_buf());
 
-    if archive.to_file_string().ends_with(".zip") {
+    if archive.to_file_string().ends_with(".src.zip") {
         command = Command::new("unzip");
         command.arg("-q").arg(archive.to_path_buf()).arg("-d").arg(destination.to_path_buf());
     }
@@ -203,7 +241,10 @@ pub fn build_wheel_from_source(project: &Project, interpreter: &Interpreter, loc
         let result_path
             = work.with_join_str("result.txt");
 
-        run(Command::new(python.to_path_buf()).arg(driver.to_path_buf()).arg(source.to_path_buf()).arg(out.to_path_buf()).arg("requires").arg(result_path.to_path_buf()), "query the build backend")?;
+        let build_system
+            = read_build_system(source);
+
+        run(Command::new(python.to_path_buf()).arg(driver.to_path_buf()).arg(source.to_path_buf()).arg(out.to_path_buf()).arg("requires").arg(result_path.to_path_buf()).arg(&build_system), "query the build backend")?;
 
         let dynamic_requires
             = result_path.fs_read_text()?;
@@ -216,7 +257,7 @@ pub fn build_wheel_from_source(project: &Project, interpreter: &Interpreter, loc
 
         pip_install(&dynamic_requires)?;
 
-        run(Command::new(python.to_path_buf()).arg(driver.to_path_buf()).arg(source.to_path_buf()).arg(out.to_path_buf()).arg("wheel").arg(result_path.to_path_buf()), &format!("build {}", locator.to_print_string()))?;
+        run(Command::new(python.to_path_buf()).arg(driver.to_path_buf()).arg(source.to_path_buf()).arg(out.to_path_buf()).arg("wheel").arg(result_path.to_path_buf()).arg(&build_system), &format!("build {}", locator.to_print_string()))?;
 
         let wheel_name
             = result_path.fs_read_text()?.trim().to_string();
