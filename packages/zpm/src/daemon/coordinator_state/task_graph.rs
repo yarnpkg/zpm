@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use zpm_primitives::Ident;
 use zpm_tasks::{ResolvedTasks, TaskId, TaskName};
@@ -82,9 +82,22 @@ pub struct TaskGraph {
     pub parents: HashMap<ContextualTaskId, HashSet<ContextualTaskId>>,
     /// Prepared task execution info
     pub prepared: BTreeMap<ContextualTaskId, PreparedTask>,
+    /// Maximum number of concurrently running processes, per context
+    pub concurrency_limits: HashMap<String, usize>,
+    /// Prerequisites specific to a context, overriding `resolved.tasks`.
+    /// `--only` drops the edges leading outside of the selection; those
+    /// edges must not leak into the graph other contexts share.
+    pub context_prerequisites: HashMap<String, BTreeMap<TaskId, Vec<TaskId>>>,
 }
 
 impl TaskGraph {
+    /// The prerequisites of a task in the given context.
+    pub fn prerequisites_of(&self, task_id: &TaskId, context_id: &str) -> Option<&Vec<TaskId>> {
+        self.context_prerequisites.get(context_id)
+            .and_then(|prerequisites| prerequisites.get(task_id))
+            .or_else(|| self.resolved.tasks.get(task_id))
+    }
+
     pub fn new() -> Self {
         Self {
             resolved: ResolvedTasks {
@@ -95,6 +108,8 @@ impl TaskGraph {
             subtasks: HashMap::new(),
             parents: HashMap::new(),
             prepared: BTreeMap::new(),
+            concurrency_limits: HashMap::new(),
+            context_prerequisites: HashMap::new(),
         }
     }
 
@@ -106,6 +121,7 @@ impl TaskGraph {
         args: Vec<String>,
         workspace_override: Option<&str>,
         context_id: Option<&str>,
+        only: Option<&BTreeSet<Ident>>,
         context_registry: &mut ContextRegistry,
     ) -> Result<(ContextualTaskId, Vec<ContextualTaskId>, Vec<Path>), Error> {
         let task_name = TaskName::new(task_name)
@@ -158,7 +174,11 @@ impl TaskGraph {
             return Ok((ctx_task_id, vec![], vec![]));
         }
 
-        let resolve_result = project.resolve_task(&task_id)?;
+        let resolve_result = match only {
+            Some(workspace_filter) => project.resolve_tasks(std::slice::from_ref(&task_id), Some(workspace_filter))?,
+            None => project.resolve_task(&task_id)?,
+        };
+
         let new_resolved = resolve_result.resolved;
         let source_files = resolve_result.source_files;
 
@@ -168,7 +188,17 @@ impl TaskGraph {
             let ctx_tid = ContextualTaskId::new(tid.clone(), ctx_id.clone());
             self.clear_task_state(&ctx_tid);
             resolved_ctx_task_ids.push(ctx_tid);
-            self.resolved.tasks.entry(tid).or_insert(prereqs);
+
+            // `--only` graphs are specific to their context (see
+            // `add_tasks_batch`)
+            if only.is_some() {
+                self.context_prerequisites
+                    .entry(ctx_id.clone())
+                    .or_default()
+                    .insert(tid, prereqs);
+            } else {
+                self.resolved.tasks.entry(tid).or_insert(prereqs);
+            }
         }
 
         // Register the parent-child link AFTER clear_task_state calls,
@@ -200,6 +230,84 @@ impl TaskGraph {
         }
 
         Ok((ctx_task_id, resolved_ctx_task_ids, source_files))
+    }
+
+    /// Add a batch of tasks (typically the same task across many workspaces)
+    /// in a single context, resolved as one deduplicated graph. Unlike
+    /// `add_task`, the targets aren't long-lived-aware and never attach to
+    /// running instances; callers handle these cases before batching.
+    pub fn add_tasks_batch(
+        &mut self,
+        project: &Project,
+        targets: &[(TaskId, Vec<String>)],
+        context_id: &str,
+        only: bool,
+        context_registry: &mut ContextRegistry,
+    ) -> Result<(Vec<ContextualTaskId>, Vec<ContextualTaskId>, Vec<Path>), Error> {
+        let root_tasks: Vec<TaskId>
+            = targets.iter()
+                .map(|(task_id, _)| task_id.clone())
+                .collect();
+
+        let workspace_filter: Option<BTreeSet<Ident>>
+            = only.then(|| root_tasks.iter().map(|task_id| task_id.workspace.clone()).collect());
+
+        let resolve_result
+            = project.resolve_tasks(&root_tasks, workspace_filter.as_ref())?;
+
+        let mut resolved_ctx_task_ids: Vec<ContextualTaskId>
+            = Vec::new();
+
+        for (tid, prereqs) in resolve_result.resolved.tasks {
+            let ctx_tid
+                = ContextualTaskId::new(tid.clone(), context_id.to_string());
+
+            if self.tasks.contains_key(&ctx_tid) {
+                continue;
+            }
+
+            resolved_ctx_task_ids.push(ctx_tid);
+
+            // `--only` graphs are specific to their context; the shared
+            // graph keeps the full edges other contexts rely on
+            if only {
+                self.context_prerequisites
+                    .entry(context_id.to_string())
+                    .or_default()
+                    .insert(tid, prereqs);
+            } else {
+                self.resolved.tasks.entry(tid).or_insert(prereqs);
+            }
+        }
+
+        for (ident, tf) in resolve_result.resolved.task_files {
+            self.resolved.task_files.insert(ident, tf);
+        }
+
+        let mut target_ctx_ids
+            = Vec::with_capacity(targets.len());
+
+        for (task_id, _) in targets {
+            let ctx_task_id
+                = ContextualTaskId::new(task_id.clone(), context_id.to_string());
+
+            self.set_as_target(&ctx_task_id);
+            target_ctx_ids.push(ctx_task_id);
+        }
+
+        self.prepare_specific_tasks(project, &resolved_ctx_task_ids, context_registry)?;
+
+        for ((_, args), ctx_task_id) in targets.iter().zip(target_ctx_ids.iter()) {
+            if args.is_empty() {
+                continue;
+            }
+
+            if let Some(task) = self.prepared.get_mut(ctx_task_id) {
+                task.args = args.clone();
+            }
+        }
+
+        Ok((target_ctx_ids, resolved_ctx_task_ids, resolve_result.source_files))
     }
 
     /// Prepare only the specific tasks that were resolved for this context.

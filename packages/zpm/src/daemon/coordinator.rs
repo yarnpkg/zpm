@@ -1,9 +1,9 @@
-use std::{collections::HashSet, io::Write, sync::Arc, time::{Duration, SystemTime}};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::Write, sync::Arc, time::{Duration, SystemTime}};
 
 use base64::Engine;
 use tokio::sync::{mpsc, oneshot};
 use zpm_primitives::Ident;
-use zpm_tasks::{parse as parse_taskfile, TaskId, TaskName};
+use zpm_tasks::{parse as parse_taskfile, Task, TaskId, TaskName};
 use zpm_utils::{Path, ToFileString};
 
 use super::{
@@ -301,14 +301,21 @@ async fn handle_command(
             parent_task_id,
             workspace,
             context_id,
+            only,
+            concurrency,
             subscription_id,
             response_tx,
         } => {
+            if let (Some(ctx), Some(limit)) = (context_id.as_ref(), concurrency) {
+                state.graph.concurrency_limits.insert(ctx.clone(), limit.max(1));
+            }
+
             let result = execute_push_tasks(
                 &tasks,
                 parent_task_id.as_deref(),
                 workspace.as_deref(),
                 context_id.as_deref(),
+                only,
                 state,
                 project,
             );
@@ -672,6 +679,7 @@ fn execute_push_tasks(
     parent_task_id: Option<&str>,
     workspace: Option<&str>,
     context_id: Option<&str>,
+    only: bool,
     state: &mut CoordinatorState,
     project: &Project,
 ) -> PushTasksResult {
@@ -679,15 +687,49 @@ fn execute_push_tasks(
     let mut dependency_ids = vec![];
     let mut attached_long_lived = vec![];
 
+    // Regular (non long-lived) top-level targets are resolved together as a
+    // single graph so that a task shared by many targets (e.g. a common
+    // `^build`) is only scheduled once and resolution happens only once.
+    let mut batch: Vec<(TaskId, Vec<String>)>
+        = vec![];
+
+    let can_batch
+        = parent_task_id.is_none() && context_id.is_some() && (tasks.len() > 1 || only);
+
+    let defaults
+        = project.workspace_task_defaults();
+
+    // With `--only`, dependencies outside of the workspaces of the pushed
+    // targets are ignored, including for long-lived targets (which don't go
+    // through the batch)
+    let only_workspaces: Option<BTreeSet<Ident>> = only.then(|| {
+        tasks.iter()
+            .filter_map(|task_sub| build_task_id(&task_sub.name, task_sub.workspace.as_deref().or(workspace), project))
+            .map(|task_id| task_id.workspace)
+            .collect()
+    });
+
     for task_sub in tasks {
+        let task_workspace
+            = task_sub.workspace.as_deref().or(workspace);
+
         let task_id
-            = build_task_id(&task_sub.name, workspace, project);
+            = build_task_id(&task_sub.name, task_workspace, project);
+
+        if task_sub.workspace.is_some() && task_id.is_none() {
+            return PushTasksResult {
+                task_ids: vec![],
+                dependency_ids: vec![],
+                attached_long_lived: vec![],
+                error: Some(format!("Could not resolve task: {}", task_sub.name)),
+            };
+        }
 
         // Check if this is a long-lived task. Use filesystem fallback on first
         // push when the graph cache hasn't been populated yet.
         let is_long_lived = task_id
             .as_ref()
-            .map(|tid| resolve_is_long_lived(&state.graph, project, tid))
+            .map(|tid| resolve_is_long_lived(&state.graph, project, tid, &defaults))
             .unwrap_or(false);
 
         // For long-lived tasks, try to attach to an already-running instance
@@ -695,6 +737,13 @@ fn execute_push_tasks(
             if let Some(attached) = try_attach_long_lived(&task_id, state) {
                 task_ids.push(attached.task_id.clone());
                 attached_long_lived.push(attached);
+                continue;
+            }
+        }
+
+        if can_batch && !is_long_lived {
+            if let Some(tid) = task_id {
+                batch.push((tid, task_sub.args.clone()));
                 continue;
             }
         }
@@ -716,8 +765,9 @@ fn execute_push_tasks(
             &task_sub.name,
             parent_task_id,
             task_sub.args.clone(),
-            workspace,
+            task_workspace,
             effective_context_id,
+            only_workspaces.as_ref(),
             &mut state.contexts,
         ) {
             Ok((ctx_task_id, resolved_ctx_task_ids, source_files)) => {
@@ -760,11 +810,75 @@ fn execute_push_tasks(
         }
     }
 
+    if !batch.is_empty() {
+        let context_id
+            = context_id.expect("Batching requires a context id");
+
+        match state.graph.add_tasks_batch(project, &batch, context_id, only, &mut state.contexts) {
+            Ok((target_ids, resolved_ctx_task_ids, source_files)) => {
+                register_batch_sources(&source_files, &batch, state, project);
+
+                record_scheduled_events(&resolved_ctx_task_ids, &mut state.event_history);
+
+                let target_set: HashSet<&ContextualTaskId>
+                    = target_ids.iter().collect();
+
+                for resolved_id in &resolved_ctx_task_ids {
+                    if !target_set.contains(resolved_id) {
+                        dependency_ids.push(resolved_id.clone());
+                    }
+                }
+
+                task_ids.extend(target_ids);
+            }
+            Err(e) => {
+                return PushTasksResult {
+                    task_ids: vec![],
+                    dependency_ids: vec![],
+                    attached_long_lived: vec![],
+                    error: Some(e.to_string()),
+                };
+            }
+        }
+    }
+
     PushTasksResult {
         task_ids,
         dependency_ids,
         attached_long_lived,
         error: None,
+    }
+}
+
+/// Register the taskfiles read while resolving a batch with the watcher,
+/// grouped by the workspace they belong to.
+fn register_batch_sources(
+    source_files: &[Path],
+    batch: &[(TaskId, Vec<String>)],
+    state: &mut CoordinatorState,
+    project: &Project,
+) {
+    if source_files.is_empty() {
+        return;
+    }
+
+    let workspaces: HashSet<&Ident>
+        = batch.iter().map(|(task_id, _)| &task_id.workspace).collect();
+
+    for ident in workspaces {
+        let Ok(workspace) = project.workspace_by_ident(ident) else {
+            continue;
+        };
+
+        let sources: Vec<Path>
+            = source_files.iter()
+                .filter(|path| workspace.path.contains(path) || **path == project.root_workspace().taskfile_path())
+                .cloned()
+                .collect();
+
+        if !sources.is_empty() {
+            state.taskfile_watcher.register_sources(ident.clone(), sources);
+        }
     }
 }
 
@@ -873,20 +987,20 @@ fn build_task_id(task_name: &str, workspace: Option<&str>, project: &Project) ->
 }
 
 /// Check if a task is long-lived, with filesystem fallback for first push.
-fn resolve_is_long_lived(graph: &TaskGraph, project: &Project, task_id: &TaskId) -> bool {
+fn resolve_is_long_lived(graph: &TaskGraph, project: &Project, task_id: &TaskId, defaults: &BTreeMap<TaskName, Task>) -> bool {
     // Fast path: check graph cache (populated after first add_task)
     if check_if_long_lived_from_graph(graph, task_id) {
         return true;
     }
 
-    // Slow path: resolve from disk (only needed on first push per task)
-    project.resolve_task(task_id)
-        .ok()
-        .and_then(|result| {
-            result.resolved.task_files.get(&task_id.workspace)
-                .and_then(|tf| tf.tasks.get(task_id.task_name.as_str()))
-                .map(|task| task.attributes.iter().any(|a| a.name == LONG_LIVED_ATTRIBUTE))
-        })
+    // Slow path: read the task definition from disk (only needed on first
+    // push per task). No need to resolve the whole dependency graph here.
+    let Ok(workspace) = project.workspace_by_ident(&task_id.workspace) else {
+        return false;
+    };
+
+    project.find_workspace_task(workspace, &task_id.task_name, defaults)
+        .map(|task| task.attributes.iter().any(|a| a.name == LONG_LIVED_ATTRIBUTE))
         .unwrap_or(false)
 }
 
@@ -1056,6 +1170,9 @@ fn purge_task_from_graph(
 
     // Remove from resolved.tasks (the dependency graph)
     state.graph.resolved.tasks.remove(&task_id);
+    for prerequisites in state.graph.context_prerequisites.values_mut() {
+        prerequisites.remove(&task_id);
+    }
 
     // Find all contextual instances of this task (across all contexts)
     let ctx_task_ids_to_remove: Vec<ContextualTaskId> = state.graph.tasks.keys()

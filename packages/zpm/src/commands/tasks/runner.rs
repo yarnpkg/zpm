@@ -11,8 +11,9 @@ use uuid::Uuid;
 use zpm_utils::ToFileString;
 
 use super::helpers::{is_long_lived_task, print_attach_header, print_detach_footer};
+use super::selection::TaskSelection;
 use crate::daemon::{
-    ContextualTaskId, DaemonClient, DaemonNotification, PushTasksResult, StandaloneDaemonHandle,
+    ContextualTaskId, DaemonClient, DaemonNotification, PushTasksOptions, PushTasksResult, StandaloneDaemonHandle,
     SubscriptionScope, TaskSubscription,
 };
 use crate::error::Error;
@@ -58,7 +59,9 @@ impl TaskRunContext {
     pub fn mark_completed(&mut self, task_id: ContextualTaskId, code: i32) {
         if self.target_task_ids.contains(&task_id) {
             self.completed_tasks.insert(task_id);
-            if code != 0 {
+            // Report the first failure (later cancellations would otherwise
+            // overwrite its exit code)
+            if code != 0 && self.exit_code == 0 {
                 self.exit_code = code;
             }
         }
@@ -99,6 +102,16 @@ pub trait TaskRunHandler: Send {
     }
 
     fn on_ctrl_c(&mut self);
+
+    /// Called when the selection didn't match any task.
+    fn on_nothing_to_run(&mut self) {
+        eprintln!("No task matched the selection");
+    }
+
+    /// Called once all target tasks have completed.
+    fn on_finished(&mut self, ctx: &TaskRunContext) {
+        let _ = ctx;
+    }
 }
 
 pub async fn run_task(
@@ -107,6 +120,31 @@ pub async fn run_task(
     args: &[String],
     standalone: bool,
     verbose_level: u8,
+) -> Result<ExitStatus, Error> {
+    run_tasks(handler, &[name.to_string()], args, &TaskRunOptions {
+        standalone,
+        verbose_level,
+        ..TaskRunOptions::default()
+    }).await
+}
+
+/// Options for `run_tasks`. The default selection runs the tasks in the
+/// active workspace only.
+#[derive(Default)]
+pub struct TaskRunOptions<'a> {
+    pub selection: TaskSelection<'a>,
+    pub standalone: bool,
+    pub verbose_level: u8,
+    pub only: bool,
+    pub concurrency: Option<usize>,
+    pub continue_on_error: bool,
+}
+
+pub async fn run_tasks(
+    handler: &mut impl TaskRunHandler,
+    names: &[String],
+    args: &[String],
+    options: &TaskRunOptions<'_>,
 ) -> Result<ExitStatus, Error> {
     let mut project
         = Project::new(None).await?;
@@ -119,12 +157,36 @@ pub async fn run_task(
     let workspace_name
         = workspace.name.to_file_string();
 
+    let task_subscriptions = match options.selection.is_active() {
+        false => names.iter().map(|name| TaskSubscription {
+            name: name.clone(),
+            args: args.to_vec(),
+            workspace: None,
+        }).collect::<Vec<_>>(),
+
+        true => {
+            let targets
+                = options.selection.select_targets(&project, names).await?;
+
+            if targets.is_empty() {
+                handler.on_nothing_to_run();
+                return Ok(exit_status_from_code(0));
+            }
+
+            targets.into_iter().map(|(workspace, name)| TaskSubscription {
+                name,
+                args: args.to_vec(),
+                workspace: Some(workspace.to_file_string()),
+            }).collect::<Vec<_>>()
+        },
+    };
+
     let project_cwd
         = project.project_cwd.clone();
 
-    let mut daemon_handle: Option<StandaloneDaemonHandle> = None;
+    let daemon_handle: Option<StandaloneDaemonHandle>;
 
-    let mut client = if standalone {
+    let mut client = if options.standalone {
         let project
             = Arc::new(project);
 
@@ -144,13 +206,16 @@ pub async fn run_task(
     let context_id_for_cancel
         = context_id.clone();
 
-    let task_subscriptions = vec![TaskSubscription {
-        name: name.to_string(),
-        args: args.to_vec(),
-    }];
-
     let config
         = handler.config();
+
+    let name
+        = names.join(" ");
+
+    let push_options = PushTasksOptions {
+        only: options.only,
+        concurrency: options.concurrency,
+    };
 
     let mut ctx = TaskRunContext {
         result: client
@@ -161,6 +226,7 @@ pub async fn run_task(
                 config.output_subscription,
                 config.status_subscription,
                 Some(context_id),
+                push_options,
             )
             .await?,
         client,
@@ -168,7 +234,7 @@ pub async fn run_task(
         completed_tasks: HashSet::new(),
         exit_code: 0,
         is_first_line: true,
-        verbose_level,
+        verbose_level: options.verbose_level,
     };
 
     if ctx.result.task_ids.is_empty() {
@@ -183,6 +249,14 @@ pub async fn run_task(
         = ctx.result.task_ids.clone().into_iter().collect();
 
     handler.on_tasks_pushed(&ctx);
+
+    // Single-task runs keep their historical behavior (only dependents of a
+    // failed task are cancelled); multi-workspace runs default to fail-fast.
+    let fail_fast
+        = !options.continue_on_error && (options.selection.is_active() || names.len() > 1);
+
+    let mut has_cancelled_context
+        = false;
 
     #[cfg(unix)]
     let mut sigint
@@ -213,7 +287,7 @@ pub async fn run_task(
                             println!();
                         }
 
-                        print_detach_footer(name);
+                        print_detach_footer(&name);
 
                         ctx.client.close();
 
@@ -261,6 +335,21 @@ pub async fn run_task(
                     .on_task_completed(&mut ctx, &task_id, exit_code, is_target)
                     .await;
 
+                // Turbo semantics: by default the first failure stops the
+                // run (running tasks are killed, pending ones cancelled);
+                // `--continue` lets independent tasks finish.
+                if exit_code != 0 && fail_fast && !has_cancelled_context {
+                    has_cancelled_context = true;
+
+                    // The failing task may be a dependency rather than a
+                    // target; its exit code is still the one to report
+                    if ctx.exit_code == 0 {
+                        ctx.exit_code = exit_code;
+                    }
+
+                    let _ = ctx.client.cancel_context(&context_id_for_cancel).await;
+                }
+
                 ctx.mark_completed(task_id, exit_code);
 
                 if ctx.all_completed() {
@@ -288,6 +377,8 @@ pub async fn run_task(
             DaemonNotification::FileChanged { .. } => {}
         }
     }
+
+    handler.on_finished(&ctx);
 
     ctx.client.close();
 

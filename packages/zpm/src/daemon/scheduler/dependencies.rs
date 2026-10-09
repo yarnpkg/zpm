@@ -22,12 +22,24 @@ pub fn find_ready_tasks(
 
     // For each context, check which tasks are ready
     for context_id in active_contexts {
-        for (task_id, prerequisites) in &graph.resolved.tasks {
-            let ctx_task_id = ContextualTaskId::new(task_id.clone(), context_id.clone());
+        // Contexts may carry a concurrency limit (`yarn tasks run -j`); tasks
+        // without a script don't spawn a process and aren't counted.
+        let mut available_slots: Option<usize>
+            = graph.concurrency_limits.get(context_id).map(|limit| {
+                let running_in_context
+                    = running.iter()
+                        .filter(|id| &id.context_id == context_id)
+                        .count();
 
-            if !graph.prepared.contains_key(&ctx_task_id) {
+                limit.saturating_sub(running_in_context)
+            });
+
+        for ctx_task_id in graph.prepared.keys().filter(|id| &id.context_id == context_id) {
+            let Some(prerequisites) = graph.prerequisites_of(&ctx_task_id.task_id, context_id) else {
                 continue;
-            }
+            };
+
+            let ctx_task_id = ctx_task_id.clone();
 
             // Skip if already completed, failed, finished, or running
             let task_state = graph.get_state(&ctx_task_id);
@@ -65,9 +77,25 @@ pub fn find_ready_tasks(
                 false
             });
 
-            if all_prereqs_ready {
-                ready.push(ctx_task_id);
+            if !all_prereqs_ready {
+                continue;
             }
+
+            if let Some(slots) = available_slots.as_mut() {
+                let spawns_process
+                    = graph.prepared.get(&ctx_task_id)
+                        .map_or(false, |prepared| !prepared.script.is_empty());
+
+                if spawns_process {
+                    if *slots == 0 {
+                        continue;
+                    }
+
+                    *slots -= 1;
+                }
+            }
+
+            ready.push(ctx_task_id);
         }
     }
 
@@ -91,12 +119,12 @@ pub fn find_tasks_to_fail(
 
     // For each context, check which tasks should fail
     for context_id in active_contexts {
-        for (task_id, prerequisites) in &graph.resolved.tasks {
-            let ctx_task_id = ContextualTaskId::new(task_id.clone(), context_id.clone());
-
-            if !graph.prepared.contains_key(&ctx_task_id) {
+        for ctx_task_id in graph.prepared.keys().filter(|id| &id.context_id == context_id) {
+            let Some(prerequisites) = graph.prerequisites_of(&ctx_task_id.task_id, context_id) else {
                 continue;
-            }
+            };
+
+            let ctx_task_id = ctx_task_id.clone();
 
             // Skip if already completed, failed, script finished (e.g. waiting for subtasks), or running
             let task_state = graph.get_state(&ctx_task_id);
