@@ -86,28 +86,37 @@ impl<'a> TaskSelection<'a> {
         let dependency_map
             = workspace_dependency_map(project);
 
-        let mut selection: BTreeSet<Ident>
-            = match self.dependencies_only {
-                true => BTreeSet::new(),
-                false => seeds.clone(),
-            };
+        let mut base: BTreeSet<Ident>
+            = seeds.clone();
 
-        if self.with_dependencies || self.dependencies_only {
-            let dependencies
-                = traverse(&seeds, &dependency_map);
-
-            selection.extend(dependencies.into_iter().filter(|ident| {
-                // A workspace that's both a seed and a dependency of another
-                // seed is still a dependency.
-                !self.dependencies_only || !seeds.contains(ident) || is_reachable_from_others(ident, &seeds, &dependency_map)
-            }));
-        }
-
+        // Dependents first, so that dependencies are then followed from the
+        // dependents too (`--with-dependents --with-dependencies` gives the
+        // full closure needed to build every consumer, like pnpm's
+        // `...{pkg}...`).
         if self.with_dependents {
             let dependent_map
                 = invert(&dependency_map);
 
-            selection.extend(traverse(&seeds, &dependent_map));
+            base.extend(traverse(&seeds, &dependent_map));
+        }
+
+        let mut selection: BTreeSet<Ident>
+            = match self.dependencies_only {
+                true => BTreeSet::new(),
+                false => base.clone(),
+            };
+
+        if self.with_dependencies || self.dependencies_only {
+            let dependencies
+                = traverse(&base, &dependency_map);
+
+            // With --dependencies-only, the seeds (and the dependents added
+            // to them) are left out. A seed that's also a dependency of
+            // another seed is still a dependency, but a seed is never kept
+            // just because the dependents added to the base depend on it.
+            selection.extend(dependencies.into_iter().filter(|ident| {
+                !self.dependencies_only || !base.contains(ident) || (seeds.contains(ident) && is_reachable_from_others(ident, &seeds, &dependency_map))
+            }));
         }
 
         selection.retain(|ident| {

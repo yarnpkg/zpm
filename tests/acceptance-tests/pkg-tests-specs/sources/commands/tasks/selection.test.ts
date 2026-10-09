@@ -109,6 +109,17 @@ describe(`Commands`, () => {
     );
 
     test(
+      `--dependencies-only --with-dependents should only run the dependencies of the selection and its dependents`,
+      monorepo()(async ({path, run, runSwitch}) => {
+        await setup(path, run);
+
+        // pkg-b and its dependent pkg-c are left out; pkg-a is what they need
+        const {events} = await runJson(runSwitch, [`--from`, `pkg-b`, `--with-dependents`, `--dependencies-only`, `build`]);
+        expect(eventsOf(events, `task-started`).sort()).toEqual([`pkg-a:build`]);
+      }),
+    );
+
+    test(
       `--only should skip ^ dependencies outside of the selection`,
       monorepo()(async ({path, run, runSwitch}) => {
         await setup(path, run);
