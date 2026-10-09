@@ -117,6 +117,13 @@ impl TaskRunHandler for SilentDependenciesHandler {
         }
     }
 
+    async fn on_task_cache_hit(&mut self, ctx: &mut TaskRunContext, task_id: &ContextualTaskId, is_target: bool) {
+        if is_target {
+            self.stop_progress();
+            super::runner::print_cache_hit(ctx, task_id);
+        }
+    }
+
     fn on_ctrl_c(&mut self) {
         self.stop_progress();
     }

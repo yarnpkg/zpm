@@ -7,10 +7,6 @@ description: How to express a turbo.json pipeline with Yarn tasks, and the Yarn 
 
 Yarn tasks can replace the task orchestration part of [Turborepo](https://turborepo.com): running `package.json` scripts across workspaces in dependency order, filtering workspaces, and detecting the workspaces affected by a change. This page maps `turbo.json` and the turbo CLI to their Yarn equivalents.
 
-:::note
-Yarn doesn't cache task results at the moment; tasks always run. `outputs`, `inputs`, `env`, and `cache` from `turbo.json` have no equivalent yet.
-:::
-
 ## Converting turbo.json
 
 Turbo task definitions become `@workspaces` tasks in the `taskfile` at the root of the project. A task without a body runs the `package.json` script of the same name in each workspace (and is a no-op that still propagates ordering in workspaces without that script, like in turbo).
@@ -36,9 +32,12 @@ becomes:
 ```
 # taskfile
 @workspaces
+@cache
+@outputs(dist/**)
 build: ^build
 
 @workspaces
+@cache
 test:ci: ^build& ^test:ci&
 
 @workspaces
@@ -48,6 +47,7 @@ check: test:ci
 check-and-build: build& test:ci&
 
 @workspaces
+@cache
 typecheck:
 
 @workspaces
@@ -62,13 +62,19 @@ dev: ^build
 start: build
 ```
 
-and the global dependencies go in `.yarnrc.yml`:
+and the global dependencies go in `.yarnrc.yml`, both for affected detection and as inputs of every cached task:
 
 ```yaml
 changesetGlobalFiles:
   - .nvmrc
   - patches/**
+
+taskCacheGlobalInputs:
+  - .nvmrc
+  - patches/**
 ```
+
+Unlike turbo, Yarn only caches tasks that opt in with `@cache`. See [Caching](/concepts/tasks#caching) for what goes into the fingerprint.
 
 | turbo.json | taskfile |
 | --- | --- |
@@ -77,8 +83,13 @@ changesetGlobalFiles:
 | `"dependsOn": ["a", "b"]` (unordered) | `task: a& b&` |
 | `"dependsOn": ["pkg#build"]` | `task: pkg:build` (`pkg` must be a dependency of the workspace) |
 | `"persistent": true` | `@long-lived` |
+| `"cache": false` | no `@cache` attribute |
+| `"outputs": ["dist/**"]` | `@cache` + `@outputs(dist/**)` |
+| `"inputs": ["src/**"]` | `@inputs(src/**)` |
+| `"inputs": ["$TURBO_DEFAULT$", "../shared/**"]` | `@inputs(@default ../shared/**)` |
+| `"env": ["API_URL", "NEXT_PUBLIC_*"]` | `@env(API_URL NEXT_PUBLIC_*)` |
 | per-package `turbo.json` | a `taskfile` in the workspace overriding the default |
-| `globalDependencies` | `changesetGlobalFiles` setting |
+| `globalDependencies` | `changesetGlobalFiles` and `taskCacheGlobalInputs` settings |
 
 Dependencies without `&` are sequential (`a b` runs `a` then `b`); add `&` to run them in parallel, which matches turbo's unordered `dependsOn`.
 
@@ -102,6 +113,7 @@ Options to `yarn tasks run` must be placed before the task name.
 | `turbo build --continue` | `yarn tasks run -A --continue build` |
 | `turbo build --output-logs=errors-only` | `yarn tasks run -A --errors-only build` |
 | `turbo run dev --filter app` | `yarn tasks run --from app dev` |
+| `turbo build --force` | `yarn tasks run -A --no-cache build` |
 | `turbo ls --affected --output json` | `yarn workspaces list --since -R --json` |
 
 ### Affected workspaces

@@ -19,6 +19,24 @@ pub struct TaskSubscription {
     pub workspace: Option<String>,
 }
 
+/// Task cache settings attached to a push by the client that created the
+/// context. Contexts without them never read nor write the task cache.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskCacheOptions {
+    /// When false, existing cache entries are ignored (new ones are still
+    /// written).
+    pub read: bool,
+    /// Absolute path of the folder storing the cache entries.
+    pub cache_folder: String,
+    /// Glob patterns (relative to the project root) of the files part of
+    /// every fingerprint.
+    pub global_inputs: Vec<String>,
+    /// Hash of each workspace's dependency closure, as described by the
+    /// lockfile; keyed by workspace ident.
+    pub tree_hashes: std::collections::BTreeMap<String, String>,
+}
+
 /// Defines the scope of subscription for notifications
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +71,10 @@ pub enum DaemonRequest {
         status_subscription: SubscriptionScope,
         /// Context ID for task execution. Required for new tasks, inherited from parent for subtasks.
         context_id: Option<String>,
+        /// Task cache settings for the context; subtasks inherit them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        cache: Option<TaskCacheOptions>,
         /// Skip cross-workspace dependencies pointing outside of the workspaces of the pushed tasks.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -164,6 +186,8 @@ pub enum TaskEventState {
     },
     /// Task was cancelled (dependency failure or context cancellation).
     Cancelled,
+    /// Task results got restored from the task cache (the script didn't run).
+    CacheHit,
 }
 
 impl std::fmt::Display for TaskEventState {
@@ -185,6 +209,7 @@ impl std::fmt::Display for TaskEventState {
                 Ok(())
             }
             Self::Cancelled => write!(f, "cancelled"),
+            Self::CacheHit => write!(f, "cache hit"),
         }
     }
 }
@@ -327,6 +352,13 @@ pub enum DaemonNotification {
     TaskWarmUpComplete {
         #[ts(type = "string")]
         task_id: ContextualTaskId,
+    },
+    /// The task results got restored from the task cache; its logs are
+    /// about to be replayed and its script won't run.
+    TaskCacheHit {
+        #[ts(type = "string")]
+        task_id: ContextualTaskId,
+        fingerprint: String,
     },
     DeclaredTasksChanged {
         tasks: Vec<DeclaredTaskInfo>,

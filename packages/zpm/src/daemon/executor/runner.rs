@@ -1,4 +1,7 @@
-use std::process::ExitStatus;
+use std::{
+    process::ExitStatus,
+    sync::{Arc, Mutex},
+};
 
 use zpm_utils::ToFileString;
 
@@ -13,6 +16,7 @@ use super::{
 use crate::{
     error::Error,
     script::ScriptEnvironment,
+    task_cache::LogLine,
 };
 
 pub struct TaskRunner {
@@ -20,6 +24,7 @@ pub struct TaskRunner {
     task_id: ContextualTaskId,
     daemon_url: String,
     command_tx: CommandSender,
+    capture: Option<Arc<Mutex<Vec<LogLine>>>>,
 }
 
 impl TaskRunner {
@@ -28,12 +33,14 @@ impl TaskRunner {
         task_id: ContextualTaskId,
         daemon_url: String,
         command_tx: CommandSender,
+        capture: Option<Arc<Mutex<Vec<LogLine>>>>,
     ) -> Self {
         Self {
             prepared,
             task_id,
             daemon_url,
             command_tx,
+            capture,
         }
     }
 
@@ -85,7 +92,7 @@ impl TaskRunner {
             .take()
             .ok_or_else(|| Error::TaskExecutionFailed("Failed to capture stderr".to_string()))?;
 
-        stream_output(child_stdout, child_stderr, self.task_id.clone(), self.command_tx.clone()).await;
+        stream_output(child_stdout, child_stderr, self.task_id.clone(), self.command_tx.clone(), self.capture.clone()).await;
 
         let status = running.child.wait().await?;
 

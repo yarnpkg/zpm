@@ -18,6 +18,7 @@ futures = { workspace = true }
 git-url-parse = { workspace = true }
 globset = { workspace = true }
 http = { workspace = true }
+ignore = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }

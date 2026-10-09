@@ -56,6 +56,8 @@ pub struct CoordinatorState {
     pub event_history: EventHistory,
     pub taskfile_watcher: TaskfileWatcher,
     pub file_watcher: FileWatcher,
+    /// Task cache settings of each context (absent = no caching)
+    pub cache_contexts: std::collections::HashMap<String, std::sync::Arc<crate::task_cache::CacheRunOptions>>,
     /// Number of terminal transitions so far; lets the coordinator detect
     /// that a scheduling pass made progress (e.g. script-less tasks
     /// completing synchronously) and that another pass is needed.
@@ -80,6 +82,7 @@ impl CoordinatorState {
             event_history: EventHistory::new(),
             taskfile_watcher: TaskfileWatcher::new(taskfile_notify_tx),
             file_watcher: FileWatcher::new(file_notify_tx, project_cwd),
+            cache_contexts: std::collections::HashMap::new(),
             closed_tasks_counter: 0,
         }
     }
@@ -94,6 +97,7 @@ impl CoordinatorState {
         if !self.contexts.is_active(&task_id.context_id) {
             self.graph.concurrency_limits.remove(&task_id.context_id);
             self.graph.context_prerequisites.remove(&task_id.context_id);
+            self.cache_contexts.remove(&task_id.context_id);
         }
 
         // 2. Output buffer: mark closed, may trigger eviction of old closed tasks

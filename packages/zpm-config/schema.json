@@ -141,6 +141,11 @@
       "description": "Whether SSL errors should be treated as errors",
       "default": true
     },
+    "enableTaskCache": {
+      "type": "boolean",
+      "description": "Whether tasks declared with the `@cache` attribute can be restored from (and saved into) the task cache",
+      "default": true
+    },
     "enableTimers": {
       "type": "boolean",
       "description": "Whether to show timers in the output",
@@ -688,6 +693,19 @@
       "items": {
         "type": "zpm_utils::Glob"
       }
+    },
+    "taskCacheFolder": {
+      "type": "zpm_utils::Path",
+      "description": "Folder where the results of the tasks declared with the `@cache` attribute are stored",
+      "default": ".yarn/ignore/task-cache"
+    },
+    "taskCacheGlobalInputs": {
+      "type": "array",
+      "description": "Glob patterns (relative to the project root) of files whose content is part of the cache key of every cached task (for example `.nvmrc`)",
+      "items": {
+        "type": "string"
+      },
+      "default": []
     },
     "virtualFolder": {
       "type": "zpm_utils::Path",

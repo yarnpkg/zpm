@@ -424,6 +424,9 @@ pub enum Error {
     #[error("Task execution failed: {0}")]
     TaskExecutionFailed(String),
 
+    #[error("Task cache error: {0}")]
+    TaskCacheError(String),
+
     #[error("Missing context_id: task operations require a context_id (either provided directly or inherited from parent task)")]
     MissingContextId,
 

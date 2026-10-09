@@ -1,4 +1,8 @@
+use std::sync::{Arc, Mutex};
+
 use tokio::{io::{AsyncBufReadExt, BufReader}, process::{ChildStderr, ChildStdout}};
+
+use crate::task_cache::LogLine;
 
 use super::super::{
     coordinator_commands::{CommandSender, CoordinatorCommand},
@@ -11,7 +15,14 @@ pub async fn stream_output(
     stderr: ChildStderr,
     task_id: ContextualTaskId,
     command_tx: CommandSender,
+    capture: Option<Arc<Mutex<Vec<LogLine>>>>,
 ) {
+    let record = |stream: &Stream, line: &str| {
+        if let Some(capture) = &capture {
+            capture.lock().unwrap().push(LogLine {stream: stream.as_str().to_string(), line: line.to_string()});
+        }
+    };
+
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
     let mut stdout_done = false;
@@ -22,6 +33,7 @@ pub async fn stream_output(
             line = stdout_reader.next_line(), if !stdout_done => {
                 match line {
                     Ok(Some(line)) => {
+                        record(&Stream::Stdout, &line);
                         if command_tx.send(CoordinatorCommand::TaskOutput {
                             task_id: task_id.clone(),
                             line,
@@ -40,6 +52,7 @@ pub async fn stream_output(
             line = stderr_reader.next_line(), if !stderr_done => {
                 match line {
                     Ok(Some(line)) => {
+                        record(&Stream::Stderr, &line);
                         if command_tx.send(CoordinatorCommand::TaskOutput {
                             task_id: task_id.clone(),
                             line,
