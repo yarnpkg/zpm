@@ -3,14 +3,16 @@ function escapeDirective(s: string): string {
 }
 
 function formatType(prop: Record<string, any>): string {
-  if (Array.isArray(prop.type))
-    return prop.type.join(` | `);
-
   if (prop.enum)
     return prop.enum.map((v: any) => typeof v === `string` ? `"${v}"` : String(v)).join(` | `);
 
-  if (prop.type === `array`)
-    return `${prop.items?.type || `any`}[]`;
+  if (Array.isArray(prop.type))
+    return prop.type.map((type: string) => formatType({...prop, type})).join(` | `);
+
+  if (prop.type === `array`) {
+    const itemType = prop.items ? formatType(prop.items) : `any`;
+    return `${itemType.includes(` | `) ? `(${itemType})` : itemType}[]`;
+  }
 
   return prop.type || `any`;
 }
@@ -108,11 +110,13 @@ function propertyToMarkdown(name: string, prop: Record<string, any>): string {
     lines.push(``, prop.description);
 
 
-  if (Array.isArray(prop._examples) && prop._examples.length > 0) {
+  const examples = prop._examples ?? prop.examples?.map((value: any) => ({value}));
+
+  if (Array.isArray(examples) && examples.length > 0) {
     lines.push(
       ``,
       `\`\`\`yaml`,
-      prop._examples.map((example: any) => exampleToYaml(name, example)).join(`\n\n`),
+      examples.map((example: any) => exampleToYaml(name, example)).join(`\n\n`),
       `\`\`\``,
     );
   }

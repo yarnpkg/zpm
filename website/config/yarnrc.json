@@ -1,12 +1,12 @@
 {
   "title": "JSON Schema for Yarnrc files",
   "$schema": "https://json-schema.org/draft/2019-09/schema#",
-  "description": "Yarnrc files (named this way because they must be called `.yarnrc.yml`) are the one place where you'll be able to configure Yarn's internal settings. While Yarn will automatically find them in the parent directories, they should usually be kept at the root of your project (often your repository). **Starting from the v2, they must be written in valid Yaml and have the right extension** (simply calling your file `.yarnrc` won't do).\n\nEnvironment variables can be accessed from setting definitions by using the `${NAME}` syntax when defining the values. By default Yarn will require the variables to be present, but this can be turned off by using either `${NAME-fallback}` (which will return `fallback` if `NAME` isn't set) or `${NAME:-fallback}` (which will return `fallback` if `NAME` isn't set, or is an empty string).\n\nFinally, note that most settings can also be defined through environment variables (at least for the simpler ones; arrays and objects aren't supported yet). To do this, just prefix the names and write them in snake case: `YARN_CACHE_FOLDER` will set the cache folder (such values will overwrite any that might have been defined in the RC files - use them sparingly).",
+  "description": "Yarnrc files (named this way because they must be called `.yarnrc.yml`) are the one place where you'll be able to configure Yarn's internal settings. While Yarn will automatically find them in the parent directories, they should usually be kept at the root of your project (often your repository). **Starting from the v2, they must be written in valid Yaml and have the right extension** (simply calling your file `.yarnrc` won't do).\n\nEnvironment variables can be accessed from setting definitions by using the `${NAME}` syntax when defining the values. By default Yarn will require the variables to be present, but this can be turned off by using either `${NAME-fallback}` (which will return `fallback` if `NAME` isn't set) or `${NAME:-fallback}` (which will return `fallback` if `NAME` isn't set, or is an empty string).\n\nNullable settings accept explicit `null` values. Omission lets configuration sources and defaults apply; `null` is an explicit value, with setting-specific behavior.\n\nFinally, note that most settings can also be defined through environment variables (at least for the simpler ones; arrays and objects aren't supported yet). To do this, just prefix the names and write them in snake case: `YARN_CACHE_FOLDER` will set the cache folder (such values will overwrite any that might have been defined in the RC files - use them sparingly).",
   "__info": [
     "This file contains the JSON Schema for Yarnrc files and is:",
-    "1) Hosted on the Yarn Website at http://yarnpkg.com/configuration/yarnrc.json",
+    "1) Hosted on the Yarn Website at https://v6.yarnpkg.com/configuration/yarnrc.json",
     "2) Registered on the SchemaStore catalog so that editors can offer autocompletion and validation.",
-    "3) Used to generate the documentation page at http://yarnpkg.com/configuration/yarnrc",
+    "3) Used to generate the documentation page at https://v6.yarnpkg.com/configuration/yarnrc",
 
     "Note: Properties prefixed with a single underscore (e.g. _exampleItems, _exampleKeys, _hidden)",
     "are unique to our documentation generation interpreter. All others will be picked up",
@@ -14,7 +14,7 @@
 
     "Rules:",
     "1) Don't set a default if it's null, dynamic, or an object.",
-    "2) Use `examples` for scalars, `_exampleItems` for arrays, and `_exampleKeys` for objects.",
+    "2) Use `examples` for scalars and `_examples` with descriptions and values for richer examples.",
     "3) Always add a _package property to each configuration setting."
   ],
   "type": "object",
@@ -22,10 +22,9 @@
     "cacheFolder": {
       "_package": "@yarnpkg/core",
       "title": "Path where the downloaded packages are stored on your system.",
-      "description": "They'll be normalized, compressed, and saved under the form of zip archives with standardized names. The cache is deemed to be relatively safe to be shared by multiple projects, even when multiple Yarn instances run at the same time on different projects. For setting a global cache folder, you should use `enableGlobalCache` instead.",
+      "description": "They'll be normalized, compressed, and saved under the form of zip archives with standardized names. The cache is deemed to be relatively safe to be shared by multiple projects, even when multiple Yarn instances run at the same time on different projects. For setting a global cache folder, you should use `enableGlobalCache` instead. Defaults to `.yarn/cache` in the project when the global cache is disabled.",
       "type": "string",
-      "format": "uri-reference",
-      "default": "crate::compute_cache_folder(context)"
+      "format": "uri-reference"
     },
     "changesetBaseRefs": {
       "_package": "@yarnpkg/plugin-git",
@@ -51,15 +50,16 @@
       "_package": "@yarnpkg/plugin-git",
       "title": "Amount of `git clone` operations that Yarn will run at the same time.",
       "description": "We by default limit it to 2 concurrent clone operations.",
-      "type": "number",
-      "default": 2
+      "type": "integer",
+      "default": 2,
+      "minimum": 0
     },
     "compressionLevel": {
       "_package": "@yarnpkg/core",
-      "type": ["number", "string"],
+      "type": ["integer", "string", "null"],
       "title": "Compression level employed for zip archives",
-      "description": "Possible values go from `0` (\"no compression, faster\") to `9` (\"heavy compression, slower\").",
-      "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      "description": "Values from `0` (no compression) to `9` (heavy compression) are accepted as integers or strings. Set to `null` to let Yarn choose the compression algorithm.",
+      "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", null]
     },
     "defaultSemverRangePrefix": {
       "_package": "@yarnpkg/plugin-essentials",
@@ -95,8 +95,7 @@
       "_package": "@yarnpkg/core",
       "title": "Define whether Yarn should attempt to check for malicious changes.",
       "description": "If true, Yarn will query the remote registries to validate that the lockfile content matches the remote information. These checks make installs slower, so you should only run them on branches managed by users outside your circle of trust.\n\nYarn will automatically enable the hardened mode on GitHub pull requests from public repository. Should you want to disable it, explicitly set it to `false` in your yarnrc file.",
-      "type": "boolean",
-      "default": "crate::is_public_pr_ci(context)"
+      "type": "boolean"
     },
     "enableImmutableCache": {
       "_package": "@yarnpkg/core",
@@ -108,7 +107,7 @@
     "enableImmutableInstalls": {
       "_package": "@yarnpkg/plugin-essentials",
       "title": "Define whether to allow adding/removing entries from the lockfile or not.",
-      "description": "If true (the default on CI), Yarn will refuse to change the lockfile in any way, whether it would add new entries or remove them. Other files can be added to the checklist via the `immutablePatterns` setting.",
+      "description": "If true, Yarn refuses to change the lockfile and aborts the install instead. Other files can be protected via `immutablePatterns`. Defaults to false, or true when hardened mode is automatically enabled for public GitHub Actions pull requests.",
       "type": "boolean",
       "default": false
     },
@@ -129,9 +128,8 @@
     "enableProgressBars": {
       "_package": "@yarnpkg/core",
       "title": "Define whether animated progress bars should be shown or not.",
-      "description": "If true (the default outside of CI environments), Yarn will show progress bars for long-running events.",
+      "description": "If true, Yarn shows progress bars for long-running events. Enabled by default when the output is a terminal.",
       "type": "boolean",
-      "default": "zpm_utils::is_terminal()",
       "examples": [true]
     },
     "enableScripts": {
@@ -165,56 +163,57 @@
     "globalFolder": {
       "_package": "@yarnpkg/core",
       "title": "Path where all files global to the system will be stored.",
-      "description": "Various files we be stored there: global cache, metadata cache, ...",
+      "description": "Stores the global package cache and metadata cache. Defaults to `.yarn/zpm` inside your home directory.",
       "type": "string",
       "format": "uri-reference",
-      "default": "Path::home_dir().unwrap().unwrap().with_join_str(\".yarn/zpm\")",
-      "examples": ["${HOME}/.yarn/berry"]
+      "examples": ["${HOME}/.yarn/zpm"]
     },
     "httpProxy": {
       "_package": "@yarnpkg/core",
       "title": "Proxy to use when making an HTTP request.",
-      "type": "string",
+      "type": ["string", "null"],
       "format": "uri",
       "examples": ["http://proxy:4040"]
     },
     "httpRetry": {
       "_package": "@yarnpkg/core",
-      "title": "Amount of time to wait in seconds before retrying a failed HTTP request.",
-      "type": "number",
-      "default": 3
+      "title": "Number of times to retry a failed HTTP request.",
+      "type": "integer",
+      "default": 3,
+      "minimum": 0
     },
     "httpTimeout": {
       "_package": "@yarnpkg/core",
       "title": "Amount of time to wait in milliseconds before cancelling pending HTTP requests.",
-      "type": "number",
-      "default": 60000
+      "type": "integer",
+      "default": 60000,
+      "minimum": 0
     },
     "httpsCaFilePath": {
       "_package": "@yarnpkg/core",
       "title": "Path to a file containing one or multiple Certificate Authority signing certificates.",
-      "type": "string",
+      "type": ["string", "null"],
       "format": "uri-reference",
       "examples": ["./exampleCA.pem"]
     },
     "httpsCertFilePath": {
       "_package": "@yarnpkg/core",
       "title": "Path to a file containing a certificate chain in PEM format.",
-      "type": "string",
+      "type": ["string", "null"],
       "format": "uri-reference",
       "examples": ["./exampleCert.pem"]
     },
     "httpsKeyFilePath": {
       "_package": "@yarnpkg/core",
       "title": "Path to a file containing a private key in PEM format.",
-      "type": "string",
+      "type": ["string", "null"],
       "format": "uri-reference",
       "examples": ["./exampleKey.pem"]
     },
     "httpsProxy": {
       "_package": "@yarnpkg/core",
       "title": "Define a proxy to use when making an HTTPS request.",
-      "type": "string",
+      "type": ["string", "null"],
       "format": "uri",
       "examples": ["http://proxy:4040"]
     },
@@ -266,6 +265,14 @@
         }
       ]
     },
+    "lazyInstallMode": {
+      "_package": "@yarnpkg/core",
+      "title": "Scope of lazy installs.",
+      "description": "Use `focused` to install only the active workspace and its dependencies, or `all` to install the entire project.",
+      "type": "string",
+      "enum": ["focused", "all"],
+      "default": "all"
+    },
     "logFilters": {
       "title": "Alter the log levels for emitted messages.",
       "description": "This can be used to hide specific messages, or instead make them more prominent. Rules defined there accept filtering messages by exact text or glob pattern.",
@@ -274,12 +281,12 @@
         "type": "object",
         "properties": {
           "text": {
-            "type": "string",
+            "type": ["string", "null"],
             "title": "Match messages whose content is strictly equal to the given text.",
             "examples": ["lorem-ipsum@npm:1.2.3 lists build scripts, but its build has been explicitly disabled through configuration"]
           },
           "pattern": {
-            "type": "string",
+            "type": ["string", "null"],
             "title": "Match messages whose content match the given glob pattern.",
             "description": "Patterns can be overridden on a case-by-case basis by using the `text` filter, which has precedence over `pattern`.",
             "examples": ["lorem-ipsum@* lists build scripts, but its build has been explicitly disabled through configuration"]
@@ -326,8 +333,9 @@
       "_package": "@yarnpkg/core",
       "title": "Amount of HTTP requests that are allowed to run at the same time.",
       "description": "We default to 100 concurrent requests, but it may be required to limit it even more when working behind proxies that can't handle large amounts of traffic.",
-      "type": "number",
-      "default": 100
+      "type": "integer",
+      "default": 100,
+      "minimum": 0
     },
     "networkSettings": {
       "_package": "@yarnpkg/core",
@@ -338,20 +346,20 @@
           "type": "object",
           "properties": {
             "enableNetwork": {
-              "$ref": "#/properties/enableNetwork",
-              "_hidden": true
+              "_hidden": true,
+              "anyOf": [{"$ref": "#/properties/enableNetwork"}, {"type": "null"}]
             },
             "httpsCaFilePath": {
-              "$ref": "#/properties/httpsCaFilePath",
-              "_hidden": true
+              "_hidden": true,
+              "$ref": "#/properties/httpsCaFilePath"
             },
             "httpsCertFilePath": {
-              "$ref": "#/properties/httpsCertFilePath",
-              "_hidden": true
+              "_hidden": true,
+              "$ref": "#/properties/httpsCertFilePath"
             },
             "httpsKeyFilePath": {
-              "$ref": "#/properties/httpsKeyFilePath",
-              "_hidden": true
+              "_hidden": true,
+              "$ref": "#/properties/httpsKeyFilePath"
             }
           }
         }
@@ -403,10 +411,6 @@
       "_package": "@yarnpkg/plugin-pnp",
       "title": "Define how Node packages should be installed.",
       "description": "Yarn supports three ways to install your project's dependencies, based on the `nodeLinker` setting. Possible values are:\n\n- If `pnp`, a single Node.js loader file will be generated.\n- If `pnpm`, a `node-modules` will be created using symlinks and hardlinks to a global content-addressable store.\n- If `node-modules`, a regular `node_modules` folder just like in Yarn Classic or npm will be created.",
-      "anyOf": [
-        { "type": "string" },
-        { "enum": ["pnp", "pnpm", "node-modules"] }
-      ],
       "type": "string",
       "default": "pnp",
       "_examples": [
@@ -418,7 +422,8 @@
           "description": "Use a traditional node_modules install.",
           "value": "node-modules"
         }
-      ]
+      ],
+      "enum": ["pnp", "pnpm", "node-modules"]
     },
     "nodeExperimentalPackageMap": {
       "_package": "@yarnpkg/plugin-pnp",
@@ -473,30 +478,30 @@
       "_package": "@yarnpkg/plugin-npm",
       "title": "Define the registry to use when auditing dependencies.",
       "description": "If not explicitly set, the value of `npmRegistryServer` will be used.",
-      "type": "string",
+      "type": ["string", "null"],
       "format": "uri",
       "examples": ["https://registry.npmjs.org"]
     },
     "npmAuthIdent": {
       "_package": "@yarnpkg/plugin-npm",
-      "title": "Define the authentication credentials to use by default when accessing your registries.",
+      "title": "Username and password (`username:password`), or their Base64 encoding, to use for npm authentication.",
       "description": "Replacement of the former `_auth` setting. Because it requires storing unencrypted values in your configuration, `npmAuthToken` should be preferred when possible.",
-      "type": "string",
+      "type": ["string", "null"],
       "examples": ["username:password"]
     },
     "npmAuthToken": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Define the authentication token to use by default when accessing your registries.",
       "description": "Replacement of the former `_authToken` settings. If you're using `npmScopes` to define multiple registries, the `npmRegistries` dictionary allows you to override these credentials on a per-registry basis.",
-      "type": "string",
+      "type": ["string", "null"],
       "examples": ["ffffffff-ffff-ffff-ffff-ffffffffffff"]
     },
     "npmPublishAccess": {
       "_package": "@yarnpkg/plugin-npm-cli",
-      "type": "string",
+      "type": ["string", "null"],
       "title": "Define the default access to use when publishing packages to the npm registry.",
       "description": "Valid values are `public` and `restricted`, but `restricted` usually requires to register for a paid plan (this is up to the registry you use). Can be overridden on a per-package basis using the [`publishConfig.access`](manifest#publishConfig.access) field.",
-      "enum": ["public", "restricted"]
+      "enum": ["public", "restricted", null]
     },
     "npmPublishProvenance": {
       "_package": "@yarnpkg/plugin-npm-cli",
@@ -512,7 +517,7 @@
       "items": {
         "type": "string"
       },
-      "examples": ["known_insecure_package"],
+      "examples": [["known_insecure_package"]],
       "_examples": [
         {
           "description": "Exclude one package from audit reports.",
@@ -531,7 +536,7 @@
       "items": {
         "type": "string"
       },
-      "examples": ["1234567"],
+      "examples": [["1234567"]],
       "_examples": [
         {
           "description": "Ignore a single advisory ID.",
@@ -547,7 +552,7 @@
       "_package": "@yarnpkg/plugin-npm",
       "title": "Define the registry to use when pushing packages.",
       "description": "If not explicitly set, the value of `npmRegistryServer` will be used. Overridden by `publishConfig.registry`.",
-      "type": "string",
+      "type": ["string", "null"],
       "format": "uri",
       "examples": ["https://npm.pkg.github.com"]
     },
@@ -561,16 +566,16 @@
           "type": "object",
           "properties": {
             "npmAlwaysAuth": {
-              "$ref": "#/properties/npmAlwaysAuth",
-              "_hidden": true
+              "_hidden": true,
+              "anyOf": [{"$ref": "#/properties/npmAlwaysAuth"}, {"type": "null"}]
             },
             "npmAuthIdent": {
-              "$ref": "#/properties/npmAuthIdent",
-              "_hidden": true
+              "_hidden": true,
+              "$ref": "#/properties/npmAuthIdent"
             },
             "npmAuthToken": {
-              "$ref": "#/properties/npmAuthToken",
-              "_hidden": true
+              "_hidden": true,
+              "$ref": "#/properties/npmAuthToken"
             }
           }
         }
@@ -629,25 +634,25 @@
           "type": "object",
           "properties": {
             "npmPublishRegistry": {
-              "$ref": "#/properties/npmPublishRegistry",
               "examples": ["https://registry.yarnpkg.com"],
-              "_hidden": true
+              "_hidden": true,
+              "$ref": "#/properties/npmPublishRegistry"
             },
             "npmRegistryServer": {
-              "$ref": "#/properties/npmRegistryServer",
-              "_hidden": true
+              "_hidden": true,
+              "anyOf": [{"$ref": "#/properties/npmRegistryServer"}, {"type": "null"}]
             },
             "npmAlwaysAuth": {
-              "$ref": "#/properties/npmAlwaysAuth",
-              "_hidden": true
+              "_hidden": true,
+              "anyOf": [{"$ref": "#/properties/npmAlwaysAuth"}, {"type": "null"}]
             },
             "npmAuthIdent": {
-              "$ref": "#/properties/npmAuthIdent",
-              "_hidden": true
+              "_hidden": true,
+              "$ref": "#/properties/npmAuthIdent"
             },
             "npmAuthToken": {
-              "$ref": "#/properties/npmAuthToken",
-              "_hidden": true
+              "_hidden": true,
+              "$ref": "#/properties/npmAuthToken"
             }
           }
         }
@@ -684,43 +689,65 @@
         "type": "object",
         "properties": {
           "ecosystemFilter": {
-            "type": "string",
-            "enum": ["npm", "pypi"],
+            "type": ["string", "null"],
+            "enum": ["npm", "pypi", null],
             "_hidden": true
           },
           "packageFilter": {
-            "type": "string",
+            "type": ["string", "null"],
             "_hidden": true
           },
           "npmRegistryServer": {
-            "$ref": "#/properties/npmRegistryServer",
-            "_hidden": true
+            "_hidden": true,
+            "anyOf": [{"$ref": "#/properties/npmRegistryServer"}, {"type": "null"}]
           },
           "npmPublishRegistry": {
-            "$ref": "#/properties/npmPublishRegistry",
-            "_hidden": true
+            "_hidden": true,
+            "$ref": "#/properties/npmPublishRegistry"
           },
           "pypiRegistryServer": {
-            "$ref": "#/properties/pypiRegistryServer",
-            "_hidden": true
+            "_hidden": true,
+            "anyOf": [{"$ref": "#/properties/pypiRegistryServer"}, {"type": "null"}]
           },
           "npmMinimalAgeGate": {
-            "$ref": "#/properties/npmMinimalAgeGate",
-            "_hidden": true
+            "_hidden": true,
+            "anyOf": [{"$ref": "#/properties/npmMinimalAgeGate"}, {"type": "null"}]
           },
           "npmAlwaysAuth": {
-            "$ref": "#/properties/npmAlwaysAuth",
-            "_hidden": true
+            "_hidden": true,
+            "anyOf": [{"$ref": "#/properties/npmAlwaysAuth"}, {"type": "null"}]
           },
           "npmAuthIdent": {
-            "$ref": "#/properties/npmAuthIdent",
-            "_hidden": true
+            "_hidden": true,
+            "$ref": "#/properties/npmAuthIdent"
           },
           "npmAuthToken": {
-            "$ref": "#/properties/npmAuthToken",
-            "_hidden": true
+            "_hidden": true,
+            "$ref": "#/properties/npmAuthToken"
           }
-        }
+        },
+        "anyOf": [
+          {
+            "required": ["ecosystemFilter"],
+            "properties": {
+              "ecosystemFilter": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "required": ["packageFilter"],
+            "properties": {
+              "packageFilter": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
       },
       "_examples": [
         {
@@ -756,32 +783,54 @@
         "type": "object",
         "properties": {
           "ecosystemFilter": {
-            "type": "string",
-            "enum": ["npm", "pypi"],
+            "type": ["string", "null"],
+            "enum": ["npm", "pypi", null],
             "_hidden": true
           },
           "registryFilter": {
-            "type": "string",
+            "type": ["string", "null"],
             "format": "uri",
             "_hidden": true
           },
           "npmMinimalAgeGate": {
-            "$ref": "#/properties/npmMinimalAgeGate",
-            "_hidden": true
+            "_hidden": true,
+            "anyOf": [{"$ref": "#/properties/npmMinimalAgeGate"}, {"type": "null"}]
           },
           "npmAlwaysAuth": {
-            "$ref": "#/properties/npmAlwaysAuth",
-            "_hidden": true
+            "_hidden": true,
+            "anyOf": [{"$ref": "#/properties/npmAlwaysAuth"}, {"type": "null"}]
           },
           "npmAuthIdent": {
-            "$ref": "#/properties/npmAuthIdent",
-            "_hidden": true
+            "_hidden": true,
+            "$ref": "#/properties/npmAuthIdent"
           },
           "npmAuthToken": {
-            "$ref": "#/properties/npmAuthToken",
-            "_hidden": true
+            "_hidden": true,
+            "$ref": "#/properties/npmAuthToken"
           }
-        }
+        },
+        "anyOf": [
+          {
+            "required": ["ecosystemFilter"],
+            "properties": {
+              "ecosystemFilter": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "required": ["registryFilter"],
+            "properties": {
+              "registryFilter": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
       },
       "_examples": [
         {
@@ -846,7 +895,7 @@
                   "properties": {
                     "optional": {
                       "_hidden": true,
-                      "type": "boolean",
+                      "type": ["boolean", "null"],
                       "examples": [true]
                     }
                   }
@@ -977,34 +1026,34 @@
     "supportedArchitectures": {
       "_package": "@yarnpkg/core",
       "title": "Systems for which Yarn should install packages.",
-      "type": "object",
+      "type": ["object", "array", "null"],
       "properties": {
         "os": {
           "title": "List of operating systems to cover.",
-          "type": "array",
+          "type": ["string", "array", "null"],
           "items": {
             "type": "string"
           },
-          "default": [],
+          "default": "current",
           "_exampleItems": ["current", "darwin", "linux", "win32"]
         },
         "cpu": {
           "title": "List of CPU architectures to cover.",
           "description": "See https://nodejs.org/docs/latest/api/process.html#processarch for the architectures supported by Node.js",
-          "type": "array",
+          "type": ["string", "array", "null"],
           "items": {
             "type": "string"
           },
-          "default": [],
+          "default": "current",
           "_exampleItems": ["current", "x64", "ia32", "arm64"]
         },
         "libc": {
           "title": "The list of standard C libraries to cover.",
-          "type": "array",
+          "type": ["string", "array", "null"],
           "items": {
             "type": "string"
           },
-          "default": [],
+          "default": "current",
           "_exampleItems": ["current", "glibc", "musl"]
         }
       },
@@ -1024,13 +1073,33 @@
             "cpu": ["x64", "arm64"],
             "libc": ["glibc", "musl"]
           }
+        },
+        {
+          "description": "Match macOS arm64 and Linux x64 independently, with any C library.",
+          "value": [
+            {
+              "os": "darwin",
+              "cpu": "arm64",
+              "libc": null
+            },
+            {
+              "os": "linux",
+              "cpu": "x64",
+              "libc": null
+            }
+          ]
         }
-      ]
+      ],
+      "description": "Accepts a single entry or a list of entries. Fields within each entry form a cross product; list entries are matched independently. An omitted setting, `null`, or an empty list uses the current system. Each field accepts a string, an array of strings, or `null` to cover all values; an empty field array covers none. Omitted fields default to `current`.",
+      "items": {
+        "$ref": "#/properties/supportedArchitectures",
+        "type": "object"
+      }
     },
     "tsEnableAutoTypes": {
       "_package": "@yarnpkg/plugin-typescript",
       "title": "Define whether to automatically install @types dependencies.",
-      "description": "If true, Yarn will automatically add `@types` dependencies when running `yarn add` with packages that don't provide their own typings (as reported by the Algolia npm database). This behavior is enabled by default if you have a tsconfig.json file at the root of your project, or in your current workspace.",
+      "description": "Alias for `enableAutoTypes`. Prefer the canonical setting name for new configurations.",
       "type": "boolean",
       "examples": [true]
     },
@@ -1058,7 +1127,7 @@
       "_package": "@yarnpkg/core",
       "title": "Maximum number of output lines kept in memory per daemon task.",
       "description": "Long-running daemon tasks keep a bounded output buffer so recent logs remain available without unbounded memory growth.",
-      "type": "number",
+      "type": "integer",
       "default": 1000,
       "_examples": [
         {
@@ -1069,13 +1138,14 @@
           "description": "Keep a larger in-memory history while debugging task output.",
           "value": 5000
         }
-      ]
+      ],
+      "minimum": 0
     },
     "daemonMaxClosedTasks": {
       "_package": "@yarnpkg/core",
       "title": "Maximum number of completed daemon tasks kept in memory.",
       "description": "Once this limit is reached, older completed or failed daemon tasks may be discarded from the daemon's in-memory history.",
-      "type": "number",
+      "type": "integer",
       "default": 100,
       "_examples": [
         {
@@ -1086,7 +1156,8 @@
           "description": "Keep more completed tasks available for inspection.",
           "value": 250
         }
-      ]
+      ],
+      "minimum": 0
     },
     "daemonDefaultWarmupPeriod": {
       "_package": "@yarnpkg/core",
@@ -1108,9 +1179,8 @@
     "enableAutoTypes": {
       "_package": "@yarnpkg/plugin-typescript",
       "title": "Define whether Yarn should automatically add @types packages.",
-      "description": "When enabled, Yarn may add matching `@types/*` packages when adding dependencies that don't ship their own TypeScript declarations. This setting is also available through the `tsEnableAutoTypes` alias.",
+      "description": "When enabled, Yarn may add matching `@types/*` packages when adding dependencies that don't ship their own TypeScript declarations. Enabled by default when a `tsconfig.json` exists at the project root or in the active workspace. This setting is also available through the `tsEnableAutoTypes` alias.",
       "type": "boolean",
-      "default": "crate::check_tsconfig(context)",
       "_examples": [
         {
           "description": "Enable automatic type acquisition explicitly.",
@@ -1287,7 +1357,7 @@
       "_package": "@yarnpkg/core",
       "title": "Timeout before a network request is considered slow.",
       "description": "The value is expressed in milliseconds and controls when Yarn reports a network request as slow.",
-      "type": "number",
+      "type": "integer",
       "default": 5000,
       "_examples": [
         {
@@ -1298,7 +1368,8 @@
           "description": "Use a more patient threshold on slow networks.",
           "value": 30000
         }
-      ]
+      ],
+      "minimum": 0
     },
     "unstableIslands": {
       "_package": "@yarnpkg/core",
@@ -1485,8 +1556,7 @@
       "title": "Array of hostname glob patterns for which using the HTTP protocol is allowed.",
       "type": "array",
       "items": {
-        "type": "string",
-        "pattern": "[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b([-a-zA-Z0-9()@:%_\\+.~#?&//=]*)"
+        "type": "string"
       },
       "_exampleItems": ["*.example.org", "example.org"],
       "_examples": [
