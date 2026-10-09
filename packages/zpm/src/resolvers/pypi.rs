@@ -1,39 +1,89 @@
-use std::collections::BTreeMap;
+//! PyPI resolver.
+//!
+//! A `pypi:` descriptor resolves to a `pypi:<version>` locator whose
+//! dependencies come from the release's core metadata (`Requires-Dist`).
+//! Markers are evaluated across the install's target environments (see
+//! `python_env`): requirements true on every target become regular
+//! dependencies, those false everywhere are dropped, and the others keep
+//! their marker in the `marker` range parameter so the linker can skip
+//! them where they don't apply.
+//!
+//! When no single artifact suits every target (platform-specific wheels),
+//! the resolution lists one variant per target platform
+//! (`pypi:==<version>#platform=<platform>`), each carrying its os/cpu/libc
+//! requirements. The tree resolver picks the variant matching the current
+//! system, like it does for `@yarnpkg/node`, and only the artifacts covered
+//! by `supportedArchitectures` get downloaded.
 
-use serde::{de::DeserializeOwned, Deserialize};
-use zpm_parsers::JsonDocument;
-use zpm_primitives::{Descriptor, Ident, Locator, PypiExtras, PypiRangeParameters, PypiRegistryReference, PypiSpecifierRange, PypiTagRange, Reference, Range, normalize_pypi_extra};
+use std::{collections::{BTreeMap, BTreeSet}, str::FromStr, sync::Arc};
+
+use zpm_primitives::{
+    Descriptor,
+    Ident,
+    Locator,
+    PypiExtras,
+    PypiRangeParameters,
+    PypiRegistryReference,
+    PypiSpecifierRange,
+    PypiSpecifierSet,
+    PypiTagRange,
+    PypiVersion,
+    Range,
+    Reference,
+    canonicalize_pypi_name,
+};
 use zpm_utils::{FromFileString, ToFileString, UrlEncoded};
 
 use crate::{
     error::Error,
     install::{InstallContext, InstallOpResult, IntoResolutionResult, ResolutionResult},
-    pypi::{PypiDistribution, get_registry, encode_path_segment, select_best_wheel},
+    pypi::{self, PypiFile, PypiProject},
+    python_env::{MarkerOutcome, Platform, PythonEnv, PythonTargets, evaluate_across, known_platforms, marker_mentions_extra},
     resolvers::Resolution,
 };
 
-#[derive(Clone, Debug, Deserialize)]
-struct PypiProjectMetadata {
-    #[serde(default)]
-    releases: BTreeMap<String, Vec<PypiDistribution>>,
+pub fn context_targets(context: &InstallContext<'_>) -> PythonTargets {
+    let project
+        = context.project
+            .expect("The project is required for resolving PyPI packages");
+
+    PythonTargets::from_config(&project.config, context.python_version.as_deref())
 }
 
-#[derive(Clone, Debug, Deserialize)]
-struct PypiVersionMetadata {
-    #[serde(default)]
-    info: PypiVersionInfo,
+pub fn platform_key(platform: &Platform) -> String {
+    let cpu
+        = platform.cpu.to_file_string();
+
+    match &platform.libc {
+        Some(libc) => format!("{}-{}-{}", platform.sys_platform(), cpu, libc.to_file_string()),
+        None => format!("{}-{}", platform.sys_platform(), cpu),
+    }
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
-struct PypiVersionInfo {
-    #[serde(default)]
-    requires_dist: Option<Vec<String>>,
+/// The key of a platform variant: the platform and the Python version, as
+/// the same release resolves to different wheels in islands targeting
+/// different Python versions (`darwin-arm64-cp312`).
+pub fn variant_key(env: &PythonEnv) -> String {
+    format!("{}-cp{}{}", platform_key(&env.platform), env.python.major, env.python.minor)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum IncludeBaseDependencies {
-    No,
-    Yes,
+pub fn env_from_variant_key(key: &str) -> Option<PythonEnv> {
+    let (platform, python) = key.rsplit_once("-cp")?;
+
+    let python = crate::python_env::PythonVersion {
+        major: python.get(..1)?.parse().ok()?,
+        minor: python.get(1..)?.parse().ok()?,
+        patch: None,
+    };
+
+    known_platforms().into_iter()
+        .find(|candidate| platform_key(candidate) == platform)
+        .map(|platform| PythonEnv {python, platform})
+}
+
+/// Pure wheels and sdists are the same for every target.
+fn is_universal_file(file: &PypiFile) -> bool {
+    file.is_sdist() || file.filename.ends_with("-none-any.whl")
 }
 
 fn comparator_to_str(comparator: pep_508::Comparator) -> &'static str {
@@ -49,115 +99,115 @@ fn comparator_to_str(comparator: pep_508::Comparator) -> &'static str {
     }
 }
 
-fn specifier_from_pep508(spec: Option<&pep_508::Spec<'_>>) -> Option<zpm_primitives::PypiSpecifierSet> {
+pub fn specifier_from_pep508(spec: Option<&pep_508::Spec<'_>>) -> Option<PypiSpecifierSet> {
     let Some(spec) = spec else {
-        return Some(zpm_primitives::PypiSpecifierSet::any());
+        return Some(PypiSpecifierSet::any());
     };
 
     let pep_508::Spec::Version(specifiers) = spec else {
         return None;
     };
 
-    let specifier = specifiers.iter()
-        .map(|specifier| format!("{}{}", comparator_to_str(specifier.comparator), specifier.version))
-        .collect::<Vec<_>>()
-        .join(",");
+    let specifier
+        = specifiers.iter()
+            .map(|specifier| format!("{}{}", comparator_to_str(specifier.comparator), specifier.version))
+            .collect::<Vec<_>>()
+            .join(",");
 
-    zpm_primitives::PypiSpecifierSet::from_file_string(&specifier).ok()
+    PypiSpecifierSet::from_file_string(&specifier).ok()
 }
 
-#[derive(Clone, Copy, Debug)]
-enum MarkerValue<'a> {
-    Extra(&'a str),
-    String(&'a str),
-}
-
-impl MarkerValue<'_> {
-    fn as_str(&self) -> &str {
-        match self {
-            Self::Extra(value) | Self::String(value) => value,
-        }
-    }
-}
-
-fn marker_value<'a>(variable: &'a pep_508::Variable<'a>, extra: &'a str) -> Option<MarkerValue<'a>> {
+fn render_variable(variable: &pep_508::Variable<'_>) -> String {
     match variable {
-        pep_508::Variable::Extra => Some(MarkerValue::Extra(extra)),
-        pep_508::Variable::String(value) => Some(MarkerValue::String(value)),
-        _ => None,
+        pep_508::Variable::PythonVersion => "python_version".to_string(),
+        pep_508::Variable::PythonFullVersion => "python_full_version".to_string(),
+        pep_508::Variable::OsName => "os_name".to_string(),
+        pep_508::Variable::SysPlatform => "sys_platform".to_string(),
+        pep_508::Variable::PlatformRelease => "platform_release".to_string(),
+        pep_508::Variable::PlatformSystem => "platform_system".to_string(),
+        pep_508::Variable::PlatformVersion => "platform_version".to_string(),
+        pep_508::Variable::PlatformMachine => "platform_machine".to_string(),
+        pep_508::Variable::PlatformPythonImplementation => "platform_python_implementation".to_string(),
+        pep_508::Variable::ImplementationName => "implementation_name".to_string(),
+        pep_508::Variable::ImplementationVersion => "implementation_version".to_string(),
+        pep_508::Variable::Extra => "extra".to_string(),
+        pep_508::Variable::String(value) => format!("'{}'", value),
     }
 }
 
-fn eval_marker_operator(lhs: MarkerValue<'_>, operator: pep_508::Operator, rhs: MarkerValue<'_>) -> Option<bool> {
-    let needs_extra_normalization
-        = matches!(lhs, MarkerValue::Extra(_)) || matches!(rhs, MarkerValue::Extra(_));
-
-    let normalized_lhs;
-    let normalized_rhs;
-
-    let (lhs, rhs)
-        = if needs_extra_normalization {
-            normalized_lhs = normalize_pypi_extra(lhs.as_str());
-            normalized_rhs = normalize_pypi_extra(rhs.as_str());
-
-            (normalized_lhs.as_str(), normalized_rhs.as_str())
-        } else {
-            (lhs.as_str(), rhs.as_str())
-        };
-
-    match operator {
-        pep_508::Operator::Comparator(pep_508::Comparator::Eq) => Some(lhs == rhs),
-        pep_508::Operator::Comparator(pep_508::Comparator::Ne) => Some(lhs != rhs),
-        pep_508::Operator::In => Some(rhs.contains(lhs)),
-        pep_508::Operator::NotIn => Some(!rhs.contains(lhs)),
-        pep_508::Operator::Comparator(_) => None,
-    }
-}
-
-fn eval_marker_for_extra(marker: &pep_508::Marker<'_>, extra: &str) -> Option<bool> {
+/// Renders a marker without its `extra == "..."` clauses; used once the
+/// extra has been applied, to only keep the environment conditions.
+fn render_environment_marker(marker: &pep_508::Marker<'_>) -> Option<String> {
     match marker {
-        pep_508::Marker::And(lhs, rhs) => {
-            match (eval_marker_for_extra(lhs, extra), eval_marker_for_extra(rhs, extra)) {
-                (Some(false), _) | (_, Some(false)) => Some(false),
-                (Some(true), Some(true)) => Some(true),
-                _ => None,
-            }
-        }
+        pep_508::Marker::And(lhs, rhs) => match (render_environment_marker(lhs), render_environment_marker(rhs)) {
+            (Some(lhs), Some(rhs)) => Some(format!("({}) and ({})", lhs, rhs)),
+            (Some(value), None) | (None, Some(value)) => Some(value),
+            (None, None) => None,
+        },
 
-        pep_508::Marker::Or(lhs, rhs) => {
-            match (eval_marker_for_extra(lhs, extra), eval_marker_for_extra(rhs, extra)) {
-                (Some(true), _) | (_, Some(true)) => Some(true),
-                (Some(false), Some(false)) => Some(false),
-                _ => None,
-            }
-        }
+        pep_508::Marker::Or(lhs, rhs) => match (render_environment_marker(lhs), render_environment_marker(rhs)) {
+            (Some(lhs), Some(rhs)) => Some(format!("({}) or ({})", lhs, rhs)),
+            (Some(value), None) | (None, Some(value)) => Some(value),
+            (None, None) => None,
+        },
 
         pep_508::Marker::Operator(lhs, operator, rhs) => {
-            let lhs = marker_value(lhs, extra)?;
-            let rhs = marker_value(rhs, extra)?;
+            if matches!(lhs, pep_508::Variable::Extra) || matches!(rhs, pep_508::Variable::Extra) {
+                return None;
+            }
 
-            eval_marker_operator(lhs, *operator, rhs)
-        }
+            let operator = match operator {
+                pep_508::Operator::Comparator(comparator) => comparator_to_str(*comparator).to_string(),
+                pep_508::Operator::In => "in".to_string(),
+                pep_508::Operator::NotIn => "not in".to_string(),
+            };
+
+            Some(format!("{} {} {}", render_variable(lhs), operator, render_variable(rhs)))
+        },
     }
 }
 
-fn requirement_applies_to_active_extras(marker: Option<&pep_508::Marker<'_>>, include_base: IncludeBaseDependencies, active_extras: &PypiExtras) -> bool {
-    match marker {
-        None => include_base == IncludeBaseDependencies::Yes,
-        Some(marker) => active_extras.iter().any(|extra| eval_marker_for_extra(marker, extra) == Some(true)),
-    }
-}
-
-fn parse_requires_dist_entry(requirement: &str, include_base: IncludeBaseDependencies, active_extras: &PypiExtras) -> Option<(Ident, Descriptor)> {
+/// The environment marker of a requirement (without `extra` clauses), as
+/// written back in `pypi:` ranges.
+pub fn marker_of(requirement: &str) -> Option<String> {
     let parsed
         = pep_508::parse(requirement).ok()?;
 
-    if !requirement_applies_to_active_extras(parsed.marker.as_ref(), include_base, active_extras) {
+    parsed.marker.as_ref().and_then(render_environment_marker)
+}
+
+pub struct ConvertedRequirement {
+    pub ident: Ident,
+    pub descriptor: Descriptor,
+}
+
+/// Converts a PEP 508 requirement into a `pypi:` descriptor. Returns `None`
+/// when the requirement doesn't apply to any target (or to the requested
+/// extra), or when it can't be represented (direct URL requirements).
+pub fn convert_requirement(requirement: &str, targets: &PythonTargets, extra: Option<&str>) -> Option<ConvertedRequirement> {
+    let parsed
+        = pep_508::parse(requirement).ok()?;
+
+    let mentions_extra
+        = parsed.marker.as_ref().map_or(false, marker_mentions_extra);
+
+    // Base dependencies never include requirements guarded by an extra, and
+    // the dependencies of an extra only include those mentioning it.
+    if extra.is_some() != mentions_extra {
         return None;
     }
 
+    let outcome
+        = evaluate_across(parsed.marker.as_ref(), &targets.envs, extra);
+
+    let marker = match outcome {
+        MarkerOutcome::Never => return None,
+        MarkerOutcome::Always => None,
+        MarkerOutcome::Sometimes => parsed.marker.as_ref().and_then(render_environment_marker),
+    };
+
     let ident
-        = Ident::from_file_string(parsed.name).ok()?;
+        = Ident::from_file_string(&canonicalize_pypi_name(parsed.name)).ok()?;
 
     let specifier
         = specifier_from_pep508(parsed.spec.as_ref())?;
@@ -169,23 +219,15 @@ fn parse_requires_dist_entry(requirement: &str, include_base: IncludeBaseDepende
         = Descriptor::new(ident.clone(), Range::PypiSpecifier(PypiSpecifierRange {
             ident: None,
             specifier,
-            parameters: (!extras.is_empty()).then(|| PypiRangeParameters::from_extras(extras)),
-        }));
+            parameters: PypiRangeParameters::new(extras, marker),
+        }.into()));
 
-    Some((ident, descriptor))
+    Some(ConvertedRequirement {ident, descriptor})
 }
 
 pub fn merge_dependency_descriptor(existing: &mut Descriptor, incoming: Descriptor) -> Result<(), Error> {
     if existing == &incoming {
         return Ok(());
-    }
-
-    if existing.ident != incoming.ident || existing.parent != incoming.parent {
-        return Err(Error::InvalidResolution(format!(
-            "Cannot merge PyPI dependency descriptors {} and {}",
-            existing.to_file_string(),
-            incoming.to_file_string(),
-        )));
     }
 
     let existing_file_string
@@ -197,13 +239,24 @@ pub fn merge_dependency_descriptor(existing: &mut Descriptor, incoming: Descript
         (Range::PypiSpecifier(existing), Range::PypiSpecifier(incoming)) => {
             existing.specifier = existing.specifier.intersection(&incoming.specifier)
                 .map_err(|err| Error::InvalidRange(err.to_string()))?;
-            existing.parameters = match (&existing.parameters, &incoming.parameters) {
-                (Some(existing_parameters), Some(incoming_parameters)) => Some(existing_parameters.merge(incoming_parameters)
-                    .map_err(|err| Error::InvalidRange(err.to_string()))?),
-                (Some(existing_parameters), None) => Some(existing_parameters.clone()),
-                (None, Some(incoming_parameters)) => Some(incoming_parameters.clone()),
-                (None, None) => None,
+
+            let lhs_conditional
+                = existing.parameters.as_ref().map_or(false, |parameters| parameters.marker.is_some());
+            let rhs_conditional
+                = incoming.parameters.as_ref().map_or(false, |parameters| parameters.marker.is_some());
+
+            let mut merged = match (&existing.parameters, &incoming.parameters) {
+                (Some(lhs), Some(rhs)) => lhs.merge(rhs).map_err(|err| Error::InvalidRange(err.to_string()))?,
+                (Some(parameters), None) | (None, Some(parameters)) => parameters.clone(),
+                (None, None) => PypiRangeParameters::empty(),
             };
+
+            // An unconditional edge absorbs a conditional one
+            if !lhs_conditional || !rhs_conditional {
+                merged.marker = None;
+            }
+
+            existing.parameters = (!merged.is_empty()).then_some(merged);
 
             Ok(())
         },
@@ -216,16 +269,18 @@ pub fn merge_dependency_descriptor(existing: &mut Descriptor, incoming: Descript
     }
 }
 
-fn parse_requires_dist(requirements: &[String], include_base: IncludeBaseDependencies, active_extras: &PypiExtras) -> Result<BTreeMap<Ident, Descriptor>, Error> {
-    let mut dependencies = BTreeMap::new();
+pub fn build_dependencies(requirements: &[String], targets: &PythonTargets, extra: Option<&str>) -> Result<BTreeMap<Ident, Descriptor>, Error> {
+    let mut dependencies
+        = BTreeMap::<Ident, Descriptor>::new();
 
-    for (ident, descriptor) in requirements.iter()
-        .filter_map(|requirement| parse_requires_dist_entry(requirement, include_base, active_extras))
-    {
-        match dependencies.get_mut(&ident) {
-            Some(existing) => merge_dependency_descriptor(existing, descriptor)?,
+    for converted in requirements.iter().filter_map(|requirement| convert_requirement(requirement, targets, extra)) {
+        match dependencies.get_mut(&converted.ident) {
+            Some(existing) => {
+                merge_dependency_descriptor(existing, converted.descriptor)?;
+            },
+
             None => {
-                dependencies.insert(ident, descriptor);
+                dependencies.insert(converted.ident, converted.descriptor);
             },
         }
     }
@@ -233,141 +288,168 @@ fn parse_requires_dist(requirements: &[String], include_base: IncludeBaseDepende
     Ok(dependencies)
 }
 
-fn project_pep440_to_semver(version: &zpm_primitives::PypiVersion) -> Result<zpm_semver::Version, Error> {
-    // TODO: Replace this lossy projection once `Resolution.version` can represent
-    // non-semver registry versions without information loss.
+fn project_pep440_to_semver(version: &PypiVersion) -> Result<zpm_semver::Version, Error> {
     version.to_lossy_semver()
         .map_err(|err| Error::InvalidResolution(err.to_string()))
 }
 
-fn build_resolution_result(context: &InstallContext<'_>, locator: Locator, version: &zpm_primitives::PypiVersion, requires_dist: &[String], include_base: IncludeBaseDependencies, active_extras: &PypiExtras) -> Result<ResolutionResult, Error> {
+pub async fn fetch_project(context: &InstallContext<'_>, ident: &Ident, known_version: Option<&PypiVersion>) -> Result<Arc<PypiProject>, Error> {
+    let project
+        = context.project
+            .expect("The project is required for resolving PyPI packages");
+
+    let known_version
+        = known_version.filter(|_| !context.refresh_lockfile);
+
+    pypi::fetch_project(&project.config, &project.http_client, ident, known_version).await
+}
+
+pub fn version_files<'a>(project: &'a PypiProject, ident: &Ident, version: &PypiVersion) -> Result<&'a Vec<PypiFile>, Error> {
+    project.releases.get(version)
+        .ok_or_else(|| Error::InvalidResolution(format!("Version {} of {} isn't available on the index", version.to_file_string(), ident.as_str())))
+}
+
+pub async fn fetch_requires_dist(context: &InstallContext<'_>, ident: &Ident, version: &PypiVersion) -> Result<Vec<String>, Error> {
+    let project
+        = context.project
+            .expect("The project is required for resolving PyPI packages");
+
+    let index_project
+        = fetch_project(context, ident, Some(version)).await?;
+
+    let files
+        = version_files(&index_project, ident, version)?;
+
+    let targets
+        = context_targets(context);
+
+    let file
+        = pypi::select_metadata_file(files, &targets, None)
+            .or_else(|| files.iter().find(|file| file.is_wheel()))
+            .or_else(|| files.first())
+            .ok_or_else(|| Error::InvalidResolution(format!("No artifact found for {}@{}", ident.as_str(), version.to_file_string())))?;
+
+    let metadata
+        = pypi::fetch_core_metadata(&project.config, &project.http_client, ident, file).await?;
+
+    Ok(metadata.requires_dist.clone())
+}
+
+pub fn variant_descriptor(locator: &Locator, ident: &Ident, version: &PypiVersion, env: &PythonEnv) -> Descriptor {
+    let mut parameters
+        = PypiRangeParameters::empty();
+
+    parameters.platform = Some(variant_key(env));
+
+    let specifier
+        = PypiSpecifierSet::from_file_string(&format!("=={}", version.to_file_string()))
+            .unwrap();
+
+    let range_ident
+        = (ident != &locator.ident).then(|| ident.clone());
+
+    Descriptor::new(locator.ident.clone(), Range::PypiSpecifier(PypiSpecifierRange {
+        ident: range_ident,
+        specifier,
+        parameters: Some(parameters),
+    }.into()))
+}
+
+/// Builds the resolution of a PyPI release. With `extra` set, only the
+/// dependencies of that extra are listed (used by the island solver).
+pub async fn resolve_release(context: &InstallContext<'_>, locator: Locator, ident: &Ident, version: &PypiVersion, extra: Option<&str>) -> Result<ResolutionResult, Error> {
+    let targets
+        = context_targets(context);
+
+    let requires_dist
+        = fetch_requires_dist(context, ident, version).await?;
+
     let mut resolution
-        = Resolution::new_empty(locator, project_pep440_to_semver(version)?);
-    resolution.dependencies = parse_requires_dist(requires_dist, include_base, active_extras)?;
+        = Resolution::new_empty(locator.clone(), project_pep440_to_semver(version)?);
+
+    resolution.dependencies
+        = build_dependencies(&requires_dist, &targets, extra)?;
+
+    if extra.is_none() {
+        let index_project
+            = fetch_project(context, ident, Some(version)).await?;
+
+        let files
+            = version_files(&index_project, ident, version)?;
+
+        let per_target
+            = targets.envs.iter()
+                .map(|env| (env, pypi::select_pinned_file(files, env, &targets)))
+                .collect::<Vec<_>>();
+
+        let distinct_files
+            = per_target.iter()
+                .filter_map(|(_, file)| file.map(|file| file.filename.as_str()))
+                .collect::<BTreeSet<_>>();
+
+        let needs_variants
+            = distinct_files.len() > 1
+                || per_target.iter().any(|(_, file)| file.map_or(true, |file| !is_universal_file(file)));
+
+        if needs_variants {
+            resolution.variants = per_target.iter()
+                .filter(|(_, file)| file.is_some())
+                .map(|(env, _)| variant_descriptor(&locator, ident, version, env))
+                .collect();
+        }
+    }
+
     resolution.into_resolution_result(context)
 }
 
-fn select_version_for_specifier(releases: &BTreeMap<String, Vec<PypiDistribution>>, specifier: &zpm_primitives::PypiSpecifierSet) -> Result<Option<(zpm_primitives::PypiVersion, Vec<PypiDistribution>)>, Error> {
-    let mut best: Option<(zpm_primitives::PypiVersion, Vec<PypiDistribution>)>
-        = None;
+/// Resolution of a platform variant: the artifact for one platform, with
+/// the platform requirements.
+pub async fn resolve_variant(context: &InstallContext<'_>, descriptor: &Descriptor, ident: &Ident, version: &PypiVersion, platform_key: &str) -> Result<ResolutionResult, Error> {
+    let targets
+        = context_targets(context);
 
-    for (raw_version, distributions) in releases {
-        let Ok(version) = zpm_primitives::PypiVersion::from_file_string(raw_version) else {
-            continue;
-        };
+    let env
+        = env_from_variant_key(platform_key)
+            .ok_or_else(|| Error::InvalidResolution(format!("Unknown Python platform {}", platform_key)))?;
 
-        if !version.satisfies(specifier)
-            .map_err(|err| Error::InvalidRange(err.to_string()))?
-        {
-            continue;
-        }
+    // The variant key carries the Python version it was resolved for
+    let mut targets
+        = targets;
 
-        let should_replace
-            = best.as_ref()
-                .map(|(best_version, _)| {
-                    version.cmp_pep440(best_version)
-                        .map(|ordering| ordering.is_gt())
-                        .unwrap_or(false)
-                })
-                .unwrap_or(true);
+    targets.python = env.python.clone();
 
-        if should_replace {
-            best = Some((version, distributions.clone()));
-        }
-    }
+    let index_project
+        = fetch_project(context, ident, Some(version)).await?;
 
-    Ok(best)
-}
+    let files
+        = version_files(&index_project, ident, version)?;
 
-fn select_latest_version(releases: &BTreeMap<String, Vec<PypiDistribution>>) -> Result<Option<(zpm_primitives::PypiVersion, Vec<PypiDistribution>)>, Error> {
-    let mut latest_any: Option<(zpm_primitives::PypiVersion, Vec<PypiDistribution>)>
-        = None;
-    let mut latest_stable: Option<(zpm_primitives::PypiVersion, Vec<PypiDistribution>)>
-        = None;
+    let file
+        = pypi::select_pinned_file(files, &env, &targets)
+            .ok_or_else(|| Error::InvalidResolution(format!("No artifact of {}@{} supports {}", ident.as_str(), version.to_file_string(), platform_key)))?;
 
-    for (raw_version, distributions) in releases {
-        let Ok(version) = zpm_primitives::PypiVersion::from_file_string(raw_version) else {
-            continue;
-        };
+    let locator
+        = descriptor.resolve_with(PypiRegistryReference {
+            ident: ident.clone(),
+            version: version.clone(),
+            url: Some(UrlEncoded::new(file.url.clone())),
+        }.into());
 
-        let should_replace_any
-            = latest_any.as_ref()
-                .map(|(best_version, _)| {
-                    version.cmp_pep440(best_version)
-                        .map(|ordering| ordering.is_gt())
-                        .unwrap_or(false)
-                })
-                .unwrap_or(true);
+    let requires_dist
+        = fetch_requires_dist(context, ident, version).await?;
 
-        if should_replace_any {
-            latest_any = Some((version.clone(), distributions.clone()));
-        }
+    let mut resolution
+        = Resolution::new_empty(locator, project_pep440_to_semver(version)?);
 
-        let is_stable
-            = version.is_stable()
-                .map_err(|err| Error::InvalidRange(err.to_string()))?;
+    // The tree resolver substitutes the variant to its parent, so it needs
+    // to list the same dependencies
+    resolution.dependencies
+        = build_dependencies(&requires_dist, &targets, None)?;
 
-        if is_stable {
-            let should_replace_stable
-                = latest_stable.as_ref()
-                    .map(|(best_version, _)| {
-                        version.cmp_pep440(best_version)
-                            .map(|ordering| ordering.is_gt())
-                            .unwrap_or(false)
-                    })
-                    .unwrap_or(true);
+    resolution.requirements
+        = env.platform.to_requirements();
 
-            if should_replace_stable {
-                latest_stable = Some((version, distributions.clone()));
-            }
-        }
-    }
-
-    Ok(latest_stable.or(latest_any))
-}
-
-async fn fetch_json<T>(context: &InstallContext<'_>, url: &str) -> Result<T, Error>
-where
-    T: DeserializeOwned,
-{
-    let project
-        = context.project
-        .expect("The project is required for resolving PyPI packages");
-
-    let bytes
-        = project.http_client.cached_get(url).await?;
-
-    let value: T
-        = JsonDocument::hydrate_from_slice(&bytes[..])?;
-    Ok(value)
-}
-
-async fn fetch_project_metadata(context: &InstallContext<'_>, package_ident: &Ident) -> Result<PypiProjectMetadata, Error> {
-    let project
-        = context.project
-            .expect("The project is required for resolving PyPI packages");
-    let base
-        = get_registry(&project.config, package_ident);
-    let url
-        = format!("{}/pypi/{}/json", base, encode_path_segment(package_ident.as_str()));
-    fetch_json(context, &url).await
-}
-
-async fn fetch_version_metadata(context: &InstallContext<'_>, package_ident: &Ident, version: &zpm_primitives::PypiVersion) -> Result<PypiVersionMetadata, Error> {
-    let project
-        = context.project
-            .expect("The project is required for resolving PyPI packages");
-    let base
-        = get_registry(&project.config, package_ident);
-    let url
-        = format!(
-            "{}/pypi/{}/{}/json",
-            base,
-            encode_path_segment(package_ident.as_str()),
-            encode_path_segment(&version.to_file_string()),
-        );
-
-    fetch_json(context, &url).await
+    resolution.into_resolution_result(context)
 }
 
 pub fn resolve_aliased(descriptor: &Descriptor, dependencies: Vec<InstallOpResult>) -> Result<ResolutionResult, Error> {
@@ -403,41 +485,138 @@ pub fn resolve_aliased(descriptor: &Descriptor, dependencies: Vec<InstallOpResul
 
     inner_resolution.resolution.locator
         = Locator::new(descriptor.ident.clone(), new_reference);
+
     Ok(inner_resolution)
+}
+
+/// The candidate versions of a package, highest first, after filtering out
+/// releases that are yanked, too recent for the age gate, incompatible
+/// with the target Python, or without an artifact for this platform.
+/// Whether a version satisfies the island's `pypiConstraints` (uv's
+/// constraint-dependencies) for the given package.
+pub fn satisfies_constraints(context: &InstallContext<'_>, ident: &Ident, version: &PypiVersion) -> bool {
+    context.pypi_constraints.iter()
+        .filter_map(|requirement| pep_508::parse(requirement).ok().map(|parsed| (canonicalize_pypi_name(parsed.name), specifier_from_pep508(parsed.spec.as_ref()))))
+        .filter(|(name, _)| name == ident.as_str())
+        .filter_map(|(_, specifier)| specifier)
+        .all(|constraint| specifier_matches(&constraint, version))
+}
+
+pub async fn candidate_versions(context: &InstallContext<'_>, ident: &Ident) -> Result<Vec<PypiVersion>, Error> {
+    let project
+        = context.project
+            .expect("The project is required for resolving PyPI packages");
+
+    let targets
+        = context_targets(context);
+
+    let cutoff
+        = pypi::get_upload_cutoff(&project.config, ident);
+
+    let index_project
+        = fetch_project(context, ident, None).await?;
+
+    Ok(index_project.sorted_versions().into_iter()
+        .filter(|(_, version)| satisfies_constraints(context, ident, version))
+        // A version is a candidate if any of the target platforms can
+        // install it: platform-only packages (pywin32) get locked for their
+        // platform, and markers keep them away from the others
+        .filter(|(_, version)| targets.envs.iter().any(|env| pypi::select_file(&index_project.releases[*version], env, &targets, cutoff).is_some()))
+        .map(|(_, version)| version.clone())
+        .collect())
+}
+
+pub fn specifier_matches(specifier: &PypiSpecifierSet, version: &PypiVersion) -> bool {
+    if specifier.is_any() {
+        return true;
+    }
+
+    version.satisfies(specifier).unwrap_or(false)
+}
+
+/// Pre-releases are only selected when the specifier mentions one, or when
+/// nothing else matches (PEP 440 / pip behavior).
+pub fn select_version(candidates: &[PypiVersion], specifier: &PypiSpecifierSet) -> Option<PypiVersion> {
+    let allows_prereleases
+        = specifier.as_str().chars().any(|c| c.is_ascii_alphabetic());
+
+    candidates.iter()
+        .filter(|version| allows_prereleases || version.is_stable().unwrap_or(true))
+        .find(|version| specifier_matches(specifier, version))
+        .or_else(|| candidates.iter().find(|version| specifier_matches(specifier, version)))
+        .cloned()
 }
 
 pub async fn resolve_specifier_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &PypiSpecifierRange) -> Result<ResolutionResult, Error> {
     let package_ident
         = params.ident.as_ref()
-        .unwrap_or(&descriptor.ident);
+            .unwrap_or(&descriptor.ident);
 
-    let project_metadata
-        = fetch_project_metadata(context, package_ident).await?;
-    let (resolved_version, release_distributions)
-        = select_version_for_specifier(&project_metadata.releases, &params.specifier)?
+    if let Some(platform) = params.parameters.as_ref().and_then(|parameters| parameters.platform.as_ref()) {
+        let version
+            = PypiVersion::from_file_string(params.specifier.as_str().trim_start_matches("=="))
+                .map_err(|err| Error::InvalidRange(err.to_string()))?;
+
+        return resolve_variant(context, descriptor, package_ident, &version, platform).await;
+    }
+
+    let candidates
+        = candidate_versions(context, package_ident).await?;
+
+    let version
+        = select_version(&candidates, &params.specifier)
             .ok_or_else(|| Error::NoCandidatesFound(descriptor.range.clone()))?;
-
-    let wheel
-        = select_best_wheel(&release_distributions)
-            .ok_or_else(|| Error::InvalidResolution(format!("No wheel artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
-
-    let version_metadata
-        = fetch_version_metadata(context, package_ident, &resolved_version).await?;
 
     let locator
         = descriptor.resolve_with(PypiRegistryReference {
             ident: package_ident.clone(),
-            version: resolved_version.clone(),
-            url: Some(UrlEncoded::new(wheel.url.clone())),
+            version: version.clone(),
+            url: None,
         }.into());
 
+    let mut result
+        = resolve_release(context, locator, package_ident, &version, None).await?;
+
+    if let Some(extras) = params.parameters.as_ref().and_then(|parameters| parameters.extras.clone()) {
+        merge_extras(context, &mut result, package_ident, &version, &extras).await?;
+    }
+
+    Ok(result)
+}
+
+/// Folds the dependencies of the requested extras into the resolution.
+/// Only used outside of islands; the island solver models extras itself.
+async fn merge_extras(context: &InstallContext<'_>, result: &mut ResolutionResult, ident: &Ident, version: &PypiVersion, extras: &PypiExtras) -> Result<(), Error> {
+    let targets
+        = context_targets(context);
+
     let requires_dist
-        = version_metadata.info.requires_dist.unwrap_or_default();
+        = fetch_requires_dist(context, ident, version).await?;
 
-    let active_extras
-        = params.parameters.as_ref().and_then(|parameters| parameters.extras.clone()).unwrap_or_default();
+    let mut resolution
+        = result.original_resolution.clone();
 
-    build_resolution_result(context, locator, &resolved_version, &requires_dist, IncludeBaseDependencies::Yes, &active_extras)
+    for extra in extras.iter() {
+        for (dep_ident, descriptor) in build_dependencies(&requires_dist, &targets, Some(extra))? {
+            match resolution.dependencies.get_mut(&dep_ident) {
+                Some(existing) => {
+                    merge_dependency_descriptor(existing, descriptor)?;
+                },
+
+                None => {
+                    resolution.dependencies.insert(dep_ident, descriptor);
+                },
+            }
+        }
+    }
+
+    let package_data
+        = result.package_data.take();
+
+    *result = resolution.into_resolution_result(context)?;
+    result.package_data = package_data;
+
+    Ok(())
 }
 
 pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &Descriptor, params: &PypiTagRange) -> Result<ResolutionResult, Error> {
@@ -445,60 +624,78 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
         return Err(Error::TagNotFound(params.tag.to_string()));
     }
 
-    let package_ident
-        = params.ident.as_ref()
-        .unwrap_or(&descriptor.ident);
-
-    let project_metadata
-        = fetch_project_metadata(context, package_ident).await?;
-    let (resolved_version, release_distributions)
-        = select_latest_version(&project_metadata.releases)?
-            .ok_or_else(|| Error::NoCandidatesFound(descriptor.range.clone()))?;
-
-    let wheel
-        = select_best_wheel(&release_distributions)
-            .ok_or_else(|| Error::InvalidResolution(format!("No wheel artifact found for {}@{}", package_ident.to_file_string(), resolved_version.to_file_string())))?;
-
-    let version_metadata
-        = fetch_version_metadata(context, package_ident, &resolved_version).await?;
-
-    let locator
-        = descriptor.resolve_with(PypiRegistryReference {
-            ident: package_ident.clone(),
-            version: resolved_version.clone(),
-            url: Some(UrlEncoded::new(wheel.url.clone())),
-        }.into());
-
-    let requires_dist
-        = version_metadata.info.requires_dist.unwrap_or_default();
-
-    let active_extras
-        = params.parameters.as_ref().and_then(|parameters| parameters.extras.clone()).unwrap_or_default();
-
-    build_resolution_result(context, locator, &resolved_version, &requires_dist, IncludeBaseDependencies::Yes, &active_extras)
+    resolve_specifier_descriptor(context, descriptor, &PypiSpecifierRange {
+        ident: params.ident.clone(),
+        specifier: PypiSpecifierSet::any(),
+        parameters: params.parameters.clone(),
+    }).await
 }
 
 pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference) -> Result<ResolutionResult, Error> {
-    resolve_locator_with_extras(context, locator, params, &PypiExtras::empty()).await
-}
-
-pub async fn resolve_locator_with_extras(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, active_extras: &PypiExtras) -> Result<ResolutionResult, Error> {
-    let version_metadata
-        = fetch_version_metadata(context, &params.ident, &params.version).await?;
-    let requires_dist
-        = version_metadata.info.requires_dist.unwrap_or_default();
-
-    build_resolution_result(context, locator.clone(), &params.version, &requires_dist, IncludeBaseDependencies::Yes, active_extras)
+    resolve_release(context, locator.clone(), &params.ident, &params.version, None).await
 }
 
 pub async fn resolve_locator_extra(context: &InstallContext<'_>, locator: &Locator, params: &PypiRegistryReference, extra: &str) -> Result<ResolutionResult, Error> {
-    let version_metadata
-        = fetch_version_metadata(context, &params.ident, &params.version).await?;
-    let requires_dist
-        = version_metadata.info.requires_dist.unwrap_or_default();
-    let active_extras
-        = PypiExtras::from_iter([extra])
-            .map_err(|err| Error::InvalidRange(err.to_string()))?;
+    resolve_release(context, locator.clone(), &params.ident, &params.version, Some(extra)).await
+}
 
-    build_resolution_result(context, locator.clone(), &params.version, &requires_dist, IncludeBaseDependencies::No, &active_extras)
+pub fn parse_pep440(version: &PypiVersion) -> Option<pep440_rs::Version> {
+    pep440_rs::Version::from_str(version.as_str()).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::python_env::PythonVersion;
+    use zpm_utils::{Cpu, Libc, Os};
+
+    fn targets() -> PythonTargets {
+        let python
+            = PythonVersion {major: 3, minor: 12, patch: None};
+
+        PythonTargets {
+            python: python.clone(),
+            envs: vec![
+                PythonEnv {python: python.clone(), platform: Platform {os: Os::MacOS, cpu: Cpu::Aarch64, libc: None}},
+                PythonEnv {python: python.clone(), platform: Platform {os: Os::Linux, cpu: Cpu::X86_64, libc: Some(Libc::Glibc)}},
+            ],
+            macos_target: (14, 0),
+            manylinux_target: (2, 34),
+        }
+    }
+
+    #[test]
+    fn requirement_conversion() {
+        let targets
+            = targets();
+
+        let always
+            = convert_requirement("Foo_Bar>=1.0", &targets, None).unwrap();
+        assert_eq!(always.descriptor.to_file_string(), "foo-bar@pypi:>=1.0");
+
+        assert!(convert_requirement("foo; python_version < '3.10'", &targets, None).is_none());
+        assert!(convert_requirement("foo; sys_platform == 'win32'", &targets, None).is_none());
+        assert!(convert_requirement("foo; extra == 'x'", &targets, None).is_none());
+
+        let sometimes
+            = convert_requirement("foo>=1; sys_platform == 'darwin'", &targets, None).unwrap();
+        assert!(sometimes.descriptor.to_file_string().contains("marker="));
+
+        let extra
+            = convert_requirement("foo[bar]>=1; extra == 'x' and python_version >= '3.8'", &targets, Some("x")).unwrap();
+        assert_eq!(extra.descriptor.to_file_string(), "foo@pypi:>=1#extras=bar");
+
+        assert!(convert_requirement("foo; extra == 'y'", &targets, Some("x")).is_none());
+        assert!(convert_requirement("foo", &targets, Some("x")).is_none());
+    }
+
+    #[test]
+    fn version_selection() {
+        let candidates
+            = ["2.0.0rc1", "1.1.0", "1.0.0"].iter().map(|v| PypiVersion::from_file_string(v).unwrap()).collect::<Vec<_>>();
+
+        assert_eq!(select_version(&candidates, &PypiSpecifierSet::any()).unwrap().as_str(), "1.1.0");
+        assert_eq!(select_version(&candidates, &PypiSpecifierSet::from_file_string(">=2.0.0rc1").unwrap()).unwrap().as_str(), "2.0.0rc1");
+        assert_eq!(select_version(&candidates, &PypiSpecifierSet::from_file_string("<1.1").unwrap()).unwrap().as_str(), "1.0.0");
+    }
 }

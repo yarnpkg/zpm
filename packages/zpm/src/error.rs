@@ -532,7 +532,7 @@ pub enum Error {
     #[error("Unmatched hunk")]
     UnmatchedHunk(usize),
 
-    #[error("Invalid resolution")]
+    #[error("Invalid resolution: {0}")]
     InvalidResolution(String),
 
     #[error("Bad resolution")]

@@ -17,41 +17,6 @@ fn prepend_env_path(key: &str, value: &str, separator: char) -> String {
     }
 }
 
-fn build_site_packages_pythonpath(site_packages_path: &zpm_utils::Path, separator: char) -> String {
-    let mut entries
-        = vec![site_packages_path.to_file_string()];
-
-    if let Ok(read_dir) = site_packages_path.fs_read_dir() {
-        for entry in read_dir.flatten() {
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-
-            if !file_type.is_dir() {
-                continue;
-            }
-
-            let dirname
-                = entry.file_name();
-
-            let dirname
-                = dirname.to_string_lossy();
-
-            if dirname.starts_with('.') {
-                continue;
-            }
-
-            entries.push(
-                site_packages_path
-                    .with_join_str(dirname.as_ref())
-                    .to_file_string(),
-            );
-        }
-    }
-
-    entries.join(&separator.to_string())
-}
-
 fn active_workspace_venv(project: &project::Project) -> Option<zpm_utils::Path> {
     let workspace
         = project.active_workspace().ok()?;
@@ -76,8 +41,8 @@ fn active_workspace_venv(project: &project::Project) -> Option<zpm_utils::Path> 
 
 /// Run a Python process within the project's environment
 ///
-/// This command mirrors `yarn node`, but for Python. When called from a workspace that belongs to an island using the `venv` linker, it sets up a
-/// virtualenv-like environment (`VIRTUAL_ENV`, `PYTHONPATH`, and `PATH`) so Python can resolve packages from `.venv/lib/site-packages`.
+/// This command mirrors `yarn node`, but for Python. When called from a workspace that belongs to an island using the `venv` linker, it runs the
+/// workspace's `.venv/bin/python` (installing the project first if needed), with `VIRTUAL_ENV` set and `.venv/bin` prepended to the `PATH`.
 ///
 #[cli::command(proxy)]
 #[cli::path("python")]
@@ -101,42 +66,25 @@ impl Python {
             .enable_shell_forwarding()
             .enable_signal_delegation();
 
+        let mut program
+            = "python".to_string();
+
         if let Some(venv_path) = active_workspace_venv(&project) {
-            let site_packages_path
-                = venv_path
-                    .with_join_str("lib")
-                    .with_join_str("site-packages");
-
-            let bin_path = if cfg!(windows) {
-                venv_path.with_join_str("Scripts")
-            } else {
-                venv_path.with_join_str("bin")
-            };
-
-            let path_separator = if cfg!(windows) {
-                ';'
-            } else {
-                ':'
-            };
+            let bin_path
+                = venv_path.with_join_str("bin");
 
             let path
-                = prepend_env_path("PATH", &bin_path.to_file_string(), path_separator);
-
-            let pythonpath
-                = prepend_env_path(
-                    "PYTHONPATH",
-                    &build_site_packages_pythonpath(&site_packages_path, path_separator),
-                    path_separator,
-                );
+                = prepend_env_path("PATH", &bin_path.to_file_string(), ':');
 
             env = env
                 .with_env_variable("VIRTUAL_ENV", &venv_path.to_file_string())
-                .with_env_variable("PYTHONPATH", &pythonpath)
                 .with_env_variable("PATH", &path);
+
+            program = bin_path.with_join_str("python").to_file_string();
         }
 
         let result
-            = env.run_exec("python", &self.args).await?;
+            = env.run_exec(&program, &self.args).await?;
 
         Ok(result.into())
     }

@@ -3,7 +3,7 @@ import {tests, yarn}  from 'pkg-tests-core';
 
 async function configureVenvIsland(path: PortablePath, workspaces: Array<string>) {
   await yarn.writeConfiguration(path, {
-    pypiRegistryServer: await tests.startPackageServer(),
+    pypiRegistryServer: `${await tests.startPackageServer()}/simple/`,
     unstableIslands: {
       main: {
         workspaces,

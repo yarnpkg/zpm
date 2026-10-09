@@ -235,6 +235,13 @@ pub struct Lockfile {
     pub transient_entries: BTreeMap<Locator, LockfileEntry>,
 
     pub islands: BTreeMap<String, BTreeMap<Descriptor, Locator>>,
+
+    /**
+     * Hash of the inputs each island was resolved from (workspace
+     * dependencies, overrides, constraints, Python targets). When it
+     * doesn't change the island is reused as-is, without running the solver.
+     */
+    pub island_hashes: BTreeMap<String, Hash64>,
 }
 
 impl Lockfile {
@@ -247,6 +254,7 @@ impl Lockfile {
             transient_resolutions: BTreeMap::new(),
             transient_entries: BTreeMap::new(),
             islands: BTreeMap::new(),
+            island_hashes: BTreeMap::new(),
         }
     }
 
@@ -314,6 +322,8 @@ impl<'de> Deserialize<'de> for Lockfile {
             }
             lockfile.islands.insert(island_id, island_resolutions);
         }
+
+        lockfile.island_hashes = payload.island_hashes;
 
         Ok(lockfile)
     }
@@ -393,6 +403,7 @@ impl Serialize for Lockfile {
             project: self.project.clone(),
             entries,
             islands: islands_payload,
+            island_hashes: self.island_hashes.clone(),
         };
 
         payload.serialize(serializer)
@@ -577,6 +588,10 @@ struct LockfilePayload {
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     islands: BTreeMap<String, BTreeMap<MultiKey<Descriptor>, LockfileEntry>>,
+
+    #[serde(default, rename = "__islandHashes")]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    island_hashes: BTreeMap<String, Hash64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -964,7 +979,7 @@ mod tests {
 
         // The overrides are stored verbatim; the catalogs they reference are kept on the side
         let ranges = lockfile.project.dependency_overrides.iter()
-            .map(|(_, range)| zpm_utils::ToFileString::to_file_string(range))
+            .map(|(_, range)| zpm_utils::ToFileString::to_file_string(range.as_ref().unwrap()))
             .collect::<Vec<_>>();
 
         assert_eq!(ranges, vec!["catalog:legacy", "catalog:", "npm:1.2.3"]);

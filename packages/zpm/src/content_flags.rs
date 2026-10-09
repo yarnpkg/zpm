@@ -262,8 +262,19 @@ impl ContentFlags {
             = archive_path.fs_read()?;
 
         if matches!(locator.reference, Reference::PypiShorthand(_) | Reference::PypiRegistry(_)) {
+            // Source distributions (tarballs, or zips cached as `.src.zip`)
+            // only know their console scripts once built, which the venv
+            // linker takes care of
+            let is_wheel
+                = package_bytes.starts_with(b"PK") && !archive_path.as_str().ends_with(".src.zip");
+
+            let binaries = match is_wheel {
+                true => extract_pypi_binaries(&package_bytes)?,
+                false => BTreeMap::new(),
+            };
+
             return Ok(Self {
-                binaries: extract_pypi_binaries(&package_bytes)?,
+                binaries,
                 build_commands: vec![],
                 prefer_extracted: None,
                 suggest_extracted: false,

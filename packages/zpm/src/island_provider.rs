@@ -78,6 +78,13 @@ pub struct IslandDependencyProvider<'a> {
     discovery_counter: Cell<usize>,
     /// Maps package ident → discovery index (first time seen in prioritize).
     discovery_order: RefCell<BTreeMap<Ident, usize>>,
+    /// Packages required through `pypi:` ranges; their candidates come
+    /// from the PyPI index rather than the npm registry.
+    pub pypi_idents: RefCell<std::collections::BTreeSet<Ident>>,
+    /// Memoized PyPI candidates (highest first).
+    pypi_candidates: RefCell<BTreeMap<Ident, Vec<IslandVersion>>>,
+    /// Memoized `local_workspaces()`
+    local_workspaces: RefCell<Option<std::collections::BTreeSet<Ident>>>,
 }
 
 impl<'a> IslandDependencyProvider<'a> {
@@ -102,7 +109,43 @@ impl<'a> IslandDependencyProvider<'a> {
             extra_resolution_cache: RefCell::new(BTreeMap::new()),
             discovery_counter: Cell::new(0),
             discovery_order: RefCell::new(BTreeMap::new()),
+            pypi_idents: RefCell::new(std::collections::BTreeSet::new()),
+            pypi_candidates: RefCell::new(BTreeMap::new()),
+            local_workspaces: RefCell::new(None),
         }
+    }
+
+    /// Candidate versions of a PyPI package, highest first.
+    fn satisfies_constraints(&self, ident: &Ident, version: &IslandVersion) -> bool {
+        let pypi_version = match &version.0.reference {
+            zpm_primitives::Reference::PypiShorthand(params) if params.url.is_none() => &params.version,
+            zpm_primitives::Reference::PypiRegistry(params) if params.url.is_none() => &params.version,
+            _ => return true,
+        };
+
+        crate::resolvers::pypi::satisfies_constraints(self.ctx, ident, pypi_version)
+    }
+
+    fn fetch_pypi_versions(&self, package: &Ident) -> Result<Vec<IslandVersion>, IslandResolutionError> {
+        if let Some(versions) = self.pypi_candidates.borrow().get(package) {
+            return Ok(versions.clone());
+        }
+
+        let versions = self.handle.block_on(
+            crate::resolvers::pypi::candidate_versions(self.ctx, package)
+        ).map_err(IslandResolutionError::from)?;
+
+        let versions = versions.into_iter()
+            .map(|version| IslandVersion(Locator::new(package.clone(), zpm_primitives::PypiShorthandReference {
+                version,
+                url: None,
+            }.into())))
+            .collect::<Vec<_>>();
+
+        self.pypi_candidates.borrow_mut()
+            .insert(package.clone(), versions.clone());
+
+        Ok(versions)
     }
 
     /// Fetch all available versions for a package from the registry,
@@ -121,12 +164,94 @@ impl<'a> IslandDependencyProvider<'a> {
     ///
     /// Semver ranges are converted directly. Non-semver ranges are resolved
     /// on the spot via `resolve_descriptor` and injected as exact singletons.
+    /// The workspace locator for `ident` when the island already uses that
+    /// workspace through a local (`workspace:`) edge somewhere in its graph.
+    fn python_workspace_locator(&self, ident: &Ident) -> Option<Locator> {
+        if !self.local_workspaces().contains(ident) {
+            return None;
+        }
+
+        Some(Locator::new(ident.clone(), zpm_primitives::WorkspaceIdentReference {ident: ident.clone()}.into()))
+    }
+
+    /// The workspaces reachable from the island's own workspaces through
+    /// `workspace:` dependencies (path sources in uv terms)
+    fn local_workspaces(&self) -> std::cell::Ref<'_, std::collections::BTreeSet<Ident>> {
+        if self.local_workspaces.borrow().is_none() {
+            let mut seen
+                = std::collections::BTreeSet::new();
+
+            let mut queue
+                = self.workspace_deps.keys().cloned().collect::<Vec<_>>();
+
+            while let Some(ident) = queue.pop() {
+                if !seen.insert(ident.clone()) {
+                    continue;
+                }
+
+                let dependencies = match self.workspace_deps.get(&ident) {
+                    Some(dependencies) => dependencies.clone(),
+                    None => self.ctx.project
+                        .and_then(|project| project.workspace_by_ident(&ident).ok())
+                        .map(|workspace| workspace.manifest.remote.dependencies.clone())
+                        .unwrap_or_default(),
+                };
+
+                for (dependency_ident, descriptor) in dependencies {
+                    if descriptor.range.is_workspace() {
+                        queue.push(dependency_ident);
+                    }
+                }
+            }
+
+            *self.local_workspaces.borrow_mut() = Some(seen);
+        }
+
+        std::cell::Ref::map(self.local_workspaces.borrow(), |set| set.as_ref().unwrap())
+    }
+
+    /// Registry packages get the island's overrides applied when they're
+    /// resolved; workspaces are read straight from their manifests, so the
+    /// overrides are applied here. Like uv's override-dependencies, they
+    /// replace the requirements of local projects too (for example the range
+    /// a path dependency declares).
+    fn apply_overrides(&self, locator: &Locator, descriptors: &BTreeMap<Ident, Descriptor>) -> BTreeMap<Ident, Descriptor> {
+        let mut resolution
+            = crate::resolvers::Resolution::new_empty(locator.clone(), zpm_semver::Version::new());
+
+        resolution.dependencies = descriptors.clone();
+
+        match crate::install::normalize_resolutions(&self.ctx, &resolution) {
+            Ok((dependencies, _)) => dependencies,
+            Err(_) => descriptors.clone(),
+        }
+    }
+
     fn descriptors_to_deps(&self, descriptors: &BTreeMap<Ident, Descriptor>) -> Result<BTreeMap<IslandPackage, IslandVersionSet>, IslandResolutionError> {
         let mut deps = BTreeMap::new();
         let mut non_semver: Vec<(Ident, Descriptor, Vec<String>)> = Vec::new();
 
         for (ident, descriptor) in descriptors {
             let extras = pypi_extras(&descriptor.range);
+
+            // A PyPI requirement on a package that's a Python workspace of
+            // the project resolves to the workspace, whatever its range: uv
+            // does the same once a project gets the package from a local
+            // source (a project requiring `lib>=3.10` while a plugin brings
+            // the local `lib`)
+            if matches!(descriptor.range, Range::PypiSpecifier(_)) {
+                if let Some(workspace_locator) = self.python_workspace_locator(ident) {
+                    insert_dependency_packages(&mut deps, ident, extras, IslandVersionSet::exact_singleton(IslandVersion(workspace_locator)));
+                    continue;
+                }
+            }
+
+            if let Some(vs) = pypi_version_set(&descriptor.range) {
+                self.pypi_idents.borrow_mut().insert(ident.clone());
+                insert_dependency_packages(&mut deps, ident, extras, vs);
+                continue;
+            }
+
             let descriptor = descriptor_without_pypi_extras(descriptor);
 
             match crate::island::range_to_version_set(&descriptor.range) {
@@ -277,6 +402,20 @@ impl<'a> IslandDependencyProvider<'a> {
     }
 }
 
+/// PyPI specifier ranges (without alias nor platform selector) are solved
+/// natively, as PEP 440 version ranges.
+fn pypi_version_set(range: &Range) -> Option<IslandVersionSet> {
+    let Range::PypiSpecifier(params) = range else {
+        return None;
+    };
+
+    if params.ident.is_some() || params.parameters.as_ref().map_or(false, |parameters| parameters.platform.is_some()) {
+        return None;
+    }
+
+    IslandVersionSet::from_pypi_specifier(&params.specifier)
+}
+
 fn pypi_extras(range: &Range) -> Vec<String> {
     match range {
         Range::PypiSpecifier(params) => params.parameters.iter()
@@ -377,6 +516,7 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
         let is_singleton = match range {
             IslandVersionSet::Exact(ExactSet::OneOf(vs)) => vs.len() == 1,
             IslandVersionSet::Semver(r) => r.as_singleton().is_some(),
+            IslandVersionSet::Pypi(r) => r.as_singleton().is_some(),
             _ => false,
         };
 
@@ -425,12 +565,28 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
             }
         }
 
-        // Check locked version first
+        // Check locked version first; constraints added since it got locked
+        // (uv's constraint-dependencies) may exclude it
         if let Some(locked_locator) = self.locked_versions.get(ident) {
             let iv = IslandVersion(locked_locator.clone());
-            if range.contains(&iv) {
+            if range.contains(&iv) && self.satisfies_constraints(ident, &iv) {
                 return Ok(Some(iv));
             }
+        }
+
+        let is_pypi
+            = matches!(range, IslandVersionSet::Pypi(_)) || self.pypi_idents.borrow().contains(ident);
+
+        if is_pypi {
+            let versions = self.fetch_pypi_versions(ident)?;
+
+            // Pre-releases are only picked when no final release matches
+            let stable = versions.iter()
+                .find(|iv| iv.pypi_version().map_or(false, |version| !version.any_prerelease()) && range.contains(iv));
+
+            let any = stable.or_else(|| versions.iter().find(|iv| range.contains(iv)));
+
+            return Ok(any.cloned());
         }
 
         // Fetch all available versions from the registry and pick the first
@@ -463,14 +619,14 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
                 let deps = BTreeMap::from([
                     (
                         IslandPackage::Named(ident.clone()),
-                        IslandVersionSet::exact_singleton(version.clone()),
+                        <IslandVersionSet as VersionSet>::singleton(version.clone()),
                     ),
                     (
                         IslandPackage::ExtraFeature {
                             ident: ident.clone(),
                             extra: extra.clone(),
                         },
-                        IslandVersionSet::exact_singleton(version.clone()),
+                        <IslandVersionSet as VersionSet>::singleton(version.clone()),
                     ),
                 ]);
 
@@ -485,8 +641,20 @@ impl DependencyProvider for IslandDependencyProvider<'_> {
 
         // Workspace packages: return their manifest dependencies
         if let Some(ws_deps) = self.workspace_deps.get(ident) {
-            let deps = self.descriptors_to_deps(ws_deps)?;
+            let deps = self.descriptors_to_deps(&self.apply_overrides(&version.0, ws_deps))?;
             return Ok(Dependencies::Available(deps.into_iter().collect()));
+        }
+
+        // Workspaces from other islands (path dependencies between Python
+        // projects) only contribute their regular dependencies, never their
+        // devDependencies - same as uv's editable path dependencies.
+        if version.0.reference.is_workspace_reference() {
+            if let Some(project) = self.ctx.project {
+                if let Ok(workspace) = project.workspace_by_ident(ident) {
+                    let deps = self.descriptors_to_deps(&self.apply_overrides(&version.0, &workspace.manifest.remote.dependencies))?;
+                    return Ok(Dependencies::Available(deps.into_iter().collect()));
+                }
+            }
         }
 
         // Fetch the package manifest and extract its dependencies
