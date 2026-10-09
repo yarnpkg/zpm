@@ -99,9 +99,12 @@ fn collect_hoistable_packages<'a>(tree: &'a ResolutionTree, patterns: &[IdentGlo
 
 /// Removes links in a `node_modules` folder that the new layout doesn't
 /// create anymore (removed dependencies, unhoisted packages). Dot-entries
-/// such as `.pnpm` or `.bin` are left alone; scoped folders are pruned
-/// one level deeper.
-fn prune_node_modules(nm_path: &Path, expected: &BTreeSet<Ident>) -> Result<(), Error> {
+/// such as `.pnpm` are left alone, except `.bin`: this linker doesn't
+/// generate bin shims, so any found there come from another layout and
+/// may point to removed packages. The store itself is never pruned, even
+/// when it sits in a `node_modules` folder. Scoped folders are pruned one
+/// level deeper.
+fn prune_node_modules(nm_path: &Path, expected: &BTreeSet<Ident>, store_path: &Path) -> Result<(), Error> {
     let mut top_level
         = BTreeSet::new();
     let mut by_scope: BTreeMap<String, BTreeSet<String>>
@@ -128,12 +131,16 @@ fn prune_node_modules(nm_path: &Path, expected: &BTreeSet<Ident>) -> Result<(), 
         let name
             = entry.file_name().to_string_lossy().to_string();
 
-        if name.starts_with('.') {
+        let entry_path
+            = nm_path.with_join_str(&name);
+
+        if entry_path.contains(store_path) {
             continue;
         }
 
-        let entry_path
-            = nm_path.with_join_str(&name);
+        if name.starts_with('.') && name != ".bin" {
+            continue;
+        }
 
         if let Some(scoped_names) = by_scope.get(&name) {
             prune_dir_entries(&entry_path, scoped_names)?;
@@ -211,6 +218,12 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                     .with_join(&locator.ident.nm_subdir());
 
                 store_slugs.insert(locator.slug());
+
+                // The package sits next to the links to its dependencies
+                expected_nm_entries
+                    .entry(package_base_path.with_join_str("node_modules"))
+                    .or_default()
+                    .insert(locator.ident.clone());
 
                 let physical_locator
                     = locator.physical_locator();
@@ -355,6 +368,11 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             = store_path
                 .with_join(&ident.nm_subdir());
 
+        expected_nm_entries
+            .entry(store_path.with_join_str("node_modules"))
+            .or_default()
+            .insert((*ident).clone());
+
         let link_abs_dirname
             = link_abs_path
                 .dirname()
@@ -460,18 +478,20 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                     .with_join(dep_rel_location);
 
             // /path/to/project/node_modules/@types/no-deps
-            if let Some(workspace) = workspace {
-                expected_nm_entries
-                    .entry(workspace.path.with_join_str("node_modules"))
-                    .or_default()
-                    .insert(dep_name.clone());
-            }
-
-            let link_abs_path = match workspace {
-                Some(workspace) => workspace.path.with_join(&dep_name.nm_subdir()),
-                None if dep_name == &locator.ident => store_path.with_join_str(&locator.slug()).with_join(&locator.ident.nm_subdir()).with_join(&dep_name.nm_subdir()),
-                None => store_path.with_join_str(&locator.slug()).with_join(&dep_name.nm_subdir()),
+            let (link_nm_path, link_abs_path) = match workspace {
+                Some(workspace) => (workspace.path.with_join_str("node_modules"), workspace.path.with_join(&dep_name.nm_subdir())),
+                None if dep_name == &locator.ident => {
+                    let nm_path = store_path.with_join_str(&locator.slug()).with_join(&locator.ident.nm_subdir()).with_join_str("node_modules");
+                    let link_abs_path = store_path.with_join_str(&locator.slug()).with_join(&locator.ident.nm_subdir()).with_join(&dep_name.nm_subdir());
+                    (nm_path, link_abs_path)
+                },
+                None => (store_path.with_join_str(&locator.slug()).with_join_str("node_modules"), store_path.with_join_str(&locator.slug()).with_join(&dep_name.nm_subdir())),
             };
+
+            expected_nm_entries
+                .entry(link_nm_path)
+                .or_default()
+                .insert(dep_name.clone());
 
             // /path/to/project/node_modules/@types
             let link_abs_dirname
@@ -494,11 +514,21 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
 
     // Every workspace gets its node_modules pruned, including those whose
     // dependencies were all removed (absent from `expected_nm_entries`).
-    for workspace in &project.workspaces {
-        let workspace_nm_path
-            = workspace.path.with_join_str("node_modules");
+    // Store folders that are kept as-is (and the hoisting folder) may also
+    // hold links the new layout doesn't create anymore.
+    let mut pruned_nm_paths: BTreeSet<Path>
+        = project.workspaces.iter()
+            .map(|workspace| workspace.path.with_join_str("node_modules"))
+            .collect();
 
-        prune_node_modules(&workspace_nm_path, expected_nm_entries.get(&workspace_nm_path).unwrap_or(&BTreeSet::new()))?;
+    pruned_nm_paths.insert(store_path.with_join_str("node_modules"));
+    pruned_nm_paths.extend(expected_nm_entries.keys().cloned());
+
+    let no_entries
+        = BTreeSet::new();
+
+    for nm_path in &pruned_nm_paths {
+        prune_node_modules(nm_path, expected_nm_entries.get(nm_path).unwrap_or(&no_entries), &store_path)?;
     }
 
     persist_package_map(project, &package_map_builder.build()?)?;

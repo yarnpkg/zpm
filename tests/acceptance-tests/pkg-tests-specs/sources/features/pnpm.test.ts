@@ -127,6 +127,82 @@ describe(`Features`, () => {
       }),
     );
 
+    test(
+      `it should update the links of store packages kept across installs`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`one-range-dep`]: `1.0.0`,
+        },
+        resolutions: {
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+        pnpmHoistPatterns: [],
+      }, async ({path, run, source}) => {
+        await run(`install`);
+
+        const store = ppath.join(path, `node_modules/.pnpm`);
+        const [entry] = (await xfs.readdirPromise(store)).filter(name => name.startsWith(`one-range-dep-`));
+
+        await expect(source(`require('one-range-dep')`)).resolves.toMatchObject({dependencies: {[`no-deps`]: {version: `1.0.0`}}});
+
+        // one-range-dep keeps its store folder, but its dependency changes
+        await xfs.writeJsonPromise(ppath.join(path, `package.json`), {
+          dependencies: {[`one-range-dep`]: `1.0.0`},
+          resolutions: {[`no-deps`]: `1.1.0`},
+        });
+
+        await run(`install`);
+
+        expect((await xfs.readdirPromise(store)).filter(name => name.startsWith(`one-range-dep-`))).toEqual([entry]);
+        await expect(source(`require('one-range-dep')`)).resolves.toMatchObject({dependencies: {[`no-deps`]: {version: `1.1.0`}}});
+      }),
+    );
+
+    test(
+      `it should remove hoisted links when packages aren't hoisted anymore`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`one-fixed-dep`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+        pnpmHoistPatterns: [`*`],
+      }, async ({path, run}) => {
+        await run(`install`);
+
+        const hoisted = ppath.join(path, `node_modules/.pnpm/node_modules`);
+        expect(xfs.existsSync(ppath.join(hoisted, `no-deps`))).toEqual(true);
+
+        await run(`install`, {env: {YARN_PNPM_HOIST_PATTERNS: ``}});
+
+        expect(xfs.existsSync(ppath.join(hoisted, `no-deps`))).toEqual(false);
+      }),
+    );
+
+    test(
+      `it should remove stale bin shims and never prune a store kept under node_modules`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+        pnpmStoreFolder: `node_modules/store`,
+      }, async ({path, run, source}) => {
+        await xfs.mkdirPromise(ppath.join(path, `node_modules/.bin`), {recursive: true});
+        await xfs.writeFilePromise(ppath.join(path, `node_modules/.bin/stale`), ``);
+
+        await run(`install`);
+        await run(`install`);
+
+        expect(xfs.existsSync(ppath.join(path, `node_modules/.bin/stale`))).toEqual(false);
+        expect(xfs.existsSync(ppath.join(path, `node_modules/store`))).toEqual(true);
+        await expect(source(`require('no-deps')`)).resolves.toMatchObject({version: `1.0.0`});
+      }),
+    );
+
     testIf(() => process.platform === `win32`,
       `'winLinkType: symlinks' on Windows should use symlinks in node_modules directories`,
       makeTemporaryEnv(
