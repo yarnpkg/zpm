@@ -492,6 +492,16 @@ pub fn resolve_aliased(descriptor: &Descriptor, dependencies: Vec<InstallOpResul
 /// The candidate versions of a package, highest first, after filtering out
 /// releases that are yanked, too recent for the age gate, incompatible
 /// with the target Python, or without an artifact for this platform.
+/// Whether a version satisfies the island's `pypiConstraints` (uv's
+/// constraint-dependencies) for the given package.
+pub fn satisfies_constraints(context: &InstallContext<'_>, ident: &Ident, version: &PypiVersion) -> bool {
+    context.pypi_constraints.iter()
+        .filter_map(|requirement| pep_508::parse(requirement).ok().map(|parsed| (canonicalize_pypi_name(parsed.name), specifier_from_pep508(parsed.spec.as_ref()))))
+        .filter(|(name, _)| name == ident.as_str())
+        .filter_map(|(_, specifier)| specifier)
+        .all(|constraint| specifier_matches(&constraint, version))
+}
+
 pub async fn candidate_versions(context: &InstallContext<'_>, ident: &Ident) -> Result<Vec<PypiVersion>, Error> {
     let project
         = context.project
@@ -506,15 +516,8 @@ pub async fn candidate_versions(context: &InstallContext<'_>, ident: &Ident) -> 
     let index_project
         = fetch_project(context, ident, None).await?;
 
-    let constraints
-        = context.pypi_constraints.iter()
-            .filter_map(|requirement| pep_508::parse(requirement).ok().map(|parsed| (canonicalize_pypi_name(parsed.name), specifier_from_pep508(parsed.spec.as_ref()))))
-            .filter(|(name, _)| name == ident.as_str())
-            .filter_map(|(_, specifier)| specifier)
-            .collect::<Vec<_>>();
-
     Ok(index_project.sorted_versions().into_iter()
-        .filter(|(_, version)| constraints.iter().all(|constraint| specifier_matches(constraint, version)))
+        .filter(|(_, version)| satisfies_constraints(context, ident, version))
         // A version is a candidate if any of the target platforms can
         // install it: platform-only packages (pywin32) get locked for their
         // platform, and markers keep them away from the others

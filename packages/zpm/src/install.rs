@@ -1425,6 +1425,11 @@ impl<'a> InstallManager<'a> {
                     self.result.install_state.island_normalized_resolutions
                         .insert(island_id.clone(), island_result.normalized_resolutions.clone());
 
+                    // Whether the lockfile entries can rebuild this island's
+                    // resolutions exactly (see below)
+                    let mut is_reproducible
+                        = true;
+
                     // Lockfile entries are shared (for checksum tracking etc.)
                     for (locator, resolution) in &island_result.normalized_resolutions {
                         island_locators.push(locator.clone());
@@ -1435,6 +1440,19 @@ impl<'a> InstallManager<'a> {
                                 checksum: None,
                                 resolution: resolution.clone(),
                             });
+
+                        // PyPI locators don't encode the Python version, but
+                        // their dependencies are evaluated against the
+                        // island's targets: another island (say, on an older
+                        // Python) may have stored different ones. Rebuilding
+                        // this island from the lockfile would then be wrong.
+                        let same_dependencies
+                            = entry.resolution.dependencies == resolution.dependencies
+                                && entry.resolution.peer_dependencies == resolution.peer_dependencies;
+
+                        if !same_dependencies {
+                            is_reproducible = false;
+                        }
 
                         // Islands targeting different Python versions list
                         // different variants for the same release; the
@@ -1449,7 +1467,9 @@ impl<'a> InstallManager<'a> {
                         entry.resolution.variants.sort();
                     }
 
-                    if let Some(input_hash) = &island_result.input_hash {
+                    // Without a hash, the next install solves the island again
+                    // (from its locked versions) instead of rebuilding it
+                    if let (Some(input_hash), true) = (&island_result.input_hash, is_reproducible) {
                         self.result.lockfile.island_hashes
                             .insert(island_id.clone(), input_hash.clone());
                     }

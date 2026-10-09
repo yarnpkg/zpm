@@ -123,7 +123,15 @@ pub fn get_registry(config: &Configuration, ident: &Ident) -> String {
     normalize_index_url(registry)
 }
 
-pub fn get_authorization(config: &Configuration, registry: &str, ident: Option<&Ident>) -> Option<String> {
+/// The credentials configured for an index (and package), as found in
+/// `pypiAuthIdent` (`user:password`) or `pypiAuthToken`, with `sourceRules`
+/// and `packageRules` applied.
+pub enum PypiCredentials {
+    Ident(String),
+    Token(String),
+}
+
+pub fn get_credentials(config: &Configuration, registry: &str, ident: Option<&Ident>) -> Option<PypiCredentials> {
     let mut token
         = config.settings.pypi_auth_token.value.as_ref().map(|secret| secret.value.clone());
     let mut auth_ident
@@ -156,11 +164,18 @@ pub fn get_authorization(config: &Configuration, registry: &str, ident: Option<&
     }
 
     if let Some(auth_ident) = auth_ident.filter(|value| !value.is_empty()) {
-        return Some(format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, auth_ident.as_bytes())));
+        return Some(PypiCredentials::Ident(auth_ident));
     }
 
     token.filter(|value| !value.is_empty())
-        .map(|token| format!("Bearer {}", token))
+        .map(PypiCredentials::Token)
+}
+
+pub fn get_authorization(config: &Configuration, registry: &str, ident: Option<&Ident>) -> Option<String> {
+    match get_credentials(config, registry, ident)? {
+        PypiCredentials::Ident(auth_ident) => Some(format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, auth_ident.as_bytes()))),
+        PypiCredentials::Token(token) => Some(format!("Bearer {}", token)),
+    }
 }
 
 /// Authorization to use when downloading an artifact. Credentials are only
