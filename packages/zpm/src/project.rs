@@ -1542,7 +1542,7 @@ impl Project {
             check_checksums: false,
             check_resolutions: false,
             enforced_resolutions: BTreeMap::new(),
-            prune_dev_dependencies: production,
+            prune_dev_dependencies: production && install_roots.is_some(),
             refresh_lockfile: false,
             silent_or_error: true,
             mode: None,
