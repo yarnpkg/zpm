@@ -1695,18 +1695,23 @@ impl Project {
 
     /// Parse the `@workspaces` default tasks declared in the root taskfile.
     pub fn workspace_task_defaults(&self) -> BTreeMap<TaskName, Task> {
+        self.try_workspace_task_defaults().unwrap_or_default()
+    }
+
+    /// Like `workspace_task_defaults`, but returns `None` when the root
+    /// taskfile exists and can't be parsed (rather than no defaults).
+    pub fn try_workspace_task_defaults(&self) -> Option<BTreeMap<TaskName, Task>> {
         let root_task_file_path
             = self.root_workspace().taskfile_path();
 
         let Ok(content) = root_task_file_path.fs_read_text() else {
-            return BTreeMap::new();
+            return Some(BTreeMap::new());
         };
 
-        let Ok(root_task_file) = parse_taskfile(&content) else {
-            return BTreeMap::new();
-        };
+        let root_task_file
+            = parse_taskfile(&content).ok()?;
 
-        extract_workspace_defaults(&root_task_file)
+        Some(extract_workspace_defaults(&root_task_file))
     }
 
     /// Load the effective taskfile of a workspace: its own `taskfile` layered
@@ -1824,14 +1829,34 @@ impl Project {
         })
     }
 
+    /// Like `get_workspace_taskfile`, but returns an error when the
+    /// workspace taskfile or the root one (for its defaults) exists and can't
+    /// be parsed, so that callers can keep the previous version.
+    pub fn try_get_workspace_taskfile(&self, workspace: &Workspace) -> Result<Option<(TaskFile, Vec<Path>)>, ()> {
+        let defaults = match workspace.rel_path == Path::new() {
+            true => BTreeMap::new(),
+            false => self.try_workspace_task_defaults().ok_or(())?,
+        };
+
+        if let Ok(content) = workspace.taskfile_path().fs_read_text() {
+            parse_taskfile(&content).map_err(|_| ())?;
+        }
+
+        Ok(self.get_workspace_taskfile_with(workspace, &defaults))
+    }
+
     /// Get the effective taskfile (including root defaults) and its source
     /// file paths for a workspace. Returns `None` if the workspace has no tasks.
     pub fn get_workspace_taskfile(&self, workspace: &Workspace) -> Option<(TaskFile, Vec<Path>)> {
         let defaults
             = self.workspace_task_defaults();
 
+        self.get_workspace_taskfile_with(workspace, &defaults)
+    }
+
+    fn get_workspace_taskfile_with(&self, workspace: &Workspace, defaults: &BTreeMap<TaskName, Task>) -> Option<(TaskFile, Vec<Path>)> {
         let (task_file, mut sources)
-            = self.load_workspace_taskfile(workspace, &defaults);
+            = self.load_workspace_taskfile(workspace, defaults);
 
         let task_file
             = task_file?;

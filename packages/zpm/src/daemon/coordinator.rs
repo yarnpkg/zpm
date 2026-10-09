@@ -905,8 +905,14 @@ fn initialize_taskfile_watcher(watcher: &mut TaskfileWatcher, project: &Project)
     for workspace in &project.workspaces {
         let task_file_path = workspace.taskfile_path();
 
-        // Always watch the default taskfile path, even if it doesn't exist yet
+        // Always watch the default taskfile path, even if it doesn't exist
+        // yet, and the root taskfile, whose `@workspaces` defaults apply to
+        // every other workspace
         let mut sources = vec![task_file_path];
+
+        if workspace.rel_path != Path::new() {
+            sources.push(project.root_workspace().taskfile_path());
+        }
 
         if let Some((task_file, extra_sources)) = project.get_workspace_taskfile(workspace) {
             // Extend sources with the full list (main + root defaults + includes)
@@ -971,13 +977,13 @@ fn reload_taskfile(
 
     let task_file_path = workspace.taskfile_path();
 
-    let new_taskfile = match project.get_workspace_taskfile(workspace) {
-        Some((tf, _)) => tf,
-        None => {
-            if task_file_path.fs_exists() {
-                return; // Parse error: keep old version
-            }
+    let new_taskfile = match project.try_get_workspace_taskfile(workspace) {
+        // Parse error in the workspace taskfile or in the root one providing
+        // its defaults: keep the old version
+        Err(()) => return,
 
+        Ok(Some((tf, _))) => tf,
+        Ok(None) => {
             // File deleted (and no root defaults): treat as empty taskfile — purge all tasks
             if let Some(old_taskfile) = state.taskfile_watcher.cached_taskfiles().get(workspace_ident).cloned() {
                 for task_name in old_taskfile.tasks.keys() {
@@ -1012,13 +1018,12 @@ fn reload_taskfile(
         new_taskfile.clone(),
     );
 
-    // Re-register source files (includes may have changed)
+    // Re-register source files (includes may have changed). Non-root
+    // workspaces always watch the root taskfile, since `@workspaces`
+    // defaults may be added to it at any time.
     let mut sources = vec![task_file_path];
     if workspace.rel_path != Path::new() {
-        let root_task_file_path = project.root_workspace().taskfile_path();
-        if root_task_file_path.fs_exists() {
-            sources.push(root_task_file_path);
-        }
+        sources.push(project.root_workspace().taskfile_path());
     }
     for include in &new_taskfile.includes {
         if let Ok(inc_ws) = project.workspace_by_ident(&include.ident) {
