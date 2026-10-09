@@ -73,6 +73,41 @@ describe(`Commands`, () => {
     );
 
     test(
+      `--head without a base should use the merge base of the head ref`,
+      affectedEnv(async ({path, run, git}) => {
+        git(`checkout`, `-q`, `-b`, `feature`);
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-d/index.js` as PortablePath), `// change d\n`);
+        git(`add`, `-A`);
+        git(`commit`, `-q`, `-m`, `change d`);
+
+        // The checkout moves on main, which also changes pkg-a
+        git(`checkout`, `-q`, `main`);
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-a/index.js` as PortablePath), `// change a\n`);
+        git(`add`, `-A`);
+        git(`commit`, `-q`, `-m`, `change a`);
+
+        const {stdout} = await run(`workspaces`, `list`, `--since`, `--head=feature`, `--json`);
+        expect(names(stdout)).toEqual([`pkg-d`]);
+      }),
+    );
+
+    test(
+      `--since should ignore install artifacts`,
+      affectedEnv(async ({path, run, git}) => {
+        await xfs.writeFilePromise(ppath.join(path, `.gitignore` as PortablePath), ``);
+        git(`add`, `-A`);
+        git(`commit`, `-q`, `-m`, `track install artifacts`);
+        const base = git(`rev-parse`, `HEAD`);
+
+        await xfs.writeFilePromise(ppath.join(path, `.pnp.cjs` as PortablePath), `// changed\n`);
+        await xfs.writeFilePromise(ppath.join(path, `.yarn/some-file` as PortablePath), `changed\n`);
+
+        const {stdout} = await run(`workspaces`, `list`, `--since=${base}`, `--json`);
+        expect(names(stdout)).toEqual([]);
+      }),
+    );
+
+    test(
       `--head should compare two refs, ignoring the working tree`,
       affectedEnv(async ({path, run, git}) => {
         const base = git(`rev-parse`, `HEAD`);
