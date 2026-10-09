@@ -488,10 +488,16 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 None => (store_path.with_join_str(&locator.slug()).with_join_str("node_modules"), store_path.with_join_str(&locator.slug()).with_join(&dep_name.nm_subdir())),
             };
 
-            expected_nm_entries
-                .entry(link_nm_path)
-                .or_default()
-                .insert(dep_name.clone());
+            // Don't track same-name deps in expected_nm_entries: the inner
+            // node_modules is never linker-owned, so prune should not delete
+            // other entries there. The inner folder is added to pruned_nm_paths
+            // below to ensure stale same-name links are removed.
+            if !(workspace.is_none() && dep_name == &locator.ident) {
+                expected_nm_entries
+                    .entry(link_nm_path)
+                    .or_default()
+                    .insert(dep_name.clone());
+            }
 
             // /path/to/project/node_modules/@types
             let link_abs_dirname
@@ -523,6 +529,19 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
 
     pruned_nm_paths.insert(store_path.with_join_str("node_modules"));
     pruned_nm_paths.extend(expected_nm_entries.keys().cloned());
+
+    // Same-name dependency links go inside the package's own node_modules.
+    // We must prune that directory even when the edge is removed, but we
+    // should never treat it as linker-owned (it may hold user content).
+    for locator in tree.locator_resolutions.keys() {
+        if !locator.reference.is_workspace_reference() {
+            let inner_nm_path = store_path
+                .with_join_str(&locator.slug())
+                .with_join(&locator.ident.nm_subdir())
+                .with_join_str("node_modules");
+            pruned_nm_paths.insert(inner_nm_path);
+        }
+    }
 
     let no_entries
         = BTreeSet::new();
