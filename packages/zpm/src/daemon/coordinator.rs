@@ -57,6 +57,9 @@ async fn run_daemon_internal(
     let daemon_url_str
         = daemon_url(port);
 
+    let is_inline
+        = port_tx.is_some();
+
     // Send port through channel or print to stdout
     if let Some(tx) = port_tx {
         let _ = tx.send(port);
@@ -103,6 +106,13 @@ async fn run_daemon_internal(
     let project_cwd_for_loop
         = project.project_cwd.to_file_string();
 
+    // Inline (standalone) daemons are one-shot: they die with the command
+    // that started them, so they don't need to hot-reload taskfiles.
+    // Registering the watches costs O(workspaces) FSEvents stream restarts,
+    // which dominated the startup time on large monorepos.
+    let watch_taskfiles
+        = !is_inline;
+
     tokio::spawn(async move {
         run_coordinator_loop(
             project_for_loop,
@@ -115,6 +125,7 @@ async fn run_daemon_internal(
             file_notify_tx,
             taskfile_notify_tx,
             project_cwd_for_loop,
+            watch_taskfiles,
         ).await;
     });
 
@@ -181,6 +192,7 @@ async fn run_coordinator_loop(
     file_notify_tx: mpsc::UnboundedSender<notify::Event>,
     taskfile_notify_tx: mpsc::UnboundedSender<notify::Event>,
     project_cwd: String,
+    watch_taskfiles: bool,
 ) {
     let mut state
         = CoordinatorState::new(
@@ -191,12 +203,35 @@ async fn run_coordinator_loop(
             std::path::PathBuf::from(project_cwd),
         );
 
-    initialize_taskfile_watcher(&mut state.taskfile_watcher, &project);
+    state.taskfile_watcher.set_enabled(watch_taskfiles);
+
+    if watch_taskfiles {
+        initialize_taskfile_watcher(&mut state.taskfile_watcher, &project);
+    }
 
     let mut executor_pool
         = ExecutorPool::new(daemon_url, command_tx.clone());
 
     while let Some(cmd) = command_rx.recv().await {
+        // Commands that can't change task states don't need a scheduling
+        // pass; output lines are by far the most frequent commands.
+        let needs_scheduling = !matches!(cmd,
+            CoordinatorCommand::TaskOutput { .. }
+            | CoordinatorCommand::GetTaskOutput { .. }
+            | CoordinatorCommand::RegisterPid { .. }
+            | CoordinatorCommand::ListLongLivedTasks { .. }
+            | CoordinatorCommand::GetStats { .. }
+            | CoordinatorCommand::GetTaskHistory { .. }
+            | CoordinatorCommand::CreateSubscription { .. }
+            | CoordinatorCommand::AddTasksToSubscription { .. }
+            | CoordinatorCommand::RemoveSubscription { .. }
+            | CoordinatorCommand::ListDeclaredTasks { .. }
+            | CoordinatorCommand::SubscribeGlobal { .. }
+            | CoordinatorCommand::ReadFile { .. }
+            | CoordinatorCommand::WatchFile { .. }
+            | CoordinatorCommand::NotifyFileEvent { .. }
+        );
+
         let should_shutdown = handle_command(
             cmd,
             &mut state,
@@ -210,7 +245,9 @@ async fn run_coordinator_loop(
             break;
         }
 
-        drain_ready_tasks(&mut state, &mut executor_pool);
+        if needs_scheduling {
+            drain_ready_tasks(&mut state, &mut executor_pool);
+        }
     }
 }
 
