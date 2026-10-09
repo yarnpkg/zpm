@@ -84,9 +84,20 @@ pub struct TaskGraph {
     pub prepared: BTreeMap<ContextualTaskId, PreparedTask>,
     /// Maximum number of concurrently running processes, per context
     pub concurrency_limits: HashMap<String, usize>,
+    /// Prerequisites specific to a context, overriding `resolved.tasks`.
+    /// `--only` drops the edges leading outside of the selection; those
+    /// edges must not leak into the graph other contexts share.
+    pub context_prerequisites: HashMap<String, BTreeMap<TaskId, Vec<TaskId>>>,
 }
 
 impl TaskGraph {
+    /// The prerequisites of a task in the given context.
+    pub fn prerequisites_of(&self, task_id: &TaskId, context_id: &str) -> Option<&Vec<TaskId>> {
+        self.context_prerequisites.get(context_id)
+            .and_then(|prerequisites| prerequisites.get(task_id))
+            .or_else(|| self.resolved.tasks.get(task_id))
+    }
+
     pub fn new() -> Self {
         Self {
             resolved: ResolvedTasks {
@@ -98,6 +109,7 @@ impl TaskGraph {
             parents: HashMap::new(),
             prepared: BTreeMap::new(),
             concurrency_limits: HashMap::new(),
+            context_prerequisites: HashMap::new(),
         }
     }
 
@@ -109,6 +121,7 @@ impl TaskGraph {
         args: Vec<String>,
         workspace_override: Option<&str>,
         context_id: Option<&str>,
+        only: Option<&BTreeSet<Ident>>,
         context_registry: &mut ContextRegistry,
     ) -> Result<(ContextualTaskId, Vec<ContextualTaskId>, Vec<Path>), Error> {
         let task_name = TaskName::new(task_name)
@@ -161,7 +174,11 @@ impl TaskGraph {
             return Ok((ctx_task_id, vec![], vec![]));
         }
 
-        let resolve_result = project.resolve_task(&task_id)?;
+        let resolve_result = match only {
+            Some(workspace_filter) => project.resolve_tasks(std::slice::from_ref(&task_id), Some(workspace_filter))?,
+            None => project.resolve_task(&task_id)?,
+        };
+
         let new_resolved = resolve_result.resolved;
         let source_files = resolve_result.source_files;
 
@@ -171,7 +188,17 @@ impl TaskGraph {
             let ctx_tid = ContextualTaskId::new(tid.clone(), ctx_id.clone());
             self.clear_task_state(&ctx_tid);
             resolved_ctx_task_ids.push(ctx_tid);
-            self.resolved.tasks.entry(tid).or_insert(prereqs);
+
+            // `--only` graphs are specific to their context (see
+            // `add_tasks_batch`)
+            if only.is_some() {
+                self.context_prerequisites
+                    .entry(ctx_id.clone())
+                    .or_default()
+                    .insert(tid, prereqs);
+            } else {
+                self.resolved.tasks.entry(tid).or_insert(prereqs);
+            }
         }
 
         // Register the parent-child link AFTER clear_task_state calls,
@@ -240,7 +267,17 @@ impl TaskGraph {
             }
 
             resolved_ctx_task_ids.push(ctx_tid);
-            self.resolved.tasks.insert(tid, prereqs);
+
+            // `--only` graphs are specific to their context; the shared
+            // graph keeps the full edges other contexts rely on
+            if only {
+                self.context_prerequisites
+                    .entry(context_id.to_string())
+                    .or_default()
+                    .insert(tid, prereqs);
+            } else {
+                self.resolved.tasks.entry(tid).or_insert(prereqs);
+            }
         }
 
         for (ident, tf) in resolve_result.resolved.task_files {

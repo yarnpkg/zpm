@@ -34,12 +34,12 @@ pub fn find_ready_tasks(
                 limit.saturating_sub(running_in_context)
             });
 
-        for (task_id, prerequisites) in &graph.resolved.tasks {
-            let ctx_task_id = ContextualTaskId::new(task_id.clone(), context_id.clone());
-
-            if !graph.prepared.contains_key(&ctx_task_id) {
+        for ctx_task_id in graph.prepared.keys().filter(|id| &id.context_id == context_id) {
+            let Some(prerequisites) = graph.prerequisites_of(&ctx_task_id.task_id, context_id) else {
                 continue;
-            }
+            };
+
+            let ctx_task_id = ctx_task_id.clone();
 
             // Skip if already completed, failed, finished, or running
             let task_state = graph.get_state(&ctx_task_id);
@@ -119,12 +119,12 @@ pub fn find_tasks_to_fail(
 
     // For each context, check which tasks should fail
     for context_id in active_contexts {
-        for (task_id, prerequisites) in &graph.resolved.tasks {
-            let ctx_task_id = ContextualTaskId::new(task_id.clone(), context_id.clone());
-
-            if !graph.prepared.contains_key(&ctx_task_id) {
+        for ctx_task_id in graph.prepared.keys().filter(|id| &id.context_id == context_id) {
+            let Some(prerequisites) = graph.prerequisites_of(&ctx_task_id.task_id, context_id) else {
                 continue;
-            }
+            };
+
+            let ctx_task_id = ctx_task_id.clone();
 
             // Skip if already completed, failed, script finished (e.g. waiting for subtasks), or running
             let task_state = graph.get_state(&ctx_task_id);

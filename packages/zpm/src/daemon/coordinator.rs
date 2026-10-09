@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashSet}, io::Write, sync::Arc, time::{Duration, SystemTime}};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::Write, sync::Arc, time::{Duration, SystemTime}};
 
 use base64::Engine;
 use tokio::sync::{mpsc, oneshot};
@@ -699,6 +699,16 @@ fn execute_push_tasks(
     let defaults
         = project.workspace_task_defaults();
 
+    // With `--only`, dependencies outside of the workspaces of the pushed
+    // targets are ignored, including for long-lived targets (which don't go
+    // through the batch)
+    let only_workspaces: Option<BTreeSet<Ident>> = only.then(|| {
+        tasks.iter()
+            .filter_map(|task_sub| build_task_id(&task_sub.name, task_sub.workspace.as_deref().or(workspace), project))
+            .map(|task_id| task_id.workspace)
+            .collect()
+    });
+
     for task_sub in tasks {
         let task_workspace
             = task_sub.workspace.as_deref().or(workspace);
@@ -757,6 +767,7 @@ fn execute_push_tasks(
             task_sub.args.clone(),
             task_workspace,
             effective_context_id,
+            only_workspaces.as_ref(),
             &mut state.contexts,
         ) {
             Ok((ctx_task_id, resolved_ctx_task_ids, source_files)) => {
@@ -1159,6 +1170,9 @@ fn purge_task_from_graph(
 
     // Remove from resolved.tasks (the dependency graph)
     state.graph.resolved.tasks.remove(&task_id);
+    for prerequisites in state.graph.context_prerequisites.values_mut() {
+        prerequisites.remove(&task_id);
+    }
 
     // Find all contextual instances of this task (across all contexts)
     let ctx_task_ids_to_remove: Vec<ContextualTaskId> = state.graph.tasks.keys()
