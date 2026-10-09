@@ -91,6 +91,9 @@ jobs:
 
   test:
     strategy:
+      # The test jobs only generate reports; one platform shouldn't prevent
+      # the others from producing theirs
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
@@ -124,6 +127,8 @@ jobs:
           switch: artifacts/yarn${{matrix.ext}}
 
       - name: Generate the test report
+        # Windows runners default to PowerShell
+        shell: bash
         run: |
           chmod +x artifacts/{yarn,yarn-bin}${{matrix.ext}}
 
