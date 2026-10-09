@@ -288,7 +288,12 @@ pub fn list_files(base: &Path, patterns: Option<&PatternSet>, excluded: Option<&
             continue;
         };
 
-        if !metadata.is_dir() {
+        // A root that's a symlink to a folder (`src -> ../shared/src`) is
+        // walked like a folder, otherwise `src/**` would match nothing
+        let is_dir = metadata.is_dir()
+            || (metadata.file_type().is_symlink() && root_path.fs_is_dir());
+
+        if !is_dir {
             files.push(root.clone());
             continue;
         }

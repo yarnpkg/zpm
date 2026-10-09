@@ -34,8 +34,9 @@ pub struct CacheJob {
 enum CacheLookup {
     /// The outputs got restored; the logs must be replayed
     Hit {fingerprint: Hash64, logs: Vec<LogLine>},
-    /// The task must run; store its results if `store` is set
-    Miss {fingerprint: Hash64, store: bool},
+    /// The task must run; store its results if `store` is set. `warning`
+    /// explains why an existing entry couldn't be used.
+    Miss {fingerprint: Hash64, store: bool, warning: Option<String>},
     /// The task can't be fingerprinted in this context; just run it
     Uncacheable,
 }
@@ -46,18 +47,22 @@ fn lookup(job: &CacheJob) -> Result<CacheLookup, Error> {
     };
 
     if !job.info.is_cached {
-        return Ok(CacheLookup::Miss {fingerprint: fingerprint.hash, store: false});
+        return Ok(CacheLookup::Miss {fingerprint: fingerprint.hash, store: false, warning: None});
     }
 
     if job.options.read {
         if let Some(entry) = job.task_cache.read_entry(&job.options, &fingerprint.hash)? {
-            job.task_cache.restore(&job.info, &entry)?;
+            // Restoring removes the stale outputs first; if it fails midway,
+            // running the task rebuilds them rather than leaving them gone
+            if let Err(err) = job.task_cache.restore(&job.info, &entry) {
+                return Ok(CacheLookup::Miss {fingerprint: fingerprint.hash, store: true, warning: Some(format!("Couldn't restore the cached outputs, running the task instead: {}", err))});
+            }
 
             return Ok(CacheLookup::Hit {fingerprint: fingerprint.hash, logs: entry.meta.logs});
         }
     }
 
-    Ok(CacheLookup::Miss {fingerprint: fingerprint.hash, store: true})
+    Ok(CacheLookup::Miss {fingerprint: fingerprint.hash, store: true, warning: None})
 }
 
 fn send_stderr(command_tx: &CommandSender, task_id: &ContextualTaskId, line: String) {
@@ -129,7 +134,11 @@ impl ExecutorPool {
                         return;
                     },
 
-                    Ok(CacheLookup::Miss {fingerprint, store}) => {
+                    Ok(CacheLookup::Miss {fingerprint, store, warning}) => {
+                        if let Some(warning) = warning {
+                            send_stderr(&command_tx, &task_id, warning);
+                        }
+
                         let _ = command_tx.send(CoordinatorCommand::TaskFingerprint {
                             task_id: task_id.clone(),
                             fingerprint: fingerprint.clone(),

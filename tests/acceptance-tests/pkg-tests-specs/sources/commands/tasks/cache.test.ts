@@ -89,6 +89,98 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should walk input roots that are symlinks to folders`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+        await setupProject(path);
+
+        const shared = await xfs.mktempPromise();
+        await xfs.writeFilePromise(ppath.join(shared, `index.txt`), `v1`);
+        await xfs.symlinkPromise(shared, ppath.join(path, `src`));
+
+        await writeTaskfile(path, [
+          `@cache`,
+          `@inputs(src/**)`,
+          `build:`,
+          `  ${countRun(`build`)}`,
+        ]);
+
+        await run(`install`);
+
+        await runSwitch(`tasks`, `run`, `--standalone`, `build`);
+        await runSwitch(`tasks`, `run`, `--standalone`, `build`);
+        expect(await readCounter(path, `build`)).toEqual(1);
+
+        await xfs.writeFilePromise(ppath.join(shared, `index.txt`), `v2`);
+        await runSwitch(`tasks`, `run`, `--standalone`, `build`);
+        expect(await readCounter(path, `build`)).toEqual(2);
+      })),
+    );
+
+    test(
+      `it should run the task when its cached outputs can't be restored`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+        await setupProject(path);
+        await xfs.writeFilePromise(ppath.join(path, `input.txt`), `v1`);
+
+        await writeTaskfile(path, [
+          `@cache`,
+          `@inputs(input.txt)`,
+          `@outputs(dist/**)`,
+          `build:`,
+          `  ${countRun(`build`)}`,
+          `  mkdir -p dist/out && echo built > dist/out/file.txt`,
+        ]);
+
+        await run(`install`);
+
+        await runSwitch(`tasks`, `run`, `--standalone`, `build`);
+        expect(await readCounter(path, `build`)).toEqual(1);
+
+        // A read-only folder in the way makes the restore fail midway
+        await xfs.removePromise(ppath.join(path, `dist`));
+        await xfs.mkdirPromise(ppath.join(path, `dist`));
+        await xfs.chmodPromise(ppath.join(path, `dist`), 0o555);
+
+        try {
+          await runSwitch(`tasks`, `run`, `--standalone`, `build`).catch(() => {});
+        } finally {
+          await xfs.chmodPromise(ppath.join(path, `dist`), 0o755);
+        }
+
+        // The failed restore falls back to running the script
+        expect(await readCounter(path, `build`)).toEqual(2);
+      })),
+    );
+
+    test(
+      `tasks hash should fingerprint cached tasks without a script`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, cleanupDaemon(async ({path, run, runSwitch}) => {
+        await setupProject(path);
+
+        await writeTaskfile(path, [
+          `@cache`,
+          `lib:`,
+          `  echo lib`,
+          ``,
+          `@cache`,
+          `build: lib`,
+        ]);
+
+        await run(`install`);
+
+        const {stdout} = await runSwitch(`tasks`, `hash`, `build`);
+        expect(stdout).toContain(`test-package:build`);
+        expect(stdout).toContain(`Fingerprint:`);
+      })),
+    );
+
+    test(
       `it should skip the script and replay the output on the second run`,
       makeTemporaryEnv({
         name: `test-package`,

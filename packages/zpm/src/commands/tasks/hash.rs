@@ -112,7 +112,32 @@ impl TaskHash {
                 = task.script.join("\n");
 
             if script.is_empty() {
-                fingerprints.insert(task_id.clone(), task_cache.aggregate_fingerprint(&task_id, &dependencies));
+                let fingerprint
+                    = task_cache.aggregate_fingerprint(&task_id, &dependencies);
+
+                fingerprints.insert(task_id.clone(), fingerprint.clone());
+
+                // Aggregators never get an entry; they're reported with
+                // their upstream fingerprints, the only thing they hash
+                let is_cached
+                    = task.cache_spec().ok().flatten().is_some();
+
+                outputs.push(TaskHashOutput {
+                    is_cached,
+                    has_entry: false,
+                    details: FingerprintDetails {
+                        task: task_id.to_file_string(),
+                        fingerprint: fingerprint.to_file_string(),
+                        components: BTreeMap::from([("aggregate".to_string(), "no script".to_string())]),
+                        env: BTreeMap::new(),
+                        global_inputs: BTreeMap::new(),
+                        inputs: BTreeMap::new(),
+                        dependencies: dependencies.iter()
+                            .map(|(task, hash)| (task.clone(), hash.to_file_string()))
+                            .collect(),
+                    },
+                });
+
                 continue;
             }
 
