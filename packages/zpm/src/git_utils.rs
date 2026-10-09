@@ -65,6 +65,12 @@ pub async fn fetch_remotes(root: &Path) -> Result<Vec<String>, Error> {
 }
 
 pub async fn fetch_branch_base(project: &Project) -> Result<String, Error> {
+    fetch_branch_base_of(project, "HEAD").await
+}
+
+/// The merge base between `head` and the first of the `changesetBaseRefs`
+/// branches (or their remote counterparts) that exists.
+pub async fn fetch_branch_base_of(project: &Project, head: &str) -> Result<String, Error> {
     let base_refs
         = project.config.settings.changeset_base_refs.iter()
             .map(|s| s.value.to_string())
@@ -88,7 +94,7 @@ pub async fn fetch_branch_base(project: &Project) -> Result<String, Error> {
         }
 
         let mut args
-            = vec!["merge-base".to_string(), "HEAD".to_string()];
+            = vec!["merge-base".to_string(), head.to_string()];
 
         args.extend(branches.clone());
 
@@ -369,13 +375,19 @@ impl ChangesetRange {
 /// `changesetGlobalFiles` setting, every workspace is considered changed
 /// (turbo's `globalDependencies`).
 pub async fn fetch_changed_workspaces_in_range(project: &Project, range: &ChangesetRange) -> Result<BTreeSet<Ident>, Error> {
+    // Without an explicit base, compare against where the head ref (not
+    // the current checkout) forked from the base branch
     let since_ref = match &range.base {
         Some(base) => base.clone(),
-        None => fetch_branch_base(project).await?,
+        None => fetch_branch_base_of(project, range.head.as_deref().unwrap_or("HEAD")).await?,
     };
 
-    let changed_files
+    let mut changed_files
         = fetch_changed_files_between(project, &since_ref, range.head.as_deref()).await?;
+
+    // Install artifacts don't make the root workspace itself change; the
+    // lockfile is compared separately
+    changed_files.retain(|file| !is_install_artifact(project, file));
 
     if touches_global_files(project, &changed_files) {
         return Ok(project.workspaces.iter().map(|w| w.name.clone()).collect());
@@ -385,6 +397,20 @@ pub async fn fetch_changed_workspaces_in_range(project: &Project, range: &Change
         = changed_workspaces_from_files(project, &since_ref, range.head.as_deref(), &changed_files).await?;
 
     Ok(changed_workspaces.into_keys().collect())
+}
+
+fn is_install_artifact(project: &Project, file: &Path) -> bool {
+    let Some(rel_path) = file.forward_relative_to(&project.project_cwd) else {
+        return false;
+    };
+
+    let rel_path
+        = rel_path.as_str();
+
+    rel_path == ".pnp.cjs"
+        || rel_path == ".pnp.loader.mjs"
+        || rel_path == ".yarn"
+        || rel_path.starts_with(".yarn/")
 }
 
 fn touches_global_files(project: &Project, changed_files: &BTreeSet<Path>) -> bool {
