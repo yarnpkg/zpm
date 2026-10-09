@@ -47,6 +47,31 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should keep the versions locked by pnpm for dist-tags`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `latest`,
+        },
+      }, async ({path, run, source}) => {
+        // `latest` points to 2.0.0 now, but pnpm locked it at 1.0.1
+        await writePnpmLockfile(path, {
+          importers: {
+            [`.`]: {dependencies: {[`no-deps`]: {specifier: `latest`, version: `1.0.1`}}},
+          },
+          snapshots: {
+            [`no-deps@1.0.1`]: {},
+          },
+        });
+
+        await run(`install`);
+
+        await expect(source(`require('no-deps')`)).resolves.toMatchObject({
+          version: `1.0.1`,
+        });
+      }),
+    );
+
+    test(
       `it should keep the versions locked by pnpm for transitive dependencies`,
       makeTemporaryEnv({
         dependencies: {

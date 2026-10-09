@@ -177,7 +177,10 @@ pub fn preferred_versions_from_pnpm_lockfile(src: &str) -> Result<PreferredVersi
 
             match declared_range(specifier, &ident) {
                 Some(range) => preferred_versions.add_declared_range(ident, range, version),
-                None => preferred_versions.add_locked_version(ident, version),
+                None => match declared_tag(specifier, &ident) {
+                    Some(tag) => preferred_versions.add_declared_tag(ident, tag, version),
+                    None => preferred_versions.add_locked_version(ident, version),
+                },
             }
         }
     }
@@ -237,6 +240,34 @@ fn aliased_ident(specifier: &str) -> Option<Ident> {
         = aliased.get(1..)?.rfind('@')? + 1;
 
     Ident::from_file_string(&aliased[..separator]).ok()
+}
+
+/// The dist-tag a specifier refers to (`latest`, `npm:foo@next`), if any.
+fn declared_tag(specifier: &str, ident: &Ident) -> Option<String> {
+    let tag = match specifier.strip_prefix("npm:") {
+        Some(aliased) => {
+            let separator
+                = aliased.get(1..)?.rfind('@')? + 1;
+
+            if aliased[..separator] != *ident.as_str() {
+                return None;
+            }
+
+            &aliased[separator + 1..]
+        },
+
+        None => {
+            specifier
+        },
+    };
+
+    // Same rule as npm: a tag is anything that isn't a valid range and
+    // doesn't look like a URL or a path
+    let is_tag = !tag.is_empty()
+        && tag.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && zpm_semver::Range::from_file_string(tag).is_err();
+
+    is_tag.then(|| tag.to_string())
 }
 
 fn declared_range(specifier: &str, ident: &Ident) -> Option<zpm_semver::Range> {

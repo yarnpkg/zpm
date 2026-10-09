@@ -435,6 +435,21 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let registry_data: RegistryMetadata<'_>
         = JsonDocument::hydrate_from_slice(&bytes[..])?;
 
+    // When migrating from another package manager, the version it locked
+    // for this tag wins over what the tag points to today (see the semver
+    // resolver for why it bypasses the age gate)
+    if let Some(preferred_versions) = &context.preferred_versions {
+        let preferred_version
+            = preferred_versions.pick_tag(package_ident, params.tag.as_str(), |version| registry_data.versions.contains_key(version));
+
+        if let Some(version) = preferred_version {
+            let manifest
+                = JsonDocument::hydrate_from_value(&registry_data.versions[&version])?;
+
+            return build_resolution_result(context, descriptor, package_ident, version, manifest);
+        }
+    }
+
     let latest_version
         = registry_data.dist_tags
         .get(params.tag.as_str())

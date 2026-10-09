@@ -71,6 +71,7 @@ pub struct PreferredVersionsStats {
 pub struct PreferredVersions {
     locked_versions: BTreeMap<Ident, BTreeSet<Version>>,
     declared_votes: BTreeMap<Ident, VoteTable>,
+    declared_tags: BTreeMap<(Ident, String), BTreeSet<Version>>,
     dependents: BTreeMap<Ident, Vec<LockedDependent>>,
 
     vote_tables: DashMap<Ident, Arc<OnceCell<Arc<VoteTable>>>>,
@@ -112,6 +113,40 @@ impl PreferredVersions {
             .workspaces += 1;
 
         self.add_locked_version(ident, version);
+    }
+
+    /// Records that something (typically a workspace) declared the given
+    /// dist-tag (`latest`, `next`...) and got the given version for it.
+    pub fn add_declared_tag(&mut self, ident: Ident, tag: String, version: Version) {
+        self.declared_tags.entry((ident.clone(), tag))
+            .or_default()
+            .insert(version.clone());
+
+        self.add_locked_version(ident, version);
+    }
+
+    /**
+     * Returns the version a dist-tag descriptor should resolve to, if the
+     * package manager we migrate from locked it. When the tag got locked to
+     * several versions (different workspaces installed at different times),
+     * the highest one wins.
+     */
+    pub fn pick_tag(&self, ident: &Ident, tag: &str, is_available: impl Fn(&Version) -> bool) -> Option<Version> {
+        let picked
+            = self.declared_tags.get(&(ident.clone(), tag.to_string()))?
+                .iter()
+                .rev()
+                .find(|version| is_available(version))
+                .cloned();
+
+        let counter = match picked {
+            Some(_) => &self.stats.reused,
+            None => &self.stats.unmatched,
+        };
+
+        counter.fetch_add(1, Ordering::Relaxed);
+
+        picked
     }
 
     pub fn add_dependent(&mut self, ident: Ident, dependent: LockedDependent) {
