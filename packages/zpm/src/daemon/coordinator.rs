@@ -549,7 +549,7 @@ async fn handle_command(
                 }
 
                 let (tasks, errors)
-                    = build_declared_tasks_list(project);
+                    = build_declared_tasks_list(project, state);
                 state.subscriptions.broadcast(DaemonNotification::DeclaredTasksChanged {
                     tasks,
                     errors,
@@ -559,7 +559,7 @@ async fn handle_command(
 
         CoordinatorCommand::ListDeclaredTasks { response_tx } => {
             let (tasks, errors)
-                = build_declared_tasks_list(project);
+                = build_declared_tasks_list(project, state);
             let _ = response_tx.send((tasks, errors));
         }
 
@@ -1081,10 +1081,9 @@ fn purge_task_from_graph(
 
 /// Build the declared tasks list by reading taskfiles from disk.
 ///
-/// We read from disk on every request rather than using the watcher cache,
-/// because the cache is populated asynchronously and may not yet contain
-/// all workspaces at the time of the first request.
-fn build_declared_tasks_list(project: &Project) -> (Vec<DeclaredTaskInfo>, Vec<super::ipc::TaskfileError>) {
+/// Uses the cached taskfile from the watcher when available (to preserve
+/// defaults during root parse errors), falling back to disk otherwise.
+fn build_declared_tasks_list(project: &Project, state: &CoordinatorState) -> (Vec<DeclaredTaskInfo>, Vec<super::ipc::TaskfileError>) {
     let mut tasks = Vec::new();
     let mut errors = Vec::new();
 
@@ -1101,8 +1100,10 @@ fn build_declared_tasks_list(project: &Project) -> (Vec<DeclaredTaskInfo>, Vec<s
             continue;
         }
 
-        let task_file = project.get_workspace_taskfile(workspace)
-            .map(|(task_file, _)| task_file);
+        // Use the cached effective taskfile from the graph when available,
+        // otherwise fall back to get_workspace_taskfile.
+        let task_file = state.graph.resolved.task_files.get(&workspace.name).cloned()
+            .or_else(|| project.get_workspace_taskfile(workspace).map(|(tf, _)| tf));
 
         let Some(task_file) = task_file else {
             continue;

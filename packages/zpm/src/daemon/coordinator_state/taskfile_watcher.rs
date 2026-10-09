@@ -53,20 +53,18 @@ impl TaskfileWatcher {
             }
         }
 
-        // Add new entries
+        // Add new entries. For shared paths (like root taskfile watched by
+        // multiple workspaces), retry watch each time in case the file was
+        // created since the last attempt.
         for path in &sources {
-            let is_new = !self.file_to_workspaces.contains_key(path);
-
             self.file_to_workspaces
                 .entry(path.clone())
                 .or_default()
                 .insert(workspace.clone());
 
-            if is_new {
-                let _ = self
-                    .watcher
-                    .watch(std::path::Path::new(&path.to_file_string()), RecursiveMode::NonRecursive);
-            }
+            let _ = self
+                .watcher
+                .watch(std::path::Path::new(&path.to_file_string()), RecursiveMode::NonRecursive);
         }
 
         self.workspace_sources.insert(workspace, sources);
