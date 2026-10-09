@@ -110,10 +110,12 @@ impl<'a> TaskSelection<'a> {
             let dependencies
                 = traverse(&base, &dependency_map);
 
+            // With --dependencies-only, the seeds (and the dependents added
+            // to them) are left out. A seed that's also a dependency of
+            // another seed is still a dependency, but a seed is never kept
+            // just because the dependents added to the base depend on it.
             selection.extend(dependencies.into_iter().filter(|ident| {
-                // A workspace that's both a seed and a dependency of another
-                // seed is still a dependency.
-                !self.dependencies_only || !base.contains(ident) || is_reachable_from_others(ident, &base, &dependency_map)
+                !self.dependencies_only || !base.contains(ident) || (seeds.contains(ident) && is_reachable_from_others(ident, &seeds, &dependency_map))
             }));
         }
 
