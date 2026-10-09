@@ -753,7 +753,7 @@ fn build_cache_job(
     let info
         = prepared.cache.as_ref()?;
 
-    let prerequisites = state.graph.resolved.tasks.get(&task_id.task_id)
+    let prerequisites = state.graph.prerequisites_of(&task_id.task_id, &task_id.context_id)
         .map(|prerequisites| prerequisites.as_slice())
         .unwrap_or_default();
 
@@ -813,7 +813,7 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
             // No script - complete immediately; aggregators still get a
             // fingerprint so that cached tasks depending on them cascade
             if let (Some(task_cache), Some(_), true) = (task_cache, &prepared.cache, state.cache_contexts.contains_key(&task_id.context_id)) {
-                let prerequisites = state.graph.resolved.tasks.get(&task_id.task_id)
+                let prerequisites = state.graph.prerequisites_of(&task_id.task_id, &task_id.context_id)
                     .cloned()
                     .unwrap_or_default();
 
