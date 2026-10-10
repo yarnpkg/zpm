@@ -35,6 +35,17 @@ use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 #[case("^0.0", "0.1.0", false)]
 #[case("^1.2", "1.9.0", true)]
 
+#[case("1 - 2", "2.12.1", true)]
+#[case("1 - 2", "3.0.0", false)]
+#[case("1.2.3 - 2.3.4", "2.3.4", true)]
+#[case("1.2.3 - 2.3.4", "2.3.5", false)]
+#[case("1.2.3 - 2.3", "2.3.9", true)]
+#[case("1.2.3 - 2.3", "2.4.0", false)]
+#[case("1.2.3 - 2.3", "1.2.2", false)]
+#[case("0.0.0-alpha - *", "0.0.0-alpha", true)]
+#[case("1.2.3 - *", "9.0.0", true)]
+#[case("1.2.3 - *", "1.2.2", false)]
+
 #[case(">1.2.3", "1.2.0", false)]
 #[case(">1.2.3", "1.2.3", false)]
 #[case(">1.2.3", "1.2.10", true)]
@@ -204,7 +215,7 @@ fn test_range_tokenize() {
         ),
         Token::Syntax(TokenType::SAnd),
         Token::Operation(
-            OperatorType::LessThan,
+            OperatorType::LessThanOrEqual,
             Version::from_file_string("2.3.4").unwrap(),
         ),
     ].into()));
