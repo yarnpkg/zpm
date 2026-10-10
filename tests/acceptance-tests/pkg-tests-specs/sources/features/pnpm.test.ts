@@ -203,6 +203,76 @@ describe(`Features`, () => {
       }),
     );
 
+    test(
+      `it should never prune a store nested deeper inside node_modules`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+        pnpmStoreFolder: `node_modules/nested/store`,
+      }, async ({path, run, source}) => {
+        await run(`install`);
+        await run(`install`);
+
+        expect(xfs.existsSync(ppath.join(path, `node_modules/nested/store`))).toEqual(true);
+        await expect(source(`require('no-deps')`)).resolves.toMatchObject({version: `1.0.0`});
+      }),
+    );
+
+    test(
+      `it should keep unknown dot-entries in node_modules`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+      }, async ({path, run}) => {
+        await run(`install`);
+
+        await xfs.mkdirPromise(ppath.join(path, `node_modules/.cache`), {recursive: true});
+        await xfs.writeFilePromise(ppath.join(path, `node_modules/.cache/file`), ``);
+        await xfs.writeFilePromise(ppath.join(path, `node_modules/.pnpm/.modules.yaml`), ``);
+
+        await xfs.writeJsonPromise(ppath.join(path, `package.json`), {dependencies: {}});
+        await run(`install`);
+
+        expect(xfs.existsSync(ppath.join(path, `node_modules/.cache/file`))).toEqual(true);
+        expect(xfs.existsSync(ppath.join(path, `node_modules/.pnpm/.modules.yaml`))).toEqual(true);
+      }),
+    );
+
+    test(
+      `it should keep the links of packages depending on their own name across installs`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`self-require-trap`]: `1.0.0`,
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+      }, async ({path, run, source}) => {
+        await run(`install`);
+
+        // Relinking without re-extracting self-require-trap
+        await xfs.writeJsonPromise(ppath.join(path, `package.json`), {
+          dependencies: {[`self-require-trap`]: `1.0.0`},
+        });
+
+        await run(`install`);
+
+        await expect(source(`require('self-require-trap')`)).resolves.toMatchObject({version: `1.0.0`});
+        await expect(source(`require('self-require-trap/self')`)).resolves.toMatchObject({version: `2.0.0`});
+
+        // Re-extracting it must restore the link nested inside the package
+        await run(`install`, `--force`);
+
+        await expect(source(`require('self-require-trap/self')`)).resolves.toMatchObject({version: `2.0.0`});
+      }),
+    );
+
     testIf(() => process.platform === `win32`,
       `'winLinkType: symlinks' on Windows should use symlinks in node_modules directories`,
       makeTemporaryEnv(

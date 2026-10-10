@@ -1,8 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 use itertools::Itertools;
 use rayon::prelude::*;
 use zpm_primitives::{Ident, IdentGlob, Locator};
-use zpm_utils::{Hash64, IoResultExt, Path, ToHumanString};
+use zpm_sync::{PreserveExtra, SyncItem, SyncTree};
+use zpm_utils::{Hash64, Path, ToHumanString};
 
 use crate::{
     build,
@@ -14,55 +15,117 @@ use crate::{
     tree_resolver::ResolutionTree,
 };
 
-/// Creates (or repairs) a symlink at `link_abs_path` pointing at
-/// `symlink_target`. Links that already point at the right place are
-/// left untouched, which keeps warm installs from rewriting tens of
-/// thousands of symlinks.
-fn ensure_symlink(link_abs_path: &Path, symlink_target: &Path) -> Result<(), Error> {
-    if link_abs_path.fs_read_link().ok().as_ref() == Some(symlink_target) {
-        return Ok(());
-    }
-
-    if link_abs_path.fs_is_symlink() || link_abs_path.fs_is_file() {
-        link_abs_path.fs_rm_file()?;
-    } else if link_abs_path.fs_exists() {
-        link_abs_path.fs_rm()?;
-    }
-
-    link_abs_path
-        .fs_create_parent()?
-        .fs_symlink(symlink_target)?;
-
-    Ok(())
+/// The sync trees covering every folder the linker writes into: one per
+/// workspace `node_modules` folder, plus one for the store. Entries are
+/// routed to the innermost tree containing them, so a store kept inside a
+/// `node_modules` folder gets its own tree.
+struct LinkTrees {
+    trees: Vec<(Path, SyncTree<'static>)>,
 }
 
-/// Removes the entries of `dir_path` that aren't listed in `keep`. Used to
-/// prune store entries and top-level links left by a previous install
-/// without wiping (and re-extracting) everything else.
-fn prune_dir_entries(dir_path: &Path, keep: &BTreeSet<String>) -> Result<(), Error> {
-    let Some(entries) = dir_path.fs_read_dir().ok_missing()? else {
-        return Ok(());
-    };
+impl LinkTrees {
+    fn new(project: &Project, store_path: &Path) -> Result<Self, Error> {
+        let mut trees
+            = Vec::new();
 
-    for entry in entries.flatten() {
-        let name
-            = entry.file_name().to_string_lossy().to_string();
+        let mut store_tree
+            = SyncTree::new();
 
-        if keep.contains(&name) {
-            continue;
+        store_tree.dry_run = false;
+
+        // Store dot-entries (.modules.yaml, ...) aren't ours to remove;
+        // neither is pnpm's own lockfile.
+        store_tree.set_root_preserve_extra(PreserveExtra::Dots)?;
+        store_tree.register_entry(Path::from_str("lock.yaml")?, SyncItem::Any)?;
+
+        // This linker doesn't generate bin shims, so any found in the
+        // hoisting folder come from another layout and may point to
+        // removed packages.
+        store_tree.register_entry(Path::from_str("node_modules/.bin")?, SyncItem::Missing)?;
+
+        trees.push((store_path.clone(), store_tree));
+
+        for workspace in &project.workspaces {
+            let workspace_nm_path
+                = workspace.path.with_join_str("node_modules");
+
+            let mut workspace_nm_tree
+                = SyncTree::new();
+
+            workspace_nm_tree.dry_run = false;
+            workspace_nm_tree.set_root_preserve_extra(PreserveExtra::Dots)?;
+            workspace_nm_tree.register_entry(Path::from_str(".bin")?, SyncItem::Missing)?;
+
+            // Every workspace gets a tree, including those without any
+            // dependency left, so their stale links get removed too. A
+            // store kept in this folder is synced by its own tree; when
+            // nested deeper, the folders leading to it aren't ours either.
+            if let Some(store_rel_path) = store_path.forward_relative_to(&workspace_nm_path).filter(|path| !path.is_empty()) {
+                let first_segment
+                    = Path::from_str(store_rel_path.segments().next().unwrap())?;
+
+                if first_segment != store_rel_path {
+                    workspace_nm_tree.register_entry(first_segment, SyncItem::Folder {
+                        template: None,
+                        assume_up_to_date: false,
+                        preserve_extra: PreserveExtra::All,
+                    })?;
+                }
+
+                workspace_nm_tree.register_entry(store_rel_path, SyncItem::Any)?;
+            }
+
+            trees.push((workspace_nm_path, workspace_nm_tree));
         }
 
-        let entry_path
-            = dir_path.with_join_str(&name);
-
-        if entry_path.fs_is_symlink() || entry_path.fs_is_file() {
-            entry_path.fs_rm_file()?;
-        } else {
-            entry_path.fs_rm()?;
-        }
+        Ok(Self {
+            trees,
+        })
     }
 
-    Ok(())
+    fn register_entry(&mut self, abs_path: &Path, item: SyncItem<'static>) -> Result<(), Error> {
+        let is_inside
+            = |root_path: &Path| root_path != abs_path && root_path.contains(abs_path);
+
+        // Most entries live in the store (the first tree), and no workspace
+        // folder can be nested inside it; skip the scan for those.
+        let (root_path, tree) = match is_inside(&self.trees[0].0) {
+            true => &mut self.trees[0],
+            false => self.trees.iter_mut()
+                .filter(|(root_path, _)| is_inside(root_path))
+                .max_by_key(|(root_path, _)| root_path.as_str().len())
+                .unwrap_or_else(|| panic!("Expected {} to be inside a synced folder", abs_path.to_print_string())),
+        };
+
+        tree.register_entry(abs_path.relative_to(root_path), item)?;
+
+        Ok(())
+    }
+
+    fn register_symlink(&mut self, link_abs_path: &Path, target_abs_path: &Path) -> Result<(), Error> {
+        let link_abs_dirname
+            = link_abs_path
+                .dirname()
+                .expect("Failed to get directory name");
+
+        self.register_entry(link_abs_path, SyncItem::Symlink {
+            target_path: target_abs_path.relative_to(&link_abs_dirname),
+        })
+    }
+
+    /// The trees cover disjoint folders, so they can run in parallel.
+    /// Symlinks that already point at the right place are left untouched,
+    /// which keeps warm installs from rewriting tens of thousands of them.
+    fn run(self) -> Result<(), Error> {
+        for (root_path, _) in &self.trees {
+            root_path.fs_create_dir_all()?;
+        }
+
+        self.trees.par_iter().try_for_each(|(root_path, tree)| -> Result<(), Error> {
+            tree.run(root_path.clone())?;
+            Ok(())
+        })
+    }
 }
 
 /// Check if an ident matches any of the given glob patterns.
@@ -95,65 +158,6 @@ fn collect_hoistable_packages<'a>(tree: &'a ResolutionTree, patterns: &[IdentGlo
     }
 
     hoistable
-}
-
-/// Removes links in a `node_modules` folder that the new layout doesn't
-/// create anymore (removed dependencies, unhoisted packages). Dot-entries
-/// such as `.pnpm` are left alone, except `.bin`: this linker doesn't
-/// generate bin shims, so any found there come from another layout and
-/// may point to removed packages. The store itself is never pruned, even
-/// when it sits in a `node_modules` folder. Scoped folders are pruned one
-/// level deeper.
-fn prune_node_modules(nm_path: &Path, expected: &BTreeSet<Ident>, store_path: &Path) -> Result<(), Error> {
-    let mut top_level
-        = BTreeSet::new();
-    let mut by_scope: BTreeMap<String, BTreeSet<String>>
-        = BTreeMap::new();
-
-    for ident in expected {
-        match ident.scope() {
-            Some(scope) => {
-                top_level.insert(scope.to_string());
-                by_scope.entry(scope.to_string()).or_default().insert(ident.name().to_string());
-            },
-
-            None => {
-                top_level.insert(ident.as_str().to_string());
-            },
-        }
-    }
-
-    let Some(entries) = nm_path.fs_read_dir().ok_missing()? else {
-        return Ok(());
-    };
-
-    for entry in entries.flatten() {
-        let name
-            = entry.file_name().to_string_lossy().to_string();
-
-        let entry_path
-            = nm_path.with_join_str(&name);
-
-        if entry_path.contains(store_path) {
-            continue;
-        }
-
-        if name.starts_with('.') && name != ".bin" {
-            continue;
-        }
-
-        if let Some(scoped_names) = by_scope.get(&name) {
-            prune_dir_entries(&entry_path, scoped_names)?;
-        } else if !top_level.contains(&name) {
-            if entry_path.fs_is_symlink() || entry_path.fs_is_file() {
-                entry_path.fs_rm_file()?;
-            } else {
-                entry_path.fs_rm()?;
-            }
-        }
-    }
-
-    Ok(())
 }
 
 pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -> Result<LinkResult, Error> {
@@ -192,10 +196,8 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
     let dependencies_meta
         = linker::helpers::TopLevelConfiguration::from_project(project);
 
-    let mut store_slugs
-        = BTreeSet::new();
-    let mut expected_nm_entries: BTreeMap<Path, BTreeSet<Ident>>
-        = BTreeMap::new();
+    let mut link_trees
+        = LinkTrees::new(project, &store_path)?;
     let mut extractions
         = Vec::new();
 
@@ -217,13 +219,17 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 let package_store_path = package_base_path
                     .with_join(&locator.ident.nm_subdir());
 
-                store_slugs.insert(locator.slug());
+                // The package sits next to the links to its dependencies.
+                // Its content is managed by the extraction below, but the
+                // tree still syncs the links registered inside it (packages
+                // depending on their own name).
+                link_trees.register_entry(&package_store_path, SyncItem::Folder {
+                    template: None,
+                    assume_up_to_date: false,
+                    preserve_extra: PreserveExtra::All,
+                })?;
 
-                // The package sits next to the links to its dependencies
-                expected_nm_entries
-                    .entry(package_base_path.with_join_str("node_modules"))
-                    .or_default()
-                    .insert(locator.ident.clone());
+                link_trees.register_entry(&package_base_path.with_join_str("node_modules/.bin"), SyncItem::Missing)?;
 
                 let physical_locator
                     = locator.physical_locator();
@@ -299,24 +305,6 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         }
     }
 
-    // Store entries whose locator is gone from the tree are leftovers from a
-    // previous install; dot-entries (.ready, .modules.yaml, ...) are kept.
-    let mut kept_store_entries
-        = store_slugs;
-    kept_store_entries.insert("node_modules".to_string());
-    kept_store_entries.insert("lock.yaml".to_string());
-
-    if let Some(store_entries) = store_path.fs_read_dir().ok_missing()? {
-        for entry in store_entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') {
-                kept_store_entries.insert(name);
-            }
-        }
-    }
-
-    prune_dir_entries(&store_path, &kept_store_entries)?;
-
     tokio::task::block_in_place(|| {
         extractions.par_iter().try_for_each(|(package_store_path, physical_locator)| -> Result<(), Error> {
             let package_data = install.package_data
@@ -368,20 +356,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             = store_path
                 .with_join(&ident.nm_subdir());
 
-        expected_nm_entries
-            .entry(store_path.with_join_str("node_modules"))
-            .or_default()
-            .insert((*ident).clone());
-
-        let link_abs_dirname
-            = link_abs_path
-                .dirname()
-                .expect("Failed to get directory name");
-
-        let symlink_target = package_abs_path
-            .relative_to(&link_abs_dirname);
-
-        ensure_symlink(&link_abs_path, &symlink_target)?;
+        link_trees.register_symlink(&link_abs_path, &package_abs_path)?;
     }
 
     // Track which packages are direct dependencies of workspaces
@@ -413,21 +388,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
             = project.project_cwd
                 .with_join(&ident.nm_subdir());
 
-        expected_nm_entries
-            .entry(nm_path.clone())
-            .or_default()
-            .insert((*ident).clone());
-
-        let link_abs_dirname
-            = link_abs_path
-                .dirname()
-                .expect("Failed to get directory name");
-
-        let symlink_target
-            = package_abs_path
-                .relative_to(&link_abs_dirname);
-
-        ensure_symlink(&link_abs_path, &symlink_target)?;
+        link_trees.register_symlink(&link_abs_path, &package_abs_path)?;
     }
 
     // Second pass: create symlinks in node_modules directories
@@ -478,33 +439,13 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                     .with_join(dep_rel_location);
 
             // /path/to/project/node_modules/@types/no-deps
-            let (link_nm_path, link_abs_path) = match workspace {
-                Some(workspace) => (workspace.path.with_join_str("node_modules"), workspace.path.with_join(&dep_name.nm_subdir())),
-                None if dep_name == &locator.ident => {
-                    let nm_path = store_path.with_join_str(&locator.slug()).with_join(&locator.ident.nm_subdir()).with_join_str("node_modules");
-                    let link_abs_path = store_path.with_join_str(&locator.slug()).with_join(&locator.ident.nm_subdir()).with_join(&dep_name.nm_subdir());
-                    (nm_path, link_abs_path)
-                },
-                None => (store_path.with_join_str(&locator.slug()).with_join_str("node_modules"), store_path.with_join_str(&locator.slug()).with_join(&dep_name.nm_subdir())),
+            let link_abs_path = match workspace {
+                Some(workspace) => workspace.path.with_join(&dep_name.nm_subdir()),
+                None if dep_name == &locator.ident => store_path.with_join_str(&locator.slug()).with_join(&locator.ident.nm_subdir()).with_join(&dep_name.nm_subdir()),
+                None => store_path.with_join_str(&locator.slug()).with_join(&dep_name.nm_subdir()),
             };
 
-            expected_nm_entries
-                .entry(link_nm_path)
-                .or_default()
-                .insert(dep_name.clone());
-
-            // /path/to/project/node_modules/@types
-            let link_abs_dirname
-                = link_abs_path
-                    .dirname()
-                    .expect("Failed to get directory name");
-
-            // ../.pnpm/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
-            let symlink_target
-                = dep_abs_path
-                    .relative_to(&link_abs_dirname);
-
-            ensure_symlink(&link_abs_path, &symlink_target)?;
+            link_trees.register_symlink(&link_abs_path, &dep_abs_path)?;
         }
 
         if !has_explicit_self_dependency && !locator.reference.is_workspace_reference() {
@@ -512,24 +453,9 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         }
     }
 
-    // Every workspace gets its node_modules pruned, including those whose
-    // dependencies were all removed (absent from `expected_nm_entries`).
-    // Store folders that are kept as-is (and the hoisting folder) may also
-    // hold links the new layout doesn't create anymore.
-    let mut pruned_nm_paths: BTreeSet<Path>
-        = project.workspaces.iter()
-            .map(|workspace| workspace.path.with_join_str("node_modules"))
-            .collect();
-
-    pruned_nm_paths.insert(store_path.with_join_str("node_modules"));
-    pruned_nm_paths.extend(expected_nm_entries.keys().cloned());
-
-    let no_entries
-        = BTreeSet::new();
-
-    for nm_path in &pruned_nm_paths {
-        prune_node_modules(nm_path, expected_nm_entries.get(nm_path).unwrap_or(&no_entries), &store_path)?;
-    }
+    // Extractions ran first: they wipe the folders they rebuild, which
+    // would drop the links the trees create inside them.
+    tokio::task::block_in_place(|| link_trees.run())?;
 
     persist_package_map(project, &package_map_builder.build()?)?;
 
