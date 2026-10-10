@@ -937,6 +937,13 @@ impl Project {
         let mut used_entries
             = BTreeSet::<Locator>::new();
 
+        // The workspaces are stored in the lockfile, starting with the
+        // descriptors the install uses to reach them from the roots
+        let mut used_workspace_resolutions
+            = self.workspaces.iter()
+                .map(|workspace| (workspace.descriptor(), workspace.locator()))
+                .collect::<BTreeMap<_, _>>();
+
         let mut process_queue
             = self.workspaces.iter()
                 .map(|workspace| workspace.locator())
@@ -982,6 +989,10 @@ impl Project {
                 normalize_lockfile_descriptor(&mut descriptor);
 
                 if let Some(workspace) = self.try_workspace_by_descriptor(&descriptor)? {
+                    let workspace_locator
+                        = descriptor.resolve_with(WorkspaceIdentReference {ident: workspace.name.clone()}.into());
+
+                    used_workspace_resolutions.insert(descriptor, workspace_locator);
                     process_queue.push(workspace.locator());
                     continue;
                 }
@@ -1020,6 +1031,36 @@ impl Project {
 
         if lockfile.entries.keys().cloned().collect::<BTreeSet<_>>() != used_entries {
             return Ok(false);
+        }
+
+        let workspace_resolutions
+            = lockfile.transient_resolutions.iter()
+                .filter(|(_, locator)| locator.reference.is_workspace_reference())
+                .map(|(descriptor, locator)| (descriptor.clone(), locator.clone()))
+                .collect::<BTreeMap<_, _>>();
+
+        if workspace_resolutions != used_workspace_resolutions {
+            return Ok(false);
+        }
+
+        // The workspace entries are never used by the install, but they still
+        // have to describe the manifests as they currently are
+        let context
+            = InstallContext::default()
+                .with_project(Some(self));
+
+        for locator in used_workspace_resolutions.values().collect::<BTreeSet<_>>() {
+            let Reference::WorkspaceIdent(params) = &locator.reference else {
+                return Ok(false);
+            };
+
+            let Ok(result) = resolve_locator_ident(&context, locator, params) else {
+                return Ok(false);
+            };
+
+            if lockfile.transient_entries.get(locator).map(|entry| &entry.resolution) != Some(&result.original_resolution) {
+                return Ok(false);
+            }
         }
 
         // If we can't compute the project section the install won't go
